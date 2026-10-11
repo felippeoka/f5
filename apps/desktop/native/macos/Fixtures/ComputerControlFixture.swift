@@ -14,6 +14,17 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate {
     window.title = "Computer Control Test Fixture"
     window.center()
     let content = window.contentView!
+    let ungranted = CommandLine.arguments.contains("--ungranted")
+    let marker = NSBox(frame: NSRect(x: 30, y: 260, width: 400, height: 24))
+    marker.boxType = .custom
+    marker.borderType = .noBorder
+    marker.fillColor = ungranted ? NSColor.green : NSColor.blue
+    marker.setAccessibilityElement(true)
+    marker.setAccessibilityLabel("Rehearsal capture marker")
+    content.addSubview(marker)
+    if ungranted, let screen = NSScreen.main {
+      window.setFrameOrigin(NSPoint(x: screen.visibleFrame.minX + 20, y: window.frame.minY))
+    }
     let field = NSTextField(frame: NSRect(x: 30, y: 205, width: 400, height: 28))
     field.setAccessibilityLabel("Rehearsal input")
     content.addSubview(field)
@@ -32,6 +43,9 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate {
     window.makeKeyAndOrderFront(nil)
     window.makeFirstResponder(field)
     NSApplication.shared.activate(ignoringOtherApps: true)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+      FileHandle.standardOutput.write(Data("FIXTURE_READY\n".utf8))
+    }
   }
   @objc func press() {
     presses += 1

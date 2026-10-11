@@ -153,4 +153,35 @@ final class AuthorizationTests: XCTestCase {
     XCTAssertFalse(computerMenuPointAllowed(x: .nan, left: 0, lastItemRight: 100))
   }
 
+  func testMouseDownRecipientUsesSelectedWindowNotRectangleOrder() {
+    // A full-display Dock rectangle can precede the actual app in the compositor list.
+    let owners = [10: 200, 11: 300, 12: 400]
+    XCTAssertEqual(computerRecipientPid(windowId: 11, owners: owners, overlayWindowIds: []), 300)
+    XCTAssertEqual(
+      computerTargetBlock(appId: "com.apple.dock", pid: 200, f5Pids: [], helperPid: 1),
+      "system-ui")
+    // Conversely, an actual protected recipient cannot be replaced with the granted app.
+    XCTAssertEqual(computerRecipientPid(windowId: 10, owners: owners, overlayWindowIds: []), 200)
+    XCTAssertEqual(computerRecipientPid(windowId: 12, owners: owners, overlayWindowIds: []), 400)
+    XCTAssertEqual(
+      computerTargetBlock(appId: "com.example.F5", pid: 400, f5Pids: [400], helperPid: 1), "f5")
+  }
+  func testUnknownStaleAndUnexpectedOverlayRecipientsFailClosed() {
+    let owners = [10: 200, 11: 0]
+    XCTAssertNil(computerRecipientPid(windowId: 0, owners: owners, overlayWindowIds: []))
+    XCTAssertNil(computerRecipientPid(windowId: -1, owners: owners, overlayWindowIds: []))
+    XCTAssertNil(computerRecipientPid(windowId: 12, owners: owners, overlayWindowIds: []))
+    XCTAssertNil(computerRecipientPid(windowId: 11, owners: owners, overlayWindowIds: []))
+    XCTAssertNil(computerRecipientPid(windowId: 10, owners: owners, overlayWindowIds: [10]))
+  }
+  func testMouseDownCoordinatesPreserveNegativeOriginsAndUsePrimaryHeight() {
+    for (x, y, expectedY) in [
+      (100.0, 50.0, 850.0), (-100.0, -200.0, 1100.0), (1200.0, 1000.0, -100.0),
+    ] {
+      let point = computerAppKitCoordinates(x: x, y: y, primaryDisplayHeight: 900)
+      XCTAssertEqual(point.x, x)
+      XCTAssertEqual(point.y, expectedY)
+    }
+  }
+
 }

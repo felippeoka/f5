@@ -365,23 +365,27 @@ func authorizePoint(_ point: CGPoint, request: [String: Any], host: [String: Any
       return
     }
   }
-  for record in windows() {
-    guard let rect = windowRect(record), rect.contains(point),
-      number(record, kCGWindowAlpha as String) > 0
-    else { continue }
-    let pid = integer(record, kCGWindowOwnerPID as String)
-    if (host["overlayWindowIds"] as? [Int] ?? []).contains(
-      integer(record, kCGWindowNumber as String))
-    {
-      continue
-    }
-    guard let app = NSRunningApplication(processIdentifier: pid_t(pid)) else {
-      throw Failure("TargetBlocked", "kind", "owner-unknown")
-    }
-    _ = try grant(app, request: request, host: host, needed: "click")
-    return
+  // This is the WindowServer's actual mouse-down hit test. Rectangles alone
+  // include transparent Dock surfaces, click-through overlays and window corners.
+  let coordinates = computerAppKitCoordinates(
+    x: point.x, y: point.y, primaryDisplayHeight: CGDisplayBounds(CGMainDisplayID()).height)
+  let appKitPoint = NSPoint(x: coordinates.x, y: coordinates.y)
+  let hit: () -> Int = {
+    NSWindow.windowNumber(at: appKitPoint, belowWindowWithWindowNumber: 0)
   }
-  throw Failure("TargetBlocked", "kind", "owner-unknown")
+  let windowId = Thread.isMainThread ? hit() : DispatchQueue.main.sync(execute: hit)
+  var owners: [Int: Int] = [:]
+  for record in windows() {
+    owners[integer(record, kCGWindowNumber as String)] = integer(
+      record, kCGWindowOwnerPID as String)
+  }
+  guard
+    let pid = computerRecipientPid(
+      windowId: windowId, owners: owners, overlayWindowIds: host["overlayWindowIds"] as? [Int] ?? []
+    ),
+    let app = NSRunningApplication(processIdentifier: pid_t(pid))
+  else { throw Failure("TargetBlocked", "kind", "owner-unknown") }
+  _ = try grant(app, request: request, host: host, needed: "click")
 }
 func postMouse(
   _ type: CGEventType, _ point: CGPoint, _ button: CGMouseButton, request: [String: Any],
@@ -1087,7 +1091,17 @@ func execute(_ message: [String: Any]) {
   }
   completed.wait()
 }
-let lockDirectory = NSHomeDirectory() + "/Library/Application Support/F5"
+guard let lockDirectory = computerDeviceLockDirectory() else {
+  emit(["type": "hello", "protocolVersion": 1, "helperVersion": "2.0.0"])
+  emit([
+    "type": "status",
+    "status": [
+      "available": false, "reason": "helper-missing", "detail": "OS account unavailable.",
+    ],
+  ])
+  outputQueue.sync {}
+  exit(1)
+}
 try FileManager.default.createDirectory(atPath: lockDirectory, withIntermediateDirectories: true)
 let deviceLock = ComputerDeviceLock(path: lockDirectory + "/computer-control.lock")
 guard deviceLock != nil else {
@@ -1097,6 +1111,9 @@ guard deviceLock != nil else {
   exit(0)
 }
 emit(["type": "hello", "protocolVersion": 1, "helperVersion": "2.0.0"])
+// AppKit's cross-process mouse hit test needs a WindowServer connection. Initialize
+// the application without a Dock icon, activation, or windows of its own.
+NSApplication.shared.setActivationPolicy(.prohibited)
 // Child AX objects otherwise retain the default timeout; set the process-wide ceiling.
 _ = AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 0.25)
 installMonitor()

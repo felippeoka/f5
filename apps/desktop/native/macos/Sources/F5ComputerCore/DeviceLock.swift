@@ -1,6 +1,13 @@
 import Darwin
 import Foundation
 
+/// Isolated provider HOME values must not create independent device locks.
+/// Resolve the OS account rather than inheriting the caller's profile home.
+public func computerDeviceLockDirectory() -> String? {
+  guard let account = getpwuid(getuid()), let home = account.pointee.pw_dir else { return nil }
+  return String(cString: home) + "/Library/Application Support/F5"
+}
+
 /// The file descriptor, rather than a transient acquisition result, owns the device lock.
 public final class ComputerDeviceLock {
   private let descriptor: Int32

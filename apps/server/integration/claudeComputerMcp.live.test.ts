@@ -1,6 +1,6 @@
 import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { ThreadId } from "@t3tools/contracts";
@@ -29,10 +29,22 @@ describe.skipIf(process.env.F5_CLAUDE_LIVE_TEST !== "1")(
         prompt: input.iterable,
         options: {
           cwd,
-          model: "claude-fable-5-1",
+          model: process.env.F5_CLAUDE_COMPUTER_MODEL ?? "claude-fable-5-1",
           persistSession: false,
           settingSources: [],
-          env: buildClaudeQueryEnv({ subagentModel: "inherit" }, process.env),
+          // A test launched from an agent terminal inherits its isolated HOME.
+          // macOS needs the real home and login name for its keychain lookup.
+          // CLAUDE_CONFIG_DIR still selects this profile's isolated credential.
+          env: buildClaudeQueryEnv(
+            { subagentModel: "inherit" },
+            process.platform === "darwin" && process.env.CLAUDE_CONFIG_DIR
+              ? {
+                  ...process.env,
+                  HOME: userInfo().homedir,
+                  USER: process.env.USER ?? userInfo().username,
+                }
+              : process.env,
+          ),
           maxTurns: 8,
           mcpServers: { [computer.serverName]: computer.config },
           extraArgs: { "no-chrome": null },
@@ -68,6 +80,18 @@ describe.skipIf(process.env.F5_CLAUDE_LIVE_TEST !== "1")(
           messages.push(next.value);
           if (next.value.type === "result") break;
         }
+        const result = messages.at(-1);
+        if (result?.type === "result" && result.subtype === "success")
+          expect(
+            result.result,
+            "The test process could not access this profile's Claude credentials.",
+          ).not.toContain("Not logged in");
+        expect(
+          result?.type === "result" && result.subtype === "success",
+          result?.type === "result" && "errors" in result
+            ? result.errors.join("\n")
+            : "Claude did not complete the transport turn.",
+        ).toBe(true);
         const toolResults = messages.flatMap((message) =>
           message.type === "user" && Array.isArray(message.message.content)
             ? message.message.content.filter((block) => block.type === "tool_result")
@@ -79,8 +103,6 @@ describe.skipIf(process.env.F5_CLAUDE_LIVE_TEST !== "1")(
         );
         expect(fixture.consentCount()).toBeGreaterThan(0);
         fixture.broker.setPaused(threadId, true);
-        const result = messages.at(-1);
-        expect(result?.type === "result" && result.subtype === "success").toBe(true);
         expect(JSON.stringify(result)).toContain("READY");
       } finally {
         clearTimeout(deadline);

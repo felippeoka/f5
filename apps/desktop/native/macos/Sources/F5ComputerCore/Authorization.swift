@@ -63,3 +63,21 @@ public func computerMenuPointAllowed(x: Double, left: Double, lastItemRight: Dou
   left.isFinite && lastItemRight.isFinite && x.isFinite && lastItemRight > left && x >= left
     && x < lastItemRight
 }
+
+/// AppKit's mouse-down hit test uses bottom-left global points. Quartz uses
+/// top-left global points, relative to the same primary display, including
+/// negative origins on secondary displays.
+public func computerAppKitCoordinates(x: Double, y: Double, primaryDisplayHeight: Double)
+  -> (x: Double, y: Double)
+{
+  (x: x, y: primaryDisplayHeight - y)
+}
+
+/// Resolve the OS-selected recipient by window identity, never by rectangle order.
+/// A missing/stale owner is refused rather than substituted with a nearby window.
+public func computerRecipientPid(windowId: Int, owners: [Int: Int], overlayWindowIds: [Int]) -> Int?
+{
+  guard windowId > 0, !overlayWindowIds.contains(windowId), let pid = owners[windowId], pid > 0
+  else { return nil }
+  return pid
+}

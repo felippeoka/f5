@@ -387,7 +387,7 @@ It refuses to overwrite a report and leaves every machine-test item pending with
 `certified: false`. It records repository and installed-build commits separately; a
 preflight never proves TCC identity, real capture isolation or input-stop latency.
 
-The unsigned macOS rehearsal controls a temporary AppKit test app containing only
+The unsigned macOS rehearsal controls two temporary AppKit test apps containing only
 synthetic data. It grants no existing user app, starts a fresh permit, stops on physical
 input without resuming automatically, and closes its own app/helper at exit:
 
@@ -397,12 +397,18 @@ bun apps/desktop/src/computer/rehearseHelperMacos.ts --helper apps/desktop/dist-
 
 It exercises real app activation, accessibility inspection, semantic pressing, secure
 field refusal, grant revocation, display-space clicking, Unicode typing, protected chords
-and permit expiry. The report keeps outcome codes and timings; no typed values,
+and permit expiry. It verifies that a second helper with a different `HOME` shares the
+OS user's device lock. Capture checks first show both synthetic color markers when
+both apps are granted, then revoke the second app and verify its marker disappears.
+They also check secure-field masking in JPEG captures and PNG zoom, and additional
+Retina zoom detail. Images are decoded and checked in memory by the fixture verifier.
+The report keeps outcome codes and timings; no typed values,
 accessibility content or screenshots are saved. A protected pointer refusal remains a
 failed check; only the independent permit-expiry refusal check continues afterward. Physical input ends the rehearsal without resuming.
 Failed or skipped checks are not certification evidence.
-Signing is deferred for this development work. Capture masking, physical kill-chord
-latency, both-provider turns, renderer/backend failures, multiple profiles, overlays,
+Signing is deferred for this development work. Capture masking across the real-app
+matrix, physical kill-chord latency, provider turns through the desktop authority,
+renderer/backend failures, multiple profiles, overlays,
 Windows runtime and installed-build TCC attribution still need recorded machine tests.
 
 The first real run exposed a macOS transport defect: `FileHandle.read(upToCount:)` waited
@@ -423,7 +429,28 @@ refusal and typing refusal in a focused secure field. Coordinate input remains f
 a Dock-owned layer-20 window spans the display and is the top rectangular candidate at
 the synthetic button. The helper retains its protected-system-UI refusal. The independent
 permit-expiry check passed afterward without retrying the pointer action or resuming
-input. The run exits with failure because pointer functionality remains unvalidated.
+input. That historical run exits with failure; the pointer failure is addressed by the
+later evidence below.
+
+The [2026-10-11 pointer and capture evidence](computer-certification/2026-10-11-macos-pointer-and-capture.json)
+records 14 passed native checks after replacing rectangle-based pointer authorization
+with [AppKit's actual mouse-down recipient query](<https://developer.apple.com/documentation/appkit/nswindow/windownumber(at:belowwindowwithwindownumber:)>).
+The helper initializes AppKit without activation or windows, converts Quartz coordinates
+to AppKit global points, and resolves the selected window's owner. Unknown, stale or
+unexpected overlay recipients remain blocked. This avoids treating a transparent Dock
+rectangle as the click recipient. The device lock now uses the OS account's home,
+preventing isolated provider `HOME` values from creating separate locks.
+
+The same evidence records successful live Claude and Codex F5-tool transport tests:
+discovery, fixture consent, model-facing image results and an action dispatch. These
+tests use a simulated desktop host and emit no OS input. Codex CLI 0.162.1 reported no
+additional MCP approval in this full-access run. The Claude test preserves the macOS
+login name and real home for keychain lookup while retaining the profile's config dir;
+the initial isolated test's authentication failure did not mean the running F5 session
+was signed out. Native checks use real OS input in synthetic apps, separately from
+these model-backed transport tests. Neither proves the full provider-to-desktop path,
+physical stop latency, signed attribution or the Windows/multiple-display matrix.
+All release gates remain closed.
 
 ### Build prerequisites and bounded replay state
 

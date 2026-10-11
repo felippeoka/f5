@@ -1,11 +1,15 @@
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, copyFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { join, resolve, dirname } from "node:path";
 import { tmpdir, release } from "node:os";
 import { performance } from "node:perf_hooks";
-import type { ComputerAutomationRequest, ComputerInspectResult } from "@t3tools/contracts";
+import type {
+  ComputerAutomationRequest,
+  ComputerInspectResult,
+  ComputerScreenshot,
+} from "@t3tools/contracts";
 import { ComputerControlError } from "@t3tools/shared/computerControl";
 import { ComputerHelperClient } from "./ComputerHelperClient";
 
@@ -35,6 +39,7 @@ const checks: Array<{
 }> = [];
 let physicalInterruption = false;
 let fixture: ReturnType<typeof spawn> | undefined;
+let ungrantedFixture: ReturnType<typeof spawn> | undefined;
 let renewal: ReturnType<typeof setInterval> | undefined;
 const fixtureId = `org.example.computer-rehearsal.${randomUUID()}`;
 const authorization = {
@@ -92,6 +97,7 @@ async function check(name: string, run: () => Promise<void>): Promise<void> {
     await run();
     checks.push({ name, state: "passed", elapsedMs: Math.round(performance.now() - started) });
   } catch (error) {
+    if (error instanceof RehearsalAssertion) process.stderr.write(`${error.message}\n`);
     const outcome = error instanceof ComputerControlError ? error.error._tag : "RehearsalFailure";
     checks.push({
       name,
@@ -105,8 +111,9 @@ async function check(name: string, run: () => Promise<void>): Promise<void> {
     throw error;
   }
 }
+class RehearsalAssertion extends Error {}
 const assert = (condition: unknown, message: string) => {
-  if (!condition) throw new Error(message);
+  if (!condition) throw new RehearsalAssertion(message);
 };
 let helperHash: string | null = null;
 try {
@@ -116,6 +123,26 @@ try {
   helper.start();
   await waitFor(() => helper.status().available);
   const root = await mkdtemp(join(tmpdir(), "f5-native-rehearsal-"));
+  await check(
+    "A second helper with a different HOME cannot acquire the OS user's device lock",
+    async () => {
+      const second = await exec(resolve(helperPath), [], {
+        env: { ...process.env, HOME: root },
+        timeout: 5000,
+        maxBuffer: 4096,
+      });
+      assert(
+        second.stdout
+          .split("\n")
+          .filter(Boolean)
+          .some((line) => {
+            const message = JSON.parse(line) as { type: string; status?: { reason?: string } };
+            return message.type === "status" && message.status?.reason === "other-instance";
+          }),
+        "The second helper acquired a separate device lock.",
+      );
+    },
+  );
   const bundle = join(root, "ComputerControlFixture.app", "Contents");
   await mkdir(join(bundle, "MacOS"), { recursive: true });
   await writeFile(
@@ -133,9 +160,82 @@ try {
     ],
     { timeout: 30000 },
   );
-  fixture = spawn(join(bundle, "MacOS", "Fixture"), [], { stdio: "ignore" });
+  const captureVerifier = join(root, "capture-verifier");
+  await exec(
+    "swiftc",
+    [
+      "-framework",
+      "AppKit",
+      resolve(import.meta.dirname, "../../native/macos/Fixtures/CaptureVerifier.swift"),
+      "-o",
+      captureVerifier,
+    ],
+    { timeout: 30000 },
+  );
+  const verifyCapture = (
+    image: ComputerScreenshot,
+    secureRect?: { x: number; y: number; width: number; height: number },
+    requireBlue = true,
+    requireGreen = false,
+  ): Promise<{ width: number; height: number }> =>
+    new Promise((done, reject) => {
+      const verifier = execFile(
+        captureVerifier,
+        [],
+        { timeout: 10000, maxBuffer: 4096 },
+        (error, stdout) => {
+          if (error) return reject(new Error("Capture verifier failed."));
+          try {
+            const outcome = JSON.parse(stdout) as {
+              grantedMarkerVisible: boolean;
+              ungrantedMarkerAbsent: boolean;
+              greenMarkerVisible: boolean;
+              secureMasked: boolean;
+              width: number;
+              height: number;
+            };
+            assert(outcome.grantedMarkerVisible, "Granted fixture marker is missing.");
+            assert(
+              requireGreen ? outcome.greenMarkerVisible : outcome.ungrantedMarkerAbsent,
+              requireGreen
+                ? "Capture control fixture marker is missing."
+                : "Ungranted fixture pixels leaked.",
+            );
+            assert(outcome.secureMasked, "Secure field pixels were not masked.");
+            done(outcome);
+          } catch (error) {
+            reject(error);
+          }
+        },
+      );
+      verifier.stdin?.end(
+        JSON.stringify({ data: image.data, mimeType: image.mimeType, secureRect, requireBlue }),
+      );
+    });
+  const ungrantedBundle = join(root, "UngrantedFixture.app", "Contents");
+  const ungrantedFixtureId = `org.example.ungranted-rehearsal.${randomUUID()}`;
+  await mkdir(join(ungrantedBundle, "MacOS"), { recursive: true });
+  await copyFile(join(bundle, "MacOS", "Fixture"), join(ungrantedBundle, "MacOS", "Fixture"));
+  await writeFile(
+    join(ungrantedBundle, "Info.plist"),
+    (await readFile(join(bundle, "Info.plist"), "utf8")).replace(fixtureId, ungrantedFixtureId),
+  );
+  ungrantedFixture = spawn(join(ungrantedBundle, "MacOS", "Fixture"), ["--ungranted"], {
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  ungrantedFixture.on("error", () => {});
+  let ungrantedReady = false;
+  ungrantedFixture.stdout?.on("data", (chunk: Buffer) => {
+    if (chunk.toString().includes("FIXTURE_READY")) ungrantedReady = true;
+  });
+  fixture = spawn(join(bundle, "MacOS", "Fixture"), [], { stdio: ["ignore", "pipe", "ignore"] });
   fixture.on("error", () => {});
-  await pause(1000);
+  let fixtureReady = false;
+  fixture.stdout?.on("data", (chunk: Buffer) => {
+    if (chunk.toString().includes("FIXTURE_READY")) fixtureReady = true;
+  });
+  await waitFor(() => fixtureReady && ungrantedReady);
+  await pause(300);
   helper.control({ type: "grantsChanged", authorization });
   helper.control({ type: "permit", executionGeneration: 1, expiresInMs: 1000 });
   helper.control({ type: "resume", executionGeneration: 1 });
@@ -167,6 +267,62 @@ try {
       ),
       "Secure element was not recognized.",
     );
+  });
+  await check(
+    "Capture control includes both synthetic markers when both fixtures are granted",
+    async () => {
+      const secure = snapshot?.nodes.find((node) => node.name === "Rehearsal secure field");
+      if (!secure?.bounds || !secure.displayId)
+        throw new Error("Secure field geometry is missing.");
+      authorization.grants.push({ appId: ungrantedFixtureId, tier: "full", allowTyping: false });
+      authorization.grantVersion += 1;
+      helper.control({ type: "grantsChanged", authorization });
+      try {
+        const image = await request<ComputerScreenshot>({
+          op: "screenshot",
+          displayId: secure.displayId,
+        });
+        await verifyCapture(image, secure.bounds, true, true);
+      } finally {
+        authorization.grants.pop();
+        authorization.grantVersion += 1;
+        helper.control({ type: "grantsChanged", authorization });
+      }
+    },
+  );
+  await check(
+    "Capture includes granted pixels, excludes revoked fixture pixels and masks secure fields",
+    async () => {
+      const secure = snapshot?.nodes.find((node) => node.name === "Rehearsal secure field");
+      if (!secure?.bounds || !secure.displayId)
+        throw new Error("Secure field geometry is missing.");
+      const image = await request<ComputerScreenshot>({
+        op: "screenshot",
+        displayId: secure.displayId,
+      });
+      assert(image.hiddenContent, "Capture did not report omitted windows.");
+      await verifyCapture(image, secure.bounds);
+    },
+  );
+  await check("Zoom masks secure fields and provides additional Retina detail", async () => {
+    const secure = snapshot?.nodes.find((node) => node.name === "Rehearsal secure field");
+    const status = helper.status();
+    const display = status.available
+      ? status.displays?.find((item) => item.displayId === secure?.displayId)
+      : undefined;
+    if (!secure?.bounds || !display) throw new Error("Secure field display is missing.");
+    const image = await request<ComputerScreenshot>({
+      op: "zoom",
+      displayId: display.displayId,
+      rect: secure.bounds,
+    });
+    const dimensions = await verifyCapture(image, { x: 0, y: 0, ...image.modelSize }, false);
+    const captureScale = Math.min(
+      1,
+      2560 / Math.max(display.pixelSize.width, display.pixelSize.height),
+    );
+    if (display.pixelSize.width * captureScale > display.modelSize.width)
+      assert(dimensions.width > secure.bounds.width, "Zoom added no capture detail.");
   });
   await check("Semantic press reaches the real app", async () => {
     const current = snapshot;
@@ -365,6 +521,7 @@ try {
   await helper.suspend();
   helper.close();
   fixture?.kill();
+  ungrantedFixture?.kill();
   const report = {
     reportVersion: 1,
     recordedAt: new Date().toISOString(),
@@ -379,7 +536,7 @@ try {
     physicalInterruption,
     remaining: [
       "Provider-mediated app consent and real provider turns",
-      "Capture isolation and secure masking",
+      "Capture isolation and secure masking across real apps, popups and moving windows",
       "Coordinate/drag/typing focus changes",
       "Physical kill-chord latency and user-input interruption",
       "Renderer/backend-stall stop path",
