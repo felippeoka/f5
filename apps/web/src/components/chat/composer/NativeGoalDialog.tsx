@@ -23,6 +23,8 @@ const MAX_TOKEN_BUDGET = 10_000_000;
 /** Starts a provider-native goal: an objective the agent pursues until done or out of budget. */
 export function NativeGoalDialog(props: {
   open: boolean;
+  /** A turn started or a goal request is in flight since the dialog opened. */
+  disabled?: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (objective: string, tokenBudget: number) => Promise<boolean>;
 }) {
@@ -35,9 +37,10 @@ export function NativeGoalDialog(props: {
     Number.isSafeInteger(tokenBudget) &&
     tokenBudget >= 1 &&
     tokenBudget <= MAX_TOKEN_BUDGET;
+  const canSubmit = valid && !submitting && !props.disabled;
 
   const submit = async () => {
-    if (!valid || submitting) return;
+    if (!canSubmit) return;
     setSubmitting(true);
     try {
       if (await props.onSubmit(objective.trim(), tokenBudget)) {
@@ -57,6 +60,9 @@ export function NativeGoalDialog(props: {
           className="contents"
           onSubmit={(event) => {
             event.preventDefault();
+            // The popup is portaled, but React still bubbles this submit to
+            // the composer form that renders the dialog; it must not send.
+            event.stopPropagation();
             void submit();
           }}
         >
@@ -78,6 +84,7 @@ export function NativeGoalDialog(props: {
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
                     event.preventDefault();
+                    event.stopPropagation();
                     void submit();
                   }
                 }}
@@ -98,7 +105,7 @@ export function NativeGoalDialog(props: {
           </DialogPanel>
           <DialogFooter variant="bare">
             <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
-            <Button type="submit" disabled={!valid || submitting}>
+            <Button type="submit" disabled={!canSubmit}>
               Start goal
             </Button>
           </DialogFooter>

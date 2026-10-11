@@ -6,7 +6,10 @@ import type {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { selectNativeRuntimeTrayRows } from "./NativeRuntimeTray.logic";
+import {
+  selectNativeRuntimeTrayRows,
+  selectNewlyFailedOperations,
+} from "./NativeRuntimeTray.logic";
 
 const suggestion = (id: string, createdAt: string) =>
   ({
@@ -105,6 +108,50 @@ describe("selectNativeRuntimeTrayRows", () => {
           ],
         }),
       ).toEqual(["recovery", "running", "running", "running"]);
+    });
+
+    it("leaves a started goal to the header instead of a long-lived spinner", () => {
+      const goal = record("g", "running", { kind: "goalSet", objective: "Ship", tokenBudget: 10 });
+      expect(kinds({ records: [goal] })).toEqual([]);
+      expect(kinds({ records: [{ ...goal, state: "indeterminate" }] })).toEqual(["recovery"]);
+    });
+  });
+
+  describe("selectNewlyFailedOperations", () => {
+    const mountedAt = "2026-01-02T00:00:00Z";
+    const at = (state: NativeOperationRecord["state"], createdAt: string, id = "op") =>
+      ({ ...record(id, state), createdAt }) as NativeOperationRecord;
+    const failed = (input: Partial<Parameters<typeof selectNewlyFailedOperations>[0]>) =>
+      selectNewlyFailedOperations({
+        previous: [],
+        next: [],
+        mountedAt,
+        reported: new Set(),
+        ...input,
+      }).map((entry) => entry.operationId);
+
+    it("reports an admitted operation that later fails", () => {
+      expect(
+        failed({
+          previous: [at("running", "2026-01-01T00:00:00Z")],
+          next: [at("failed", "2026-01-01T00:00:00Z")],
+        }),
+      ).toEqual(["op"]);
+    });
+
+    it("reports a failure created after mount even if never seen running", () => {
+      expect(failed({ next: [at("failed", "2026-01-03T00:00:00Z")] })).toEqual(["op"]);
+    });
+
+    it("stays quiet about old failures and already reported ones", () => {
+      expect(failed({ next: [at("failed", "2026-01-01T00:00:00Z")] })).toEqual([]);
+      expect(
+        failed({
+          previous: [at("running", "2026-01-03T00:00:00Z")],
+          next: [at("failed", "2026-01-03T00:00:00Z")],
+          reported: new Set(["op"]),
+        }),
+      ).toEqual([]);
     });
   });
 

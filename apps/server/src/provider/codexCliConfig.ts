@@ -29,13 +29,19 @@ function encodeTomlInlineValue(value: unknown): string {
   return "{}";
 }
 
+type CodexCliMcpServerEntry = CodexMcpServerEntry extends infer Entry
+  ? Entry extends unknown
+    ? Omit<Entry, "type">
+    : never
+  : never;
+
 /**
  * Codex infers an MCP server's transport from `command` vs `url` and warns
  * about unknown keys, so F5's internal `type` discriminant stays out of argv.
  */
 function toCodexCliMcpServers(
   servers: Record<string, CodexMcpServerEntry>,
-): Record<string, Omit<CodexMcpServerEntry, "type">> {
+): Record<string, CodexCliMcpServerEntry> {
   return Object.fromEntries(
     Object.entries(servers).map(([name, { type: _type, ...entry }]) => [name, entry]),
   );

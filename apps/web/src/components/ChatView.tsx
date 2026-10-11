@@ -1,6 +1,7 @@
 import { parseNativeReviewTarget } from "@t3tools/shared/nativeReviewTarget";
+import { NativeRuntimePanel } from "./chat/NativeRuntimePanel";
 import { NativeRuntimeTray } from "./chat/NativeRuntimeTray";
-import { latestNativeGoal } from "./chat/nativeGoal";
+import { latestNativeGoal, resolveNativeGoalMenuState } from "./chat/nativeGoal";
 import { TranscriptRepairAction } from "./TranscriptRepairAction";
 import { isSessionActionSupported } from "@t3tools/shared/providerRuntimeCapabilities";
 import { isBlockingUserInput } from "@t3tools/shared/pendingUserInputs";
@@ -2508,6 +2509,7 @@ export default function ChatView({
       threadModel: activeThread?.model ?? null,
       configuredRuntime: latestConfiguredRuntimeActivity,
       rerouteActivity: latestModelRerouteActivity,
+      activities: threadActivities,
       cliVersion: activeProviderStatus?.version ?? null,
       mcpSummary: mcpRuntimeSummary,
     });
@@ -2516,6 +2518,7 @@ export default function ChatView({
     activeThread?.model,
     latestConfiguredRuntimeActivity,
     latestModelRerouteActivity,
+    threadActivities,
     mcpRuntimeSummary,
     selectedProviderByThreadId,
     sessionProvider,
@@ -4542,13 +4545,25 @@ export default function ChatView({
   ]);
 
   /** Runs a goal command; resolves true once the provider admitted it. */
+  const [nativeGoalRequestPending, setNativeGoalRequestPending] = useState(false);
+  const nativeGoalRequestInFlight = useRef(false);
   const executeNativeGoalCommand = useCallback(
     async (command: NativeOperationCommand): Promise<boolean> => {
-      const api = readNativeApi();
-      const capabilities = activeThread?.session?.capabilities;
-      if (!api?.nativeOperations || !activeThread || !capabilities) return false;
       const title =
         command.kind === "goalClear" ? "Goal could not be cleared" : "Goal could not start";
+      const api = readNativeApi();
+      const capabilities = activeThread?.session?.capabilities;
+      if (!api?.nativeOperations || !activeThread || !capabilities) {
+        toastManager.add({
+          type: "error",
+          title,
+          description: "Goals are unavailable until the provider session is ready.",
+        });
+        return false;
+      }
+      if (nativeGoalRequestInFlight.current) return false;
+      nativeGoalRequestInFlight.current = true;
+      setNativeGoalRequestPending(true);
       try {
         const record = await api.nativeOperations.execute({
           threadId: activeThread.id,
@@ -4567,35 +4582,43 @@ export default function ChatView({
           description:
             cause instanceof Error ? cause.message : "Retry after the current operation settles.",
         });
+      } finally {
+        nativeGoalRequestInFlight.current = false;
+        setNativeGoalRequestPending(false);
       }
       return false;
     },
     [activeThread],
   );
-  const nativeGoalControls = useMemo<ComposerNativeGoalControls | null>(
-    () =>
-      activeThread?.session?.capabilities?.actions.some(
-        (action) => action.action === "nativeGoals" && action.supported,
-      )
-        ? {
-            hasGoal: nativeGoal !== null,
-            disabled: isWorking || isRevertingCheckpoint || hasPendingTurnDispatch,
-            onSet: (objective, tokenBudget) =>
-              executeNativeGoalCommand({ kind: "goalSet", objective, tokenBudget }),
-            onClear: async () => {
-              await executeNativeGoalCommand({ kind: "goalClear" });
-            },
-          }
-        : null,
-    [
-      activeThread?.session?.capabilities,
-      executeNativeGoalCommand,
-      hasPendingTurnDispatch,
-      isRevertingCheckpoint,
-      isWorking,
-      nativeGoal,
-    ],
-  );
+  const nativeGoalControls = useMemo<ComposerNativeGoalControls | null>(() => {
+    const state = resolveNativeGoalMenuState({
+      supported:
+        activeThread?.session?.capabilities?.actions.some(
+          (action) => action.action === "nativeGoals" && action.supported,
+        ) === true,
+      goal: nativeGoal,
+      turnBusy: isWorking || isRevertingCheckpoint || hasPendingTurnDispatch,
+      requestPending: nativeGoalRequestPending,
+    });
+    return state
+      ? {
+          ...state,
+          onSet: (objective, tokenBudget) =>
+            executeNativeGoalCommand({ kind: "goalSet", objective, tokenBudget }),
+          onClear: async () => {
+            await executeNativeGoalCommand({ kind: "goalClear" });
+          },
+        }
+      : null;
+  }, [
+    activeThread?.session?.capabilities,
+    executeNativeGoalCommand,
+    hasPendingTurnDispatch,
+    isRevertingCheckpoint,
+    isWorking,
+    nativeGoal,
+    nativeGoalRequestPending,
+  ]);
 
   const onSend = async (
     e?: { preventDefault: () => void },
@@ -7063,12 +7086,28 @@ export default function ChatView({
           />
         </AppTitlebar>
 
-        {settings.showProviderRuntimeMetadata ? (
-          <ProviderRuntimeInfoBanner
-            provider={sessionProvider ?? selectedProviderByThreadId ?? null}
-            entries={providerRuntimeInfoEntries}
-          />
-        ) : null}
+        {(activeThread.session != null ||
+          latestConfiguredRuntimeActivity != null ||
+          (settings.showProviderRuntimeMetadata && providerRuntimeInfoEntries.length > 0)) && (
+          <div className="flex shrink-0 items-center border-b border-border">
+            <div className="min-w-0 flex-1">
+              {settings.showProviderRuntimeMetadata ? (
+                <ProviderRuntimeInfoBanner
+                  provider={sessionProvider ?? selectedProviderByThreadId ?? null}
+                  entries={providerRuntimeInfoEntries}
+                />
+              ) : null}
+            </div>
+            <NativeRuntimePanel
+              threadId={activeThread.id}
+              capabilities={activeThread.session?.capabilities}
+              activities={activeThread.activities}
+              runtime={latestConfiguredRuntimeActivity}
+              requestedModel={activeThread.model}
+              outcome={activeThread.latestTurn?.state}
+            />
+          </div>
+        )}
         {latestConfiguredRuntimeActivity?.agentBrowser ? (
           <div className="flex justify-end px-3 pt-1">
             <BrowserCapabilityChip

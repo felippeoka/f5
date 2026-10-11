@@ -76,7 +76,11 @@ export function selectNativeRuntimeTrayRows(input: {
     }
   }
   for (const record of input.records) {
-    if (RUNNING_STATES.has(record.state)) rows.push({ kind: "running", record });
+    // A started goal stays `running` until it settles, possibly for hours;
+    // the header already shows its status.
+    if (RUNNING_STATES.has(record.state) && record.command.kind !== "goalSet") {
+      rows.push({ kind: "running", record });
+    }
   }
   if (input.canInspectTasks || input.canStopTasks) {
     for (const task of input.tasks) {
@@ -84,4 +88,26 @@ export function selectNativeRuntimeTrayRows(input: {
     }
   }
   return rows;
+}
+
+/**
+ * Operations that failed after admission and have not been reported yet:
+ * either seen in a non-failed state before, or created while the tray was
+ * mounted. Older failures in the server history stay quiet.
+ */
+export function selectNewlyFailedOperations(input: {
+  readonly previous: readonly NativeOperationRecord[];
+  readonly next: readonly NativeOperationRecord[];
+  readonly mountedAt: string;
+  readonly reported: ReadonlySet<string>;
+}): NativeOperationRecord[] {
+  return input.next.filter(
+    (record) =>
+      record.state === "failed" &&
+      !input.reported.has(record.operationId) &&
+      (record.createdAt >= input.mountedAt ||
+        input.previous.some(
+          (entry) => entry.operationId === record.operationId && entry.state !== "failed",
+        )),
+  );
 }

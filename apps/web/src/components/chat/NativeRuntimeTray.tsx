@@ -33,9 +33,9 @@ import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
 import { COMPOSER_TRAY_PANEL_CLASS_NAME } from "./composer/ComposerTray";
 import {
-  latestPromptSuggestion,
   nativeOperationLabel,
   selectNativeRuntimeTrayRows,
+  selectNewlyFailedOperations,
 } from "./NativeRuntimeTray.logic";
 
 const ROW_CLASS_NAME = `${COMPOSER_TRAY_PANEL_CLASS_NAME} flex items-center gap-2 text-xs`;
@@ -58,14 +58,21 @@ interface TaskInspection {
  * whose outcome needs recovery or is still running, and stoppable child
  * tasks. Renders nothing when none of those exist.
  */
-export function NativeRuntimeTray(props: {
+interface NativeRuntimeTrayProps {
   threadId: ThreadId;
   capabilities: ProviderSessionCapabilities | null | undefined;
   activities: readonly OrchestrationThreadActivity[];
   prompt: string;
   latestMessageAt?: string | undefined;
   onSuggestion: (text: string) => void;
-}) {
+}
+
+export function NativeRuntimeTray(props: NativeRuntimeTrayProps) {
+  // Per-thread state (records, open dialogs) must never leak into another thread.
+  return <NativeRuntimeTrayContent key={props.threadId} {...props} />;
+}
+
+function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
   const { threadId, capabilities, activities, prompt } = props;
   const [records, setRecords] = useState<readonly NativeOperationRecord[]>([]);
   const [tasks, setTasks] = useState<readonly ThreadBackgroundWorkEntry[]>([]);
@@ -74,29 +81,77 @@ export function NativeRuntimeTray(props: {
   const [acknowledging, setAcknowledging] = useState<NativeOperationRecord | null>(null);
   const [inspection, setInspection] = useState<TaskInspection | null>(null);
   const [reading, setReading] = useState(false);
+  const [mountedAt] = useState(() => new Date().toISOString());
+  const mutationVersion = useRef(0);
+  const reportedFailures = useRef(new Set<string>());
+  const previousRecords = useRef(records);
+  const supported = (action: string) =>
+    capabilities?.actions.some((entry) => entry.action === action && entry.supported) === true;
+  const canInspectTasks = supported("childTaskInspection");
+  const canStopTasks = supported("childTaskStop");
+  const rows = selectNativeRuntimeTrayRows({
+    activities,
+    prompt,
+    latestMessageAt: props.latestMessageAt,
+    usedSuggestionId,
+    records,
+    tasks,
+    canInspectTasks,
+    canStopTasks,
+  });
+  const shownSuggestionId = rows.find((row) => row.kind === "suggestion")?.id ?? null;
+  const shownSuggestionBefore = useRef(shownSuggestionId);
   const promptBefore = useRef(prompt);
-  const suggestion = latestPromptSuggestion(activities);
   useEffect(() => {
-    // Typing counts as passing on the suggestion.
-    if (promptBefore.current !== prompt && suggestion) setUsedSuggestionId(suggestion.id);
+    // Typing passes on the suggestion that was on screen before the edit,
+    // not one that arrived together with it.
+    if (promptBefore.current !== prompt && shownSuggestionBefore.current) {
+      setUsedSuggestionId(shownSuggestionBefore.current);
+    }
     promptBefore.current = prompt;
-  }, [prompt, suggestion]);
+  }, [prompt]);
+  useEffect(() => {
+    shownSuggestionBefore.current = shownSuggestionId;
+  });
+  useEffect(() => {
+    for (const record of selectNewlyFailedOperations({
+      previous: previousRecords.current,
+      next: records,
+      mountedAt,
+      reported: reportedFailures.current,
+    })) {
+      reportedFailures.current.add(record.operationId);
+      showError(
+        `${nativeOperationLabel(record.command.kind)} failed`,
+        record.error ?? "The provider reported a failure.",
+      );
+    }
+    previousRecords.current = records;
+  }, [records, mountedAt]);
   useEffect(() => {
     let alive = true;
+    let refreshing = false;
     const refresh = async () => {
+      if (refreshing) return;
       const api = readNativeApi();
       if (!api?.nativeOperations) return;
+      refreshing = true;
       try {
+        const version = mutationVersion.current;
         const [next, snapshot] = await Promise.all([
           api.nativeOperations.list({ threadId }),
           api.agents.getSnapshot(),
         ]);
         if (alive) {
-          setRecords(next);
+          // A poll that started before a local receipt is older than that
+          // receipt; the next poll replaces the list authoritatively.
+          if (version === mutationVersion.current) setRecords(next);
           setTasks(snapshot.entries.filter((entry) => entry.threadId === threadId));
         }
       } catch {
         /* Connection and capability surfaces already report transport failures. */
+      } finally {
+        refreshing = false;
       }
     };
     void refresh();
@@ -106,10 +161,6 @@ export function NativeRuntimeTray(props: {
       window.clearInterval(timer);
     };
   }, [threadId, capabilities?.generation]);
-  const supported = (action: string) =>
-    capabilities?.actions.some((entry) => entry.action === action && entry.supported) === true;
-  const canInspectTasks = supported("childTaskInspection");
-  const canStopTasks = supported("childTaskStop");
 
   const execute = async (command: NativeOperationCommand) => {
     const api = readNativeApi()?.nativeOperations;
@@ -122,11 +173,15 @@ export function NativeRuntimeTray(props: {
         generation: capabilities.generation,
         command,
       });
+      mutationVersion.current++;
+      if (record.error) {
+        reportedFailures.current.add(record.operationId);
+        showError(`${nativeOperationLabel(command.kind)} failed`, record.error);
+      }
       setRecords((current) => [
         record,
         ...current.filter((entry) => entry.operationId !== record.operationId),
       ]);
-      if (record.error) showError(`${nativeOperationLabel(command.kind)} failed`, record.error);
     } catch (cause) {
       showError(
         `${nativeOperationLabel(command.kind)} failed`,
@@ -147,6 +202,7 @@ export function NativeRuntimeTray(props: {
         generation: capabilities.generation,
         action,
       });
+      mutationVersion.current++;
       setRecords((current) =>
         current.map((entry) => (entry.operationId === next.operationId ? next : entry)),
       );
@@ -158,10 +214,15 @@ export function NativeRuntimeTray(props: {
   };
   const inspect = async (nativeId: string, label: string, cursor?: string) => {
     if (!capabilities) return;
+    const api = readNativeApi()?.nativeOperations;
+    if (!api?.inspect) {
+      showError("Task output unavailable", "Native output API is unavailable.");
+      return;
+    }
     setReading(true);
     try {
       const identity = readNativeTaskIdentity(nativeId);
-      const page = await readNativeApi()?.nativeOperations?.inspect({
+      const page = await api.inspect({
         threadId,
         generation: capabilities.generation,
         kind: "task",
@@ -186,16 +247,6 @@ export function NativeRuntimeTray(props: {
   };
 
   if (!capabilities) return null;
-  const rows = selectNativeRuntimeTrayRows({
-    activities,
-    prompt,
-    latestMessageAt: props.latestMessageAt,
-    usedSuggestionId,
-    records,
-    tasks,
-    canInspectTasks,
-    canStopTasks,
-  });
 
   return (
     <>

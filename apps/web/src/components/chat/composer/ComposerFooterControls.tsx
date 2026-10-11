@@ -123,6 +123,11 @@ export function ComposerFooterControls(props: {
                   Clear goal
                 </MenuItem>
               ) : null}
+              {nativeGoal.active ? (
+                <div className="px-2 py-1 text-muted-foreground text-xs">
+                  Available once the current goal settles
+                </div>
+              ) : null}
             </>
           ) : null}
         </MenuPopup>
@@ -130,6 +135,7 @@ export function ComposerFooterControls(props: {
       {nativeGoal ? (
         <NativeGoalDialog
           open={goalDialogOpen}
+          disabled={nativeGoal.disabled}
           onOpenChange={setGoalDialogOpen}
           onSubmit={nativeGoal.onSet}
         />
