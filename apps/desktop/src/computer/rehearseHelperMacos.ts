@@ -323,6 +323,18 @@ try {
       JSON.stringify(after).includes("presses: 2"),
       "Coordinate click missed the fixture button.",
     );
+  }).catch((error: unknown) => {
+    // Keep the pointer refusal failed. The independent expiry check below
+    // verifies refusal only; it never retries pointer input or resumes input.
+    if (
+      error instanceof ComputerControlError &&
+      error.error._tag === "TargetBlocked" &&
+      error.error.kind === "system-ui"
+    ) {
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
   });
   await check("Permit expiry blocks the next real action", async () => {
     clearInterval(renewal);

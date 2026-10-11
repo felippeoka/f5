@@ -398,8 +398,9 @@ bun apps/desktop/src/computer/rehearseHelperMacos.ts --helper apps/desktop/dist-
 It exercises real app activation, accessibility inspection, semantic pressing, secure
 field refusal, grant revocation, display-space clicking, Unicode typing, protected chords
 and permit expiry. The report keeps outcome codes and timings; no typed values,
-accessibility content or screenshots are saved. A protected target or physical-input
-interruption ends the rehearsal; failed or skipped checks are not certification evidence.
+accessibility content or screenshots are saved. A protected pointer refusal remains a
+failed check; only the independent permit-expiry refusal check continues afterward. Physical input ends the rehearsal without resuming.
+Failed or skipped checks are not certification evidence.
 Signing is deferred for this development work. Capture masking, physical kill-chord
 latency, both-provider turns, renderer/backend failures, multiple profiles, overlays,
 Windows runtime and installed-build TCC attribution still need recorded machine tests.
@@ -415,3 +416,11 @@ records six passed real-app checks after the pipe fix, protected-system-UI refus
 pointer checks, and a physical-input interruption in a separate run. It also records the
 installed plugin versions/hashes and unsupported launch reasons. These results establish
 only the listed development observations; the rest of the release matrix remains pending.
+
+The [2026-10-11 idle-Mac evidence](computer-certification/2026-10-11-macos-unsigned.json)
+records nine passed checks, now including real Unicode typing, protected-system-chord
+refusal and typing refusal in a focused secure field. Coordinate input remains failed:
+a Dock-owned layer-20 window spans the display and is the top rectangular candidate at
+the synthetic button. The helper retains its protected-system-UI refusal. The independent
+permit-expiry check passed afterward without retrying the pointer action or resuming
+input. The run exits with failure because pointer functionality remains unvalidated.
