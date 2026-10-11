@@ -2368,7 +2368,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       );
 
     const offerRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-      Queue.offer(runtimeEventQueue, event).pipe(Effect.asVoid);
+      Queue.offer(
+        runtimeEventQueue,
+        automationEventSanitizer.sanitize(event.threadId, event) as ProviderRuntimeEvent,
+      ).pipe(Effect.asVoid);
 
     const emitSessionConfigured = (
       context: ClaudeSessionContext,
@@ -5510,7 +5513,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         if (context.stopped) return;
 
         context.stopped = true;
-        context.computerDispose?.();
+        // Stop input immediately; retain provenance until final tool events are queued safely.
+        if (context.turnState) context.computerEndTurn?.(context.turnState.turnId);
         for (const stop of context.nativeTaskStops.values()) {
           if (stop.settlement)
             yield* Deferred.fail(
@@ -5624,7 +5628,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             context.chromeGeneration,
           );
         }
-      });
+      }).pipe(Effect.ensuring(Effect.sync(() => context.computerDispose?.())));
 
     const requireSession = (
       threadId: ThreadId,
@@ -5846,8 +5850,9 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         ),
       );
 
-    const startSessionUnlocked: ClaudeAdapterShape["startSession"] = (input) =>
-      Effect.gen(function* () {
+    const startSessionUnlocked: ClaudeAdapterShape["startSession"] = (input) => {
+      let disposeComputer: (() => void) | undefined;
+      return Effect.gen(function* () {
         if (input.provider !== undefined && input.provider !== PROVIDER) {
           return yield* new ProviderAdapterValidationError({
             provider: PROVIDER,
@@ -6735,6 +6740,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                 ]),
               })
             : undefined;
+        disposeComputer = computerServer?.dispose;
         // Computer use and Claude in Chrome stay uncertified (see claudeAgentBrowser.ts):
         // enabling them reports "unavailable" and their tools are denied.
         let chromeAllowed = false;
@@ -7311,7 +7317,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         return {
           ...session,
         };
-      });
+      }).pipe(Effect.onError(() => Effect.sync(() => disposeComputer?.())));
+    };
 
     const startSession: ClaudeAdapterShape["startSession"] = (input) =>
       withThreadLock(input.threadId, startSessionUnlocked(input));

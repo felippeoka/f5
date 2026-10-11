@@ -95,6 +95,38 @@ async function harness() {
   };
 }
 describe("computer broker safety boundaries", () => {
+  it("keeps native pause authoritative and refuses remote resume", async () => {
+    const h = await harness();
+    try {
+      h.broker.setPaused("t", true);
+      expect(() => h.broker.assertRemoteResumeAllowed("t")).toThrow("computer running F5");
+      expect(() => h.broker.setPaused("t", false)).toThrow("computer running F5");
+      expect(h.broker.pause.has("t")).toBe(true);
+      expect(h.ipc.messages.some((message) => message.type === "resumeRequested")).toBe(false);
+      h.ipc.emit("message", { type: "pauseChanged", threadId: "t", paused: false });
+      expect(h.broker.pause.has("t")).toBe(false);
+      expect(() => h.broker.assertRemoteResumeAllowed("preview-only")).not.toThrow();
+    } finally {
+      h.broker.close();
+    }
+  });
+  it("rejects keyboard mutation before acquiring a lease when no grant permits typing", async () => {
+    const h = await harness();
+    try {
+      await h.broker.invoke("t", "s", { op: "listApps" });
+      h.broker.access.revoke("t", "com.apple.TextEdit");
+      for (const input of [
+        { op: "type" as const, text: "x" },
+        { op: "key" as const, chords: ["ENTER"] },
+      ])
+        await expect(h.broker.invoke("t", "s", input)).rejects.toMatchObject({
+          error: { _tag: "NotGranted", needed: "type" },
+        });
+      expect(h.ipc.messages.some((message) => message.type === "leaseAcquire")).toBe(false);
+    } finally {
+      h.broker.close();
+    }
+  });
   it("does not prompt for ambiguous app matches or grant every fuzzy match", async () => {
     const h = await harness();
     try {

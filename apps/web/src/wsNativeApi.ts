@@ -1,3 +1,4 @@
+import { useAgentComputerActivityStore } from "./agentComputerActivityStore";
 import { NATIVE_OPERATION_WS_METHODS } from "@t3tools/contracts";
 import type { ProfileListResult, ProviderAccountEvent } from "@t3tools/contracts";
 import {
@@ -238,6 +239,8 @@ export function createWsNativeApi(): NativeApi {
     for (const listener of accountListeners) listener(message.data);
   });
   transport.subscribe(WS_CHANNELS.serverWelcome, (message) => {
+    // Welcome precedes the authoritative pending-consent/grant snapshot on every connection.
+    useAgentComputerActivityStore.getState().resetConnection();
     const payload = message.data;
     for (const listener of welcomeListeners) {
       try {

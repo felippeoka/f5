@@ -162,25 +162,13 @@ export class ComputerHostChannel {
           this.controller.cancel(message.requestId, profileId);
           break;
         case "pauseChanged":
-          try {
-            if (!this.pauseChrome(profileId, message.threadId, message.paused))
-              this.controller.setPaused(profileId, message.threadId, message.paused);
-          } catch {
-            /* A failed resume keeps the native latch set. */
+          // Backend clients can narrow access. Only trusted local renderer IPC can resume.
+          if (message.paused) {
+            if (!this.pauseChrome(profileId, message.threadId, true))
+              this.controller.setPaused(profileId, message.threadId, true);
           }
           break;
         case "resumeRequested":
-          try {
-            if (!this.pauseChrome(profileId, message.threadId, false))
-              this.controller.setPaused(profileId, message.threadId, false);
-            this.send(profileId, {
-              type: "pauseChanged",
-              threadId: message.threadId,
-              paused: false,
-            });
-          } catch {
-            /* Fail closed; no resume notification. */
-          }
           break;
         case "accessRequested":
           backend.pendingAccess.add(message.request.requestId);

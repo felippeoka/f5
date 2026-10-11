@@ -171,13 +171,19 @@ export function ComputerAccessInbox() {
 }
 export function ComputerAccessTimeline({ threadId }: { threadId: string }) {
   const requests = useAgentComputerActivityStore((state) => state.requests);
+  const history = Object.values(requests)
+    .filter((request) => request?.threadId === threadId)
+    .slice(-20);
+  if (!history.length) return null;
   return (
-    <>
-      {Object.values(requests)
-        .filter((request) => request?.threadId === threadId)
-        .map((request) =>
+    <details className="shrink-0 rounded-lg border text-sm">
+      <summary className="cursor-pointer px-3 py-2">
+        Computer access · {history.length} recent requests
+      </summary>
+      <div className="max-h-48 overflow-y-auto">
+        {history.map((request) =>
           request ? (
-            <div key={request.requestId} className="my-2 rounded-lg border">
+            <div key={request.requestId} className="border-t">
               <ComputerAccessCard
                 request={request}
                 settled={request.settled}
@@ -186,6 +192,7 @@ export function ComputerAccessTimeline({ threadId }: { threadId: string }) {
             </div>
           ) : null,
         )}
-    </>
+      </div>
+    </details>
   );
 }

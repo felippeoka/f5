@@ -257,14 +257,15 @@ export class ComputerHelperClient implements ComputerHelper {
     });
   }
   async suspend(): Promise<void> {
-    if (!this.child) return;
+    const child = this.child;
+    if (!child) return;
     const id = randomUUID();
     try {
       await this.sendRequest(id, { type: "suspend", requestId: id }, 50, false);
     } catch {
-      const child = this.child;
+      if (this.child !== child) return;
       this.child = null;
-      child?.kill("SIGKILL");
+      child.kill("SIGKILL");
       this.fail({ available: false, reason: "helper-crashed" });
       if (!this.closing) this.restartTimer = setTimeout(() => this.start(), 250);
     }

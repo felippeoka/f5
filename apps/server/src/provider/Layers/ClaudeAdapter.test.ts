@@ -25,6 +25,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { Cause, Effect, Fiber, Layer, Random, Schema, Stream } from "effect";
 import * as TestClock from "effect/testing/TestClock";
 
+import * as computerBackendPolicy from "../../computer/computerBackendPolicy";
+import * as claudeAgentBrowser from "./claudeAgentBrowser";
 import { beginClaudeTranscriptMaintenance } from "../claudeTranscript.ts";
 import { CLAUDE_AUTO_UNAVAILABLE_WARNING } from "../claudeAutoMode.ts";
 import { attachmentRelativePath } from "../../attachmentStore.ts";
@@ -260,6 +262,7 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
 }
 
 function makeHarness(config?: {
+  readonly createQueryError?: Error;
   readonly oneOffProviderOptions?: ClaudeAdapterLiveOptions["oneOffProviderOptions"];
   readonly processEnvironment?: NodeJS.ProcessEnv;
   readonly nativeEventLogPath?: string;
@@ -300,6 +303,7 @@ function makeHarness(config?: {
     createQuery: (input) => {
       createInput = input;
       createInputs.push(input);
+      if (config?.createQueryError) throw config.createQueryError;
       const nextQuery = queries[createInputs.length - 1] ?? new FakeClaudeQuery();
       if (!queries.includes(nextQuery)) queries.push(nextQuery);
       return nextQuery;
@@ -651,6 +655,148 @@ describe("ClaudeAdapter agent browser", () => {
     tool_use_id: `hook-${toolName}`,
     ...(mcpServer ? { mcp_server: mcpServer } : {}),
   });
+
+  it.effect("disposes the computer server and binding if SDK query construction fails", () => {
+    const host = new DesktopComputerHost("profile", "incarnation", undefined, false);
+    const computer = new ComputerAutomationBrokerRuntime(host, {
+      platform: "darwin",
+      storage: { load: async () => [], save: async () => {} },
+      resolve: async () => {
+        throw new Error("not used");
+      },
+    });
+    const selection = vi
+      .spyOn(computerBackendPolicy, "resolveComputerBackendSelection")
+      .mockReturnValue(
+        Effect.succeed({
+          status: { available: true },
+          selection: { kind: "native" },
+          fingerprint: "test-native",
+        }),
+      );
+    const factory = vi.spyOn(claudeAgentBrowser, "makeClaudeComputerMcpServer");
+    const unsubscribe = vi.fn();
+    const subscription = vi.spyOn(computer, "subscribe").mockReturnValue(unsubscribe);
+    const { harness } = makeBrowserHarness(
+      { computerUse: true },
+      { computerAutomationBroker: computer, createQueryError: new Error("SDK constructor failed") },
+    );
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const exit = yield* adapter
+        .startSession({ threadId: THREAD_ID, provider: "claudeAgent", runtimeMode: "full-access" })
+        .pipe(Effect.exit);
+      assert.equal(exit._tag, "Failure");
+      assert.equal(factory.mock.calls.length, 1);
+      assert.equal(computer.generation(THREAD_ID), undefined);
+    }).pipe(
+      Effect.provide(harness.layer),
+      Effect.ensuring(
+        Effect.sync(() => {
+          selection.mockRestore();
+          factory.mockRestore();
+          computer.close();
+        }),
+      ),
+    );
+  });
+  it.effect(
+    "redacts queued tool events and interrupted completion before disposing computer provenance",
+    () => {
+      const host = new DesktopComputerHost("profile", "incarnation", undefined, false);
+      const computer = new ComputerAutomationBrokerRuntime(host, {
+        platform: "darwin",
+        storage: { load: async () => [], save: async () => {} },
+        resolve: async () => {
+          throw new Error("not used");
+        },
+      });
+      const selection = vi
+        .spyOn(computerBackendPolicy, "resolveComputerBackendSelection")
+        .mockReturnValue(
+          Effect.succeed({
+            status: { available: true },
+            selection: { kind: "native" },
+            fingerprint: "test-native",
+          }),
+        );
+      const logs: unknown[] = [];
+      const { harness } = makeBrowserHarness(
+        { computerUse: true },
+        {
+          computerAutomationBroker: computer,
+          nativeEventLogger: {
+            filePath: "/tmp/not-written",
+            write: (event) =>
+              Effect.sync(() => {
+                logs.push(event);
+              }),
+            close: () => Effect.void,
+          },
+        },
+      );
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeAgent",
+          runtimeMode: "full-access",
+        });
+        yield* adapter.sendTurn({ threadId: THREAD_ID, input: "Edit notes" });
+        harness.query.emit({
+          type: "stream_event",
+          session_id: BACKGROUND_SESSION_ID,
+          uuid: "computer-start",
+          parent_tool_use_id: null,
+          event: {
+            type: "content_block_start",
+            index: 0,
+            content_block: {
+              type: "tool_use",
+              id: "sensitive-call",
+              name: "mcp__f5_computer__computer_type",
+              input: { text: "REDACTION_SENTINEL" },
+            },
+          },
+        } as unknown as SDKMessage);
+        harness.query.emit({
+          type: "assistant",
+          session_id: BACKGROUND_SESSION_ID,
+          uuid: "computer-typed-text",
+          parent_tool_use_id: null,
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "sensitive-call",
+                name: "mcp__f5_computer__computer_type",
+                input: { text: "REDACTION_SENTINEL" },
+              },
+            ],
+          },
+        } as unknown as SDKMessage);
+        yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 10)));
+        yield* adapter.stopSession(THREAD_ID);
+        const events = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "session.exited"),
+          Stream.runCollect,
+        );
+        assert.ok(events.some((event) => event.type === "item.completed"));
+        assert.equal(JSON.stringify(events).includes("REDACTION_SENTINEL"), false);
+        assert.equal(JSON.stringify(logs).includes("REDACTION_SENTINEL"), false);
+        assert.equal(computer.generation(THREAD_ID), undefined);
+      }).pipe(
+        Effect.provide(harness.layer),
+        Effect.ensuring(
+          Effect.sync(() => {
+            selection.mockRestore();
+            computer.close();
+          }),
+        ),
+      );
+    },
+  );
 
   it.effect("installs an in-process preview server without any F5 credential", () => {
     const { harness } = makeBrowserHarness();

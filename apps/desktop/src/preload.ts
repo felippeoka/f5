@@ -77,7 +77,11 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       computerGestureAt = -Infinity;
       return ipcRenderer.invoke("desktop-computer:answer", answer, trusted);
     },
-    setPaused: (threadId, paused) => ipcRenderer.invoke("desktop-computer:pause", threadId, paused),
+    setPaused: (threadId, paused) => {
+      const trusted = performance.now() - computerGestureAt < 1000;
+      if (!paused) computerGestureAt = -Infinity;
+      return ipcRenderer.invoke("desktop-computer:pause", threadId, paused, trusted);
+    },
     onStatus: (listener) => {
       const handler = (_event: Electron.IpcRendererEvent, status: Parameters<typeof listener>[0]) =>
         listener(status);

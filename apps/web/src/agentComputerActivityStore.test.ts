@@ -24,6 +24,33 @@ describe("computer activity", () => {
     expect(isAgentComputerActive(activity, activity.at + 15000, false)).toBe(false);
     expect(isAgentComputerActive(activity, activity.at + 60000, true)).toBe(true);
   });
+  it("discards missed consent settlements before replaying a reconnect snapshot", () => {
+    const store = useAgentComputerActivityStore.getState();
+    store.request({
+      requestId: "expired",
+      threadId,
+      backendIncarnation: "old",
+      kind: "apps",
+      reason: "Old",
+      apps: [],
+    });
+    store.setPaused(threadId, true);
+    store.resetConnection();
+    store.request({
+      requestId: "current",
+      threadId,
+      backendIncarnation: "new",
+      kind: "apps",
+      reason: "New",
+      apps: [],
+    });
+    store.settle({ requestId: "expired", threadId, allowed: true });
+    expect(Object.keys(useAgentComputerActivityStore.getState().requests)).toEqual(["current"]);
+    expect(useAgentComputerActivityStore.getState().requests.current?.settled).toBeUndefined();
+    expect(useAgentComputerActivityStore.getState().paused[threadId]).toBeUndefined();
+    store.resetConnection();
+    expect(useAgentComputerActivityStore.getState().requests).toEqual({});
+  });
   it("settles cards without accepting unknown requests and preserves pause state", () => {
     const store = useAgentComputerActivityStore.getState();
     store.request({

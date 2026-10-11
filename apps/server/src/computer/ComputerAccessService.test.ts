@@ -122,6 +122,47 @@ describe("server-owned computer grants", () => {
     expect(service.listRemembered("p")).toEqual([]);
     service.close();
   });
+  it("revocation wins over an approval whose remembered write is still pending", async () => {
+    const requests: ComputerAccessRequested[] = [];
+    let releaseWrite: () => void = () => {};
+    const save = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseWrite = resolve;
+          }),
+      )
+      .mockResolvedValue(undefined);
+    const service = new ComputerAccessService({
+      platform: "darwin",
+      backendIncarnation: "backend",
+      storage: { load: async () => [], save },
+      request: (request) => requests.push(request),
+      settled: vi.fn(),
+      changed: vi.fn(),
+      timeoutMs: 1000,
+    });
+    await service.initialize();
+    service.bind("t", "p", "s");
+    service.bind("other", "p", "other-session");
+    const pending = service.requestAccess("t", "turn", [app], "Edit");
+    const answer = service.answerFromHost({
+      requestId: requests[0]!.requestId,
+      backendIncarnation: "backend",
+      decisions: [{ appId: app.appId, allow: true, allowTyping: true, remember: true }],
+    });
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    service.revoke("t", app.appId);
+    expect(await pending).toBeNull();
+    releaseWrite();
+    await answer;
+    expect(service.grants("t")).toEqual([]);
+    expect(service.grants("other")).toEqual([]);
+    expect(service.listRemembered("p")).toEqual([]);
+    expect(save).toHaveBeenLastCalledWith([]);
+    service.close();
+  });
   it("answers only from the owning backend and ignores unrequested apps", async () => {
     const { service, requests } = await harness();
     const pending = service.requestAccess("t", "turn", [app], "Edit");

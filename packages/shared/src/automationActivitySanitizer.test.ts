@@ -46,6 +46,37 @@ describe("computer persistence sanitization", () => {
       ),
     ).not.toContain("SENTINEL");
   });
+  it("registers normal assistant-message call IDs before redacting the message envelope", () => {
+    const sanitizer = new AutomationEventSanitizer();
+    sanitizer.register("a", provenance);
+    const assistant = {
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "native-call",
+            name: "mcp__f5_computer__computer_type",
+            input: { text: "SENTINEL" },
+          },
+          { type: "tool_use", id: "other-call", name: "mcp__untrusted__computer_type", input: {} },
+        ],
+      },
+    };
+    expect(JSON.stringify(sanitizer.sanitize("a", assistant))).not.toContain("SENTINEL");
+    expect(sanitizer.isComputerItem("a", "native-call")).toBe(true);
+    expect(sanitizer.isComputerItem("a", "other-call")).toBe(false);
+    const safe = sanitizer.sanitize("a", {
+      type: "user",
+      message: {
+        content: [{ type: "tool_result", tool_use_id: "native-call", content: "SENTINEL" }],
+      },
+    });
+    expect(JSON.stringify(safe)).not.toContain("SENTINEL");
+    sanitizer.clear("a");
+    expect(JSON.stringify(safe)).not.toContain("SENTINEL");
+    expect(assistant.message.content[0]?.input).toEqual({ text: "SENTINEL" });
+  });
   it("tracks SDK tool results and streamed input deltas by provenance", () => {
     const sanitizer = new AutomationEventSanitizer();
     sanitizer.register("a", provenance);

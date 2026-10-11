@@ -2931,6 +2931,11 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
               computerMcpSessions.get(event.threadId)?.serverName,
               computerDecisions.get(event.threadId),
             );
+            // Redact at admission, before lifecycle cleanup removes provenance.
+            const safeRuntimeEvents = runtimeEvents.map(
+              (entry) =>
+                automationEventSanitizer.sanitize(entry.threadId, entry) as ProviderRuntimeEvent,
+            );
             if (event.method === "session/exited" || event.method === "session/closed") {
               computerMcpSessions.get(event.threadId)?.dispose();
               computerMcpSessions.delete(event.threadId);
@@ -2947,7 +2952,7 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
               });
               return;
             }
-            yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
+            yield* Queue.offerAll(runtimeEventQueue, safeRuntimeEvents);
           }).pipe(Effect.runPromiseWith(services));
         manager.on("event", listener);
         return listener;

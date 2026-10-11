@@ -22,9 +22,19 @@ interface ComputerState {
   settle: (event: typeof ComputerAccessSettled.Type) => void;
   setGrants: (threadId: string, grants: ReadonlyArray<ComputerGrant>) => void;
   setPaused: (threadId: string, paused: boolean) => void;
+  resetConnection: () => void;
   setLease: (lease: typeof AgentComputerUseChanged.Type) => void;
 }
 export const useAgentComputerActivityStore = create<ComputerState>((set) => ({
+  resetConnection: () =>
+    set({
+      appNames: {},
+      activity: {},
+      grants: {},
+      requests: {},
+      paused: {},
+      lease: { threadId: null },
+    }),
   appNames: {},
   activity: {},
   grants: {},

@@ -4,7 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import { ComputerHostChannel } from "./ComputerHostChannel";
 import type { ComputerController } from "./ComputerController";
 function setup(certified = false) {
-  const controller = { disconnect: vi.fn(), lease: { current: () => null }, invoke: vi.fn() };
+  const controller = {
+    disconnect: vi.fn(),
+    setPaused: vi.fn(),
+    lease: { current: () => null },
+    invoke: vi.fn(),
+  };
   const channel = new ComputerHostChannel(
     controller as unknown as ComputerController,
     () => ({ available: true }),
@@ -119,6 +124,27 @@ describe("private computer host channel", () => {
     );
     h.process.emit("disconnect");
     expect(h.channel.chrome.current()).toBeNull();
+  });
+  it("does not accept backend resume requests for native or Chrome control", async () => {
+    const h = setup(true);
+    h.hello();
+    h.process.emit("message", { type: "pauseChanged", threadId: "thread", paused: true });
+    h.controller.setPaused.mockClear();
+    h.process.emit("message", { type: "resumeRequested", threadId: "thread" });
+    h.process.emit("message", { type: "pauseChanged", threadId: "thread", paused: false });
+    expect(h.controller.setPaused).not.toHaveBeenCalled();
+    const holder = {
+      profileId: "profile",
+      threadId: "chrome-thread",
+      sessionGeneration: "s",
+      provider: "claude" as const,
+    };
+    h.channel.chrome.acquire(holder, null);
+    h.channel.pauseChrome("profile", "chrome-thread", true);
+    h.process.emit("message", { type: "resumeRequested", threadId: "chrome-thread" });
+    h.process.emit("message", { type: "pauseChanged", threadId: "chrome-thread", paused: false });
+    expect(() => h.channel.chrome.validate(holder)).toThrow();
+    expect(h.controller.setPaused).not.toHaveBeenCalled();
   });
   it("redacts Chrome session ownership for another profile", () => {
     const h = setup(true);

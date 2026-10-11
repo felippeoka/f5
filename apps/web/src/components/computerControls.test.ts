@@ -1,6 +1,7 @@
+import { useAgentBrowserActivityStore } from "../agentBrowserActivityStore";
 import { ThreadId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { pauseComputerThread, stopComputerTurn } from "./computerControls";
+import { pauseComputerThread, pausePreviewThread, stopComputerTurn } from "./computerControls";
 const mocks = vi.hoisted(() => ({ dispatch: vi.fn(), pause: vi.fn() }));
 vi.mock("../nativeApi", () => ({
   readNativeApi: () => ({
@@ -44,7 +45,7 @@ describe("computer controls", () => {
     await expect(stopComputerTurn(ThreadId.makeUnsafe("t"))).rejects.toThrow("Host lost");
     expect(mocks.dispatch).toHaveBeenCalledOnce();
   });
-  it("mirrors pause into the shared provider control path after native acknowledgement", async () => {
+  it("waits for authoritative native resume without clearing the server pause locally", async () => {
     const order: string[] = [];
     vi.stubGlobal("window", {
       desktopBridge: {
@@ -59,6 +60,44 @@ describe("computer controls", () => {
       order.push("server");
     });
     await pauseComputerThread(ThreadId.makeUnsafe("t"), false);
-    expect(order).toEqual(["native", "server"]);
+    expect(order).toEqual(["native"]);
+    expect(mocks.pause).not.toHaveBeenCalled();
+  });
+  it("keeps the server pause latched when native resume fails or the client is remote", async () => {
+    vi.stubGlobal("window", {
+      desktopBridge: {
+        computerAutomation: {
+          setPaused: vi.fn(async () => {
+            throw new Error("monitor unhealthy");
+          }),
+        },
+      },
+    });
+    await expect(pauseComputerThread(ThreadId.makeUnsafe("t"), false)).rejects.toThrow(
+      "monitor unhealthy",
+    );
+    expect(mocks.pause).not.toHaveBeenCalled();
+    vi.stubGlobal("window", {});
+    await expect(pauseComputerThread(ThreadId.makeUnsafe("t"), false)).rejects.toThrow(
+      "computer running F5",
+    );
+    expect(mocks.pause).not.toHaveBeenCalled();
+  });
+  it("does not optimistically resume preview when its shared native pause is refused", async () => {
+    const thread = ThreadId.makeUnsafe("paused-preview");
+    const setPaused = vi.spyOn(useAgentBrowserActivityStore.getState(), "setPaused");
+    mocks.pause.mockRejectedValueOnce(new Error("Resume on host"));
+    vi.stubGlobal("window", {
+      desktopBridge: {
+        computerAutomation: {
+          setPaused: vi.fn(async () => {
+            throw new Error("monitor unhealthy");
+          }),
+        },
+      },
+    });
+    await expect(pausePreviewThread(thread, false)).rejects.toThrow("monitor unhealthy");
+    expect(setPaused).not.toHaveBeenCalled();
+    setPaused.mockRestore();
   });
 });

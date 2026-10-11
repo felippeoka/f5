@@ -386,6 +386,13 @@ export class ComputerAutomationBrokerRuntime {
           input.appId,
           !mutation ? "view" : input.action === "setValue" ? "type" : "click",
         );
+      if (
+        (input.op === "type" || input.op === "key") &&
+        !this.access
+          .grants(threadId)
+          .some((grant) => grant.tier === "full" || (grant.tier === "click" && grant.allowTyping))
+      )
+        throw new ComputerControlError({ _tag: "NotGranted", needed: "type" });
       let executionGeneration = binding.holder?.executionGeneration ?? 1;
       if (mutation) {
         const holder = (await this.host.correlated(
@@ -476,13 +483,17 @@ export class ComputerAutomationBrokerRuntime {
       })),
     };
   }
+  assertRemoteResumeAllowed(threadId: string): void {
+    if (this.bindings.has(threadId) || this.chromeHolder?.threadId === threadId)
+      throw new Error("Resume computer control on the computer running F5.");
+  }
   setPaused(threadId: string, paused: boolean): void {
     if (paused) {
       this.pause.set(threadId, true);
       this.host.send({ type: "pauseChanged", threadId, paused });
       const binding = this.bindings.get(threadId);
       if (binding) this.cancelTurn(threadId, binding.generation, binding.turnId, "paused");
-    } else this.host.send({ type: "resumeRequested", threadId });
+    } else this.assertRemoteResumeAllowed(threadId);
   }
   private cancelTurn(
     threadId: string,

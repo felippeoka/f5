@@ -138,6 +138,7 @@ export class AutomationEventSanitizer {
         "raw",
         "content_block",
         "content",
+        "message",
         "item",
         "tool",
       ]) {
@@ -146,6 +147,33 @@ export class AutomationEventSanitizer {
       }
       return undefined;
     };
+    const registerCalls = (node: unknown, depth = 0): void => {
+      if (depth > 32 || node === null || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        for (const child of node) registerCalls(child, depth + 1);
+        return;
+      }
+      const record = node as Record<string, unknown>;
+      const name = record.toolName ?? record.name;
+      const match =
+        typeof name === "string"
+          ? servers.find((entry) => isComputerAutomationTool(name, entry))
+          : undefined;
+      const id = record.itemId ?? record.id;
+      if (match && typeof id === "string") this.items.set(`${threadId}\0${id}`, match);
+      for (const key of [
+        "message",
+        "content",
+        "content_block",
+        "payload",
+        "event",
+        "raw",
+        "item",
+        "tool",
+      ])
+        registerCalls(record[key], depth + 1);
+    };
+    registerCalls(value);
     const envelopeStrings = new Set([
       "type",
       "eventId",

@@ -50,7 +50,6 @@ export class ComputerAccessService {
       settled: (requestId: string, threadId: string, allowed: boolean) => void;
       changed: (threadId: string) => void;
       timeoutMs?: number;
-      runtimeF5Ids?: ReadonlyArray<string>;
     },
   ) {}
   async initialize(): Promise<void> {
@@ -59,15 +58,10 @@ export class ComputerAccessService {
       .map((grant) => ({
         ...grant,
         appId: this.options.platform === "win32" ? grant.appId.toLowerCase() : grant.appId,
-        tier: restrictComputerTier(
-          grant.tier,
-          appTier(grant.appId, this.options.platform, this.options.runtimeF5Ids ?? []),
-        ),
+        tier: restrictComputerTier(grant.tier, appTier(grant.appId, this.options.platform)),
         allowTyping:
-          restrictComputerTier(
-            grant.tier,
-            appTier(grant.appId, this.options.platform, this.options.runtimeF5Ids ?? []),
-          ) === "click" && grant.allowTyping,
+          restrictComputerTier(grant.tier, appTier(grant.appId, this.options.platform)) ===
+            "click" && grant.allowTyping,
       }));
   }
   bind(threadId: string, projectId: string, generation: string): void {
@@ -106,8 +100,7 @@ export class ComputerAccessService {
       else grants.delete(appId);
     }
     return [...grants.values()].filter(
-      (grant) =>
-        appTier(grant.appId, this.options.platform, this.options.runtimeF5Ids ?? []) !== "blocked",
+      (grant) => appTier(grant.appId, this.options.platform) !== "blocked",
     );
   }
   require(threadId: string, appId: string, needed: "view" | "click" | "type"): void {
@@ -126,9 +119,7 @@ export class ComputerAccessService {
     if (!binding) throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
     const candidates = apps
       .filter(
-        (app) =>
-          app.tier !== "blocked" &&
-          appTier(app.appId, this.options.platform, this.options.runtimeF5Ids ?? []) !== "blocked",
+        (app) => app.tier !== "blocked" && appTier(app.appId, this.options.platform) !== "blocked",
       )
       .filter(
         (app) =>
@@ -136,10 +127,7 @@ export class ComputerAccessService {
             (grant) =>
               grant.appId === app.appId &&
               grant.tier ===
-                restrictComputerTier(
-                  app.tier,
-                  appTier(app.appId, this.options.platform, this.options.runtimeF5Ids ?? []),
-                ),
+                restrictComputerTier(app.tier, appTier(app.appId, this.options.platform)),
           ),
       )
       .filter((app) => !this.deniedThisTurn.has(`${threadId}\0${turnId}\0${app.appId}`));
@@ -164,10 +152,7 @@ export class ComputerAccessService {
       apps: candidates.slice(0, 10).map((app) => ({
         appId: app.appId,
         name: app.name,
-        tier: restrictComputerTier(
-          app.tier,
-          appTier(app.appId, this.options.platform, this.options.runtimeF5Ids ?? []),
-        ),
+        tier: restrictComputerTier(app.tier, appTier(app.appId, this.options.platform)),
         ...(app.warning ? { warning: app.warning } : {}),
       })),
     };
@@ -196,6 +181,7 @@ export class ComputerAccessService {
         this.deny(answer.requestId);
         throw new Error("This session ended.");
       }
+      const approvalVersion = binding.version;
       const decisions = pending.request.apps.map((app) => {
         const decision = answer.decisions.find((entry) => entry.appId === app.appId);
         return {
@@ -225,9 +211,11 @@ export class ComputerAccessService {
       // A turn can end while storage is being written. Never revive its session grants.
       if (
         this.pending.get(answer.requestId) !== pending ||
-        this.bindings.get(pending.request.threadId) !== binding
+        this.bindings.get(pending.request.threadId) !== binding ||
+        binding.version !== approvalVersion
       ) {
         if (rememberChanged) await this.options.storage.save(this.remembered);
+        this.deny(answer.requestId);
         return;
       }
       this.remembered = next;
@@ -286,6 +274,12 @@ export class ComputerAccessService {
     if (this.options.platform === "win32") appId = appId.toLowerCase();
     const binding = this.bindings.get(threadId);
     if (!binding) return;
+    for (const [id, pending] of this.pending)
+      if (
+        pending.request.threadId === threadId &&
+        pending.request.apps.some((app) => app.appId === appId)
+      )
+        this.deny(id);
     binding.overrides.set(appId, null);
     ++binding.version;
     this.options.changed(threadId);

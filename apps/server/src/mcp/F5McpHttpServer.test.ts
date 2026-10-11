@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 import { Effect } from "effect";
+import { vi } from "vitest";
 import { makePreviewAutomationBroker, PreviewAutomationBroker } from "./PreviewAutomationBroker";
 import { makePreviewMcpHttpServer } from "./PreviewMcpHttpServer";
 import {
@@ -55,4 +56,74 @@ it.effect(
         assert.equal((yield* post("computer", computerToken)).status, 401);
       }),
     ),
+);
+
+it.effect("scopes reused RPC IDs to a new MCP initialization and rejects retired sessions", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const invoke = vi.fn(async () => ({ available: true }));
+      const computer = {
+        bindSession: () => {},
+        subscribe: () => () => {},
+        releaseSession: () => {},
+        invoke,
+      };
+      const preview = makePreviewAutomationBroker();
+      const server = yield* makePreviewMcpHttpServer.pipe(
+        Effect.provideService(PreviewAutomationBroker, preview),
+        Effect.provideService(
+          ComputerAutomationBroker,
+          computer as unknown as ComputerAutomationBrokerRuntime,
+        ),
+      );
+      yield* Effect.addFinalizer(() => preview.shutdown);
+      const config = server.createSessionConfig({
+        threadId: ThreadId.makeUnsafe("reload"),
+        catalog: "computer",
+      });
+      const token = Object.values(config.env)[0]!;
+      const post = (method: string, rpcSession?: string) =>
+        Effect.promise(async () => {
+          const response = await fetch(server.getUrl("computer"), {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${token}`,
+              "content-type": "application/json",
+              ...(rpcSession ? { "Mcp-Session-Id": rpcSession } : {}),
+            },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method,
+              ...(method === "tools/call"
+                ? { params: { name: "computer_status", arguments: {} } }
+                : {}),
+            }),
+          });
+          return {
+            status: response.status,
+            session: response.headers.get("mcp-session-id"),
+            body: await response.json(),
+          };
+        });
+      const first = (yield* post("initialize")).session!;
+      const result = yield* post("tools/call", first);
+      assert.equal(JSON.stringify(result.body).includes("ReplayRejected"), false);
+      assert.equal(invoke.mock.calls.length, 1);
+      assert.equal(
+        JSON.stringify((yield* post("tools/call", first)).body).includes("ReplayRejected"),
+        true,
+      );
+      const second = (yield* post("initialize")).session!;
+      assert.notEqual(second, first);
+      assert.equal((yield* post("tools/call", first)).status, 404);
+      assert.equal((yield* post("tools/call")).status, 404);
+      assert.equal(
+        JSON.stringify((yield* post("tools/call", second)).body).includes("ReplayRejected"),
+        false,
+      );
+      assert.equal(invoke.mock.calls.length, 2);
+      config.dispose();
+    }),
+  ),
 );

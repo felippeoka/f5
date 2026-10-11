@@ -97,6 +97,41 @@ describe("certified Chrome session runtime", () => {
     expect(result.skipped).toEqual(["user"]);
     expect(h.restoreRegistration).not.toHaveBeenCalled();
   });
+  it("detects drift of an unchanged current-profile registration without owning its restore", async () => {
+    const h = setup();
+    h.setRegistrations([parseNativeHostManifest("chrome", "user", manifest("/profile/host"))]);
+    await h.runtime.prepare(session, true);
+    await h.runtime.connected("thread", "generation");
+    expect([...h.saved.values()][0]?.registrations[0]?.postLaunchHash).toBeUndefined();
+    expect(await h.runtime.beforeTool("thread", "generation", true)).toBeUndefined();
+    h.setRegistrations([parseNativeHostManifest("chrome", "user", manifest("/foreign"))]);
+    expect(await h.runtime.beforeTool("thread", "generation", true)).toContain("changed");
+    const restored = await h.runtime.restore([...h.saved.keys()][0]!, async () =>
+      h.runtime.release("thread", "generation"),
+    );
+    expect(restored.skipped).toEqual(["user"]);
+    expect(h.restoreRegistration).not.toHaveBeenCalled();
+  });
+  it.each(["absent", "shadowed"])(
+    "detects changes to %s registrations in the full snapshot",
+    async (state) => {
+      const h = setup();
+      const profile = parseNativeHostManifest("chrome", "user", manifest("/profile/host"));
+      const additional =
+        state === "absent"
+          ? parseNativeHostManifest("chrome", "machine", null)
+          : {
+              ...parseNativeHostManifest("chrome", "machine", manifest("/foreign")),
+              shadowed: true,
+            };
+      h.setRegistrations([profile, additional]);
+      await h.runtime.prepare(session, true);
+      await h.runtime.connected("thread", "generation");
+      h.setRegistrations([profile]);
+      expect(await h.runtime.beforeTool("thread", "generation", true)).toContain("changed");
+      h.runtime.release("thread", "generation");
+    },
+  );
   it("honors main's veto without poisoning a paused session", async () => {
     const h = setup();
     await h.runtime.prepare(session, true);

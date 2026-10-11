@@ -29,6 +29,16 @@ describe("renderer computer controls", () => {
     expect(input.answer).not.toHaveBeenCalled();
     handlers.get("desktop-computer:answer")!(event, answer, true);
     expect(input.answer).toHaveBeenCalledWith("profile", answer);
+    const pause = handlers.get("desktop-computer:pause")!;
+    expect(() => pause(event, "t", false, false)).toThrow("trusted");
+    expect(input.pause).not.toHaveBeenCalled();
+    pause(event, "t", true, false);
+    pause(event, "t", false, true);
+    expect(input.pause).toHaveBeenLastCalledWith("profile", "t", false);
+    input.pause.mockImplementation(() => {
+      throw new Error("monitor unhealthy");
+    });
+    expect(() => pause(event, "t", false, true)).toThrow("monitor unhealthy");
     input.authorize.mockImplementation(() => {
       throw new Error("Wrong profile");
     });

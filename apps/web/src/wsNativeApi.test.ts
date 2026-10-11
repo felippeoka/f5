@@ -155,6 +155,33 @@ describe("wsNativeApi", () => {
     unsubscribe();
   });
 
+  it("resets missed computer consent before handling the new connection snapshot", async () => {
+    const { createWsNativeApi } = await import("./wsNativeApi");
+    const { useAgentComputerActivityStore } = await import("./agentComputerActivityStore");
+    const api = createWsNativeApi();
+    const store = useAgentComputerActivityStore.getState();
+    const threadId = ThreadId.makeUnsafe("computer-consent");
+    api.computer!.access.onRequested(store.request);
+    store.request({
+      requestId: "old",
+      threadId,
+      backendIncarnation: "old-backend",
+      reason: "Old",
+      kind: "apps",
+      apps: [],
+    });
+    emitPush(WS_CHANNELS.serverWelcome, { cwd: "/tmp", projectName: "test" });
+    expect(useAgentComputerActivityStore.getState().requests).toEqual({});
+    emitPush(WS_CHANNELS.computerAccessRequested, {
+      requestId: "new",
+      threadId,
+      backendIncarnation: "new-backend",
+      reason: "New",
+      kind: "apps",
+      apps: [],
+    });
+    expect(Object.keys(useAgentComputerActivityStore.getState().requests)).toEqual(["new"]);
+  });
   it("delivers and caches valid server.welcome payloads", async () => {
     const { createWsNativeApi, onServerWelcome } = await import("./wsNativeApi");
 

@@ -1,3 +1,4 @@
+import { pausePreviewThread } from "./computerControls";
 import { decodeTaggedAutomationErrorMessage } from "@t3tools/shared/preview";
 import { agentBrowserPolicyFromSettings } from "@t3tools/shared/projectSettings";
 import { isAgentBrowserActive, useAgentBrowserActivityStore } from "../agentBrowserActivityStore";
@@ -704,10 +705,9 @@ export default function PreviewPanel({ threadId, onClose, visible = true }: Prev
   const setAgentPaused = useCallback(
     (paused: boolean) => {
       // The paused-state effect below cancels in-flight input; the server fails queued actions.
-      useAgentBrowserActivityStore.getState().setPaused(threadId, paused);
-      void api.preview.automation.setPaused({ threadId, paused }).catch(() => undefined);
+      void pausePreviewThread(threadId, paused).catch(() => undefined);
     },
-    [api, threadId],
+    [threadId],
   );
   // Any local pause (this overlay or the chat's live card) stops in-flight input at once,
   // without waiting for the server's pause broadcast.

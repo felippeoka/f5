@@ -82,6 +82,24 @@ describe("computer helper supervision", () => {
     );
     expect(h.client.status().available).toBe(true);
   });
+  it("does not kill a replacement when an old suspend is rejected by retry", async () => {
+    const h = make();
+    ready(h);
+    const suspended = h.client.suspend();
+    const replacement = child();
+    vi.mocked(spawn).mockReturnValue(replacement);
+    h.client.retry();
+    await suspended;
+    await vi.advanceTimersByTimeAsync(300);
+    expect(replacement.kill).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledTimes(2);
+    replacement.stdout.emit("data", JSON.stringify({ type: "hello", protocolVersion: 1 }) + "\n");
+    replacement.stdout.emit(
+      "data",
+      JSON.stringify({ type: "status", status: { available: true } }) + "\n",
+    );
+    expect(h.client.status().available).toBe(true);
+  });
   it("correlates concurrent responses without retrying mutations", async () => {
     const h = make();
     ready(h);

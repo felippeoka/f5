@@ -48,7 +48,8 @@ interface PreviewMcpSessionScope {
   readonly automationSessionId: string;
   readonly issuedAt: string;
   readonly catalog: "preview" | "computer";
-  readonly geometry: ComputerToolGeometry;
+  geometry: ComputerToolGeometry;
+  rpcIncarnation?: string;
 }
 
 export interface PreviewMcpSessionConfig {
@@ -364,7 +365,26 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
         return;
       }
 
+      const scope = sessionsByToken.get(token);
+      if (!scope) {
+        writeJson(response, 401, { error: "invalid_mcp_credential" });
+        return;
+      }
       const requests = Array.isArray(body) ? body : [body];
+      if (catalog === "computer") {
+        const initializes = requests.some((entry) => asObject(entry).method === "initialize");
+        if (initializes) {
+          scope.rpcIncarnation = randomUUID();
+          scope.geometry = new ComputerToolGeometry();
+          response.setHeader("Mcp-Session-Id", scope.rpcIncarnation);
+        } else if (
+          scope.rpcIncarnation &&
+          request.headers["mcp-session-id"] !== scope.rpcIncarnation
+        ) {
+          writeJson(response, 404, { error: "expired_mcp_session" });
+          return;
+        }
+      }
       const results = (
         await Promise.all(
           requests.map((entry) =>
@@ -372,7 +392,15 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
               request: asObject(entry) as JsonRpcRequest,
               token,
               catalog,
-              callTool,
+              callTool: (token, name, args, id) =>
+                callTool(
+                  token,
+                  name,
+                  args,
+                  id === undefined
+                    ? undefined
+                    : `${scope.rpcIncarnation ?? scope.automationSessionId}:${id}`,
+                ),
             }),
           ),
         )
@@ -458,13 +486,13 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
                 event.channel === "computer.access.grantsChanged" &&
                 event.data.threadId === input.threadId
               )
-                geometry.clear();
+                sessionsByToken.get(token)?.geometry.clear();
               if (
                 event.channel === "computer.host" &&
                 event.data.type === "pauseChanged" &&
                 event.data.threadId === input.threadId
               )
-                geometry.clear();
+                sessionsByToken.get(token)?.geometry.clear();
             })
           : undefined;
       sessionsByToken.set(token, {

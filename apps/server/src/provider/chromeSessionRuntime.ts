@@ -171,12 +171,9 @@ export class ChromeSessionRuntime {
         const current = await this.input.storage.inspect();
         if (
           current.some((entry) => entry.state === "unreadable" || entry.state === "malformed") ||
-          binding.transaction.registrations.some(
-            (entry) =>
-              entry.postLaunchHash &&
-              current.find((after) => after.location === entry.location)?.sha256 !==
-                entry.postLaunchHash,
-          )
+          !binding.transaction.launchSnapshot ||
+          JSON.stringify(current.map(({ bytes: _bytes, ...entry }) => entry)) !==
+            JSON.stringify(binding.transaction.launchSnapshot)
         )
           throw new Error("Chrome registration changed.");
       }

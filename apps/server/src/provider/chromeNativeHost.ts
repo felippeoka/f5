@@ -130,6 +130,8 @@ export interface ChromeNativeHostTransaction {
   readonly targetPath: string;
   readonly createdAt: string;
   readonly state: "approved" | "launched" | "restored";
+  /** Full live snapshot, separate from hashes of writes owned by this transaction. */
+  readonly launchSnapshot?: ReadonlyArray<Omit<ChromeNativeHostRegistration, "bytes">>;
   readonly registrations: ReadonlyArray<{
     readonly browser: string;
     readonly location: string;
@@ -198,6 +200,7 @@ export class ChromeNativeHostTransactions {
       const next: ChromeNativeHostTransaction = {
         ...transaction,
         state: "launched",
+        launchSnapshot: current.map(({ bytes: _bytes, ...entry }) => entry),
         registrations: transaction.registrations.map((entry) => {
           const after = current.find((registration) => registration.location === entry.location);
           return {

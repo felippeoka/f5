@@ -424,3 +424,33 @@ a Dock-owned layer-20 window spans the display and is the top rectangular candid
 the synthetic button. The helper retains its protected-system-UI refusal. The independent
 permit-expiry check passed afterward without retrying the pointer action or resuming
 input. The run exits with failure because pointer functionality remains unvalidated.
+
+### Build prerequisites and bounded replay state
+
+Desktop development builds attempt the native helper build on macOS and Windows. A
+missing development toolchain produces a warning and `helper-missing`; there is no
+runtime compilation or download. Release artifacts always build and bundle the helper,
+even while certification gates are closed, so the shipped binary and packaging can be
+certified. This requirement is intentional.
+
+macOS requires Xcode with the Swift toolchain and macOS SDK. Universal artifacts build
+both arm64 and x86_64 slices and combine them with `lipo`. Windows requires Rust, the
+requested `x86_64-pc-windows-msvc` or `aarch64-pc-windows-msvc` target, Visual Studio C++
+build tools and the Windows SDK. Release builds fail if the required helper cannot be
+built. Signing remains a separate release/certification requirement; unsigned rehearsal
+results do not open a release gate.
+
+Replay tombstones are retained within their authorization generation, including failed
+admissions. They have a fail-closed ceiling of 65,536 per dispatcher/controller. Expiring
+them by time would let a delayed request execute again. Session replacement clears the
+old session's desktop admissions; lease generation changes clear older admissions. An
+observation-only session reaching the ceiling must restart its provider session. An MCP
+client reinitialization gets a new `Mcp-Session-Id` and dispatcher; requests using the
+retired transport session are rejected. Mutations are never retried automatically.
+
+Consent keeps the approved plan's defaults: grantable apps are selected, typing for
+click-tier apps and remembering grants are off. Ambiguous app searches return candidates
+without opening a consent card. The user must explicitly allow the displayed selection.
+Resume requires a trusted gesture in a local F5 window; remote clients can pause but
+cannot re-arm native or Chrome control. The server mirrors resume only after main's
+successful acknowledgement.

@@ -41,6 +41,8 @@ export function registerComputerIpc(
   register("pause", (profile, args) => {
     if (typeof args[0] !== "string" || args[0].length === 0 || typeof args[1] !== "boolean")
       throw new Error("Invalid pause request.");
-    input.pause(profile, args[0], args[1]);
+    if (!args[1] && args[2] !== true)
+      throw new Error("Resuming computer control requires a trusted user gesture.");
+    return input.pause(profile, args[0], args[1]);
   });
 }
