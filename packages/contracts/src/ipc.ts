@@ -9,6 +9,13 @@ import type {
   ComputerActivity,
   ChromeNativeHostTransactionSummary,
 } from "./computerAutomation";
+import type {
+  NativeOperationInput,
+  NativeOperationResolutionInput,
+  NativeOperationInspectInput,
+  NativeOperationRecord,
+  NativeForkInput,
+} from "./nativeOperation";
 import type { ThreadId } from "./baseSchemas";
 import type { DesktopComputerAutomationBridge } from "./computerAutomation";
 import type { PullRequestKey } from "./prHub";
@@ -48,6 +55,7 @@ import type {
   GitPreparePullRequestThreadResult,
   GitPullRequestRefInput,
   GitCreateWorktreeInput,
+  GitPrepareWorktreeInput,
   GitCreateWorktreeResult,
   GitInitInput,
   GitListBranchesInput,
@@ -746,6 +754,7 @@ export interface NativeApi {
     // Existing branch/worktree API
     listBranches: (input: GitListBranchesInput) => Promise<GitListBranchesResult>;
     createWorktree: (input: GitCreateWorktreeInput) => Promise<GitCreateWorktreeResult>;
+    prepareWorktree: (input: GitPrepareWorktreeInput) => Promise<GitCreateWorktreeResult>;
     removeWorktree: (input: GitRemoveWorktreeInput) => Promise<void>;
     createBranch: (input: GitCreateBranchInput) => Promise<void>;
     checkout: (input: GitCheckoutInput) => Promise<void>;
@@ -891,6 +900,13 @@ export interface NativeApi {
     getSummary: (input: UsageGetSummaryInput) => Promise<UsageSummary>;
   };
   /** Private provider form/URL answers; never go through orchestration commands. */
+  nativeOperations?: {
+    resolve: (input: NativeOperationResolutionInput) => Promise<NativeOperationRecord>;
+    fork: (input: NativeForkInput) => Promise<NativeOperationRecord>;
+    execute: (input: NativeOperationInput) => Promise<NativeOperationRecord>;
+    list: (input: { threadId: ThreadId }) => Promise<readonly NativeOperationRecord[]>;
+    inspect: (input: NativeOperationInspectInput) => Promise<unknown>;
+  };
   elicitation: {
     submit: (input: ElicitationSubmitInput) => Promise<ElicitationSubmitResult>;
   };

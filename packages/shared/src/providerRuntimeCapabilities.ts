@@ -1,3 +1,4 @@
+import { compareCodexCliVersions, parseCodexCliVersion } from "./codexCliVersion";
 import {
   isKnownProviderKind,
   type ProviderRuntimeCapabilities,
@@ -11,12 +12,37 @@ export function supportsCodexAsyncQuestions(version: string | null | undefined):
   return !!match && (Number(match[1]) > 0 || Number(match[2]) >= 153);
 }
 
+function codexVersionAtLeast(version: string | null | undefined, minimum: string): boolean {
+  const parsed = version ? parseCodexCliVersion(version) : null;
+  return parsed !== null && compareCodexCliVersions(parsed, minimum) >= 0;
+}
+
+/** Compaction and two post-compaction resumes were certified separately on 0.159.2. */
+export function supportsCodexNativeCompaction(version: string | null | undefined): boolean {
+  return codexVersionAtLeast(version, "0.159.2");
+}
+
+/** Other native operations require the runtime certified by the full live spike. */
+export function supportsCodexNativeOperations(version: string | null | undefined): boolean {
+  return codexVersionAtLeast(version, "0.162.0");
+}
+
 export function providerRuntimeCapabilities(
   driver: string,
   version?: string | null,
 ): ProviderRuntimeCapabilities {
   const rollback = driver === "codex" || driver === "claudeAgent" || driver === "opencode";
+  const codexNative = driver === "codex" && supportsCodexNativeOperations(version);
   return {
+    nativeReview: codexNative,
+    nativeCompaction:
+      driver === "claudeAgent" || (driver === "codex" && supportsCodexNativeCompaction(version)),
+    nativeFork: driver === "claudeAgent" || codexNative,
+    nativeGoals: codexNative,
+    nativeAttachments: codexNative,
+    childTaskInspection: driver === "claudeAgent" || codexNative,
+    childTaskStop: driver === "claudeAgent",
+    fileCheckpointing: driver === "claudeAgent",
     turnSteering: ["codex", "claudeAgent", "grok", "cursor", "antigravity"].includes(driver),
     conversationRollback: rollback,
     rollbackReadback: rollback,

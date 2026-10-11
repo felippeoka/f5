@@ -26,6 +26,7 @@ export default mergeConfig(
         "src/hooks/inputSafety.browser.tsx",
         "src/components/ProfileSwitcher.browser.tsx",
         "src/components/ChatView.browser.tsx",
+        "src/components/BranchToolbarBranchSelector.browser.tsx",
         "src/components/chat/WorktreeSetupCard.browser.tsx",
         "src/components/ComposerPromptEditor.browser.tsx",
         "src/components/ProjectCloneController.browser.tsx",
@@ -69,6 +70,7 @@ export default mergeConfig(
         "src/components/chat/ClaudeTraitsPicker.browser.tsx",
         "src/components/chat/CodexTraitsPicker.browser.tsx",
         "src/components/chat/ChatHeader.browser.tsx",
+        "src/components/chat/NativeRuntimePanel.browser.tsx",
         "src/components/chat/composer/ContextMeter.browser.tsx",
         "src/components/chat/composer/ComposerDock.browser.tsx",
         "src/components/chat/CommandTranscriptCard.browser.tsx",
@@ -89,7 +91,8 @@ export default mergeConfig(
       ],
       browser: {
         enabled: true,
-        provider: playwright(),
+        // Composer tests assert CSS transitions; don't inherit a host reduce setting.
+        provider: playwright({ contextOptions: { reducedMotion: "no-preference" } }),
         instances: [{ browser: "chromium" }],
         headless: true,
       },

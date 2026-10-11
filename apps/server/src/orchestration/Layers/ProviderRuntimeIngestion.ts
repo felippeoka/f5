@@ -2056,6 +2056,7 @@ export function runtimeEventToActivities(
                 : "Task started",
           payload: {
             taskId: event.payload.taskId,
+            ...(event.payload.runId ? { runId: event.payload.runId } : {}),
             ...(event.payload.model ? { model: event.payload.model } : {}),
             ...(event.payload.taskType ? { taskType: event.payload.taskType } : {}),
             ...(event.payload.description
@@ -2079,6 +2080,7 @@ export function runtimeEventToActivities(
           summary: "Reasoning update",
           payload: {
             taskId: event.payload.taskId,
+            ...(event.payload.runId ? { runId: event.payload.runId } : {}),
             ...(event.payload.model ? { model: event.payload.model } : {}),
             detail: truncateDetail(event.payload.description),
             ...(displayHints?.readPaths && displayHints.readPaths.length > 0
@@ -2110,6 +2112,7 @@ export function runtimeEventToActivities(
                 : "Task completed",
           payload: {
             taskId: event.payload.taskId,
+            ...(event.payload.runId ? { runId: event.payload.runId } : {}),
             status: event.payload.status,
             ...(event.payload.summary ? { detail: truncateDetail(event.payload.summary) } : {}),
             ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
@@ -4821,12 +4824,58 @@ const make = Effect.gen(function* () {
         });
       }
 
+      if (
+        event.type === "thread.metadata.updated" &&
+        event.payload.metadata &&
+        ("nativeAttachment" in event.payload.metadata || "nativeGoal" in event.payload.metadata)
+      ) {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId: providerCommandId(event, "native-metadata"),
+          threadId: thread.id,
+          activity: {
+            id: EventId.makeUnsafe(`${event.eventId}:native-metadata`),
+            kind: "native.metadata",
+            tone: "info",
+            summary: "Provider metadata updated",
+            payload: event.payload.metadata,
+            turnId: null,
+            createdAt: now,
+          },
+          createdAt: now,
+        });
+      }
+      if (event.type === "thread.metadata.updated" && event.payload.metadata?.promptSuggestion) {
+        const suggestion = event.payload.metadata.promptSuggestion;
+        if (
+          typeof suggestion === "object" &&
+          suggestion !== null &&
+          "text" in suggestion &&
+          typeof suggestion.text === "string"
+        )
+          yield* orchestrationEngine.dispatch({
+            type: "thread.activity.append",
+            commandId: providerCommandId(event, "prompt-suggestion"),
+            threadId: thread.id,
+            activity: {
+              id: EventId.makeUnsafe(`${event.eventId}:prompt-suggestion`),
+              kind: "prompt.suggestion",
+              tone: "info",
+              summary: suggestion.text.slice(0, 4000),
+              payload: { provider: event.provider },
+              turnId: null,
+              createdAt: now,
+            },
+            createdAt: now,
+          });
+      }
       if (event.type === "thread.metadata.updated" && event.payload.name) {
         yield* orchestrationEngine.dispatch({
           type: "thread.meta.update",
           commandId: providerCommandId(event, "thread-meta-update"),
           threadId: thread.id,
           title: event.payload.name,
+          titleOrigin: "provider",
         });
       }
 

@@ -4,6 +4,18 @@ import {
   supportsCodexAsyncQuestions,
 } from "./providerRuntimeCapabilities";
 describe("runtime capabilities", () => {
+  it("enables separately certified Codex compaction without enabling newer native operations", () => {
+    for (const version of [undefined, "unknown", "0.147.0", "0.159.1"])
+      expect(providerRuntimeCapabilities("codex", version).nativeCompaction).toBe(false);
+    for (const version of ["codex 0.159.2", "0.160.0", "0.160.1", "0.161.0"])
+      expect(providerRuntimeCapabilities("codex", version)).toMatchObject({
+        nativeCompaction: true,
+        nativeReview: false,
+        nativeGoals: false,
+        nativeAttachments: false,
+        nativeFork: false,
+      });
+  });
   it("gates message questions by the Codex version", () => {
     for (const version of [undefined, "unknown", "codex 0.152.9"])
       expect(supportsCodexAsyncQuestions(version)).toBe(false);
@@ -21,4 +33,26 @@ describe("runtime capabilities", () => {
     });
     expect(providerRuntimeCapabilities("unknown").maxImagesPerTurn).toBe(0);
   });
+});
+
+it("gates the certified Codex native operations at 0.162.0", () => {
+  for (const version of [
+    undefined,
+    "unknown",
+    "0.147.0",
+    "0.156.1",
+    "0.160.0",
+    "0.160.1-beta.1",
+    "0.160.1",
+    "0.161.0",
+  ])
+    expect(providerRuntimeCapabilities("codex", version).nativeReview).toBe(false);
+  for (const version of ["codex 0.162.0", "0.163.0", "1.0.0"])
+    expect(providerRuntimeCapabilities("codex", version)).toMatchObject({
+      nativeReview: true,
+      nativeGoals: true,
+      nativeAttachments: true,
+      nativeCompaction: true,
+      nativeFork: true,
+    });
 });

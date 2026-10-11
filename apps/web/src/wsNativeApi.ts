@@ -1,3 +1,4 @@
+import { NATIVE_OPERATION_WS_METHODS } from "@t3tools/contracts";
 import type { ProfileListResult, ProviderAccountEvent } from "@t3tools/contracts";
 import {
   ProjectCloneJob,
@@ -606,6 +607,8 @@ export function createWsNativeApi(): NativeApi {
         transport.request(WS_METHODS.gitRunStackedAction, input, { timeoutMs: null }),
       listBranches: (input) => transport.request(WS_METHODS.gitListBranches, input),
       createWorktree: (input) => transport.request(WS_METHODS.gitCreateWorktree, input),
+      prepareWorktree: (input) =>
+        transport.request(WS_METHODS.gitPrepareWorktree, input, { timeoutMs: null }),
       removeWorktree: (input) => transport.request(WS_METHODS.gitRemoveWorktree, input),
       createBranch: (input) => transport.request(WS_METHODS.gitCreateBranch, input),
       checkout: (input) => transport.request(WS_METHODS.gitCheckout, input),
@@ -782,6 +785,13 @@ export function createWsNativeApi(): NativeApi {
       consumeResetCredit: (input) => transport.request(USAGE_WS_METHODS.consumeResetCredit, input),
       getAccounts: (input) => transport.request(USAGE_WS_METHODS.getAccounts, input),
       getSummary: (input) => transport.request(USAGE_WS_METHODS.getSummary, input),
+    },
+    nativeOperations: {
+      resolve: (input) => transport.request(NATIVE_OPERATION_WS_METHODS.resolve, input),
+      fork: (input) => transport.request(NATIVE_OPERATION_WS_METHODS.fork, input),
+      execute: (input) => transport.request(NATIVE_OPERATION_WS_METHODS.execute, input),
+      list: (input) => transport.request(NATIVE_OPERATION_WS_METHODS.list, input),
+      inspect: (input) => transport.request(NATIVE_OPERATION_WS_METHODS.inspect, input),
     },
     elicitation: {
       submit: (input) => transport.request(ELICITATION_WS_METHODS.submit, input),

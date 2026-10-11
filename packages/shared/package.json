@@ -287,6 +287,18 @@
     "./computerControl": {
       "types": "./src/computerControl.ts",
       "import": "./src/computerControl.ts"
+    },
+    "./nativeReviewTarget": {
+      "types": "./src/nativeReviewTarget.ts",
+      "import": "./src/nativeReviewTarget.ts"
+    },
+    "./nativeTaskIdentity": {
+      "types": "./src/nativeTaskIdentity.ts",
+      "import": "./src/nativeTaskIdentity.ts"
+    },
+    "./runtimeInfo": {
+      "types": "./src/runtimeInfo.ts",
+      "import": "./src/runtimeInfo.ts"
     }
   },
   "scripts": {

@@ -4,6 +4,9 @@ import {
   listChromeSessionSetups,
   isChromeRuntimeSession,
 } from "./provider/chromeSessionRuntimeFactory";
+import { finishAcknowledgedNativeRewind } from "./orchestration/nativeRewindAcknowledgement.ts";
+import { ProviderValidationError } from "./provider/Errors.ts";
+import { NATIVE_OPERATION_WS_METHODS, ThreadId as NativeForkThreadId } from "@t3tools/contracts";
 import {
   getClaudeTranscriptMaintenance,
   runClaudeTranscriptMaintenance,
@@ -32,6 +35,7 @@ import {
   F5_PROTOCOL_QUERY,
   F5_UPGRADE_REQUIRED_CLOSE_CODE,
   type TurnSubmissionResult,
+  type GitCheckoutConflict,
 } from "@t3tools/contracts";
 import { GithubDeviceLogin, resolveGithubOAuthClientId } from "./git/GithubDeviceLogin";
 import { GithubCliImport } from "./git/GithubCliImport";
@@ -228,6 +232,7 @@ import {
   type BootstrapThreadDisposition,
   dispatchBootstrapTurnStart,
 } from "./wsServer/bootstrapTurnStart.ts";
+import { makeWorktreePreparation } from "./project/worktreePreparation.ts";
 import { WorktreeSetup, type WorktreeSetupShape } from "./project/Services/WorktreeSetup.ts";
 import { withWorktreeLifecycleLock } from "./project/Layers/WorktreeLifecycleCoordinator.ts";
 import { makeServerPushBus, makeWebSocketSendController } from "./wsServer/pushBus.ts";
@@ -758,11 +763,26 @@ function formatRouteFailureMessage(cause: Cause.Cause<unknown>): string {
   return Cause.pretty(cause);
 }
 
-function formatRouteFailure(cause: Cause.Cause<unknown>): {
+function formatRouteFailure(
+  cause: Cause.Cause<unknown>,
+  method: string,
+): {
   readonly message: string;
   readonly code?: string;
+  readonly checkoutConflict?: GitCheckoutConflict;
 } {
   const squashed = Cause.squash(cause);
+  if (
+    method === WS_METHODS.gitCheckout &&
+    Schema.is(GitCommandError)(squashed) &&
+    squashed.checkoutConflict
+  ) {
+    return {
+      code: "GitCheckoutConflict",
+      message: `Local changes in ${squashed.checkoutConflict.cwd} would be overwritten by switching to '${squashed.checkoutConflict.branch}'.`,
+      checkoutConflict: squashed.checkoutConflict,
+    };
+  }
   if (Schema.is(AttachmentIngressError)(squashed)) {
     return { message: squashed.message };
   }
@@ -2894,6 +2914,31 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     };
   };
 
+  const prepareWorktree = yield* makeWorktreePreparation({
+    scope: subscriptionsScope,
+    createWorktree: (input) =>
+      Effect.gen(function* () {
+        const commit = yield* git.resolveCommit(input.cwd, input.branch);
+        if (!commit)
+          return yield* Effect.fail(new Error(`Cannot resolve worktree base '${input.branch}'.`));
+        return yield* createConfiguredWorktree({
+          ...input,
+          baseRefName: commit,
+          path: resolveDefaultWorktreePath({
+            worktreesDir: serverConfig.worktreesDir,
+            cwd: input.cwd,
+            branch: input.newBranch,
+          }),
+        });
+      }),
+    runSetup: (input) =>
+      awaitOrchestrationRuntimeForRoute.pipe(
+        Effect.flatMap(({ projectSetupScriptRunner }) =>
+          projectSetupScriptRunner.runForThread(input),
+        ),
+      ),
+  });
+
   const routeRequest = Effect.fnUntraced(function* (ws: WebSocket, request: WebSocketRequest) {
     switch (request.body._tag) {
       case WS_METHODS.githubLoginStart:
@@ -3071,6 +3116,154 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           );
       }
 
+      case NATIVE_OPERATION_WS_METHODS.fork: {
+        const input = stripRequestTag(request.body);
+        const { orchestrationEngine, providerSessionDirectory, projectSetupScriptRunner } =
+          yield* awaitOrchestrationRuntimeForRoute;
+        const snapshot = yield* orchestrationEngine.getReadModel();
+        const source = snapshot.threads.find(
+          (entry) => entry.id === input.threadId && entry.deletedAt === null,
+        );
+        const project = snapshot.projects.find((entry) => entry.id === source?.projectId);
+        if (!source || !project || !providerService.nativeOperations?.executeWithApply)
+          return yield* new RouteRequestError({ message: "This conversation cannot be forked." });
+        if (!/^[0-9a-f-]{36}$/i.test(input.operationId))
+          return yield* new RouteRequestError({ message: "Invalid fork identifier." });
+        const targetId = NativeForkThreadId.makeUnsafe(`fork-${input.operationId}`);
+        const branch = `t3code/${input.operationId.slice(0, 8)}`;
+        const cwd = resolveDefaultWorktreePath({
+          worktreesDir: serverConfig.worktreesDir,
+          cwd: project.workspaceRoot,
+          branch,
+        });
+        const binding = yield* providerSessionDirectory
+          .getBinding(input.threadId)
+          .pipe(Effect.mapError((cause) => new RouteRequestError({ message: String(cause) })));
+        if (Option.isNone(binding))
+          return yield* new RouteRequestError({
+            message: "The source provider session is unavailable.",
+          });
+        const validation = (cause: unknown) =>
+          new ProviderValidationError({
+            operation: "nativeFork",
+            issue: cause instanceof Error ? cause.message : String(cause),
+          });
+        return yield* providerService.nativeOperations
+          .executeWithApply(
+            {
+              threadId: input.threadId,
+              operationId: input.operationId,
+              generation: input.generation,
+              command: {
+                kind: "fork",
+                targetThreadId: targetId,
+                cwd,
+                ...(input.beforeTurnId ? { beforeTurnId: input.beforeTurnId } : {}),
+              },
+            },
+            (result) =>
+              Effect.gen(function* () {
+                if (!result || typeof result !== "object" || !("resumeCursor" in result))
+                  return yield* validation("Native fork returned no resume cursor.");
+                const at = new Date().toISOString();
+                yield* orchestrationEngine
+                  .dispatch({
+                    type: "thread.create",
+                    commandId: CommandId.makeUnsafe(`fork-create:${input.operationId}`),
+                    threadId: targetId,
+                    projectId: project.id,
+                    title: `Fork of ${source.title}`,
+                    model: source.model,
+                    ...(source.modelSelection ? { modelSelection: source.modelSelection } : {}),
+                    runtimeMode: source.runtimeMode,
+                    interactionMode: source.interactionMode,
+                    branch,
+                    worktreePath: cwd,
+                    threadReferences: [{ threadId: source.id, relation: "source", createdAt: at }],
+                    createdAt: at,
+                  })
+                  .pipe(Effect.mapError(validation));
+                yield* providerSessionDirectory.upsert({
+                  ...binding.value,
+                  threadId: targetId,
+                  resumeCursor: result.resumeCursor,
+                  launchFingerprint: null,
+                  status: "stopped",
+                  runtimePayload: {
+                    ...(typeof binding.value.runtimePayload === "object"
+                      ? binding.value.runtimePayload
+                      : {}),
+                    cwd,
+                  },
+                });
+                yield* projectSetupScriptRunner
+                  .runForThread({
+                    threadId: targetId,
+                    projectId: project.id,
+                    projectCwd: project.workspaceRoot,
+                    worktreePath: cwd,
+                  })
+                  .pipe(Effect.mapError(validation));
+              }),
+            createConfiguredWorktree({
+              cwd: source.worktreePath ?? project.workspaceRoot,
+              branch: source.branch ?? "HEAD",
+              baseRefName: source.branch ?? "HEAD",
+              newBranch: branch,
+              path: cwd,
+            }).pipe(Effect.asVoid, Effect.mapError(validation)),
+            { background: true },
+          )
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+      }
+      case NATIVE_OPERATION_WS_METHODS.resolve:
+      case NATIVE_OPERATION_WS_METHODS.execute:
+      case NATIVE_OPERATION_WS_METHODS.list:
+      case NATIVE_OPERATION_WS_METHODS.inspect: {
+        const { orchestrationEngine } = yield* awaitOrchestrationRuntimeForRoute;
+        const input = stripRequestTag(request.body);
+        const snapshot = yield* orchestrationEngine.getReadModel();
+        const thread = snapshot.threads.find(
+          (entry) => entry.id === input.threadId && entry.deletedAt === null,
+        );
+        if (!thread || !providerService.nativeOperations)
+          return yield* new RouteRequestError({
+            message: "Native operations are unavailable for this conversation.",
+          });
+        if (request.body._tag === NATIVE_OPERATION_WS_METHODS.resolve) {
+          if (!providerService.nativeOperations.resolve)
+            return yield* new RouteRequestError({
+              message: "Native outcome resolution is unavailable.",
+            });
+          const resolution = stripRequestTag(request.body);
+          const record = yield* providerService.nativeOperations
+            .resolve(resolution)
+            .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+          if (resolution.action === "acknowledge")
+            yield* finishAcknowledgedNativeRewind(record, sql, orchestrationEngine).pipe(
+              Effect.mapError((error) => new RouteRequestError({ message: error.message })),
+            );
+          return record;
+        }
+        if (request.body._tag === NATIVE_OPERATION_WS_METHODS.execute) {
+          const operation = stripRequestTag(request.body);
+          if (["fork", "revertFiles", "compact"].includes(operation.command.kind))
+            return yield* new RouteRequestError({
+              message:
+                "Use the conversation fork, checkpoint or compaction action for this operation.",
+            });
+          return yield* providerService.nativeOperations
+            .execute(operation)
+            .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+        }
+        if (request.body._tag === NATIVE_OPERATION_WS_METHODS.inspect)
+          return yield* providerService.nativeOperations
+            .inspect(stripRequestTag(request.body))
+            .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+        return yield* providerService.nativeOperations
+          .list(input.threadId)
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+      }
       case ELICITATION_WS_METHODS.submit: {
         // The connection is authenticated at upgrade; the submission itself
         // authorizes against the thread's open request, its generation and
@@ -3181,7 +3374,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case ORCHESTRATION_WS_METHODS.dispatchCommand: {
         const { orchestrationEngine, projectSetupScriptRunner } =
           yield* awaitOrchestrationRuntimeForRoute;
-        const { command } = request.body;
+        const rawCommand = request.body.command;
+        const command =
+          rawCommand.type === "thread.meta.update"
+            ? { ...rawCommand, titleOrigin: "host" as const }
+            : rawCommand;
         if (command.type === "thread.turn.start" && command.bootstrap) {
           const dispatched = yield* runBootstrapTurnStart({
             command,
@@ -4067,6 +4264,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         });
       }
 
+      case WS_METHODS.gitPrepareWorktree: {
+        return yield* prepareWorktree(stripRequestTag(request.body));
+      }
+
       case WS_METHODS.gitRemoveWorktree: {
         const body = stripRequestTag(request.body);
         return yield* git.removeWorktree(body);
@@ -4079,7 +4280,15 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.gitCheckout: {
         const body = stripRequestTag(request.body);
-        return yield* Effect.scoped(git.checkoutBranch(body));
+        return yield* Effect.scoped(git.checkoutBranch(body)).pipe(
+          Effect.tapError((error) =>
+            Effect.logWarning("Branch checkout failed", {
+              cwd: body.cwd,
+              branch: body.branch,
+              detail: error.detail,
+            }),
+          ),
+        );
       }
 
       case WS_METHODS.gitInit: {
@@ -5845,7 +6054,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     if (Exit.isFailure(result)) {
       return yield* sendWsResponse({
         id: request.success.id,
-        error: formatRouteFailure(result.cause),
+        error: formatRouteFailure(result.cause, method),
       });
     }
 
