@@ -29,7 +29,6 @@ function fixture(overrides: Partial<Parameters<typeof NativeRuntimePanel>[0]> = 
   return {
     threadId: ThreadId.makeUnsafe("thread"),
     requestedModel: "requested-model",
-    prompt: "",
     activities: [],
     capabilities: {
       generation: 1,
@@ -41,8 +40,6 @@ function fixture(overrides: Partial<Parameters<typeof NativeRuntimePanel>[0]> = 
       ],
     },
     runtime: readRuntimeConfiguredPayload({ config: { model: "reported-model", effort: "high" } }),
-    onSuggestion: vi.fn(),
-    onStop: async () => {},
     ...overrides,
   };
 }
@@ -182,39 +179,7 @@ describe("NativeRuntimePanel", () => {
     }
   });
 
-  it("does not overwrite a newly admitted operation with an older poll", async () => {
-    let finish!: (records: readonly NativeOperationRecord[]) => void;
-    const oldPoll = new Promise<readonly NativeOperationRecord[]>((resolve) => {
-      finish = resolve;
-    });
-    mocks.list.mockReturnValue(oldPoll);
-    const props = fixture();
-    mocks.execute.mockResolvedValue({
-      operationId: "new",
-      threadId: props.threadId,
-      generation: 1,
-      state: "running",
-      command: { kind: "review", target: { type: "uncommittedChanges" } },
-      createdAt: at,
-      updatedAt: at,
-    });
-    const screen = await render(<NativeRuntimePanel {...props} />);
-    try {
-      await page.getByRole("button", { name: "Runtime details" }).click();
-      await page.getByRole("button", { name: "Review", exact: true }).click();
-      await expect.element(page.getByText("review · running", { exact: true })).toBeVisible();
-      finish([]);
-      await oldPoll;
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      await expect.element(page.getByText("review · running", { exact: true })).toBeVisible();
-    } finally {
-      finish([]);
-      mocks.list.mockResolvedValue([]);
-      await screen.unmount();
-    }
-  });
-
-  it("keeps runtime details reachable in a narrow pane with a long suggestion and goal", async () => {
+  it("keeps runtime details reachable in a narrow pane and leaves suggestions to the composer", async () => {
     await page.viewport(320, 650);
     const suggestion = {
       ...warnings()[0]!,
@@ -239,6 +204,7 @@ describe("NativeRuntimePanel", () => {
       const bounds = button.element().getBoundingClientRect();
       expect(bounds.left).toBeGreaterThanOrEqual(0);
       expect(bounds.right).toBeLessThanOrEqual(320);
+      expect(page.getByText(/A long suggested prompt/).query()).toBeNull();
       await button.click();
       await expect.element(page.getByRole("dialog")).toBeVisible();
     } finally {
@@ -252,7 +218,7 @@ describe("NativeRuntimePanel", () => {
       await page.getByRole("button", { name: "Runtime details" }).click();
       await expect.element(page.getByText("reported-model", { exact: true })).toBeVisible();
       await expect
-        .element(page.getByRole("button", { name: "Start goal" }))
+        .element(page.getByRole("button", { name: "Inspect output" }))
         .not.toBeInTheDocument();
     } finally {
       await screen.unmount();
@@ -297,16 +263,29 @@ describe("NativeRuntimePanel", () => {
 
   it("resets private dialog state when switching conversations", async () => {
     const props = fixture();
+    mocks.list.mockResolvedValue([
+      {
+        operationId: "thread-a-operation",
+        threadId: props.threadId,
+        generation: 1,
+        state: "failed",
+        command: { kind: "compact" },
+        createdAt: at,
+        updatedAt: at,
+      },
+    ]);
     const screen = await render(<NativeRuntimePanel {...props} />);
     try {
       await page.getByRole("button", { name: "Runtime details" }).click();
-      await page.getByRole("textbox", { name: "Goal objective" }).fill("Thread A private goal");
+      await expect.element(page.getByText("compact · failed", { exact: true })).toBeVisible();
+      mocks.list.mockResolvedValue([]);
       await screen.rerender(
         <NativeRuntimePanel {...props} threadId={ThreadId.makeUnsafe("thread-b")} />,
       );
       await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
       await page.getByRole("button", { name: "Runtime details" }).click();
-      await expect.element(page.getByRole("textbox", { name: "Goal objective" })).toHaveValue("");
+      await expect.element(page.getByRole("dialog")).toBeVisible();
+      expect(page.getByText("compact · failed", { exact: true }).query()).toBeNull();
     } finally {
       await screen.unmount();
     }

@@ -2,12 +2,14 @@ import type { ThreadId } from "@t3tools/contracts";
 import {
   AtSignIcon,
   BotIcon,
+  CircleOffIcon,
+  GoalIcon,
   ListTodoIcon,
   NotebookPenIcon,
   PaperclipIcon,
   PlusIcon,
 } from "lucide-react";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 
 import { ClaudeTraitsMenuContent, ClaudeTraitsPicker } from "~/components/chat/ClaudeTraitsPicker";
 import { CodexTraitsMenuContent, CodexTraitsPicker } from "~/components/chat/CodexTraitsPicker";
@@ -15,7 +17,7 @@ import { CompactComposerControlsMenu } from "~/components/chat/CompactComposerCo
 import { ProviderInstanceModelPicker } from "~/components/chat/ProviderInstanceModelPicker";
 import { RuntimeModePicker } from "~/components/chat/RuntimeModePicker";
 import { Button } from "~/components/ui/button";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "~/components/ui/menu";
 import { Toggle, ToggleGroup } from "~/components/ui/toggle-group";
 import { cn } from "~/lib/utils";
 
@@ -26,6 +28,7 @@ import type {
   ComposerModelControls,
   ComposerSendControls,
 } from "./composerControls";
+import { NativeGoalDialog } from "./NativeGoalDialog";
 
 const INTERACTION_MODE_TOGGLE_CLASS_NAME =
   "h-6 min-w-0 gap-1 rounded-sm border-0 px-2 text-ui font-normal text-muted-foreground hover:bg-transparent hover:text-foreground data-pressed:bg-background data-pressed:text-foreground data-pressed:shadow-xs sm:h-6 [&_svg:not([class*='size-'])]:size-3.5";
@@ -54,6 +57,8 @@ export function ComposerFooterControls(props: {
   const attachDisabled =
     send.isConnecting || isComposerApprovalState || isPendingTurnDispatchBlocked;
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [goalDialogOpen, setGoalDialogOpen] = useState(false);
+  const nativeGoal = mode.nativeGoal;
   const showPlanControl = Boolean(
     mode.activePlan || mode.activeProposedPlan || mode.planSidebarOpen,
   );
@@ -105,8 +110,36 @@ export function ComposerFooterControls(props: {
             <AtSignIcon className="size-4 shrink-0" />
             Mention a file
           </MenuItem>
+          {nativeGoal ? (
+            <>
+              <MenuSeparator />
+              <MenuItem disabled={nativeGoal.disabled} onClick={() => setGoalDialogOpen(true)}>
+                <GoalIcon className="size-4 shrink-0" />
+                Set goal…
+              </MenuItem>
+              {nativeGoal.hasGoal ? (
+                <MenuItem disabled={nativeGoal.disabled} onClick={() => void nativeGoal.onClear()}>
+                  <CircleOffIcon className="size-4 shrink-0" />
+                  Clear goal
+                </MenuItem>
+              ) : null}
+              {nativeGoal.active ? (
+                <div className="px-2 py-1 text-muted-foreground text-xs">
+                  Available once the current goal settles
+                </div>
+              ) : null}
+            </>
+          ) : null}
         </MenuPopup>
       </Menu>
+      {nativeGoal ? (
+        <NativeGoalDialog
+          open={goalDialogOpen}
+          disabled={nativeGoal.disabled}
+          onOpenChange={setGoalDialogOpen}
+          onSubmit={nativeGoal.onSet}
+        />
+      ) : null}
       {/* Provider/model picker */}
       <ProviderInstanceModelPicker
         compact={compact}

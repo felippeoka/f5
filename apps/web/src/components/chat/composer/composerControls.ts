@@ -105,6 +105,20 @@ export interface ComposerModeControls {
   togglePlanSidebar: () => void;
   canCompactConversation: boolean;
   onCompactConversation: () => Promise<void>;
+  /** Provider-native goals; null when the session does not support them. */
+  nativeGoal: ComposerNativeGoalControls | null;
+}
+
+export interface ComposerNativeGoalControls {
+  /** A goal (active or settled) is recorded on the thread. */
+  hasGoal: boolean;
+  /** The goal is still running and holds the thread's native-operation slot. */
+  active: boolean;
+  /** A turn is busy, a goal request is in flight, or the goal is active. */
+  disabled: boolean;
+  /** Resolves true once the provider admitted the goal. */
+  onSet: (objective: string, tokenBudget: number) => Promise<boolean>;
+  onClear: () => Promise<void>;
 }
 
 /** Sending, queueing, interrupting and plan implementation. */
