@@ -1,5 +1,6 @@
 import { parseNativeReviewTarget } from "@t3tools/shared/nativeReviewTarget";
-import { NativeRuntimePanel } from "./chat/NativeRuntimePanel";
+import { NativeRuntimeTray } from "./chat/NativeRuntimeTray";
+import { latestNativeGoal } from "./chat/nativeGoal";
 import { TranscriptRepairAction } from "./TranscriptRepairAction";
 import { isSessionActionSupported } from "@t3tools/shared/providerRuntimeCapabilities";
 import { isBlockingUserInput } from "@t3tools/shared/pendingUserInputs";
@@ -31,6 +32,7 @@ import { ChatComposer } from "./chat/composer/ChatComposer";
 import type {
   ComposerAttachments,
   ComposerModeControls,
+  ComposerNativeGoalControls,
   ComposerModelControls,
   ComposerPendingInteraction,
   ComposerSendControls,
@@ -53,6 +55,7 @@ import {
   type ProjectScript,
   type ModelSlug,
   type ModelSelection,
+  type NativeOperationCommand,
   type ResolvedKeybindingsConfig,
   type ProviderApprovalDecision,
   type ServerProvider,
@@ -1707,6 +1710,7 @@ export default function ChatView({
   const nowIso = new Date(nowTick).toISOString();
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const threadTasks = activeThread?.tasks ?? EMPTY_TASKS;
+  const nativeGoal = useMemo(() => latestNativeGoal(threadActivities), [threadActivities]);
   const latestConfiguredRuntimeActivity = useMemo(() => {
     for (let index = threadActivities.length - 1; index >= 0; index -= 1) {
       const activity = threadActivities[index];
@@ -4537,6 +4541,62 @@ export default function ChatView({
     setThreadError,
   ]);
 
+  /** Runs a goal command; resolves true once the provider admitted it. */
+  const executeNativeGoalCommand = useCallback(
+    async (command: NativeOperationCommand): Promise<boolean> => {
+      const api = readNativeApi();
+      const capabilities = activeThread?.session?.capabilities;
+      if (!api?.nativeOperations || !activeThread || !capabilities) return false;
+      const title =
+        command.kind === "goalClear" ? "Goal could not be cleared" : "Goal could not start";
+      try {
+        const record = await api.nativeOperations.execute({
+          threadId: activeThread.id,
+          operationId: crypto.randomUUID(),
+          generation: capabilities.generation,
+          command,
+        });
+        if (["requested", "dispatched", "running", "completed"].includes(record.state)) {
+          return true;
+        }
+        toastManager.add({ type: "error", title, description: record.error ?? record.state });
+      } catch (cause) {
+        toastManager.add({
+          type: "error",
+          title,
+          description:
+            cause instanceof Error ? cause.message : "Retry after the current operation settles.",
+        });
+      }
+      return false;
+    },
+    [activeThread],
+  );
+  const nativeGoalControls = useMemo<ComposerNativeGoalControls | null>(
+    () =>
+      activeThread?.session?.capabilities?.actions.some(
+        (action) => action.action === "nativeGoals" && action.supported,
+      )
+        ? {
+            hasGoal: nativeGoal !== null,
+            disabled: isWorking || isRevertingCheckpoint || hasPendingTurnDispatch,
+            onSet: (objective, tokenBudget) =>
+              executeNativeGoalCommand({ kind: "goalSet", objective, tokenBudget }),
+            onClear: async () => {
+              await executeNativeGoalCommand({ kind: "goalClear" });
+            },
+          }
+        : null,
+    [
+      activeThread?.session?.capabilities,
+      executeNativeGoalCommand,
+      hasPendingTurnDispatch,
+      isRevertingCheckpoint,
+      isWorking,
+      nativeGoal,
+    ],
+  );
+
   const onSend = async (
     e?: { preventDefault: () => void },
     intent: SendIntent = "auto",
@@ -6836,6 +6896,7 @@ export default function ChatView({
     togglePlanSidebar,
     canCompactConversation,
     onCompactConversation,
+    nativeGoal: nativeGoalControls,
   };
   const composerSendControls: ComposerSendControls = {
     onSend,
@@ -6954,22 +7015,9 @@ export default function ChatView({
             isServerThread={isServerThread}
             activeThreadId={activeThread.id}
             activeThreadTitle={activeThread.title}
-            nativeGoalSummary={(() => {
-              const payload = activeThread.activities.findLast(
-                (activity) =>
-                  activity.kind === "native.metadata" &&
-                  activity.payload &&
-                  typeof activity.payload === "object" &&
-                  "nativeGoal" in activity.payload,
-              )?.payload;
-              const goal =
-                payload && typeof payload === "object" && "nativeGoal" in payload
-                  ? payload.nativeGoal
-                  : null;
-              return goal && typeof goal === "object" && "objective" in goal && "status" in goal
-                ? `Goal: ${String(goal.objective)} · ${String(goal.status)}`
-                : undefined;
-            })()}
+            nativeGoalSummary={
+              nativeGoal ? `Goal: ${nativeGoal.objective} · ${nativeGoal.status}` : undefined
+            }
             activeProjectId={activeProject?.id}
             activeProjectIcon={activeProject?.icon}
             activeProjectName={activeProject?.name}
@@ -7255,18 +7303,15 @@ export default function ChatView({
                           />
                         ))
                       : null}
+                    <NativeRuntimeTray
+                      threadId={activeThread.id}
+                      capabilities={activeThread.session?.capabilities}
+                      activities={activeThread.activities}
+                      prompt={prompt}
+                      latestMessageAt={activeThread.messages.at(-1)?.createdAt}
+                      onSuggestion={setPrompt}
+                    />
                   </ComposerTray>
-                  <NativeRuntimePanel
-                    threadId={activeThread.id}
-                    capabilities={activeThread.session?.capabilities}
-                    activities={activeThread.activities}
-                    requestedModel={activeThread.model}
-                    outcome={activeThread.latestTurn?.state}
-                    prompt={prompt}
-                    latestMessageAt={activeThread.messages.at(-1)?.createdAt}
-                    onSuggestion={setPrompt}
-                    onStop={onInterrupt}
-                  />
                   <ChatComposer
                     redesignEnabled={composerRedesign}
                     getTimeline={getComposerTimeline}

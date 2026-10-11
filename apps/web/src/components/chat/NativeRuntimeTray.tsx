@@ -1,0 +1,382 @@
+import { readNativeTaskIdentity } from "@t3tools/shared/nativeTaskIdentity";
+import type {
+  NativeOperationCommand,
+  NativeOperationRecord,
+  OrchestrationThreadActivity,
+  ProviderSessionCapabilities,
+  ThreadBackgroundWorkEntry,
+  ThreadId,
+} from "@t3tools/contracts";
+import { LightbulbIcon, TriangleAlertIcon, XIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+
+import { readNativeApi } from "../../nativeApi";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
+import { Button } from "../ui/button";
+import {
+  Dialog,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "../ui/dialog";
+import { Spinner } from "../ui/spinner";
+import { toastManager } from "../ui/toast";
+import { COMPOSER_TRAY_PANEL_CLASS_NAME } from "./composer/ComposerTray";
+import {
+  latestPromptSuggestion,
+  nativeOperationLabel,
+  selectNativeRuntimeTrayRows,
+} from "./NativeRuntimeTray.logic";
+
+const ROW_CLASS_NAME = `${COMPOSER_TRAY_PANEL_CLASS_NAME} flex items-center gap-2 text-xs`;
+
+const errorMessage = (cause: unknown, fallback: string) =>
+  cause instanceof Error ? cause.message : fallback;
+
+const showError = (title: string, description: string) =>
+  toastManager.add({ type: "error", title, description });
+
+interface TaskInspection {
+  readonly nativeId: string;
+  readonly label: string;
+  readonly page: unknown;
+  readonly nextCursor: string | null;
+}
+
+/**
+ * Native runtime rows in the composer tray: a prompt suggestion, operations
+ * whose outcome needs recovery or is still running, and stoppable child
+ * tasks. Renders nothing when none of those exist.
+ */
+export function NativeRuntimeTray(props: {
+  threadId: ThreadId;
+  capabilities: ProviderSessionCapabilities | null | undefined;
+  activities: readonly OrchestrationThreadActivity[];
+  prompt: string;
+  latestMessageAt?: string | undefined;
+  onSuggestion: (text: string) => void;
+}) {
+  const { threadId, capabilities, activities, prompt } = props;
+  const [records, setRecords] = useState<readonly NativeOperationRecord[]>([]);
+  const [tasks, setTasks] = useState<readonly ThreadBackgroundWorkEntry[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [usedSuggestionId, setUsedSuggestionId] = useState<string | null>(null);
+  const [acknowledging, setAcknowledging] = useState<NativeOperationRecord | null>(null);
+  const [inspection, setInspection] = useState<TaskInspection | null>(null);
+  const [reading, setReading] = useState(false);
+  const promptBefore = useRef(prompt);
+  const suggestion = latestPromptSuggestion(activities);
+  useEffect(() => {
+    // Typing counts as passing on the suggestion.
+    if (promptBefore.current !== prompt && suggestion) setUsedSuggestionId(suggestion.id);
+    promptBefore.current = prompt;
+  }, [prompt, suggestion]);
+  useEffect(() => {
+    let alive = true;
+    const refresh = async () => {
+      const api = readNativeApi();
+      if (!api?.nativeOperations) return;
+      try {
+        const [next, snapshot] = await Promise.all([
+          api.nativeOperations.list({ threadId }),
+          api.agents.getSnapshot(),
+        ]);
+        if (alive) {
+          setRecords(next);
+          setTasks(snapshot.entries.filter((entry) => entry.threadId === threadId));
+        }
+      } catch {
+        /* Connection and capability surfaces already report transport failures. */
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 5000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [threadId, capabilities?.generation]);
+  const supported = (action: string) =>
+    capabilities?.actions.some((entry) => entry.action === action && entry.supported) === true;
+  const canInspectTasks = supported("childTaskInspection");
+  const canStopTasks = supported("childTaskStop");
+
+  const execute = async (command: NativeOperationCommand) => {
+    const api = readNativeApi()?.nativeOperations;
+    if (!api || !capabilities || busy) return;
+    setBusy(true);
+    try {
+      const record = await api.execute({
+        threadId,
+        operationId: crypto.randomUUID(),
+        generation: capabilities.generation,
+        command,
+      });
+      setRecords((current) => [
+        record,
+        ...current.filter((entry) => entry.operationId !== record.operationId),
+      ]);
+      if (record.error) showError(`${nativeOperationLabel(command.kind)} failed`, record.error);
+    } catch (cause) {
+      showError(
+        `${nativeOperationLabel(command.kind)} failed`,
+        errorMessage(cause, "The native operation failed."),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const resolve = async (record: NativeOperationRecord, action: "reconcile" | "acknowledge") => {
+    const api = readNativeApi()?.nativeOperations;
+    if (!api?.resolve || !capabilities || busy) return;
+    setBusy(true);
+    try {
+      const next = await api.resolve({
+        threadId,
+        operationId: record.operationId,
+        generation: capabilities.generation,
+        action,
+      });
+      setRecords((current) =>
+        current.map((entry) => (entry.operationId === next.operationId ? next : entry)),
+      );
+    } catch (cause) {
+      showError("Outcome resolution failed", errorMessage(cause, "Outcome resolution failed."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const inspect = async (nativeId: string, label: string, cursor?: string) => {
+    if (!capabilities) return;
+    setReading(true);
+    try {
+      const identity = readNativeTaskIdentity(nativeId);
+      const page = await readNativeApi()?.nativeOperations?.inspect({
+        threadId,
+        generation: capabilities.generation,
+        kind: "task",
+        nativeId: identity.taskId,
+        ...(identity.runId ? { runId: identity.runId } : {}),
+        limit: 20,
+        ...(cursor ? { cursor } : {}),
+      });
+      const nextCursor =
+        page && typeof page === "object" && "nextCursor" in page ? page.nextCursor : null;
+      setInspection({
+        nativeId,
+        label,
+        page,
+        nextCursor: typeof nextCursor === "string" ? nextCursor : null,
+      });
+    } catch (cause) {
+      showError("Task output unavailable", errorMessage(cause, "Native output is unavailable."));
+    } finally {
+      setReading(false);
+    }
+  };
+
+  if (!capabilities) return null;
+  const rows = selectNativeRuntimeTrayRows({
+    activities,
+    prompt,
+    latestMessageAt: props.latestMessageAt,
+    usedSuggestionId,
+    records,
+    tasks,
+    canInspectTasks,
+    canStopTasks,
+  });
+
+  return (
+    <>
+      {rows.map((row) => {
+        switch (row.kind) {
+          case "suggestion":
+            return (
+              <div key={`suggestion:${row.id}`} className={ROW_CLASS_NAME}>
+                <LightbulbIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                  Suggested: <span className="text-foreground">{row.summary}</span>
+                </span>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => {
+                    setUsedSuggestionId(row.id);
+                    props.onSuggestion(row.summary);
+                  }}
+                >
+                  Use
+                </Button>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label="Dismiss suggestion"
+                  onClick={() => setUsedSuggestionId(row.id)}
+                >
+                  <XIcon />
+                </Button>
+              </div>
+            );
+          case "recovery": {
+            const { record } = row;
+            return (
+              <div key={`recovery:${record.operationId}`} className={ROW_CLASS_NAME}>
+                <TriangleAlertIcon
+                  aria-hidden
+                  className="size-3.5 shrink-0 text-warning-foreground"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="text-foreground">
+                    {nativeOperationLabel(record.command.kind)} outcome is uncertain
+                  </span>
+                  <span className="text-muted-foreground">
+                    {record.staleGeneration ? " · result belongs to an older session" : ""}
+                    {record.error ? ` · ${record.error}` : ""}
+                    {record.command.kind === "fork"
+                      ? ` · Preserved workspace: ${record.command.cwd}`
+                      : ""}
+                  </span>
+                </span>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void resolve(record, "reconcile")}
+                >
+                  Recheck outcome
+                </Button>
+                <Button
+                  size="xs"
+                  variant="destructive-outline"
+                  disabled={busy}
+                  onClick={() => setAcknowledging(record)}
+                >
+                  {row.finishAcknowledgement
+                    ? "Finish acknowledgement"
+                    : "Stop provider and acknowledge"}
+                </Button>
+              </div>
+            );
+          }
+          case "running":
+            return (
+              <div
+                key={`running:${row.record.operationId}`}
+                className={`${ROW_CLASS_NAME} text-muted-foreground`}
+              >
+                <Spinner aria-hidden className="size-3.5 shrink-0" />
+                {nativeOperationLabel(row.record.command.kind)} running…
+              </div>
+            );
+          case "task": {
+            const { task } = row;
+            const label = task.phase ?? task.workItemId;
+            return (
+              <div key={`task:${task.workItemId}`} className={ROW_CLASS_NAME}>
+                <Spinner aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate">
+                  {label} <span className="text-muted-foreground">· {task.status}</span>
+                </span>
+                {canInspectTasks && (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    disabled={reading}
+                    onClick={() => void inspect(task.workItemId, label)}
+                  >
+                    Inspect output
+                  </Button>
+                )}
+                {canStopTasks && (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() =>
+                      void execute({ kind: "stopTask", ...readNativeTaskIdentity(task.workItemId) })
+                    }
+                  >
+                    Stop
+                  </Button>
+                )}
+              </div>
+            );
+          }
+        }
+      })}
+      <AlertDialog
+        open={acknowledging !== null}
+        onOpenChange={(open) => {
+          if (!open) setAcknowledging(null);
+        }}
+      >
+        <AlertDialogPopup className="sm:max-w-[460px]">
+          <AlertDialogHeader className="text-left">
+            <AlertDialogTitle>Accept this uncertain outcome?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Stop the provider and accept this uncertain outcome? Files, conversation or forks may
+              already have changed. F5 will release the reservation without repeating the operation.
+              Inspect any affected workspace before continuing.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter variant="bare">
+            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <Button
+              variant="destructive"
+              disabled={busy}
+              onClick={() => {
+                const record = acknowledging;
+                setAcknowledging(null);
+                if (record) void resolve(record, "acknowledge");
+              }}
+            >
+              Stop provider and acknowledge
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+      <Dialog
+        open={inspection !== null}
+        onOpenChange={(open) => {
+          if (!open) setInspection(null);
+        }}
+      >
+        <DialogPopup className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-base">Output · {inspection?.label}</DialogTitle>
+          </DialogHeader>
+          <DialogPanel>
+            <pre className="whitespace-pre-wrap break-all font-mono text-xs">
+              {JSON.stringify(inspection?.page ?? null, null, 2)}
+            </pre>
+          </DialogPanel>
+          {inspection?.nextCursor ? (
+            <DialogFooter variant="bare">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={reading}
+                onClick={() =>
+                  void inspect(inspection.nativeId, inspection.label, inspection.nextCursor!)
+                }
+              >
+                Next page
+              </Button>
+            </DialogFooter>
+          ) : null}
+        </DialogPopup>
+      </Dialog>
+    </>
+  );
+}
