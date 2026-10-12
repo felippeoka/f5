@@ -24,7 +24,7 @@ import {
   Stream,
 } from "effect";
 
-import { CheckpointStoreLive } from "../src/checkpointing/Layers/CheckpointStore.ts";
+import { CheckpointStoreLiveWithoutCredentials } from "../src/checkpointing/Layers/CheckpointStore.ts";
 import { CheckpointStore } from "../src/checkpointing/Services/CheckpointStore.ts";
 import { makeFakeGitCore } from "../src/git/testDoubles.ts";
 import { GitCore, type GitCoreShape } from "../src/git/Services/GitCore.ts";
@@ -371,7 +371,7 @@ export const makeOrchestrationIntegrationHarness = (
       OrchestrationProjectionSnapshotQueryLive,
       ProjectionCheckpointRepositoryLive,
       ProjectionPendingApprovalRepositoryLive,
-      CheckpointStoreLive,
+      CheckpointStoreLiveWithoutCredentials,
       providerSessionDirectoryLayer,
       ThreadBackgroundWorkLive.pipe(Layer.provideMerge(providerSessionDirectoryLayer)),
       providerLayer,
