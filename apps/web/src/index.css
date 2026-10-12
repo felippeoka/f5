@@ -233,6 +233,19 @@
     --warning-foreground: CanvasText !important;
     --destructive-foreground: CanvasText !important;
     --attention-foreground: CanvasText !important;
+    /* Effort levels collapse to one system colour; EffortMenuSection marks the selection with Highlight. */
+    --effort-low: CanvasText !important;
+    --effort-low-foreground: CanvasText !important;
+    --effort-medium: CanvasText !important;
+    --effort-medium-foreground: CanvasText !important;
+    --effort-high: CanvasText !important;
+    --effort-high-foreground: CanvasText !important;
+    --effort-xhigh: CanvasText !important;
+    --effort-xhigh-foreground: CanvasText !important;
+    --effort-max: CanvasText !important;
+    --effort-max-foreground: CanvasText !important;
+    --effort-deepest: CanvasText !important;
+    --effort-deepest-foreground: CanvasText !important;
   }
 }
 

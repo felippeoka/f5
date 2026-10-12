@@ -1,9 +1,8 @@
-import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { ZapIcon } from "lucide-react";
-import { useState, type FocusEvent } from "react";
+import { useEffect, useRef, useState, type FocusEvent } from "react";
 
 import { cn } from "~/lib/utils";
-import { MenuGroup } from "../ui/menu";
+import { MenuGroup, MenuRadioGroup, MenuRadioItem } from "../ui/menu";
 import { getEffortLevel, sortEffortOptions } from "./effortLevels";
 
 export interface EffortMenuOption {
@@ -35,6 +34,9 @@ export function FastModeTriggerIcon() {
   );
 }
 
+/** Keys that move the menu highlight; typeahead is any single printable key. */
+const NAVIGATION_KEYS = new Set(["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
+
 function focusedEffortLevel(event: FocusEvent<HTMLElement>): string | null {
   if (!(event.target instanceof HTMLElement)) return null;
   return event.target.closest<HTMLElement>("[data-effort-level]")?.dataset.effortLevel ?? null;
@@ -44,14 +46,30 @@ function focusedEffortLevel(event: FocusEvent<HTMLElement>): string | null {
  * Reasoning effort as a ranked "battery": highest level at the top, one
  * coloured segment per row, filled from the lowest level up to the selected
  * one. Highlighting a row (pointer or keyboard) previews its fill.
+ *
+ * In forced-colours mode the level colours become system colours: filled
+ * segments use CanvasText, empty ones GrayText, and the selected one Highlight.
  */
 export function EffortMenuSection(props: {
   options: ReadonlyArray<EffortMenuOption>;
   value: string | null;
   onValueChange: (value: string) => void;
-  header?: string;
 }) {
   const [previewLevel, setPreviewLevel] = useState<string | null>(null);
+  // Opening the menu from the keyboard focuses the top row (the highest level).
+  // Only preview once the user actually moves the highlight, so the battery
+  // keeps showing the stored selection until then.
+  const navigatedRef = useRef(false);
+  useEffect(() => {
+    const markNavigated = (event: KeyboardEvent) => {
+      if (NAVIGATION_KEYS.has(event.key) || event.key.length === 1) {
+        navigatedRef.current = true;
+      }
+    };
+    document.addEventListener("keydown", markNavigated, true);
+    return () => document.removeEventListener("keydown", markNavigated, true);
+  }, []);
+
   const options = sortEffortOptions(props.options);
   const selectedIndex = options.findIndex((option) => option.id === props.value);
   const previewIndex = options.findIndex((option) => option.id === previewLevel);
@@ -60,7 +78,12 @@ export function EffortMenuSection(props: {
 
   return (
     <MenuGroup
-      onFocus={(event: FocusEvent<HTMLElement>) => setPreviewLevel(focusedEffortLevel(event))}
+      onPointerMoveCapture={() => {
+        navigatedRef.current = true;
+      }}
+      onFocus={(event: FocusEvent<HTMLElement>) => {
+        if (navigatedRef.current) setPreviewLevel(focusedEffortLevel(event));
+      }}
       onBlur={(event: FocusEvent<HTMLElement>) => {
         if (
           !(event.relatedTarget instanceof Node) ||
@@ -70,11 +93,8 @@ export function EffortMenuSection(props: {
         }
       }}
     >
-      <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
-        {props.header ?? "Reasoning effort"}
-      </div>
-      <MenuPrimitive.RadioGroup
-        data-slot="menu-radio-group"
+      <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Reasoning effort</div>
+      <MenuRadioGroup
         value={props.value ?? ""}
         onValueChange={(value: unknown) => {
           if (typeof value === "string" && value) props.onValueChange(value);
@@ -85,23 +105,26 @@ export function EffortMenuSection(props: {
           const selected = index === selectedIndex;
           const filled = fillIndex >= 0 && index >= fillIndex;
           return (
-            <MenuPrimitive.RadioItem
+            <MenuRadioItem
               key={option.id}
+              variant="plain"
               value={option.id}
               aria-label={`${option.label}${option.isDefault ? " (default)" : ""}`}
               data-effort-level={option.id}
-              data-slot="menu-radio-item"
-              className="flex min-h-8 cursor-default items-center gap-2.5 rounded-sm py-0.5 ps-1.5 pe-2 text-base text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm"
+              className="gap-2.5 py-0.5 ps-1.5 pe-2"
             >
               <span
                 aria-hidden="true"
                 data-effort-filled={filled}
+                data-effort-selected={selected}
                 className={cn(
                   "h-6 w-3.5 shrink-0 rounded-xs transition-[background-color,box-shadow] duration-150",
                   index === 0 && "rounded-t-md",
                   index === options.length - 1 && "rounded-b-md",
-                  filled ? level?.segmentClass : "bg-foreground/10",
-                  selected && level?.glowClass,
+                  filled
+                    ? level?.segmentClass
+                    : "bg-foreground/10 forced-colors:bg-[color:GrayText]",
+                  selected && [level?.glowClass, "forced-colors:bg-[color:Highlight]"],
                 )}
               />
               <span
@@ -114,10 +137,10 @@ export function EffortMenuSection(props: {
                   {option.isDefault ? `Default · ${level.tag}` : level.tag}
                 </span>
               ) : null}
-            </MenuPrimitive.RadioItem>
+            </MenuRadioItem>
           );
         })}
-      </MenuPrimitive.RadioGroup>
+      </MenuRadioGroup>
     </MenuGroup>
   );
 }
