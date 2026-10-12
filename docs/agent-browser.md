@@ -623,6 +623,27 @@ bun run build:desktop
 F5_COMPUTER_ELECTRON_REHEARSAL=1 bun apps/desktop/scripts/rehearse-computer-electron.mjs --codex-home <selected-profile-home> --codex-binary <codex-binary> --output /tmp/f5-electron-computer.json
 ```
 
+The same runner supports `--provider claude --claude-home <selected-profile-home>
+--claude-binary <native-sdk-cli>`, with optional `--model`. It retains temporary F5
+and Claude config/transcript state, copies only the selected credential file if one
+exists, and uses an isolated launch wrapper to select that profile's secure storage.
+The wrapper preserves the real macOS login home/name; it never copies settings,
+plugins, transcripts or keychain contents. A read-only authentication preflight runs
+before Electron, consent or desktop actions. Missing/unknown authentication fails
+closed rather than falling back to another account. The full-access runtime and
+production consent/tool/stop paths remain unchanged.
+
+Authentication preparation can run separately without a provider turn or desktop
+input, even while the operator uses the computer:
+
+```sh
+bun apps/desktop/src/computer/rehearseClaudeAuthMacos.ts --claude-home <selected-profile-home> --claude-binary <native-sdk-cli> --output /tmp/f5-claude-account-preflight.json
+```
+
+This probes only a fresh process with the selected credential scope. An unavailable
+test login does not establish that an existing F5 Claude session is signed out. No
+account identifiers, credential values or raw CLI errors are retained in its report.
+
 The `--real-apps` mode checks TextEdit and Calculator through the compiled Electron
 app and a real Codex session. Both apps must initially be closed; a read-only verifier
 checks this before Electron launch and again after consent. The first composer turn
@@ -689,7 +710,7 @@ events. Native tests exercise the real CGEvent flags, Unicode payload and marker
 without posting OS input. The complete real-app workflow still requires a fresh run;
 this fix does not change authorization, permit checks or certification gates.
 Earlier passing physical-stop and capture reports remain pinned to their previous
-helper hash; they do not establish those guarantees for the rebuilt helper.
+helper hash; the later updated-helper checks below provide separate evidence.
 
 The subsequent [real-app run](computer-certification/2026-10-12-macos-electron-real-apps-passed.json)
 passed all 16 checks on clean revision `bc51241ac6`, using rebuilt helper hash
@@ -704,6 +725,19 @@ Both apps' grants survived the turns, the lease released, and no tagged tool/pro
 errors or unexpected app input were observed. This passes the narrow unsigned Codex
 TextEdit/Calculator workflow, not the complete provider/app/privacy matrix. Failed
 attempts remain unchanged. Signing is deferred and all release gates remain closed.
+
+All three updated-helper rechecks on clean revision `644fd2eecd` passed, with the
+same `a11ef2e783c9d344372f9b12a86e0a1a67ec40ddecaafc1e0f5a27cfcd8d7c9e` helper
+as the passing real-app run. The [capture-only check](computer-certification/2026-10-12-macos-updated-helper-capture-privacy-passed.json)
+passed all seven synthetic fixture checks without physical interruption. The
+[frozen-main check](computer-certification/2026-10-12-macos-updated-helper-electron-main-stop-passed.json)
+verified a 703.7 ms Electron main freeze; the [frozen-renderer check](computer-certification/2026-10-12-macos-updated-helper-electron-renderer-stop-passed.json)
+verified a 406.5 ms renderer freeze. Both independently observed the physical chord,
+recorded no synthesized input or app delivery after recognition, mirrored pause,
+released the lease and refused subsequent typing. These are narrow unsigned macOS
+Codex/synthetic-app checkpoints. Real-browser masking, complete consent integrity,
+Claude real-app execution, multiple profiles/displays, Windows runtime and signed
+installed-build attribution remain pending. No gate is opened by these results.
 
 ```sh
 F5_COMPUTER_ELECTRON_REHEARSAL=1 bun apps/desktop/scripts/rehearse-computer-electron.mjs --codex-home <selected-profile-home> --codex-binary <codex-binary> --output /tmp/f5-electron-real-apps.json --real-apps

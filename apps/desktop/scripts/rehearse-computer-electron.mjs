@@ -20,6 +20,7 @@ import { createRehearsalFixture } from "../src/computer/rehearsalFixture.ts";
 import { RehearsalStopObservation } from "../src/computer/rehearsalStopObservation.ts";
 import { measureStopLatency } from "../src/computer/stopLatencyMeasurement.ts";
 import { rehearsalProviderErrorCodes } from "../src/computer/rehearsalElectronObservation.ts";
+import { prepareRehearsalClaude } from "../src/computer/rehearsalClaudeLaunch.ts";
 
 // Run with Bun, like the native rehearsals. The launched Electron app loads its
 // actual compiled main/preload/renderer/server. No execution or consent shortcut.
@@ -29,8 +30,10 @@ const arg = (name) => {
   return i < 0 ? undefined : args[i + 1];
 };
 const output = arg("--output");
-const sourceHome = arg("--codex-home");
-const binary = arg("--codex-binary");
+const provider = arg("--provider") ?? "codex";
+const driver = provider === "claude" ? "claudeAgent" : "codex";
+const sourceHome = arg(provider === "claude" ? "--claude-home" : "--codex-home");
+const binary = arg(provider === "claude" ? "--claude-binary" : "--codex-binary");
 const statusOnly = args.includes("--status-only");
 const controlsOnly = args.includes("--controls-only");
 const actionsOnly = args.includes("--actions-only");
@@ -41,6 +44,7 @@ const realApps = args.includes("--real-apps");
 if (
   process.platform !== "darwin" ||
   process.env.F5_COMPUTER_ELECTRON_REHEARSAL !== "1" ||
+  !["claude", "codex"].includes(provider) ||
   !output ||
   !sourceHome ||
   !binary ||
@@ -48,7 +52,7 @@ if (
     1
 ) {
   process.stderr.write(
-    "Human coordination and real quota required: F5_COMPUTER_ELECTRON_REHEARSAL=1 bun apps/desktop/scripts/rehearse-computer-electron.mjs --codex-home <selected profile home> --codex-binary <path> --output <new report.json>\n",
+    "Human coordination and real quota required: F5_COMPUTER_ELECTRON_REHEARSAL=1 bun apps/desktop/scripts/rehearse-computer-electron.mjs [--provider codex|claude] --<provider>-home <selected profile home> --<provider>-binary <path> --output <new report.json>\n",
   );
   process.exit(1);
 }
@@ -98,7 +102,7 @@ const { _electron } = requireWeb("playwright");
 const exec = promisify(execFile);
 const root = await mkdtemp(join(tmpdir(), "f5-computer-electron-"));
 const state = join(root, "app", "userdata");
-const home = join(state, "provider-homes", "codex");
+const home = join(state, "provider-homes", provider === "claude" ? "claude" : "codex");
 const workspace = join(root, "workspace");
 const threadId = randomUUID();
 const projectId = randomUUID();
@@ -126,6 +130,7 @@ let thumbnailObservation;
 let fixtureObservation;
 let realAppObservation;
 let realAppPrerequisites;
+let claudeAuthentication;
 let realAppVerifier;
 let documentRoot;
 let documentPath;
@@ -214,9 +219,9 @@ async function waitTurn() {
   await waitFor(async () => !(await observer()).held, 5000);
 }
 const modelSelection = {
-  instanceId: "codex",
-  model: "gpt-6.1-sol",
-  options: [{ id: "reasoningEffort", value: "low" }],
+  instanceId: driver,
+  model: arg("--model") ?? (provider === "claude" ? "claude-fable-5-1" : "gpt-6.1-sol"),
+  options: provider === "claude" ? [] : [{ id: "reasoningEffort", value: "low" }],
 };
 async function startTurn(text) {
   if (interrupted) throw new Error("Rehearsal interrupted.");
@@ -253,6 +258,9 @@ try {
         ["stopObserverSource", join(desktopDir, "src/computer/rehearsalStopObservation.ts")],
         ["stopMeasurementSource", join(desktopDir, "src/computer/stopLatencyMeasurement.ts")],
         ["stopFixtureSource", join(desktopDir, "native/macos/Fixtures/StopLatencyFixture.swift")],
+        ...(provider === "claude"
+          ? [["claudeLaunchSource", join(desktopDir, "src/computer/rehearsalClaudeLaunch.ts")]]
+          : []),
         ...(realApps
           ? [
               [
@@ -273,6 +281,29 @@ try {
       ]),
     ),
   );
+  await mkdir(home, { recursive: true, mode: 0o700 });
+  let providerBinary = resolve(binary);
+  if (provider === "claude") {
+    stage = "claude-authentication-preflight";
+    const prepared = await prepareRehearsalClaude({
+      binary: resolve(binary),
+      sourceHome: resolve(sourceHome),
+      isolatedHome: home,
+      root,
+    });
+    providerBinary = prepared.binary;
+    claudeAuthentication = prepared.authentication;
+    if (claudeAuthentication.status !== "authenticated")
+      throw new Error("Fresh isolated Claude process cannot authenticate.");
+  } else {
+    await copyFile(join(resolve(sourceHome), "auth.json"), join(home, "auth.json"));
+    await chmod(join(home, "auth.json"), 0o600);
+    await writeFile(
+      join(home, "config.toml"),
+      'cli_auth_credentials_store = "file"\n[features]\nplugins = false\n',
+      { mode: 0o600 },
+    );
+  }
   if (realApps) {
     realAppVerifier = join(root, "real-app-verifier");
     await exec(
@@ -294,14 +325,6 @@ try {
     if (!Object.values(realAppPrerequisites).every(Boolean))
       throw new Error("Real-app rehearsal requires both apps closed before starting.");
   }
-  await mkdir(home, { recursive: true, mode: 0o700 });
-  await copyFile(join(resolve(sourceHome), "auth.json"), join(home, "auth.json"));
-  await chmod(join(home, "auth.json"), 0o600);
-  await writeFile(
-    join(home, "config.toml"),
-    'cli_auth_credentials_store = "file"\n[features]\nplugins = false\n',
-    { mode: 0o600 },
-  );
   await mkdir(workspace);
   await exec("git", ["-c", "init.templateDir=", "init", "--initial-branch=main", workspace]);
   await writeFile(
@@ -310,14 +333,14 @@ try {
       providers: Object.fromEntries(
         ["codex", "claudeAgent", "cursor", "opencode", "grok", "antigravity"].map((id) => [
           id,
-          { enabled: id === "codex" },
+          { enabled: id === driver },
         ]),
       ),
       providerInstances: {
-        codex: {
-          driver: "codex",
+        [driver]: {
+          driver,
           enabled: true,
-          config: { binaryPath: resolve(binary), homePath: home },
+          config: { binaryPath: providerBinary, homePath: home },
         },
       },
       enableAgentComputerUse: true,
@@ -565,7 +588,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     threadId,
     projectId,
     title: "F5 computer UI rehearsal",
-    model: "gpt-6.1-sol",
+    model: modelSelection.model,
     modelSelection,
     runtimeMode: "full-access",
     interactionMode: "default",
@@ -1180,16 +1203,16 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         reportVersion: 1,
         recordedAt: new Date().toISOString(),
         scope: realApps
-          ? "unsigned-real-electron-codex-textedit-and-calculator"
+          ? `unsigned-real-electron-${provider}-textedit-and-calculator`
           : stopOnly
-            ? `unsigned-real-electron-codex-${stopMain ? "main" : "renderer"}-frozen-physical-stop`
+            ? `unsigned-real-electron-${provider}-${stopMain ? "main" : "renderer"}-frozen-physical-stop`
             : statusOnly
-              ? "unsigned-real-electron-codex-read-only-discovery-diagnostic"
+              ? `unsigned-real-electron-${provider}-read-only-discovery-diagnostic`
               : controlsOnly
-                ? "unsigned-real-electron-codex-human-consent-and-controls"
+                ? `unsigned-real-electron-${provider}-human-consent-and-controls`
                 : actionsOnly
-                  ? "unsigned-real-electron-codex-human-consent-and-actions"
-                  : "unsigned-real-electron-codex-human-consent-synthetic-app",
+                  ? `unsigned-real-electron-${provider}-human-consent-and-actions`
+                  : `unsigned-real-electron-${provider}-human-consent-synthetic-app`,
         platform: process.platform,
         arch: process.arch,
         osVersion: release(),
@@ -1199,7 +1222,8 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         buildHashes,
         signed: false,
         certified: false,
-        provider: "codex",
+        provider,
+        ...(claudeAuthentication ? { claudeAuthentication } : {}),
         runtimeMode: "full-access",
         state: passed ? "passed" : "failed",
         interrupted,
