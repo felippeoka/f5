@@ -16,7 +16,6 @@ interface PendingUserInputPanelProps {
   onSelectOption: (questionId: string, optionLabel: string) => void;
   onToggleOption: (questionId: string, optionLabel: string) => void;
   onAdvance: () => void;
-  onPrevious: () => void;
 }
 
 export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
@@ -27,7 +26,6 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
   onSelectOption,
   onToggleOption,
   onAdvance,
-  onPrevious,
 }: PendingUserInputPanelProps) {
   if (pendingUserInputs.length === 0) return null;
   const activePrompt = pendingUserInputs[0];
@@ -43,7 +41,6 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
       onSelectOption={onSelectOption}
       onToggleOption={onToggleOption}
       onAdvance={onAdvance}
-      onPrevious={onPrevious}
     />
   );
 });
@@ -57,7 +54,6 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   onSelectOption,
   onToggleOption,
   onAdvance,
-  onPrevious,
 }: {
   prompt: PendingUserInput;
   isResponding: boolean;
@@ -66,7 +62,6 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   onSelectOption: (questionId: string, optionLabel: string) => void;
   onToggleOption: (questionId: string, optionLabel: string) => void;
   onAdvance: () => void;
-  onPrevious: () => void;
 }) {
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
@@ -89,9 +84,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         hasComposerCustomAnswer={progress.customAnswer.length > 0}
         onSelectOption={(label) => onSelectOption(activeQuestion.id, label)}
         onToggleOption={(label) => onToggleOption(activeQuestion.id, label)}
+        // Previous/Next live in the composer's primary action, so no header arrows.
         onAdvance={onAdvance}
-        onBack={onPrevious}
-        onForward={progress.canAdvance && !progress.isLastQuestion ? onAdvance : undefined}
         footer={
           isMultiSelect ? (
             <div className="flex items-center justify-end">

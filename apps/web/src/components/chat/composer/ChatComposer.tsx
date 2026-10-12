@@ -321,7 +321,6 @@ export function ChatComposer({
                 onSelectOption={pendingInteraction.onSelectActivePendingUserInputOption}
                 onToggleOption={pendingInteraction.onToggleActivePendingUserInputOption}
                 onAdvance={pendingInteraction.onAdvanceActivePendingUserInput}
-                onPrevious={pendingInteraction.onPreviousActivePendingUserInputQuestion}
               />
             </div>
           ) : showPlanFollowUpPrompt && activeProposedPlan ? (

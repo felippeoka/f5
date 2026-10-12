@@ -43,9 +43,11 @@ interface UserInputQuestionStepProps {
   onToggleOption: (optionLabel: string) => void;
   /** Called after a single-select pick to move past this question. */
   onAdvance: () => void;
-  /** Omitted hides the back control; on later steps it is always shown. */
+  /**
+   * Header ‹/› controls. Omit both when the host already provides step
+   * navigation (the composer does); an omitted `onForward` alone disables ›.
+   */
   onBack?: (() => void) | undefined;
-  /** Omitted disables the forward control. */
   onForward?: (() => void) | undefined;
   /** Keep a single-select pick on the last question from auto-advancing. */
   suppressAutoSubmit?: boolean;
@@ -56,6 +58,7 @@ interface UserInputQuestionStepProps {
 }
 
 const AUTO_ADVANCE_DELAY_MS = 200;
+const PANEL_SCOPE_SELECTOR = '[data-user-input-shortcut-scope="panel"]';
 
 export function UserInputQuestionStep({
   question,
@@ -164,11 +167,13 @@ export function UserInputQuestionStep({
   useEffect(() => {
     if (shortcutScope !== "document" || disabled || collapsed) return;
     const handler = (event: globalThis.KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
         return;
       }
+      // Digits typed inside a panel-scoped step belong to that step only.
+      if (target instanceof Element && target.closest(PANEL_SCOPE_SELECTOR)) return;
       // If the user has started typing a custom answer in the contenteditable
       // composer, let digit keys pass through so they can type numbers.
       if (target instanceof HTMLElement && target.isContentEditable && hasComposerCustomAnswer) {
@@ -191,7 +196,10 @@ export function UserInputQuestionStep({
     ) {
       return;
     }
-    if (applyDigitShortcut(event.key)) event.preventDefault();
+    if (applyDigitShortcut(event.key)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
   };
 
   // Focus the field when the user opens "Other…", not when a step mounts.
@@ -201,11 +209,46 @@ export function UserInputQuestionStep({
     previousCustomOpenRef.current = customOpen;
   }, [customOpen]);
 
+  // Changing step unmounts the focused option row. If focus was inside this
+  // step and fell back to the page, move it to the new step so keyboard users
+  // (and panel-scoped digit shortcuts) keep working.
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const focusWithinRef = useRef(false);
+  const mountedQuestionIdRef = useRef(question.id);
+  useEffect(() => {
+    if (mountedQuestionIdRef.current === question.id) return;
+    mountedQuestionIdRef.current = question.id;
+    const container = containerRef.current;
+    const active = document.activeElement;
+    if (!container || !focusWithinRef.current) return;
+    if (active && active !== document.body && active.isConnected) return;
+    const next =
+      container.querySelector<HTMLElement>("[data-user-input-option]") ??
+      container.querySelector<HTMLElement>("textarea");
+    (next ?? container).focus();
+  }, [question.id]);
+
   const selectedSet = new Set(selectedOptionLabels);
-  const showNavigation = questionCount > 1;
+  const showNavigation = questionCount > 1 && (onBack !== undefined || onForward !== undefined);
 
   return (
-    <div onKeyDown={onPanelKeyDown}>
+    <div
+      ref={containerRef}
+      tabIndex={-1}
+      data-user-input-shortcut-scope={shortcutScope}
+      className="outline-none"
+      onKeyDown={onPanelKeyDown}
+      onFocus={() => {
+        focusWithinRef.current = true;
+      }}
+      onBlur={(event) => {
+        // A null target means focus fell back to the page (e.g. the focused
+        // row unmounted); only a move elsewhere counts as leaving the step.
+        if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) {
+          focusWithinRef.current = false;
+        }
+      }}
+    >
       <div className="flex items-center gap-2">
         <button
           type="button"
@@ -262,7 +305,6 @@ export function UserInputQuestionStep({
                   label={option.label}
                   description={option.description !== option.label ? option.description : null}
                   selected={isSelected}
-                  pressable={isMultiSelect}
                   disabled={disabled}
                   onClick={() => pickOption(option.label)}
                 />
@@ -274,7 +316,6 @@ export function UserInputQuestionStep({
                 label="Other…"
                 description={null}
                 selected={customOpen}
-                pressable={isMultiSelect}
                 disabled={disabled}
                 onClick={toggleCustom}
               />
@@ -286,7 +327,7 @@ export function UserInputQuestionStep({
             ref={customFieldRef}
             rows={1}
             aria-label={`Other answer: ${question.question}`}
-            placeholder="Type your answer…"
+            placeholder={`Type your answer… (Enter to ${isLastQuestion ? "send" : "continue"}, Shift+Enter for a new line)`}
             className="mt-2 field-sizing-content max-h-24 min-h-8 w-full resize-none rounded-lg border border-input bg-background px-3 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50"
             disabled={disabled}
             value={customAnswer}
@@ -303,8 +344,9 @@ export function UserInputQuestionStep({
             Or type your own answer in the composer
           </p>
         ) : null}
-        {footer ? <div className="mt-3">{footer}</div> : null}
       </div>
+      {/* Actions stay reachable while the question body is collapsed. */}
+      {footer ? <div className="mt-3">{footer}</div> : null}
     </div>
   );
 }
@@ -338,7 +380,6 @@ function OptionRow({
   label,
   description,
   selected,
-  pressable,
   disabled,
   onClick,
 }: {
@@ -346,7 +387,6 @@ function OptionRow({
   label: string;
   description: string | null;
   selected: boolean;
-  pressable: boolean;
   disabled: boolean;
   onClick: () => void;
 }) {
@@ -354,11 +394,13 @@ function OptionRow({
   return (
     <button
       type="button"
+      data-user-input-option=""
       disabled={disabled}
       // The label names the choice; the description stays supplementary.
       aria-label={label}
       aria-describedby={description ? descriptionId : undefined}
-      aria-pressed={pressable ? selected : undefined}
+      // Single-select too, so a revisited step announces the saved choice.
+      aria-pressed={selected}
       onClick={onClick}
       className={cn(
         "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-all duration-150 focus-visible:ring-2 focus-visible:ring-ring",
