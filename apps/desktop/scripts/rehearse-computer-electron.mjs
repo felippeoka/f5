@@ -20,7 +20,7 @@ import { createRehearsalFixture } from "../src/computer/rehearsalFixture.ts";
 import { RehearsalStopObservation } from "../src/computer/rehearsalStopObservation.ts";
 import { measureStopLatency } from "../src/computer/stopLatencyMeasurement.ts";
 import { rehearsalProviderErrorCodes } from "../src/computer/rehearsalElectronObservation.ts";
-import { prepareRehearsalClaude } from "../src/computer/rehearsalClaudeLaunch.ts";
+import { prepareRehearsalClaude } from "@t3tools/shared/computerRehearsalClaude";
 
 // Run with Bun, like the native rehearsals. The launched Electron app loads its
 // actual compiled main/preload/renderer/server. No execution or consent shortcut.
@@ -259,7 +259,7 @@ try {
         ["stopMeasurementSource", join(desktopDir, "src/computer/stopLatencyMeasurement.ts")],
         ["stopFixtureSource", join(desktopDir, "native/macos/Fixtures/StopLatencyFixture.swift")],
         ...(provider === "claude"
-          ? [["claudeLaunchSource", join(desktopDir, "src/computer/rehearsalClaudeLaunch.ts")]]
+          ? [["claudeLaunchSource", join(repo, "packages/shared/src/computerRehearsalClaude.ts")]]
           : []),
         ...(realApps
           ? [

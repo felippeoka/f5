@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./computerRehearsalClaude": {
+      "types": "./src/computerRehearsalClaude.ts",
+      "import": "./src/computerRehearsalClaude.ts"
+    },
     "./github": {
       "types": "./src/github.ts",
       "import": "./src/github.ts"

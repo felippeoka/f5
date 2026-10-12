@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { prepareRehearsalClaude } from "./rehearsalClaudeLaunch";
+import { prepareRehearsalClaude } from "@t3tools/shared/computerRehearsalClaude";
 
 const args = process.argv.slice(2);
 const argument = (name: string) => {
@@ -33,7 +33,11 @@ try {
   repositoryCommit = (await exec("git", ["rev-parse", "HEAD"])).stdout.trim();
   workingTreeDirty = !!(await exec("git", ["status", "--porcelain"])).stdout.trim();
   launchSourceSha256 = createHash("sha256")
-    .update(await readFile(join(import.meta.dirname, "rehearsalClaudeLaunch.ts")))
+    .update(
+      await readFile(
+        resolve(import.meta.dirname, "../../../../packages/shared/src/computerRehearsalClaude.ts"),
+      ),
+    )
     .digest("hex");
   cliSha256 = createHash("sha256")
     .update(await readFile(resolve(binary)))

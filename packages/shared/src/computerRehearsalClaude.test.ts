@@ -1,10 +1,14 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
-import { rehearsalClaudeLaunch, rehearsalClaudeAuthentication } from "./rehearsalClaudeLaunch";
+import {
+  rehearsalClaudeLaunch,
+  rehearsalClaudeAuthentication,
+  prepareRehearsalClaude,
+} from "./computerRehearsalClaude";
 
 it("keeps transcript state isolated and forwards CLI arguments with only selected credentials", async () => {
   const root = await mkdtemp(join(tmpdir(), "f5-claude-launch-test-"));
@@ -84,5 +88,39 @@ it("keeps only strict authentication state and discards account data and errors"
     const result = rehearsalClaudeAuthentication(value, false);
     expect(result.status).toBe("unknown");
     expect(JSON.stringify(result)).not.toContain("PRIVATE_SENTINEL");
+  }
+});
+it("prepares an SDK-recognized script and copies only the selected credential file privately", async () => {
+  const root = await mkdtemp(join(tmpdir(), "f5-claude-prepare-test-"));
+  try {
+    const sourceHome = join(root, "source");
+    const isolatedHome = join(root, "isolated");
+    await mkdir(join(sourceHome, ".claude"), { recursive: true });
+    await writeFile(
+      join(sourceHome, ".claude/.credentials.json"),
+      '{"synthetic":"PRIVATE_SENTINEL"}',
+    );
+    await writeFile(join(sourceHome, ".claude/settings.json"), '{"hooks":"PRIVATE_SENTINEL"}');
+    const result = await prepareRehearsalClaude({
+      binary: process.execPath,
+      root,
+      sourceHome,
+      isolatedHome,
+    });
+    expect(result.binary).toBe(join(root, "claude-launch.js"));
+    expect(result.authentication.credentialFileCopied).toBe(true);
+    expect(JSON.stringify(result.authentication)).not.toContain("PRIVATE_SENTINEL");
+    expect(await readFile(join(isolatedHome, ".claude/.credentials.json"), "utf8")).toBe(
+      '{"synthetic":"PRIVATE_SENTINEL"}',
+    );
+    if (process.platform !== "win32")
+      expect((await stat(join(isolatedHome, ".claude/.credentials.json"))).mode & 0o777).toBe(
+        0o600,
+      );
+    await expect(stat(join(isolatedHome, ".claude/settings.json"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });

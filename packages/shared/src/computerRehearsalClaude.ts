@@ -42,7 +42,9 @@ export async function prepareRehearsalClaude(input: {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT")
       throw new Error("Selected credential file unavailable.");
   }
-  const binary = join(input.root, "claude-launch.cjs");
+  // The SDK recognizes .js as a script; it treats .cjs as a native executable
+  // even when its caller supplies executable: "node".
+  const binary = join(input.root, "claude-launch.js");
   await writeFile(binary, rehearsalClaudeLaunch(input.binary, join(input.sourceHome, ".claude")), {
     mode: 0o600,
     flag: "wx",
@@ -67,7 +69,7 @@ export async function prepareRehearsalClaude(input: {
   return { binary, authentication: rehearsalClaudeAuthentication(stdout, credentialFileCopied) };
 }
 
-/** Rehearsal only: reuse the explicitly selected account's secure storage while
+/** Node rehearsal only: reuse the explicitly selected account's secure storage while
  * retaining the isolated CLI config/transcript directory supplied by F5. Never
  * copies user settings, plugins, transcripts or keychain contents. */
 export function rehearsalClaudeLaunch(binary: string, credentialDirectory: string): string {

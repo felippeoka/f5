@@ -638,11 +638,25 @@ input, even while the operator uses the computer:
 
 ```sh
 bun apps/desktop/src/computer/rehearseClaudeAuthMacos.ts --claude-home <selected-profile-home> --claude-binary <native-sdk-cli> --output /tmp/f5-claude-account-preflight.json
+bun apps/server/scripts/rehearse-claude-sdk-launch.ts --claude-home <selected-profile-home> --claude-binary <native-sdk-cli> --output /tmp/f5-claude-sdk-launch.json
 ```
 
 This probes only a fresh process with the selected credential scope. An unavailable
 test login does not establish that an existing F5 Claude session is signed out. No
 account identifiers, credential values or raw CLI errors are retained in its report.
+The SDK launch preflight additionally initializes the actual SDK/CLI bridge and
+checks model metadata with an empty input stream and all tool execution denied.
+It sends no user prompt, starts no model turn and does not control the desktop.
+
+The [Claude account preflight](computer-certification/2026-10-12-macos-claude-account-preflight-ready.json)
+on clean revision `dc7487b8a2` authenticated through the selected profile's secure
+storage without copying a credential file. The [first Claude Electron attempt](computer-certification/2026-10-12-macos-claude-electron-real-apps-startup-attempt.json)
+then failed before requesting consent, with zero native operations, no lease and
+no test document opened. It remains failed. A read-only SDK probe identified a
+launcher mismatch: this SDK recognizes `.js` scripts but treats `.cjs` as native
+executables regardless of the supplied Node executable option. The rehearsal
+wrapper now uses `.js`; a regression checks its prepared suffix and private,
+credential-only copy. Account readiness alone does not prove SDK launch readiness.
 
 The `--real-apps` mode checks TextEdit and Calculator through the compiled Electron
 app and a real Codex session. Both apps must initially be closed; a read-only verifier
