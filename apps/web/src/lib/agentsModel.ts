@@ -1,5 +1,6 @@
 import type {
   AgentsSnapshot,
+  BackgroundWorkKind,
   OrchestrationThreadActivity,
   ThreadBackgroundWorkEntry,
   ThreadId,
@@ -47,37 +48,66 @@ export interface AgentsPanelEntry {
   readonly turnId: TurnId | null;
   readonly focusActivityId: string | null;
   readonly ownership: ThreadBackgroundWorkEntry["ownership"];
+  readonly kind: BackgroundWorkKind;
   readonly classification: ThreadBackgroundWorkEntry["classification"];
   readonly status: ThreadBackgroundWorkEntry["status"];
   readonly active: boolean;
+  /** Running or monitoring work that is still alive. */
+  readonly live: boolean;
   readonly provider: ThreadBackgroundWorkEntry["provider"];
   readonly model: string | null;
+  /** Task or subagent type recorded at start. */
   readonly phase: string | null;
   readonly title: string;
+  readonly prompt: string | null;
+  readonly lastTool: string | null;
+  /** Latest output, or the result once settled. */
   readonly detail: string | null;
   readonly outputTruncated: boolean;
+  /** Durable work item addressed by native stop and inspect operations. */
+  readonly nativeWorkItemId: string;
   readonly startedAt: string;
   readonly updatedAt: string;
   readonly completedAt: string | null;
 }
 
+export interface AgentsPanelThreadGroup {
+  readonly threadId: ThreadId;
+  readonly threadTitle: string;
+  readonly projectName: string | null;
+  readonly agents: ReadonlyArray<AgentsPanelEntry>;
+  readonly backgroundTasks: ReadonlyArray<AgentsPanelEntry>;
+  readonly liveCount: number;
+  readonly updatedAt: string;
+}
+
 export interface AgentsPanelModel {
-  readonly directEntries: ReadonlyArray<AgentsPanelEntry>;
-  readonly workflowEntries: ReadonlyArray<AgentsPanelEntry>;
+  /** Delegated agents and workflow work. */
+  readonly agents: ReadonlyArray<AgentsPanelEntry>;
+  /** Background shells and monitors. */
+  readonly backgroundTasks: ReadonlyArray<AgentsPanelEntry>;
+  /** Entries grouped by thread, threads with live work first. */
+  readonly threads: ReadonlyArray<AgentsPanelThreadGroup>;
   readonly liveCount: number;
   readonly settledCount: number;
-  readonly coverageWindowLimited: boolean;
   readonly generatedAt: string | null;
 }
 
 export const EMPTY_AGENTS_PANEL_MODEL: AgentsPanelModel = Object.freeze({
-  directEntries: [],
-  workflowEntries: [],
+  agents: [],
+  backgroundTasks: [],
+  threads: [],
   liveCount: 0,
   settledCount: 0,
-  coverageWindowLimited: false,
   generatedAt: null,
 });
+
+export type AgentsStatusFilter = "all" | "running" | "failed" | "done";
+
+export interface AgentsPanelFilter {
+  readonly query: string;
+  readonly status: AgentsStatusFilter;
+}
 
 function asRecord(value: unknown): UnknownRecord | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -324,6 +354,7 @@ function chooseSnapshotEntry(
       current.ownership === "workflow" || next.ownership === "workflow"
         ? "workflow"
         : "direct-subagent",
+    kind: current.kind === "workflow" || next.kind === "workflow" ? "workflow" : preferred.kind,
     classification:
       preferred.classification === "inert" && fallback.classification !== "inert"
         ? fallback.classification
@@ -333,6 +364,9 @@ function chooseSnapshotEntry(
     providerSessionIdentity: preferred.providerSessionIdentity ?? fallback.providerSessionIdentity,
     model: preferred.model ?? fallback.model,
     phase: preferred.phase ?? fallback.phase,
+    title: preferred.title ?? fallback.title,
+    prompt: preferred.prompt ?? fallback.prompt,
+    lastTool: preferred.lastTool ?? fallback.lastTool,
     latestOutput: preferred.latestOutput ?? fallback.latestOutput,
     outputTruncated: preferred.outputTruncated || fallback.outputTruncated,
   };
@@ -346,17 +380,161 @@ function isLiveEntry(entry: Pick<AgentsPanelEntry, "active" | "classification" |
   );
 }
 
+const KNOWN_TYPE_LABELS: Readonly<Record<string, string>> = {
+  local_bash: "shell",
+  shell: "shell",
+  monitor: "monitor",
+  monitor_mcp: "monitor",
+  local_agent: "agent",
+  remote_agent: "remote agent",
+  local_workflow: "workflow",
+};
+
+const KNOWN_TYPE_TITLES: Readonly<Record<string, string>> = {
+  local_bash: "Shell command",
+  shell: "Shell command",
+  monitor: "Monitor",
+  monitor_mcp: "MCP monitor",
+  local_agent: "Subagent",
+  remote_agent: "Remote agent",
+  local_workflow: "Workflow",
+};
+
+/** Short badge label for a task or subagent type (`local_bash` → `shell`). */
+export function agentTypeLabel(phase: string | null): string | null {
+  if (!phase) return null;
+  return KNOWN_TYPE_LABELS[phase] ?? phase;
+}
+
+function humanizeType(phase: string | null): string | null {
+  if (!phase) return null;
+  const known = KNOWN_TYPE_TITLES[phase];
+  if (known) return known;
+  const words = phase.replace(/[_-]+/g, " ").trim();
+  return words.length > 0 ? words.charAt(0).toUpperCase() + words.slice(1) : null;
+}
+
 function panelEntryTitle(
   entry: ThreadBackgroundWorkEntry,
   detail: AgentActivityDetail | undefined,
 ): string {
   return (
+    asTrimmedString(entry.title) ??
     detail?.description ??
     detail?.path ??
-    detail?.type ??
-    entry.phase ??
-    (entry.ownership === "workflow" ? "Workflow work" : "Subagent")
+    humanizeType(entry.phase ?? detail?.type ?? null) ??
+    (entry.kind === "workflow" ? "Workflow work" : "Subagent")
   );
+}
+
+function matchesStatus(entry: AgentsPanelEntry, status: AgentsStatusFilter): boolean {
+  switch (status) {
+    case "all":
+      return true;
+    case "running":
+      return entry.live;
+    case "failed":
+      return !entry.live && entry.status === "failed";
+    case "done":
+      return !entry.live && entry.status !== "failed";
+  }
+}
+
+function matchesQuery(entry: AgentsPanelEntry, query: string): boolean {
+  if (query.length === 0) return true;
+  return [
+    entry.title,
+    entry.prompt,
+    entry.detail,
+    entry.phase,
+    entry.lastTool,
+    entry.threadTitle,
+    entry.projectName,
+  ].some((value) => value?.toLowerCase().includes(query) === true);
+}
+
+/** Counts per status chip for entries that already match the search query. */
+export function countAgentsByStatus(
+  entries: ReadonlyArray<AgentsPanelEntry>,
+): Readonly<Record<AgentsStatusFilter, number>> {
+  const counts = { all: entries.length, running: 0, failed: 0, done: 0 };
+  for (const entry of entries) {
+    if (matchesStatus(entry, "running")) counts.running += 1;
+    else if (matchesStatus(entry, "failed")) counts.failed += 1;
+    else counts.done += 1;
+  }
+  return counts;
+}
+
+export function filterAgentsPanelEntries(
+  entries: ReadonlyArray<AgentsPanelEntry>,
+  filter: AgentsPanelFilter,
+): ReadonlyArray<AgentsPanelEntry> {
+  const query = filter.query.trim().toLowerCase();
+  if (query.length === 0 && filter.status === "all") return entries;
+  return entries.filter(
+    (entry) => matchesQuery(entry, query) && matchesStatus(entry, filter.status),
+  );
+}
+
+function compareEntries(left: AgentsPanelEntry, right: AgentsPanelEntry): number {
+  return (
+    Number(right.live) - Number(left.live) ||
+    compareTimestamps(right.updatedAt, left.updatedAt) ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+/** Rebuilds the sections and thread groups from an ordered list of entries. */
+export function buildAgentsPanelModel(
+  entries: ReadonlyArray<AgentsPanelEntry>,
+  generatedAt: string | null,
+): AgentsPanelModel {
+  const ordered = entries.toSorted(compareEntries);
+  const groups = new Map<
+    ThreadId,
+    {
+      threadId: ThreadId;
+      threadTitle: string;
+      projectName: string | null;
+      agents: AgentsPanelEntry[];
+      backgroundTasks: AgentsPanelEntry[];
+      liveCount: number;
+      updatedAt: string;
+    }
+  >();
+  for (const entry of ordered) {
+    let group = groups.get(entry.threadId);
+    if (!group) {
+      group = {
+        threadId: entry.threadId,
+        threadTitle: entry.threadTitle,
+        projectName: entry.projectName,
+        agents: [],
+        backgroundTasks: [],
+        liveCount: 0,
+        updatedAt: entry.updatedAt,
+      };
+      groups.set(entry.threadId, group);
+    }
+    (entry.kind === "shell" ? group.backgroundTasks : group.agents).push(entry);
+    if (entry.live) group.liveCount += 1;
+    if (compareTimestamps(entry.updatedAt, group.updatedAt) > 0) group.updatedAt = entry.updatedAt;
+  }
+  const liveCount = ordered.filter((entry) => entry.live).length;
+  return {
+    agents: ordered.filter((entry) => entry.kind !== "shell"),
+    backgroundTasks: ordered.filter((entry) => entry.kind === "shell"),
+    threads: [...groups.values()].toSorted(
+      (left, right) =>
+        Number(right.liveCount > 0) - Number(left.liveCount > 0) ||
+        compareTimestamps(right.updatedAt, left.updatedAt) ||
+        left.threadId.localeCompare(right.threadId),
+    ),
+    liveCount,
+    settledCount: ordered.length - liveCount,
+    generatedAt,
+  };
 }
 
 export function deriveAgentsPanelModel(input: {
@@ -364,11 +542,7 @@ export function deriveAgentsPanelModel(input: {
   readonly activityIndex: AgentActivityIndex;
   readonly threads: ReadonlyArray<AgentActivityThreadSource>;
 }): AgentsPanelModel {
-  if (!input.snapshot) {
-    return input.activityIndex.coverageWindowLimited
-      ? { ...EMPTY_AGENTS_PANEL_MODEL, coverageWindowLimited: true }
-      : EMPTY_AGENTS_PANEL_MODEL;
-  }
+  if (!input.snapshot) return EMPTY_AGENTS_PANEL_MODEL;
 
   const threadById = new Map(input.threads.map((thread) => [thread.threadId, thread] as const));
   const grouped = new Map<
@@ -408,47 +582,37 @@ export function deriveAgentsPanelModel(input: {
     });
   }
 
-  const entries = [...grouped.entries()]
-    .map(([id, group]): AgentsPanelEntry => {
-      const thread = threadById.get(group.entry.threadId);
-      return {
-        id,
-        workItemIds: [...group.workItemIds],
-        threadId: group.entry.threadId,
-        threadTitle: thread?.threadTitle ?? "Unknown thread",
-        projectName: thread?.projectName ?? null,
-        turnId: group.entry.turnId ?? group.detail?.turnId ?? null,
-        focusActivityId: group.detail?.parentActivityId ?? null,
-        ownership: group.entry.ownership,
-        classification: group.entry.classification,
-        status: group.entry.status,
-        active: group.entry.active,
-        provider: group.entry.provider,
-        model: group.entry.model ?? group.detail?.model ?? null,
-        phase: group.entry.phase ?? group.detail?.type ?? null,
-        title: panelEntryTitle(group.entry, group.detail),
-        detail: group.entry.latestOutput ?? group.detail?.result ?? group.detail?.prompt ?? null,
-        outputTruncated: group.outputTruncated,
-        startedAt: group.startedAt,
-        updatedAt: group.entry.updatedAt,
-        completedAt: group.completedAt,
-      };
-    })
-    .toSorted((left, right) => {
-      const liveOrder = Number(isLiveEntry(right)) - Number(isLiveEntry(left));
-      return (
-        liveOrder ||
-        compareTimestamps(right.updatedAt, left.updatedAt) ||
-        left.id.localeCompare(right.id)
-      );
-    });
+  const entries = [...grouped.entries()].map(([id, group]): AgentsPanelEntry => {
+    const thread = threadById.get(group.entry.threadId);
+    const prompt = asTrimmedString(group.entry.prompt) ?? group.detail?.prompt ?? null;
+    return {
+      id,
+      workItemIds: [...group.workItemIds],
+      threadId: group.entry.threadId,
+      threadTitle: thread?.threadTitle ?? "Unknown thread",
+      projectName: thread?.projectName ?? null,
+      turnId: group.entry.turnId ?? group.detail?.turnId ?? null,
+      focusActivityId: group.detail?.parentActivityId ?? null,
+      ownership: group.entry.ownership,
+      kind: group.entry.kind,
+      classification: group.entry.classification,
+      status: group.entry.status,
+      active: group.entry.active,
+      live: isLiveEntry(group.entry),
+      provider: group.entry.provider,
+      model: group.entry.model ?? group.detail?.model ?? null,
+      phase: group.entry.phase ?? group.detail?.type ?? null,
+      title: panelEntryTitle(group.entry, group.detail),
+      prompt,
+      lastTool: group.entry.lastTool,
+      detail: asTrimmedString(group.entry.latestOutput) ?? group.detail?.result ?? null,
+      outputTruncated: group.outputTruncated,
+      nativeWorkItemId: group.entry.workItemId,
+      startedAt: group.startedAt,
+      updatedAt: group.entry.updatedAt,
+      completedAt: group.completedAt,
+    };
+  });
 
-  return {
-    directEntries: entries.filter((entry) => entry.ownership === "direct-subagent"),
-    workflowEntries: entries.filter((entry) => entry.ownership === "workflow"),
-    liveCount: entries.filter(isLiveEntry).length,
-    settledCount: entries.filter((entry) => !isLiveEntry(entry)).length,
-    coverageWindowLimited: input.activityIndex.coverageWindowLimited,
-    generatedAt: input.snapshot.generatedAt,
-  };
+  return buildAgentsPanelModel(entries, input.snapshot.generatedAt);
 }

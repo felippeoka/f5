@@ -239,7 +239,12 @@ import type {
   WorktreeSetupUpdatedPayload,
 } from "./worktreeSetup";
 import type { GlobalSearchQueryInput, GlobalSearchQueryResult } from "./globalSearch";
-import type { AgentsSnapshot } from "./backgroundWork";
+import type {
+  AgentsDismissInput,
+  AgentsDismissResult,
+  AgentsGetSnapshotInput,
+  AgentsSnapshot,
+} from "./backgroundWork";
 import type {
   WorkflowPlatformCreateRunInput,
   WorkflowPlatformCreateRunResult,
@@ -855,7 +860,8 @@ export interface NativeApi {
     query: (input: GlobalSearchQueryInput) => Promise<GlobalSearchQueryResult>;
   };
   agents: {
-    getSnapshot: () => Promise<AgentsSnapshot>;
+    getSnapshot: (input?: AgentsGetSnapshotInput) => Promise<AgentsSnapshot>;
+    dismiss: (input: AgentsDismissInput) => Promise<AgentsDismissResult>;
     onSnapshotUpdated: (callback: (snapshot: AgentsSnapshot) => void) => () => void;
   };
   usage: {

@@ -2,6 +2,7 @@ import { nativeTaskWorkItemId } from "@t3tools/shared/nativeTaskIdentity";
 import {
   MAX_BACKGROUND_WORK_OUTPUT_BYTES,
   type BackgroundWorkClassification,
+  type BackgroundWorkKind,
   type BackgroundWorkOwnership,
   type BackgroundWorkStatus,
   type ProviderRuntimeEvent,
@@ -51,6 +52,21 @@ function ownershipForTask(taskType: string | undefined): BackgroundWorkOwnership
   return taskType?.toLowerCase().includes("workflow") === true ? "workflow" : "direct-subagent";
 }
 
+function kindForTask(taskType: string | undefined): BackgroundWorkKind {
+  if (ownershipForTask(taskType) === "workflow") return "workflow";
+  if (taskType !== undefined && MONITOR_TASK_TYPES.has(taskType)) return "shell";
+  return "agent";
+}
+
+function boundedPrompt(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return truncateMiddleByBytes(value, {
+    maxBytes: MAX_BACKGROUND_WORK_OUTPUT_BYTES,
+    headBytes: 6 * 1024,
+    marker: OUTPUT_TRUNCATION_MARKER,
+  }).output;
+}
+
 function itemTerminalStatus(
   event: Extract<
     ProviderRuntimeEvent,
@@ -93,6 +109,10 @@ function lifecycleItemTransition(
     asString(data?.subagentDescription) ??
     asString(input?.description) ??
     asString(input?.prompt);
+  const subagentType = asString(data?.subagentType) ?? asString(input?.subagent_type);
+  const title = asString(data?.subagentDescription) ?? asString(input?.description) ?? subagentType;
+  const prompt = boundedPrompt(asString(data?.subagentPrompt) ?? asString(input?.prompt));
+  const phase = subagentType ?? asString(data?.toolName);
 
   return {
     threadId: event.threadId,
@@ -101,14 +121,14 @@ function lifecycleItemTransition(
     turnId: event.turnId ?? null,
     ...(event.type === "item.started" ? { classification: "working" as const } : {}),
     ...(event.type === "item.started" ? { ownership: "direct-subagent" as const } : {}),
+    ...(event.type === "item.started" ? { kind: "agent" as const } : {}),
+    ...(title ? { title } : {}),
+    ...(prompt ? { prompt } : {}),
     status: terminalStatus ?? "running",
     active: terminalStatus === null,
     model: asString(data?.subagentModel) ?? asString(input?.model) ?? null,
-    phase:
-      asString(data?.subagentType) ??
-      asString(input?.subagent_type) ??
-      asString(data?.toolName) ??
-      null,
+    // Updates often omit the type; keep the one recorded at start.
+    ...(phase ? { phase } : {}),
     latestOutput: latestOutput ?? null,
     occurredAt: event.createdAt,
   };
@@ -131,6 +151,8 @@ function taskTransition(
       turnId: event.turnId ?? null,
       classification,
       ownership: ownershipForTask(taskType),
+      kind: kindForTask(taskType),
+      ...(event.payload.description ? { title: event.payload.description } : {}),
       status:
         classification === "monitoring"
           ? "monitoring"
@@ -153,7 +175,8 @@ function taskTransition(
       turnId: event.turnId ?? null,
       status: "running",
       active: true,
-      phase: event.payload.lastToolName ?? undefined,
+      // `phase` stays the task type from start; progress only reports the tool.
+      ...(event.payload.lastToolName ? { lastTool: event.payload.lastToolName } : {}),
       latestOutput: event.payload.description,
       occurredAt: event.createdAt,
     };
@@ -183,6 +206,8 @@ function subagentTransition(
     turnId: event.turnId ?? null,
     ...(event.payload.kind === "started" ? { classification: "working" as const } : {}),
     ...(event.payload.kind === "started" ? { ownership: "direct-subagent" as const } : {}),
+    ...(event.payload.kind === "started" ? { kind: "agent" as const } : {}),
+    title: event.payload.agentPath,
     status: active ? "running" : event.payload.kind === "completed" ? "completed" : "interrupted",
     active,
     phase: event.payload.agentPath,
@@ -308,6 +333,23 @@ const make = Effect.gen(function* () {
       Effect.map((entries) => ({ entries: [...entries], generatedAt: new Date().toISOString() })),
     );
 
+  const getThreadSnapshot: ThreadBackgroundWorkShape["getThreadSnapshot"] = (threadId) =>
+    repository
+      .listSnapshot({ threadId })
+      .pipe(
+        Effect.map((entries) => ({ entries: [...entries], generatedAt: new Date().toISOString() })),
+      );
+
+  const dismiss: ThreadBackgroundWorkShape["dismiss"] = (input) =>
+    Effect.gen(function* () {
+      const dismissedCount = yield* repository.dismiss({
+        ...input,
+        dismissedAt: new Date().toISOString(),
+      });
+      if (dismissedCount > 0) yield* publish(input.threadId ?? null);
+      return { dismissedCount };
+    });
+
   const expireStale: ThreadBackgroundWorkShape["expireStale"] = (input) =>
     repository.expireStale(input).pipe(Effect.andThen(publish(null)));
 
@@ -317,6 +359,8 @@ const make = Effect.gen(function* () {
   return {
     recordProviderEvent,
     getSnapshot,
+    getThreadSnapshot,
+    dismiss,
     expireStale,
     listProtectedThreadIds,
     hasFreshProtectingWork: (input) => repository.hasFreshProtectingWork(input),

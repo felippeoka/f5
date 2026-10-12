@@ -2919,11 +2919,28 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case AGENTS_WS_METHODS.getSnapshot: {
         const { threadBackgroundWork } = yield* awaitOrchestrationRuntimeForRoute;
-        return yield* threadBackgroundWork.getSnapshot.pipe(
+        const { threadId } = stripRequestTag(request.body);
+        return yield* (
+          threadId === undefined
+            ? threadBackgroundWork.getSnapshot
+            : threadBackgroundWork.getThreadSnapshot(threadId)
+        ).pipe(
           Effect.mapError(
             (error) =>
               new RouteRequestError({
                 message: `Unable to load background work: ${error.message}`,
+              }),
+          ),
+        );
+      }
+
+      case AGENTS_WS_METHODS.dismiss: {
+        const { threadBackgroundWork } = yield* awaitOrchestrationRuntimeForRoute;
+        return yield* threadBackgroundWork.dismiss(stripRequestTag(request.body)).pipe(
+          Effect.mapError(
+            (error) =>
+              new RouteRequestError({
+                message: `Unable to dismiss background work: ${error.message}`,
               }),
           ),
         );

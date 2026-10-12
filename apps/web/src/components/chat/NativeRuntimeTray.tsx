@@ -1,6 +1,4 @@
-import { readNativeTaskIdentity } from "@t3tools/shared/nativeTaskIdentity";
 import type {
-  NativeOperationCommand,
   NativeOperationRecord,
   OrchestrationThreadActivity,
   ProviderSessionCapabilities,
@@ -10,6 +8,12 @@ import type {
 import { LightbulbIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import {
+  canInspectNativeTask,
+  canStopNativeTask,
+  inspectNativeTask,
+  stopNativeTask,
+} from "../../lib/nativeTaskActions";
 import { readNativeApi } from "../../nativeApi";
 import {
   AlertDialog,
@@ -85,10 +89,8 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
   const mutationVersion = useRef(0);
   const reportedFailures = useRef(new Set<string>());
   const previousRecords = useRef(records);
-  const supported = (action: string) =>
-    capabilities?.actions.some((entry) => entry.action === action && entry.supported) === true;
-  const canInspectTasks = supported("childTaskInspection");
-  const canStopTasks = supported("childTaskStop");
+  const canInspectTasks = canInspectNativeTask(capabilities);
+  const canStopTasks = canStopNativeTask(capabilities);
   const rows = selectNativeRuntimeTrayRows({
     activities,
     prompt,
@@ -162,31 +164,18 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
     };
   }, [threadId, capabilities?.generation]);
 
-  const execute = async (command: NativeOperationCommand) => {
-    const api = readNativeApi()?.nativeOperations;
-    if (!api || !capabilities || busy) return;
+  const stop = async (workItemId: string) => {
+    if (!capabilities || busy) return;
     setBusy(true);
     try {
-      const record = await api.execute({
-        threadId,
-        operationId: crypto.randomUUID(),
-        generation: capabilities.generation,
-        command,
-      });
+      const record = await stopNativeTask({ threadId, capabilities, workItemId });
+      if (!record) return;
       mutationVersion.current++;
-      if (record.error) {
-        reportedFailures.current.add(record.operationId);
-        showError(`${nativeOperationLabel(command.kind)} failed`, record.error);
-      }
+      if (record.error) reportedFailures.current.add(record.operationId);
       setRecords((current) => [
         record,
         ...current.filter((entry) => entry.operationId !== record.operationId),
       ]);
-    } catch (cause) {
-      showError(
-        `${nativeOperationLabel(command.kind)} failed`,
-        errorMessage(cause, "The native operation failed."),
-      );
     } finally {
       setBusy(false);
     }
@@ -214,33 +203,13 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
   };
   const inspect = async (nativeId: string, label: string, cursor?: string) => {
     if (!capabilities) return;
-    const api = readNativeApi()?.nativeOperations;
-    if (!api?.inspect) {
-      showError("Task output unavailable", "Native output API is unavailable.");
-      return;
-    }
     setReading(true);
     try {
-      const identity = readNativeTaskIdentity(nativeId);
-      const page = await api.inspect({
-        threadId,
-        generation: capabilities.generation,
-        kind: "task",
-        nativeId: identity.taskId,
-        ...(identity.runId ? { runId: identity.runId } : {}),
-        limit: 20,
-        ...(cursor ? { cursor } : {}),
-      });
-      const nextCursor =
-        page && typeof page === "object" && "nextCursor" in page ? page.nextCursor : null;
-      setInspection({
-        nativeId,
-        label,
-        page,
-        nextCursor: typeof nextCursor === "string" ? nextCursor : null,
-      });
-    } catch (cause) {
-      showError("Task output unavailable", errorMessage(cause, "Native output is unavailable."));
+      const result = await inspectNativeTask(
+        { threadId, capabilities, workItemId: nativeId },
+        cursor,
+      );
+      if (result) setInspection({ nativeId, label, ...result });
     } finally {
       setReading(false);
     }
@@ -332,7 +301,7 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
             );
           case "task": {
             const { task } = row;
-            const label = task.phase ?? task.workItemId;
+            const label = task.title ?? task.phase ?? task.workItemId;
             return (
               <div key={`task:${task.workItemId}`} className={ROW_CLASS_NAME}>
                 <Spinner aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
@@ -354,9 +323,7 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
                     size="xs"
                     variant="outline"
                     disabled={busy}
-                    onClick={() =>
-                      void execute({ kind: "stopTask", ...readNativeTaskIdentity(task.workItemId) })
-                    }
+                    onClick={() => void stop(task.workItemId)}
                   >
                     Stop
                   </Button>

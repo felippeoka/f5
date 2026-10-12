@@ -2,7 +2,11 @@ import { ProjectId, ProviderInstanceId, ThreadId, type AgentsSnapshot } from "@t
 import { describe, expect, it } from "vitest";
 
 import type { Project, Thread } from "../types";
-import { decodeAgentsSnapshot, selectAgentActivityThreads } from "./agentsReactQuery";
+import {
+  decodeAgentsSnapshot,
+  mergeThreadSnapshot,
+  selectAgentActivityThreads,
+} from "./agentsReactQuery";
 
 describe("decodeAgentsSnapshot", () => {
   it("accepts an empty durable snapshot", () => {
@@ -40,6 +44,10 @@ describe("selectAgentActivityThreads", () => {
           turnId: null,
           classification: "working",
           ownership: "direct-subagent",
+          kind: "agent",
+          title: null,
+          prompt: null,
+          lastTool: null,
           status: "running",
           active: true,
           model: null,
@@ -81,5 +89,77 @@ describe("selectAgentActivityThreads", () => {
 
   it("does no activity work before the snapshot is available", () => {
     expect(selectAgentActivityThreads({ snapshot: null, threads: [], projects: [] })).toEqual([]);
+  });
+});
+
+describe("mergeThreadSnapshot", () => {
+  const threadId = ThreadId.makeUnsafe("thread-merge");
+  const otherThreadId = ThreadId.makeUnsafe("thread-merge-other");
+  const row = (
+    workItemId: string,
+    updatedAt: string,
+    overrides: Partial<AgentsSnapshot["entries"][number]> = {},
+  ): AgentsSnapshot["entries"][number] => ({
+    threadId,
+    workItemId,
+    provider: "claudeAgent",
+    providerInstanceId: null,
+    providerSessionIdentity: null,
+    turnId: null,
+    classification: "working",
+    ownership: "direct-subagent",
+    kind: "agent",
+    status: "running",
+    active: true,
+    model: null,
+    phase: null,
+    title: null,
+    prompt: null,
+    lastTool: null,
+    latestOutput: null,
+    outputTruncated: false,
+    startedAt: "2026-08-18T10:00:00.000Z",
+    updatedAt,
+    lastSeenAt: updatedAt,
+    completedAt: null,
+    ...overrides,
+  });
+
+  it("upserts newer rows for the thread and keeps older history the push omits", () => {
+    const current = {
+      generatedAt: "2026-08-18T10:00:05.000Z",
+      entries: [
+        row("history", "2026-08-18T09:00:00.000Z", { status: "completed", active: false }),
+        row("live", "2026-08-18T10:00:04.000Z"),
+      ],
+    };
+    const pushed = {
+      generatedAt: "2026-08-18T10:00:06.000Z",
+      entries: [
+        row("live", "2026-08-18T10:00:06.000Z", { status: "completed", active: false }),
+        row("new", "2026-08-18T10:00:06.000Z"),
+        row("elsewhere", "2026-08-18T10:00:06.000Z", { threadId: otherThreadId }),
+      ],
+    };
+
+    const merged = mergeThreadSnapshot(current, threadId, pushed);
+    expect(merged.generatedAt).toBe(pushed.generatedAt);
+    expect(merged.entries.map((entry) => [entry.workItemId, entry.status]).toSorted()).toEqual([
+      ["history", "completed"],
+      ["live", "completed"],
+      ["new", "running"],
+    ]);
+  });
+
+  it("ignores pushes older than the thread snapshot", () => {
+    const current = {
+      generatedAt: "2026-08-18T10:00:05.000Z",
+      entries: [row("live", "2026-08-18T10:00:05.000Z")],
+    };
+    const stale = {
+      generatedAt: "2026-08-18T10:00:01.000Z",
+      entries: [row("live", "2026-08-18T10:00:01.000Z", { status: "failed", active: false })],
+    };
+    expect(mergeThreadSnapshot(current, threadId, stale)).toBe(current);
   });
 });

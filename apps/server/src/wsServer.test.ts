@@ -1660,6 +1660,9 @@ describe("WebSocket Server", () => {
             entries: [],
             generatedAt: "2026-01-01T00:00:00.000Z",
           }),
+          getThreadSnapshot: () =>
+            Effect.succeed({ entries: [], generatedAt: "2026-01-01T00:00:00.000Z" }),
+          dismiss: () => Effect.succeed({ dismissedCount: 0 }),
           expireStale: () => Effect.void,
           listProtectedThreadIds: () => Effect.succeed(new Set()),
           hasFreshProtectingWork: () => Effect.succeed(false),
@@ -1930,6 +1933,9 @@ describe("WebSocket Server", () => {
             entries: [],
             generatedAt: "2026-01-01T00:00:00.000Z",
           }),
+          getThreadSnapshot: () =>
+            Effect.succeed({ entries: [], generatedAt: "2026-01-01T00:00:00.000Z" }),
+          dismiss: () => Effect.succeed({ dismissedCount: 0 }),
           expireStale: () => Effect.void,
           listProtectedThreadIds: () => Effect.succeed(new Set()),
           hasFreshProtectingWork: () => Effect.succeed(false),
