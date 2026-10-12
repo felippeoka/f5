@@ -623,6 +623,38 @@ bun run build:desktop
 F5_COMPUTER_ELECTRON_REHEARSAL=1 bun apps/desktop/scripts/rehearse-computer-electron.mjs --codex-home <selected-profile-home> --codex-binary <codex-binary> --output /tmp/f5-electron-computer.json
 ```
 
+The `--real-apps` mode checks TextEdit and Calculator through the compiled Electron
+app and a real Codex session. Both apps must initially be closed; a read-only verifier
+checks this before Electron launch and again after consent. The first composer turn
+requests exactly these two app IDs and executes no input. After real human consent,
+setup opens its own temporary UTF-8 text file in TextEdit. A read-only AX verifier must
+confirm that this file is the focused document before the provider's editing turn.
+Provider F5 tools perform inspection, Unicode typing and saving; the coordinator checks
+the saved file bytes directly. A subsequent turn closes only that saved test document
+and launches Calculator. The test records a distinguishable baseline before semantic
+button presses calculate 12 + 30; an independent AX check verifies 42. Four composer
+turns, correlated per-app native outcomes, captures, surviving grants and lease cleanup
+are required. The verifier emits only booleans, bounded counts and fixed state codes.
+Unconfirmed document closure retains the test file and reports its location; private
+provider/application state is always removed. Apps are not forcibly quit. Grants are
+app-wide, so this workflow does not establish capture privacy or the complete real-app
+matrix. Coordinate an idle window with the operator before starting.
+
+The helper rehearsal's `--privacy-only` mode runs the existing pixel-verification
+checks without its semantic/keyboard/pointer actions. It uses only two temporary
+synthetic apps with scripted helper-level grants: a positive control includes both
+colored markers, revocation excludes one marker, secure fields are omitted from AX
+values and masked in JPEG captures and PNG zoom, and Retina zoom must add detail.
+Device-lock contention and permit-expiry refusal remain checked. Images stay in memory;
+reports keep outcomes and repository/helper/verifier source hashes. The temporary
+fixtures are terminated and their files removed. This is native-helper coverage, with
+no real provider consent, Electron overlays or cross-profile activity proof.
+
+```sh
+F5_COMPUTER_ELECTRON_REHEARSAL=1 bun apps/desktop/scripts/rehearse-computer-electron.mjs --codex-home <selected-profile-home> --codex-binary <codex-binary> --output /tmp/f5-electron-real-apps.json --real-apps
+bun apps/desktop/src/computer/rehearseHelperMacos.ts --helper apps/desktop/dist-native/mac-arm64/f5-computer-helper --output /tmp/f5-capture-privacy.json --privacy-only
+```
+
 The same runner accepts `--stop-renderer` or `--stop-main` for separate physical-stop
 checks. Both use a timing-only synthetic fixture, the real human app-consent flow,
 and a real provider typing call. An external supervisor SIGSTOPs the selected isolated

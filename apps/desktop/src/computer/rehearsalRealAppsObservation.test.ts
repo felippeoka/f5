@@ -1,0 +1,138 @@
+import { expect, it } from "vitest";
+import type { ComputerAutomationRequest } from "@t3tools/contracts";
+import {
+  RehearsalRealAppsObservation,
+  REAL_APP_REHEARSAL_IDS,
+} from "./rehearsalRealAppsObservation";
+const [textEdit, calculator] = REAL_APP_REHEARSAL_IDS;
+const request = (
+  op: "inspect" | "type" | "key" | "openApp" | "elementAction",
+  appId: string = calculator,
+  requestId: string = op,
+  threadId = "thread",
+) => ({
+  type: "request",
+  request: {
+    op,
+    appId,
+    requestId,
+    authorization: {
+      profileId: "profile",
+      threadId,
+      sessionGeneration: "session",
+      turnId: "turn",
+      executionGeneration: 1,
+      grantVersion: 1,
+      grants: [],
+    },
+    payloadHash: "a".repeat(64),
+    deadlineAtMs: Date.now() + 10000,
+    agent: { provider: "codex", threadTitle: "PRIVATE_SENTINEL" },
+    text: "PRIVATE_SENTINEL",
+    chords: ["PRIVATE_SENTINEL"],
+    repeat: 1,
+    maxNodes: 100,
+    snapshotId: "snapshot",
+    elementRef: "element",
+    action: "press",
+  } as ComputerAutomationRequest,
+});
+const action = (appId: string, actionCompleted = true) => ({
+  displayId: "display",
+  geometryGeneration: "geometry",
+  cursor: null,
+  actionCompleted,
+  frontmostApp: { appId, name: "PRIVATE_SENTINEL", running: true, frontmost: true, tier: "full" },
+});
+const inspection = (appId: string) => ({
+  snapshotId: "snapshot",
+  appId,
+  accessible: true,
+  nodes: [
+    {
+      elementRef: "element",
+      role: "AXTextField",
+      name: "PRIVATE_SENTINEL",
+      value: "PRIVATE_SENTINEL",
+      focused: true,
+      enabled: true,
+      actions: [],
+    },
+  ],
+});
+it("requires correlated successful results for the expected app and keeps only safe evidence", () => {
+  const trace = new RehearsalRealAppsObservation("thread");
+  for (const [op, appId] of [
+    ["inspect", textEdit],
+    ["inspect", calculator],
+    ["type", textEdit],
+    ["key", textEdit],
+    ["openApp", calculator],
+    ["elementAction", calculator],
+  ] as const) {
+    const id = op + appId;
+    trace.receive(request(op, appId, id));
+    trace.receive({
+      type: "response",
+      requestId: id,
+      result: op === "inspect" ? inspection(appId) : action(appId),
+    });
+  }
+  expect(trace.snapshot()).toEqual({
+    textEditInspected: true,
+    calculatorInspected: true,
+    textEditTyping: true,
+    textEditKeys: 1,
+    calculatorOpened: true,
+    calculatorPresses: 1,
+    unexpectedAppInput: false,
+    traceComplete: true,
+  });
+  expect(JSON.stringify(trace.snapshot())).not.toContain("PRIVATE_SENTINEL");
+});
+it("does not credit mismatched app results, incomplete actions or another thread", () => {
+  const trace = new RehearsalRealAppsObservation("thread");
+  trace.receive(request("inspect", textEdit));
+  trace.receive({ type: "response", requestId: "inspect", result: inspection(calculator) });
+  trace.receive(request("openApp", calculator));
+  trace.receive({ type: "response", requestId: "openApp", result: action(calculator, false) });
+  trace.receive(request("type", textEdit, "foreign", "another-thread"));
+  trace.receive({ type: "response", requestId: "foreign", result: action(textEdit) });
+  expect(trace.snapshot()).toMatchObject({
+    textEditInspected: false,
+    calculatorOpened: false,
+    textEditTyping: false,
+    unexpectedAppInput: false,
+  });
+  trace.receive(request("elementAction", "com.apple.calculator.lookalike"));
+  trace.receive({ type: "response", requestId: "elementAction", result: action(calculator) });
+  expect(trace.snapshot()).toMatchObject({ calculatorPresses: 0, unexpectedAppInput: true });
+});
+it("cannot count retries or overwrite a failed result with a later success", () => {
+  const trace = new RehearsalRealAppsObservation("thread");
+  trace.receive(request("openApp"));
+  trace.receive({
+    type: "response",
+    requestId: "openApp",
+    error: { _tag: "Interrupted", cause: "paused" },
+  });
+  trace.receive(request("openApp"));
+  trace.receive({ type: "response", requestId: "openApp", result: action(calculator) });
+  expect(trace.snapshot().calculatorOpened).toBe(false);
+  trace.receive(request("elementAction"));
+  trace.receive({ type: "response", requestId: "elementAction", result: action(calculator) });
+  trace.receive({ type: "response", requestId: "elementAction", result: action(calculator) });
+  expect(trace.snapshot().calculatorPresses).toBe(1);
+});
+it("bounds admission and refuses unknown successful input recipients", () => {
+  const trace = new RehearsalRealAppsObservation("thread");
+  trace.receive(request("type", textEdit));
+  trace.receive({ type: "response", requestId: "type", result: action("other-app") });
+  for (let index = 0; index < 129; index++)
+    trace.receive(request("inspect", calculator, String(index)));
+  expect(trace.snapshot()).toMatchObject({
+    unexpectedAppInput: true,
+    traceComplete: false,
+    textEditTyping: false,
+  });
+});

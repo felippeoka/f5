@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { join, resolve, dirname } from "node:path";
 import { tmpdir, release } from "node:os";
@@ -22,6 +22,7 @@ const argument = (name: string) => {
 };
 const helperPath = argument("--helper");
 const output = argument("--output");
+const privacyOnly = args.includes("--privacy-only");
 if (process.platform !== "darwin" || !helperPath || !output) {
   process.stderr.write(
     "Usage on macOS: bun apps/desktop/src/computer/rehearseHelperMacos.ts --helper <development helper> --output <new report.json>\n",
@@ -117,13 +118,33 @@ const assert = (condition: unknown, message: string) => {
   if (!condition) throw new RehearsalAssertion(message);
 };
 let helperHash: string | null = null;
+let repositoryCommit: string | undefined;
+let workingTreeDirty: boolean | undefined;
+let rehearsalSourceSha256: string | undefined;
+let captureVerifierSha256: string | undefined;
+let root: string | undefined;
 try {
+  const repo = resolve(import.meta.dirname, "../../../..");
+  repositoryCommit = (await exec("git", ["rev-parse", "HEAD"], { cwd: repo })).stdout.trim();
+  workingTreeDirty = Boolean(
+    (await exec("git", ["status", "--porcelain"], { cwd: repo })).stdout.trim(),
+  );
+  rehearsalSourceSha256 = createHash("sha256")
+    .update(await readFile(import.meta.filename))
+    .digest("hex");
+  captureVerifierSha256 = createHash("sha256")
+    .update(
+      await readFile(
+        resolve(import.meta.dirname, "../../native/macos/Fixtures/CaptureVerifier.swift"),
+      ),
+    )
+    .digest("hex");
   helperHash = createHash("sha256")
     .update(await readFile(resolve(helperPath)))
     .digest("hex");
   helper.start();
   await waitFor(() => helper.status().available);
-  const root = await mkdtemp(join(tmpdir(), "f5-native-rehearsal-"));
+  root = await mkdtemp(join(tmpdir(), "f5-native-rehearsal-"));
   await check(
     "A second helper with a different HOME cannot acquire the OS user's device lock",
     async () => {
@@ -295,174 +316,176 @@ try {
     if (display.pixelSize.width * captureScale > display.modelSize.width)
       assert(dimensions.width > secure.bounds.width, "Zoom added no capture detail.");
   });
-  await check("Semantic press reaches the real app", async () => {
-    const current = snapshot;
-    if (!current) throw new Error("Inspect did not return a snapshot.");
-    const button = current.nodes.find(
-      (node) => node.name === "Rehearsal press" && node.actions.includes("press"),
-    );
-    if (!button) throw new Error("Fixture button is missing.");
-    await request({
-      op: "elementAction",
-      appId: fixtureId,
-      snapshotId: current.snapshotId,
-      elementRef: button.elementRef,
-      action: "press",
-    });
-    await pause(100);
-    const after = await request({ op: "inspect", appId: fixtureId, maxNodes: 100 });
-    assert(JSON.stringify(after).includes("presses: 1"), "Press did not reach the fixture.");
-  });
-  await check("Secure semantic setValue is refused", async () => {
-    const current = snapshot;
-    const secure = current?.nodes.find((node) => node.name === "Rehearsal secure field");
-    if (!current || !secure) throw new Error("Secure element is missing.");
-    try {
+  if (!privacyOnly) {
+    await check("Semantic press reaches the real app", async () => {
+      const current = snapshot;
+      if (!current) throw new Error("Inspect did not return a snapshot.");
+      const button = current.nodes.find(
+        (node) => node.name === "Rehearsal press" && node.actions.includes("press"),
+      );
+      if (!button) throw new Error("Fixture button is missing.");
       await request({
         op: "elementAction",
         appId: fixtureId,
         snapshotId: current.snapshotId,
-        elementRef: secure.elementRef,
-        action: "setValue",
-        value: "SYNTHETIC_REHEARSAL_TEXT",
+        elementRef: button.elementRef,
+        action: "press",
       });
-    } catch (error) {
+      await pause(100);
+      const after = await request({ op: "inspect", appId: fixtureId, maxNodes: 100 });
+      assert(JSON.stringify(after).includes("presses: 1"), "Press did not reach the fixture.");
+    });
+    await check("Secure semantic setValue is refused", async () => {
+      const current = snapshot;
+      const secure = current?.nodes.find((node) => node.name === "Rehearsal secure field");
+      if (!current || !secure) throw new Error("Secure element is missing.");
+      try {
+        await request({
+          op: "elementAction",
+          appId: fixtureId,
+          snapshotId: current.snapshotId,
+          elementRef: secure.elementRef,
+          action: "setValue",
+          value: "SYNTHETIC_REHEARSAL_TEXT",
+        });
+      } catch (error) {
+        assert(
+          error instanceof ComputerControlError &&
+            error.error._tag === "TargetBlocked" &&
+            error.error.kind === "secure-field",
+          "Unexpected refusal.",
+        );
+        return;
+      }
+      throw new Error("Secure field accepted setValue.");
+    });
+    await check("Revoked fixture inspect is refused", async () => {
+      const revoked = { ...authorization, grantVersion: 2, grants: [] };
+      helper.control({ type: "grantsChanged", authorization: revoked });
+      try {
+        await request({ op: "inspect", appId: fixtureId, maxNodes: 100 });
+      } catch (error) {
+        assert(
+          error instanceof ComputerControlError && error.error._tag === "Interrupted",
+          "Stale grant was accepted.",
+        );
+        return;
+      } finally {
+        authorization.grantVersion = 3;
+        helper.control({ type: "grantsChanged", authorization });
+      }
+      throw new Error("Stale grant was accepted.");
+    });
+    await check("Unicode typing reaches only the fixture's editable field", async () => {
+      const current = await request<ComputerInspectResult>({
+        op: "inspect",
+        appId: fixtureId,
+        maxNodes: 100,
+      });
+      const field = current.nodes.find((node) => node.name === "Rehearsal input");
+      if (!field) throw new Error("Editable field is missing.");
+      await request({
+        op: "elementAction",
+        appId: fixtureId,
+        snapshotId: current.snapshotId,
+        elementRef: field.elementRef,
+        action: "focus",
+      });
+      const text = "SYNTHETIC Ω🙂 input ".repeat(3);
+      await request({ op: "type", text });
+      const after = await request<ComputerInspectResult>({
+        op: "inspect",
+        appId: fixtureId,
+        maxNodes: 100,
+      });
       assert(
+        after.nodes.some((node) => node.name === "Rehearsal input" && node.value === text),
+        "Unicode typing did not reach the fixture.",
+      );
+    });
+    await check("Protected system chord is refused without emitting input", async () => {
+      try {
+        await request({ op: "key", chords: ["cmd+space"], repeat: 1 });
+      } catch (error) {
+        assert(
+          error instanceof ComputerControlError &&
+            error.error._tag === "TargetBlocked" &&
+            error.error.kind === "system-ui",
+          "Unexpected chord result.",
+        );
+        return;
+      }
+      throw new Error("Protected chord was accepted.");
+    });
+    await check("Focused secure field rejects keyboard typing", async () => {
+      const current = await request<ComputerInspectResult>({
+        op: "inspect",
+        appId: fixtureId,
+        maxNodes: 100,
+      });
+      const button = current.nodes.find((node) => node.name === "Focus secure");
+      if (!button) throw new Error("Secure-focus fixture button is missing.");
+      await request({
+        op: "elementAction",
+        appId: fixtureId,
+        snapshotId: current.snapshotId,
+        elementRef: button.elementRef,
+        action: "press",
+      });
+      try {
+        await request({ op: "type", text: "SYNTHETIC_REJECTED_TEXT" });
+      } catch (error) {
+        assert(
+          error instanceof ComputerControlError &&
+            error.error._tag === "TargetBlocked" &&
+            error.error.kind === "secure-field",
+          "Unexpected secure-focus result.",
+        );
+        return;
+      }
+      throw new Error("Secure focus accepted typing.");
+    });
+    await check("Coordinate click reaches the fixture in display model space", async () => {
+      const current = await request<ComputerInspectResult>({
+        op: "inspect",
+        appId: fixtureId,
+        maxNodes: 100,
+      });
+      const button = current.nodes.find((node) => node.name === "Rehearsal press");
+      const status = helper.status();
+      const display = status.available
+        ? status.displays?.find((display) => display.displayId === button?.displayId)
+        : undefined;
+      if (!button?.bounds || !display) throw new Error("Button display geometry is unavailable.");
+      await request({
+        op: "click",
+        displayId: display.displayId,
+        geometryGeneration: display.geometryGeneration,
+        x: Math.floor(button.bounds.x + button.bounds.width / 2),
+        y: Math.floor(button.bounds.y + button.bounds.height / 2),
+        button: "left",
+        clickCount: 1,
+        modifiers: [],
+      });
+      const after = await request({ op: "inspect", appId: fixtureId, maxNodes: 100 });
+      assert(
+        JSON.stringify(after).includes("presses: 2"),
+        "Coordinate click missed the fixture button.",
+      );
+    }).catch((error: unknown) => {
+      // Keep the pointer refusal failed. The independent expiry check below
+      // verifies refusal only; it never retries pointer input or resumes input.
+      if (
         error instanceof ComputerControlError &&
-          error.error._tag === "TargetBlocked" &&
-          error.error.kind === "secure-field",
-        "Unexpected refusal.",
-      );
-      return;
-    }
-    throw new Error("Secure field accepted setValue.");
-  });
-  await check("Revoked fixture inspect is refused", async () => {
-    const revoked = { ...authorization, grantVersion: 2, grants: [] };
-    helper.control({ type: "grantsChanged", authorization: revoked });
-    try {
-      await request({ op: "inspect", appId: fixtureId, maxNodes: 100 });
-    } catch (error) {
-      assert(
-        error instanceof ComputerControlError && error.error._tag === "Interrupted",
-        "Stale grant was accepted.",
-      );
-      return;
-    } finally {
-      authorization.grantVersion = 3;
-      helper.control({ type: "grantsChanged", authorization });
-    }
-    throw new Error("Stale grant was accepted.");
-  });
-  await check("Unicode typing reaches only the fixture's editable field", async () => {
-    const current = await request<ComputerInspectResult>({
-      op: "inspect",
-      appId: fixtureId,
-      maxNodes: 100,
+        error.error._tag === "TargetBlocked" &&
+        error.error.kind === "system-ui"
+      ) {
+        process.exitCode = 1;
+        return;
+      }
+      throw error;
     });
-    const field = current.nodes.find((node) => node.name === "Rehearsal input");
-    if (!field) throw new Error("Editable field is missing.");
-    await request({
-      op: "elementAction",
-      appId: fixtureId,
-      snapshotId: current.snapshotId,
-      elementRef: field.elementRef,
-      action: "focus",
-    });
-    const text = "SYNTHETIC Ω🙂 input ".repeat(3);
-    await request({ op: "type", text });
-    const after = await request<ComputerInspectResult>({
-      op: "inspect",
-      appId: fixtureId,
-      maxNodes: 100,
-    });
-    assert(
-      after.nodes.some((node) => node.name === "Rehearsal input" && node.value === text),
-      "Unicode typing did not reach the fixture.",
-    );
-  });
-  await check("Protected system chord is refused without emitting input", async () => {
-    try {
-      await request({ op: "key", chords: ["cmd+space"], repeat: 1 });
-    } catch (error) {
-      assert(
-        error instanceof ComputerControlError &&
-          error.error._tag === "TargetBlocked" &&
-          error.error.kind === "system-ui",
-        "Unexpected chord result.",
-      );
-      return;
-    }
-    throw new Error("Protected chord was accepted.");
-  });
-  await check("Focused secure field rejects keyboard typing", async () => {
-    const current = await request<ComputerInspectResult>({
-      op: "inspect",
-      appId: fixtureId,
-      maxNodes: 100,
-    });
-    const button = current.nodes.find((node) => node.name === "Focus secure");
-    if (!button) throw new Error("Secure-focus fixture button is missing.");
-    await request({
-      op: "elementAction",
-      appId: fixtureId,
-      snapshotId: current.snapshotId,
-      elementRef: button.elementRef,
-      action: "press",
-    });
-    try {
-      await request({ op: "type", text: "SYNTHETIC_REJECTED_TEXT" });
-    } catch (error) {
-      assert(
-        error instanceof ComputerControlError &&
-          error.error._tag === "TargetBlocked" &&
-          error.error.kind === "secure-field",
-        "Unexpected secure-focus result.",
-      );
-      return;
-    }
-    throw new Error("Secure focus accepted typing.");
-  });
-  await check("Coordinate click reaches the fixture in display model space", async () => {
-    const current = await request<ComputerInspectResult>({
-      op: "inspect",
-      appId: fixtureId,
-      maxNodes: 100,
-    });
-    const button = current.nodes.find((node) => node.name === "Rehearsal press");
-    const status = helper.status();
-    const display = status.available
-      ? status.displays?.find((display) => display.displayId === button?.displayId)
-      : undefined;
-    if (!button?.bounds || !display) throw new Error("Button display geometry is unavailable.");
-    await request({
-      op: "click",
-      displayId: display.displayId,
-      geometryGeneration: display.geometryGeneration,
-      x: Math.floor(button.bounds.x + button.bounds.width / 2),
-      y: Math.floor(button.bounds.y + button.bounds.height / 2),
-      button: "left",
-      clickCount: 1,
-      modifiers: [],
-    });
-    const after = await request({ op: "inspect", appId: fixtureId, maxNodes: 100 });
-    assert(
-      JSON.stringify(after).includes("presses: 2"),
-      "Coordinate click missed the fixture button.",
-    );
-  }).catch((error: unknown) => {
-    // Keep the pointer refusal failed. The independent expiry check below
-    // verifies refusal only; it never retries pointer input or resumes input.
-    if (
-      error instanceof ComputerControlError &&
-      error.error._tag === "TargetBlocked" &&
-      error.error.kind === "system-ui"
-    ) {
-      process.exitCode = 1;
-      return;
-    }
-    throw error;
-  });
+  }
   await check("Permit expiry blocks the next real action", async () => {
     clearInterval(renewal);
     renewal = undefined;
@@ -493,6 +516,17 @@ try {
   helper.close();
   fixture?.kill();
   ungrantedFixture?.kill();
+  for (const child of [fixture, ungrantedFixture]) {
+    if (child && child.exitCode === null && child.signalCode === null)
+      await new Promise<void>((done) => {
+        const timeout = setTimeout(done, 2000);
+        child.once("exit", () => {
+          clearTimeout(timeout);
+          done();
+        });
+      });
+  }
+  if (root) await rm(root, { recursive: true, force: true });
   const report = {
     reportVersion: 1,
     recordedAt: new Date().toISOString(),
@@ -500,12 +534,22 @@ try {
     arch: process.arch,
     osVersion: release(),
     helperSha256: helperHash,
-    scope: "unsigned-native-helper-only",
+    scope: privacyOnly
+      ? "unsigned-native-helper-synthetic-capture-privacy"
+      : "unsigned-native-helper-only",
+    repositoryCommit,
+    workingTreeDirty,
+    rehearsalSourceSha256,
+    captureVerifierSha256,
+    ...(privacyOnly ? { privacyOnly: true } : {}),
     signed: false,
     certified: false,
     checks,
     physicalInterruption,
     remaining: [
+      ...(privacyOnly
+        ? ["Capture-only mode excludes semantic, keyboard and coordinate input checks"]
+        : []),
       "Provider-mediated app consent and real provider turns",
       "Capture isolation and secure masking across real apps, popups and moving windows",
       "Coordinate/drag/typing focus changes",
