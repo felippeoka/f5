@@ -11,6 +11,7 @@ import { ComputerHostChannel } from "./ComputerHostChannel";
 import { ComputerLeaseAuthority } from "./ComputerLeaseAuthority";
 import { createRehearsalFixture } from "./rehearsalFixture";
 import { rehearsalAccessAnswer } from "./rehearsalConsent";
+import { RehearsalResponses } from "./rehearsalResponses";
 
 const args = process.argv.slice(2);
 const argument = (name: string) => {
@@ -81,7 +82,14 @@ const offHelper = helper.onEvent((message) => {
 });
 let consentCount = 0;
 let fixtureAppId = `org.example.computer-rehearsal.${randomUUID()}`;
-channel = new ComputerHostChannel(
+let responseEvidence: { profileId: string; responses: RehearsalResponses } | undefined;
+class RehearsalHostChannel extends ComputerHostChannel {
+  override send(profileId: string, message: DesktopComputerHostMessage): void {
+    if (responseEvidence?.profileId === profileId) responseEvidence.responses.response(message);
+    super.send(profileId, message);
+  }
+}
+channel = new RehearsalHostChannel(
   controller,
   () => helper.status(),
   (profileId, request) => {
@@ -139,6 +147,8 @@ try {
     const seen: ComputerAutomationRequest["op"][] = [];
     let serverReleasedLease = false;
     const profileId = `rehearsal-${randomUUID()}`;
+    const responses = new RehearsalResponses();
+    responseEvidence = { profileId, responses };
     const incarnation = randomUUID();
     const consentBefore = consentCount;
     worker = spawn(
@@ -161,7 +171,10 @@ try {
     worker.stderr?.resume();
     worker.on("message", (raw: unknown) => {
       const message = raw as DesktopComputerHostMessage;
-      if (message.type === "request") seen.push(message.request.op);
+      if (message.type === "request") {
+        seen.push(message.request.op);
+        responses.request(message.request);
+      }
       if (message.type === "leaseRelease") serverReleasedLease = true;
     });
     channel.register(profileId, incarnation, worker);
@@ -196,6 +209,7 @@ try {
         : {}),
       nativeInspectionDispatched: seen.includes("inspect"),
       nativeInputDispatched: seen.includes("type") && seen.includes("elementAction"),
+      ...responses.checks(),
       realAppReceivedExactlyOnePress: fixture.presses() === 1,
       realAppReceivedExpectedUnicodeText: fixture.typed(),
       serverReleasedTurnLease: serverReleasedLease,

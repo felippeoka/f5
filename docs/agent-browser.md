@@ -446,7 +446,12 @@ provider quota and foreground input; leave the mouse and keyboard idle. Physical
 stops the worker and input authority; a fresh run needs explicit user coordination.
 Reports refuse overwrite, retain only operation names, booleans, timing and build
 metadata, and never include images, accessibility content, typed values or provider
-error details. Failed, interrupted and incomplete turns cannot pass.
+error details. Capture, nonempty accessible inspection of the fixture, and input must
+have valid successful native responses correlated to their request IDs; dispatch and
+normal turn completion alone cannot pass. Failed, interrupted and incomplete turns
+cannot pass. Earlier provider evidence without these response checks proves dispatch
+and independently observed app delivery only; capture/inspection response validation
+requires a new coordinated run of the strengthened harness.
 
 This harness deliberately omits Electron renderer windows and real overlays. Its
 scripted fixture consent does not certify the trusted consent dialog. Provider calls

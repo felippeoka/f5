@@ -6,6 +6,10 @@
   "workingTreeDirty": true,
   "signingDeferredByUser": true,
   "certified": false,
+  "responseEvidenceQualification": {
+    "correlatedSuccessfulCaptureAndInspectionCollected": false,
+    "explanation": "These historical checks observed request dispatch and independent app input delivery. They did not require correlated successful capture/inspection responses. The strengthened rehearsal requires those responses; these results do not satisfy that additional check without a new coordinated run."
+  },
   "providerVersions": {
     "claudeAgentSdk": "0.3.295",
     "codexCli": "0.162.1"
