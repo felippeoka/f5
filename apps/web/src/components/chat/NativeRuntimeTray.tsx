@@ -7,9 +7,22 @@ import type {
   ThreadBackgroundWorkEntry,
   ThreadId,
 } from "@t3tools/contracts";
-import { LightbulbIcon, TriangleAlertIcon, XIcon } from "lucide-react";
+import {
+  BotIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  EyeIcon,
+  LightbulbIcon,
+  SquareIcon,
+  TerminalIcon,
+  TriangleAlertIcon,
+  WorkflowIcon,
+  XIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { cn } from "~/lib/utils";
 import { readNativeApi } from "../../nativeApi";
 import {
   AlertDialog,
@@ -27,18 +40,34 @@ import {
   DialogHeader,
   DialogPanel,
   DialogPopup,
+  DialogDescription,
   DialogTitle,
 } from "../ui/dialog";
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { COMPOSER_TRAY_PANEL_CLASS_NAME } from "./composer/ComposerTray";
 import {
+  describeBackgroundTask,
+  formatByteSize,
+  isNativeOperationInFlight,
   nativeOperationLabel,
+  readShellOutputPage,
   selectNativeRuntimeTrayRows,
   selectNewlyFailedOperations,
+  utf8ByteLength,
+  type BackgroundTaskDescription,
+  type BackgroundTaskKind,
 } from "./NativeRuntimeTray.logic";
 
 const ROW_CLASS_NAME = `${COMPOSER_TRAY_PANEL_CLASS_NAME} flex items-center gap-2 text-xs`;
+
+const TASK_KIND_ICONS: Record<BackgroundTaskKind, LucideIcon> = {
+  shell: TerminalIcon,
+  monitor: EyeIcon,
+  agent: BotIcon,
+  workflow: WorkflowIcon,
+};
 
 const errorMessage = (cause: unknown, fallback: string) =>
   cause instanceof Error ? cause.message : fallback;
@@ -46,9 +75,13 @@ const errorMessage = (cause: unknown, fallback: string) =>
 const showError = (title: string, description: string) =>
   toastManager.add({ type: "error", title, description });
 
+/** The Claude adapter waits up to 30s for a stop to settle. */
+const STOP_SETTLEMENT_TIMEOUT_MS = 35_000;
+const STOP_SETTLEMENT_POLL_MS = 250;
+
 interface TaskInspection {
   readonly nativeId: string;
-  readonly label: string;
+  readonly task: BackgroundTaskDescription;
   readonly page: unknown;
   readonly nextCursor: string | null;
 }
@@ -77,10 +110,15 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
   const [records, setRecords] = useState<readonly NativeOperationRecord[]>([]);
   const [tasks, setTasks] = useState<readonly ThreadBackgroundWorkEntry[]>([]);
   const [busy, setBusy] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const mounted = useRef(true);
   const [usedSuggestionId, setUsedSuggestionId] = useState<string | null>(null);
   const [acknowledging, setAcknowledging] = useState<NativeOperationRecord | null>(null);
   const [inspection, setInspection] = useState<TaskInspection | null>(null);
   const [reading, setReading] = useState(false);
+  const [tasksExpanded, setTasksExpanded] = useState(false);
+  // Elapsed times advance with the poll rather than a separate timer.
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [mountedAt] = useState(() => new Date().toISOString());
   const mutationVersion = useRef(0);
   const reportedFailures = useRef(new Set<string>());
@@ -89,6 +127,20 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
     capabilities?.actions.some((entry) => entry.action === action && entry.supported) === true;
   const canInspectTasks = supported("childTaskInspection");
   const canStopTasks = supported("childTaskStop");
+  // The server holds one native-operation reservation per thread until a stop
+  // settles, so a second stop sent earlier is refused.
+  const stopBlocked =
+    busy ||
+    stopping ||
+    records.some(
+      (record) => record.command.kind === "stopTask" && isNativeOperationInFlight(record),
+    );
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const rows = selectNativeRuntimeTrayRows({
     activities,
     prompt,
@@ -100,6 +152,11 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
     canStopTasks,
   });
   const shownSuggestionId = rows.find((row) => row.kind === "suggestion")?.id ?? null;
+  const shownTaskCount = rows.find((row) => row.kind === "tasks")?.tasks.length ?? 0;
+  useEffect(() => {
+    // A group that shrinks to one row starts collapsed if it grows again.
+    if (shownTaskCount < 2) setTasksExpanded(false);
+  }, [shownTaskCount]);
   const shownSuggestionBefore = useRef(shownSuggestionId);
   const promptBefore = useRef(prompt);
   useEffect(() => {
@@ -147,6 +204,7 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
           // receipt; the next poll replaces the list authoritatively.
           if (version === mutationVersion.current) setRecords(next);
           setTasks(snapshot.entries.filter((entry) => entry.threadId === threadId));
+          setNowMs(Date.now());
         }
       } catch {
         /* Connection and capability surfaces already report transport failures. */
@@ -162,9 +220,11 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
     };
   }, [threadId, capabilities?.generation]);
 
-  const execute = async (command: NativeOperationCommand) => {
+  const execute = async (
+    command: NativeOperationCommand,
+  ): Promise<NativeOperationRecord | null> => {
     const api = readNativeApi()?.nativeOperations;
-    if (!api || !capabilities || busy) return;
+    if (!api || !capabilities || busy) return null;
     setBusy(true);
     try {
       const record = await api.execute({
@@ -182,14 +242,41 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
         record,
         ...current.filter((entry) => entry.operationId !== record.operationId),
       ]);
+      return record;
     } catch (cause) {
       showError(
         `${nativeOperationLabel(command.kind)} failed`,
         errorMessage(cause, "The native operation failed."),
       );
+      return null;
     } finally {
       setBusy(false);
     }
+  };
+  /**
+   * `execute` returns once the server admits an operation; the stop itself
+   * settles later. Polls until the record leaves the in-flight states, and
+   * returns null if it disappears, the tray unmounts or settlement times out.
+   */
+  const waitForSettlement = async (operationId: string): Promise<NativeOperationRecord | null> => {
+    const api = readNativeApi()?.nativeOperations;
+    if (!api) return null;
+    const deadline = Date.now() + STOP_SETTLEMENT_TIMEOUT_MS;
+    while (mounted.current && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, STOP_SETTLEMENT_POLL_MS));
+      if (!mounted.current) return null;
+      try {
+        const next = await api.list({ threadId });
+        mutationVersion.current++;
+        setRecords(next);
+        const record = next.find((entry) => entry.operationId === operationId);
+        if (!record) return null;
+        if (!isNativeOperationInFlight(record)) return record;
+      } catch {
+        /* A transient poll failure retries until the deadline. */
+      }
+    }
+    return null;
   };
   const resolve = async (record: NativeOperationRecord, action: "reconcile" | "acknowledge") => {
     const api = readNativeApi()?.nativeOperations;
@@ -212,7 +299,7 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
       setBusy(false);
     }
   };
-  const inspect = async (nativeId: string, label: string, cursor?: string) => {
+  const inspect = async (nativeId: string, task: BackgroundTaskDescription, cursor?: string) => {
     if (!capabilities) return;
     const api = readNativeApi()?.nativeOperations;
     if (!api?.inspect) {
@@ -235,7 +322,7 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
         page && typeof page === "object" && "nextCursor" in page ? page.nextCursor : null;
       setInspection({
         nativeId,
-        label,
+        task,
         page,
         nextCursor: typeof nextCursor === "string" ? nextCursor : null,
       });
@@ -245,6 +332,107 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
       setReading(false);
     }
   };
+  const stopTasks = async (entries: readonly ThreadBackgroundWorkEntry[]) => {
+    if (stopBlocked) return;
+    setStopping(true);
+    try {
+      for (const entry of entries) {
+        const record = await execute({
+          kind: "stopTask",
+          ...readNativeTaskIdentity(entry.workItemId),
+        });
+        if (!record) return;
+        const settled = isNativeOperationInFlight(record)
+          ? await waitForSettlement(record.operationId)
+          : record;
+        // An unsettled or uncertain stop keeps the reservation; the recovery
+        // row takes over and later stops would only be refused.
+        if (!settled || settled.state === "indeterminate") return;
+      }
+    } finally {
+      if (mounted.current) setStopping(false);
+    }
+  };
+  const copyOutput = async (output: string) => {
+    try {
+      await navigator.clipboard.writeText(output);
+      toastManager.add({ type: "success", title: "Output copied" });
+    } catch (cause) {
+      showError("Copy failed", errorMessage(cause, "The clipboard is unavailable."));
+    }
+  };
+
+  const renderTaskRow = (task: ThreadBackgroundWorkEntry, indented: boolean) => {
+    const description = describeBackgroundTask(task, nowMs);
+    const KindIcon = TASK_KIND_ICONS[description.kind];
+    return (
+      <div key={`task:${task.workItemId}`} className={cn(ROW_CLASS_NAME, indented && "pl-8")}>
+        <KindIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate text-foreground" title={description.title}>
+          {description.title}
+        </span>
+        <span className="shrink-0 text-muted-foreground tabular-nums">
+          {[
+            description.kindLabel,
+            description.agentName !== description.title ? description.agentName : null,
+            description.elapsed,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+        {canInspectTasks && (
+          <Button
+            size="xs"
+            variant="ghost"
+            aria-label={`View output: ${description.title}`}
+            disabled={reading}
+            onClick={() => void inspect(task.workItemId, description)}
+          >
+            Output
+          </Button>
+        )}
+        {canStopTasks && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={`Stop ${description.title}`}
+                  disabled={stopBlocked}
+                  onClick={() => void stopTasks([task])}
+                />
+              }
+            >
+              <SquareIcon className="fill-current" />
+            </TooltipTrigger>
+            <TooltipPopup>Stop</TooltipPopup>
+          </Tooltip>
+        )}
+      </div>
+    );
+  };
+
+  const liveInspectedTask = inspection
+    ? tasks.find((entry) => entry.workItemId === inspection.nativeId)
+    : undefined;
+  const inspectedTask = liveInspectedTask
+    ? describeBackgroundTask(liveInspectedTask, nowMs)
+    : inspection?.task;
+  const shellOutput = readShellOutputPage(inspection?.page);
+  const inspectionSubtitle = inspectedTask
+    ? [
+        inspectedTask.kindLabel,
+        liveInspectedTask?.active && inspectedTask.elapsed
+          ? `running ${inspectedTask.elapsed}`
+          : null,
+        shellOutput?.omitted
+          ? `last ${formatByteSize(utf8ByteLength(shellOutput.output))} of ${formatByteSize(shellOutput.totalBytes)}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null;
 
   if (!capabilities) return null;
 
@@ -330,37 +518,48 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
                 {nativeOperationLabel(row.record.command.kind)} running…
               </div>
             );
-          case "task": {
-            const { task } = row;
-            const label = task.phase ?? task.workItemId;
+          case "tasks": {
+            const { tasks: shownTasks } = row;
+            if (shownTasks.length === 1) return renderTaskRow(shownTasks[0]!, false);
+            const newest = describeBackgroundTask(shownTasks.at(-1)!, nowMs);
+            const ToggleIcon = tasksExpanded ? ChevronDownIcon : ChevronRightIcon;
             return (
-              <div key={`task:${task.workItemId}`} className={ROW_CLASS_NAME}>
-                <Spinner aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate">
-                  {label} <span className="text-muted-foreground">· {task.status}</span>
-                </span>
-                {canInspectTasks && (
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    disabled={reading}
-                    onClick={() => void inspect(task.workItemId, label)}
+              <div
+                key="tasks"
+                role="group"
+                aria-label="Background tasks"
+                className="divide-y divide-border"
+              >
+                <div className={ROW_CLASS_NAME}>
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-expanded={tasksExpanded}
+                    onClick={() => setTasksExpanded((expanded) => !expanded)}
                   >
-                    Inspect output
-                  </Button>
-                )}
-                {canStopTasks && (
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() =>
-                      void execute({ kind: "stopTask", ...readNativeTaskIdentity(task.workItemId) })
-                    }
-                  >
-                    Stop
-                  </Button>
-                )}
+                    <Spinner aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate text-foreground">
+                      {shownTasks.length} background tasks
+                      {tasksExpanded ? null : (
+                        <span className="text-muted-foreground">
+                          {` · ${newest.title}, +${shownTasks.length - 1} more`}
+                        </span>
+                      )}
+                    </span>
+                    <ToggleIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+                  </button>
+                  {tasksExpanded && canStopTasks && (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      disabled={stopBlocked}
+                      onClick={() => void stopTasks(shownTasks)}
+                    >
+                      Stop all
+                    </Button>
+                  )}
+                </div>
+                {tasksExpanded && shownTasks.map((task) => renderTaskRow(task, true))}
               </div>
             );
           }
@@ -405,21 +604,45 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
       >
         <DialogPopup className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="text-base">Output · {inspection?.label}</DialogTitle>
+            <DialogTitle className="text-base">{inspectedTask?.title}</DialogTitle>
+            {inspectionSubtitle ? (
+              <DialogDescription className="tabular-nums">{inspectionSubtitle}</DialogDescription>
+            ) : null}
           </DialogHeader>
           <DialogPanel>
             <pre className="whitespace-pre-wrap break-all font-mono text-xs">
-              {JSON.stringify(inspection?.page ?? null, null, 2)}
+              {shellOutput
+                ? shellOutput.output || "No output yet."
+                : JSON.stringify(inspection?.page ?? null, null, 2)}
             </pre>
           </DialogPanel>
-          {inspection?.nextCursor ? (
+          {inspection && shellOutput ? (
+            <DialogFooter variant="bare">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={reading}
+                onClick={() => void inspect(inspection.nativeId, inspection.task)}
+              >
+                Refresh
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!shellOutput.output}
+                onClick={() => void copyOutput(shellOutput.output)}
+              >
+                Copy
+              </Button>
+            </DialogFooter>
+          ) : inspection?.nextCursor ? (
             <DialogFooter variant="bare">
               <Button
                 size="sm"
                 variant="outline"
                 disabled={reading}
                 onClick={() =>
-                  void inspect(inspection.nativeId, inspection.label, inspection.nextCursor!)
+                  void inspect(inspection.nativeId, inspection.task, inspection.nextCursor!)
                 }
               >
                 Next page
