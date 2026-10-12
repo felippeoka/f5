@@ -134,6 +134,7 @@ export function ComputerAccessInbox() {
   const requests = useAgentComputerActivityStore((state) => state.requests);
   useEffect(() => {
     const api = readNativeApi();
+    if (!api?.computer) return;
     const store = useAgentComputerActivityStore.getState();
     const off = [
       api?.computer?.access.onRequested(store.request),

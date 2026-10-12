@@ -1,3 +1,4 @@
+import { resolveEmptyAppRpc } from "../test/emptyAppRpc";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { DEFAULT_SERVER_SETTINGS, type ProjectId as SettingsProjectId } from "@t3tools/contracts";
 import { serverBootstrapFixture } from "../test/serverBootstrap";
@@ -148,6 +149,8 @@ function resolveWsRpc(body: {
   value?: string | boolean;
   key?: string;
 }): unknown {
+  const emptyReply = resolveEmptyAppRpc(body);
+  if (emptyReply !== undefined) return emptyReply;
   const tag = body._tag;
   if (tag === AGENTS_WS_METHODS.getSnapshot) {
     return { entries: [], generatedAt: NOW_ISO };

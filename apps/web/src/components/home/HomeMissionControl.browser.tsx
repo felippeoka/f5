@@ -1,4 +1,5 @@
 import "../../index.css";
+import { emptyDiskSpaceStatus } from "../../test/emptyAppRpc";
 
 import { ProjectId, ThreadId, type NativeApi } from "@t3tools/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -185,6 +186,10 @@ async function renderHome(threads: ReadonlyArray<Thread> = []) {
 describe("HomeMissionControl", () => {
   beforeAll(() => {
     window.nativeApi = {
+      storage: {
+        getDiskSpace: async () => emptyDiskSpaceStatus,
+        onDiskSpaceUpdated: () => () => {},
+      },
       server: { getProjectSettings },
       orchestration: { dispatchCommand },
     } as unknown as NativeApi;
