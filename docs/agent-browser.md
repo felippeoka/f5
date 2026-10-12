@@ -675,6 +675,21 @@ predates receipt counts and cannot distinguish a missing receipt from a timestam
 mismatch. It is preserved unchanged; the passive-observer change requires another
 coordinated run and does not retroactively make this attempt pass.
 
+The subsequent [real frozen-main run](computer-certification/2026-10-12-macos-electron-main-stop-passed.json)
+**passed every check**, using clean revision `b1a70f7362` and the recorded compiled
+main, renderer, server and native-helper hashes. Real native app consent was answered
+by the operator. Both recognition events occurred during a verified 708.4 ms Electron
+main-process freeze, with 0.8 ms clock uncertainty; the independent fixture tap observed
+one physical chord, whose event time differed from helper recognition by 0.1 ms. The
+physical-input emission tail was 6.7 ms and the app-delivery tail 15.1 ms, below the
+unchanged 100 ms boundary. Typing was interrupted, the lease released, the fixture
+remained frontmost, and the subsequent provider typing attempt was refused while
+computer access stayed paused. This proves the narrow unsigned macOS synthetic-app
+stop path with real Electron main frozen. It does not certify installed-build TCC,
+signed packaging, arbitrary deadlocks, real apps, Windows, mixed displays or built-in
+provider backends. The earlier failed reports remain unchanged, the complete renderer
+run still needs its follow-up verification, and all release gates stay closed.
+
 Coordinate with the operator before launching. The real consent dialog must be answered
 by a human for the single synthetic fixture. The operator then leaves input idle and
 follows the window's instructions for Pause and Resume. Turns go through the real
