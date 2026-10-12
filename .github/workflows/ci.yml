@@ -79,6 +79,15 @@ jobs:
       - name: Run browser tests
         run: bun run --cwd apps/web test:browser
 
+      # Electron's npm archive does not install the privileged sandbox helper.
+      # Configure it on the ephemeral runner rather than disabling sandboxing.
+      - name: Configure Electron sandbox
+        working-directory: apps/desktop
+        run: |
+          electron_sandbox="$(node -e 'const path = require("node:path"); console.log(path.join(path.dirname(require("electron")), "chrome-sandbox"))')"
+          sudo chown root:root "$electron_sandbox"
+          sudo chmod 4755 "$electron_sandbox"
+
       - name: Run desktop smoke tests
         run: xvfb-run --auto-servernum bun run test:desktop-smoke
 
@@ -88,7 +97,9 @@ jobs:
   windows:
     name: Windows build and integration suite
     runs-on: windows-latest
-    timeout-minutes: 25
+    # Native compilation plus the full workspace suite leaves too little time
+    # for desktop/profile smoke checks inside the former 25-minute budget.
+    timeout-minutes: 35
     steps:
       # Preserve repository LF policy so this lane also detects accidental CRLF assumptions.
       - name: Configure Git line endings
