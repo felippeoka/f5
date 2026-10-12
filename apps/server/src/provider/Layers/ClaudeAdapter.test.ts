@@ -8620,7 +8620,7 @@ describe("ClaudeAdapterLive", () => {
         path.join(childCwd, ".claude-profile"),
       );
       assert.equal(
-        resolveClaudeConfigDir({ HOME: "relative-home" }, childCwd),
+        resolveClaudeConfigDir({ HOME: "relative-home", USERPROFILE: "relative-home" }, childCwd),
         path.join(childCwd, "relative-home", ".claude"),
       );
       assert.equal(
@@ -8653,7 +8653,10 @@ describe("ClaudeAdapterLive", () => {
 
         assert.equal(probeCalls.length, 1);
         assert.equal(probeCalls[0]?.sessionId, probeSessionId);
-        assert.equal(probeCalls[0]?.claudeConfigDir, "/profiles/abc/provider-homes/claude/.claude");
+        assert.equal(
+          probeCalls[0]?.claudeConfigDir,
+          path.resolve("/profiles/abc/provider-homes/claude/.claude"),
+        );
       }).pipe(
         Effect.provideService(Random.Random, makeDeterministicRandomService()),
         Effect.provide(harness.layer),

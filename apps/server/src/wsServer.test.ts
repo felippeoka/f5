@@ -3827,7 +3827,7 @@ describe("WebSocket Server", () => {
         expect(settled.phase).toBe("cancelled_kept");
         expect(settled.error).toContain(".env");
         expect(fs.readFileSync(path.join(running!.worktreePath!, ".env"), "utf8")).toBe(
-          "SECRET=1\n",
+          process.platform === "win32" ? "SECRET=1 \r\n" : "SECRET=1\n",
         );
       });
 

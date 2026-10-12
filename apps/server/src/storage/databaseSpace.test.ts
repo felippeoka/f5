@@ -4,6 +4,7 @@ import * as NodePath from "node:path";
 
 import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
+import { afterAll } from "vitest";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as SqliteClient from "../persistence/NodeSqliteClient.ts";
@@ -54,13 +55,12 @@ it.layer(SqliteClient.layer({ filename }))("databaseSpace", (it) => {
       const after = yield* readDatabasePages;
       assert.equal(after.freelistCount, 0);
       assert.isBelow(after.pageCount, freed.pageCount);
-    }).pipe(
-      Effect.ensuring(
-        Effect.sync(() => NodeFS.rmSync(directory, { recursive: true, force: true })),
-      ),
-    ),
+    }),
   );
 });
+
+// Close the scoped SQLite layer before deleting its files (required on Windows).
+afterAll(() => NodeFS.rmSync(directory, { recursive: true, force: true }));
 
 describe("vacuumFreeSpaceShortfall", () => {
   const GB = 1024 ** 3;
@@ -84,7 +84,8 @@ describe("vacuumFreeSpaceShortfall", () => {
 
   it("checks the temp directory's own volume when it differs", async () => {
     // `/dev` is a separate file system from the temp directory on macOS and Linux.
-    const tempDirectory = "/dev";
+    const tempDirectory =
+      process.platform === "win32" ? NodePath.parse(process.cwd()).root : "/dev";
     if (NodeFS.statSync(tempDirectory).dev === NodeFS.statSync(NodeOS.tmpdir()).dev) return;
     const enough = statfsWith({ [NodeOS.tmpdir()]: 12 * GB, [tempDirectory]: 12 * GB });
     assert.isNull(

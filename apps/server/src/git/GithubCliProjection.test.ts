@@ -2,13 +2,16 @@ import * as FS from "node:fs/promises";
 import * as Path from "node:path";
 import * as OS from "node:os";
 import { Effect } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import type { ServerSecretStoreShape } from "../auth/Services/ServerSecretStore";
 import { ProfileGithubAccount } from "./ProfileGithubAccount";
 import { buildAccountExecutionEnvironment } from "../providerProcessEnv";
 import { fallbackDefaultProfile } from "../profiles/ProfileRegistryStore";
 import { runProcess } from "../processRunner";
+
+// These tests apply real Windows ACLs, including cold PowerShell startup.
+if (process.platform === "win32") vi.setConfig({ testTimeout: 60_000 });
 
 const roots: string[] = [];
 afterEach(async () => {

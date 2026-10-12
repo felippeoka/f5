@@ -1,3 +1,4 @@
+import * as NodePath from "node:path";
 import { buildAccountExecutionEnvironment } from "../../providerProcessEnv.ts";
 import { fallbackDefaultProfile } from "../../profiles/ProfileRegistryStore.ts";
 import { describe, expect, it } from "vitest";
@@ -168,7 +169,7 @@ it("keeps provider profile isolation when building the Antigravity child environ
     "helper",
   );
   expect(env.HOME).not.toBe("/personal");
-  expect(env.GH_CONFIG_DIR).toContain(stateDir);
+  expect(env.GH_CONFIG_DIR).toBe(NodePath.join(stateDir, "github"));
   expect(env.GH_TOKEN).toBeUndefined();
   expect(env.GITHUB_TOKEN).toBeUndefined();
   expect(env.GIT_AUTHOR_EMAIL).toBeUndefined();

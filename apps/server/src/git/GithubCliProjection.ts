@@ -25,17 +25,27 @@ export async function secureGithubPaths(paths: ProtectedPath[]): Promise<void> {
   const script =
     `$ErrorActionPreference = 'Stop'; $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User; ` +
     `$items = ConvertFrom-Json '${items}'; foreach ($item in $items) { ` +
-    `if ($item.directory) { $acl = New-Object System.Security.AccessControl.DirectorySecurity; $inheritance = 'ContainerInherit, ObjectInherit' } ` +
-    `else { $acl = New-Object System.Security.AccessControl.FileSecurity; $inheritance = 'None' }; ` +
+    `if ($item.directory) { $acl = [System.Security.AccessControl.DirectorySecurity]::new(); $inheritance = 'ContainerInherit, ObjectInherit' } ` +
+    `else { $acl = [System.Security.AccessControl.FileSecurity]::new(); $inheritance = 'None' }; ` +
     `$acl.SetOwner($sid); $acl.SetAccessRuleProtection($true, $false); ` +
-    `$rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', $inheritance, 'None', 'Allow'); ` +
-    `$acl.AddAccessRule($rule); Set-Acl -LiteralPath $item.path -AclObject $acl }`;
-  await execute("powershell.exe", [
-    "-NoProfile",
-    "-NonInteractive",
-    "-EncodedCommand",
-    Buffer.from(script, "utf16le").toString("base64"),
-  ]);
+    `$rule = [System.Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', $inheritance, 'None', 'Allow'); ` +
+    `$acl.AddAccessRule($rule); ` +
+    `if ($item.directory) { [System.IO.Directory]::SetAccessControl($item.path, $acl) } ` +
+    `else { [System.IO.File]::SetAccessControl($item.path, $acl) } }`;
+  const pending = execute(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-EncodedCommand",
+      Buffer.from(script, "utf16le").toString("base64"),
+    ],
+    { windowsHide: true, timeout: 30_000 },
+  );
+  // No console input is needed; close the inherited pipe so PowerShell exits
+  // promptly after applying the ACLs. Any failure still prevents publication.
+  pending.child.stdin?.end();
+  await pending;
 }
 
 /**

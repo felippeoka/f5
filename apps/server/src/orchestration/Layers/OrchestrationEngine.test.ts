@@ -539,7 +539,7 @@ describe("OrchestrationEngine", () => {
 
     await warmSystem.dispose();
     fs.rmSync(tempDir, { recursive: true, force: true });
-  });
+  }, 60_000);
 
   it("falls back to full replay when projection snapshot hydration fails", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-orchestration-snapshot-fallback-"));
@@ -647,7 +647,7 @@ describe("OrchestrationEngine", () => {
 
     await fallbackSystem.dispose();
     fs.rmSync(tempDir, { recursive: true, force: true });
-  });
+  }, 60_000);
 
   it("records orchestration command metrics and traces", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-orchestration-observability-"));

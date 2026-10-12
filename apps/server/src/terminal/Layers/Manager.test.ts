@@ -761,7 +761,9 @@ describe("TerminalManager", () => {
     await manager.close({ threadId: "thread-1" });
     await waitFor(() => process.killSignals.includes("SIGKILL"));
 
-    expect(process.killSignals[0]).toBe("SIGTERM");
+    expect(process.killSignals[0]).toBe(
+      globalThis.process.platform === "win32" ? "SIGKILL" : "SIGTERM",
+    );
     expect(process.killSignals).toContain("SIGKILL");
 
     manager.dispose();
