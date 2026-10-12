@@ -407,9 +407,9 @@ function OptionRow({
         // `muted`/`border` are ~4-8% alpha in both themes, so use them at full
         // strength; fractions of them vanish on the card background.
         selected
-          ? "border-info/60 bg-info/15 text-foreground"
-          : "border-border bg-muted text-foreground hover:border-input hover:bg-foreground/8",
-        disabled && "opacity-50 cursor-not-allowed",
+          ? "border-info/60 bg-info/15 text-foreground hover:border-info hover:bg-info/22"
+          : "border-border bg-muted text-foreground hover:border-foreground/25 hover:bg-foreground/10",
+        disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
       )}
     >
       {shortcutKey !== null ? (
@@ -419,7 +419,7 @@ function OptionRow({
             "flex size-5 shrink-0 items-center justify-center rounded border text-2xs font-medium tabular-nums transition-colors duration-150",
             selected
               ? "border-info bg-info text-white"
-              : "border-input bg-background text-muted-foreground group-hover:text-foreground",
+              : "border-input bg-background text-muted-foreground group-hover:border-foreground/40 group-hover:text-foreground",
           )}
         >
           {shortcutKey}
