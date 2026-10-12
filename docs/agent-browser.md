@@ -680,10 +680,67 @@ rehearsal now explicitly permits tool discovery as well as the F5 catalog; the p
 prompt restriction may have contributed, but the historical report does not establish
 that cause. Pre-host diagnostics retain only known error tags from sanitized provider
 activities and the latest host availability/reason, never raw provider output.
-The [latest foreground attempt](computer-certification/2026-10-12-macos-electron-consent-timeout.json)
+The [earlier foreground attempt](computer-certification/2026-10-12-macos-electron-consent-timeout.json)
 expired waiting for a human answer: no trusted click, forwarded answer, grant or lease
 was observed, and no input was emitted. Pause/Resume, the subsequent fresh screenshot
 and coordinate-click sequence remain pending in the real Electron workflow.
+
+The [native-consent inspection attempt](computer-certification/2026-10-12-macos-native-consent-inspection-failure.json)
+at commit `856ae44523` passed the main-owned native consent dialog, grant settlement,
+activation and capture, then failed at `inspect` with `Execution` before any input or
+human controls. That report predates safe execution-error classification and does not
+identify the cause. A separate
+[background inspection diagnostic](computer-certification/2026-10-12-macos-background-inspection.json)
+passed at node limits 20, 100 and 400, returning 12 nodes within 30 ms each. The
+helper stayed suspended, with no execution permit, capture, activation or input; the
+only scripted grant was for the diagnostic's own synthetic app. This does not prove
+inspection through Electron or a provider session.
+
+Append `--controls-only` to the Electron command to isolate native consent, persistent
+Pause visibility, human Pause/Resume, refusal of an untrusted resume, fresh capture and
+lease/overlay cleanup. This mode activates and captures the fixture but issues no
+inspection, pointer/keyboard or semantic actions. The
+[recorded controls run](computer-certification/2026-10-12-macos-native-controls.json)
+passed all those checks and submitted all three turns through the real composer.
+It still **failed overall** because the combined activity/thumbnail push check and
+thumbnail rendering failed. That aggregate result does not identify which push was
+absent. Those checks remain required, since app activation is a
+mutation. The transport regression exercises private IPC through the real server push
+bus to a WebSocket client; the rehearsal now counts IPC activity and action captures
+separately, retaining no content, to locate the outstanding failure.
+
+Append `--actions-only` instead to investigate the full inspection, semantic input,
+Unicode typing and coordinate workflow without repeating human Pause/Resume. The
+operator approves the native fixture dialog and stays idle through the action turns;
+this mode does not claim controls evidence. The three diagnostic modes are mutually
+exclusive. Exact known F5 execution messages map to fixed codes; unknown details are
+discarded. Neither a completed model turn nor an action with a failed follow-up capture
+is treated as proof of that capture.
+
+The [actions-only trace](computer-certification/2026-10-12-macos-native-actions-trace.json)
+then passed native consent, capture, inspection, semantic press/focus, Unicode typing,
+the next-turn coordinate click, semantic and coordinate overlays, and lease cleanup.
+It observed 12 IPC activity events and one thumbnail reaching the renderer, but still
+**failed overall** because the live-card image was absent at the end. The store replaced
+each action with the next one, discarding a previous thumbnail when later actions
+provided no screenshot. The live card now retains a separately labelled last capture
+while displaying the latest action. Grant changes, backend changes and reconnects
+discard that capture; the earlier image is never attached to a later action. Store and
+browser regressions exercise this sequence and revocation. The earlier inspection
+failure remains unexplained; a later successful observation does not retroactively
+turn that failed report into a pass. A run of the corrected renderer is still required.
+
+For background inspection without changing focus or starting a provider session:
+
+```sh
+bun apps/desktop/src/computer/rehearseInspectMacos.ts --helper apps/desktop/dist-native/mac-arm64/f5-computer-helper --output /tmp/f5-background-inspection.json
+```
+
+The [current read-only preflight](computer-certification/2026-10-12-macos-gate-preflight-856ae44523.json)
+confirms development permissions on one Retina display. Signing remains deferred;
+the native release flags and provider built-in/Chrome certification registries remain
+closed. These unsigned results do not establish installed-build TCC attribution,
+Windows runtime safety, mixed-display behavior or the complete real-app matrix.
 
 ### Build prerequisites and bounded replay state
 

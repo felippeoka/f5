@@ -8,6 +8,7 @@ export async function createRehearsalFixture(options: {
   root: string;
   appId: string;
   ungranted?: boolean;
+  background?: boolean;
   executableSource?: string;
   expectedText?: string;
   sourceFile?: string;
@@ -34,6 +35,7 @@ export async function createRehearsalFixture(options: {
       { timeout: 30000 },
     );
   const args = [
+    ...(options.background ? ["--background"] : []),
     ...(options.ungranted ? ["--ungranted"] : []),
     ...(options.expectedText ? ["--expected-text", options.expectedText] : []),
   ];

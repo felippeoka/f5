@@ -6,6 +6,7 @@ beforeEach(() =>
   useAgentComputerActivityStore.setState({
     appNames: {},
     activity: {},
+    lastCapture: {},
     grants: {},
     requests: {},
     paused: {},
@@ -14,6 +15,50 @@ beforeEach(() =>
   }),
 );
 describe("computer activity", () => {
+  it("keeps the last capture separate from later actions that have no screenshot", () => {
+    const store = useAgentComputerActivityStore.getState();
+    store.record({
+      threadId,
+      op: "activateApp",
+      status: "completed",
+      backend: "native",
+      appName: "Fixture",
+      thumbnailDataUrl: "SYNTHETIC_CAPTURE",
+    });
+    store.record({ threadId, op: "type", status: "started", backend: "native" });
+    store.record({ threadId, op: "type", status: "completed", backend: "native" });
+    const state = useAgentComputerActivityStore.getState();
+    expect(state.activity[threadId]).toMatchObject({ op: "type", status: "completed" });
+    expect(state.activity[threadId]?.thumbnailDataUrl).toBeUndefined();
+    expect(state.lastCapture[threadId]).toMatchObject({
+      op: "activateApp",
+      appName: "Fixture",
+      thumbnailDataUrl: "SYNTHETIC_CAPTURE",
+    });
+    expect(state.lastCapture.otherThread).toBeUndefined();
+  });
+  it("discards capture content on grant changes, backend switches and reconnect", () => {
+    const store = useAgentComputerActivityStore.getState();
+    const captured = {
+      threadId,
+      op: "click",
+      status: "completed" as const,
+      backend: "native" as const,
+      thumbnailDataUrl: "SYNTHETIC_CAPTURE",
+    };
+    store.record(captured);
+    store.setGrants(threadId, []);
+    expect(useAgentComputerActivityStore.getState().lastCapture[threadId]).toBeUndefined();
+    expect(JSON.stringify(useAgentComputerActivityStore.getState())).not.toContain(
+      "SYNTHETIC_CAPTURE",
+    );
+    store.record(captured);
+    store.record({ threadId, op: "computer", status: "started", backend: "codex-builtin" });
+    expect(useAgentComputerActivityStore.getState().lastCapture[threadId]).toBeUndefined();
+    store.record(captured);
+    store.resetConnection();
+    expect(useAgentComputerActivityStore.getState().lastCapture).toEqual({});
+  });
   it("keeps controls visible for 15 seconds after lease release even when the last action is older", () => {
     const clock = vi.spyOn(Date, "now").mockReturnValue(100000);
     try {

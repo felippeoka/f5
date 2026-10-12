@@ -10,6 +10,7 @@ import { isAgentActivityRecent } from "./agentActivityWindow";
 interface ComputerState {
   appNames: Record<string, string | undefined>;
   activity: Record<string, (ComputerActivity & { at: number }) | undefined>;
+  lastCapture: Record<string, (ComputerActivity & { at: number }) | undefined>;
   grants: Record<string, ReadonlyArray<ComputerGrant> | undefined>;
   requests: Record<
     string,
@@ -31,6 +32,7 @@ export const useAgentComputerActivityStore = create<ComputerState>((set) => ({
     set({
       appNames: {},
       activity: {},
+      lastCapture: {},
       grants: {},
       requests: {},
       paused: {},
@@ -39,15 +41,30 @@ export const useAgentComputerActivityStore = create<ComputerState>((set) => ({
     }),
   appNames: {},
   activity: {},
+  lastCapture: {},
   grants: {},
   requests: {},
   paused: {},
   lease: { threadId: null },
   lastLeaseAt: {},
   record: (activity) =>
-    set((state) => ({
-      activity: { ...state.activity, [activity.threadId]: { ...activity, at: Date.now() } },
-    })),
+    set((state) => {
+      const { thumbnailDataUrl, ...summary } = activity;
+      const at = Date.now();
+      const previous = state.lastCapture[activity.threadId];
+      return {
+        activity: { ...state.activity, [activity.threadId]: { ...summary, at } },
+        lastCapture: {
+          ...state.lastCapture,
+          [activity.threadId]:
+            activity.status === "completed" && thumbnailDataUrl
+              ? { ...activity, at }
+              : previous?.backend === activity.backend
+                ? previous
+                : undefined,
+        },
+      };
+    }),
   request: (request) =>
     set((state) => ({
       requests: { ...state.requests, [request.requestId]: request },
@@ -69,7 +86,11 @@ export const useAgentComputerActivityStore = create<ComputerState>((set) => ({
         : state;
     }),
   setGrants: (threadId, grants) =>
-    set((state) => ({ grants: { ...state.grants, [threadId]: grants } })),
+    set((state) => ({
+      grants: { ...state.grants, [threadId]: grants },
+      // A capture may include every granted app; discard it on any grant change.
+      lastCapture: { ...state.lastCapture, [threadId]: undefined },
+    })),
   setPaused: (threadId, paused) =>
     set((state) => ({ paused: { ...state.paused, [threadId]: paused } })),
   setLease: (lease) =>

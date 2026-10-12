@@ -10,6 +10,7 @@ import { pauseComputerThread, stopComputerTurn } from "./computerControls";
 const EMPTY_GRANTS: ReadonlyArray<import("@t3tools/contracts").ComputerGrant> = [];
 export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
   const activity = useAgentComputerActivityStore((state) => state.activity[threadId]);
+  const capture = useAgentComputerActivityStore((state) => state.lastCapture[threadId]);
   const grants = useAgentComputerActivityStore((state) => state.grants[threadId] ?? EMPTY_GRANTS);
   const appNames = useAgentComputerActivityStore((state) => state.appNames);
   const paused = useAgentComputerActivityStore((state) => state.paused[threadId]);
@@ -41,8 +42,17 @@ export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
       <p>
         {activity?.appName} {activity?.op} · {activity?.status}
       </p>
-      {activity?.thumbnailDataUrl ? (
-        <img src={activity.thumbnailDataUrl} className="max-w-80 rounded" alt="Last agent action" />
+      {capture?.thumbnailDataUrl ? (
+        <figure>
+          <img
+            src={capture.thumbnailDataUrl}
+            className="max-w-80 rounded"
+            alt="Last captured computer action"
+          />
+          <figcaption className="text-xs text-muted-foreground">
+            Last capture{capture.appName ? ` · ${capture.appName}` : ""}
+          </figcaption>
+        </figure>
       ) : null}
       {grants.map((grant) => (
         <div key={grant.appId} className="flex items-center justify-between gap-2">

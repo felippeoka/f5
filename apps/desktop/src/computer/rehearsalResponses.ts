@@ -7,6 +7,18 @@ import {
   type DesktopComputerHostMessage,
 } from "@t3tools/contracts";
 
+// Exact F5 literals only; unknown details can contain screen or input content.
+const executionCodes = new Map([
+  ["App is not running.", "app-not-running"],
+  ["Accessibility observation timed out.", "accessibility-timeout"],
+  ["Observation timed out.", "helper-observation-timeout"],
+  ["Request expired before execution.", "request-expired"],
+  ["Native action failed.", "native-action-failed"],
+]);
+export function rehearsalExecutionCode(message: string): string | undefined {
+  return executionCodes.get(message);
+}
+
 /** Correlates terminal responses without retaining image, accessibility or input content. */
 export class RehearsalResponses {
   private readonly pending = new Map<

@@ -21,12 +21,15 @@ const output = arg("--output");
 const sourceHome = arg("--codex-home");
 const binary = arg("--codex-binary");
 const statusOnly = args.includes("--status-only");
+const controlsOnly = args.includes("--controls-only");
+const actionsOnly = args.includes("--actions-only");
 if (
   process.platform !== "darwin" ||
   process.env.F5_COMPUTER_ELECTRON_REHEARSAL !== "1" ||
   !output ||
   !sourceHome ||
-  !binary
+  !binary ||
+  [statusOnly, controlsOnly, actionsOnly].filter(Boolean).length > 1
 ) {
   process.stderr.write(
     "Human coordination and real quota required: F5_COMPUTER_ELECTRON_REHEARSAL=1 bun apps/desktop/scripts/rehearse-computer-electron.mjs --codex-home <selected profile home> --codex-binary <path> --output <new report.json>\n",
@@ -187,6 +190,8 @@ try {
         ["serverBundle", join(repo, "apps/server/dist/index.mjs")],
         ["rendererIndex", join(repo, "apps/web/dist/index.html")],
         ["rehearsalSource", join(desktopDir, "scripts/rehearse-computer-electron.mjs")],
+        ["observerSource", join(desktopDir, "src/computer/rehearsalElectronObservation.ts")],
+        ["responseSource", join(desktopDir, "src/computer/rehearsalResponses.ts")],
       ].map(async ([name, path]) => [
         name,
         createHash("sha256")
@@ -534,67 +539,102 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       await delay(2000);
       stage = "first-action-turn";
       await startTurn(
-        `Continue the isolated F5 UI rehearsal. Access was approved in the previous turn for exact app ${appId}; use only F5 computer tools for that app. You may use tool discovery to locate them. Call computer_status, activate it, take computer_screenshot, inspect it. Press Rehearsal press once using computer_element_action, focus Rehearsal input with an element action, and type exactly this synthetic text: F5_ELECTRON_REHEARSAL Ω🙂. Finish READY. Never use shell, files, network, any other app or the secure field. Stop immediately on any interruption, ambiguity or failed action.`,
+        controlsOnly
+          ? `Continue the isolated F5 UI controls check. Access was approved for exact app ${appId}; use only F5 computer tools for that app. Call computer_status, activate that app, take computer_screenshot, then finish READY. Do not inspect, click, type, send keys, scroll, drag or perform element actions. Never use shell, files, network or other apps. Stop immediately on any interruption, ambiguity or failed action.`
+          : `Continue the isolated F5 UI rehearsal. Access was approved in the previous turn for exact app ${appId}; use only F5 computer tools for that app. You may use tool discovery to locate them. Call computer_status, activate it, take computer_screenshot, inspect it. Press Rehearsal press once using computer_element_action, focus Rehearsal input with an element action, and type exactly this synthetic text: F5_ELECTRON_REHEARSAL Ω🙂. Finish READY. Never use shell, files, network, any other app or the secure field. Stop immediately on any interruption, ambiguity or failed action.`,
       );
       await waitTurn();
       checks.humanTrustedConsent = await page.evaluate(
         () => window.__computerRehearsal.trustedConsent,
       );
-      checks.firstTurnNativeResponses = Object.values((await observer()).responses).every(Boolean);
-      checks.fixtureReceivedOnePressAndUnicode = fixture.presses() === 1 && fixture.typed();
+      const first = await observer();
+      if (controlsOnly) {
+        checks.controlsFirstCaptureSucceeded = first.responses.nativeCaptureSucceeded;
+        checks.controlsFirstActivationSucceeded = first.operations.some(
+          (op) => op.op === "activateApp" && op.outcome === "ok",
+        );
+      } else {
+        checks.firstTurnNativeResponses = Object.values(first.responses).every(Boolean);
+        checks.fixtureReceivedOnePressAndUnicode = fixture.presses() === 1 && fixture.typed();
+      }
       if (
         !checks.humanTrustedConsent ||
-        !checks.firstTurnNativeResponses ||
-        !checks.fixtureReceivedOnePressAndUnicode
+        (controlsOnly
+          ? !checks.controlsFirstCaptureSucceeded || !checks.controlsFirstActivationSucceeded
+          : !checks.firstTurnNativeResponses || !checks.fixtureReceivedOnePressAndUnicode)
       )
         throw new Error("First turn evidence incomplete.");
-      stage = "human-pause";
-      checks.pauseControlVisibleAfterTurn = await page
-        .getByTestId("computer-live-card")
-        .getByRole("button", { name: "Pause", exact: true })
-        .isVisible();
-      if (!checks.pauseControlVisibleAfterTurn) throw new Error("Pause control was not visible.");
-      await application.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows()
-          .find((w) => w.webContents.getURL().startsWith("t3:"))
-          ?.focus(),
-      );
-      await instructions(
-        "First turn finished. Click Pause in the Agent computer control card now.",
-      );
-      await waitFor(() => page.evaluate(() => window.__computerRehearsal.paused), 180000);
-      checks.humanPauseMirrored =
-        (await observer()).pauseObserved &&
-        (await page.evaluate(() => window.__computerRehearsal.trustedPause));
-      await delay(1500);
-      checks.untrustedResumeRefused = await page.evaluate(async (id) => {
-        try {
-          await window.desktopBridge.computerAutomation.setPaused(id, false);
-          return false;
-        } catch {
-          return true;
-        }
-      }, threadId);
-      if (!checks.untrustedResumeRefused) throw new Error("Untrusted resume was accepted.");
-      stage = "human-resume";
-      await instructions(
-        "Click Resume in the same card and confirm Resume in the native F5 dialog, then keep mouse and keyboard idle. The agent will take a fresh screenshot and click the test button once.",
-      );
-      await waitFor(() => page.evaluate(() => !window.__computerRehearsal.paused), 180000);
-      checks.humanResumeMirrored =
-        (await observer()).resumeObserved &&
-        (await page.evaluate(() => window.__computerRehearsal.trustedResume));
+      if (!actionsOnly) {
+        stage = "human-pause";
+        checks.pauseControlVisibleAfterTurn = await page
+          .getByTestId("computer-live-card")
+          .getByRole("button", { name: "Pause", exact: true })
+          .isVisible();
+        if (!checks.pauseControlVisibleAfterTurn) throw new Error("Pause control was not visible.");
+        await application.evaluate(({ BrowserWindow }) =>
+          BrowserWindow.getAllWindows()
+            .find((w) => w.webContents.getURL().startsWith("t3:"))
+            ?.focus(),
+        );
+        await instructions(
+          "First turn finished. Click Pause in the Agent computer control card now.",
+        );
+        await waitFor(() => page.evaluate(() => window.__computerRehearsal.paused), 180000);
+        checks.humanPauseMirrored =
+          (await observer()).pauseObserved &&
+          (await page.evaluate(() => window.__computerRehearsal.trustedPause));
+        await delay(1500);
+        checks.untrustedResumeRefused = await page.evaluate(async (id) => {
+          try {
+            await window.desktopBridge.computerAutomation.setPaused(id, false);
+            return false;
+          } catch {
+            return true;
+          }
+        }, threadId);
+        if (!checks.untrustedResumeRefused) throw new Error("Untrusted resume was accepted.");
+        stage = "human-resume";
+        await instructions(
+          controlsOnly
+            ? "Click Resume in the same card and confirm Resume in the native F5 dialog, then keep input idle. The agent will only activate the fixture and take a fresh screenshot."
+            : "Click Resume in the same card and confirm Resume in the native F5 dialog, then keep mouse and keyboard idle. The agent will take a fresh screenshot and click the test button once.",
+        );
+        await waitFor(() => page.evaluate(() => !window.__computerRehearsal.paused), 180000);
+        checks.humanResumeMirrored =
+          (await observer()).resumeObserved &&
+          (await page.evaluate(() => window.__computerRehearsal.trustedResume));
+      }
       const before = await observer();
       await delay(2000);
-      stage = "second-turn-after-resume";
+      stage = actionsOnly ? "second-action-turn" : "second-turn-after-resume";
       await startTurn(
-        `Continue this explicit isolated UI rehearsal. Use only F5 computer tools for exact app ${appId}; you may use tool discovery to locate them. First computer_status; activate the app; take a NEW computer_screenshot; inspect Rehearsal press and compute its center from its bounds. Use computer_click once at that center with the screenshot displayId. Never use a cached screenshot, element action for this click, shell, filesystem, network, other apps or the secure field. Finish READY. Stop immediately on any failure or interruption; do not retry.`,
+        controlsOnly
+          ? `Continue this isolated F5 controls check. Use only F5 computer tools for exact app ${appId}. First computer_status; activate that app; take a NEW computer_screenshot, then finish READY. Do not inspect, click, type, send keys, scroll, drag or perform element actions. Never use shell, filesystem, network or other apps. Stop immediately on any failure or interruption; do not retry.`
+          : `Continue this explicit isolated UI rehearsal. Use only F5 computer tools for exact app ${appId}; you may use tool discovery to locate them. First computer_status; activate the app; take a NEW computer_screenshot; inspect Rehearsal press and compute its center from its bounds. Use computer_click once at that center with the screenshot displayId. Never use a cached screenshot, element action for this click, shell, filesystem, network, other apps or the secure field. Finish READY. Stop immediately on any failure or interruption; do not retry.`,
       );
       await waitTurn();
       const after = await observer();
-      checks.freshCaptureAfterResume = after.captureResponses > before.captureResponses;
-      checks.fixtureReceivedSecondCoordinatePress = fixture.presses() === 2;
-      const visibleImage = page.getByAltText("Last agent action");
+      checks[actionsOnly ? "freshCaptureOnNextTurn" : "freshCaptureAfterResume"] =
+        after.captureResponses > before.captureResponses;
+      if (controlsOnly)
+        checks.controlsOnlyEmittedNoInput =
+          fixture.presses() === 0 &&
+          !fixture.typed() &&
+          after.operations.every(
+            (op) =>
+              ![
+                "inspect",
+                "type",
+                "key",
+                "click",
+                "move",
+                "drag",
+                "scroll",
+                "elementAction",
+              ].includes(op.op),
+          );
+      else checks.fixtureReceivedSecondCoordinatePress = fixture.presses() === 2;
+      const visibleImage = page.getByAltText("Last captured computer action");
       checks.liveCardThumbnailRendered =
         (await visibleImage.isVisible()) &&
         (await visibleImage.evaluate((img) => img.complete && img.naturalWidth > 0));
@@ -609,8 +649,10 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       clearInterval(overlayTimer);
       await Promise.race([overlayPoll, delay(1000)]);
       checks.realOverlayObserved = overlay.observed && overlay.protectedOptions;
-      checks.realSemanticOutlineObserved = overlay.semanticOutline;
-      checks.realCoordinateCursorObserved = overlay.coordinateCursor;
+      if (!controlsOnly) {
+        checks.realSemanticOutlineObserved = overlay.semanticOutline;
+        checks.realCoordinateCursorObserved = overlay.coordinateCursor;
+      }
       checks.overlayClosedAfterLease = await application.evaluate(
         ({ BrowserWindow }) =>
           !BrowserWindow.getAllWindows().some((w) =>
@@ -705,7 +747,11 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         recordedAt: new Date().toISOString(),
         scope: statusOnly
           ? "unsigned-real-electron-codex-read-only-discovery-diagnostic"
-          : "unsigned-real-electron-codex-human-consent-synthetic-app",
+          : controlsOnly
+            ? "unsigned-real-electron-codex-human-consent-and-controls"
+            : actionsOnly
+              ? "unsigned-real-electron-codex-human-consent-and-actions"
+              : "unsigned-real-electron-codex-human-consent-synthetic-app",
         platform: process.platform,
         arch: process.arch,
         osVersion: release(),
@@ -726,6 +772,8 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         consentObservation,
         providerErrorCodes,
         checks,
+        ...(controlsOnly ? { controlsOnly: true } : {}),
+        ...(actionsOnly ? { actionsOnly: true } : {}),
         limitations: [
           ...(statusOnly
             ? [
@@ -733,7 +781,15 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
               ]
             : [
                 "One real provider and one synthetic AppKit app, on the current display only",
-                "Human app consent and pause/resume; no session-actions consent in full-access mode",
+                actionsOnly
+                  ? "Human app consent; Pause/Resume is excluded from this actions-only run"
+                  : "Human app consent and pause/resume; no session-actions consent in full-access mode",
+                ...(actionsOnly ? ["No session-actions consent in full-access mode"] : []),
+                ...(controlsOnly
+                  ? [
+                      "Controls-only check: no inspection, pointer/keyboard/semantic input or coordinate/element overlay proof",
+                    ]
+                  : []),
               ]),
           "No installed-build TCC attribution, signed packaging, real-app or multi-profile/display certification",
           "Overlay capture exclusion, hung-renderer/host stop latency, Stop interruption and Windows runtime remain pending",

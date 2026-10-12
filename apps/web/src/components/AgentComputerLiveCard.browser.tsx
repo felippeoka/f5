@@ -91,3 +91,32 @@ it("retains idle controls while apps are granted and removes them after access i
     await screen.unmount();
   }
 });
+
+it("renders an earlier capture after no-image actions and clears it on revoke", async () => {
+  const store = useAgentComputerActivityStore.getState();
+  store.setGrants(threadId, [{ appId: "fixture", tier: "full", allowTyping: false }]);
+  store.record({
+    threadId,
+    op: "activateApp",
+    status: "completed",
+    backend: "native",
+    appName: "Synthetic fixture",
+    thumbnailDataUrl:
+      "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='2'%3E%3Crect width='2' height='2' fill='gray'/%3E%3C/svg%3E",
+  });
+  const screen = await render(<AgentComputerLiveCard threadId={threadId} />);
+  try {
+    const image = page.getByAltText("Last captured computer action");
+    await expect.element(image).toBeVisible();
+    store.record({ threadId, op: "type", status: "completed", backend: "native" });
+    await expect.element(image).toBeVisible();
+    await expect
+      .element(page.getByText("Last capture · Synthetic fixture", { exact: true }))
+      .toBeVisible();
+    await expect.element(page.getByText("type · completed", { exact: true })).toBeVisible();
+    store.setGrants(threadId, []);
+    await expect.element(image).not.toBeInTheDocument();
+  } finally {
+    await screen.unmount();
+  }
+});

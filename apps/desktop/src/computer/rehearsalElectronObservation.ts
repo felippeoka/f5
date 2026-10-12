@@ -7,7 +7,7 @@ import {
   DesktopComputerHostMessage,
   type ComputerAutomationRequest,
 } from "@t3tools/contracts";
-import { RehearsalResponses } from "./rehearsalResponses";
+import { RehearsalResponses, rehearsalExecutionCode } from "./rehearsalResponses";
 
 /** Development-only IPC observer. Never changes messages or keeps raw tool I/O. */
 export class ElectronRehearsalObservation {
@@ -21,6 +21,8 @@ export class ElectronRehearsalObservation {
   private resumeObserved = false;
   private captureResponses = 0;
   private inspectionResponses = 0;
+  private activityMessages = 0;
+  private activityThumbnails = 0;
   private overflow = false;
   private readonly accessRequests = new Set<string>();
   private readonly accessAnswers = new Set<string>();
@@ -31,6 +33,9 @@ export class ElectronRehearsalObservation {
       this.hostStatus = raw.status.available
         ? { available: true }
         : { available: false, reason: raw.status.reason };
+    } else if (raw.type === "activity") {
+      this.activityMessages++;
+      if (raw.activity.thumbnailDataUrl) this.activityThumbnails++;
     } else if (raw.type === "accessRequested") {
       if (this.accessRequests.size >= 128) this.overflow = true;
       else this.accessRequests.add(raw.request.requestId);
@@ -61,7 +66,21 @@ export class ElectronRehearsalObservation {
           if (error._tag === "Interrupted") summary.cause = error.cause;
           if (error._tag === "TargetBlocked") summary.kind = error.kind;
           if (error._tag === "NotGranted") summary.needed = error.needed;
+          if (error._tag === "Execution") {
+            const code = rehearsalExecutionCode(error.message);
+            if (code) summary.executionCode = code;
+          }
         } else summary.outcome = "invalid-error";
+      } else if (op === "activateApp" || op === "openApp") {
+        if (raw.result && typeof raw.result === "object") {
+          const action = raw.result as Record<string, unknown>;
+          summary.actionCompleted = action.actionCompleted === true;
+          summary.actionCaptureSucceeded =
+            Schema.is(ComputerScreenshot)(action.screenshot) && action.screenshot.data.length > 0;
+          const error = action.screenshotError;
+          if (typeof error === "string" && rehearsalProviderErrorCodes([{ _tag: error }]).length)
+            summary.screenshotError = error;
+        }
       } else if (op === "listApps") {
         const valid = Schema.is(Schema.Array(ComputerApp))(raw.result);
         summary.validApps = valid;
@@ -97,6 +116,8 @@ export class ElectronRehearsalObservation {
       resumeObserved: this.resumeObserved,
       captureResponses: this.captureResponses,
       inspectionResponses: this.inspectionResponses,
+      activityMessages: this.activityMessages,
+      activityThumbnails: this.activityThumbnails,
       traceComplete: !this.overflow,
       accessRequests: this.accessRequests.size,
       accessAnswersForwarded: this.accessAnswers.size,

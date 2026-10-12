@@ -41,9 +41,10 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegat
     content.addSubview(focusSecure)
     counter.frame = NSRect(x: 30, y: 40, width: 400, height: 28)
     content.addSubview(counter)
-    window.makeKeyAndOrderFront(nil)
+    let background = CommandLine.arguments.contains("--background")
+    if background { window.orderBack(nil) } else { window.makeKeyAndOrderFront(nil) }
     window.makeFirstResponder(field)
-    NSApplication.shared.activate(ignoringOtherApps: true)
+    if !background { NSApplication.shared.activate(ignoringOtherApps: true) }
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
       FileHandle.standardOutput.write(Data("FIXTURE_READY\n".utf8))
     }
@@ -68,5 +69,6 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegat
 let application = NSApplication.shared
 let delegate = FixtureDelegate()
 application.delegate = delegate
-application.setActivationPolicy(.regular)
+application.setActivationPolicy(
+  CommandLine.arguments.contains("--background") ? .accessory : .regular)
 application.run()

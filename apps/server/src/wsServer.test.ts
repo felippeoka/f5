@@ -1047,6 +1047,47 @@ describe("WebSocket Server", () => {
     },
   );
 
+  it("delivers native action activity and ephemeral thumbnails from private IPC to clients", async () => {
+    const ipc = Object.assign(new EventEmitter(), {
+      connected: true,
+      send: (_message: unknown, callback: (error: Error | null) => void) => {
+        callback(null);
+        return true;
+      },
+    });
+    const host = new DesktopComputerHost("profile", "backend", ipc, true);
+    const broker = new ComputerAutomationBrokerRuntime(host, {
+      platform: "darwin",
+      storage: { load: async () => [], save: async () => {} },
+      resolve: async () => {
+        throw new Error("No native action should execute in this transport test.");
+      },
+    });
+    try {
+      server = await createTestServer({
+        createServerFactory: () =>
+          createServer().pipe(Effect.provideService(ComputerAutomationBroker, broker)),
+      });
+      const address = server.address();
+      const [ws] = await connectAndAwaitWelcome(
+        typeof address === "object" && address ? address.port : 0,
+      );
+      connections.push(ws);
+      const activity = {
+        threadId: "fixture-thread",
+        backend: "native",
+        op: "activateApp",
+        status: "completed",
+        thumbnailDataUrl: "data:image/jpeg;base64,SYNTHETIC",
+      };
+      ipc.emit("message", { type: "activity", activity });
+      const push = await waitForPush(ws, WS_CHANNELS.computerActivity);
+      expect(push.data).toEqual(activity);
+    } finally {
+      broker.close();
+    }
+  });
+
   afterEach(async () => {
     for (const ws of connections) {
       ws.close();
@@ -1221,7 +1262,9 @@ describe("WebSocket Server", () => {
         // The response arrives while the real capability is throttled. The
         // scoped retry must perform a second probe after its five-second gate.
         await vi.waitFor(() => expect(probeCalls).toBe(2), { timeout: 7000 });
-        expect(refreshCalls).toBe(2);
+        // A timer can wake just before the gate, causing another refused
+        // in-memory refresh attempt. The real probe count must still be exactly two.
+        expect(refreshCalls).toBeGreaterThanOrEqual(2);
       }
     },
     15000,

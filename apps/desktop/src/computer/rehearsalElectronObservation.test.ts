@@ -5,7 +5,10 @@ import {
   rehearsalProviderErrorCodes,
 } from "./rehearsalElectronObservation";
 
-const request = (op: "screenshot" | "inspect" | "type" | "listApps", requestId: string = op) =>
+const request = (
+  op: "screenshot" | "inspect" | "type" | "listApps" | "activateApp",
+  requestId: string = op,
+) =>
   ({
     requestId,
     payloadHash: "a".repeat(64),
@@ -33,6 +36,70 @@ const screenshot = {
   data: "PRIVATE_SENTINEL",
   hiddenContent: true,
 };
+
+it("counts IPC activity and action captures without retaining thumbnails or screenshot errors", () => {
+  const observer = new ElectronRehearsalObservation();
+  observer.receive({
+    type: "activity",
+    activity: {
+      threadId: "PRIVATE_SENTINEL",
+      backend: "native",
+      op: "activateApp",
+      status: "completed",
+      appName: "PRIVATE_SENTINEL",
+      thumbnailDataUrl: "PRIVATE_SENTINEL",
+    },
+  });
+  for (const [id, error] of [
+    ["known", "missing-permissions"],
+    ["private", "PRIVATE_SENTINEL"],
+    ["tag", "Unavailable"],
+  ]) {
+    observer.receive({ type: "request", request: request("activateApp", id) });
+    observer.receive({
+      type: "response",
+      requestId: id,
+      result: {
+        actionCompleted: true,
+        screenshot,
+        screenshotError: error,
+      },
+    });
+  }
+  const snapshot = observer.snapshot();
+  expect(snapshot.activityMessages).toBe(1);
+  expect(snapshot.activityThumbnails).toBe(1);
+  expect(snapshot.operations).toEqual([
+    { op: "activateApp", outcome: "ok", actionCompleted: true, actionCaptureSucceeded: true },
+    { op: "activateApp", outcome: "ok", actionCompleted: true, actionCaptureSucceeded: true },
+    {
+      op: "activateApp",
+      outcome: "ok",
+      actionCompleted: true,
+      actionCaptureSucceeded: true,
+      screenshotError: "Unavailable",
+    },
+  ]);
+  expect(JSON.stringify(snapshot)).not.toContain("PRIVATE_SENTINEL");
+});
+
+it("classifies fixed F5 execution failures without retaining arbitrary error detail", () => {
+  const observer = new ElectronRehearsalObservation();
+  for (const [id, message] of [
+    ["timeout", "Accessibility observation timed out."],
+    ["private", "PRIVATE_SENTINEL"],
+    ["lookalike", "Accessibility observation timed out. PRIVATE_SENTINEL"],
+  ]) {
+    observer.receive({ type: "request", request: request("inspect", id) });
+    observer.receive({ type: "response", requestId: id, error: { _tag: "Execution", message } });
+  }
+  expect(observer.snapshot().operations).toEqual([
+    { op: "inspect", outcome: "Execution", executionCode: "accessibility-timeout" },
+    { op: "inspect", outcome: "Execution" },
+    { op: "inspect", outcome: "Execution" },
+  ]);
+  expect(JSON.stringify(observer.snapshot())).not.toContain("PRIVATE_SENTINEL");
+});
 
 it("validates metadata responses and omits app identities from the diagnostic", () => {
   const observer = new ElectronRehearsalObservation();

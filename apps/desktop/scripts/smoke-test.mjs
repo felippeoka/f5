@@ -76,6 +76,13 @@ try {
   await page
     .getByRole("button", { name: "Add your first project", exact: true })
     .waitFor({ timeout: 60_000 });
+  // The renderer can become ready before Electron shows its native surface.
+  // Capturing that hidden surface under Xvfb can fail with a zero-width bitmap.
+  await page.waitForFunction(
+    () => document.visibilityState === "visible" && innerWidth > 0 && innerHeight > 0,
+    undefined,
+    { timeout: 60_000 },
+  );
   await page.screenshot({ path: join(directory, "welcome.png") });
   await page.evaluate(async () => {
     const computer = window.desktopBridge.computerAutomation;
