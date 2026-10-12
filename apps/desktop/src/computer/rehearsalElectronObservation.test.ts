@@ -46,6 +46,7 @@ it("counts IPC activity and action captures without retaining thumbnails or scre
       backend: "native",
       op: "activateApp",
       status: "completed",
+      outcome: "app-resolution-failed",
       appName: "PRIVATE_SENTINEL",
       thumbnailDataUrl: "PRIVATE_SENTINEL",
     },
@@ -69,6 +70,7 @@ it("counts IPC activity and action captures without retaining thumbnails or scre
   const snapshot = observer.snapshot();
   expect(snapshot.activityMessages).toBe(1);
   expect(snapshot.activityThumbnails).toBe(1);
+  expect(snapshot.toolOutcomeErrors).toEqual(["app-resolution-failed"]);
   expect(snapshot.operations).toEqual([
     { op: "activateApp", outcome: "ok", actionCompleted: true, actionCaptureSucceeded: true },
     { op: "activateApp", outcome: "ok", actionCompleted: true, actionCaptureSucceeded: true },

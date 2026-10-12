@@ -32,6 +32,7 @@ function setup(displays = [display]) {
     invoke,
     host: { status: () => ({ available: true, displays }) },
     requestAccess: vi.fn(async () => ({})),
+    reportToolFailure: vi.fn(),
   };
   return {
     invoke,
@@ -45,6 +46,43 @@ function setup(displays = [display]) {
   };
 }
 describe("shared computer tool catalog", () => {
+  it("reports safe pre-dispatch failures without screen contents or invalid argument values", async () => {
+    const h = setup();
+    await callComputerTool(h.context, "computer_type", { text: { secret: "PRIVATE_SENTINEL" } });
+    expect(h.broker.reportToolFailure).toHaveBeenLastCalledWith(
+      "t",
+      "s",
+      "type",
+      "invalid-arguments",
+    );
+    expect(h.invoke).not.toHaveBeenCalled();
+    h.invoke.mockResolvedValue([
+      { appId: "one", name: "Fixture" },
+      { appId: "two", name: "Fixture" },
+    ]);
+    await callComputerTool(h.context, "computer_element_action", {
+      app: "Fixture",
+      snapshotId: "snapshot",
+      elementRef: "element",
+      action: "press",
+    });
+    expect(h.broker.reportToolFailure).toHaveBeenLastCalledWith(
+      "t",
+      "s",
+      "elementAction",
+      "app-resolution-failed",
+    );
+    expect(h.invoke).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(h.broker.reportToolFailure.mock.calls)).not.toContain("PRIVATE_SENTINEL");
+    h.broker.reportToolFailure.mockImplementation(() => {
+      throw new Error("UI unavailable");
+    });
+    const result = await callComputerTool(h.context, "computer_click", { x: 1, y: 1 });
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      error: { _tag: "Execution", message: "Take a computer_screenshot first." },
+    });
+  });
   it("routes an explicit typing upgrade to the shared grant gate", async () => {
     const h = setup();
     const response = await callComputerTool(h.context, "computer_request_access", {

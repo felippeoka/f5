@@ -10,6 +10,7 @@ import {
   type ComputerLeaseHolder,
   type ComputerAccessRequested,
   type ComputerActivity,
+  type ComputerToolOutcomeCode,
   type DesktopComputerHostMessage,
   type ChromeLeaseHolder,
 } from "@t3tools/contracts";
@@ -618,6 +619,18 @@ export class ComputerAutomationBrokerRuntime {
         this.access.policyChanged(threadId);
       }
     }
+  }
+  reportToolFailure(
+    threadId: string,
+    generation: string,
+    op: string,
+    outcome: ComputerToolOutcomeCode,
+  ): void {
+    if (this.generation(threadId) !== generation) return;
+    this.publish({
+      channel: "computer.activity",
+      data: { threadId, backend: "native", op, status: "failed", outcome },
+    });
   }
   subscribe(listener: (event: ComputerBrokerEvent) => void): () => void {
     this.listeners.add(listener);

@@ -729,6 +729,18 @@ discard that capture; the earlier image is never attached to a later action. Sto
 browser regressions exercise this sequence and revocation. The earlier inspection
 failure remains unexplained; a later successful observation does not retroactively
 turn that failed report into a pass. A run of the corrected renderer is still required.
+The [corrected-renderer attempt](computer-certification/2026-10-12-macos-corrected-renderer-pre-input-failure.json)
+at `073e4ccb60` passed native consent, activation, capture and inspection, but stopped
+before any semantic or keyboard input reached the helper. Its last observed request
+was app resolution, with no tagged helper failure. It did not reach thumbnail validation
+and remains failed; it does not establish why the agent stopped. The shared tool
+boundary now publishes fixed, session-scoped outcome codes for failed calls, including
+failures before native dispatch, without names, input values or raw error text. Unknown
+details remain discarded and model-facing errors remain intact. The rehearsal captures
+those ephemeral WebSocket codes separately from native IPC outcomes. Prompts explicitly
+use the exact app ID in every app argument and request post-activation captures instead
+of leaving those choices to the model. These changes improve reproducibility and
+diagnosis; they do not retroactively identify this attempt's cause or weaken any check.
 
 For background inspection without changing focus or starting a provider session:
 

@@ -6,7 +6,12 @@ import { dirname, join, resolve } from "node:path";
 import { release, tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { F5_PROTOCOL_VERSION, ORCHESTRATION_WS_METHODS } from "@t3tools/contracts";
+import {
+  F5_PROTOCOL_VERSION,
+  ORCHESTRATION_WS_METHODS,
+  ComputerToolOutcomeCode,
+} from "@t3tools/contracts";
+import { Schema } from "effect";
 import { createRehearsalFixture } from "../src/computer/rehearsalFixture.ts";
 import { rehearsalProviderErrorCodes } from "../src/computer/rehearsalElectronObservation.ts";
 
@@ -102,6 +107,7 @@ let nativeObservation;
 let threadObservation;
 let consentObservation;
 let providerErrorCodes;
+let toolOutcomeErrors;
 const checks = {};
 const halt = () => {
   interrupted = true;
@@ -313,6 +319,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         trustedResume: false,
         activitySeen: false,
         thumbnailSeen: false,
+        toolOutcomeErrors: [],
         leaseSeen: false,
         consentSettled: false,
         consentAllowed: false,
@@ -363,6 +370,8 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           state.leaseSeen = true;
         if (message.channel === "computer.activity") {
           state.activitySeen = true;
+          if (typeof message.data.outcome === "string" && state.toolOutcomeErrors.length < 128)
+            state.toolOutcomeErrors.push(message.data.outcome.slice(0, 64));
           state.thumbnailSeen ||=
             typeof message.data.thumbnailDataUrl === "string" &&
             message.data.thumbnailDataUrl.startsWith("data:image/jpeg;base64,") &&
@@ -540,8 +549,8 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       stage = "first-action-turn";
       await startTurn(
         controlsOnly
-          ? `Continue the isolated F5 UI controls check. Access was approved for exact app ${appId}; use only F5 computer tools for that app. Call computer_status, activate that app, take computer_screenshot, then finish READY. Do not inspect, click, type, send keys, scroll, drag or perform element actions. Never use shell, files, network or other apps. Stop immediately on any interruption, ambiguity or failed action.`
-          : `Continue the isolated F5 UI rehearsal. Access was approved in the previous turn for exact app ${appId}; use only F5 computer tools for that app. You may use tool discovery to locate them. Call computer_status, activate it, take computer_screenshot, inspect it. Press Rehearsal press once using computer_element_action, focus Rehearsal input with an element action, and type exactly this synthetic text: F5_ELECTRON_REHEARSAL Ω🙂. Finish READY. Never use shell, files, network, any other app or the secure field. Stop immediately on any interruption, ambiguity or failed action.`,
+          ? `Continue the isolated F5 UI controls check. Access was approved for exact app ${appId}; use only F5 computer tools for that app. Call computer_status, call computer_activate_app with app set to the exact appId and screenshot:true, take computer_screenshot, then finish READY. Do not inspect, click, type, send keys, scroll, drag or perform element actions. Never use shell, files, network or other apps. Stop immediately on any interruption, ambiguity or failed action.`
+          : `Continue the isolated F5 UI rehearsal. Access was approved in the previous turn for exact app ${appId}; use only F5 computer tools for that app. You may use tool discovery to locate them. Call computer_status, call computer_activate_app with app set to the exact appId and screenshot:true, take computer_screenshot, inspect the exact appId. Use this exact appId in every tool app argument; never substitute the display name. Press Rehearsal press once using computer_element_action, focus Rehearsal input with an element action, and type exactly this synthetic text: F5_ELECTRON_REHEARSAL Ω🙂. Finish READY. Never use shell, files, network, any other app or the secure field. Stop immediately on any interruption, ambiguity or failed action.`,
       );
       await waitTurn();
       checks.humanTrustedConsent = await page.evaluate(
@@ -609,8 +618,8 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       stage = actionsOnly ? "second-action-turn" : "second-turn-after-resume";
       await startTurn(
         controlsOnly
-          ? `Continue this isolated F5 controls check. Use only F5 computer tools for exact app ${appId}. First computer_status; activate that app; take a NEW computer_screenshot, then finish READY. Do not inspect, click, type, send keys, scroll, drag or perform element actions. Never use shell, filesystem, network or other apps. Stop immediately on any failure or interruption; do not retry.`
-          : `Continue this explicit isolated UI rehearsal. Use only F5 computer tools for exact app ${appId}; you may use tool discovery to locate them. First computer_status; activate the app; take a NEW computer_screenshot; inspect Rehearsal press and compute its center from its bounds. Use computer_click once at that center with the screenshot displayId. Never use a cached screenshot, element action for this click, shell, filesystem, network, other apps or the secure field. Finish READY. Stop immediately on any failure or interruption; do not retry.`,
+          ? `Continue this isolated F5 controls check. Use only F5 computer tools for exact app ${appId}. First computer_status; call computer_activate_app with app set to the exact appId and screenshot:true; take a NEW computer_screenshot, then finish READY. Do not inspect, click, type, send keys, scroll, drag or perform element actions. Never use shell, filesystem, network or other apps. Stop immediately on any failure or interruption; do not retry.`
+          : `Continue this explicit isolated UI rehearsal. Use only F5 computer tools for exact app ${appId}; you may use tool discovery to locate them. First computer_status; call computer_activate_app with app set to the exact appId and screenshot:true; take a NEW computer_screenshot; inspect Rehearsal press and compute its center from its bounds. Use computer_click once at that center with the screenshot displayId and screenshot:true. Never use a cached screenshot, element action for this click, shell, filesystem, network, other apps or the secure field. Finish READY. Stop immediately on any failure or interruption; do not retry.`,
       );
       await waitTurn();
       const after = await observer();
@@ -681,6 +690,10 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       activityLimit: 100,
     }).catch(() => undefined);
     providerErrorCodes = rehearsalProviderErrorCodes(tail?.activities);
+    toolOutcomeErrors = await page
+      .evaluate(() => window.__computerRehearsal.toolOutcomeErrors)
+      .then((codes) => [...new Set(codes.filter(Schema.is(ComputerToolOutcomeCode)))].sort())
+      .catch(() => []);
     if (statusOnly) {
       checks.noTaggedProviderErrors = providerErrorCodes.length === 0;
       checks.hostAvailableAtEnd = nativeObservation?.hostStatus?.available === true;
@@ -735,6 +748,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       .evaluate((id) => window.desktopBridge.computerAutomation.setPaused(id, true), threadId)
       .catch(() => {});
   if (application) await application.close().catch(() => {});
+  if (failureStage) process.stdout.write("Test closed. You can use your computer again.\n");
   fixture?.child.kill();
   await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   const passed = !failureStage && !interrupted && Object.values(checks).every(Boolean);
@@ -771,6 +785,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         threadObservation,
         consentObservation,
         providerErrorCodes,
+        toolOutcomeErrors,
         checks,
         ...(controlsOnly ? { controlsOnly: true } : {}),
         ...(actionsOnly ? { actionsOnly: true } : {}),

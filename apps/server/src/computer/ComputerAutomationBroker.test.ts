@@ -95,6 +95,28 @@ async function harness() {
   };
 }
 describe("computer broker safety boundaries", () => {
+  it("publishes tool-boundary outcome codes only for the matching session", async () => {
+    const h = await harness();
+    const events = vi.fn();
+    h.broker.subscribe(events);
+    try {
+      h.broker.reportToolFailure("t", "old-session", "elementAction", "app-resolution-failed");
+      expect(events).not.toHaveBeenCalled();
+      h.broker.reportToolFailure("t", "s", "elementAction", "app-resolution-failed");
+      expect(events).toHaveBeenCalledExactlyOnceWith({
+        channel: "computer.activity",
+        data: {
+          threadId: "t",
+          backend: "native",
+          op: "elementAction",
+          status: "failed",
+          outcome: "app-resolution-failed",
+        },
+      });
+    } finally {
+      h.broker.close();
+    }
+  });
   it("allows remote preview resume when computer tools were installed but never used", async () => {
     const h = await harness();
     try {

@@ -334,11 +334,32 @@ export const ChromeNativeHostTransactionSummary = Schema.Struct({
   state: Schema.Literals(["approved", "launched", "restored"]),
 });
 export type ChromeNativeHostTransactionSummary = typeof ChromeNativeHostTransactionSummary.Type;
+export const ComputerToolOutcomeCode = Schema.Literals([
+  "Unavailable",
+  "Busy",
+  "Interrupted",
+  "OutcomeUnknown",
+  "NotGranted",
+  "TargetBlocked",
+  "GeometryChanged",
+  "StaleElement",
+  "UnsupportedAction",
+  "ReplayRejected",
+  "PayloadMismatch",
+  "ResultTooLarge",
+  "Execution",
+  "invalid-arguments",
+  "app-resolution-failed",
+  "fresh-screenshot-required",
+  "display-required",
+]);
+export type ComputerToolOutcomeCode = typeof ComputerToolOutcomeCode.Type;
 export const ComputerActivity = Schema.Struct({
   threadId: Id,
   backend: ComputerBackendKind,
   op: Id,
   status: Schema.Literals(["started", "completed", "failed", "interrupted"]),
+  outcome: Schema.optional(ComputerToolOutcomeCode),
   appName: Schema.optional(Schema.String.check(Schema.isMaxLength(200))),
   thumbnailDataUrl: Schema.optional(Schema.String.check(Schema.isMaxLength(40 * 1024))),
 });

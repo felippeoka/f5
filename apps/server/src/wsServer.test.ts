@@ -1083,6 +1083,16 @@ describe("WebSocket Server", () => {
       ipc.emit("message", { type: "activity", activity });
       const push = await waitForPush(ws, WS_CHANNELS.computerActivity);
       expect(push.data).toEqual(activity);
+      const failed = {
+        threadId: "fixture-thread",
+        backend: "native",
+        op: "elementAction",
+        status: "failed",
+        outcome: "app-resolution-failed",
+      };
+      ipc.emit("message", { type: "activity", activity: failed });
+      const failurePush = await waitForPush(ws, WS_CHANNELS.computerActivity);
+      expect(failurePush.data).toEqual(failed);
     } finally {
       broker.close();
     }

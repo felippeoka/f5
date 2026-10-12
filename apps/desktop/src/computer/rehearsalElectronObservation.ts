@@ -23,6 +23,7 @@ export class ElectronRehearsalObservation {
   private inspectionResponses = 0;
   private activityMessages = 0;
   private activityThumbnails = 0;
+  private readonly toolOutcomeErrors = new Set<string>();
   private overflow = false;
   private readonly accessRequests = new Set<string>();
   private readonly accessAnswers = new Set<string>();
@@ -36,6 +37,7 @@ export class ElectronRehearsalObservation {
     } else if (raw.type === "activity") {
       this.activityMessages++;
       if (raw.activity.thumbnailDataUrl) this.activityThumbnails++;
+      if (raw.activity.outcome) this.toolOutcomeErrors.add(raw.activity.outcome);
     } else if (raw.type === "accessRequested") {
       if (this.accessRequests.size >= 128) this.overflow = true;
       else this.accessRequests.add(raw.request.requestId);
@@ -118,6 +120,7 @@ export class ElectronRehearsalObservation {
       inspectionResponses: this.inspectionResponses,
       activityMessages: this.activityMessages,
       activityThumbnails: this.activityThumbnails,
+      toolOutcomeErrors: [...this.toolOutcomeErrors].sort(),
       traceComplete: !this.overflow,
       accessRequests: this.accessRequests.size,
       accessAnswersForwarded: this.accessAnswers.size,

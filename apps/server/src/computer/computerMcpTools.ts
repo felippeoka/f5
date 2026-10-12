@@ -303,6 +303,27 @@ export async function callComputerTool(
     return result(value);
   } catch (cause) {
     const error = computerError(cause);
+    const op = shapes[name]?.op;
+    if (op) {
+      const outcome =
+        cause instanceof z.ZodError
+          ? "invalid-arguments"
+          : error._tag === "Execution" &&
+              error.message ===
+                "App could not be resolved uniquely; use an appId from computer_list_apps."
+            ? "app-resolution-failed"
+            : error._tag === "Execution" && error.message === "Take a computer_screenshot first."
+              ? "fresh-screenshot-required"
+              : error._tag === "Execution" &&
+                  error.message === "Specify displayId; call computer_status."
+                ? "display-required"
+                : error._tag;
+      try {
+        context.broker.reportToolFailure(context.threadId, context.sessionGeneration, op, outcome);
+      } catch {
+        /* Activity delivery cannot alter the model-facing tool result. */
+      }
+    }
     return {
       isError: true,
       structuredContent: { error },
