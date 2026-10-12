@@ -14,6 +14,7 @@ import {
   DiffIcon,
   EllipsisIcon,
   FilesIcon,
+  Globe2Icon,
   PanelRightIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -27,6 +28,8 @@ import { Button } from "../ui/button";
 import {
   Menu,
   MenuCheckboxItem,
+  MenuGroup,
+  MenuGroupLabel,
   MenuItem,
   MenuPopup,
   MenuSeparator,
@@ -45,6 +48,7 @@ import {
 import { cn } from "../../lib/utils";
 import type { ThreadStatusPill } from "../../threadStatus";
 import type { Project } from "../../types";
+import type { RightPanelSurfaceHeaderState } from "../../rightPanelStore";
 
 interface ChatHeaderProps {
   activeThreadId: ThreadId;
@@ -69,13 +73,15 @@ interface ChatHeaderProps {
   terminalAvailable: boolean;
   terminalOpen: boolean;
   workspaceFilesAvailable: boolean;
-  filesOpen: boolean;
-  agentsOpen: boolean;
+  filesState: RightPanelSurfaceHeaderState;
+  agentsState: RightPanelSurfaceHeaderState;
+  previewState: RightPanelSurfaceHeaderState;
+  previewAvailable: boolean;
   liveAgentCount: number;
   terminalToggleShortcutLabel: string | null;
   diffToggleShortcutLabel: string | null;
   gitCwd: string | null;
-  diffOpen: boolean;
+  diffState: RightPanelSurfaceHeaderState;
   threadActionItems: ReadonlyArray<ThreadActionMenuItem>;
   onThreadAction: (actionId: ThreadActionId) => void;
   onRenameThread: (title: string) => void;
@@ -86,6 +92,7 @@ interface ChatHeaderProps {
   onToggleTerminal: () => void;
   onToggleFiles: () => void;
   onToggleAgents: () => void;
+  onTogglePreview: () => void;
   onToggleDiff: () => void;
 }
 
@@ -95,7 +102,7 @@ interface PanelToggleSpec {
   label: string;
   ariaLabel: string;
   shortcutLabel: string | null;
-  pressed: boolean;
+  state: RightPanelSurfaceHeaderState;
   disabled: boolean;
   disabledReason: string;
   badgeCount?: number;
@@ -129,13 +136,15 @@ export const ChatHeader = memo(function ChatHeader({
   terminalAvailable,
   terminalOpen,
   workspaceFilesAvailable,
-  filesOpen,
-  agentsOpen,
+  filesState,
+  agentsState,
+  previewState,
+  previewAvailable,
   liveAgentCount,
   terminalToggleShortcutLabel,
   diffToggleShortcutLabel,
   gitCwd,
-  diffOpen,
+  diffState,
   threadActionItems,
   onThreadAction,
   onRenameThread,
@@ -146,6 +155,7 @@ export const ChatHeader = memo(function ChatHeader({
   onToggleTerminal,
   onToggleFiles,
   onToggleAgents,
+  onTogglePreview,
   onToggleDiff,
 }: ChatHeaderProps) {
   const [renamingThreadId, setRenamingThreadId] = useState<ThreadId | null>(null);
@@ -155,14 +165,15 @@ export const ChatHeader = memo(function ChatHeader({
       ? `${liveAgentCount} ${liveAgentCount === 1 ? "agent" : "agents"} working`
       : null;
 
-  const panels: PanelToggleSpec[] = [
+  // Right-panel tabs: clicking a background tab brings it to front rather than closing it.
+  const sidePanels: PanelToggleSpec[] = [
     {
       key: "files",
       icon: FilesIcon,
       label: "Files",
       ariaLabel: "Toggle workspace files",
       shortcutLabel: null,
-      pressed: filesOpen,
+      state: filesState,
       disabled: !workspaceFilesAvailable,
       disabledReason: "Workspace files are unavailable until this thread has an active project.",
       onToggle: onToggleFiles,
@@ -173,11 +184,26 @@ export const ChatHeader = memo(function ChatHeader({
       label: "Diff",
       ariaLabel: "Toggle diff panel",
       shortcutLabel: diffToggleShortcutLabel,
-      pressed: diffOpen,
-      disabled: !isGitRepo && !diffOpen,
+      state: diffState,
+      disabled: !isGitRepo && diffState === "closed",
       disabledReason: "Diff panel is unavailable because this project is not a git repository.",
       onToggle: onToggleDiff,
     },
+    ...(previewAvailable
+      ? [
+          {
+            key: "preview",
+            icon: Globe2Icon,
+            label: "Preview",
+            ariaLabel: "Toggle preview",
+            shortcutLabel: null,
+            state: previewState,
+            disabled: false,
+            disabledReason: "",
+            onToggle: onTogglePreview,
+          } satisfies PanelToggleSpec,
+        ]
+      : []),
     {
       key: "agents",
       icon: BotIcon,
@@ -186,24 +212,25 @@ export const ChatHeader = memo(function ChatHeader({
         ? `Toggle Agents panel, ${agentsWorkingLabel}`
         : "Toggle Agents panel",
       shortcutLabel: null,
-      pressed: agentsOpen,
+      state: agentsState,
       disabled: false,
       disabledReason: "",
       badgeCount: liveAgentCount,
       onToggle: onToggleAgents,
     },
-    {
-      key: "terminal",
-      icon: TerminalSquareIcon,
-      label: "Terminal",
-      ariaLabel: "Toggle terminal drawer",
-      shortcutLabel: terminalToggleShortcutLabel,
-      pressed: terminalOpen,
-      disabled: !terminalAvailable,
-      disabledReason: "Terminal is unavailable until this thread has an active project.",
-      onToggle: onToggleTerminal,
-    },
   ];
+  // The terminal is a bottom drawer, so it sits apart from the side-panel tabs.
+  const terminalPanel: PanelToggleSpec = {
+    key: "terminal",
+    icon: TerminalSquareIcon,
+    label: "Terminal",
+    ariaLabel: "Toggle terminal drawer",
+    shortcutLabel: terminalToggleShortcutLabel,
+    state: terminalOpen ? "active" : "closed",
+    disabled: !terminalAvailable,
+    disabledReason: "Terminal is unavailable until this thread has an active project.",
+    onToggle: onToggleTerminal,
+  };
 
   const WorkflowIcon = workflowType ? WORKFLOW_TYPE_ICON[workflowType] : null;
 
@@ -360,25 +387,18 @@ export const ChatHeader = memo(function ChatHeader({
         {activeProjectName ? (
           <Separator orientation="vertical" className="mx-0.5 h-4 self-center" />
         ) : null}
-        <div
-          role="group"
-          aria-label="Panels"
-          className="hidden items-center gap-0.5 @xl/header-actions:flex"
-        >
-          {panels.map((panel) => (
-            <ToolbarToggle
-              key={panel.key}
-              icon={panel.icon}
-              label={panel.label}
-              ariaLabel={panel.ariaLabel}
-              shortcutLabel={panel.shortcutLabel}
-              pressed={panel.pressed}
-              onPressedChange={() => panel.onToggle()}
-              disabled={panel.disabled}
-              disabledReason={panel.disabledReason}
-              badgeCount={panel.badgeCount}
-            />
-          ))}
+        <div className="hidden items-center gap-2 @xl/header-actions:flex">
+          <div
+            role="group"
+            aria-label="Side panel"
+            className="flex items-center gap-px rounded-lg border border-border/70 bg-muted/40 p-0.5"
+          >
+            {sidePanels.map((panel) => (
+              <PanelToggle key={panel.key} panel={panel} variant="segmented" />
+            ))}
+          </div>
+          <Separator orientation="vertical" className="mx-0.5 h-4 self-center" />
+          <PanelToggle panel={terminalPanel} />
         </div>
         <Menu>
           <MenuTrigger
@@ -400,18 +420,18 @@ export const ChatHeader = memo(function ChatHeader({
               />
             ) : null}
           </MenuTrigger>
-          <MenuPopup side="bottom" align="end">
-            {panels.map((panel) => (
-              <MenuCheckboxItem
-                key={panel.key}
-                checked={panel.pressed}
-                disabled={panel.disabled}
-                aria-label={panel.ariaLabel}
-                onCheckedChange={() => panel.onToggle()}
-              >
-                {panel.label}
-              </MenuCheckboxItem>
-            ))}
+          <MenuPopup side="bottom" align="end" className="min-w-52">
+            <MenuGroup>
+              <MenuGroupLabel>Side panel</MenuGroupLabel>
+              {sidePanels.map((panel) => (
+                <PanelMenuItem key={panel.key} panel={panel} />
+              ))}
+            </MenuGroup>
+            <MenuSeparator />
+            <MenuGroup>
+              <MenuGroupLabel>Bottom</MenuGroupLabel>
+              <PanelMenuItem panel={terminalPanel} />
+            </MenuGroup>
           </MenuPopup>
         </Menu>
         <Menu>
@@ -454,6 +474,57 @@ export const ChatHeader = memo(function ChatHeader({
     </div>
   );
 });
+
+function PanelToggle(props: { panel: PanelToggleSpec; variant?: "default" | "segmented" }) {
+  const { panel } = props;
+  return (
+    <ToolbarToggle
+      icon={panel.icon}
+      label={panel.label}
+      ariaLabel={panel.ariaLabel}
+      shortcutLabel={panel.shortcutLabel}
+      pressed={panel.state === "active"}
+      inBackground={panel.state === "background"}
+      variant={props.variant}
+      onPressedChange={() => panel.onToggle()}
+      disabled={panel.disabled}
+      disabledReason={panel.disabledReason}
+      badgeCount={panel.badgeCount}
+    />
+  );
+}
+
+function PanelMenuItem(props: { panel: PanelToggleSpec }) {
+  const { panel } = props;
+  const Icon = panel.icon;
+  return (
+    <MenuCheckboxItem
+      checked={panel.state === "active"}
+      disabled={panel.disabled}
+      aria-label={panel.ariaLabel}
+      onCheckedChange={() => panel.onToggle()}
+    >
+      <span className="flex w-full items-center gap-2">
+        <Icon aria-hidden="true" className="size-4 text-muted-foreground" />
+        <span className="truncate">{panel.label}</span>
+        {panel.state === "background" ? (
+          <span className="ml-auto pl-3 text-xs text-muted-foreground">in background</span>
+        ) : null}
+        {panel.badgeCount && panel.badgeCount > 0 ? (
+          <span
+            aria-hidden="true"
+            className={cn(
+              "flex h-4 min-w-4 items-center justify-center rounded-full bg-info px-1 text-2xs leading-none font-semibold text-white tabular-nums",
+              panel.state !== "background" && "ml-auto",
+            )}
+          >
+            {panel.badgeCount}
+          </span>
+        ) : null}
+      </span>
+    </MenuCheckboxItem>
+  );
+}
 
 function ThreadActionMenuEntry(props: {
   item: ThreadActionMenuItem;

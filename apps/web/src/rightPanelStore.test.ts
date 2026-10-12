@@ -1,7 +1,11 @@
 import { ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { selectThreadRightPanelState, useRightPanelStore } from "./rightPanelStore";
+import {
+  selectSurfaceHeaderState,
+  selectThreadRightPanelState,
+  useRightPanelStore,
+} from "./rightPanelStore";
 
 const THREAD_A = ThreadId.makeUnsafe("thread-a");
 const THREAD_B = ThreadId.makeUnsafe("thread-b");
@@ -193,5 +197,21 @@ describe("rightPanelStore", () => {
         surfaces: [{ id: "plan", kind: "plan" }],
       },
     );
+  });
+
+  it("derives header toggle state from panel visibility and the active tab", () => {
+    const state = () =>
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadId, THREAD_A);
+    expect(selectSurfaceHeaderState(state(), "preview")).toBe("closed");
+
+    useRightPanelStore.getState().open(THREAD_A, "agents");
+    useRightPanelStore.getState().open(THREAD_A, "preview");
+    expect(selectSurfaceHeaderState(state(), "preview")).toBe("active");
+    expect(selectSurfaceHeaderState(state(), "agents")).toBe("background");
+    expect(selectSurfaceHeaderState(state(), "diff")).toBe("closed");
+
+    useRightPanelStore.getState().close(THREAD_A);
+    expect(selectSurfaceHeaderState(state(), "preview")).toBe("closed");
+    expect(selectSurfaceHeaderState(state(), "agents")).toBe("closed");
   });
 });
