@@ -1,6 +1,13 @@
 import { useState } from "react";
+import { FileDiffIcon, GitForkIcon, LoaderCircleIcon } from "lucide-react";
 import type { NativeFileRewindPreview, ThreadId } from "@t3tools/contracts";
 import { readNativeApi } from "../../nativeApi";
+import { Button } from "../ui/button";
+
+const FORK_LABEL = "Fork from this message";
+const FORK_TITLE = `${FORK_LABEL} — new thread with files from the current branch tip`;
+const FILES_LABEL = "Show files changed since this message";
+
 export function NativeFilePreview(props: {
   threadId: ThreadId;
   turnId: string;
@@ -10,14 +17,15 @@ export function NativeFilePreview(props: {
 }) {
   const [preview, setPreview] = useState<NativeFileRewindPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<"fork" | "files" | null>(null);
+  const loading = pendingAction !== null;
   const load = async () => {
     const api = readNativeApi()?.nativeOperations;
     if (!api?.inspect) {
       setError("Native file preview API is unavailable.");
       return;
     }
-    setLoading(true);
+    setPendingAction("files");
     setError(null);
     try {
       setPreview(
@@ -31,7 +39,7 @@ export function NativeFilePreview(props: {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "File preview is unavailable.");
     } finally {
-      setLoading(false);
+      setPendingAction(null);
     }
   };
   const fork = async () => {
@@ -40,7 +48,7 @@ export function NativeFilePreview(props: {
       setError("Native fork API is unavailable.");
       return;
     }
-    setLoading(true);
+    setPendingAction("fork");
     setError(null);
     try {
       const record = await api.fork({
@@ -54,30 +62,54 @@ export function NativeFilePreview(props: {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Fork could not start.");
     } finally {
-      setLoading(false);
+      setPendingAction(null);
     }
   };
   return (
-    <span>
+    <span className="inline-flex flex-wrap items-center gap-0.5">
       {props.nativeFork && (
-        <button type="button" disabled={loading} onClick={() => void fork()}>
-          Fork from here (branch-tip workspace)
-        </button>
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="ghost"
+          disabled={loading}
+          onClick={() => void fork()}
+          title={FORK_TITLE}
+          aria-label={FORK_LABEL}
+        >
+          {pendingAction === "fork" ? (
+            <LoaderCircleIcon aria-hidden="true" className="size-3.5 animate-spin" />
+          ) : (
+            <GitForkIcon aria-hidden="true" className="size-3.5" />
+          )}
+        </Button>
       )}
       {props.filePreview && (
-        <button type="button" disabled={loading} onClick={() => void load()}>
-          Files changed since here
-        </button>
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="ghost"
+          disabled={loading}
+          onClick={() => void load()}
+          title={FILES_LABEL}
+          aria-label={FILES_LABEL}
+        >
+          {pendingAction === "files" ? (
+            <LoaderCircleIcon aria-hidden="true" className="size-3.5 animate-spin" />
+          ) : (
+            <FileDiffIcon aria-hidden="true" className="size-3.5" />
+          )}
+        </Button>
       )}
       {preview && (
-        <span className="block">
+        <span className="basis-full">
           {preview.canRewind
             ? `${preview.filesChanged?.join(", ") || "No tracked changes"} · +${preview.insertions ?? 0} −${preview.deletions ?? 0}`
             : (preview.error ?? "No native checkpoint is available.")}
         </span>
       )}
       {error && (
-        <span role="alert" className="block">
+        <span role="alert" className="basis-full">
           {error}
         </span>
       )}
