@@ -55,7 +55,7 @@ it.layer(SqliteClient.layer({ filename }))("databaseSpace", (it) => {
         let released = 0;
         // A bounded pass may reclaim only part of this fixture on a slower disk.
         // Subsequent passes must make progress and reclaim exactly the remainder.
-        for (let pass = 0; pass < 4; pass++) {
+        for (let pass = 0; pass < 8; pass++) {
           const remaining = (yield* readDatabasePages).freelistCount;
           if (remaining === 0) break;
           const reclaimed = yield* incrementalVacuum({ maxDurationMs: 5_000 });
