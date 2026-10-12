@@ -29,7 +29,27 @@ it("counts held-input release in the stop tail without retaining key contents", 
     physicalInputTailMs: 4,
     killChordTailMs: 0,
     appDeliveryTailMs: 5,
+    chordEventsObserved: 1,
+    chordEventToRecognitionDeltaMs: 0,
   });
+});
+it("distinguishes a missing independent chord receipt from a mismatched timestamp", () => {
+  const missing = measureStopLatency({
+    ...evidence,
+    samples: evidence.samples.filter((sample) => sample.kind !== "chord"),
+  });
+  expect(missing.state).toBe("failed");
+  expect(missing.chordEventsObserved).toBe(0);
+  expect(missing).not.toHaveProperty("chordEventToRecognitionDeltaMs");
+  const delayed = measureStopLatency({
+    ...evidence,
+    samples: evidence.samples.map((sample) =>
+      sample.kind === "chord" ? { ...sample, eventAtMs: 1440, observedAtMs: 1442 } : sample,
+    ),
+  });
+  expect(delayed.state).toBe("failed");
+  expect(delayed.chordEventsObserved).toBe(1);
+  expect(delayed.chordEventToRecognitionDeltaMs).toBe(200);
 });
 it("fails when any input emission or app delivery reaches the 100 ms boundary", () => {
   for (const sample of [

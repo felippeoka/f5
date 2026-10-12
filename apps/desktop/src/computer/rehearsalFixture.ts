@@ -12,6 +12,7 @@ export async function createRehearsalFixture(options: {
   executableSource?: string;
   expectedText?: string;
   sourceFile?: string;
+  observeChord?: boolean;
 }) {
   const contents = join(options.root, options.appId, "Fixture.app", "Contents");
   const executable = join(contents, "MacOS", "Fixture");
@@ -38,6 +39,7 @@ export async function createRehearsalFixture(options: {
     ...(options.background ? ["--background"] : []),
     ...(options.ungranted ? ["--ungranted"] : []),
     ...(options.expectedText ? ["--expected-text", options.expectedText] : []),
+    ...(options.observeChord ? ["--observe-chord"] : []),
   ];
   const child = spawn(executable, args, { stdio: ["pipe", "pipe", "ignore"] });
   let presses = 0;

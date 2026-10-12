@@ -115,6 +115,10 @@ export function measureStopLatency(evidence: StopLatencyEvidence) {
     checks,
     injectedKeyDowns: downs.length,
     injectedEvents: injected.length,
+    chordEventsObserved: evidence.samples.filter((sample) => sample.kind === "chord").length,
+    ...(chord && finite(chordAt)
+      ? { chordEventToRecognitionDeltaMs: round(chord.eventAtMs - chordAt) }
+      : {}),
     ...(physicalTailMs !== undefined ? { physicalInputTailMs: round(physicalTailMs) } : {}),
     ...(chordTailMs !== undefined ? { killChordTailMs: round(chordTailMs) } : {}),
     ...(deliveryTailMs !== undefined ? { appDeliveryTailMs: round(deliveryTailMs) } : {}),

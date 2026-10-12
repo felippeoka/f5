@@ -640,6 +640,20 @@ saved; helper/fixture raw data and typed values are discarded. A SIGSTOP test co
 process unresponsiveness, not every possible deadlock. These runs do not open signed
 release gates.
 
+Electron stop modes opt into a separate passive session-event tap for the fixed physical
+Control+Command+Escape chord, filtered to the fixture being frontmost. Electron's OS
+shortcut registration may prevent AppKit from delivering the chord to the window,
+especially while main is frozen. The independent fixture tap is listen-only: it cannot
+inject, suppress or rewrite input; it reads no characters, retains no physical key codes,
+and reports only chord-event and observation timestamps. Injected delivery and the first
+physical event are still observed by the local AppKit monitor. Local chord receipts are
+deduplicated when the passive tap is active. An unavailable or disabled tap fails the
+check, without requesting permissions or falling back to helper-only evidence. A
+`--probe-chord-monitor` fixture invocation checks availability without activating a
+window or emitting input. The original native-controller modes keep their local-only
+observer. Reports now count independent chord receipts and report their relative timing
+delta, so a missing receipt can be distinguished from a clock mismatch.
+
 The first [real frozen-renderer attempt](computer-certification/2026-10-12-macos-electron-renderer-stop-attempt.json)
 records both physical recognition and the full chord during a verified 709.4 ms renderer
 freeze. Input emission stopped within 8.2 ms of physical recognition and app delivery
@@ -650,6 +664,16 @@ It therefore did not prove refusal of a subsequent mutation or record a frontmos
 receipt. The runner now handles Send now without resuming computer permission, and the
 fixture reports its own frontmost state before subsequent composer interaction. The
 original failed report remains unchanged; these fixes alone are not a passing rerun.
+
+The first [real frozen-main attempt](computer-certification/2026-10-12-macos-electron-main-stop-attempt.json)
+completed the follow-up turn and proved refusal of another typing call, mirrored pause,
+lease release and the fixture's frontmost receipt. Both helper recognition events fell
+inside a verified 704.2 ms main-process freeze, with 0.4 ms clock uncertainty. No recorded
+synthetic event was created or delivered after physical recognition. The **overall check
+still failed** because the independent AppKit chord receipt did not match. That report
+predates receipt counts and cannot distinguish a missing receipt from a timestamp
+mismatch. It is preserved unchanged; the passive-observer change requires another
+coordinated run and does not retroactively make this attempt pass.
 
 Coordinate with the operator before launching. The real consent dialog must be answered
 by a human for the single synthetic fixture. The operator then leaves input idle and

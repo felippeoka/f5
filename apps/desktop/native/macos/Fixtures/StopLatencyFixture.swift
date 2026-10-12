@@ -1,11 +1,15 @@
 import AppKit
+import ApplicationServices
 import Darwin
 
-// Only local events in this synthetic window are observed. Never reads event
-// characters, logs physical key codes, or installs a global keyboard monitor.
+// Delivery observations stay local to this synthetic window. The opt-in passive
+// tap observes only the fixed stop chord while this fixture is frontmost; system
+// shortcut handling can prevent AppKit from delivering that chord to the window.
+// Neither observer reads characters, persists key codes, or changes an event.
 final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
   var window: NSWindow!
   var monitor: Any?
+  var chordTap: CFMachPort?
   let instruction = NSTextField(labelWithString: "Preparing. Keep the mouse and keyboard idle.")
   let field = NSTextField(frame: NSRect(x: 30, y: 80, width: 600, height: 40))
   var finished = false
@@ -19,7 +23,47 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
     FileHandle.standardOutput.write(data)
     FileHandle.standardOutput.write(Data([10]))
   }
+  func installChordObserver() -> Bool {
+    chordTap = CGEvent.tapCreate(
+      tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly,
+      eventsOfInterest: CGEventMask(1) << CGEventType.keyDown.rawValue,
+      callback: { _, type, event, context in
+        guard let context else { return Unmanaged.passUnretained(event) }
+        let delegate = Unmanaged<StopFixtureDelegate>.fromOpaque(context).takeUnretainedValue()
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+          delegate.emit(["kind": "chordMonitor", "available": false,
+            "observedAtMs": ProcessInfo.processInfo.systemUptime * 1000])
+          return Unmanaged.passUnretained(event)
+        }
+        guard delegate.window != nil,
+          NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(),
+          type == .keyDown,
+          event.getIntegerValueField(.eventSourceUserData) != 0xF5C0,
+          event.getIntegerValueField(.keyboardEventKeycode) == 53,
+          event.flags.contains([.maskControl, .maskCommand])
+        else { return Unmanaged.passUnretained(event) }
+        delegate.emit([
+          "kind": "chord", "eventAtMs": Double(event.timestamp) / 1_000_000,
+          "observedAtMs": ProcessInfo.processInfo.systemUptime * 1000, "keyDown": true,
+        ])
+        delegate.showStopped()
+        return Unmanaged.passUnretained(event)
+      }, userInfo: Unmanaged.passUnretained(self).toOpaque())
+    guard let tap = chordTap,
+      let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else { return false }
+    CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+    CGEvent.tapEnable(tap: tap, enable: true)
+    return CGEvent.tapIsEnabled(tap: tap)
+  }
+  func showStopped() {
+    instruction.stringValue = "Stopped. Release the keys; measuring the final input tail."
+    window.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.25)
+  }
   func applicationDidFinishLaunching(_ notification: Notification) {
+    // Failure is reported before activation or typing; never request permissions.
+    if CommandLine.arguments.contains("--observe-chord") && !installChordObserver() {
+      exit(2)
+    }
     window = NSWindow(
       contentRect: NSRect(x: 120, y: 120, width: 660, height: 240),
       styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -38,6 +82,7 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
       let marked = native.getIntegerValueField(.eventSourceUserData) == 0xF5C0
       let chord = !marked && event.type == .keyDown && event.keyCode == 53
         && event.modifierFlags.contains([.control, .command])
+      if chord && self.chordTap != nil { return event }
       self.emit([
         "kind": marked ? "injected" : chord ? "chord" : "physical",
         "eventAtMs": event.timestamp * 1000,
@@ -45,8 +90,7 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
         "keyDown": event.type == .keyDown,
       ])
       if chord {
-        self.instruction.stringValue = "Stopped. Release the keys; measuring the final input tail."
-        self.window.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.25)
+        self.showStopped()
       }
       return event
     }
@@ -84,7 +128,9 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
               self.prompt()
             } else if command == "FINISH" {
               self.finished = true
-              self.instruction.stringValue = "Check complete. You can use your computer again."
+              self.instruction.stringValue = CommandLine.arguments.contains("--observe-chord")
+                ? "Input stopped. Verifying pause; keep input idle."
+                : "Check complete. You can use your computer again."
               self.emit([
                 "kind": "finished", "observedAtMs": ProcessInfo.processInfo.systemUptime * 1000,
                 "frontmost": NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(),
@@ -102,6 +148,12 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
 }
 let application = NSApplication.shared
 let delegate = StopFixtureDelegate()
+if CommandLine.arguments.contains("--probe-chord-monitor") {
+  let available = delegate.installChordObserver()
+  print(available ? "passive-chord-probe: available" : "passive-chord-probe: unavailable")
+  if let tap = delegate.chordTap { CFMachPortInvalidate(tap) }
+  exit(available ? 0 : 2)
+}
 application.delegate = delegate
 application.setActivationPolicy(.regular)
 application.run()

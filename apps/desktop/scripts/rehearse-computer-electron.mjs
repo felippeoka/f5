@@ -278,6 +278,7 @@ try {
       root,
       appId,
       expectedText: "F5_ELECTRON_REHEARSAL Ω🙂",
+      observeChord: stopOnly,
       sourceFile: join(
         desktopDir,
         stopOnly
