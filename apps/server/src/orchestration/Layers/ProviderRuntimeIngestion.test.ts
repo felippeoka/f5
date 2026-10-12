@@ -3873,6 +3873,75 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.streaming).toBe(false);
   });
 
+  it("keeps computer approvals answerable through sanitized runtime ingestion", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const itemId = asItemId("computer-approval-call");
+    automationEventSanitizer.register(threadId, {
+      serverName: "__f5_computer",
+      verified: true,
+      kind: "f5-computer",
+    });
+    automationEventSanitizer.sanitize(threadId, {
+      itemId,
+      payload: { toolName: "mcp____f5_computer__computer_type" },
+    });
+    try {
+      harness.emit({
+        type: "request.opened",
+        eventId: asEventId("computer-approval-open"),
+        provider: "codex",
+        createdAt: new Date().toISOString(),
+        threadId,
+        itemId,
+        requestId: ApprovalRequestId.makeUnsafe("computer-approval"),
+        payload: {
+          requestType: "mcp_elicitation_approval",
+          detail: "PRIVATE_APPROVAL_SENTINEL",
+          approvalOptions: [
+            { decision: "accept", label: "PRIVATE_APPROVAL_SENTINEL" },
+            { decision: "decline", label: "PRIVATE_APPROVAL_SENTINEL" },
+          ],
+        },
+      });
+      const opened = await waitForThread(harness.engine, (thread) =>
+        thread.activities.some((activity) => activity.id === "computer-approval-open"),
+      );
+      const approval = opened.activities.find(
+        (activity) => activity.id === "computer-approval-open",
+      );
+      expect(approval?.payload).toMatchObject({
+        requestId: "computer-approval",
+        requestKind: "mcp-elicitation",
+        requestType: "mcp_elicitation_approval",
+        approvalOptions: [
+          { decision: "accept", label: "Approve once" },
+          { decision: "decline", label: "Decline" },
+        ],
+      });
+      expect(JSON.stringify(approval)).not.toContain("PRIVATE_APPROVAL_SENTINEL");
+      harness.emit({
+        type: "request.resolved",
+        eventId: asEventId("computer-approval-resolved"),
+        provider: "codex",
+        createdAt: new Date().toISOString(),
+        threadId,
+        itemId,
+        requestId: ApprovalRequestId.makeUnsafe("computer-approval"),
+        payload: { requestType: "mcp_elicitation_approval", decision: "accept" },
+      });
+      const resolved = await waitForThread(harness.engine, (thread) =>
+        thread.activities.some((activity) => activity.id === "computer-approval-resolved"),
+      );
+      expect(
+        resolved.activities.find((activity) => activity.id === "computer-approval-resolved")
+          ?.payload,
+      ).toMatchObject({ requestId: "computer-approval", requestKind: "mcp-elicitation" });
+    } finally {
+      automationEventSanitizer.clear(threadId);
+    }
+  });
+
   it("maps canonical request events into approval activities with requestKind", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

@@ -14,6 +14,7 @@ export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
   const appNames = useAgentComputerActivityStore((state) => state.appNames);
   const paused = useAgentComputerActivityStore((state) => state.paused[threadId]);
   const held = useAgentComputerActivityStore((state) => state.lease.threadId === threadId);
+  const lastLeaseAt = useAgentComputerActivityStore((state) => state.lastLeaseAt[threadId]);
   const [now, setNow] = useState(Date.now());
   const [error, setError] = useState("");
   useEffect(() => {
@@ -24,12 +25,17 @@ export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
     setError("");
     void action().catch(() => setError("Computer control could not be updated."));
   };
-  if (!paused && !isAgentComputerActive(activity, now, held)) return null;
+  if (!paused && grants.length === 0 && !isAgentComputerActive(activity, now, held, lastLeaseAt))
+    return null;
   const native = activity?.backend === "native";
   return (
-    <div className="my-2 space-y-2 rounded-lg border p-3 text-sm" role="status">
+    <div
+      className="my-2 shrink-0 space-y-2 rounded-lg border p-3 text-sm"
+      role="status"
+      data-testid="computer-live-card"
+    >
       <p>
-        {paused ? "You have control" : "Agent computer control"} ·{" "}
+        {paused ? "You have control" : held ? "Agent computer control" : "Computer access"} ·{" "}
         {native ? "F5" : (activity?.backend ?? "F5")}
       </p>
       <p>

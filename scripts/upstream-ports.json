@@ -5425,7 +5425,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "3c",
-      "evidence": ["apps/web/src/components/chat/ComposerPendingUserInputPanel.tsx:176"],
+      "evidence": ["apps/web/src/components/chat/ComposerPendingUserInputPanel.tsx:49"],
       "f5Shas": ["de26827bdc26045fcaef20ae12dfd5032648e0cd"]
     },
     {

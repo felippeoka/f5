@@ -1,5 +1,5 @@
 import { ThreadId } from "@t3tools/contracts";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isAgentComputerActive, useAgentComputerActivityStore } from "./agentComputerActivityStore";
 const threadId = ThreadId.makeUnsafe("computer-thread");
 beforeEach(() =>
@@ -10,9 +10,32 @@ beforeEach(() =>
     requests: {},
     paused: {},
     lease: { threadId: null },
+    lastLeaseAt: {},
   }),
 );
 describe("computer activity", () => {
+  it("keeps controls visible for 15 seconds after lease release even when the last action is older", () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(100000);
+    try {
+      const store = useAgentComputerActivityStore.getState();
+      store.record({ threadId, op: "type", status: "completed", backend: "native" });
+      store.setLease({ threadId, backend: "native" });
+      clock.mockReturnValue(130000);
+      store.setLease({ threadId: null });
+      const state = useAgentComputerActivityStore.getState();
+      expect(state.lastLeaseAt[threadId]).toBe(130000);
+      expect(
+        isAgentComputerActive(state.activity[threadId], 144999, false, state.lastLeaseAt[threadId]),
+      ).toBe(true);
+      expect(
+        isAgentComputerActive(state.activity[threadId], 145000, false, state.lastLeaseAt[threadId]),
+      ).toBe(false);
+      store.resetConnection();
+      expect(useAgentComputerActivityStore.getState().lastLeaseAt).toEqual({});
+    } finally {
+      clock.mockRestore();
+    }
+  });
   it("keeps running actions and held leases visible, then expires completed feedback", () => {
     const store = useAgentComputerActivityStore.getState();
     store.record({ threadId, op: "click", status: "started", backend: "native" });

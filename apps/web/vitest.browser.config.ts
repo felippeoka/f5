@@ -31,6 +31,7 @@ export default mergeConfig(
         "src/components/ComposerPromptEditor.browser.tsx",
         "src/components/ProjectCloneController.browser.tsx",
         "src/components/AgentsPanel.browser.tsx",
+        "src/components/AgentComputerLiveCard.browser.tsx",
         "src/components/ThreadSidebar.browser.tsx",
         "src/components/AppTitlebar.browser.tsx",
         "src/components/ThreadRecencyController.browser.tsx",

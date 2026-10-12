@@ -5,6 +5,66 @@ import {
 } from "./automationActivitySanitizer";
 const provenance = { serverName: "f5_computer", verified: true, kind: "f5-computer" } as const;
 describe("computer persistence sanitization", () => {
+  it("preserves correlated approval choices without provider text or tool contents", () => {
+    const sanitizer = new AutomationEventSanitizer();
+    sanitizer.register("a", provenance);
+    sanitizer.sanitize("a", {
+      itemId: "call",
+      payload: { toolName: "mcp__f5_computer__computer_type" },
+    });
+    const safe = sanitizer.sanitize("a", {
+      type: "request.opened",
+      threadId: "a",
+      itemId: "call",
+      requestId: "approval",
+      payload: {
+        requestType: "mcp_elicitation_approval",
+        detail: "SENTINEL",
+        args: { text: "SENTINEL" },
+        raw: {
+          type: "request.opened",
+          requestId: "SENTINEL",
+          payload: {
+            requestType: "mcp_elicitation_approval",
+            approvalOptions: [{ decision: "accept", label: "SENTINEL" }],
+          },
+        },
+        approvalOptions: [
+          { decision: "accept", label: "SENTINEL", warning: "SENTINEL" },
+          { decision: "decline", label: "SENTINEL" },
+          { decision: "SENTINEL", label: "SENTINEL" },
+        ],
+        presentation: { title: "SENTINEL", defaultToNo: true, suppressAlwaysAllowRule: true },
+      },
+    });
+    expect(safe).toMatchObject({
+      requestId: "approval",
+      payload: {
+        requestType: "mcp_elicitation_approval",
+        approvalOptions: [
+          { decision: "accept", label: "Approve once" },
+          { decision: "decline", label: "Decline" },
+        ],
+        presentation: { defaultToNo: true, suppressAlwaysAllowRule: true },
+      },
+    });
+    expect(JSON.stringify(safe)).not.toContain("SENTINEL");
+    expect(
+      sanitizer.sanitize("a", {
+        type: "request.resolved",
+        itemId: "call",
+        requestId: "approval",
+        payload: {
+          requestType: "mcp_elicitation_approval",
+          decision: "accept",
+          resolution: { text: "SENTINEL" },
+        },
+      }),
+    ).toMatchObject({
+      requestId: "approval",
+      payload: { requestType: "mcp_elicitation_approval", decision: "accept" },
+    });
+  });
   it("drops typed text, semantic values, AX names and nested error detail", () => {
     const payload = {
       op: "type",

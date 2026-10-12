@@ -17,6 +17,7 @@ interface ComputerState {
   >;
   paused: Record<string, boolean | undefined>;
   lease: typeof AgentComputerUseChanged.Type;
+  lastLeaseAt: Record<string, number | undefined>;
   record: (activity: ComputerActivity) => void;
   request: (request: typeof ComputerAccessPush.Type) => void;
   settle: (event: typeof ComputerAccessSettled.Type) => void;
@@ -34,6 +35,7 @@ export const useAgentComputerActivityStore = create<ComputerState>((set) => ({
       requests: {},
       paused: {},
       lease: { threadId: null },
+      lastLeaseAt: {},
     }),
   appNames: {},
   activity: {},
@@ -41,6 +43,7 @@ export const useAgentComputerActivityStore = create<ComputerState>((set) => ({
   requests: {},
   paused: {},
   lease: { threadId: null },
+  lastLeaseAt: {},
   record: (activity) =>
     set((state) => ({
       activity: { ...state.activity, [activity.threadId]: { ...activity, at: Date.now() } },
@@ -69,15 +72,24 @@ export const useAgentComputerActivityStore = create<ComputerState>((set) => ({
     set((state) => ({ grants: { ...state.grants, [threadId]: grants } })),
   setPaused: (threadId, paused) =>
     set((state) => ({ paused: { ...state.paused, [threadId]: paused } })),
-  setLease: (lease) => set({ lease }),
+  setLease: (lease) =>
+    set((state) => ({
+      lease,
+      lastLeaseAt:
+        state.lease.threadId && state.lease.threadId !== lease.threadId
+          ? { ...state.lastLeaseAt, [state.lease.threadId]: Date.now() }
+          : state.lastLeaseAt,
+    })),
 }));
 export function isAgentComputerActive(
   activity: (ComputerActivity & { at: number }) | undefined,
   now: number,
   held: boolean,
+  lastLeaseAt?: number,
 ): boolean {
   return (
     held ||
+    (lastLeaseAt !== undefined && isAgentActivityRecent(lastLeaseAt, now)) ||
     (!!activity && (activity.status === "started" || isAgentActivityRecent(activity.at, now)))
   );
 }

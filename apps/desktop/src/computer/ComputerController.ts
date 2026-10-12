@@ -146,6 +146,9 @@ export class ComputerController {
       });
     if (this.now() - this.physicalInputAt < 1500) {
       this.paused.add(this.key(holder));
+      // There is no lease yet, so stop() cannot identify this thread. Publish the
+      // latched pause explicitly so the operator can see and resume it.
+      this.options.paused(holder, "user-input");
       throw new ComputerControlError({ _tag: "Interrupted", cause: "user-input" });
     }
     return this.lease.acquire(holder);

@@ -85,6 +85,28 @@ function envelope(id: string, authorization = auth, extras: Record<string, unkno
   } as ComputerAutomationRequest;
 }
 describe("main computer controller", () => {
+  it("publishes a recent-input pause when a different thread tries to acquire an idle device", () => {
+    const h = make();
+    const next = { ...holder, threadId: "next-thread" };
+    try {
+      h.event({ type: "physicalInput" });
+      h.paused.mockClear();
+      expect(() => h.controller.acquire(next)).toThrow();
+      expect(h.lease.current()).toBeNull();
+      expect(h.paused).toHaveBeenCalledExactlyOnceWith(next, "user-input");
+      const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 2000);
+      try {
+        // Waiting cannot silently clear the latch; only an explicit resume can.
+        expect(() => h.controller.acquire(next)).toThrow();
+        h.controller.setPaused("p", "next-thread", false);
+        expect(h.controller.acquire(next).threadId).toBe("next-thread");
+      } finally {
+        clock.mockRestore();
+      }
+    } finally {
+      h.controller.close();
+    }
+  });
   it("replays authorization into a replacement suspended helper", async () => {
     const h = make();
     try {

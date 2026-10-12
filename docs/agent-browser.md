@@ -581,6 +581,80 @@ Signed installed-build attribution, real
 Electron renderer/backend failures, Windows and the full release matrix remain pending.
 No gate is opened by this unsigned evidence.
 
+### Real Electron rehearsal
+
+The opt-in Electron rehearsal launches the compiled F5 main, preload, renderer and
+server with isolated application state. It copies only the selected Codex profile's
+authentication file into its temporary private home, disables plugins, creates its own
+temporary project, and grants no user app automatically. Build the desktop first:
+
+```sh
+bun run build:desktop
+F5_COMPUTER_ELECTRON_REHEARSAL=1 bun apps/desktop/scripts/rehearse-computer-electron.mjs --codex-home <selected-profile-home> --codex-binary <codex-binary> --output /tmp/f5-electron-computer.json
+```
+
+Coordinate with the operator before launching. The real consent dialog must be answered
+by a human for the single synthetic fixture. The operator then leaves input idle and
+follows the window's instructions for Pause and Resume. Turns go through the real
+composer and queue admission. The rehearsal checks correlated successful native
+responses, fixture receipt, consent settlement, banner and live thumbnail, semantic
+outlines, coordinate cursor, explicit resume, a fresh capture and lease/overlay cleanup.
+It never auto-answers F5 consent or relaxes the physical-input pause boundary.
+
+Reports distinguish a trusted click, a correlated answer forwarded by main, and server
+grant settlement. They retain only booleans, counts, operation/outcome codes, geometry
+and build identity. No screenshots, accessibility values, typed values, credentials or
+raw errors are saved. Failures remain failures; the temporary window, fixture and state
+are cleaned up afterward. This is an unsigned macOS/Codex/synthetic-app rehearsal,
+not the signed installed-build or complete real-app certification matrix.
+
+Append `--status-only` for a read-only diagnostic: three provider turns use tool discovery,
+`computer_status` and `computer_list_apps`. A pass requires three successful native
+metadata responses correlated at the inherited IPC boundary, not merely three completed
+model turns. No consent, screenshot or lease is requested. The
+[recorded discovery run](computer-certification/2026-10-12-macos-electron-read-only-discovery.json)
+observed all three metadata responses with no lease and no recorded provider error.
+It proves that narrow observation path, not input or human controls.
+A [subsequent diagnostic](computer-certification/2026-10-12-macos-electron-read-only-timeout.json)
+timed out with the provider turn still running and no native request. That result remains
+failed. The observer now validates metadata response schemas as well as correlation.
+Code inspection also found that a correlated computer-tool approval could lose its
+request ID, request type and advertised choices during sanitization. The sanitizer now
+preserves those control fields, validates decisions and generates fixed choice labels;
+provider labels, warning/detail strings and tool contents are removed. Safety presentation
+flags remain intact. An ingestion regression verifies the UI receives both the request
+and its matching settlement. This fixes an independently demonstrated approval bug;
+the earlier diagnostic does not establish it as that run's cause.
+
+The [first recorded Electron consent attempt](computer-certification/2026-10-12-macos-electron-consent.json)
+confirmed human consent, main's answer forwarding and server grant settlement, but the
+turn completed without native input. That run remains failed; its report does not identify
+the subsequent blocker. The [separate consent/action-turn attempt](computer-certification/2026-10-12-macos-electron-actions.json)
+confirmed that the grant survived a turn boundary, successful native capture and
+inspection, one fixture button press and Unicode typing, and the real lease banner.
+It failed at human Pause: the operator reported no visible button. A
+[follow-up attempt](computer-certification/2026-10-12-macos-electron-controls-attempt.json)
+confirmed Pause was initially visible after correcting lease-release recency, but the
+operator could not click it before the 15-second window expired. The live card now
+retains controls while the session has approved apps, labelled "Computer access" when
+idle. With no grants remaining it retains the 15-second post-release activity window.
+This extends the original transient-card design in response to operator feedback; it
+keeps Pause and Revoke reachable without widening grants or resuming input.
+A recent-input refusal during initial
+lease acquisition also publishes its pause to the UI instead of leaving an invisible
+latch. Unit and browser regressions cover both control visibility and dialog settlement.
+These historical attempts remain failed, and all release gates remain closed.
+An [additional pre-action attempt](computer-certification/2026-10-12-macos-electron-no-action-attempt.json)
+confirmed consent but completed the action turn without issuing native input. The
+rehearsal now explicitly permits tool discovery as well as the F5 catalog; the prior
+prompt restriction may have contributed, but the historical report does not establish
+that cause. Pre-host diagnostics retain only known error tags from sanitized provider
+activities and the latest host availability/reason, never raw provider output.
+The [latest foreground attempt](computer-certification/2026-10-12-macos-electron-consent-timeout.json)
+expired waiting for a human answer: no trusted click, forwarded answer, grant or lease
+was observed, and no input was emitted. Pause/Resume, the subsequent fresh screenshot
+and coordinate-click sequence remain pending in the real Electron workflow.
+
 ### Build prerequisites and bounded replay state
 
 Desktop development builds attempt the native helper build on macOS and Windows. A

@@ -1,3 +1,18 @@
+import {
+  CanonicalRequestType,
+  ProviderApprovalDecision,
+  ProviderRequestKind,
+} from "@t3tools/contracts";
+import { Schema } from "effect";
+
+const APPROVAL_LABELS: Record<typeof ProviderApprovalDecision.Type, string> = {
+  accept: "Approve once",
+  acceptForSession: "Allow for this session",
+  acceptAlways: "Always allow",
+  decline: "Decline",
+  cancel: "Cancel",
+};
+
 /** Provenance is assigned by the adapter that installed the server, never by a tool prefix. */
 export interface AutomationToolProvenance {
   readonly serverName: string;
@@ -245,6 +260,51 @@ export class AutomationEventSanitizer {
       }
       if (provenance) {
         result.sanitized = true;
+        // Approval envelopes are control metadata, not tool I/O. Without their
+        // correlation and advertised decisions, the UI cannot settle a pending call.
+        if (
+          depth === 0 &&
+          (record.type === "request.opened" ||
+            record.type === "request.resolved" ||
+            record.kind === "request")
+        ) {
+          if (typeof record.requestId === "string") result.requestId = record.requestId;
+          if (Schema.is(ProviderRequestKind)(record.requestKind))
+            result.requestKind = record.requestKind;
+          const payload = record.payload;
+          if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+            const original = payload as Record<string, unknown>;
+            const preserved = (
+              result.payload && typeof result.payload === "object" ? result.payload : {}
+            ) as Record<string, unknown>;
+            if (Schema.is(CanonicalRequestType)(original.requestType))
+              preserved.requestType = original.requestType;
+            if (Schema.is(ProviderApprovalDecision)(original.decision))
+              preserved.decision = original.decision;
+            if (Array.isArray(original.approvalOptions))
+              preserved.approvalOptions = original.approvalOptions
+                .slice(0, 16)
+                .flatMap((option: unknown) => {
+                  const decision =
+                    option && typeof option === "object"
+                      ? (option as Record<string, unknown>).decision
+                      : undefined;
+                  return Schema.is(ProviderApprovalDecision)(decision)
+                    ? [{ decision, label: APPROVAL_LABELS[decision] }]
+                    : [];
+                });
+            const presentation = original.presentation;
+            if (presentation && typeof presentation === "object") {
+              const flags: Record<string, boolean> = {};
+              for (const key of ["defaultToNo", "suppressAlwaysAllowRule"] as const) {
+                const flag = (presentation as Record<string, unknown>)[key];
+                if (typeof flag === "boolean") flags[key] = flag;
+              }
+              preserved.presentation = flags;
+            }
+            result.payload = preserved;
+          }
+        }
         // AX/UIA names are never tool identities, even inside a trusted result.
         if (isComputerAutomationTool(name, provenance)) {
           result.toolName = name;
