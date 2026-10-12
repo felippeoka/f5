@@ -13,6 +13,8 @@ import {
 } from "@t3tools/contracts";
 import { Schema } from "effect";
 import { createRehearsalFixture } from "../src/computer/rehearsalFixture.ts";
+import { RehearsalStopObservation } from "../src/computer/rehearsalStopObservation.ts";
+import { measureStopLatency } from "../src/computer/stopLatencyMeasurement.ts";
 import { rehearsalProviderErrorCodes } from "../src/computer/rehearsalElectronObservation.ts";
 
 // Run with Bun, like the native rehearsals. The launched Electron app loads its
@@ -28,13 +30,16 @@ const binary = arg("--codex-binary");
 const statusOnly = args.includes("--status-only");
 const controlsOnly = args.includes("--controls-only");
 const actionsOnly = args.includes("--actions-only");
+const stopMain = args.includes("--stop-main");
+const stopRenderer = args.includes("--stop-renderer");
+const stopOnly = stopMain || stopRenderer;
 if (
   process.platform !== "darwin" ||
   process.env.F5_COMPUTER_ELECTRON_REHEARSAL !== "1" ||
   !output ||
   !sourceHome ||
   !binary ||
-  [statusOnly, controlsOnly, actionsOnly].filter(Boolean).length > 1
+  [statusOnly, controlsOnly, actionsOnly, stopMain, stopRenderer].filter(Boolean).length > 1
 ) {
   process.stderr.write(
     "Human coordination and real quota required: F5_COMPUTER_ELECTRON_REHEARSAL=1 bun apps/desktop/scripts/rehearse-computer-electron.mjs --codex-home <selected profile home> --codex-binary <path> --output <new report.json>\n",
@@ -110,9 +115,26 @@ let providerErrorCodes;
 let toolOutcomeErrors;
 let thumbnailObservation;
 let fixtureObservation;
+const stopTrace = new RehearsalStopObservation();
+let stopMeasurement;
+let frozenPid;
+let restoreTimer;
+const restoreProcess = () => {
+  if (restoreTimer) clearTimeout(restoreTimer);
+  restoreTimer = undefined;
+  if (frozenPid) {
+    try {
+      process.kill(frozenPid, "SIGCONT");
+    } catch {
+      /* Process may have exited. */
+    }
+    frozenPid = undefined;
+  }
+};
 const checks = {};
 const halt = () => {
   interrupted = true;
+  restoreProcess();
   if (page)
     void page
       .evaluate((id) => window.desktopBridge.computerAutomation.setPaused(id, true), threadId)
@@ -121,7 +143,7 @@ const halt = () => {
 process.once("SIGINT", halt);
 process.once("SIGTERM", halt);
 const delay = (ms) => new Promise((done) => setTimeout(done, ms));
-async function waitFor(condition, timeout = 60000) {
+async function waitFor(condition, timeout = 60000, interval = 100) {
   const end = Date.now() + timeout;
   for (;;) {
     if (interrupted || Date.now() > end) throw new Error("Rehearsal interrupted or timed out.");
@@ -129,7 +151,7 @@ async function waitFor(condition, timeout = 60000) {
       if (interrupted) throw new Error("Rehearsal interrupted.");
       return;
     }
-    await delay(100);
+    await delay(interval);
   }
 }
 async function instructions(text) {
@@ -180,7 +202,14 @@ async function startTurn(text) {
   const snapshot = await rpc(ORCHESTRATION_WS_METHODS.getSnapshot);
   previousTurnId = snapshot.threads.find((thread) => thread.id === threadId)?.latestTurn?.turnId;
   await page.getByTestId("composer-editor").fill(text);
-  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  // A kill chord interrupts the turn and pauses the turn queue. "Send now"
+  // submits the verification turn; it does not resume computer authorization.
+  await page
+    .getByRole("button", {
+      name: stopOnly ? /^(Send message|Send now)$/ : "Send message",
+      exact: true,
+    })
+    .click();
   composerSubmissions++;
 }
 try {
@@ -200,6 +229,9 @@ try {
         ["rehearsalSource", join(desktopDir, "scripts/rehearse-computer-electron.mjs")],
         ["observerSource", join(desktopDir, "src/computer/rehearsalElectronObservation.ts")],
         ["responseSource", join(desktopDir, "src/computer/rehearsalResponses.ts")],
+        ["stopObserverSource", join(desktopDir, "src/computer/rehearsalStopObservation.ts")],
+        ["stopMeasurementSource", join(desktopDir, "src/computer/stopLatencyMeasurement.ts")],
+        ["stopFixtureSource", join(desktopDir, "native/macos/Fixtures/StopLatencyFixture.swift")],
       ].map(async ([name, path]) => [
         name,
         createHash("sha256")
@@ -246,8 +278,34 @@ try {
       root,
       appId,
       expectedText: "F5_ELECTRON_REHEARSAL Ω🙂",
-      sourceFile: join(desktopDir, "native/macos/Fixtures/ComputerControlFixture.swift"),
+      sourceFile: join(
+        desktopDir,
+        stopOnly
+          ? "native/macos/Fixtures/StopLatencyFixture.swift"
+          : "native/macos/Fixtures/ComputerControlFixture.swift",
+      ),
     });
+  if (stopOnly) {
+    let buffer = "";
+    fixture.child.stdout.on("data", (chunk) => {
+      buffer += chunk;
+      let end;
+      while ((end = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, end);
+        buffer = buffer.slice(end + 1);
+        if (line === "FIXTURE_READY") continue;
+        try {
+          stopTrace.fixture(JSON.parse(line));
+        } catch {
+          stopTrace.evidence.overflow = true;
+        }
+      }
+      if (buffer.length > 4096) {
+        stopTrace.evidence.overflow = true;
+        buffer = "";
+      }
+    });
+  }
   // Reuse the tested correlator at the actual inherited IPC boundary. Instrumentation
   // only observes; it does not supply results, grants, permits or consent answers.
   const compiledObserver = join(root, "response-observer.cjs");
@@ -262,6 +320,18 @@ try {
     ],
     { timeout: 30000 },
   );
+  const compiledStopObserver = join(root, "stop-observer.cjs");
+  await exec(
+    "bun",
+    [
+      "build",
+      join(desktopDir, "src/computer/rehearsalStopObservation.ts"),
+      "--target=node",
+      "--format=cjs",
+      `--outfile=${compiledStopObserver}`,
+    ],
+    { timeout: 30000 },
+  );
   const wrapper = join(root, "launch.cjs");
   await writeFile(
     wrapper,
@@ -271,11 +341,17 @@ const setPath=app.setPath.bind(app);
 app.setPath=(key,value)=>setPath(key,key==='userData'?${JSON.stringify(join(root, "electron"))}:value);
 const {ElectronRehearsalObservation}=require(${JSON.stringify(compiledObserver)});
 const evidence=globalThis.__computerRehearsalNative=new ElectronRehearsalObservation();
+const {RehearsalStopObservation}=require(${JSON.stringify(compiledStopObserver)});
+const stopEvidence=globalThis.__computerRehearsalStop=new RehearsalStopObservation();
 const cp=require('node:child_process'),spawn=cp.spawn;
 cp.spawn=function(...args){const child=spawn.apply(this,args);if(args[2]?.env?.F5_DESKTOP_COMPUTER_HOST==='ipc'){
 child.on('message',m=>evidence.receive(m));
 const send=child.send.bind(child);child.send=function(m,...args){evidence.receive(m);
-return send(m,...args);};}return child;};
+return send(m,...args);};}
+if(args[0]===${JSON.stringify(join(desktopDir, `dist-native/mac-${process.arch}/f5-computer-helper`))}){
+let buffer='';child.stdout.on('data',chunk=>{buffer+=chunk;let end;while((end=buffer.indexOf('\\n'))>=0){
+const line=buffer.slice(0,end);buffer=buffer.slice(end+1);try{stopEvidence.helper(JSON.parse(line));}catch{}}
+if(buffer.length>12*1024*1024)buffer='';});}return child;};
 require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
 `,
   );
@@ -548,130 +624,283 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         "Access confirmed. Keep mouse and keyboard idle; the agent will now use only the fixture.",
       );
       await delay(2000);
-      stage = "first-action-turn";
-      await startTurn(
-        controlsOnly
-          ? `Continue the isolated F5 UI controls check. Access was approved for exact app ${appId}; use only F5 computer tools for that app. Call computer_status, call computer_activate_app with app set to the exact appId and screenshot:true, take computer_screenshot, then finish READY. Do not inspect, click, type, send keys, scroll, drag or perform element actions. Never use shell, files, network or other apps. Stop immediately on any interruption, ambiguity or failed action.`
-          : `Continue the isolated F5 UI rehearsal. Access was approved in the previous turn for exact app ${appId}; use only F5 computer tools for that app. You may use tool discovery to locate them. Call computer_status, call computer_activate_app with app set to the exact appId and screenshot:true, take computer_screenshot, inspect the exact appId. Use this exact appId in every tool app argument; never substitute the display name. Press Rehearsal press once using computer_element_action, focus Rehearsal input with an element action, and type exactly this synthetic text: F5_ELECTRON_REHEARSAL Ω🙂. Finish READY. Never use shell, files, network, any other app or the secure field. Stop immediately on any interruption, ambiguity or failed action.`,
-      );
-      await waitTurn();
-      checks.humanTrustedConsent = await page.evaluate(
-        () => window.__computerRehearsal.trustedConsent,
-      );
-      const first = await observer();
-      if (controlsOnly) {
-        checks.controlsFirstCaptureSucceeded = first.responses.nativeCaptureSucceeded;
-        checks.controlsFirstActivationSucceeded = first.operations.some(
-          (op) => op.op === "activateApp" && op.outcome === "ok",
-        );
-      } else {
-        checks.firstTurnNativeResponses = Object.values(first.responses).every(Boolean);
-        checks.fixtureReceivedOnePressAndUnicode = fixture.presses() === 1 && fixture.typed();
-      }
-      if (
-        !checks.humanTrustedConsent ||
-        (controlsOnly
-          ? !checks.controlsFirstCaptureSucceeded || !checks.controlsFirstActivationSucceeded
-          : !checks.firstTurnNativeResponses || !checks.fixtureReceivedOnePressAndUnicode)
-      )
-        throw new Error("First turn evidence incomplete.");
-      if (!actionsOnly) {
-        stage = "human-pause";
-        checks.pauseControlVisibleAfterTurn = await page
-          .getByTestId("computer-live-card")
-          .getByRole("button", { name: "Pause", exact: true })
-          .isVisible();
-        if (!checks.pauseControlVisibleAfterTurn) throw new Error("Pause control was not visible.");
-        await application.evaluate(({ BrowserWindow }) =>
-          BrowserWindow.getAllWindows()
-            .find((w) => w.webContents.getURL().startsWith("t3:"))
-            ?.focus(),
-        );
+      if (stopOnly) {
+        stage = "stop-clock-calibration";
+        let clock;
+        for (let index = 0; index < 3; index++) {
+          const before = performance.now();
+          fixture.child.stdin.write("CALIBRATE\n");
+          await waitFor(() => stopTrace.calibrations.length > index, 5000, 1);
+          const after = performance.now();
+          const native = stopTrace.calibrations[index];
+          const candidate = { offsetMinMs: native - after, offsetMaxMs: native - before };
+          if (
+            !clock ||
+            candidate.offsetMaxMs - candidate.offsetMinMs < clock.offsetMaxMs - clock.offsetMinMs
+          )
+            clock = candidate;
+        }
+        if (clock.offsetMaxMs - clock.offsetMinMs > 25)
+          throw new Error("Stop clock calibration uncertain.");
+        // Resolve the real renderer PID before it is frozen. Main and helper stay
+        // independent; no renderer RPC is needed on the stop path.
+        const targetPid = stopMain
+          ? application.process().pid
+          : await application.evaluate(({ BrowserWindow }) =>
+              BrowserWindow.getAllWindows()
+                .find((w) => w.webContents.getURL().startsWith("t3:"))
+                ?.webContents.getOSProcessId(),
+            );
+        if (!Number.isInteger(targetPid) || targetPid <= 0)
+          throw new Error("Missing isolated process.");
         await instructions(
-          "First turn finished. Click Pause in the Agent computer control card now.",
+          "Wait for the separate fixture to turn RED, then press Control + Command + Escape once. Keep input idle until RED.",
         );
-        await waitFor(() => page.evaluate(() => window.__computerRehearsal.paused), 180000);
-        checks.humanPauseMirrored =
-          (await observer()).pauseObserved &&
-          (await page.evaluate(() => window.__computerRehearsal.trustedPause));
-        await delay(1500);
-        checks.untrustedResumeRefused = await page.evaluate(async (id) => {
-          try {
-            await window.desktopBridge.computerAutomation.setPaused(id, false);
-            return false;
-          } catch {
-            return true;
-          }
-        }, threadId);
-        if (!checks.untrustedResumeRefused) throw new Error("Untrusted resume was accepted.");
-        stage = "human-resume";
-        await instructions(
-          controlsOnly
-            ? "Click Resume in the same card and confirm Resume in the native F5 dialog, then keep input idle. The agent will only activate the fixture and take a fresh screenshot."
-            : "Click Resume in the same card and confirm Resume in the native F5 dialog, then keep mouse and keyboard idle. The agent will take a fresh screenshot and click the test button once.",
+        fixture.child.stdin.write("COUNTDOWN_WAIT\n");
+        await delay(3100);
+        stage = "stop-input-turn";
+        await startTurn(
+          `Explicit isolated physical stop test. Use only F5 computer tools for exact app ${appId}. Call computer_status, activate that exact app with screenshot:false, then call computer_type once with text consisting of exactly 8000 lowercase x characters and screenshot:false. Do not use inspect, screenshots, element actions, any other app, shell, files or network. Do not retry any interrupted or failed call; stop immediately on interruption. The operator will press the native kill chord during this single typing action.`,
         );
-        await waitFor(() => page.evaluate(() => !window.__computerRehearsal.paused), 180000);
-        checks.humanResumeMirrored =
-          (await observer()).resumeObserved &&
-          (await page.evaluate(() => window.__computerRehearsal.trustedResume));
-      }
-      const before = await observer();
-      await delay(2000);
-      stage = actionsOnly ? "second-action-turn" : "second-turn-after-resume";
-      await startTurn(
-        controlsOnly
-          ? `Continue this isolated F5 controls check. Use only F5 computer tools for exact app ${appId}. First computer_status; call computer_activate_app with app set to the exact appId and screenshot:true; take a NEW computer_screenshot, then finish READY. Do not inspect, click, type, send keys, scroll, drag or perform element actions. Never use shell, filesystem, network or other apps. Stop immediately on any failure or interruption; do not retry.`
-          : `Continue this explicit isolated UI rehearsal. Use only F5 computer tools for exact app ${appId}; you may use tool discovery to locate them. First computer_status; call computer_activate_app with app set to the exact appId and screenshot:true; take a NEW computer_screenshot; inspect Rehearsal press and compute its center from its bounds. Use computer_click once at that center with the screenshot displayId and screenshot:true. Never use a cached screenshot, element action for this click, shell, filesystem, network, other apps or the secure field. Finish READY. Stop immediately on any failure or interruption; do not retry.`,
-      );
-      await waitTurn();
-      const after = await observer();
-      checks[actionsOnly ? "freshCaptureOnNextTurn" : "freshCaptureAfterResume"] =
-        after.captureResponses > before.captureResponses;
-      if (controlsOnly)
-        checks.controlsOnlyEmittedNoInput =
-          fixture.presses() === 0 &&
-          !fixture.typed() &&
-          after.operations.every(
-            (op) =>
-              ![
-                "inspect",
-                "type",
-                "key",
-                "click",
-                "move",
-                "drag",
-                "scroll",
-                "elementAction",
-              ].includes(op.op),
+        await waitFor(
+          () =>
+            stopTrace.evidence.samples.filter(
+              (sample) => sample.kind === "injected" && sample.keyDown,
+            ).length >= 8,
+          150000,
+        );
+        if (
+          stopTrace.evidence.overflow ||
+          stopTrace.evidence.samples.some((sample) => sample.kind !== "injected")
+        )
+          throw new Error("Premature physical input or incomplete stop trace.");
+        const heartbeat = await application.evaluate(
+          () => globalThis.__computerRehearsalStop.snapshot().heartbeatSequence,
+        );
+        await waitFor(
+          async () =>
+            (await application.evaluate(
+              () => globalThis.__computerRehearsalStop.snapshot().heartbeatSequence,
+            )) > heartbeat,
+          1000,
+        );
+        stage = stopMain ? "main-frozen-physical-stop" : "renderer-frozen-physical-stop";
+        frozenPid = targetPid;
+        // External supervisor, independent of the frozen app, always restores it.
+        restoreTimer = setTimeout(restoreProcess, stopMain ? 850 : 10000);
+        process.kill(frozenPid, "SIGSTOP");
+        const state = (
+          await exec("ps", ["-o", "state=", "-p", String(frozenPid)], { timeout: 2000 })
+        ).stdout;
+        if (!state.includes("T")) throw new Error("Process did not stop.");
+        const startMs = performance.now();
+        fixture.child.stdin.write("GO\n");
+        if (stopMain) await delay(700);
+        else
+          await waitFor(
+            () => stopTrace.evidence.samples.some((sample) => sample.kind === "chord"),
+            8000,
           );
-      else checks.fixtureReceivedSecondCoordinatePress = fixture.presses() === 2;
-      const visibleImage = page.getByAltText("Last captured computer action");
-      checks.liveCardThumbnailRendered =
-        (await visibleImage.isVisible()) &&
-        (await visibleImage.evaluate((img) => img.complete && img.naturalWidth > 0));
-      checks.realActivityAndThumbnailPush = await page.evaluate(
-        () =>
-          window.__computerRehearsal.activitySeen &&
-          window.__computerRehearsal.thumbnailSeen &&
-          window.__computerRehearsal.leaseSeen,
-      );
-      checks.turnLeaseReleased = !after.held && after.leaseObserved;
-      checks.realComposerSubmittedAllThreeTurns = composerSubmissions === 3;
-      clearInterval(overlayTimer);
-      await Promise.race([overlayPoll, delay(1000)]);
-      checks.realOverlayObserved = overlay.observed && overlay.protectedOptions;
-      if (!controlsOnly) {
-        checks.realSemanticOutlineObserved = overlay.semanticOutline;
-        checks.realCoordinateCursorObserved = overlay.coordinateCursor;
+        const stillStopped = (
+          await exec("ps", ["-o", "state=", "-p", String(targetPid)], { timeout: 2000 })
+        ).stdout.includes("T");
+        const endMs = performance.now();
+        if (!frozenPid || !stillStopped)
+          throw new Error("Process freeze ended before measurement.");
+        const bounds = { startMs, endMs, ...clock };
+        if (stopMain) stopTrace.evidence.hostStall = bounds;
+        else stopTrace.evidence.rendererFreeze = bounds;
+        restoreProcess();
+        checks.actualElectronProcessFrozen = true;
+        await waitFor(async () => {
+          const trace = await application.evaluate(() =>
+            globalThis.__computerRehearsalStop.snapshot(),
+          );
+          stopTrace.helper({ type: "physicalInput", recognizedAtMs: trace.physicalRecognizedAtMs });
+          stopTrace.helper({ type: "killSwitch", recognizedAtMs: trace.chordRecognizedAtMs });
+          return stopTrace.evidence.chordRecognizedAtMs !== undefined;
+        }, 10000);
+        await waitFor(async () => !(await observer()).held, 10000);
+        await delay(750);
+        fixture.child.stdin.write("FINISH\n");
+        await waitFor(() => stopTrace.evidence.observationEndedAtMs !== undefined, 5000);
+        const native = await observer();
+        stopTrace.evidence.mutationInterrupted = native.operations.some(
+          (op) => op.op === "type" && op.outcome === "Interrupted",
+        );
+        stopTrace.evidence.leaseReleased = !native.held && native.leaseObserved;
+        checks.helperRecognizedChordAndMirroredPause = native.pauseObserved;
+        stage = "paused-mutation-refusal";
+        await waitFor(async () => {
+          const snapshot = await rpc(ORCHESTRATION_WS_METHODS.getSnapshot);
+          const turn = snapshot.threads.find((t) => t.id === threadId)?.latestTurn;
+          return turn && turn.turnId !== previousTurnId && turn.state !== "running";
+        }, 60000);
+        const before = native.operations.length;
+        const failuresBefore = await page.evaluate(
+          () => window.__computerRehearsal.toolOutcomeErrors.length,
+        );
+        await startTurn(
+          `Isolated stop verification: use only F5 computer tools. Call computer_list_apps once, then attempt computer_type with text x and screenshot:false once. The thread is deliberately paused, so that call MUST be refused. Do not resume, retry or use any other tools, apps, shell, files or network. Finish READY after refusal.`,
+        );
+        await waitFor(async () => {
+          const snapshot = await rpc(ORCHESTRATION_WS_METHODS.getSnapshot);
+          const turn = snapshot.threads.find((t) => t.id === threadId)?.latestTurn;
+          return turn && turn.turnId !== previousTurnId && turn.state !== "running";
+        }, 90000);
+        const final = await observer();
+        stopTrace.evidence.pausedMutationRefused =
+          final.operations
+            .slice(before)
+            .some(
+              (op) =>
+                (op.op === "leaseAcquire" || op.op === "type") &&
+                op.outcome === "Interrupted" &&
+                op.cause === "paused",
+            ) ||
+          (await page.evaluate(
+            (count) =>
+              window.__computerRehearsal.paused &&
+              window.__computerRehearsal.toolOutcomeErrors.slice(count).includes("Interrupted"),
+            failuresBefore,
+          ));
+        // Require a newly refused call, not the earlier interrupted input action.
+        checks.noSyntheticInputAfterStop = !stopTrace.evidence.samples.some(
+          (sample) =>
+            sample.kind === "injected" &&
+            sample.eventAtMs > stopTrace.evidence.chordRecognizedAtMs + 100,
+        );
+        stopMeasurement = measureStopLatency(stopTrace.evidence);
+        checks.nativeStopMeasurementPassed = stopMeasurement.state === "passed";
+        stage = "finished";
+        await instructions("Stop check finished. You can use your computer again.");
+      } else {
+        stage = "first-action-turn";
+        await startTurn(
+          controlsOnly
+            ? `Continue the isolated F5 UI controls check. Access was approved for exact app ${appId}; use only F5 computer tools for that app. Call computer_status, call computer_activate_app with app set to the exact appId and screenshot:true, take computer_screenshot, then finish READY. Do not inspect, click, type, send keys, scroll, drag or perform element actions. Never use shell, files, network or other apps. Stop immediately on any interruption, ambiguity or failed action.`
+            : `Continue the isolated F5 UI rehearsal. Access was approved in the previous turn for exact app ${appId}; use only F5 computer tools for that app. You may use tool discovery to locate them. Call computer_status, call computer_activate_app with app set to the exact appId and screenshot:true, take computer_screenshot, inspect the exact appId. Use this exact appId in every tool app argument; never substitute the display name. Press Rehearsal press once using computer_element_action, focus Rehearsal input with an element action, and type exactly this synthetic text: F5_ELECTRON_REHEARSAL Ω🙂. Finish READY. Never use shell, files, network, any other app or the secure field. Stop immediately on any interruption, ambiguity or failed action.`,
+        );
+        await waitTurn();
+        checks.humanTrustedConsent = await page.evaluate(
+          () => window.__computerRehearsal.trustedConsent,
+        );
+        const first = await observer();
+        if (controlsOnly) {
+          checks.controlsFirstCaptureSucceeded = first.responses.nativeCaptureSucceeded;
+          checks.controlsFirstActivationSucceeded = first.operations.some(
+            (op) => op.op === "activateApp" && op.outcome === "ok",
+          );
+        } else {
+          checks.firstTurnNativeResponses = Object.values(first.responses).every(Boolean);
+          checks.fixtureReceivedOnePressAndUnicode = fixture.presses() === 1 && fixture.typed();
+        }
+        if (
+          !checks.humanTrustedConsent ||
+          (controlsOnly
+            ? !checks.controlsFirstCaptureSucceeded || !checks.controlsFirstActivationSucceeded
+            : !checks.firstTurnNativeResponses || !checks.fixtureReceivedOnePressAndUnicode)
+        )
+          throw new Error("First turn evidence incomplete.");
+        if (!actionsOnly) {
+          stage = "human-pause";
+          checks.pauseControlVisibleAfterTurn = await page
+            .getByTestId("computer-live-card")
+            .getByRole("button", { name: "Pause", exact: true })
+            .isVisible();
+          if (!checks.pauseControlVisibleAfterTurn)
+            throw new Error("Pause control was not visible.");
+          await application.evaluate(({ BrowserWindow }) =>
+            BrowserWindow.getAllWindows()
+              .find((w) => w.webContents.getURL().startsWith("t3:"))
+              ?.focus(),
+          );
+          await instructions(
+            "First turn finished. Click Pause in the Agent computer control card now.",
+          );
+          await waitFor(() => page.evaluate(() => window.__computerRehearsal.paused), 180000);
+          checks.humanPauseMirrored =
+            (await observer()).pauseObserved &&
+            (await page.evaluate(() => window.__computerRehearsal.trustedPause));
+          await delay(1500);
+          checks.untrustedResumeRefused = await page.evaluate(async (id) => {
+            try {
+              await window.desktopBridge.computerAutomation.setPaused(id, false);
+              return false;
+            } catch {
+              return true;
+            }
+          }, threadId);
+          if (!checks.untrustedResumeRefused) throw new Error("Untrusted resume was accepted.");
+          stage = "human-resume";
+          await instructions(
+            controlsOnly
+              ? "Click Resume in the same card and confirm Resume in the native F5 dialog, then keep input idle. The agent will only activate the fixture and take a fresh screenshot."
+              : "Click Resume in the same card and confirm Resume in the native F5 dialog, then keep mouse and keyboard idle. The agent will take a fresh screenshot and click the test button once.",
+          );
+          await waitFor(() => page.evaluate(() => !window.__computerRehearsal.paused), 180000);
+          checks.humanResumeMirrored =
+            (await observer()).resumeObserved &&
+            (await page.evaluate(() => window.__computerRehearsal.trustedResume));
+        }
+        const before = await observer();
+        await delay(2000);
+        stage = actionsOnly ? "second-action-turn" : "second-turn-after-resume";
+        await startTurn(
+          controlsOnly
+            ? `Continue this isolated F5 controls check. Use only F5 computer tools for exact app ${appId}. First computer_status; call computer_activate_app with app set to the exact appId and screenshot:true; take a NEW computer_screenshot, then finish READY. Do not inspect, click, type, send keys, scroll, drag or perform element actions. Never use shell, filesystem, network or other apps. Stop immediately on any failure or interruption; do not retry.`
+            : `Continue this explicit isolated UI rehearsal. Use only F5 computer tools for exact app ${appId}; you may use tool discovery to locate them. First computer_status; call computer_activate_app with app set to the exact appId and screenshot:true; take a NEW computer_screenshot; inspect Rehearsal press and compute its center from its bounds. Use computer_click once at that center with the screenshot displayId and screenshot:true. Never use a cached screenshot, element action for this click, shell, filesystem, network, other apps or the secure field. Finish READY. Stop immediately on any failure or interruption; do not retry.`,
+        );
+        await waitTurn();
+        const after = await observer();
+        checks[actionsOnly ? "freshCaptureOnNextTurn" : "freshCaptureAfterResume"] =
+          after.captureResponses > before.captureResponses;
+        if (controlsOnly)
+          checks.controlsOnlyEmittedNoInput =
+            fixture.presses() === 0 &&
+            !fixture.typed() &&
+            after.operations.every(
+              (op) =>
+                ![
+                  "inspect",
+                  "type",
+                  "key",
+                  "click",
+                  "move",
+                  "drag",
+                  "scroll",
+                  "elementAction",
+                ].includes(op.op),
+            );
+        else checks.fixtureReceivedSecondCoordinatePress = fixture.presses() === 2;
+        const visibleImage = page.getByAltText("Last captured computer action");
+        checks.liveCardThumbnailRendered =
+          (await visibleImage.isVisible()) &&
+          (await visibleImage.evaluate((img) => img.complete && img.naturalWidth > 0));
+        checks.realActivityAndThumbnailPush = await page.evaluate(
+          () =>
+            window.__computerRehearsal.activitySeen &&
+            window.__computerRehearsal.thumbnailSeen &&
+            window.__computerRehearsal.leaseSeen,
+        );
+        checks.turnLeaseReleased = !after.held && after.leaseObserved;
+        checks.realComposerSubmittedAllThreeTurns = composerSubmissions === 3;
+        clearInterval(overlayTimer);
+        await Promise.race([overlayPoll, delay(1000)]);
+        checks.realOverlayObserved = overlay.observed && overlay.protectedOptions;
+        if (!controlsOnly) {
+          checks.realSemanticOutlineObserved = overlay.semanticOutline;
+          checks.realCoordinateCursorObserved = overlay.coordinateCursor;
+        }
+        checks.overlayClosedAfterLease = await application.evaluate(
+          ({ BrowserWindow }) =>
+            !BrowserWindow.getAllWindows().some((w) =>
+              w.webContents.getURL().startsWith("data:text/html"),
+            ),
+        );
+        stage = "finished";
+        await instructions("Check finished. You can use your computer again.");
       }
-      checks.overlayClosedAfterLease = await application.evaluate(
-        ({ BrowserWindow }) =>
-          !BrowserWindow.getAllWindows().some((w) =>
-            w.webContents.getURL().startsWith("data:text/html"),
-          ),
-      );
-      stage = "finished";
-      await instructions("Check finished. You can use your computer again.");
     } finally {
       clearInterval(overlayTimer);
       await Promise.race([overlayPoll, delay(1000)]);
@@ -681,6 +910,8 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
   failureStage = stage;
   process.exitCode = 1;
 } finally {
+  restoreProcess();
+  if (stopOnly) stopMeasurement = measureStopLatency(stopTrace.evidence);
   process.off("SIGINT", halt);
   process.off("SIGTERM", halt);
   if (application) nativeObservation = await observer().catch(() => undefined);
@@ -774,13 +1005,15 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       {
         reportVersion: 1,
         recordedAt: new Date().toISOString(),
-        scope: statusOnly
-          ? "unsigned-real-electron-codex-read-only-discovery-diagnostic"
-          : controlsOnly
-            ? "unsigned-real-electron-codex-human-consent-and-controls"
-            : actionsOnly
-              ? "unsigned-real-electron-codex-human-consent-and-actions"
-              : "unsigned-real-electron-codex-human-consent-synthetic-app",
+        scope: stopOnly
+          ? `unsigned-real-electron-codex-${stopMain ? "main" : "renderer"}-frozen-physical-stop`
+          : statusOnly
+            ? "unsigned-real-electron-codex-read-only-discovery-diagnostic"
+            : controlsOnly
+              ? "unsigned-real-electron-codex-human-consent-and-controls"
+              : actionsOnly
+                ? "unsigned-real-electron-codex-human-consent-and-actions"
+                : "unsigned-real-electron-codex-human-consent-synthetic-app",
         platform: process.platform,
         arch: process.arch,
         osVersion: release(),
@@ -803,6 +1036,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         toolOutcomeErrors,
         thumbnailObservation,
         fixtureObservation,
+        ...(stopOnly ? { stopMeasurement } : {}),
         checks,
         ...(controlsOnly ? { controlsOnly: true } : {}),
         ...(actionsOnly ? { actionsOnly: true } : {}),
@@ -813,9 +1047,11 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
               ]
             : [
                 "One real provider and one synthetic AppKit app, on the current display only",
-                actionsOnly
-                  ? "Human app consent; Pause/Resume is excluded from this actions-only run"
-                  : "Human app consent and pause/resume; no session-actions consent in full-access mode",
+                stopOnly
+                  ? "Human app consent and physical chord; UI Pause/Resume is excluded"
+                  : actionsOnly
+                    ? "Human app consent; Pause/Resume is excluded from this actions-only run"
+                    : "Human app consent and pause/resume; no session-actions consent in full-access mode",
                 ...(actionsOnly ? ["No session-actions consent in full-access mode"] : []),
                 ...(controlsOnly
                   ? [
@@ -824,7 +1060,9 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
                   : []),
               ]),
           "No installed-build TCC attribution, signed packaging, real-app or multi-profile/display certification",
-          "Overlay capture exclusion, hung-renderer/host stop latency, Stop interruption and Windows runtime remain pending",
+          stopOnly
+            ? "SIGSTOP of one isolated Electron process; does not prove arbitrary deadlocks, signed packaging or Windows stop behavior"
+            : "Overlay capture exclusion, hung-renderer/host stop latency, Stop interruption and Windows runtime remain pending",
           "Provider built-in and Chrome gates remain closed; no image bytes, typed values, accessibility content or raw errors retained",
         ],
       },

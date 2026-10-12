@@ -623,6 +623,34 @@ bun run build:desktop
 F5_COMPUTER_ELECTRON_REHEARSAL=1 bun apps/desktop/scripts/rehearse-computer-electron.mjs --codex-home <selected-profile-home> --codex-binary <codex-binary> --output /tmp/f5-electron-computer.json
 ```
 
+The same runner accepts `--stop-renderer` or `--stop-main` for separate physical-stop
+checks. Both use a timing-only synthetic fixture, the real human app-consent flow,
+and a real provider typing call. An external supervisor SIGSTOPs the selected isolated
+Electron process, verifies its OS process state, then sends the fixture's red cue.
+The renderer mode remains frozen until the chord is observed (at most ten seconds);
+the main mode measures a 700 ms freeze, with an independent 850 ms restoration limit.
+SIGCONT is also guaranteed on runner cancellation and normal cleanup. The main mode
+retains the production permit expiry, so a late human response fails coverage instead
+of extending input authorization. Both physical recognition and the complete chord
+must fall inside conservative clock bounds for the verified freeze. The checks also
+require interrupted typing, a quiet delivery tail, mirrored pause, refusal of a new
+typing call, and lease cleanup. No input, grant, permit or consent is injected by the
+observation wrapper. Only counts, fixed outcomes and relative timing summaries are
+saved; helper/fixture raw data and typed values are discarded. A SIGSTOP test covers
+process unresponsiveness, not every possible deadlock. These runs do not open signed
+release gates.
+
+The first [real frozen-renderer attempt](computer-certification/2026-10-12-macos-electron-renderer-stop-attempt.json)
+records both physical recognition and the full chord during a verified 709.4 ms renderer
+freeze. Input emission stopped within 8.2 ms of physical recognition and app delivery
+within 12.6 ms; typing was interrupted, pause mirrored and the lease released. The
+**overall run failed** in its follow-up verification: the runner looked for the ordinary
+Send message control instead of the Send now control shown after turn interruption.
+It therefore did not prove refusal of a subsequent mutation or record a frontmost-app
+receipt. The runner now handles Send now without resuming computer permission, and the
+fixture reports its own frontmost state before subsequent composer interaction. The
+original failed report remains unchanged; these fixes alone are not a passing rerun.
+
 Coordinate with the operator before launching. The real consent dialog must be answered
 by a human for the single synthetic fixture. The operator then leaves input idle and
 follows the window's instructions for Pause and Resume. Turns go through the real

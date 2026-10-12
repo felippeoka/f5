@@ -4,6 +4,12 @@ export interface StopInputSample {
   observedAtMs: number;
   keyDown: boolean;
 }
+export interface StopProcessFreeze {
+  startMs: number;
+  endMs: number;
+  offsetMinMs: number;
+  offsetMaxMs: number;
+}
 export interface StopLatencyEvidence {
   samples: ReadonlyArray<StopInputSample>;
   physicalRecognizedAtMs?: number;
@@ -16,12 +22,8 @@ export interface StopLatencyEvidence {
   overflow: boolean;
   observationEndedAtMs?: number;
   backendFrozenAtStop?: boolean;
-  hostStall?: {
-    startMs: number;
-    endMs: number;
-    offsetMinMs: number;
-    offsetMaxMs: number;
-  };
+  hostStall?: StopProcessFreeze;
+  rendererFreeze?: StopProcessFreeze;
 }
 const finite = (value: number | undefined): value is number =>
   value !== undefined && Number.isFinite(value) && value >= 0;
@@ -49,6 +51,18 @@ export function measureStopLatency(evidence: StopLatencyEvidence) {
   const deliveryTailMs =
     finite(lastDelivery) && finite(physicalAt) ? Math.max(0, lastDelivery - physicalAt) : undefined;
   const stall = evidence.hostStall;
+  const renderer = evidence.rendererFreeze;
+  const calibrated = (bounds: StopProcessFreeze) =>
+    [bounds.startMs, bounds.endMs, bounds.offsetMinMs, bounds.offsetMaxMs].every(Number.isFinite) &&
+    bounds.endMs > bounds.startMs &&
+    bounds.offsetMaxMs >= bounds.offsetMinMs &&
+    bounds.offsetMaxMs - bounds.offsetMinMs <= 25;
+  const duringFreeze = (bounds: StopProcessFreeze) =>
+    finite(physicalAt) &&
+    finite(chordAt) &&
+    physicalAt >= bounds.startMs + bounds.offsetMaxMs &&
+    chordAt >= physicalAt &&
+    chordAt <= bounds.endMs + bounds.offsetMinMs;
   const checks = {
     traceComplete:
       !evidence.overflow && evidence.samples.length > 0 && evidence.samples.length <= 8192,
@@ -83,21 +97,16 @@ export function measureStopLatency(evidence: StopLatencyEvidence) {
     ...(evidence.backendFrozenAtStop !== undefined
       ? { backendFrozenAtStop: evidence.backendFrozenAtStop }
       : {}),
+    ...(renderer
+      ? {
+          rendererClockCalibrated: calibrated(renderer),
+          physicalAndChordDuringRendererFreeze: duringFreeze(renderer),
+        }
+      : {}),
     ...(stall
       ? {
-          stallClockCalibrated:
-            [stall.startMs, stall.endMs, stall.offsetMinMs, stall.offsetMaxMs].every(
-              Number.isFinite,
-            ) &&
-            stall.endMs > stall.startMs &&
-            stall.offsetMaxMs >= stall.offsetMinMs &&
-            stall.offsetMaxMs - stall.offsetMinMs <= 25,
-          physicalAndChordDuringHostStall:
-            finite(physicalAt) &&
-            finite(chordAt) &&
-            physicalAt >= stall.startMs + stall.offsetMaxMs &&
-            chordAt >= physicalAt &&
-            chordAt <= stall.endMs + stall.offsetMinMs,
+          stallClockCalibrated: calibrated(stall),
+          physicalAndChordDuringHostStall: duringFreeze(stall),
         }
       : {}),
   };
@@ -112,6 +121,7 @@ export function measureStopLatency(evidence: StopLatencyEvidence) {
     ...(finite(physicalAt) && finite(chordAt)
       ? { physicalToChordMs: round(chordAt - physicalAt) }
       : {}),
+    ...(renderer ? { rendererFreezeDurationMs: round(renderer.endMs - renderer.startMs) } : {}),
     ...(stall
       ? {
           hostStallDurationMs: round(stall.endMs - stall.startMs),

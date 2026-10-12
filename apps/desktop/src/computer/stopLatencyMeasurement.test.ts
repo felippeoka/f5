@@ -88,6 +88,22 @@ it("requires the backend to remain stopped when that mode is selected", () => {
   expect(measureStopLatency({ ...evidence, backendFrozenAtStop: true }).state).toBe("passed");
   expect(measureStopLatency({ ...evidence, backendFrozenAtStop: false }).state).toBe("failed");
 });
+it("requires physical input and the whole chord inside a separately calibrated renderer freeze", () => {
+  const rendererFreeze = { startMs: 100, endMs: 800, offsetMinMs: 1000, offsetMaxMs: 1002 };
+  const result = measureStopLatency({ ...evidence, rendererFreeze });
+  expect(result.state).toBe("passed");
+  expect(result.checks).toMatchObject({
+    rendererClockCalibrated: true,
+    physicalAndChordDuringRendererFreeze: true,
+  });
+  expect(result.checks).not.toHaveProperty("physicalAndChordDuringHostStall");
+  for (const changed of [
+    { ...rendererFreeze, startMs: 199 },
+    { ...rendererFreeze, endMs: 239 },
+    { ...rendererFreeze, offsetMaxMs: 1030 },
+  ])
+    expect(measureStopLatency({ ...evidence, rendererFreeze: changed }).state).toBe("failed");
+});
 it("reports conservative relative stall offsets without exposing native clock origins", () => {
   const hostStall = { startMs: 100, endMs: 800, offsetMinMs: 1000, offsetMaxMs: 1002 };
   expect(measureStopLatency({ ...evidence, hostStall })).toMatchObject({

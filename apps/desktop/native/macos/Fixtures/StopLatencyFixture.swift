@@ -85,7 +85,10 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
             } else if command == "FINISH" {
               self.finished = true
               self.instruction.stringValue = "Check complete. You can use your computer again."
-              self.emit(["kind": "finished", "observedAtMs": ProcessInfo.processInfo.systemUptime * 1000])
+              self.emit([
+                "kind": "finished", "observedAtMs": ProcessInfo.processInfo.systemUptime * 1000,
+                "frontmost": NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(),
+              ])
             }
           }
         }
