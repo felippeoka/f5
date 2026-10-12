@@ -215,7 +215,12 @@ import { isWsInteractionBlocked, useWsConnectionState } from "../wsConnectionSta
 import BranchToolbar from "./BranchToolbar";
 import { useChatViewBranchDriftGuard } from "./ChatViewBranchDriftGuard";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
-import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
+import {
+  selectSurfaceHeaderState,
+  selectThreadRightPanelState,
+  useRightPanelStore,
+} from "../rightPanelStore";
+import { setSearchParamsForSurface } from "../rightPanelNavigation";
 import { canStartImplementation, workflowContainsThread } from "./workflow/workflowUtils";
 import { codeReviewWorkflowContainsThread } from "./workflow/codeReviewWorkflowUtils";
 import { investigationWorkflowContainsThread } from "./workflow/investigationWorkflowUtils";
@@ -1040,18 +1045,18 @@ export default function ChatView({
   const isServerThread = serverThread !== undefined;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
-  const diffOpen = useRightPanelStore((store) => {
-    const state = selectThreadRightPanelState(store.byThreadId, threadId);
-    return state.isOpen && state.surfaces.some((surface) => surface.id === "diff");
-  });
-  const filesOpen = useRightPanelStore((store) => {
-    const state = selectThreadRightPanelState(store.byThreadId, threadId);
-    return state.isOpen && state.surfaces.some((surface) => surface.id === "files");
-  });
-  const agentsOpen = useRightPanelStore((store) => {
-    const state = selectThreadRightPanelState(store.byThreadId, threadId);
-    return state.isOpen && state.surfaces.some((surface) => surface.id === "agents");
-  });
+  const diffState = useRightPanelStore((store) =>
+    selectSurfaceHeaderState(selectThreadRightPanelState(store.byThreadId, threadId), "diff"),
+  );
+  const filesState = useRightPanelStore((store) =>
+    selectSurfaceHeaderState(selectThreadRightPanelState(store.byThreadId, threadId), "files"),
+  );
+  const agentsState = useRightPanelStore((store) =>
+    selectSurfaceHeaderState(selectThreadRightPanelState(store.byThreadId, threadId), "agents"),
+  );
+  const previewState = useRightPanelStore((store) =>
+    selectSurfaceHeaderState(selectThreadRightPanelState(store.byThreadId, threadId), "preview"),
+  );
   const activeThreadId = activeThread?.id ?? null;
   const activeLatestTurn = activeThread?.latestTurn ?? null;
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
@@ -2635,8 +2640,21 @@ export default function ChatView({
     () => shortcutLabelForCommand(keybindings, "chat.scrollToBottom"),
     [keybindings],
   );
+  // Header toggles: a visible tab closes, a background tab comes to front, a closed one opens.
   const onToggleDiff = useCallback(() => {
-    if (diffOpen) {
+    if (diffState === "background") {
+      // Same as clicking the tab: keep the selected turn/scope, drop any file-view params.
+      useRightPanelStore.getState().activateSurface(threadId, "diff");
+      void navigate({
+        to: "/$threadId",
+        params: { threadId },
+        replace: true,
+        search: (previous) => setSearchParamsForSurface(previous, { id: "diff", kind: "diff" }),
+      });
+      return;
+    }
+    const closing = diffState === "active";
+    if (closing) {
       useRightPanelStore.getState().closeSurface(threadId, "diff");
     } else {
       useRightPanelStore.getState().open(threadId, "diff");
@@ -2647,24 +2665,33 @@ export default function ChatView({
       replace: true,
       search: (previous) => {
         const rest = clearTurnDiffSearchParams(previous);
-        return diffOpen ? rest : { ...rest, diff: "1", diffScope: "working-tree" };
+        return closing
+          ? rest
+          : { ...clearFileViewSearchParams(rest), diff: "1", diffScope: "working-tree" };
       },
     });
-  }, [diffOpen, navigate, threadId]);
+  }, [diffState, navigate, threadId]);
   const onToggleFiles = useCallback(() => {
-    if (filesOpen) {
+    if (filesState === "active") {
       useRightPanelStore.getState().closeSurface(threadId, "files");
       return;
     }
     useRightPanelStore.getState().open(threadId, "files");
-  }, [filesOpen, threadId]);
+  }, [filesState, threadId]);
   const onToggleAgents = useCallback(() => {
-    if (agentsOpen) {
+    if (agentsState === "active") {
       useRightPanelStore.getState().closeSurface(threadId, "agents");
       return;
     }
     useRightPanelStore.getState().open(threadId, "agents");
-  }, [agentsOpen, threadId]);
+  }, [agentsState, threadId]);
+  const onTogglePreview = useCallback(() => {
+    if (previewState === "active") {
+      useRightPanelStore.getState().closeSurface(threadId, "preview");
+      return;
+    }
+    useRightPanelStore.getState().open(threadId, "preview");
+  }, [previewState, threadId]);
 
   const envLocked = Boolean(
     activeThread &&
@@ -7065,13 +7092,15 @@ export default function ChatView({
             terminalAvailable={activeProject != null}
             terminalOpen={terminalState.terminalOpen}
             workspaceFilesAvailable={workspaceRoot !== undefined}
-            filesOpen={filesOpen}
-            agentsOpen={agentsOpen}
+            filesState={filesState}
+            agentsState={agentsState}
+            previewState={previewState}
+            previewAvailable={Boolean(window.desktopBridge?.preview)}
             liveAgentCount={liveAgentCount}
             terminalToggleShortcutLabel={terminalToggleShortcutLabel}
             diffToggleShortcutLabel={diffPanelShortcutLabel}
             gitCwd={gitCwd}
-            diffOpen={diffOpen}
+            diffState={diffState}
             threadActionItems={headerThreadActionItems}
             onThreadAction={handleHeaderThreadAction}
             onRenameThread={handleHeaderRenameThread}
@@ -7082,6 +7111,7 @@ export default function ChatView({
             onToggleTerminal={toggleTerminalVisibility}
             onToggleFiles={onToggleFiles}
             onToggleAgents={onToggleAgents}
+            onTogglePreview={onTogglePreview}
             onToggleDiff={onToggleDiff}
           />
         </AppTitlebar>

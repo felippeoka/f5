@@ -134,6 +134,19 @@ export function selectThreadRightPanelState(
   return byThreadId[threadKey(threadId)] ?? EMPTY_THREAD_RIGHT_PANEL_STATE;
 }
 
+/** How a surface's header toggle presents: hidden, open behind another tab, or visible. */
+export type RightPanelSurfaceHeaderState = "closed" | "background" | "active";
+
+export function selectSurfaceHeaderState(
+  state: ThreadRightPanelState,
+  surfaceId: string,
+): RightPanelSurfaceHeaderState {
+  if (!state.isOpen || !state.surfaces.some((surface) => surface.id === surfaceId)) {
+    return "closed";
+  }
+  return state.activeSurfaceId === surfaceId ? "active" : "background";
+}
+
 export const useRightPanelStore = create<RightPanelStoreState>()((set) => ({
   byThreadId: {},
   open: (threadId, kind) =>
