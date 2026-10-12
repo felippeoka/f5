@@ -1,0 +1,122 @@
+export interface StopInputSample {
+  kind: "injected" | "physical" | "chord";
+  eventAtMs: number;
+  observedAtMs: number;
+  keyDown: boolean;
+}
+export interface StopLatencyEvidence {
+  samples: ReadonlyArray<StopInputSample>;
+  physicalRecognizedAtMs?: number;
+  chordRecognizedAtMs?: number;
+  promptAtMs?: number;
+  mutationInterrupted: boolean;
+  pausedMutationRefused: boolean;
+  leaseReleased: boolean;
+  fixtureStillFrontmost: boolean;
+  overflow: boolean;
+  observationEndedAtMs?: number;
+  backendFrozenAtStop?: boolean;
+  hostStall?: {
+    startMs: number;
+    endMs: number;
+    offsetMinMs: number;
+    offsetMaxMs: number;
+  };
+}
+const finite = (value: number | undefined): value is number =>
+  value !== undefined && Number.isFinite(value) && value >= 0;
+const round = (value: number) => Math.round(value * 10) / 10;
+
+/** Missing/uncertain evidence cannot become a zero-latency passing measurement. */
+export function measureStopLatency(evidence: StopLatencyEvidence) {
+  const injected = evidence.samples.filter((sample) => sample.kind === "injected");
+  const downs = injected.filter((sample) => sample.keyDown);
+  const physical = evidence.samples.find((sample) => sample.kind !== "injected");
+  const chord = evidence.samples.find((sample) => sample.kind === "chord");
+  const lastEvent = injected.length
+    ? Math.max(...injected.map((sample) => sample.eventAtMs))
+    : undefined;
+  const lastDelivery = injected.length
+    ? Math.max(...injected.map((sample) => sample.observedAtMs))
+    : undefined;
+  const lastDown = downs.length ? Math.max(...downs.map((sample) => sample.eventAtMs)) : undefined;
+  const physicalAt = evidence.physicalRecognizedAtMs;
+  const chordAt = evidence.chordRecognizedAtMs;
+  const physicalTailMs =
+    finite(lastEvent) && finite(physicalAt) ? Math.max(0, lastEvent - physicalAt) : undefined;
+  const chordTailMs =
+    finite(lastEvent) && finite(chordAt) ? Math.max(0, lastEvent - chordAt) : undefined;
+  const deliveryTailMs =
+    finite(lastDelivery) && finite(physicalAt) ? Math.max(0, lastDelivery - physicalAt) : undefined;
+  const stall = evidence.hostStall;
+  const checks = {
+    traceComplete:
+      !evidence.overflow && evidence.samples.length > 0 && evidence.samples.length <= 8192,
+    clocksValid: evidence.samples.every(
+      (sample) =>
+        finite(sample.eventAtMs) &&
+        finite(sample.observedAtMs) &&
+        sample.observedAtMs - sample.eventAtMs >= -1 &&
+        sample.observedAtMs - sample.eventAtMs <= 1000,
+    ),
+    syntheticInputObserved: downs.length >= 8,
+    physicalInputRecognized:
+      finite(physicalAt) &&
+      physical !== undefined &&
+      Math.abs(physical.eventAtMs - physicalAt) <= 100,
+    chordRecognized:
+      finite(chordAt) && chord !== undefined && Math.abs(chord.eventAtMs - chordAt) <= 100,
+    promptedBeforeInterruption:
+      finite(evidence.promptAtMs) && finite(physicalAt) && evidence.promptAtMs <= physicalAt,
+    typingActiveAtTrigger: finite(lastDown) && finite(physicalAt) && lastDown >= physicalAt - 250,
+    physicalStopUnder100Ms: finite(physicalTailMs) && physicalTailMs < 100,
+    chordStopUnder100Ms: finite(chordTailMs) && chordTailMs < 100,
+    appDeliveryStoppedUnder100Ms: finite(deliveryTailMs) && deliveryTailMs < 100,
+    quietTailObserved:
+      finite(evidence.observationEndedAtMs) &&
+      finite(chordAt) &&
+      evidence.observationEndedAtMs - chordAt >= 500,
+    inFlightMutationInterrupted: evidence.mutationInterrupted,
+    pausedMutationRefused: evidence.pausedMutationRefused,
+    leaseReleased: evidence.leaseReleased,
+    fixtureStillFrontmost: evidence.fixtureStillFrontmost,
+    ...(evidence.backendFrozenAtStop !== undefined
+      ? { backendFrozenAtStop: evidence.backendFrozenAtStop }
+      : {}),
+    ...(stall
+      ? {
+          stallClockCalibrated:
+            [stall.startMs, stall.endMs, stall.offsetMinMs, stall.offsetMaxMs].every(
+              Number.isFinite,
+            ) &&
+            stall.endMs > stall.startMs &&
+            stall.offsetMaxMs >= stall.offsetMinMs &&
+            stall.offsetMaxMs - stall.offsetMinMs <= 25,
+          physicalAndChordDuringHostStall:
+            finite(physicalAt) &&
+            finite(chordAt) &&
+            physicalAt >= stall.startMs + stall.offsetMaxMs &&
+            chordAt >= physicalAt &&
+            chordAt <= stall.endMs + stall.offsetMinMs,
+        }
+      : {}),
+  };
+  return {
+    state: Object.values(checks).every(Boolean) ? ("passed" as const) : ("failed" as const),
+    checks,
+    injectedKeyDowns: downs.length,
+    injectedEvents: injected.length,
+    ...(physicalTailMs !== undefined ? { physicalInputTailMs: round(physicalTailMs) } : {}),
+    ...(chordTailMs !== undefined ? { killChordTailMs: round(chordTailMs) } : {}),
+    ...(deliveryTailMs !== undefined ? { appDeliveryTailMs: round(deliveryTailMs) } : {}),
+    ...(finite(physicalAt) && finite(chordAt)
+      ? { physicalToChordMs: round(chordAt - physicalAt) }
+      : {}),
+    ...(stall
+      ? {
+          hostStallDurationMs: round(stall.endMs - stall.startMs),
+          clockUncertaintyMs: round(stall.offsetMaxMs - stall.offsetMinMs),
+        }
+      : {}),
+  };
+}

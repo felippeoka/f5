@@ -190,9 +190,12 @@ func releaseHeldInput() {
   }
 }
 func suspend(_ event: String? = nil) {
+  // Local recognition time, before waiting to release held input. Certification
+  // fixtures compare this with AppKit event/delivery times, never text or key data.
+  let recognizedAtMs = ProcessInfo.processInfo.systemUptime * 1000
   permit.suspend()
   releaseHeldInput()
-  if let event { emit(["type": event]) }
+  if let event { emit(["type": event, "recognizedAtMs": recognizedAtMs]) }
 }
 func permissions() -> [String: Any] {
   let screen = CGPreflightScreenCaptureAccess()

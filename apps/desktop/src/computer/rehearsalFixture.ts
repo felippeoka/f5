@@ -10,6 +10,7 @@ export async function createRehearsalFixture(options: {
   ungranted?: boolean;
   executableSource?: string;
   expectedText?: string;
+  sourceFile?: string;
 }) {
   const contents = join(options.root, options.appId, "Fixture.app", "Contents");
   const executable = join(contents, "MacOS", "Fixture");
@@ -25,7 +26,8 @@ export async function createRehearsalFixture(options: {
       [
         "-framework",
         "AppKit",
-        resolve(import.meta.dirname, "../../native/macos/Fixtures/ComputerControlFixture.swift"),
+        options.sourceFile ??
+          resolve(import.meta.dirname, "../../native/macos/Fixtures/ComputerControlFixture.swift"),
         "-o",
         executable,
       ],
@@ -35,7 +37,7 @@ export async function createRehearsalFixture(options: {
     ...(options.ungranted ? ["--ungranted"] : []),
     ...(options.expectedText ? ["--expected-text", options.expectedText] : []),
   ];
-  const child = spawn(executable, args, { stdio: ["ignore", "pipe", "ignore"] });
+  const child = spawn(executable, args, { stdio: ["pipe", "pipe", "ignore"] });
   let presses = 0;
   let typed = false;
   let buffer = "";

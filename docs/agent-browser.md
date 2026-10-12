@@ -166,6 +166,10 @@ Forget removes a remembered grant from project settings. Restart retains remembe
 grants and drops session grants. Settings patches and model tool calls cannot add grants.
 An agent with unrestricted filesystem write access can still edit these files; the
 no-widening guarantee applies to the tool and consent paths.
+These controls govern F5's computer tools, not every command an unrestricted shell
+can run. A separate AppleScript/`osascript` or native Accessibility program is subject
+to macOS permissions and its own execution policy; the F5 computer lease and pause
+cannot supervise an independent process that bypasses this tool interface.
 
 ### Capture, coordinates and accessibility
 
@@ -515,6 +519,42 @@ Electron renderer or real overlay windows; it does not certify the complete desk
 experience, physical kill-chord latency, real-app/multi-display/multi-profile matrix,
 Windows desktop behavior or installed-build permission attribution. Signing remains
 deferred, and every release gate stays closed.
+
+The human-assisted physical-stop rehearsal observes only event timings inside a
+temporary synthetic AppKit window. The helper reports its monotonic recognition time
+before releasing held input; the fixture records native event-creation and app-delivery
+times without reading characters or logging physical key codes. A passing run requires
+active synthetic typing, both physical input and the complete kill chord, a quiet tail,
+interrupted input, refusal of further typing and a released lease. Missing traces,
+clock mismatches, overflow and timing uncertainty fail the check.
+
+```sh
+F5_COMPUTER_STOP_REHEARSAL=1 bun apps/desktop/src/computer/rehearseStopMacos.ts --helper apps/desktop/dist-native/mac-universal/f5-computer-helper --output /tmp/f5-physical-stop.json
+F5_COMPUTER_STOP_REHEARSAL=1 bun apps/desktop/src/computer/rehearseStopMacos.ts --helper apps/desktop/dist-native/mac-universal/f5-computer-helper --output /tmp/f5-frozen-backend-stop.json --freeze-backend
+```
+
+Coordinate an idle window with the operator first. Press Control+Command+Escape only
+when the fixture turns red and says NOW. Physical input latches pause; the harness never
+resumes input. The frozen-backend mode uses the real broker/host IPC classes, grants only
+its own fixture, SIGSTOPs that worker during typing, verifies its stopped OS process
+state before and after the chord, then SIGCONTs it only for cleanup. It uses no provider
+account/quota. A separate `--stall-host` mode blocks the test supervisor for 700 ms.
+Clock offset bounds come from a native-fixture round trip; both recognition events must
+fall conservatively inside that interval, otherwise the stalled-host check fails.
+Execution permits retain the production one-second expiry and 250 ms renewal cadence.
+No renderer or real overlay is launched in either mode.
+
+The [2026-10-12 physical-stop evidence](computer-certification/2026-10-12-macos-physical-stop.json)
+records a passed responsive-host run (0 ms input-emission tail, 0.4 ms delivery tail)
+and a passed frozen-broker-backend run (no recorded synthetic event created or delivered
+after recognition). A zero tail means the last synthetic event preceded recognition;
+it is not an exact zero-time cancellation measurement. Both runs observed the full chord,
+interrupted the action, refused further typing and released the lease. The operator
+reported no system action during the first two attempts. The three supervisor-stall
+attempts stayed below 100 ms for stopping input but **failed** timing/arming coverage,
+so they do not certify a stalled supervisor. Signed installed-build attribution, real
+Electron renderer/backend failures, Windows and the full release matrix remain pending.
+No gate is opened by this unsigned evidence.
 
 ### Build prerequisites and bounded replay state
 
