@@ -13,19 +13,19 @@ import {
 } from "@t3tools/shared/model";
 import { getProviderModelCapabilities } from "../../providerModels";
 import { memo, useState } from "react";
-import { ChevronDownIcon, ZapIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import { useComposerDraftStore, useComposerThreadDraft } from "../../composerDraftStore";
 import { recordModelSelection } from "../../modelPreferencesStore";
 import { cn } from "~/lib/utils";
 
 import { Button } from "../ui/button";
 import { COMPOSER_CHIP_CLASS_NAME } from "./composer/composerChip";
+import { EffortMenuSection, FastModeLabel, FastModeTriggerIcon } from "./EffortMenuSection";
+import { getEffortLevel } from "./effortLevels";
 import {
   Menu,
-  MenuGroup,
+  MenuCheckboxItem,
   MenuPopup,
-  MenuRadioGroup,
-  MenuRadioItem,
   MenuSeparator as MenuDivider,
   MenuTrigger,
 } from "../ui/menu";
@@ -112,53 +112,45 @@ function CodexTraitsMenuContentImpl(props: {
 
   return (
     <>
-      <MenuGroup>
-        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Reasoning</div>
-        <MenuRadioGroup
-          value={effort}
-          onValueChange={(value) => {
-            if (!value) return;
-            const nextEffort = options.find((option) => option === value);
-            if (!nextEffort) return;
-            setCodexModelOptions(
-              normalizeCodexModelOptions(
-                props.model,
-                { ...modelOptions, reasoningEffort: nextEffort },
-                reported,
-              ),
-            );
-            props.onSelectionComplete?.();
-          }}
-        >
-          {options.map((option) => (
-            <MenuRadioItem key={option} value={option}>
-              {CODEX_REASONING_LABELS[option]}
-              {option === defaultReasoningEffort ? " (default)" : ""}
-            </MenuRadioItem>
-          ))}
-        </MenuRadioGroup>
-      </MenuGroup>
-      {capabilities.supportsFastMode ? <MenuDivider /> : null}
+      <EffortMenuSection
+        options={options.map((option) => ({
+          id: option,
+          label: CODEX_REASONING_LABELS[option],
+          isDefault: option === defaultReasoningEffort,
+        }))}
+        value={effort}
+        onValueChange={(value) => {
+          const nextEffort = options.find((option) => option === value);
+          if (!nextEffort) return;
+          setCodexModelOptions(
+            normalizeCodexModelOptions(
+              props.model,
+              { ...modelOptions, reasoningEffort: nextEffort },
+              reported,
+            ),
+          );
+          props.onSelectionComplete?.();
+        }}
+      />
       {capabilities.supportsFastMode ? (
-        <MenuGroup>
-          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Fast Mode</div>
-          <MenuRadioGroup
-            value={fastModeEnabled ? "on" : "off"}
-            onValueChange={(value) => {
+        <>
+          <MenuDivider />
+          <MenuCheckboxItem
+            variant="switch"
+            checked={fastModeEnabled}
+            onCheckedChange={(checked) => {
               setCodexModelOptions(
                 normalizeCodexModelOptions(
                   props.model,
-                  { ...modelOptions, fastMode: value === "on" },
+                  { ...modelOptions, fastMode: checked },
                   reported,
                 ),
               );
-              props.onSelectionComplete?.();
             }}
           >
-            <MenuRadioItem value="off">off</MenuRadioItem>
-            <MenuRadioItem value="on">on</MenuRadioItem>
-          </MenuRadioGroup>
-        </MenuGroup>
+            <FastModeLabel enabled={fastModeEnabled} />
+          </MenuCheckboxItem>
+        </>
       ) : null}
     </>
   );
@@ -189,6 +181,7 @@ export const CodexTraitsPicker = memo(function CodexTraitsPicker(props: {
     >
       <MenuTrigger
         data-composer-control="effort"
+        data-effort-level={effort}
         render={
           <Button
             size="sm"
@@ -196,15 +189,14 @@ export const CodexTraitsPicker = memo(function CodexTraitsPicker(props: {
             className={cn(
               COMPOSER_CHIP_CLASS_NAME,
               "min-w-0 max-w-40 shrink justify-start overflow-hidden sm:max-w-48 [&_svg]:mx-0",
+              getEffortLevel(effort)?.chipClass,
             )}
           />
         }
       >
         <span className="flex min-w-0 w-full items-center gap-2 overflow-hidden">
           {triggerLabel}
-          {fastModeEnabled ? (
-            <ZapIcon aria-label="Fast mode enabled" className="size-3 shrink-0" />
-          ) : null}
+          {fastModeEnabled ? <FastModeTriggerIcon /> : null}
           <ChevronDownIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
         </span>
       </MenuTrigger>

@@ -69,6 +69,7 @@ export default mergeConfig(
         "src/components/chat/ComposerPendingApprovalActions.browser.tsx",
         "src/components/chat/ClaudeTraitsPicker.browser.tsx",
         "src/components/chat/CodexTraitsPicker.browser.tsx",
+        "src/components/chat/TraitsPicker.browser.tsx",
         "src/components/chat/ChatHeader.browser.tsx",
         "src/components/chat/NativeRuntimePanel.browser.tsx",
         "src/components/chat/NativeRuntimeTray.browser.tsx",

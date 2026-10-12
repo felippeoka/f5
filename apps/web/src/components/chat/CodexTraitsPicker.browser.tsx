@@ -1,13 +1,20 @@
 import "../../index.css";
 
 import { ThreadId } from "@t3tools/contracts";
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 import { CodexTraitsPicker } from "./CodexTraitsPicker";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useModelPreferencesStore } from "../../modelPreferencesStore";
+
+/** Effort levels whose battery segment is currently filled, top row first. */
+function filledLevels() {
+  return [...document.querySelectorAll('[data-effort-filled="true"]')].map((segment) =>
+    segment.closest("[data-effort-level]")?.getAttribute("data-effort-level"),
+  );
+}
 
 async function mountPicker(props?: {
   model?: string;
@@ -94,6 +101,108 @@ describe("CodexTraitsPicker", () => {
     }
   });
 
+  it("ranks efforts high to low and fills the battery up to the selected level", async () => {
+    const mounted = await mountPicker({ model: "gpt-6.1-sol", effort: "high" });
+    const threadId = ThreadId.makeUnsafe("thread-codex-traits");
+
+    try {
+      await expect.element(page.getByRole("button")).toHaveAttribute("data-effort-level", "high");
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        expect(
+          page
+            .getByRole("menuitemradio")
+            .elements()
+            .map((item) => item.getAttribute("data-effort-level")),
+        ).toEqual(["ultra", "max", "xhigh", "high", "medium", "low"]);
+        expect(filledLevels()).toEqual(["high", "medium", "low"]);
+      });
+
+      // The selection keeps a cue that survives forced colours (fills and glows
+      // are overridden there), verified manually under emulated forced colours.
+      const selectedSegments = document.querySelectorAll('[data-effort-selected="true"]');
+      expect(selectedSegments).toHaveLength(1);
+      expect(
+        selectedSegments[0]?.closest("[data-effort-level]")?.getAttribute("data-effort-level"),
+      ).toBe("high");
+      expect(selectedSegments[0]?.className).toContain("forced-colors:bg-[color:Highlight]");
+
+      // Highlighting a higher level previews its fill without selecting it.
+      await page.getByRole("menuitemradio", { name: "Max" }).hover();
+      await vi.waitFor(() => {
+        expect(filledLevels()).toEqual(["max", "xhigh", "high", "medium", "low"]);
+      });
+      expect(
+        useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelOptions?.codex
+          ?.reasoningEffort,
+      ).toBe("high");
+
+      // Leaving the effort rows restores the selected fill.
+      const fastMode = page.getByRole("menuitemcheckbox", { name: "Fast Mode" });
+      await fastMode.hover();
+      await vi.waitFor(() => {
+        expect(filledLevels()).toEqual(["high", "medium", "low"]);
+      });
+      await page.getByRole("menuitemradio", { name: "Max" }).hover();
+      await page.getByRole("button").hover();
+      await vi.waitFor(() => {
+        expect(filledLevels()).toEqual(["high", "medium", "low"]);
+      });
+
+      // Fast mode is a switch that keeps the menu open.
+      await expect.element(fastMode).toHaveAttribute("aria-checked", "false");
+      await fastMode.click();
+      await vi.waitFor(() => {
+        expect(
+          useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelOptions?.codex
+            ?.fastMode,
+        ).toBe(true);
+        expect(fastMode.element().getAttribute("aria-checked")).toBe("true");
+      });
+      expect(page.getByRole("button").element().textContent?.trim()).toBe("High");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("previews keyboard navigation without previewing the item focused on open", async () => {
+    const mounted = await mountPicker({ model: "gpt-6.1-sol", effort: "medium" });
+    const threadId = ThreadId.makeUnsafe("thread-codex-traits");
+
+    try {
+      page.getByRole("button").element().focus();
+      await userEvent.keyboard("{ArrowDown}");
+
+      // Opening from the keyboard focuses the top row (Ultra); the fill must
+      // still show the stored selection rather than a full battery.
+      await vi.waitFor(() => {
+        expect(document.activeElement?.getAttribute("data-effort-level")).toBe("ultra");
+      });
+      expect(filledLevels()).toEqual(["medium", "low"]);
+
+      // Arrowing through the rows previews each one.
+      await userEvent.keyboard("{ArrowDown}");
+      await vi.waitFor(() => {
+        expect(document.activeElement?.getAttribute("data-effort-level")).toBe("max");
+        expect(filledLevels()).toEqual(["max", "xhigh", "high", "medium", "low"]);
+      });
+
+      // Moving focus out of the effort rows restores the selected fill.
+      await userEvent.keyboard("{End}");
+      await vi.waitFor(() => {
+        expect(document.activeElement?.getAttribute("role")).toBe("menuitemcheckbox");
+        expect(filledLevels()).toEqual(["medium", "low"]);
+      });
+      expect(
+        useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelOptions?.codex
+          ?.reasoningEffort,
+      ).toBe("medium");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("closes the menu after selecting a reasoning level", async () => {
     const mounted = await mountPicker({ effort: "high" });
 
@@ -126,7 +235,7 @@ describe("CodexTraitsPicker", () => {
       await vi.waitFor(() => {
         expect(document.body.textContent ?? "").not.toContain("Ultra");
         expect(document.body.textContent ?? "").toContain("Max");
-        expect(page.getByRole("menuitemradio").all()).toHaveLength(7);
+        expect(page.getByRole("menuitemradio").all()).toHaveLength(5);
       });
       await page.getByRole("menuitemradio", { name: "Max" }).click();
       await vi.waitFor(() => {
@@ -156,7 +265,7 @@ describe("CodexTraitsPicker", () => {
             .element()
             .getAttribute("aria-checked"),
         ).toBe("true");
-        expect(page.getByRole("menuitemradio").all()).toHaveLength(8);
+        expect(page.getByRole("menuitemradio").all()).toHaveLength(6);
       });
       expect(
         useComposerDraftStore.getState().draftsByThreadId[
@@ -175,7 +284,7 @@ describe("CodexTraitsPicker", () => {
       await page.getByRole("button").click();
       await vi.waitFor(() => {
         expect(document.body.textContent ?? "").toContain("Ultra");
-        expect(page.getByRole("menuitemradio").all()).toHaveLength(8);
+        expect(page.getByRole("menuitemradio").all()).toHaveLength(6);
       });
     } finally {
       await mounted.cleanup();

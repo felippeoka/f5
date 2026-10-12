@@ -7,9 +7,12 @@ import {
 } from "@t3tools/contracts";
 import { getProviderOptionCurrentLabel, getProviderOptionDescriptors } from "@t3tools/shared/model";
 import { memo, useState } from "react";
-import { ChevronDownIcon, ZapIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
+import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { COMPOSER_CHIP_CLASS_NAME } from "./composer/composerChip";
+import { FastModeTriggerIcon } from "./EffortMenuSection";
+import { getEffortChipClass } from "./effortLevels";
 import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
 import { getProviderModelCapabilities } from "../../providerModels";
 import {
@@ -38,9 +41,11 @@ function getClaudeOptionDescriptors(
 function getClaudeTriggerPresentation(input: ClaudeTraitsInput): {
   label: string;
   fastModeEnabled: boolean;
+  effortTint: { level: string; className: string } | null;
 } {
   const descriptors = getClaudeOptionDescriptors(input);
   return {
+    effortTint: getEffortChipClass(descriptors),
     label: descriptors
       .map((descriptor) => {
         if (descriptor.type === "boolean") {
@@ -113,12 +118,17 @@ export const ClaudeTraitsPicker = memo(function ClaudeTraitsPicker(props: {
     >
       <MenuTrigger
         data-composer-control="effort"
-        render={<Button size="sm" variant="ghost" className={COMPOSER_CHIP_CLASS_NAME} />}
+        {...(trigger.effortTint ? { "data-effort-level": trigger.effortTint.level } : {})}
+        render={
+          <Button
+            size="sm"
+            variant="ghost"
+            className={cn(COMPOSER_CHIP_CLASS_NAME, trigger.effortTint?.className)}
+          />
+        }
       >
         <span>{trigger.label}</span>
-        {trigger.fastModeEnabled ? (
-          <ZapIcon aria-label="Fast mode enabled" className="size-3 shrink-0" />
-        ) : null}
+        {trigger.fastModeEnabled ? <FastModeTriggerIcon /> : null}
         <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
       </MenuTrigger>
       <MenuPopup align="start">
