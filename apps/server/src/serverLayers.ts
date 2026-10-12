@@ -14,7 +14,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery";
-import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore";
+import { ServerGitLive } from "./serverGitLayers.ts";
 import { ServerConfig } from "./config";
 import { OrchestrationCommandReceiptRepositoryLive } from "./persistence/Layers/OrchestrationCommandReceipts";
 import { OrchestrationEventStoreLive } from "./persistence/Layers/OrchestrationEventStore";
@@ -88,10 +88,8 @@ import { ForgeAccountsLive } from "./sourceControl/accountRouting";
 import { TerminalManagerLive } from "./terminal/Layers/Manager";
 import { KeybindingsLive } from "./keybindings";
 import { GitManagerLive } from "./git/Layers/GitManager";
-import { GitCoreLive } from "./git/Layers/GitCore";
 import { GitHubCliLive } from "./git/Layers/GitHubCli";
 import { TextGenerationLive } from "./git/Layers/TextGenerationLive";
-import { GitServiceLive } from "./git/Layers/GitService";
 import { ObservabilityLive } from "./observability/Layers/Observability";
 import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScriptRunner";
 import { PtyAdapter } from "./terminal/Services/PTY";
@@ -281,9 +279,7 @@ export function makeServerProviderLayer(): Layer.Layer<
 }
 
 export function makeServerRuntimeServicesLayer() {
-  const gitCoreLayer = GitCoreLive.pipe(
-    Layer.provideMerge(GitServiceLive.pipe(Layer.provideMerge(ServerSecretStoreLive))),
-  );
+  const gitCoreLayer = ServerGitLive;
   const forgeAccountsLayer = ForgeAccountsLive.pipe(Layer.provideMerge(ServerSecretStoreLive));
   const githubCliLayer = GitHubCliLive.pipe(Layer.provideMerge(ServerSecretStoreLive));
   const textGenerationLayer = TextGenerationLive;
@@ -292,7 +288,7 @@ export function makeServerRuntimeServicesLayer() {
     Layer.provideMerge(ProjectionThreadRepositoryLive),
     Layer.provideMerge(ProjectionProjectRepositoryLive),
     Layer.provideMerge(ProjectionCheckpointRepositoryLive),
-    Layer.provideMerge(CheckpointStoreLive),
+    Layer.provideMerge(ServerGitLive),
   );
   const threadCommandExecutionQueryLayer = ThreadCommandExecutionQueryLive.pipe(
     Layer.provideMerge(ProjectionThreadCommandExecutionRepositoryLive),
@@ -334,7 +330,6 @@ export function makeServerRuntimeServicesLayer() {
     ProjectionWorkspaceQueryLive,
     threadCommandExecutionQueryLayer,
     threadFileChangeQueryLayer,
-    CheckpointStoreLive,
     checkpointDiffQueryLayer,
     gitCoreLayer,
     gitManagerLayer,
@@ -358,14 +353,12 @@ export function makeServerOrchestrationRuntimeLayer() {
     Layer.provideMerge(providerSessionDirectoryLayer),
   );
   const usageServiceLayer = UsageServiceLive;
-  const gitCoreLayer = GitCoreLive.pipe(
-    Layer.provideMerge(GitServiceLive.pipe(Layer.provideMerge(ServerSecretStoreLive))),
-  );
+  const gitCoreLayer = ServerGitLive;
   const checkpointDiffQueryLayer = CheckpointDiffQueryLive.pipe(
     Layer.provideMerge(ProjectionThreadRepositoryLive),
     Layer.provideMerge(ProjectionProjectRepositoryLive),
     Layer.provideMerge(ProjectionCheckpointRepositoryLive),
-    Layer.provideMerge(CheckpointStoreLive),
+    Layer.provideMerge(ServerGitLive),
   );
   const orchestrationLayer = OrchestrationEngineLive.pipe(
     Layer.provide(NextTurnQueueStoreLive),
