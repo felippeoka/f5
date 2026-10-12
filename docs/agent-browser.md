@@ -412,9 +412,43 @@ accessibility content or screenshots are saved. A protected pointer refusal rema
 failed check; only the independent permit-expiry refusal check continues afterward. Physical input ends the rehearsal without resuming.
 Failed or skipped checks are not certification evidence.
 Signing is deferred for this development work. Capture masking across the real-app
-matrix, physical kill-chord latency, provider turns through the desktop authority,
+matrix, physical kill-chord latency, provider turns through the full Electron desktop,
 renderer/backend failures, multiple profiles, overlays,
 Windows runtime and installed-build TCC attribution still need recorded machine tests.
+
+A separate opt-in rehearsal connects real Claude/Codex turns to the production
+`ComputerHostChannel`, `ComputerController`, lease authority, helper client and native
+helper through inherited process IPC. It creates a fresh synthetic AppKit app for each
+provider and independently observes one button press and the expected Unicode typing
+inside that app. No existing user app receives a grant. Scripted consent permits only
+the exact fixture identity, rejects mixed-app requests and never remembers a grant.
+It exercises the broker's session-actions approval separately from app access.
+
+```sh
+F5_COMPUTER_PROVIDER_REHEARSAL=1 bun apps/desktop/src/computer/rehearseProviderMacos.ts --helper apps/desktop/dist-native/mac-universal/f5-computer-helper --provider both --output /tmp/f5-provider-native-rehearsal.json
+```
+
+Select the profile's Claude credential directory with `CLAUDE_CONFIG_DIR` and
+`CLAUDE_SECURESTORAGE_CONFIG_DIR`, both pointing to that profile's `.claude` directory.
+For Codex set `CODEX_BINARY_PATH` and `F5_CODEX_CERTIFICATION_HOME` (or `CODEX_HOME`).
+The worker preserves the real macOS login home/name for Claude's keychain lookup.
+Codex uses a temporary home containing only a private copy of that selected account's
+credential, disables plugins and denies command/filesystem approval requests. The
+worker accepts an additional MCP consent once only when it names the exact
+authenticated F5 computer catalog created by that worker and its form is representable;
+commands, unknown servers, URL prompts and unrepresented fields are denied. The
+temporary home is removed on success, failure or interruption. The test consumes
+provider quota and foreground input; leave the mouse and keyboard idle. Physical input
+stops the worker and input authority; a fresh run needs explicit user coordination.
+Reports refuse overwrite, retain only operation names, booleans, timing and build
+metadata, and never include images, accessibility content, typed values or provider
+error details. Failed, interrupted and incomplete turns cannot pass.
+
+This harness deliberately omits Electron renderer windows and real overlays. Its
+scripted fixture consent does not certify the trusted consent dialog. Provider calls
+through this harness do not prove installed-build attribution, physical kill-chord
+latency, the real-app workflow/capture matrix, multiple profiles/displays or Windows
+desktop behavior, and never open a release gate.
 
 The first real run exposed a macOS transport defect: `FileHandle.read(upToCount:)` waited
 for a full pipe buffer, preventing short requests and suspend messages from executing.
@@ -462,6 +496,25 @@ was signed out. Native checks use real OS input in synthetic apps, separately fr
 these model-backed transport tests. Neither proves the full provider-to-desktop path,
 physical stop latency, signed attribution or the Windows/multiple-display matrix.
 All release gates remain closed.
+
+The [2026-10-12 real-provider/native evidence](computer-certification/2026-10-12-macos-real-provider-native.json)
+records successful Claude and Codex turns through the production private host channel,
+broker, controller, lease authority and native helper. Each provider received access to
+one temporary AppKit fixture, took a native screenshot, inspected its real accessibility
+tree, pressed its button once and typed the expected Unicode text. The fixture itself
+reported receipt independently of the model's response. Both workers released their
+turn lease before exit. Claude's model-facing native image block was directly observed.
+Codex CLI 0.162.1, in approval-required mode, issued five additional MCP approval prompts;
+each was accepted once for the exact test catalog. An earlier denied-prompt run delivered
+no input. A separate physical-input attempt interrupted the worker without auto-resume.
+All 14 native-helper checks passed again after sharing the fixture launcher.
+
+These observations replace the earlier simulated-host limitation for this narrow
+provider-to-native-controller path. The harness uses scripted fixture consent and no
+Electron renderer or real overlay windows; it does not certify the complete desktop
+experience, physical kill-chord latency, real-app/multi-display/multi-profile matrix,
+Windows desktop behavior or installed-build permission attribution. Signing remains
+deferred, and every release gate stays closed.
 
 ### Build prerequisites and bounded replay state
 

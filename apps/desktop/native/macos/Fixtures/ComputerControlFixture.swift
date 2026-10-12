@@ -2,7 +2,7 @@ import AppKit
 
 // Synthetic content only. The rehearsal launches this temporary app and grants
 // no existing user app. Its editable and secure fields exercise real AX behavior.
-final class FixtureDelegate: NSObject, NSApplicationDelegate {
+final class FixtureDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
   var window: NSWindow!
   let counter = NSTextField(labelWithString: "presses: 0")
   let secure = NSSecureTextField(frame: NSRect(x: 30, y: 150, width: 400, height: 28))
@@ -27,6 +27,7 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate {
     }
     let field = NSTextField(frame: NSRect(x: 30, y: 205, width: 400, height: 28))
     field.setAccessibilityLabel("Rehearsal input")
+    field.delegate = self
     content.addSubview(field)
     secure.stringValue = "SYNTHETIC_SECURE_SENTINEL"
     secure.setAccessibilityLabel("Rehearsal secure field")
@@ -50,6 +51,16 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate {
   @objc func press() {
     presses += 1
     counter.stringValue = "presses: \(presses)"
+    FileHandle.standardOutput.write(Data("FIXTURE_PRESSED\n".utf8))
+  }
+  func controlTextDidChange(_ notification: Notification) {
+    guard let index = CommandLine.arguments.firstIndex(of: "--expected-text"),
+      index + 1 < CommandLine.arguments.count,
+      let field = notification.object as? NSTextField,
+      field.stringValue == CommandLine.arguments[index + 1]
+    else { return }
+    // Only a boolean observation leaves the fixture, never the typed content.
+    FileHandle.standardOutput.write(Data("FIXTURE_TYPED\n".utf8))
   }
   @objc func focusSecureField() { window.makeFirstResponder(secure) }
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

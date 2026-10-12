@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, writeFile, readFile, copyFile } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { join, resolve, dirname } from "node:path";
 import { tmpdir, release } from "node:os";
@@ -12,6 +12,7 @@ import type {
 } from "@t3tools/contracts";
 import { ComputerControlError } from "@t3tools/shared/computerControl";
 import { ComputerHelperClient } from "./ComputerHelperClient";
+import { createRehearsalFixture } from "./rehearsalFixture";
 
 const exec = promisify(execFile);
 const args = process.argv.slice(2);
@@ -143,23 +144,6 @@ try {
       );
     },
   );
-  const bundle = join(root, "ComputerControlFixture.app", "Contents");
-  await mkdir(join(bundle, "MacOS"), { recursive: true });
-  await writeFile(
-    join(bundle, "Info.plist"),
-    `<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>${fixtureId}</string><key>CFBundleExecutable</key><string>Fixture</string><key>CFBundleName</key><string>Computer Control Test Fixture</string><key>CFBundlePackageType</key><string>APPL</string><key>NSPrincipalClass</key><string>NSApplication</string><key>LSMinimumSystemVersion</key><string>14.0</string></dict></plist>`,
-  );
-  await exec(
-    "swiftc",
-    [
-      "-framework",
-      "AppKit",
-      resolve(import.meta.dirname, "../../native/macos/Fixtures/ComputerControlFixture.swift"),
-      "-o",
-      join(bundle, "MacOS", "Fixture"),
-    ],
-    { timeout: 30000 },
-  );
   const captureVerifier = join(root, "capture-verifier");
   await exec(
     "swiftc",
@@ -212,29 +196,16 @@ try {
         JSON.stringify({ data: image.data, mimeType: image.mimeType, secureRect, requireBlue }),
       );
     });
-  const ungrantedBundle = join(root, "UngrantedFixture.app", "Contents");
   const ungrantedFixtureId = `org.example.ungranted-rehearsal.${randomUUID()}`;
-  await mkdir(join(ungrantedBundle, "MacOS"), { recursive: true });
-  await copyFile(join(bundle, "MacOS", "Fixture"), join(ungrantedBundle, "MacOS", "Fixture"));
-  await writeFile(
-    join(ungrantedBundle, "Info.plist"),
-    (await readFile(join(bundle, "Info.plist"), "utf8")).replace(fixtureId, ungrantedFixtureId),
-  );
-  ungrantedFixture = spawn(join(ungrantedBundle, "MacOS", "Fixture"), ["--ungranted"], {
-    stdio: ["ignore", "pipe", "ignore"],
+  const granted = await createRehearsalFixture({ root, appId: fixtureId });
+  fixture = granted.child;
+  const excluded = await createRehearsalFixture({
+    root,
+    appId: ungrantedFixtureId,
+    ungranted: true,
+    executableSource: granted.executable,
   });
-  ungrantedFixture.on("error", () => {});
-  let ungrantedReady = false;
-  ungrantedFixture.stdout?.on("data", (chunk: Buffer) => {
-    if (chunk.toString().includes("FIXTURE_READY")) ungrantedReady = true;
-  });
-  fixture = spawn(join(bundle, "MacOS", "Fixture"), [], { stdio: ["ignore", "pipe", "ignore"] });
-  fixture.on("error", () => {});
-  let fixtureReady = false;
-  fixture.stdout?.on("data", (chunk: Buffer) => {
-    if (chunk.toString().includes("FIXTURE_READY")) fixtureReady = true;
-  });
-  await waitFor(() => fixtureReady && ungrantedReady);
+  ungrantedFixture = excluded.child;
   await pause(300);
   helper.control({ type: "grantsChanged", authorization });
   helper.control({ type: "permit", executionGeneration: 1, expiresInMs: 1000 });
