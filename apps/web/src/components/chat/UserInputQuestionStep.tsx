@@ -404,20 +404,22 @@ function OptionRow({
       onClick={onClick}
       className={cn(
         "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-all duration-150 focus-visible:ring-2 focus-visible:ring-ring",
+        // `muted`/`border` are ~4-8% alpha in both themes, so use them at full
+        // strength; fractions of them vanish on the card background.
         selected
-          ? "border-info/40 bg-info/8 text-foreground"
-          : "border-transparent bg-muted/20 text-foreground hover:bg-muted/40 hover:border-border/40",
-        disabled && "opacity-50 cursor-not-allowed",
+          ? "border-info/60 bg-info/15 text-foreground hover:border-info hover:bg-info/22"
+          : "border-border bg-muted text-foreground hover:border-foreground/25 hover:bg-foreground/10",
+        disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
       )}
     >
       {shortcutKey !== null ? (
         <kbd
           aria-hidden="true"
           className={cn(
-            "flex size-5 shrink-0 items-center justify-center rounded text-2xs font-medium tabular-nums transition-colors duration-150",
+            "flex size-5 shrink-0 items-center justify-center rounded border text-2xs font-medium tabular-nums transition-colors duration-150",
             selected
-              ? "bg-info/20 text-info-foreground"
-              : "bg-muted/40 text-muted-foreground group-hover:bg-muted/60 group-hover:text-foreground",
+              ? "border-info bg-info text-white"
+              : "border-input bg-background text-muted-foreground group-hover:border-foreground/40 group-hover:text-foreground",
           )}
         >
           {shortcutKey}
