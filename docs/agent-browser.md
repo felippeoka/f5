@@ -687,8 +687,20 @@ remained frontmost, and the subsequent provider typing attempt was refused while
 computer access stayed paused. This proves the narrow unsigned macOS synthetic-app
 stop path with real Electron main frozen. It does not certify installed-build TCC,
 signed packaging, arbitrary deadlocks, real apps, Windows, mixed displays or built-in
-provider backends. The earlier failed reports remain unchanged, the complete renderer
-run still needs its follow-up verification, and all release gates stay closed.
+provider backends. The earlier failed reports remain unchanged and all release gates
+stay closed.
+
+The subsequent [real frozen-renderer run](computer-certification/2026-10-12-macos-electron-renderer-stop-passed.json)
+also **passed every check**, using clean revision `ae526a1d02` and verified build/source
+hashes. The isolated Electron renderer stayed OS-verified frozen for 407.5 ms, covering
+both physical recognition and the independently observed full chord. Input emission
+stopped within 5.9 ms of physical recognition and app delivery within 9.6 ms. After
+restoration, the real provider's next typing call was refused without resuming computer
+access; pause mirrored, the lease released and the fixture remained frontmost. This
+completes the narrow unsigned macOS synthetic-app stop checkpoints for frozen main and
+renderer. It retains the same installed-build, signing, real-app, Windows, mixed-display
+and provider-backend limitations; it does not open release gates or replace the original
+failed reports.
 
 Coordinate with the operator before launching. The real consent dialog must be answered
 by a human for the single synthetic fixture. The operator then leaves input idle and
