@@ -691,6 +691,20 @@ this fix does not change authorization, permit checks or certification gates.
 Earlier passing physical-stop and capture reports remain pinned to their previous
 helper hash; they do not establish those guarantees for the rebuilt helper.
 
+The subsequent [real-app run](computer-certification/2026-10-12-macos-electron-real-apps-passed.json)
+passed all 16 checks on clean revision `bc51241ac6`, using rebuilt helper hash
+`a11ef2e783c9d344372f9b12a86e0a1a67ec40ddecaafc1e0f5a27cfcd8d7c9e`.
+Native human consent granted only TextEdit and Calculator. The exact Unicode test
+text was typed and saved, with file bytes independently verified; the saved test
+document was closed before its temporary files were deleted. Calculator was launched
+and used through seven semantic button presses, with an independent AX check of 42
+after a distinguishable baseline. The real Electron/Codex path completed four composer
+turns, three captures, eleven inspections and 32 activity events with six thumbnails.
+Both apps' grants survived the turns, the lease released, and no tagged tool/provider
+errors or unexpected app input were observed. This passes the narrow unsigned Codex
+TextEdit/Calculator workflow, not the complete provider/app/privacy matrix. Failed
+attempts remain unchanged. Signing is deferred and all release gates remain closed.
+
 ```sh
 F5_COMPUTER_ELECTRON_REHEARSAL=1 bun apps/desktop/scripts/rehearse-computer-electron.mjs --codex-home <selected-profile-home> --codex-binary <codex-binary> --output /tmp/f5-electron-real-apps.json --real-apps
 bun apps/desktop/src/computer/rehearseHelperMacos.ts --helper apps/desktop/dist-native/mac-arm64/f5-computer-helper --output /tmp/f5-capture-privacy.json --privacy-only
