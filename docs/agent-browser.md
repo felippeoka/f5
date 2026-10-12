@@ -728,7 +728,7 @@ while displaying the latest action. Grant changes, backend changes and reconnect
 discard that capture; the earlier image is never attached to a later action. Store and
 browser regressions exercise this sequence and revocation. The earlier inspection
 failure remains unexplained; a later successful observation does not retroactively
-turn that failed report into a pass. A run of the corrected renderer is still required.
+turn that failed report into a pass. The failed reports remain part of the evidence.
 The [corrected-renderer attempt](computer-certification/2026-10-12-macos-corrected-renderer-pre-input-failure.json)
 at `073e4ccb60` passed native consent, activation, capture and inspection, but stopped
 before any semantic or keyboard input reached the helper. Its last observed request
@@ -754,6 +754,22 @@ effective typing permission without changing its stored flag or opening another 
 request. This is a demonstrated presentation defect, not proof of why that model turn
 stopped. Future failed runs also record content-free thumbnail visibility/load booleans
 at cleanup, separately from the overall workflow checks.
+
+The [passing Electron actions run](computer-certification/2026-10-12-macos-electron-actions-passed.json)
+at `31d4458d19` then passed all 18 actions-only checks through the real composer,
+provider, main and helper. Native human consent settled once; successful capture,
+inspection, semantic press/focus and Unicode typing were correlated; a subsequent
+turn took a fresh capture and delivered the coordinate click. The fixture independently
+reported two presses and receipt of the expected synthetic text. Twelve activity events
+and four thumbnails were observed; the live-card image was visible and loaded. Semantic
+outlines, the coordinate cursor and lease/overlay cleanup passed, with no recorded
+provider or tool-outcome error. This confirms that narrow unsigned Codex/synthetic-app
+workflow on one Retina display, not the complete release matrix. Pause/Resume was
+excluded and retains its separate earlier evidence. The earlier failed runs remain
+failed, and this later success does not prove their exact causes. Signed installed-build
+attribution, real apps, stalled-host/hung-renderer stop latency, multi-profile/display
+isolation and Windows runtime still require their own proving runs. Native, provider
+built-in and Chrome release gates remain closed; signing remains deferred.
 
 For background inspection without changing focus or starting a provider session:
 
