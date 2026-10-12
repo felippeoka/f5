@@ -100,4 +100,42 @@ describe("computer controls", () => {
     expect(setPaused).not.toHaveBeenCalled();
     setPaused.mockRestore();
   });
+  it("sends trusted local resume before waiting for a slow server refusal", async () => {
+    const thread = ThreadId.makeUnsafe("slow-preview");
+    let refuse: (error: Error) => void = () => {};
+    mocks.pause.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          refuse = reject;
+        }),
+    );
+    const native = vi.fn(async () => {});
+    vi.stubGlobal("window", { desktopBridge: { computerAutomation: { setPaused: native } } });
+    const setPaused = vi.spyOn(useAgentBrowserActivityStore.getState(), "setPaused");
+    const resume = pausePreviewThread(thread, false);
+    expect(native).toHaveBeenCalledWith(thread, false);
+    expect(setPaused).not.toHaveBeenCalled();
+    refuse(new Error("Resume on host"));
+    await resume;
+    expect(native).toHaveBeenCalledOnce();
+    expect(setPaused).not.toHaveBeenCalled();
+    setPaused.mockRestore();
+  });
+  it("allows preview-only resume when the computer helper is unavailable", async () => {
+    const thread = ThreadId.makeUnsafe("preview-only");
+    mocks.pause.mockResolvedValueOnce(undefined);
+    vi.stubGlobal("window", {
+      desktopBridge: {
+        computerAutomation: {
+          setPaused: vi.fn(async () => {
+            throw new Error("Not certified");
+          }),
+        },
+      },
+    });
+    const setPaused = vi.spyOn(useAgentBrowserActivityStore.getState(), "setPaused");
+    await pausePreviewThread(thread, false);
+    expect(setPaused).toHaveBeenCalledWith(thread, false);
+    setPaused.mockRestore();
+  });
 });

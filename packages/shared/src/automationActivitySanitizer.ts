@@ -38,6 +38,7 @@ const SAFE_NUMERIC_FIELDS = new Set([
   "sizeBytes",
   "elapsedMs",
   "omitted",
+  "mcpImagesOmitted",
 ]);
 const SAFE_CONTAINER_FIELDS = new Set([
   "geometry",
@@ -73,9 +74,9 @@ export function sanitizeAutomationActivity(
     return output;
   };
   // cua_repl source and text output have no trustworthy field-level structure.
-  return provenance.kind === "codex-builtin"
-    ? { sanitized: true, backend: "codex-builtin" }
-    : { ...(visit(value, 0) as object), sanitized: true };
+  if (provenance.kind === "codex-builtin") return { sanitized: true, backend: "codex-builtin" };
+  const safe = visit(value, 0);
+  return Array.isArray(safe) ? safe : { ...(safe as object), sanitized: true };
 }
 export function sanitizeAutomationToolPayload(
   toolName: string,

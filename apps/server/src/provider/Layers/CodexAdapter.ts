@@ -1,4 +1,5 @@
 import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
+import { makeAutomationRuntimeEventPreparer } from "../prepareAutomationRuntimeEvent";
 import type { ComputerAutomationBrokerRuntime } from "../../computer/ComputerAutomationBroker";
 import { resolveAgentBrowserPolicy } from "../../mcp/browserAccess";
 import { resolveComputerBackendSelection } from "../../computer/computerBackendPolicy";
@@ -2875,6 +2876,7 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
       });
 
     const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const prepareRuntimeEvent = yield* makeAutomationRuntimeEventPreparer;
     const turnStartedAtByThread = new Map<ThreadId, string>();
     const limitsByThread = new Map<
       ThreadId,
@@ -2932,10 +2934,7 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
               computerDecisions.get(event.threadId),
             );
             // Redact at admission, before lifecycle cleanup removes provenance.
-            const safeRuntimeEvents = runtimeEvents.map(
-              (entry) =>
-                automationEventSanitizer.sanitize(entry.threadId, entry) as ProviderRuntimeEvent,
-            );
+            const safeRuntimeEvents = yield* Effect.forEach(runtimeEvents, prepareRuntimeEvent);
             if (event.method === "session/exited" || event.method === "session/closed") {
               computerMcpSessions.get(event.threadId)?.dispose();
               computerMcpSessions.delete(event.threadId);

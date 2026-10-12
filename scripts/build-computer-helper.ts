@@ -1,4 +1,5 @@
-import { spawnSync, spawn } from "node:child_process";
+import { spawnSync } from "node:child_process";
+import { checkComputerHelperProtocol } from "./computer-helper-protocol";
 import { mkdirSync, copyFileSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,51 +69,7 @@ async function main(): Promise<void> {
     copyFileSync(join(cwd, "target", target, "release", "f5-computer-helper.exe"), binary);
   }
   if (args.includes("--check")) {
-    await new Promise<void>((accept, reject) => {
-      const child = spawn(binary, [], { stdio: ["pipe", "pipe", "pipe"] });
-      let buffer = "";
-      let hello = false;
-      let permissions = false;
-      let suspended = false;
-      const timer = setTimeout(() => {
-        child.kill();
-        reject(new Error("Helper protocol check timed out."));
-      }, 10_000);
-      child.on("error", reject);
-      child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
-        buffer += chunk;
-        let end: number;
-        while ((end = buffer.indexOf("\n")) >= 0) {
-          const message = JSON.parse(buffer.slice(0, end));
-          buffer = buffer.slice(end + 1);
-          if (message.type === "hello") {
-            if (message.protocolVersion !== 1) {
-              clearTimeout(timer);
-              child.kill();
-              reject(new Error("Helper protocol mismatch."));
-              return;
-            }
-            hello = true;
-            child.stdin.write(
-              '{"type":"request","request":{"op":"status","requestId":"protocol-permissions"}}\n',
-            );
-            child.stdin.write('{"type":"suspend","requestId":"protocol-check"}\n');
-          }
-          if (hello && message.type === "response" && !message.error) {
-            if (message.requestId === "protocol-permissions")
-              permissions = typeof message.result?.available === "boolean";
-            if (message.requestId === "protocol-check") suspended = true;
-          }
-          if (permissions && suspended) {
-            clearTimeout(timer);
-            child.stdin.end();
-            child.kill();
-            accept();
-          }
-        }
-      });
-    });
+    await checkComputerHelperProtocol(binary);
   }
 }
 void main().catch((error: unknown) => {

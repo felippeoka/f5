@@ -2263,15 +2263,25 @@ const make = Effect.gen(function* () {
     automationEventSanitizer.sanitize(threadId, event);
     const omitComputerImages =
       interactionMode === "plan" &&
-      automationEventSanitizer.isComputerItem(threadId, event.itemId ?? event.eventId);
+      (automationEventSanitizer.isComputerItem(threadId, event.itemId ?? event.eventId) ||
+        event.payload.mcpImages !== undefined ||
+        event.payload.mcpImagesOmitted !== undefined);
+    const preparedRefs = event.payload.mcpImages ?? [];
+    const preparedOmitted =
+      (event.payload.mcpImagesOmitted ?? 0) + (omitComputerImages ? preparedRefs.length : 0);
+    const preparedImages: ToolImageRefs = {
+      ...(!omitComputerImages && preparedRefs.length ? { mcpImages: preparedRefs } : {}),
+      ...(preparedOmitted ? { mcpImagesOmitted: preparedOmitted } : {}),
+    };
     if (extraction.images.length === 0 && extraction.omitted === 0) {
       return Effect.succeed({
         event: automationEventSanitizer.sanitize(threadId, event) as ProviderRuntimeEvent,
+        images: preparedImages,
       });
     }
     return Effect.gen(function* () {
-      const refs: ToolResultImageRef[] = [];
-      let omitted = extraction.omitted;
+      const refs: ToolResultImageRef[] = [...(preparedImages.mcpImages ?? [])];
+      let omitted = extraction.omitted + (preparedImages.mcpImagesOmitted ?? 0);
       const { config, sql, fileSystem, path } = imageStorage;
       for (const image of extraction.images) {
         if (

@@ -336,25 +336,31 @@ projectionLayer("OrchestrationProjectionPipeline", (it) => {
           updatedAt: now,
         },
       });
-      for (let index = 0; index < 1001; index++) {
-        yield* store.append({
-          ...common,
-          eventId: EventId.makeUnsafe(`large-message-${index}`),
-          type: "thread.message-sent",
-          aggregateKind: "thread",
-          aggregateId: threadId,
-          payload: {
-            threadId,
-            messageId: MessageId.makeUnsafe(`large-message-${index}`),
-            role: "user",
-            text: `Message ${index}`,
-            turnId: null,
-            streaming: false,
-            createdAt: now,
-            updatedAt: now,
-          },
-        });
-      }
+      // Seed the large fixture in one transaction to avoid thousands of commits
+      // competing with the full CI suite; replay coverage remains unchanged.
+      yield* sql.withTransaction(
+        Effect.gen(function* () {
+          for (let index = 0; index < 1001; index++) {
+            yield* store.append({
+              ...common,
+              eventId: EventId.makeUnsafe(`large-message-${index}`),
+              type: "thread.message-sent",
+              aggregateKind: "thread",
+              aggregateId: threadId,
+              payload: {
+                threadId,
+                messageId: MessageId.makeUnsafe(`large-message-${index}`),
+                role: "user",
+                text: `Message ${index}`,
+                turnId: null,
+                streaming: false,
+                createdAt: now,
+                updatedAt: now,
+              },
+            });
+          }
+        }),
+      );
       // Exercise persisted pre-turn-ID messages, not only the contract decoder.
       yield* sql`UPDATE orchestration_events SET payload_json = json_remove(payload_json, '$.turnId')
         WHERE stream_id = ${threadId} AND event_type = 'thread.message-sent'`;

@@ -7,6 +7,8 @@ import {
 } from "@t3tools/contracts";
 import { createHash } from "node:crypto";
 import { createAttachmentId } from "../../attachmentStore.ts";
+import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
+import { makeAutomationRuntimeEventPreparer } from "../../provider/prepareAutomationRuntimeEvent";
 import { GitCommandError } from "../../git/Errors.ts";
 import { cleanupStaleWorktrees } from "./WorktreeStartupCleanup.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
@@ -29,6 +31,7 @@ import {
   OrchestrationFileChangeId,
   ProjectId,
   ProviderItemId,
+  RuntimeItemId,
   ProviderInstanceId,
   ThreadId,
   TurnId,
@@ -423,6 +426,7 @@ describe("ProviderRuntimeIngestion", () => {
       drain,
       workspaceRoot,
       attachmentsDir: (await runtime.runPromise(Effect.service(ServerConfig))).attachmentsDir,
+      prepareRuntimeEvent: await runtime.runPromise(makeAutomationRuntimeEventPreparer),
     };
   }
 
@@ -2374,6 +2378,82 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.text).toBe("hello world");
     expect(message?.streaming).toBe(false);
   });
+
+  it.each(["default", "plan"])(
+    "retains prepared computer attachments across disposal in %s mode",
+    async (mode) => {
+      const stateDir = path.join(makeTempDir("f5-prepared-computer-images-"), "userdata");
+      const harness = await createHarness({ stateDir });
+      const threadId = asThreadId("thread-1");
+      const png =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+      await Effect.runPromise(
+        harness.sql`UPDATE projection_threads SET interaction_mode = ${mode} WHERE thread_id = ${threadId}`,
+      );
+      automationEventSanitizer.register(threadId, {
+        serverName: "__f5_computer",
+        verified: true,
+        kind: "f5-computer",
+      });
+      try {
+        const queued = await Effect.runPromise(
+          harness.prepareRuntimeEvent({
+            type: "item.completed",
+            eventId: asEventId("prepared-computer-shot"),
+            provider: "codex",
+            createdAt: new Date().toISOString(),
+            threadId,
+            itemId: RuntimeItemId.makeUnsafe("prepared-computer-shot"),
+            payload: {
+              itemType: "mcp_tool_call",
+              status: "completed",
+              data: {
+                toolName: "mcp____f5_computer__computer_screenshot",
+                input: { text: "PRIVATE_CAPTURE_SENTINEL" },
+                result: { content: [{ type: "image", mimeType: "image/png", data: png }] },
+              },
+            },
+          }),
+        );
+        automationEventSanitizer.clear(threadId);
+        expect(JSON.stringify(queued)).not.toContain(png);
+        expect(JSON.stringify(queued)).not.toContain("PRIVATE_CAPTURE_SENTINEL");
+        harness.emit(queued);
+        const thread = await waitForThread(harness.engine, (entry) =>
+          entry.activities.some(
+            (activity: ProviderRuntimeTestActivity) => activity.id === "prepared-computer-shot",
+          ),
+        );
+        await harness.drain();
+        const activity = thread.activities.find(
+          (entry: ProviderRuntimeTestActivity) => entry.id === "prepared-computer-shot",
+        )!;
+        const payload = activity.payload as {
+          mcpImages?: Array<{ attachmentId: string }>;
+          mcpImagesOmitted?: number;
+        };
+        const rows = await Effect.runPromise(
+          harness.sql<{
+            attachmentId: string;
+            finalPath: string;
+            lifecycle: string;
+          }>`SELECT attachment_id AS "attachmentId", final_path AS "finalPath", lifecycle FROM attachments`,
+        );
+        if (mode === "plan") {
+          expect(rows).toHaveLength(0);
+          expect(payload.mcpImages).toBeUndefined();
+          expect(payload.mcpImagesOmitted).toBe(1);
+        } else {
+          expect(rows).toHaveLength(1);
+          expect(rows[0]?.lifecycle).toBe("ready");
+          expect(payload.mcpImages?.[0]?.attachmentId).toBe(rows[0]?.attachmentId);
+          expect(fs.readFileSync(rows[0]!.finalPath).toString("base64")).toBe(png);
+        }
+      } finally {
+        automationEventSanitizer.clear(threadId);
+      }
+    },
+  );
 
   it("stores tool-result screenshots before compaction for Claude and Codex shapes", async () => {
     const stateDir = path.join(makeTempDir("t3-provider-images-"), "userdata");

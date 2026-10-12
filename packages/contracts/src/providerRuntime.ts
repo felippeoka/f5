@@ -413,6 +413,17 @@ export const ItemLifecyclePayload = Schema.Struct({
   detail: Schema.optional(TrimmedNonEmptyStringSchema),
   requestKind: Schema.optional(ProviderRequestKind),
   data: Schema.optional(Schema.Unknown),
+  /** Computer screenshots stored before queue admission; never inline image bytes. */
+  mcpImages: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        attachmentId: TrimmedNonEmptyStringSchema,
+        mimeType: Schema.String,
+        sizeBytes: NonNegativeInt,
+      }),
+    ),
+  ),
+  mcpImagesOmitted: Schema.optional(NonNegativeInt),
   /** Only on `item.completed`; never on starts, updates or deltas. */
   completion: Schema.optional(ToolCompletionEnvelope),
 });

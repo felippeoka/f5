@@ -1,4 +1,5 @@
 import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
+import { makeAutomationRuntimeEventPreparer } from "../prepareAutomationRuntimeEvent";
 import type { ComputerAutomationBrokerRuntime } from "../../computer/ComputerAutomationBroker";
 import { resolveComputerBackendSelection } from "../../computer/computerBackendPolicy";
 import type { ChromeSessionRuntime } from "../chromeSessionRuntime";
@@ -2314,6 +2315,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
     }
     const threadLocksRef = yield* SynchronizedRef.make(new Map<string, ThreadLockEntry>());
     const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const prepareRuntimeEvent = yield* makeAutomationRuntimeEventPreparer;
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
     const nextEventId = Effect.map(Random.nextUUIDv4, (id) => EventId.makeUnsafe(id));
@@ -2368,10 +2370,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       );
 
     const offerRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-      Queue.offer(
-        runtimeEventQueue,
-        automationEventSanitizer.sanitize(event.threadId, event) as ProviderRuntimeEvent,
-      ).pipe(Effect.asVoid);
+      prepareRuntimeEvent(event).pipe(
+        Effect.flatMap((safe) => Queue.offer(runtimeEventQueue, safe)),
+        Effect.asVoid,
+      );
 
     const emitSessionConfigured = (
       context: ClaudeSessionContext,

@@ -260,6 +260,11 @@ persistence. Typed text, semantic values, inspect names/values and raw error str
 removed, including nested fields. Codex built-in `cua_repl` JavaScript and text output are
 entirely omitted. This does not modify model-facing results or erase provider-managed
 conversation history. Look-alike project server names do not acquire trusted provenance.
+Before queue admission, both adapters store bounded computer screenshots through the
+attachment registry and enqueue only sanitized summaries and attachment references.
+Missing storage, unknown threads, plan mode, or exhausted image budgets produce an
+omitted count. Queued references survive session/provenance disposal. Central ingestion
+keeps these references when creating activities and still extracts other MCP images.
 
 ## Chrome integrations and native-host transactions
 
@@ -416,6 +421,12 @@ for a full pipe buffer, preventing short requests and suspend messages from exec
 The helper now uses an interruptible POSIX read; XCTest verifies a short command arrives
 while stdin remains open. The build protocol check requires a correlated suspend
 acknowledgement rather than accepting an unsolicited status heartbeat.
+For an elevated Windows CI process, a helper may refuse startup and exit cleanly with
+`missing-permissions`. The protocol probe accepts only that explicit fail-closed startup
+case; it does not claim an interactive round trip or input health. A running helper must
+still answer the correlated permissions and suspend requests. Broken-pipe writes, bad
+versions, incomplete handshakes and abnormal exits cannot become a successful usable
+helper check.
 
 The [2026-10-10 unsigned evidence](computer-certification/2026-10-10-macos-unsigned.json)
 records six passed real-app checks after the pipe fix, protected-system-UI refusals during
