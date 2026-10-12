@@ -3,6 +3,7 @@ import type { ComputerAutomationRequest } from "@t3tools/contracts";
 import {
   RehearsalRealAppsObservation,
   REAL_APP_REHEARSAL_IDS,
+  REAL_APP_REHEARSAL_TEXT,
 } from "./rehearsalRealAppsObservation";
 const [textEdit, calculator] = REAL_APP_REHEARSAL_IDS;
 const request = (
@@ -83,6 +84,9 @@ it("requires correlated successful results for the expected app and keeps only s
     calculatorInspected: true,
     textEditTyping: true,
     textEditKeys: 1,
+    expectedTextTyping: false,
+    selectAllKeySucceeded: false,
+    saveKeySucceeded: false,
     calculatorOpened: true,
     calculatorPresses: 1,
     unexpectedAppInput: false,
@@ -134,5 +138,51 @@ it("bounds admission and refuses unknown successful input recipients", () => {
     unexpectedAppInput: true,
     traceComplete: false,
     textEditTyping: false,
+  });
+});
+it("records only fixed expected text and exact command chords after correlated success", () => {
+  const trace = new RehearsalRealAppsObservation("thread");
+  const type = request("type", textEdit);
+  trace.receive({ ...type, request: { ...type.request, text: REAL_APP_REHEARSAL_TEXT } });
+  trace.receive({ type: "response", requestId: "type", result: action(textEdit) });
+  for (const [id, chord] of [
+    ["select", "Command+A"],
+    ["save", "META+S"],
+  ]) {
+    const key = request("key", textEdit, id);
+    trace.receive({ ...key, request: { ...key.request, chords: [chord!] } });
+    trace.receive({ type: "response", requestId: id, result: action(textEdit) });
+  }
+  expect(trace.snapshot()).toMatchObject({
+    expectedTextTyping: true,
+    selectAllKeySucceeded: true,
+    saveKeySucceeded: true,
+  });
+  expect(JSON.stringify(trace.snapshot())).not.toContain(REAL_APP_REHEARSAL_TEXT);
+});
+it("does not credit wrong modifiers, combined chords, failed input or another app", () => {
+  const trace = new RehearsalRealAppsObservation("thread");
+  for (const [id, chords] of [
+    ["control", ["CTRL+A"]],
+    ["combined", ["CMD+A", "CMD+S"]],
+  ] as const) {
+    const key = request("key", textEdit, id);
+    trace.receive({ ...key, request: { ...key.request, chords: [...chords] } });
+    trace.receive({ type: "response", requestId: id, result: action(textEdit) });
+  }
+  const key = request("key", textEdit, "failed");
+  trace.receive({ ...key, request: { ...key.request, chords: ["CMD+S"] } });
+  trace.receive({
+    type: "response",
+    requestId: "failed",
+    error: { _tag: "Interrupted", cause: "paused" },
+  });
+  const type = request("type", calculator);
+  trace.receive({ ...type, request: { ...type.request, text: REAL_APP_REHEARSAL_TEXT } });
+  trace.receive({ type: "response", requestId: "type", result: action(calculator) });
+  expect(trace.snapshot()).toMatchObject({
+    expectedTextTyping: false,
+    selectAllKeySucceeded: false,
+    saveKeySucceeded: false,
   });
 });

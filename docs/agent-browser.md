@@ -657,6 +657,26 @@ The attempt remains failed/incomplete, with `physicalInterruption: true`; it pro
 neither pixel exclusion nor masking. The real-app phase was held rather than resumed
 automatically. Capture-only fixture windows require no clicks or keyboard interaction.
 
+The subsequent [capture-only run](computer-certification/2026-10-12-macos-capture-privacy-passed.json)
+passed all seven checks on clean revision `03695fecc2`, with no physical interruption.
+The positive control included both fixture markers; revocation excluded the ungranted
+marker while retaining granted content. Secure fields were masked in JPEG and PNG,
+and Retina zoom provided additional detail. The device lock and permit-expiry refusal
+also passed. This is unsigned synthetic-app helper evidence, not real-app/browser,
+Electron overlay, cross-profile, mixed-display or installed-build certification.
+
+The first [real-app run](computer-certification/2026-10-12-macos-electron-real-apps-attempt.json)
+on the same clean revision passed native human consent for TextEdit and Calculator,
+owned-document verification, capture and inspection. The helper returned successful
+typing and two key actions, with no interruption or tagged provider/tool errors, but
+the saved test file did not match the expected text. A separate read-only AX check
+confirmed the original seed remained in the test document; the disk also retained
+the seed. The run remains failed and did not reach document closure or Calculator.
+Its test file was retained rather than deleted while open. No cause is established:
+successful injection alone does not prove application delivery. Future traces retain
+only booleans for the fixed expected text and exact single select-all/save chords,
+alongside correlated native outcomes; they retain no raw typed text or chords.
+
 ```sh
 F5_COMPUTER_ELECTRON_REHEARSAL=1 bun apps/desktop/scripts/rehearse-computer-electron.mjs --codex-home <selected-profile-home> --codex-binary <codex-binary> --output /tmp/f5-electron-real-apps.json --real-apps
 bun apps/desktop/src/computer/rehearseHelperMacos.ts --helper apps/desktop/dist-native/mac-arm64/f5-computer-helper --output /tmp/f5-capture-privacy.json --privacy-only

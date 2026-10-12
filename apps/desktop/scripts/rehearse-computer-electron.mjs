@@ -12,7 +12,10 @@ import {
   ComputerToolOutcomeCode,
 } from "@t3tools/contracts";
 import { Schema } from "effect";
-import { REAL_APP_REHEARSAL_IDS } from "../src/computer/rehearsalRealAppsObservation.ts";
+import {
+  REAL_APP_REHEARSAL_IDS,
+  REAL_APP_REHEARSAL_TEXT,
+} from "../src/computer/rehearsalRealAppsObservation.ts";
 import { createRehearsalFixture } from "../src/computer/rehearsalFixture.ts";
 import { RehearsalStopObservation } from "../src/computer/rehearsalStopObservation.ts";
 import { measureStopLatency } from "../src/computer/stopLatencyMeasurement.ts";
@@ -128,7 +131,7 @@ let documentRoot;
 let documentPath;
 let documentOpened = false;
 let documentClosed = false;
-const expectedRealAppText = "F5_REAL_APP_REHEARSAL Ω🙂";
+const expectedRealAppText = REAL_APP_REHEARSAL_TEXT;
 async function verifyRealApp(...args) {
   const result = await exec(realAppVerifier, args, { timeout: 10000, maxBuffer: 4096 });
   return JSON.parse(result.stdout);
@@ -768,6 +771,9 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           realAppObservation.textEditInspected &&
           realAppObservation.textEditTyping &&
           realAppObservation.textEditKeys >= 2 &&
+          realAppObservation.expectedTextTyping &&
+          realAppObservation.selectAllKeySucceeded &&
+          realAppObservation.saveKeySucceeded &&
           realAppObservation.calculatorOpened &&
           realAppObservation.calculatorInspected &&
           realAppObservation.calculatorPresses >= 7;

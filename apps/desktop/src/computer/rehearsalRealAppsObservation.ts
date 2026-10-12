@@ -8,6 +8,7 @@ import {
 } from "@t3tools/contracts";
 
 export const REAL_APP_REHEARSAL_IDS = ["com.apple.TextEdit", "com.apple.calculator"] as const;
+export const REAL_APP_REHEARSAL_TEXT = "F5_REAL_APP_REHEARSAL Ω🙂";
 type AppKind = "textEdit" | "calculator";
 const appKind = (appId: string | undefined): AppKind | undefined =>
   appId === REAL_APP_REHEARSAL_IDS[0]
@@ -27,12 +28,18 @@ export class RehearsalRealAppsObservation {
       app?: AppKind;
       explicitApp: boolean;
       press: boolean;
+      expectedText: boolean;
+      selectAll: boolean;
+      save: boolean;
     }
   >();
   private textEditInspected = false;
   private calculatorInspected = false;
   private textEditTyping = false;
   private textEditKeys = 0;
+  private expectedTextTyping = false;
+  private selectAllKeySucceeded = false;
+  private saveKeySucceeded = false;
   private calculatorOpened = false;
   private calculatorPresses = 0;
   private unexpectedAppInput = false;
@@ -54,6 +61,17 @@ export class RehearsalRealAppsObservation {
         ...(app ? { app } : {}),
         explicitApp: "appId" in request,
         press: request.op === "elementAction" && request.action === "press",
+        expectedText: request.op === "type" && request.text === REAL_APP_REHEARSAL_TEXT,
+        selectAll:
+          request.op === "key" &&
+          request.chords.length === 1 &&
+          request.repeat === 1 &&
+          /^(cmd|command|meta)\+a$/i.test(request.chords[0]!),
+        save:
+          request.op === "key" &&
+          request.chords.length === 1 &&
+          request.repeat === 1 &&
+          /^(cmd|command|meta)\+s$/i.test(request.chords[0]!),
       });
     } else if (raw.type === "response") {
       const request = this.pending.get(raw.requestId);
@@ -80,8 +98,15 @@ export class RehearsalRealAppsObservation {
           this.unexpectedAppInput = true;
           return;
         }
-        if (request.op === "type" && app === "textEdit") this.textEditTyping = true;
-        if (request.op === "key" && app === "textEdit") this.textEditKeys++;
+        if (request.op === "type" && app === "textEdit") {
+          this.textEditTyping = true;
+          this.expectedTextTyping ||= request.expectedText;
+        }
+        if (request.op === "key" && app === "textEdit") {
+          this.textEditKeys++;
+          this.selectAllKeySucceeded ||= request.selectAll;
+          this.saveKeySucceeded ||= request.save;
+        }
         if (request.op === "openApp" && app === "calculator") this.calculatorOpened = true;
         if (request.press && app === "calculator") this.calculatorPresses++;
       }
@@ -93,6 +118,9 @@ export class RehearsalRealAppsObservation {
       calculatorInspected: this.calculatorInspected,
       textEditTyping: this.textEditTyping,
       textEditKeys: this.textEditKeys,
+      expectedTextTyping: this.expectedTextTyping,
+      selectAllKeySucceeded: this.selectAllKeySucceeded,
+      saveKeySucceeded: this.saveKeySucceeded,
       calculatorOpened: this.calculatorOpened,
       calculatorPresses: this.calculatorPresses,
       unexpectedAppInput: this.unexpectedAppInput,
