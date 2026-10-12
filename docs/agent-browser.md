@@ -650,6 +650,13 @@ reports keep outcomes and repository/helper/verifier source hashes. The temporar
 fixtures are terminated and their files removed. This is native-helper coverage, with
 no real provider consent, Electron overlays or cross-profile activity proof.
 
+The first [capture-only attempt](computer-certification/2026-10-12-macos-capture-privacy-interrupted.json)
+passed device-lock contention, fixture activation and secure-value omission, then
+auto-paused before its first capture. The operator confirmed mouse/keyboard input.
+The attempt remains failed/incomplete, with `physicalInterruption: true`; it proves
+neither pixel exclusion nor masking. The real-app phase was held rather than resumed
+automatically. Capture-only fixture windows require no clicks or keyboard interaction.
+
 ```sh
 F5_COMPUTER_ELECTRON_REHEARSAL=1 bun apps/desktop/scripts/rehearse-computer-electron.mjs --codex-home <selected-profile-home> --codex-binary <codex-binary> --output /tmp/f5-electron-real-apps.json --real-apps
 bun apps/desktop/src/computer/rehearseHelperMacos.ts --helper apps/desktop/dist-native/mac-arm64/f5-computer-helper --output /tmp/f5-capture-privacy.json --privacy-only
