@@ -159,7 +159,10 @@ describe("ChatHeader", () => {
       await previewToggle.click();
       expect(onTogglePreview).toHaveBeenCalledTimes(1);
 
-      const agentsToggle = sideGroup.getByRole("button", { name: "Toggle Agents panel" });
+      const agentsToggle = sideGroup.getByRole("button", {
+        name: "Toggle Agents panel, open in background",
+        exact: true,
+      });
       await expect.element(agentsToggle).toHaveAttribute("aria-pressed", "false");
       await expect.element(agentsToggle).toHaveAttribute("data-in-background", "");
       await agentsToggle.hover();
@@ -206,7 +209,10 @@ describe("ChatHeader", () => {
       await expect
         .element(page.getByRole("menuitemcheckbox", { name: "Toggle preview" }))
         .toHaveAttribute("aria-checked", "true");
-      const agentsItem = page.getByRole("menuitemcheckbox", { name: "Toggle Agents panel" });
+      const agentsItem = page.getByRole("menuitemcheckbox", {
+        name: "Toggle Agents panel, open in background",
+        exact: true,
+      });
       await expect.element(agentsItem).toHaveAttribute("aria-checked", "false");
       expect(agentsItem.element().textContent).toContain("in background");
     } finally {

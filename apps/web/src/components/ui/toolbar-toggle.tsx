@@ -53,7 +53,7 @@ function ToolbarToggle({
             pressed={pressed}
             onPressedChange={onPressedChange}
             disabled={disabled}
-            aria-label={ariaLabel ?? label}
+            aria-label={`${ariaLabel ?? label}${inBackground ? ", open in background" : ""}`}
             data-in-background={inBackground ? "" : undefined}
             className={cn(
               "relative shrink-0 px-0 text-muted-foreground hover:text-foreground data-pressed:text-foreground",

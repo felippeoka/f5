@@ -59,7 +59,7 @@ import { useNextTurnQueueStore } from "../nextTurnQueueStore";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { useRecoveryStateStore } from "../recoveryStateStore";
 import { useTerminalStateStore } from "../terminalStateStore";
-import { useRightPanelStore } from "../rightPanelStore";
+import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 import { getRouter } from "../router";
 import { useStore } from "../store";
 import { createTestServerProvider } from "../testServerProvider";
@@ -3596,6 +3596,99 @@ describe("ChatView timeline (full app)", () => {
     } finally {
       await mounted.cleanup();
     }
+  });
+
+  describe("header Diff toggle", () => {
+    const WIDE_VIEWPORT: ViewportSpec = { name: "wide", width: 1_600, height: 1_000 };
+    const rightPanel = () =>
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadId, THREAD_ID);
+
+    async function mountWithBranchRangeDiff() {
+      const mounted = await mountChatView({
+        viewport: WIDE_VIEWPORT,
+        snapshot: createSnapshotForTargetUser({
+          targetMessageId: "msg-user-diff-toggle" as MessageId,
+          targetText: "diff toggle",
+        }),
+      });
+      await mounted.router.navigate({
+        to: "/$threadId",
+        params: { threadId: THREAD_ID },
+        search: { diff: "1", diffScope: "branch-range", diffBaseRef: "main" },
+      });
+      await vi.waitFor(() => expect(rightPanel().activeSurfaceId).toBe("diff"), {
+        timeout: 8_000,
+        interval: 16,
+      });
+      return mounted;
+    }
+
+    it("brings a background Diff to front without resetting its scope", async () => {
+      const mounted = await mountWithBranchRangeDiff();
+
+      try {
+        useRightPanelStore.getState().open(THREAD_ID, "agents");
+        await page
+          .getByRole("button", { name: "Toggle diff panel, open in background", exact: true })
+          .click();
+
+        await vi.waitFor(
+          () => {
+            expect(rightPanel().activeSurfaceId).toBe("diff");
+            expect(mounted.router.state.location.search).toMatchObject({
+              diff: "1",
+              diffScope: "branch-range",
+              diffBaseRef: "main",
+            });
+          },
+          { timeout: 8_000, interval: 16 },
+        );
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+
+    it("brings Diff in front of an open file tab and clears the file view", async () => {
+      const mounted = await mountWithBranchRangeDiff();
+
+      try {
+        await mounted.router.navigate({
+          to: "/$threadId",
+          params: { threadId: THREAD_ID },
+          search: (previous) => ({ ...previous, fileViewPath: "README.md" }),
+        });
+        await vi.waitFor(() => expect(rightPanel().activeSurfaceId).toBe("file:README.md"), {
+          timeout: 8_000,
+          interval: 16,
+        });
+
+        // DOM click: the file panel keeps settling its layout, which fails pointer stability checks.
+        (
+          await waitForElement(
+            () =>
+              document.querySelector<HTMLButtonElement>(
+                '[aria-label="Toggle diff panel, open in background"]',
+              ),
+            "Unable to find the background Diff toggle.",
+          )
+        ).click();
+
+        await vi.waitFor(
+          () => {
+            expect(rightPanel().activeSurfaceId).toBe("diff");
+            const search = mounted.router.state.location.search as Record<string, unknown>;
+            expect(search.fileViewPath).toBeUndefined();
+            expect(search).toMatchObject({ diff: "1", diffScope: "branch-range" });
+          },
+          { timeout: 8_000, interval: 16 },
+        );
+        // The route sync must not pull the file tab back in front afterwards.
+        await waitForLayout();
+        expect(rightPanel().activeSurfaceId).toBe("diff");
+      } finally {
+        await mounted.cleanup();
+      }
+    });
   });
 
   it("opens the project cwd with VS Code Insiders when it is the only available editor", async () => {

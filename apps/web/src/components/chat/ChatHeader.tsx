@@ -501,7 +501,7 @@ function PanelMenuItem(props: { panel: PanelToggleSpec }) {
     <MenuCheckboxItem
       checked={panel.state === "active"}
       disabled={panel.disabled}
-      aria-label={panel.ariaLabel}
+      aria-label={`${panel.ariaLabel}${panel.state === "background" ? ", open in background" : ""}`}
       onCheckedChange={() => panel.onToggle()}
     >
       <span className="flex w-full items-center gap-2">

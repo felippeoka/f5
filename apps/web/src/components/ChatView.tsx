@@ -220,6 +220,7 @@ import {
   selectThreadRightPanelState,
   useRightPanelStore,
 } from "../rightPanelStore";
+import { setSearchParamsForSurface } from "../rightPanelNavigation";
 import { canStartImplementation, workflowContainsThread } from "./workflow/workflowUtils";
 import { codeReviewWorkflowContainsThread } from "./workflow/codeReviewWorkflowUtils";
 import { investigationWorkflowContainsThread } from "./workflow/investigationWorkflowUtils";
@@ -2641,6 +2642,17 @@ export default function ChatView({
   );
   // Header toggles: a visible tab closes, a background tab comes to front, a closed one opens.
   const onToggleDiff = useCallback(() => {
+    if (diffState === "background") {
+      // Same as clicking the tab: keep the selected turn/scope, drop any file-view params.
+      useRightPanelStore.getState().activateSurface(threadId, "diff");
+      void navigate({
+        to: "/$threadId",
+        params: { threadId },
+        replace: true,
+        search: (previous) => setSearchParamsForSurface(previous, { id: "diff", kind: "diff" }),
+      });
+      return;
+    }
     const closing = diffState === "active";
     if (closing) {
       useRightPanelStore.getState().closeSurface(threadId, "diff");
@@ -2653,7 +2665,9 @@ export default function ChatView({
       replace: true,
       search: (previous) => {
         const rest = clearTurnDiffSearchParams(previous);
-        return closing ? rest : { ...rest, diff: "1", diffScope: "working-tree" };
+        return closing
+          ? rest
+          : { ...clearFileViewSearchParams(rest), diff: "1", diffScope: "working-tree" };
       },
     });
   }, [diffState, navigate, threadId]);
