@@ -4,6 +4,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { readNativeTaskIdentity } from "@t3tools/shared/nativeTaskIdentity";
+import { create } from "zustand";
 
 import { isNativeOperationInFlight } from "../components/chat/NativeRuntimeTray.logic";
 import { toastManager } from "../components/ui/toast";
@@ -39,40 +40,6 @@ export interface NativeTaskTarget {
   readonly workItemId: string;
 }
 
-/**
- * Asks the provider to stop a child task. Resolves with the operation record,
- * or `null` when the request could not be sent. Failures surface as toasts
- * unless `silent` is set (callers batching stops report a summary instead).
- */
-export async function stopNativeTask(
-  target: NativeTaskTarget,
-  options: { readonly silent?: boolean } = {},
-): Promise<NativeOperationRecord | null> {
-  const api = readNativeApi()?.nativeOperations;
-  const report = (description: string) => {
-    if (!options.silent) {
-      toastManager.add({ type: "error", title: "Task stop failed", description });
-    }
-  };
-  if (!api) {
-    report("Native operations are unavailable.");
-    return null;
-  }
-  try {
-    const record = await api.execute({
-      threadId: target.threadId,
-      operationId: crypto.randomUUID(),
-      generation: target.capabilities.generation,
-      command: { kind: "stopTask", ...readNativeTaskIdentity(target.workItemId) },
-    });
-    if (record.error) report(record.error);
-    return record;
-  } catch (cause) {
-    report(errorMessage(cause, "The native operation failed."));
-    return null;
-  }
-}
-
 /** The Claude adapter waits up to 30s for a stop to settle. */
 const STOP_SETTLEMENT_TIMEOUT_MS = 35_000;
 const STOP_SETTLEMENT_POLL_MS = 250;
@@ -81,19 +48,17 @@ const STOP_SETTLEMENT_POLL_MS = 250;
  * `execute` returns once the server admits an operation; the stop settles
  * later, and the thread's native-operation reservation is held until then.
  * Polls until the record leaves the in-flight states. Resolves with null if it
- * disappears, `isCancelled` reports true, or settlement times out.
+ * disappears or settlement times out.
  */
-export async function waitForNativeOperationSettlement(
+async function waitForNativeOperationSettlement(
   threadId: ThreadId,
   operationId: string,
-  isCancelled: () => boolean = () => false,
 ): Promise<NativeOperationRecord | null> {
   const api = readNativeApi()?.nativeOperations;
   if (!api) return null;
   const deadline = Date.now() + STOP_SETTLEMENT_TIMEOUT_MS;
-  while (!isCancelled() && Date.now() < deadline) {
+  while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, STOP_SETTLEMENT_POLL_MS));
-    if (isCancelled()) return null;
     try {
       const record = (await api.list({ threadId })).find(
         (entry) => entry.operationId === operationId,
@@ -107,20 +72,155 @@ export async function waitForNativeOperationSettlement(
   return null;
 }
 
-/**
- * Stops a task and waits for the stop to settle, so a following stop on the
- * same thread is not refused. Resolves true only for a cleanly settled stop.
- */
-export async function stopNativeTaskAndSettle(
-  target: NativeTaskTarget,
-  isCancelled?: () => boolean,
-): Promise<boolean> {
-  const record = await stopNativeTask(target, { silent: true });
-  if (!record || record.error) return false;
+type StopOutcome =
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly error: string;
+      /** The thread's reservation may still be held, so later stops there would be refused. */
+      readonly blocksThread: boolean;
+    };
+
+/** Sends one stop and waits until the provider settles it. */
+async function stopAndSettle(target: NativeTaskTarget): Promise<StopOutcome> {
+  const api = readNativeApi()?.nativeOperations;
+  if (!api) {
+    return { ok: false, error: "Native operations are unavailable.", blocksThread: false };
+  }
+  let record: NativeOperationRecord;
+  try {
+    record = await api.execute({
+      threadId: target.threadId,
+      operationId: crypto.randomUUID(),
+      generation: target.capabilities.generation,
+      command: { kind: "stopTask", ...readNativeTaskIdentity(target.workItemId) },
+    });
+  } catch (cause) {
+    return {
+      ok: false,
+      error: errorMessage(cause, "The native operation failed."),
+      blocksThread: false,
+    };
+  }
   const settled = isNativeOperationInFlight(record)
-    ? await waitForNativeOperationSettlement(target.threadId, record.operationId, isCancelled)
+    ? await waitForNativeOperationSettlement(target.threadId, record.operationId)
     : record;
-  return settled !== null && !settled.error && settled.state === "completed";
+  if (!settled) {
+    return { ok: false, error: "The stop did not finish in time.", blocksThread: true };
+  }
+  if (settled.state === "completed" && !settled.error) return { ok: true };
+  if (settled.state === "indeterminate") {
+    return {
+      ok: false,
+      error: settled.error ?? "The stop outcome is uncertain. Recheck it from the composer.",
+      blocksThread: true,
+    };
+  }
+  return {
+    ok: false,
+    error: settled.error ?? "The provider did not stop the task.",
+    blocksThread: false,
+  };
+}
+
+export function nativeTaskStopKey(threadId: ThreadId, workItemId: string): string {
+  return `${threadId}\u0000${workItemId}`;
+}
+
+interface NativeTaskStopState {
+  /** Stops sent and not yet settled, keyed by `nativeTaskStopKey`. */
+  readonly pending: ReadonlySet<string>;
+}
+
+/**
+ * Pending stops live outside any component: a stop keeps running, and is
+ * reported, after the panel that started it closes.
+ */
+export const useNativeTaskStopStore = create<NativeTaskStopState>(() => ({
+  pending: new Set(),
+}));
+
+function setStopPending(key: string, pending: boolean) {
+  useNativeTaskStopStore.setState((state) => {
+    if (state.pending.has(key) === pending) return state;
+    const next = new Set(state.pending);
+    if (pending) next.add(key);
+    else next.delete(key);
+    return { pending: next };
+  });
+}
+
+/**
+ * A thread holds one native-operation reservation until a stop settles, so
+ * while any stop is pending there, other tasks in that thread can't be stopped.
+ */
+export function isNativeTaskStopBlocked(
+  pending: ReadonlySet<string>,
+  threadId: ThreadId,
+  workItemId: string,
+): boolean {
+  const prefix = `${threadId}\u0000`;
+  const own = nativeTaskStopKey(threadId, workItemId);
+  for (const key of pending) {
+    if (key !== own && key.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+/**
+ * Stops tasks one at a time, waiting for each stop to settle, and reports the
+ * outcome with a toast. Tasks already being stopped are skipped. After a stop
+ * that may still hold its thread's reservation, the remaining tasks in that
+ * thread are reported as failed instead of being refused one by one.
+ */
+export async function stopNativeTasks(targets: ReadonlyArray<NativeTaskTarget>): Promise<void> {
+  const queued = targets.filter(
+    (target) =>
+      !useNativeTaskStopStore
+        .getState()
+        .pending.has(nativeTaskStopKey(target.threadId, target.workItemId)),
+  );
+  if (queued.length === 0) return;
+  const keys = queued.map((target) => nativeTaskStopKey(target.threadId, target.workItemId));
+  for (const key of keys) setStopPending(key, true);
+
+  let stopped = 0;
+  let lastError: string | null = null;
+  const blockedThreads = new Set<ThreadId>();
+  for (const [index, target] of queued.entries()) {
+    try {
+      if (blockedThreads.has(target.threadId)) {
+        lastError = "An earlier stop in this thread has not finished.";
+        continue;
+      }
+      const outcome = await stopAndSettle(target);
+      if (outcome.ok) {
+        stopped += 1;
+      } else {
+        lastError = outcome.error;
+        if (outcome.blocksThread) blockedThreads.add(target.threadId);
+      }
+    } finally {
+      setStopPending(keys[index]!, false);
+    }
+  }
+
+  const failed = queued.length - stopped;
+  if (queued.length === 1) {
+    if (failed > 0) {
+      toastManager.add({ type: "error", title: "Task stop failed", description: lastError ?? "" });
+    }
+    return;
+  }
+  toastManager.add(
+    failed === 0
+      ? { type: "success", title: `Stopped ${stopped} tasks` }
+      : {
+          type: "error",
+          title: "Some tasks could not be stopped",
+          description: `${stopped} stopped, ${failed} failed.${lastError ? ` ${lastError}` : ""}`,
+        },
+  );
 }
 
 export interface NativeTaskInspection {

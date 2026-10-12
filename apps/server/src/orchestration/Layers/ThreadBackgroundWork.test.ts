@@ -448,11 +448,62 @@ it.layer(testLayer)("ThreadBackgroundWork", (it) => {
         },
       });
 
-      const entry = (yield* work.getSnapshot).entries[0];
+      const entry = (yield* work.getThreadSnapshot(threadId)).entries[0];
       assert.equal(entry?.kind, "agent");
       assert.equal(entry?.title, "Explore the agents panel");
       assert.equal(entry?.prompt, "Find every consumer of the agents snapshot.");
       assert.equal(entry?.phase, "Explore");
+
+      // Global snapshots are pushed to every client and leave the prompt out.
+      const global = (yield* work.getSnapshot).entries[0];
+      assert.equal(global?.title, "Explore the agents panel");
+      assert.equal(global?.prompt, null);
+    }),
+  );
+
+  it.effect("only stores real descriptions as titles", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`CREATE TABLE IF NOT EXISTS projection_threads (thread_id TEXT PRIMARY KEY)`;
+      yield* sql`INSERT OR REPLACE INTO projection_threads (thread_id) VALUES (${threadId})`;
+      yield* migrateBackgroundWork;
+      yield* sql`DELETE FROM projection_thread_background_work`;
+
+      const work = yield* ThreadBackgroundWork;
+      const itemId = RuntimeItemId.makeUnsafe("tool-use-typed");
+      // The first event knows the type but not the description yet.
+      yield* work.recordProviderEvent({
+        ...eventBase(1),
+        itemId,
+        type: "item.started",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          data: { input: { subagent_type: "Explore" } },
+        },
+      });
+      yield* work.recordProviderEvent({
+        ...eventBase(2),
+        itemId,
+        type: "item.updated",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          data: { input: { description: "Map the agents panel" } },
+        },
+      });
+      yield* work.recordProviderEvent({
+        ...eventBase(3),
+        type: "subagent.activity",
+        payload: { kind: "started", agentThreadId: "agent-thread-1", agentPath: "/root/explorer" },
+      });
+
+      const entries = (yield* work.getSnapshot).entries;
+      const collab = entries.find((entry) => entry.workItemId === itemId);
+      const subagent = entries.find((entry) => entry.workItemId === "subagent:agent-thread-1");
+      assert.equal(collab?.title, "Map the agents panel");
+      assert.equal(collab?.phase, "Explore");
+      // The path stays the type; the client derives a fallback name from it.
+      assert.equal(subagent?.title, null);
+      assert.equal(subagent?.phase, "/root/explorer");
     }),
   );
 

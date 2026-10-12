@@ -13,7 +13,7 @@ import {
   XIcon,
   type LucideIcon,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { agentTypeLabel, type AgentsPanelEntry } from "../lib/agentsModel";
@@ -183,6 +183,33 @@ export interface AgentRowActions {
   readonly onNavigate: () => void;
   readonly onOpenThread: () => void;
   readonly onInspect: (cursor?: string) => Promise<NativeTaskInspection | null>;
+  readonly onLoadPrompt: () => Promise<string | null>;
+}
+
+interface InspectedOutput {
+  /** Pages in the order they were read; later pages append. */
+  readonly pages: ReadonlyArray<unknown>;
+  readonly nextCursor: string | null;
+}
+
+/** The entry's prompt, loaded on demand when the snapshot left it out. */
+function useEntryPrompt(entry: AgentsPanelEntry, load: () => Promise<string | null>) {
+  const [loaded, setLoaded] = useState<string | null>(null);
+  const needsLoad = entry.prompt === null;
+  // The callback is recreated on every render; load once per entry.
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  useEffect(() => {
+    if (!needsLoad) return;
+    let alive = true;
+    void loadRef.current().then((prompt) => {
+      if (alive) setLoaded(prompt);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [entry.id, needsLoad]);
+  return entry.prompt ?? loaded;
 }
 
 function AgentDetail(props: {
@@ -192,14 +219,19 @@ function AgentDetail(props: {
   readonly actions: AgentRowActions;
 }) {
   const { entry, actions } = props;
-  const [inspection, setInspection] = useState<NativeTaskInspection | null>(null);
+  const [output, setOutput] = useState<InspectedOutput | null>(null);
   const [reading, setReading] = useState(false);
+  const prompt = useEntryPrompt(entry, actions.onLoadPrompt);
   const elapsed = elapsedLabel(entry.startedAt, entry.completedAt, props.now);
   const inspect = async (cursor?: string) => {
     setReading(true);
     try {
       const result = await actions.onInspect(cursor);
-      if (result) setInspection(result);
+      if (!result) return;
+      setOutput((current) => ({
+        pages: cursor && current ? [...current.pages, result.page] : [result.page],
+        nextCursor: result.nextCursor,
+      }));
     } finally {
       setReading(false);
     }
@@ -210,7 +242,7 @@ function AgentDetail(props: {
       className="ml-6 flex flex-col gap-3 border-l border-border/60 py-2 pr-2 pl-3"
       data-testid="agent-detail"
     >
-      {entry.prompt ? <PromptBlock prompt={entry.prompt} /> : null}
+      {prompt ? <PromptBlock prompt={prompt} /> : null}
       <DetailSection
         title={entry.live ? "Latest output" : "Result"}
         action={
@@ -219,21 +251,17 @@ function AgentDetail(props: {
               size="xs"
               variant="ghost"
               disabled={reading}
-              onClick={() => void inspect(inspection?.nextCursor ?? undefined)}
+              onClick={() => void inspect(output?.nextCursor ?? undefined)}
             >
               {reading ? <Spinner aria-hidden="true" className="size-3" /> : null}
-              {inspection
-                ? inspection.nextCursor
-                  ? "Next page"
-                  : "Reload output"
-                : "Load full output"}
+              {output ? (output.nextCursor ? "Load more" : "Refresh output") : "Inspect output"}
             </Button>
           ) : null
         }
       >
-        {inspection ? (
+        {output ? (
           <pre className="max-h-96 overflow-auto rounded-md bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap break-all">
-            {JSON.stringify(inspection.page ?? null, null, 2)}
+            {output.pages.map((page) => JSON.stringify(page ?? null, null, 2)).join("\n\n")}
           </pre>
         ) : entry.detail ? (
           <>

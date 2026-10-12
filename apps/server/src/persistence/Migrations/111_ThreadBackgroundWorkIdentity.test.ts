@@ -14,20 +14,28 @@ it.layer(SqliteClient.layerMemory())("111_ThreadBackgroundWorkIdentity", (it) =>
       yield* sql`INSERT INTO projection_threads (thread_id) VALUES ('thread-1')`;
       yield* Migration0066;
 
-      const insert = (workItemId: string, ownership: string, phase: string | null) => sql`
+      const insert = (
+        workItemId: string,
+        ownership: string,
+        phase: string | null,
+        classification = "working",
+      ) => sql`
         INSERT INTO projection_thread_background_work (
           thread_id, provider_work_item_id, provider_name, classification, ownership,
           status, active, phase, started_at, updated_at, last_seen_at
         ) VALUES (
-          'thread-1', ${workItemId}, 'claudeAgent', 'working', ${ownership},
+          'thread-1', ${workItemId}, 'claudeAgent', ${classification}, ${ownership},
           'completed', 0, ${phase},
           '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
         )
       `;
-      yield* insert("shell", "direct-subagent", "local_bash");
-      yield* insert("monitor", "direct-subagent", "monitor");
+      yield* insert("shell", "direct-subagent", "local_bash", "monitoring");
+      yield* insert("monitor", "direct-subagent", "monitor", "monitoring");
+      // Before this migration, progress overwrote a shell's phase with its last tool.
+      yield* insert("overwritten-shell", "direct-subagent", "Bash", "monitoring");
       yield* insert("workflow", "workflow", "local_workflow");
       yield* insert("agent", "direct-subagent", "Explore");
+      yield* insert("agent-with-tool-phase", "direct-subagent", "Read");
       yield* insert("untyped", "direct-subagent", null);
 
       yield* Migration0111;
@@ -48,7 +56,9 @@ it.layer(SqliteClient.layerMemory())("111_ThreadBackgroundWorkIdentity", (it) =>
       `;
       assert.deepStrictEqual(kinds, [
         { workItemId: "agent", kind: "agent" },
+        { workItemId: "agent-with-tool-phase", kind: "agent" },
         { workItemId: "monitor", kind: "shell" },
+        { workItemId: "overwritten-shell", kind: "shell" },
         { workItemId: "shell", kind: "shell" },
         { workItemId: "untyped", kind: "agent" },
         { workItemId: "workflow", kind: "workflow" },

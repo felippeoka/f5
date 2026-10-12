@@ -13,7 +13,7 @@ import {
   TerminalIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { useAgentsPanelStore, type AgentsPanelScope } from "../agentsPanelStore";
 import {
@@ -24,14 +24,17 @@ import {
   type AgentsPanelModel,
   type AgentsStatusFilter,
 } from "../lib/agentsModel";
-import { dismissAgentWork } from "../lib/agentsReactQuery";
+import { agentsSnapshotQueryOptions, dismissAgentWork } from "../lib/agentsReactQuery";
 import {
   canInspectNativeTask,
   canStopNativeTask,
   inspectNativeTask,
-  stopNativeTask,
-  stopNativeTaskAndSettle,
+  isNativeTaskStopBlocked,
+  nativeTaskStopKey,
+  stopNativeTasks,
+  useNativeTaskStopStore,
   type NativeTaskInspection,
+  type NativeTaskTarget,
 } from "../lib/nativeTaskActions";
 import { cn } from "../lib/utils";
 import { useRightPanelStore } from "../rightPanelStore";
@@ -104,6 +107,8 @@ export interface AgentsPanelViewProps {
   readonly onStopAll: (entries: ReadonlyArray<AgentsPanelEntry>) => void;
   readonly onDismiss: (entry: AgentsPanelEntry) => void;
   readonly onClearFinished: () => void;
+  /** Loads a prompt the snapshot left out (global snapshots carry none). */
+  readonly onLoadPrompt: (entry: AgentsPanelEntry) => Promise<string | null>;
   readonly onInspect: (
     entry: AgentsPanelEntry,
     cursor?: string,
@@ -115,6 +120,7 @@ function AgentsPanelToolbar(props: {
   readonly counts: Readonly<Record<AgentsStatusFilter, number>>;
   readonly stoppable: ReadonlyArray<AgentsPanelEntry>;
   readonly onRequestStopAll: () => void;
+  readonly onRequestClearFinished: () => void;
 }) {
   const { view } = props;
   const finishedCount = view.model.settledCount;
@@ -167,7 +173,7 @@ function AgentsPanelToolbar(props: {
               </MenuItem>
               <MenuItem
                 disabled={finishedCount === 0}
-                onClick={finishedCount > 0 ? view.onClearFinished : undefined}
+                onClick={finishedCount > 0 ? props.onRequestClearFinished : undefined}
               >
                 <EyeOffIcon />
                 Clear finished
@@ -292,6 +298,7 @@ function EntryList(props: {
           onNavigate: () => view.onNavigate(entry),
           onOpenThread: () => view.onOpenThread(entry.threadId),
           onInspect: (cursor) => view.onInspect(entry, cursor),
+          onLoadPrompt: () => view.onLoadPrompt(entry),
         };
         return (
           <AgentRow
@@ -446,6 +453,11 @@ function EmptyState(props: {
 export function AgentsPanelView(props: AgentsPanelViewProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirmStopAll, setConfirmStopAll] = useState(false);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
+  // Clearing across every thread also hides entries beyond the ones listed, and
+  // nothing brings them back, so it asks first.
+  const requestClearFinished = () =>
+    props.scope === "all" ? setConfirmClearAll(true) : props.onClearFinished();
 
   const allEntries = useMemo(
     () => [...props.model.agents, ...props.model.backgroundTasks],
@@ -508,6 +520,7 @@ export function AgentsPanelView(props: AgentsPanelViewProps) {
         counts={counts}
         stoppable={stoppable}
         onRequestStopAll={() => setConfirmStopAll(true)}
+        onRequestClearFinished={requestClearFinished}
       />
       <ScrollArea className="min-h-0 flex-1">
         {isEmpty ? (
@@ -563,12 +576,34 @@ export function AgentsPanelView(props: AgentsPanelViewProps) {
           <button
             type="button"
             className="ml-auto underline-offset-2 hover:text-foreground hover:underline"
-            onClick={props.onClearFinished}
+            onClick={requestClearFinished}
           >
             Clear finished
           </button>
         ) : null}
       </footer>
+      <AlertDialog open={confirmClearAll} onOpenChange={setConfirmClearAll}>
+        <AlertDialogPopup className="sm:max-w-[420px]">
+          <AlertDialogHeader className="text-left">
+            <AlertDialogTitle>Clear finished work in every thread?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Finished agents and background tasks in all threads are hidden from this panel,
+              including any not listed here. This can't be undone. Running work is not affected.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter variant="bare">
+            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <Button
+              onClick={() => {
+                setConfirmClearAll(false);
+                props.onClearFinished();
+              }}
+            >
+              Clear finished
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
       <AlertDialog open={confirmStopAll} onOpenChange={setConfirmStopAll}>
         <AlertDialogPopup className="sm:max-w-[420px]">
           <AlertDialogHeader className="text-left">
@@ -623,21 +658,17 @@ export function AgentsPanel(props: {
     (state) => state.setBackgroundTasksExpanded,
   );
   const [query, setQuery] = useState("");
-  const [stoppingIds, setStoppingIds] = useState<ReadonlySet<string>>(EMPTY_STOPPING_IDS);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-  const stoppingThreadIds = useMemo(() => {
-    const threadIds = new Set<ThreadId>();
+  const pendingStops = useNativeTaskStopStore((state) => state.pending);
+  const stoppingIds = useMemo(() => {
+    if (pendingStops.size === 0) return EMPTY_STOPPING_IDS;
+    const ids = new Set<string>();
     for (const entry of [...props.model.agents, ...props.model.backgroundTasks]) {
-      if (stoppingIds.has(entry.id)) threadIds.add(entry.threadId);
+      if (pendingStops.has(nativeTaskStopKey(entry.threadId, entry.nativeWorkItemId))) {
+        ids.add(entry.id);
+      }
     }
-    return threadIds;
-  }, [props.model, stoppingIds]);
+    return ids;
+  }, [pendingStops, props.model]);
   const threads = useStore((state) => state.threads);
   const capabilitiesByThreadId = useMemo(() => {
     const map = new Map<ThreadId, ProviderSessionCapabilities>();
@@ -647,71 +678,22 @@ export function AgentsPanel(props: {
     return map;
   }, [threads]);
 
-  // Clear pending stops once the snapshot reports the work as settled.
-  useEffect(() => {
-    setStoppingIds((current) => {
-      if (current.size === 0) return current;
-      const live = new Set(
-        [...props.model.agents, ...props.model.backgroundTasks]
-          .filter((entry) => entry.live)
-          .map((entry) => entry.id),
-      );
-      const next = new Set([...current].filter((id) => live.has(id)));
-      return next.size === current.size ? current : next;
-    });
-  }, [props.model]);
-
-  const targetFor = (entry: AgentsPanelEntry) => {
+  const targetFor = (entry: AgentsPanelEntry): NativeTaskTarget | null => {
     const capabilities = capabilitiesByThreadId.get(entry.threadId);
     return capabilities
       ? { threadId: entry.threadId, capabilities, workItemId: entry.nativeWorkItemId }
       : null;
   };
 
-  const setStopping = (id: string, stopping: boolean) =>
-    setStoppingIds((current) => {
-      const next = new Set(current);
-      if (stopping) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-
-  const stopEntry = async (entry: AgentsPanelEntry) => {
-    const target = targetFor(entry);
-    if (!target) return;
-    setStopping(entry.id, true);
-    const record = await stopNativeTask(target);
-    if ((!record || record.error) && mounted.current) setStopping(entry.id, false);
-  };
-
-  const stopAll = async (entries: ReadonlyArray<AgentsPanelEntry>) => {
-    // Each thread holds one native-operation reservation until a stop settles,
-    // so stops go one at a time and each waits for the previous to finish.
-    let succeeded = 0;
-    for (const entry of entries) {
-      if (!mounted.current) return;
-      const target = targetFor(entry);
-      if (!target) continue;
-      setStopping(entry.id, true);
-      const stopped = await stopNativeTaskAndSettle(target, () => !mounted.current);
-      if (stopped) succeeded += 1;
-      else if (mounted.current) setStopping(entry.id, false);
-    }
-    if (!mounted.current) return;
-    const failed = entries.length - succeeded;
-    toastManager.add(
-      failed === 0
-        ? {
-            type: "success",
-            title: `Stopped ${succeeded} ${succeeded === 1 ? "task" : "tasks"}`,
-          }
-        : {
-            type: "error",
-            title: "Some tasks could not be stopped",
-            description: `${succeeded} stopped, ${failed} failed.`,
-          },
+  // Stops run outside the component, so they finish and report even if the
+  // panel closes first.
+  const stop = (entries: ReadonlyArray<AgentsPanelEntry>) =>
+    void stopNativeTasks(
+      entries.flatMap((entry) => {
+        const target = targetFor(entry);
+        return target ? [target] : [];
+      }),
     );
-  };
 
   const dismiss = async (input: Parameters<typeof dismissAgentWork>[1]) => {
     try {
@@ -755,8 +737,7 @@ export function AgentsPanel(props: {
       canStop={(entry) =>
         entry.live &&
         canStopNativeTask(capabilitiesByThreadId.get(entry.threadId)) &&
-        // The thread's reservation is held until a pending stop settles.
-        !(stoppingThreadIds.has(entry.threadId) && !stoppingIds.has(entry.id))
+        !isNativeTaskStopBlocked(pendingStops, entry.threadId, entry.nativeWorkItemId)
       }
       canInspect={(entry) => canInspectNativeTask(capabilitiesByThreadId.get(entry.threadId))}
       onScopeChange={setScope}
@@ -766,8 +747,8 @@ export function AgentsPanel(props: {
       onRetry={props.onRetry}
       onNavigate={(entry) => navigateToThread(entry.threadId, entry.focusActivityId)}
       onOpenThread={(threadId) => navigateToThread(threadId, null)}
-      onStop={(entry) => void stopEntry(entry)}
-      onStopAll={(entries) => void stopAll(entries)}
+      onStop={(entry) => stop([entry])}
+      onStopAll={stop}
       onDismiss={(entry) =>
         void dismiss({ threadId: entry.threadId, workItemIds: [...entry.workItemIds] })
       }
@@ -786,6 +767,19 @@ export function AgentsPanel(props: {
       onInspect={(entry, cursor) => {
         const target = targetFor(entry);
         return target ? inspectNativeTask(target, cursor) : Promise.resolve(null);
+      }}
+      onLoadPrompt={async (entry) => {
+        // Global snapshots leave prompts out; the thread snapshot carries them.
+        try {
+          const snapshot = await queryClient.fetchQuery(agentsSnapshotQueryOptions(entry.threadId));
+          return (
+            snapshot.entries.find(
+              (row) => row.prompt !== null && entry.workItemIds.includes(row.workItemId),
+            )?.prompt ?? null
+          );
+        } catch {
+          return null;
+        }
       }}
     />
   );

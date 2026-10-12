@@ -133,6 +133,7 @@ function Harness(props: HarnessProps) {
         onDismiss={() => {}}
         onClearFinished={() => {}}
         onInspect={async () => null}
+        onLoadPrompt={async () => null}
         {...overrides}
       />
     </div>
@@ -246,6 +247,63 @@ describe("AgentsPanelView", () => {
 
       await page.getByRole("button", { name: "Clear finished" }).click();
       expect(onClearFinished).toHaveBeenCalledTimes(1);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("confirms before clearing finished work in every thread", async () => {
+    const onClearFinished = vi.fn();
+    const screen = await render(<Harness onClearFinished={onClearFinished} />);
+    try {
+      await page.getByRole("button", { name: "All threads" }).click();
+      await page.getByRole("button", { name: "Clear finished" }).click();
+      const dialog = page.getByRole("alertdialog");
+      await expect.element(dialog.getByText("Clear finished work in every thread?")).toBeVisible();
+      expect(onClearFinished).not.toHaveBeenCalled();
+      await dialog.getByRole("button", { name: "Clear finished" }).click();
+      expect(onClearFinished).toHaveBeenCalledTimes(1);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("loads a missing prompt and appends output pages", async () => {
+    const onLoadPrompt = vi.fn(async () => "Loaded prompt from the thread snapshot.");
+    const onInspect = vi.fn(async (_entry: AgentsPanelEntry, cursor?: string) =>
+      cursor
+        ? { page: { entries: ["second page"] }, nextCursor: null }
+        : { page: { entries: ["first page"] }, nextCursor: "cursor-2" },
+    );
+    const models = {
+      thread: buildAgentsPanelModel([entry({ prompt: null })], null),
+      all: allModel,
+    };
+    const screen = await render(
+      <Harness
+        models={models}
+        canInspect={() => true}
+        onInspect={onInspect}
+        onLoadPrompt={onLoadPrompt}
+      />,
+    );
+    try {
+      await page.getByRole("button", { name: "Expand Review pagination" }).click();
+      const detail = page.getByTestId("agent-detail");
+      await expect
+        .element(detail.getByText("Loaded prompt from the thread snapshot."))
+        .toBeVisible();
+
+      await detail.getByRole("button", { name: "Inspect output" }).click();
+      await expect.element(detail.getByText(/first page/)).toBeVisible();
+      await detail.getByRole("button", { name: "Load more" }).click();
+      await expect.element(detail.getByText(/second page/)).toBeVisible();
+      await expect.element(detail.getByText(/first page/)).toBeVisible();
+      expect(onInspect).toHaveBeenLastCalledWith(
+        expect.objectContaining({ id: "work-1" }),
+        "cursor-2",
+      );
+      await expect.element(detail.getByRole("button", { name: "Refresh output" })).toBeVisible();
     } finally {
       await screen.unmount();
     }

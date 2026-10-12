@@ -110,7 +110,9 @@ function lifecycleItemTransition(
     asString(input?.description) ??
     asString(input?.prompt);
   const subagentType = asString(data?.subagentType) ?? asString(input?.subagent_type);
-  const title = asString(data?.subagentDescription) ?? asString(input?.description) ?? subagentType;
+  // Titles are written once, so only a real description may become one. The
+  // type and path stay fallbacks the client derives from `phase`.
+  const title = asString(data?.subagentDescription) ?? asString(input?.description);
   const prompt = boundedPrompt(asString(data?.subagentPrompt) ?? asString(input?.prompt));
   const phase = subagentType ?? asString(data?.toolName);
 
@@ -207,7 +209,6 @@ function subagentTransition(
     ...(event.payload.kind === "started" ? { classification: "working" as const } : {}),
     ...(event.payload.kind === "started" ? { ownership: "direct-subagent" as const } : {}),
     ...(event.payload.kind === "started" ? { kind: "agent" as const } : {}),
-    title: event.payload.agentPath,
     status: active ? "running" : event.payload.kind === "completed" ? "completed" : "interrupted",
     active,
     phase: event.payload.agentPath,

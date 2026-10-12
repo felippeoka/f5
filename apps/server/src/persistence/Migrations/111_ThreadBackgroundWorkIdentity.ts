@@ -21,10 +21,13 @@ export default Effect.gen(function* () {
       ADD COLUMN kind TEXT NOT NULL DEFAULT 'agent'
         CHECK (kind IN ('agent', 'shell', 'workflow'))
     `;
+    // Progress used to overwrite `phase` with the last tool name, so the
+    // monitoring classification is the stable signal for shells and monitors.
     yield* sql`
       UPDATE projection_thread_background_work
       SET kind = CASE
         WHEN ownership = 'workflow' THEN 'workflow'
+        WHEN classification = 'monitoring' THEN 'shell'
         WHEN phase IN ('monitor', 'monitor_mcp', 'local_bash', 'shell') THEN 'shell'
         ELSE 'agent'
       END

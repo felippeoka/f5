@@ -53,6 +53,7 @@ import {
   ThreadId,
   TurnId,
   USAGE_WS_METHODS,
+  AGENTS_WS_METHODS,
   WS_CHANNELS,
   WS_METHODS,
   type WebSocketResponse,
@@ -1033,6 +1034,34 @@ describe("WebSocket Server", () => {
     expect(refreshedAccounts.error).toBeUndefined();
     expect(refreshedAccounts.result).toEqual([]);
     expect(response.result).not.toHaveProperty("codexAccount");
+  });
+
+  it("routes thread-scoped agent snapshots and dismissals", async () => {
+    server = await createTestServer({ cwd: "/test/project" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+    const global = await sendRequest(ws, AGENTS_WS_METHODS.getSnapshot, {});
+    expect(global.error).toBeUndefined();
+    expect(global.result).toEqual({ entries: [], generatedAt: expect.any(String) });
+
+    const scoped = await sendRequest(ws, AGENTS_WS_METHODS.getSnapshot, {
+      threadId: "thread-agents",
+    });
+    expect(scoped.error).toBeUndefined();
+    expect(scoped.result).toEqual({ entries: [], generatedAt: expect.any(String) });
+
+    const dismissed = await sendRequest(ws, AGENTS_WS_METHODS.dismiss, {
+      threadId: "thread-agents",
+      workItemIds: ["task-1"],
+    });
+    expect(dismissed.error).toBeUndefined();
+    expect(dismissed.result).toEqual({ dismissedCount: 0 });
+
+    const invalid = await sendRequest(ws, AGENTS_WS_METHODS.dismiss, { workItemIds: [""] });
+    expect(invalid.error).toBeDefined();
   });
 
   it.each([

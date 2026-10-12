@@ -1,11 +1,14 @@
 import { ProjectId, ProviderInstanceId, ThreadId, type AgentsSnapshot } from "@t3tools/contracts";
-import { describe, expect, it } from "vitest";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Project, Thread } from "../types";
 import {
+  agentsQueryKeys,
+  applyPushedSnapshot,
   decodeAgentsSnapshot,
-  mergeThreadSnapshot,
   selectAgentActivityThreads,
+  THREAD_SNAPSHOT_REFRESH_MS,
 } from "./agentsReactQuery";
 
 describe("decodeAgentsSnapshot", () => {
@@ -92,9 +95,8 @@ describe("selectAgentActivityThreads", () => {
   });
 });
 
-describe("mergeThreadSnapshot", () => {
+describe("applyPushedSnapshot", () => {
   const threadId = ThreadId.makeUnsafe("thread-merge");
-  const otherThreadId = ThreadId.makeUnsafe("thread-merge-other");
   const row = (
     workItemId: string,
     updatedAt: string,
@@ -125,41 +127,83 @@ describe("mergeThreadSnapshot", () => {
     ...overrides,
   });
 
-  it("upserts newer rows for the thread and keeps older history the push omits", () => {
-    const current = {
-      generatedAt: "2026-08-18T10:00:05.000Z",
-      entries: [
-        row("history", "2026-08-18T09:00:00.000Z", { status: "completed", active: false }),
-        row("live", "2026-08-18T10:00:04.000Z"),
-      ],
-    };
-    const pushed = {
-      generatedAt: "2026-08-18T10:00:06.000Z",
-      entries: [
-        row("live", "2026-08-18T10:00:06.000Z", { status: "completed", active: false }),
-        row("new", "2026-08-18T10:00:06.000Z"),
-        row("elsewhere", "2026-08-18T10:00:06.000Z", { threadId: otherThreadId }),
-      ],
-    };
-
-    const merged = mergeThreadSnapshot(current, threadId, pushed);
-    expect(merged.generatedAt).toBe(pushed.generatedAt);
-    expect(merged.entries.map((entry) => [entry.workItemId, entry.status]).toSorted()).toEqual([
-      ["history", "completed"],
-      ["live", "completed"],
-      ["new", "running"],
-    ]);
+  const snapshotAt = (generatedAt: string, entries: AgentsSnapshot["entries"]) => ({
+    generatedAt,
+    entries,
   });
 
-  it("ignores pushes older than the thread snapshot", () => {
-    const current = {
-      generatedAt: "2026-08-18T10:00:05.000Z",
-      entries: [row("live", "2026-08-18T10:00:05.000Z")],
-    };
-    const stale = {
-      generatedAt: "2026-08-18T10:00:01.000Z",
-      entries: [row("live", "2026-08-18T10:00:01.000Z", { status: "failed", active: false })],
-    };
-    expect(mergeThreadSnapshot(current, threadId, stale)).toBe(current);
+  /** A thread query with an active observer, fed by `responses` in order. */
+  function observeThread(
+    queryClient: QueryClient,
+    responses: ReadonlyArray<() => Promise<AgentsSnapshot>>,
+  ) {
+    let calls = 0;
+    const observer = new QueryObserver(queryClient, {
+      queryKey: agentsQueryKeys.thread(threadId),
+      queryFn: () => responses[Math.min(calls++, responses.length - 1)]!(),
+      staleTime: 30_000,
+    });
+    const unsubscribe = observer.subscribe(() => {});
+    return { calls: () => calls, unsubscribe };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("replaces the global snapshot and refetches thread snapshots once per burst", async () => {
+    const queryClient = new QueryClient();
+    const initial = snapshotAt("2026-08-18T10:00:00.000Z", [
+      row("live", "2026-08-18T10:00:00.000Z"),
+      row("dismissed-elsewhere", "2026-08-18T09:00:00.000Z", { active: false }),
+    ]);
+    // The refetch drops the row another client dismissed and settles the live one.
+    const refreshed = snapshotAt("2026-08-18T10:00:02.000Z", [
+      row("live", "2026-08-18T10:00:02.000Z", { status: "completed", active: false }),
+    ]);
+    const thread = observeThread(queryClient, [
+      () => Promise.resolve(initial),
+      () => Promise.resolve(refreshed),
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(thread.calls()).toBe(1);
+
+    // A capped global push that leaves this thread out entirely.
+    const pushed = snapshotAt("2026-08-18T10:00:01.000Z", []);
+    applyPushedSnapshot(queryClient, pushed);
+    applyPushedSnapshot(queryClient, pushed);
+    applyPushedSnapshot(queryClient, pushed);
+    expect(queryClient.getQueryData(agentsQueryKeys.global)).toBe(pushed);
+
+    await vi.advanceTimersByTimeAsync(THREAD_SNAPSHOT_REFRESH_MS);
+    expect(thread.calls()).toBe(2);
+    expect(queryClient.getQueryData(agentsQueryKeys.thread(threadId))).toEqual(refreshed);
+    thread.unsubscribe();
+  });
+
+  it("does not lose a push that arrives during the first thread fetch", async () => {
+    const queryClient = new QueryClient();
+    let resolveStale: (value: AgentsSnapshot) => void = () => {};
+    const stale = snapshotAt("2026-08-18T10:00:00.000Z", [row("live", "2026-08-18T10:00:00.000Z")]);
+    const fresh = snapshotAt("2026-08-18T10:00:03.000Z", [
+      row("live", "2026-08-18T10:00:03.000Z", { status: "completed", active: false }),
+    ]);
+    const thread = observeThread(queryClient, [
+      () => new Promise<AgentsSnapshot>((resolve) => (resolveStale = resolve)),
+      () => Promise.resolve(fresh),
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    applyPushedSnapshot(queryClient, snapshotAt("2026-08-18T10:00:03.000Z", []));
+    await vi.advanceTimersByTimeAsync(THREAD_SNAPSHOT_REFRESH_MS);
+    resolveStale(stale);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(thread.calls()).toBe(2);
+    expect(queryClient.getQueryData(agentsQueryKeys.thread(threadId))).toEqual(fresh);
+    thread.unsubscribe();
   });
 });

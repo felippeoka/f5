@@ -56,7 +56,10 @@ export const ThreadBackgroundWorkEntry = Schema.Struct({
   phase: Schema.NullOr(TrimmedNonEmptyString),
   /** Human-readable title, fixed at start. */
   title: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(() => null)),
-  /** Original instructions given to the work, bounded. */
+  /**
+   * Original instructions given to the work, bounded. Only thread-scoped
+   * snapshots carry it; global snapshots and pushes leave it null.
+   */
   prompt: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(() => null)),
   /** Most recent tool the work used. */
   lastTool: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => null)),

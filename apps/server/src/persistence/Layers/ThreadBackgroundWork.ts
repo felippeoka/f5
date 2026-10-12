@@ -206,36 +206,42 @@ const make = Effect.gen(function* () {
   const listSnapshotQuery = SqlSchema.findAll({
     Request: ListThreadBackgroundWorkSnapshotInput,
     Result: ThreadBackgroundWorkDbRow,
-    execute: ({ threadId }) => sql`
-      SELECT
-        thread_id AS "threadId",
-        provider_work_item_id AS "workItemId",
-        provider_name AS provider,
-        provider_instance_id AS "providerInstanceId",
-        provider_session_identity AS "providerSessionIdentity",
-        turn_id AS "turnId",
-        classification,
-        ownership,
-        kind,
-        status,
-        active,
-        model,
-        phase,
-        title,
-        prompt,
-        last_tool AS "lastTool",
-        latest_output AS "latestOutput",
-        output_truncated AS "outputTruncated",
-        started_at AS "startedAt",
-        updated_at AS "updatedAt",
-        last_seen_at AS "lastSeenAt",
-        completed_at AS "completedAt"
-      FROM projection_thread_background_work
-      WHERE dismissed_at IS NULL
-        AND (${threadId ?? null} IS NULL OR thread_id = ${threadId ?? null})
-      ORDER BY active DESC, updated_at DESC, thread_id ASC, provider_work_item_id ASC
-      LIMIT ${MAX_AGENTS_SNAPSHOT_ENTRIES}
-    `,
+    execute: ({ threadId }) => {
+      // Global snapshots are pushed to every client on each change, so they
+      // leave out the prompt; thread-scoped reads carry it for the detail view.
+      // Separate statements keep the thread filter usable by the visibility index.
+      const prompt = threadId === undefined ? sql`NULL` : sql`prompt`;
+      const threadFilter = threadId === undefined ? sql`` : sql`AND thread_id = ${threadId}`;
+      return sql`
+        SELECT
+          thread_id AS "threadId",
+          provider_work_item_id AS "workItemId",
+          provider_name AS provider,
+          provider_instance_id AS "providerInstanceId",
+          provider_session_identity AS "providerSessionIdentity",
+          turn_id AS "turnId",
+          classification,
+          ownership,
+          kind,
+          status,
+          active,
+          model,
+          phase,
+          title,
+          ${prompt} AS prompt,
+          last_tool AS "lastTool",
+          latest_output AS "latestOutput",
+          output_truncated AS "outputTruncated",
+          started_at AS "startedAt",
+          updated_at AS "updatedAt",
+          last_seen_at AS "lastSeenAt",
+          completed_at AS "completedAt"
+        FROM projection_thread_background_work
+        WHERE dismissed_at IS NULL ${threadFilter}
+        ORDER BY active DESC, updated_at DESC, thread_id ASC, provider_work_item_id ASC
+        LIMIT ${MAX_AGENTS_SNAPSHOT_ENTRIES}
+      `;
+    },
   });
 
   const dismissQuery = SqlSchema.findAll({

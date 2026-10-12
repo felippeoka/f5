@@ -72,44 +72,44 @@ export function agentsSnapshotQueryOptions(threadId: ThreadId | null = null) {
   });
 }
 
-/**
- * Folds a global push into a thread-scoped snapshot. The push is capped across
- * all threads but always carries active and recently updated work first, so
- * upserting its rows keeps the thread view live without refetching per push.
- */
-export function mergeThreadSnapshot(
-  current: DecodedAgentsSnapshot,
-  threadId: ThreadId,
-  pushed: DecodedAgentsSnapshot,
-): DecodedAgentsSnapshot {
-  if (pushed.generatedAt < current.generatedAt) return current;
-  const pushedForThread = pushed.entries.filter((entry) => entry.threadId === threadId);
-  if (pushedForThread.length === 0) return { ...current, generatedAt: pushed.generatedAt };
-  const byWorkItemId = new Map(current.entries.map((entry) => [entry.workItemId, entry] as const));
-  for (const entry of pushedForThread) {
-    const existing = byWorkItemId.get(entry.workItemId);
-    if (!existing || existing.updatedAt <= entry.updatedAt) {
-      byWorkItemId.set(entry.workItemId, entry);
-    }
-  }
-  return { entries: [...byWorkItemId.values()], generatedAt: pushed.generatedAt };
-}
+/** At most one thread-snapshot refetch per interval while pushes stream in. */
+export const THREAD_SNAPSHOT_REFRESH_MS = 400;
 
-function applyPushedSnapshot(queryClient: QueryClient, decoded: DecodedAgentsSnapshot) {
+const threadRefreshTimers = new WeakMap<QueryClient, ReturnType<typeof setTimeout>>();
+
+/**
+ * Applies a global push. The global snapshot is replaced outright. Thread
+ * snapshots are refetched instead of patched: the capped global push can
+ * leave out a thread's completions and can't express removals, while a
+ * refetch replaces the thread's rows authoritatively.
+ */
+export function applyPushedSnapshot(queryClient: QueryClient, decoded: DecodedAgentsSnapshot) {
   queryClient.setQueryData<DecodedAgentsSnapshot>(agentsQueryKeys.global, (current) =>
     current && current.generatedAt > decoded.generatedAt ? current : decoded,
   );
-  for (const query of queryClient.getQueryCache().findAll({ queryKey: agentsQueryKeys.threads })) {
-    const threadId = query.queryKey[3] as ThreadId | undefined;
-    const current = query.state.data as DecodedAgentsSnapshot | undefined;
-    if (!threadId || !current) continue;
-    queryClient.setQueryData(query.queryKey, mergeThreadSnapshot(current, threadId, decoded));
-  }
+  if (threadRefreshTimers.has(queryClient)) return;
+  threadRefreshTimers.set(
+    queryClient,
+    setTimeout(() => {
+      threadRefreshTimers.delete(queryClient);
+      void refreshThreadSnapshots(queryClient);
+    }, THREAD_SNAPSHOT_REFRESH_MS),
+  );
+}
+
+async function refreshThreadSnapshots(queryClient: QueryClient) {
+  // A refetch reuses a first load that is still in flight instead of
+  // restarting it, and that load may predate the push. Cancel it so the
+  // refetch below starts fresh.
+  await queryClient.cancelQueries({
+    queryKey: agentsQueryKeys.threads,
+    predicate: (query) => query.state.data === undefined && query.state.fetchStatus === "fetching",
+  });
+  await queryClient.invalidateQueries({ queryKey: agentsQueryKeys.threads, refetchType: "active" });
 }
 
 export async function dismissAgentWork(queryClient: QueryClient, input: AgentsDismissInput) {
   const result = await ensureNativeApi().agents.dismiss(input);
-  // Dismissal removes rows, which a merged push cannot express.
   await queryClient.invalidateQueries({ queryKey: agentsQueryKeys.all, refetchType: "active" });
   return result;
 }
