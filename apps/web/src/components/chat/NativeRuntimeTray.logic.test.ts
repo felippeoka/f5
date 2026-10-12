@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   describeBackgroundTask,
+  formatByteSize,
   readShellOutputPage,
   selectNativeRuntimeTrayRows,
   selectNewlyFailedOperations,
@@ -202,6 +203,7 @@ describe("describeBackgroundTask", () => {
       kind: "shell",
       kindLabel: "Shell",
       title: "Run full browser suite",
+      agentName: null,
       elapsed: "3m 12s",
     });
     expect(describeEntry({ phase: "shell" }).kind).toBe("shell");
@@ -209,6 +211,8 @@ describe("describeBackgroundTask", () => {
 
   it("maps monitors, agents and workflows", () => {
     expect(describeEntry({ phase: "monitor_mcp" }).kind).toBe("monitor");
+    // Progress replaces a monitor's phase with its last tool name.
+    expect(describeEntry({ phase: "Read" }).kind).toBe("monitor");
     // Progress replaces an agent's phase with its last tool name.
     expect(describeEntry({ classification: "working", phase: "Read" }).kind).toBe("agent");
     expect(describeEntry({ ownership: "workflow", classification: "working" }).kind).toBe(
@@ -234,6 +238,36 @@ describe("describeBackgroundTask", () => {
     );
   });
 
+  it("keeps a Codex subagent's path when it has no description", () => {
+    // `subagent.activity` rows store the agent path in phase and no output.
+    expect(
+      describeEntry({
+        workItemId: "subagent:thread-2",
+        classification: "working",
+        phase: "/root/reviewer",
+        latestOutput: null,
+      }),
+    ).toMatchObject({ kind: "agent", title: "/root/reviewer", agentName: "/root/reviewer" });
+  });
+
+  it("keeps a Claude agent's type next to its description or result", () => {
+    const running = describeEntry({
+      classification: "working",
+      phase: "Explore",
+      latestOutput: "Find tray rendering",
+    });
+    expect(running).toMatchObject({ title: "Find tray rendering", agentName: "Explore" });
+    const settled = describeEntry({
+      classification: "working",
+      phase: "Explore",
+      latestOutput: "## Findings\n\n- The tray renders `task.phase`.",
+    });
+    expect(settled).toMatchObject({ title: "Findings", agentName: "Explore" });
+    expect(
+      describeEntry({ classification: "working", phase: "local_agent", latestOutput: null }),
+    ).toMatchObject({ title: "Agent task", agentName: null });
+  });
+
   it("omits elapsed time for an invalid or future start", () => {
     expect(describeEntry({ startedAt: "not a date" }).elapsed).toBeNull();
     expect(describeEntry({ startedAt: "2026-01-01T01:00:00Z" }).elapsed).toBeNull();
@@ -250,6 +284,16 @@ describe("readShellOutputPage", () => {
     ).toEqual({ output: "ok\n", totalBytes: 41_873, omitted: true });
   });
 
+  it("treats a tail shorter than the total as cut, even without the SDK flag", () => {
+    // The server slices the tail itself and only forwards the SDK's flag.
+    expect(
+      readShellOutputPage({ entries: [{ output: "tail", totalBytes: 20_480, omitted: false }] }),
+    ).toMatchObject({ omitted: true });
+    expect(
+      readShellOutputPage({ entries: [{ output: "é", totalBytes: 2, omitted: false }] }),
+    ).toMatchObject({ omitted: false });
+  });
+
   it("rejects other output shapes", () => {
     expect(readShellOutputPage(null)).toBeNull();
     expect(readShellOutputPage({ entries: [] })).toBeNull();
@@ -262,5 +306,14 @@ describe("readShellOutputPage", () => {
         ],
       }),
     ).toBeNull();
+  });
+});
+
+describe("formatByteSize", () => {
+  it("shows bytes below 1 KB and kilobytes above", () => {
+    expect(formatByteSize(36)).toBe("36 B");
+    expect(formatByteSize(1023)).toBe("1023 B");
+    expect(formatByteSize(8192)).toBe("8 KB");
+    expect(formatByteSize(41_873)).toBe("41 KB");
   });
 });

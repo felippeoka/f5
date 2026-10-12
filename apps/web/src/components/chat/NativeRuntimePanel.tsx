@@ -23,10 +23,20 @@ import { readNativeApi } from "../../nativeApi";
 import { describeBackgroundTask } from "./NativeRuntimeTray.logic";
 import { recentRuntimeNotices, resolveRuntimeModelReport } from "./runtimePresentation";
 
-/** Same names as the composer tray; settled tasks keep their outcome. */
+/**
+ * Same names as the composer tray, plus the agent's own type so finished
+ * agents stay distinguishable; settled tasks keep their outcome.
+ */
 function backgroundTaskLabel(task: ThreadBackgroundWorkEntry): string {
-  const { title, kindLabel } = describeBackgroundTask(task, Date.now());
-  return task.active ? `${title} · ${kindLabel}` : `${title} · ${kindLabel} · ${task.status}`;
+  const { title, kindLabel, agentName } = describeBackgroundTask(task, Date.now());
+  return [
+    title,
+    kindLabel,
+    agentName !== title ? agentName : null,
+    task.active ? null : task.status,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 const object = (value: unknown): Record<string, unknown> =>

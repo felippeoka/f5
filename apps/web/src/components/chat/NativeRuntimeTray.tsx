@@ -49,10 +49,13 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { COMPOSER_TRAY_PANEL_CLASS_NAME } from "./composer/ComposerTray";
 import {
   describeBackgroundTask,
+  formatByteSize,
+  isNativeOperationInFlight,
   nativeOperationLabel,
   readShellOutputPage,
   selectNativeRuntimeTrayRows,
   selectNewlyFailedOperations,
+  utf8ByteLength,
   type BackgroundTaskDescription,
   type BackgroundTaskKind,
 } from "./NativeRuntimeTray.logic";
@@ -72,7 +75,9 @@ const errorMessage = (cause: unknown, fallback: string) =>
 const showError = (title: string, description: string) =>
   toastManager.add({ type: "error", title, description });
 
-const formatKilobytes = (bytes: number) => `${Math.max(1, Math.round(bytes / 1024))} KB`;
+/** The Claude adapter waits up to 30s for a stop to settle. */
+const STOP_SETTLEMENT_TIMEOUT_MS = 35_000;
+const STOP_SETTLEMENT_POLL_MS = 250;
 
 interface TaskInspection {
   readonly nativeId: string;
@@ -105,6 +110,8 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
   const [records, setRecords] = useState<readonly NativeOperationRecord[]>([]);
   const [tasks, setTasks] = useState<readonly ThreadBackgroundWorkEntry[]>([]);
   const [busy, setBusy] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const mounted = useRef(true);
   const [usedSuggestionId, setUsedSuggestionId] = useState<string | null>(null);
   const [acknowledging, setAcknowledging] = useState<NativeOperationRecord | null>(null);
   const [inspection, setInspection] = useState<TaskInspection | null>(null);
@@ -120,6 +127,20 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
     capabilities?.actions.some((entry) => entry.action === action && entry.supported) === true;
   const canInspectTasks = supported("childTaskInspection");
   const canStopTasks = supported("childTaskStop");
+  // The server holds one native-operation reservation per thread until a stop
+  // settles, so a second stop sent earlier is refused.
+  const stopBlocked =
+    busy ||
+    stopping ||
+    records.some(
+      (record) => record.command.kind === "stopTask" && isNativeOperationInFlight(record),
+    );
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const rows = selectNativeRuntimeTrayRows({
     activities,
     prompt,
@@ -199,9 +220,11 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
     };
   }, [threadId, capabilities?.generation]);
 
-  const execute = async (command: NativeOperationCommand) => {
+  const execute = async (
+    command: NativeOperationCommand,
+  ): Promise<NativeOperationRecord | null> => {
     const api = readNativeApi()?.nativeOperations;
-    if (!api || !capabilities || busy) return;
+    if (!api || !capabilities || busy) return null;
     setBusy(true);
     try {
       const record = await api.execute({
@@ -219,14 +242,41 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
         record,
         ...current.filter((entry) => entry.operationId !== record.operationId),
       ]);
+      return record;
     } catch (cause) {
       showError(
         `${nativeOperationLabel(command.kind)} failed`,
         errorMessage(cause, "The native operation failed."),
       );
+      return null;
     } finally {
       setBusy(false);
     }
+  };
+  /**
+   * `execute` returns once the server admits an operation; the stop itself
+   * settles later. Polls until the record leaves the in-flight states, and
+   * returns null if it disappears, the tray unmounts or settlement times out.
+   */
+  const waitForSettlement = async (operationId: string): Promise<NativeOperationRecord | null> => {
+    const api = readNativeApi()?.nativeOperations;
+    if (!api) return null;
+    const deadline = Date.now() + STOP_SETTLEMENT_TIMEOUT_MS;
+    while (mounted.current && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, STOP_SETTLEMENT_POLL_MS));
+      if (!mounted.current) return null;
+      try {
+        const next = await api.list({ threadId });
+        mutationVersion.current++;
+        setRecords(next);
+        const record = next.find((entry) => entry.operationId === operationId);
+        if (!record) return null;
+        if (!isNativeOperationInFlight(record)) return record;
+      } catch {
+        /* A transient poll failure retries until the deadline. */
+      }
+    }
+    return null;
   };
   const resolve = async (record: NativeOperationRecord, action: "reconcile" | "acknowledge") => {
     const api = readNativeApi()?.nativeOperations;
@@ -283,8 +333,24 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
     }
   };
   const stopTasks = async (entries: readonly ThreadBackgroundWorkEntry[]) => {
-    for (const entry of entries) {
-      await execute({ kind: "stopTask", ...readNativeTaskIdentity(entry.workItemId) });
+    if (stopBlocked) return;
+    setStopping(true);
+    try {
+      for (const entry of entries) {
+        const record = await execute({
+          kind: "stopTask",
+          ...readNativeTaskIdentity(entry.workItemId),
+        });
+        if (!record) return;
+        const settled = isNativeOperationInFlight(record)
+          ? await waitForSettlement(record.operationId)
+          : record;
+        // An unsettled or uncertain stop keeps the reservation; the recovery
+        // row takes over and later stops would only be refused.
+        if (!settled || settled.state === "indeterminate") return;
+      }
+    } finally {
+      if (mounted.current) setStopping(false);
     }
   };
   const copyOutput = async (output: string) => {
@@ -306,9 +372,13 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
           {description.title}
         </span>
         <span className="shrink-0 text-muted-foreground tabular-nums">
-          {description.elapsed
-            ? `${description.kindLabel} · ${description.elapsed}`
-            : description.kindLabel}
+          {[
+            description.kindLabel,
+            description.agentName !== description.title ? description.agentName : null,
+            description.elapsed,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
         </span>
         {canInspectTasks && (
           <Button
@@ -329,7 +399,7 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
                   size="icon-xs"
                   variant="ghost"
                   aria-label={`Stop ${description.title}`}
-                  disabled={busy}
+                  disabled={stopBlocked}
                   onClick={() => void stopTasks([task])}
                 />
               }
@@ -357,7 +427,7 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
           ? `running ${inspectedTask.elapsed}`
           : null,
         shellOutput?.omitted
-          ? `last ${formatKilobytes(new TextEncoder().encode(shellOutput.output).length)} of ${formatKilobytes(shellOutput.totalBytes)}`
+          ? `last ${formatByteSize(utf8ByteLength(shellOutput.output))} of ${formatByteSize(shellOutput.totalBytes)}`
           : null,
       ]
         .filter(Boolean)
@@ -482,7 +552,7 @@ function NativeRuntimeTrayContent(props: NativeRuntimeTrayProps) {
                     <Button
                       size="xs"
                       variant="ghost"
-                      disabled={busy}
+                      disabled={stopBlocked}
                       onClick={() => void stopTasks(shownTasks)}
                     >
                       Stop all

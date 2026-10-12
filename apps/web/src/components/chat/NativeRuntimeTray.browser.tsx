@@ -213,6 +213,59 @@ describe("NativeRuntimeTray", () => {
       }
     });
 
+    it("stops every task, waiting for each stop to settle before the next", async () => {
+      mocks.snapshot.mockResolvedValue({
+        entries: [
+          shellTask("b1", "Watch typecheck", 340),
+          shellTask("b2", "Run full browser suite", 192),
+          shellTask("b3", "Run unit tests", 30),
+        ],
+      });
+      // The server admits a stop as `requested` and holds the thread's
+      // reservation until the provider confirms it.
+      let listed: NativeOperationRecord[] = [];
+      mocks.list.mockImplementation(async () => listed);
+      mocks.execute.mockImplementation(
+        async (input: Pick<NativeOperationRecord, "operationId" | "command">) => {
+          const admitted = record("requested", {
+            operationId: input.operationId,
+            command: input.command,
+          });
+          listed = [admitted, ...listed];
+          return admitted;
+        },
+      );
+      const settleAll = () => {
+        listed = listed.map((entry) => ({ ...entry, state: "completed" }));
+      };
+      const stoppedTaskIds = () =>
+        mocks.execute.mock.calls.map(([input]) => (input as NativeOperationRecord).command);
+      const screen = await render(<NativeRuntimeTray {...taskProps} />);
+      try {
+        await page.getByRole("button", { name: /3 background tasks/ }).click();
+        const stopAll = page.getByRole("button", { name: "Stop all" });
+        await stopAll.click();
+        await expect.poll(() => mocks.execute.mock.calls.length).toBe(1);
+        await expect.element(stopAll).toBeDisabled();
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        expect(mocks.execute).toHaveBeenCalledTimes(1);
+
+        settleAll();
+        await expect.poll(() => mocks.execute.mock.calls.length).toBe(2);
+        settleAll();
+        await expect.poll(() => mocks.execute.mock.calls.length).toBe(3);
+        expect(stoppedTaskIds()).toEqual([
+          { kind: "stopTask", taskId: "b1" },
+          { kind: "stopTask", taskId: "b2" },
+          { kind: "stopTask", taskId: "b3" },
+        ]);
+        settleAll();
+        await expect.element(stopAll).toBeEnabled();
+      } finally {
+        await screen.unmount();
+      }
+    });
+
     it("shows shell output as text with its truncation", async () => {
       mocks.snapshot.mockResolvedValue({
         entries: [shellTask("b1", "Run full browser suite", 192)],
@@ -229,7 +282,7 @@ describe("NativeRuntimeTray", () => {
         const dialog = page.getByRole("dialog");
         await expect.element(dialog.getByText("✓ ChatView.browser.tsx (88 tests)")).toBeVisible();
         await expect
-          .element(dialog.getByText(/Shell · running 3m.* · last 1 KB of 41 KB/))
+          .element(dialog.getByText(/Shell · running 3m.* · last 36 B of 41 KB/))
           .toBeVisible();
         expect(dialog.element().textContent).not.toContain('"entries"');
         await expect.element(dialog.getByRole("button", { name: "Refresh" })).toBeVisible();
