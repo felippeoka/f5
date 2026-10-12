@@ -28,6 +28,7 @@ import { useComposerDraftStore } from "../composerDraftStore";
 import { getRouter } from "../router";
 import { useStore } from "../store";
 import { createTestServerProvider } from "../testServerProvider";
+import { toastManager } from "./ui/toast";
 
 vi.mock("./DiffWorkerPoolProvider", () => ({
   DiffWorkerPoolProvider: ({ children }: { children?: ReactNode }) => children ?? null,
@@ -505,6 +506,9 @@ describe("Keybindings update toast", () => {
     try {
       sendServerConfigUpdatedPush([]);
       await waitForToast("Keybindings updated");
+      // This tests replay suppression, not auto-dismiss timers (which pause on
+      // blur/hover). Dismiss the live toast before checking the fresh mount.
+      toastManager.close();
       await waitForNoToast("Keybindings updated");
 
       // Remount the app — onServerConfigUpdated replays the cached value
