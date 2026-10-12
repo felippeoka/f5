@@ -677,6 +677,20 @@ successful injection alone does not prove application delivery. Future traces re
 only booleans for the fixed expected text and exact single select-all/save chords,
 alongside correlated native outcomes; they retain no raw typed text or chords.
 
+The [diagnostic retry](computer-certification/2026-10-12-macos-electron-real-apps-diagnostic-attempt.json)
+on clean revision `45c5aef2f5` confirmed the exact expected text and single Command+A
+and Command+S requests, with successful native outcomes. The saved file still contained
+the original seed, so this run also remains failed before Calculator. A read-only
+post-run probe found Command set in combined session event state and inherited by a
+new keyboard event. The helper had applied chord modifiers to both key-down and
+key-up, and plain Unicode events used inherited state. Keyboard construction now
+uses private state, explicit plain-text flags and modifier-free key-up/cancellation
+events. Native tests exercise the real CGEvent flags, Unicode payload and marker
+without posting OS input. The complete real-app workflow still requires a fresh run;
+this fix does not change authorization, permit checks or certification gates.
+Earlier passing physical-stop and capture reports remain pinned to their previous
+helper hash; they do not establish those guarantees for the rebuilt helper.
+
 ```sh
 F5_COMPUTER_ELECTRON_REHEARSAL=1 bun apps/desktop/scripts/rehearse-computer-electron.mjs --codex-home <selected-profile-home> --codex-binary <codex-binary> --output /tmp/f5-electron-real-apps.json --real-apps
 bun apps/desktop/src/computer/rehearseHelperMacos.ts --helper apps/desktop/dist-native/mac-arm64/f5-computer-helper --output /tmp/f5-capture-privacy.json --privacy-only

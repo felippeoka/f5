@@ -173,8 +173,7 @@ func releaseHeldInput() {
   inputLock.lock()
   defer { inputLock.unlock() }
   for key in pressedKeys.drain() {
-    if let event = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: false) {
-      event.setIntegerValueField(.eventSourceUserData, value: 0xF5C0)
+    if let event = computerKeyboardEvent(keyCode: key, keyDown: false) {
       event.post(tap: .cghidEventTap)
     }
   }
@@ -185,6 +184,7 @@ func releaseHeldInput() {
     if let event = CGEvent(
       mouseEventSource: nil, mouseType: t, mouseCursorPosition: location, mouseButton: b)
     {
+      event.flags = []
       event.setIntegerValueField(.eventSourceUserData, value: 0xF5C0)
       event.post(tap: .cghidEventTap)
     }
@@ -951,14 +951,9 @@ func mutate(_ request: [String: Any], _ host: [String: Any]) async throws -> [St
         for down in [true, false] {
           try validateFocus()
           try inputLock.withLock {
-            guard let event = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: down) else {
+            guard let event = computerKeyboardEvent(keyCode: 0, keyDown: down, unicode: units) else {
               throw Failure("UnsupportedAction")
             }
-            units.withUnsafeBufferPointer {
-              event.keyboardSetUnicodeString(
-                stringLength: units.count, unicodeString: $0.baseAddress!)
-            }
-            event.setIntegerValueField(.eventSourceUserData, value: 0xF5C0)
             try checkPermit(request)
             if down { pressedKeys.insert(0) }
             event.post(tap: .cghidEventTap)
@@ -977,10 +972,8 @@ func mutate(_ request: [String: Any], _ host: [String: Any]) async throws -> [St
           for down in [true, false] {
             try validateFocus()
             try inputLock.withLock {
-              guard let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)
+              guard let event = computerKeyboardEvent(keyCode: code, keyDown: down, modifiers: flags)
               else { throw Failure("UnsupportedAction") }
-              event.flags = flags
-              event.setIntegerValueField(.eventSourceUserData, value: 0xF5C0)
               try checkPermit(request)
               if down { pressedKeys.insert(code) }
               event.post(tap: .cghidEventTap)
