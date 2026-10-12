@@ -22,9 +22,10 @@ let outputLock = NSLock()
 let outputQueue = DispatchQueue(label: "f5.computer.output")
 let outputSlots = DispatchSemaphore(value: 32)
 func emit(_ message: [String: Any]) {
-  guard let bytes = try? JSONSerialization.data(withJSONObject: message),
-    bytes.count <= 12 * 1024 * 1024
-  else { return }
+  guard let bytes = encodeComputerPacket(message) else {
+    permit.suspend()
+    return
+  }
   guard outputSlots.wait(timeout: .now()) == .success else {
     permit.suspend()
     return
@@ -360,8 +361,7 @@ func authorizePoint(_ point: CGPoint, request: [String: Any], host: [String: Any
       point.y >= bounds.minY && point.y < bounds.maxY
     {
       let items = attribute(bar, kAXChildrenAttribute) as? [AXUIElement] ?? []
-      let right = items.compactMap(axRect).map(\.maxX).max() ?? bounds.minX
-      guard computerMenuPointAllowed(x: point.x, left: bounds.minX, lastItemRight: right) else {
+      guard computerMenuPointAllowed(x: point.x, y: point.y, items: items.map(axRect)) else {
         throw Failure("TargetBlocked", "kind", "system-ui")
       }
       _ = try grant(app, request: request, host: host, needed: "click")

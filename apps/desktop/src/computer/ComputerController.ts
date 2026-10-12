@@ -33,6 +33,8 @@ interface Job {
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
   cancelled: boolean;
+  cancellation: Promise<void>;
+  cancel: () => void;
 }
 export interface ComputerOverlaySurface {
   show(holder: ComputerLeaseHolder): void;
@@ -51,6 +53,7 @@ export interface ComputerOverlayTarget {
 }
 export class ComputerController {
   private readonly paused = new Set<string>();
+  private readonly controlled = new Map<string, ComputerLeaseHolder>();
   private readonly grants = new Map<string, ComputerAuthorization>();
   private readonly admitted = new Map<string, Admission>();
   private cacheBytes = 0;
@@ -135,6 +138,7 @@ export class ComputerController {
     return `${auth.profileId}\0${auth.threadId}`;
   }
   acquire(holder: ComputerLeaseHolder): ComputerLeaseHolder {
+    this.controlled.set(this.key(holder), holder);
     if (this.paused.has(this.key(holder)))
       throw new ComputerControlError({ _tag: "Interrupted", cause: "paused" });
     if (!this.helper.status().available)
@@ -151,7 +155,15 @@ export class ComputerController {
       this.options.paused(holder, "user-input");
       throw new ComputerControlError({ _tag: "Interrupted", cause: "user-input" });
     }
-    return this.lease.acquire(holder);
+    const acquired = this.lease.acquire(holder);
+    // A lease listener may reject control if the emergency shortcut cannot register.
+    if (
+      this.paused.has(this.key(holder)) ||
+      !this.lease.current() ||
+      !sameComputerHolder(this.lease.current()!, acquired)
+    )
+      throw new ComputerControlError({ _tag: "Interrupted", cause: "paused" });
+    return acquired;
   }
   updateGrants(authorization: ComputerAuthorization): void {
     const key = this.key(authorization);
@@ -209,7 +221,11 @@ export class ComputerController {
     };
     this.admitted.set(key, admission);
     const promise = new Promise<unknown>((resolve, reject) => {
-      const job: Job = { request, resolve, reject, cancelled: false };
+      let cancel = () => {};
+      const cancellation = new Promise<void>((resolve) => {
+        cancel = resolve;
+      });
+      const job: Job = { request, resolve, reject, cancelled: false, cancellation, cancel };
       const mutation = isComputerMutation(request.op);
       if (
         mutation
@@ -361,7 +377,18 @@ export class ComputerController {
           ...(node?.displayId ? { displayId: node.displayId } : {}),
           ...(node?.bounds ? { bounds: node.bounds } : {}),
         };
-        await this.overlay.action(request, status.available ? (status.displays ?? []) : [], target);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            this.overlay.action(request, status.available ? (status.displays ?? []) : [], target),
+            job.cancellation,
+            new Promise<void>((resolve) => {
+              timer = setTimeout(resolve, 280);
+            }),
+          ]);
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
         this.validate(request);
         if (job.cancelled) return;
         this.options.activity(request.authorization.profileId, {
@@ -371,11 +398,14 @@ export class ComputerController {
           status: "started",
         });
       }
-      const result = await this.helper.request(request, {
-        f5Pids: this.options.f5Pids(),
-        f5BundlePath: this.options.f5BundlePath,
-        overlayWindowIds: this.overlay.windowIds(),
-      });
+      const result = await Promise.race([
+        this.helper.request(request, {
+          f5Pids: this.options.f5Pids(),
+          f5BundlePath: this.options.f5BundlePath,
+          overlayWindowIds: this.overlay.windowIds(),
+        }),
+        job.cancellation,
+      ]);
       if (job.cancelled) return;
       const limit =
         request.op === "inspect"
@@ -450,6 +480,7 @@ export class ComputerController {
     const interrupt = (job: Job) => {
       if (job.cancelled) return;
       job.cancelled = true;
+      job.cancel();
       job.reject(error);
       if (isComputerMutation(job.request.op))
         this.options.activity(job.request.authorization.profileId, {
@@ -492,6 +523,7 @@ export class ComputerController {
       if (auth.profileId === profileId) {
         this.grants.delete(key);
         this.paused.delete(key);
+        this.controlled.delete(key);
       }
     for (const [id, snapshot] of this.snapshots)
       if (snapshot.owner.startsWith(`${profileId}\0`)) this.snapshots.delete(id);
@@ -514,13 +546,27 @@ export class ComputerController {
     if (cause === "kill-switch") this.recentlyStopped = undefined;
     if (active) void this.helper.suspend();
   }
+  resumeTarget(profileId: string, threadId: string) {
+    const key = this.key({ profileId, threadId });
+    return {
+      title: this.controlled.get(key)?.threadTitle ?? threadId,
+      authorization: this.grants.get(key),
+    };
+  }
+  requiresLocalResume(profileId: string, threadId: string): boolean {
+    const key = this.key({ profileId, threadId });
+    const holder = this.lease.current();
+    return (
+      (this.paused.has(key) && this.controlled.has(key)) || (!!holder && this.key(holder) === key)
+    );
+  }
   setPaused(profileId: string, threadId: string, paused: boolean): void {
     const key = this.key({ profileId, threadId });
     if (paused) {
       this.paused.add(key);
       if (this.lease.current() && this.key(this.lease.current()!) === key) this.stop();
     } else {
-      if (!this.helper.status().available)
+      if (this.paused.has(key) && this.controlled.has(key) && !this.helper.status().available)
         throw new ComputerControlError({ _tag: "Unavailable", reason: "monitor-unhealthy" });
       this.paused.delete(key);
     }
@@ -532,6 +578,8 @@ export class ComputerController {
     this.stop();
     this.forgetAdmissions(() => true);
     this.grants.clear();
+    this.controlled.clear();
+    this.paused.clear();
     this.snapshots.clear();
     this.appNames.clear();
     this.recentlyStopped = undefined;

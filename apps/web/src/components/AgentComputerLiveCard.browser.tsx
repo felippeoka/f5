@@ -1,7 +1,7 @@
 import "../index.css";
 import { ThreadId } from "@t3tools/contracts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
 import { useAgentComputerActivityStore } from "../agentComputerActivityStore";
 import { AgentComputerLiveCard } from "./AgentComputerLiveCard";
@@ -53,11 +53,13 @@ it("closes the real consent dialog only when its matching settlement arrives", a
   const screen = await render(<ComputerAccessInbox />);
   try {
     await expect.element(page.getByRole("dialog", { name: "Computer access" })).toBeVisible();
-    await page.getByRole("button", { name: "Allow selected", exact: true }).click();
+    await userEvent.keyboard("{Escape}");
+    expect(answer).not.toHaveBeenCalled();
+    await page.getByRole("button", { name: "Review access", exact: true }).click();
     expect(answer).toHaveBeenCalledExactlyOnceWith({
       requestId: "consent",
       backendIncarnation: "fixture-backend",
-      decisions: [{ appId: "fixture", allow: true, allowTyping: false, remember: false }],
+      decisions: [],
     });
     store.settle({ requestId: "other", threadId, allowed: true });
     await expect.element(page.getByRole("dialog", { name: "Computer access" })).toBeVisible();

@@ -1,6 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { ComputerToolDispatcher } from "./ComputerToolDispatcher";
 describe("computer transport admission", () => {
+  it("refuses saturation without evicting completed invocation tombstones", async () => {
+    const dispatcher = new ComputerToolDispatcher();
+    const call = vi.fn(async () => "done");
+    for (let i = 0; i < 65536; i++) await dispatcher.dispatch(String(i), {}, call);
+    await expect(dispatcher.dispatch("overflow", {}, call)).rejects.toMatchObject({
+      error: { _tag: "ReplayRejected" },
+    });
+    await expect(dispatcher.dispatch("0", {}, call)).rejects.toMatchObject({
+      error: { _tag: "ReplayRejected" },
+    });
+    expect(call).toHaveBeenCalledTimes(65536);
+  });
   it("joins retries under one invocation and never repeats a completed mutation", async () => {
     const dispatcher = new ComputerToolDispatcher();
     let finish: (value: string) => void = () => {};

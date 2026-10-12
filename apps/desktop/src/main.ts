@@ -25,6 +25,7 @@ import { ComputerHelperClient } from "./computer/ComputerHelperClient";
 import { ComputerLeaseAuthority } from "./computer/ComputerLeaseAuthority";
 import { ComputerController } from "./computer/ComputerController";
 import { ComputerOverlay } from "./computer/ComputerOverlay";
+import { ComputerConsentAuthority } from "./computer/ComputerConsentAuthority";
 import { ComputerHostChannel } from "./computer/ComputerHostChannel";
 import { registerComputerIpc } from "./computer/registerComputerIpc";
 import { capturePermissions, openComputerPermissionSettings } from "./computer/permissions";
@@ -374,7 +375,14 @@ function initializeComputerSystem(): void {
   lease.subscribe((holder) => {
     channel.publishLease(holder);
     globalShortcut.unregister(killChord);
-    if (holder) globalShortcut.register(killChord, () => controller.stop("kill-switch"));
+    if (holder) {
+      try {
+        if (!globalShortcut.register(killChord, () => controller.stop("kill-switch")))
+          controller.stop("paused");
+      } catch {
+        controller.stop("paused");
+      }
+    }
   });
   let lastComputerStatus = "";
   helper.onEvent((message) => {
@@ -387,6 +395,19 @@ function initializeComputerSystem(): void {
     channel.broadcast({ type: "status", status: currentStatus });
     for (const id of appRendererWebContentsIds)
       electronWebContents.fromId(id)?.send("desktop-computer:status-changed", currentStatus);
+  });
+  const consent = new ComputerConsentAuthority({
+    platform: process.platform === "win32" ? "win32" : "darwin",
+    request: (profileId, answer) => channel.accessRequest(profileId, answer),
+    answer: (profileId, answer) => channel.answerAccess(profileId, answer),
+    show: (profileId, options) => {
+      const parent = BrowserWindow.getAllWindows().find(
+        (window) =>
+          appRendererWebContentsIds.has(window.webContents.id) &&
+          profileByWebContentsId.get(window.webContents.id) === profileId,
+      );
+      return parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
+    },
   });
   registerComputerIpc(ipcMain, {
     authorize: (event) => {
@@ -414,8 +435,23 @@ function initializeComputerSystem(): void {
       )
         helper.retry();
     },
-    answer: (profile, answer) => channel.answerAccess(profile, answer),
-    pause: (profileId, threadId, paused) => {
+    answer: (profile, answer) => consent.review(profile, answer),
+    pause: async (profileId, threadId, paused) => {
+      const target = controller.resumeTarget(profileId, threadId);
+      const chromeHolder = channel.chrome.current();
+      if (
+        !paused &&
+        (controller.requiresLocalResume(profileId, threadId) ||
+          (chromeHolder?.profileId === profileId && chromeHolder.threadId === threadId))
+      ) {
+        if (!(await consent.confirmResume(profileId, target.title)))
+          throw new Error("Computer control remains paused.");
+        if (
+          controller.resumeTarget(profileId, threadId).authorization !== target.authorization ||
+          channel.chrome.current() !== chromeHolder
+        )
+          throw new Error("The computer session changed while Resume was being confirmed.");
+      }
       if (!channel.pauseChrome(profileId, threadId, paused))
         controller.setPaused(profileId, threadId, paused);
       channel.send(profileId, { type: "pauseChanged", threadId, paused });

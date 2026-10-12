@@ -39,10 +39,11 @@ export class ComputerLeaseAuthority {
         ...(holder.profileId === input.profileId ? { threadTitle: holder.threadTitle } : {}),
       });
     }
-    this.holder = { ...input, executionGeneration: ++this.generation };
+    const granted = { ...input, executionGeneration: ++this.generation };
+    this.holder = granted;
     this.lastMutationAt = this.now();
     this.notify();
-    return this.holder;
+    return granted;
   }
   touch(holder: ComputerLeaseHolder): void {
     if (this.holder && sameComputerHolder(this.holder, holder)) this.lastMutationAt = this.now();

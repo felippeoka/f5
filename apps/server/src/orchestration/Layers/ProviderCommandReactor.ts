@@ -91,7 +91,7 @@ import {
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ComputerAutomationBroker } from "../../computer/ComputerAutomationBroker";
 import { resolveAgentBrowserPolicy } from "../../mcp/browserAccess";
-import { resolveComputerBackendSelection } from "../../computer/computerBackendPolicy";
+import { resolveProviderComputerBackendSelection } from "../../computer/computerBackendPolicy";
 import { chromeSessionFingerprint } from "../../provider/chromeSessionRuntimeFactory";
 import {
   formatThreadTitleRegenerationContext,
@@ -913,19 +913,21 @@ const make = Effect.gen(function* () {
 
       const activeSession = yield* resolveActiveSession(threadId);
       const computerPolicy = yield* resolveAgentBrowserPolicy(threadId);
-      const computerDecision = yield* resolveComputerBackendSelection({
-        provider: preferredProvider === "claudeAgent" ? "claude" : "codex",
+      const supportsComputer = preferredProvider === "claudeAgent" || preferredProvider === "codex";
+      const computerSelection = (yield* resolveProviderComputerBackendSelection(preferredProvider, {
         enabled: computerPolicy.computerUse,
         nativeStatus: Option.isSome(computerBroker)
           ? computerBroker.value.host.status()
           : { available: false, reason: "no-host" },
-      });
-      const computerSelection = computerDecision.fingerprint;
+      }))?.fingerprint;
       const previousComputerSelection =
         activeSession?.computerConfigurationFingerprint ?? computerSelections.get(threadId);
       const shouldRestartForComputerUseChange =
-        previousComputerSelection !== undefined && previousComputerSelection !== computerSelection;
-      computerSelections.set(threadId, computerSelection);
+        supportsComputer &&
+        previousComputerSelection !== undefined &&
+        previousComputerSelection !== computerSelection;
+      if (computerSelection !== undefined) computerSelections.set(threadId, computerSelection);
+      else computerSelections.delete(threadId);
       const shouldRestartForChromeLaunchChange =
         activeSession?.provider === "claudeAgent" &&
         activeSession.chromeConfigurationFingerprint !== undefined &&

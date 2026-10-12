@@ -370,7 +370,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           if (!event.isTrusted || !(event.target instanceof Element)) return;
           const button = event.target.closest("button");
           const name = button?.textContent?.trim();
-          if (name === "Allow selected" && button?.closest('[data-testid="computer-access-card"]'))
+          if (name === "Review access" && button?.closest('[data-testid="computer-access-card"]'))
             state.trustedConsent = true;
           if (name === "Pause") state.trustedPause = true;
           if (name === "Resume") state.trustedResume = true;
@@ -427,7 +427,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
   } else {
     stage = "human-consent-and-first-turn";
     await instructions(
-      "Approve only Computer Control Test Fixture when the Computer access dialog appears. Leave typing and remembering defaults unchanged. Then keep mouse and keyboard idle until prompted.",
+      "Click Review access when the Computer access card appears, then approve only Computer Control Test Fixture in the native F5 dialog. Leave remembering off. Then keep mouse and keyboard idle until prompted.",
     );
     let overlayTimer;
     let overlayPoll = Promise.resolve();
@@ -578,7 +578,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       if (!checks.untrustedResumeRefused) throw new Error("Untrusted resume was accepted.");
       stage = "human-resume";
       await instructions(
-        "Click Resume in the same card, then keep mouse and keyboard idle. The agent will take a fresh screenshot and click the test button once.",
+        "Click Resume in the same card and confirm Resume in the native F5 dialog, then keep mouse and keyboard idle. The agent will take a fresh screenshot and click the test button once.",
       );
       await waitFor(() => page.evaluate(() => !window.__computerRehearsal.paused), 180000);
       checks.humanResumeMirrored =

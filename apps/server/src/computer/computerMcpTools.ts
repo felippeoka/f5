@@ -29,7 +29,11 @@ const shapes: Record<
   computer_list_apps: { op: "listApps", shape: {} },
   computer_request_access: {
     op: "requestAccess",
-    shape: { apps: z.array(app).min(1).max(10), reason: z.string().max(500) },
+    shape: {
+      apps: z.array(app).min(1).max(10),
+      reason: z.string().max(500),
+      typing: z.boolean().optional(),
+    },
   },
   computer_screenshot: { op: "screenshot", shape: { displayId } },
   computer_zoom: {
@@ -116,7 +120,7 @@ export const COMPUTER_TOOL_DEFINITIONS = Object.entries(shapes).map(([name, defi
   name,
   ...definition,
   title: name.replaceAll("_", " "),
-  description: `${name.replaceAll("_", " ")}. ${name === "computer_scroll" ? "Positive deltaY scrolls down; positive deltaX scrolls right. " : ""}${GUIDANCE}`,
+  description: `${name.replaceAll("_", " ")}. ${name === "computer_request_access" ? "Set typing: true to request typing for an app already allowed clicks. " : ""}${name === "computer_scroll" ? "Positive deltaY scrolls down; positive deltaX scrolls right. " : ""}${GUIDANCE}`,
   alwaysLoad: name === "computer_status" || name === "computer_request_access",
   annotations: {
     readOnlyHint: definition.op !== "requestAccess" && !isComputerMutation(definition.op),
@@ -236,6 +240,7 @@ export async function callComputerTool(
           context.sessionGeneration,
           input.apps,
           input.reason,
+          input.typing === true,
         ),
       );
     const op = tool.op;

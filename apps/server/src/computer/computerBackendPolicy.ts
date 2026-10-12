@@ -1,8 +1,24 @@
 import { Effect, Option } from "effect";
-import type { ComputerAutomationBackendStatus } from "@t3tools/contracts";
+import type { ComputerAutomationBackendStatus, ProviderKind } from "@t3tools/contracts";
 import { ServerSettingsService } from "../serverSettings";
 import { selectComputerBackend } from "./computerBackendSelection";
 import { probeComputerBuiltin } from "./computerBuiltinAvailability";
+
+/** Providers without computer tools have neither a probe nor a restart fingerprint. */
+export function resolveProviderComputerBackendSelection(
+  provider: ProviderKind | undefined,
+  input: {
+    enabled: boolean;
+    nativeStatus: ComputerAutomationBackendStatus;
+  },
+) {
+  return provider === "claudeAgent" || provider === "codex"
+    ? resolveComputerBackendSelection({
+        ...input,
+        provider: provider === "claudeAgent" ? "claude" : "codex",
+      })
+    : Effect.succeed(undefined);
+}
 
 /** Built-in enablement remains unavailable until a supported, certified mechanism is recorded. */
 export function resolveComputerBackendSelection(input: {

@@ -21,7 +21,9 @@ const auth: ComputerAuthorization = {
 const holder: ComputerLeaseHolder = { ...auth, backend: "native", threadTitle: "Thread" };
 function make() {
   let event: (message: Record<string, unknown>) => void = () => {};
-  const request = vi.fn(async (): Promise<unknown> => ({ ok: true }));
+  const request = vi.fn(
+    async (_request: ComputerAutomationRequest): Promise<unknown> => ({ ok: true }),
+  );
   const helper: ComputerHelper = {
     status: vi.fn(
       (): ReturnType<ComputerHelper["status"]> => ({
@@ -50,12 +52,19 @@ function make() {
   const lease = new ComputerLeaseAuthority();
   const paused = vi.fn();
   const activity = vi.fn();
-  const controller = new ComputerController(
-    lease,
-    helper,
-    { show: vi.fn(), clear: vi.fn(), action: vi.fn(async () => {}), windowIds: () => [] },
-    { f5Pids: () => [1], f5BundlePath: "F5", platform: "darwin", activity, paused },
-  );
+  const overlay = {
+    show: vi.fn(),
+    clear: vi.fn(),
+    action: vi.fn(async () => {}),
+    windowIds: () => [],
+  };
+  const controller = new ComputerController(lease, helper, overlay, {
+    f5Pids: () => [1],
+    f5BundlePath: "F5",
+    platform: "darwin",
+    activity,
+    paused,
+  });
   controller.updateGrants(auth);
   const held = controller.acquire(holder);
   return {
@@ -65,6 +74,7 @@ function make() {
     lease,
     paused,
     activity,
+    overlay,
     held,
     event: (message: Record<string, unknown>) => event(message),
   };
@@ -85,6 +95,106 @@ function envelope(id: string, authorization = auth, extras: Record<string, unkno
   } as ComputerAutomationRequest;
 }
 describe("main computer controller", () => {
+  it("releases a cancelled helper wait and ignores its late result", async () => {
+    const h = make();
+    let finish: (value: unknown) => void = () => {};
+    h.request.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    try {
+      const pending = h.controller.invoke(envelope("old-helper"));
+      const interrupted = expect(pending).rejects.toMatchObject({ error: { _tag: "Interrupted" } });
+      await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(1));
+      h.controller.stop();
+      await interrupted;
+      h.controller.setPaused("p", "t", false);
+      const next = h.controller.acquire(holder);
+      await h.controller.invoke(
+        envelope("next-helper", { ...auth, executionGeneration: next.executionGeneration }),
+      );
+      finish({ ok: true });
+      await Promise.resolve();
+      expect(h.request).toHaveBeenCalledTimes(2);
+      expect(
+        h.activity.mock.calls.filter(([, action]) => action.status === "completed"),
+      ).toHaveLength(1);
+    } finally {
+      h.controller.close();
+    }
+  });
+  it("frees a stalled overlay job on Stop and never dispatches it after Resume", async () => {
+    const h = make();
+    let finish = () => {};
+    const draw = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    h.overlay.action.mockReturnValueOnce(draw);
+    try {
+      const pending = h.controller.invoke(envelope("stalled"));
+      const interrupted = expect(pending).rejects.toMatchObject({
+        error: { _tag: "Interrupted", cause: "paused" },
+      });
+      h.controller.stop();
+      await interrupted;
+      h.controller.setPaused("p", "t", false);
+      const next = h.controller.acquire(holder);
+      await h.controller.invoke(
+        envelope("new", { ...auth, executionGeneration: next.executionGeneration }),
+      );
+      expect(h.request).toHaveBeenCalledTimes(1);
+      finish();
+      await Promise.resolve();
+      expect(h.request).toHaveBeenCalledTimes(1);
+      expect(h.request.mock.calls[0]?.[0]).toMatchObject({ requestId: "new" });
+    } finally {
+      h.controller.close();
+    }
+  });
+  it("times out a hung overlay while retaining input authorization", async () => {
+    vi.useFakeTimers();
+    const h = make();
+    h.overlay.action.mockReturnValueOnce(new Promise(() => {}));
+    try {
+      const pending = h.controller.invoke(envelope("bounded"));
+      await vi.advanceTimersByTimeAsync(280);
+      await expect(pending).resolves.toEqual({ ok: true });
+      expect(h.request).toHaveBeenCalledTimes(1);
+    } finally {
+      h.controller.close();
+      vi.useRealTimers();
+    }
+  });
+  it("rejects acquisition when the shortcut observer immediately revokes the lease", () => {
+    const h = make();
+    h.lease.release(h.held);
+    const off = h.lease.subscribe((current) => {
+      if (current) h.controller.stop();
+    });
+    try {
+      expect(() => h.controller.acquire(holder)).toThrow();
+      expect(h.lease.current()).toBeNull();
+      expect(h.request).not.toHaveBeenCalled();
+    } finally {
+      off();
+      h.controller.close();
+    }
+  });
+  it("resumes preview-only pauses with an unavailable helper", () => {
+    const h = make();
+    try {
+      h.controller.setPaused("p", "preview-only", true);
+      vi.mocked(h.helper.status).mockReturnValue({ available: false, reason: "helper-missing" });
+      expect(h.controller.requiresLocalResume("p", "preview-only")).toBe(false);
+      expect(() => h.controller.setPaused("p", "preview-only", false)).not.toThrow();
+      h.controller.stop();
+      expect(h.controller.requiresLocalResume("p", "t")).toBe(true);
+      expect(() => h.controller.setPaused("p", "t", false)).toThrow();
+    } finally {
+      h.controller.close();
+    }
+  });
   it("publishes a recent-input pause when a different thread tries to acquire an idle device", () => {
     const h = make();
     const next = { ...holder, threadId: "next-thread" };

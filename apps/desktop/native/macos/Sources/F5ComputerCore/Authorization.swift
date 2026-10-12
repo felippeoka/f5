@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 public func allowsComputerGrant(tier: String, allowTyping: Bool, needed: String) -> Bool {
@@ -59,9 +60,19 @@ public func computerFocusUnchanged(
 ) -> Bool {
   initialPid == currentPid && sameWindow && (!typing || sameElement)
 }
-public func computerMenuPointAllowed(x: Double, left: Double, lastItemRight: Double) -> Bool {
-  left.isFinite && lastItemRight.isFinite && x.isFinite && lastItemRight > left && x >= left
-    && x < lastItemRight
+public func computerMenuPointAllowed(x: Double, y: Double, items: [CGRect?]) -> Bool {
+  guard x.isFinite, y.isFinite, items.count > 1, let apple = items.first!,
+    apple.minX.isFinite, apple.minY.isFinite, apple.width.isFinite, apple.height.isFinite,
+    apple.width > 0, apple.height > 0,
+    !apple.contains(CGPoint(x: x, y: y))
+  else { return false }
+  // The first child is the system Apple menu, even inside the app's AX menu bar.
+  return items.dropFirst().contains { bounds in
+    guard let bounds, bounds.minX.isFinite, bounds.minY.isFinite,
+      bounds.width.isFinite, bounds.height.isFinite, bounds.width > 0, bounds.height > 0
+    else { return false }
+    return x >= bounds.minX && x < bounds.maxX && y >= bounds.minY && y < bounds.maxY
+  }
 }
 
 /// AppKit's mouse-down hit test uses bottom-left global points. Quartz uses

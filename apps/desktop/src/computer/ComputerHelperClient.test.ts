@@ -50,6 +50,77 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("computer helper supervision", () => {
+  it("bounds repeated blocked-worker recovery to three failures and requires Retry", async () => {
+    const h = make();
+    ready(h);
+    let current = h.process;
+    const heartbeat = setInterval(
+      () =>
+        current.stdout.emit(
+          "data",
+          JSON.stringify({ type: "heartbeat", monitorHealthy: true }) + "\n",
+        ),
+      250,
+    );
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const pending = h.client.request(request(`blocked-${attempt}`, "screenshot"), extra);
+        const failed = expect(pending).rejects.toMatchObject({ error: { _tag: "Execution" } });
+        await vi.advanceTimersByTimeAsync(10050);
+        await failed;
+        expect(current.kill).toHaveBeenCalledWith("SIGKILL");
+        if (attempt < 2) {
+          current = child();
+          vi.mocked(spawn).mockReturnValue(current);
+          await vi.advanceTimersByTimeAsync(250);
+          current.stdout.emit("data", JSON.stringify({ type: "hello", protocolVersion: 1 }) + "\n");
+          current.stdout.emit(
+            "data",
+            JSON.stringify({ type: "status", status: { available: true } }) + "\n",
+          );
+        }
+      }
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(spawn).toHaveBeenCalledTimes(3);
+      expect(h.client.status()).toMatchObject({ available: false, reason: "helper-crashed" });
+      vi.mocked(spawn).mockReturnValue(child());
+      h.client.retry();
+      expect(spawn).toHaveBeenCalledTimes(4);
+    } finally {
+      clearInterval(heartbeat);
+    }
+  });
+  it("replaces blocked observation workers even while hooks keep sending healthy heartbeats", async () => {
+    const h = make();
+    ready(h);
+    const heartbeat = setInterval(
+      () => h.emit({ type: "heartbeat", monitorHealthy: true, suspended: true }),
+      250,
+    );
+    const observed = h.client.request(request("blocked", "screenshot"), extra);
+    const second = h.client.request(request("blocked-two", "inspect"), extra);
+    const failed = expect(observed).rejects.toMatchObject({ error: { _tag: "Execution" } });
+    const other = expect(second).rejects.toMatchObject({ error: { _tag: "Unavailable" } });
+    await vi.advanceTimersByTimeAsync(10050);
+    await failed;
+    await other;
+    clearInterval(heartbeat);
+    expect(h.process.kill).toHaveBeenCalledWith("SIGKILL");
+    const replacement = child();
+    vi.mocked(spawn).mockReturnValue(replacement);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(h.client.status().available).toBe(false);
+    replacement.stdout.emit("data", JSON.stringify({ type: "hello", protocolVersion: 1 }) + "\n");
+    replacement.stdout.emit(
+      "data",
+      JSON.stringify({ type: "status", status: { available: true } }) + "\n",
+    );
+    expect(h.client.status().available).toBe(true);
+    const writes = (replacement.stdin as PassThrough).read()?.toString() ?? "";
+    expect(writes).not.toContain("blocked");
+    expect(writes).not.toContain('"type":"resume"');
+  });
   it("keeps missing permission detail despite unhealthy heartbeats and deduplicates failure pushes", () => {
     const h = make();
     ready(h);

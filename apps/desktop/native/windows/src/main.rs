@@ -6,6 +6,8 @@ mod desktop;
 mod geometry;
 mod permit;
 #[cfg(any(windows, test))]
+mod protocol;
+#[cfg(any(windows, test))]
 mod safety;
 #[cfg(windows)]
 fn main() {

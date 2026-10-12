@@ -5,6 +5,23 @@ import {
 } from "./automationActivitySanitizer";
 const provenance = { serverName: "f5_computer", verified: true, kind: "f5-computer" } as const;
 describe("computer persistence sanitization", () => {
+  it("bounds identity memory and keeps late results redacted after saturation", () => {
+    const sanitizer = new AutomationEventSanitizer(2);
+    sanitizer.register("a", provenance);
+    for (const id of ["1", "2", "3"])
+      sanitizer.sanitize("a", {
+        itemId: id,
+        payload: { toolName: "mcp__f5_computer__computer_type", text: "SENTINEL" },
+      });
+    for (const id of ["1", "2", "3", "unknown"])
+      expect(
+        JSON.stringify(sanitizer.sanitize("a", { itemId: id, payload: { output: "SENTINEL" } })),
+      ).not.toContain("SENTINEL");
+    expect(sanitizer.isComputerItem("a", "unknown")).toBe(true);
+    sanitizer.clear("a");
+    expect(sanitizer.sanitize("a", { output: "ordinary" })).toEqual({ output: "ordinary" });
+    expect(sanitizer.isComputerItem("a", "unknown")).toBe(false);
+  });
   it("preserves correlated approval choices without provider text or tool contents", () => {
     const sanitizer = new AutomationEventSanitizer();
     sanitizer.register("a", provenance);

@@ -35,6 +35,7 @@ function setup(displays = [display]) {
   };
   return {
     invoke,
+    broker,
     context: {
       broker: broker as unknown as ComputerAutomationBrokerRuntime,
       threadId: "t",
@@ -44,6 +45,22 @@ function setup(displays = [display]) {
   };
 }
 describe("shared computer tool catalog", () => {
+  it("routes an explicit typing upgrade to the shared grant gate", async () => {
+    const h = setup();
+    const response = await callComputerTool(h.context, "computer_request_access", {
+      apps: ["Terminal"],
+      reason: "Typing needed",
+      typing: true,
+    });
+    expect(response.isError).toBeFalsy();
+    expect(h.broker.requestAccess).toHaveBeenCalledWith(
+      "t",
+      "s",
+      ["Terminal"],
+      "Typing needed",
+      true,
+    );
+  });
   it("preserves completed input when its post-action screenshot fails", async () => {
     const h = setup();
     h.invoke.mockResolvedValue({ actionCompleted: true, screenshotError: "Unavailable" });

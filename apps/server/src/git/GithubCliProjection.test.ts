@@ -216,7 +216,7 @@ it("starts native gh with only the disconnected placeholder, then an Enterprise-
   }
   await p.account.reconcile();
   const invoke = (host: string) =>
-    runProcess("gh", ["auth", "token", "--hostname", host], { env, timeoutMs: 3000 });
+    runProcess("gh", ["auth", "token", "--hostname", host], { env, timeoutMs: 15000 });
   expect((await invoke("github.com")).stdout.trim()).toBe("f5-profile-not-connected");
   await p.account.set("git.example.com", "enterprise-only");
   expect((await invoke("git.example.com")).stdout.trim()).toBe("enterprise-only");

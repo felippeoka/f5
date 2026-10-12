@@ -1,3 +1,4 @@
+import CoreGraphics
 import XCTest
 
 @testable import F5ComputerCore
@@ -145,12 +146,18 @@ final class AuthorizationTests: XCTestCase {
       computerFocusUnchanged(
         initialPid: 20, currentPid: 20, sameWindow: true, sameElement: false, typing: false))
   }
-  func testMenuAuthorizationExcludesStatusItemsAndUnknownGeometry() {
-    XCTAssertTrue(computerMenuPointAllowed(x: -100, left: -200, lastItemRight: 0))
-    XCTAssertFalse(computerMenuPointAllowed(x: 0, left: -200, lastItemRight: 0))
-    XCTAssertFalse(computerMenuPointAllowed(x: -201, left: -200, lastItemRight: 0))
-    XCTAssertFalse(computerMenuPointAllowed(x: 100, left: 100, lastItemRight: 100))
-    XCTAssertFalse(computerMenuPointAllowed(x: .nan, left: 0, lastItemRight: 100))
+  func testMenuAuthorizationExcludesAppleMenuGapsAndUnknownGeometry() {
+    let items: [CGRect?] = [
+      CGRect(x: -200, y: 0, width: 20, height: 24),
+      CGRect(x: -170, y: 0, width: 50, height: 24), CGRect(x: -110, y: 0, width: 40, height: 24),
+    ]
+    XCTAssertFalse(computerMenuPointAllowed(x: -190, y: 12, items: items))
+    XCTAssertTrue(computerMenuPointAllowed(x: -150, y: 12, items: items))
+    XCTAssertFalse(computerMenuPointAllowed(x: -175, y: 12, items: items))
+    XCTAssertFalse(computerMenuPointAllowed(x: -70, y: 12, items: items))
+    XCTAssertFalse(computerMenuPointAllowed(x: -150, y: 24, items: items))
+    XCTAssertFalse(computerMenuPointAllowed(x: .nan, y: 0, items: items))
+    XCTAssertFalse(computerMenuPointAllowed(x: -150, y: 12, items: [nil, items[1]]))
   }
 
   func testMouseDownRecipientUsesSelectedWindowNotRectangleOrder() {

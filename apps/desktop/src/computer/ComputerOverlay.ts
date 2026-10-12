@@ -110,6 +110,7 @@ export class ComputerOverlay implements ComputerOverlaySurface {
     const animate =
       !!point &&
       (!this.lastPoint || Math.hypot(point.x - this.lastPoint.x, point.y - this.lastPoint.y) >= 4);
+    const renders: Promise<unknown>[] = [];
     for (const window of this.windows.values()) {
       const bounds = window.getBounds();
       const here =
@@ -132,9 +133,22 @@ export class ComputerOverlay implements ComputerOverlaySurface {
           : {}),
       };
       if (!window.isDestroyed())
-        await window.webContents
-          .executeJavaScript(`window.drawComputerAction(${JSON.stringify(action)})`)
-          .catch(() => undefined);
+        renders.push(
+          window.webContents
+            .executeJavaScript(`window.drawComputerAction(${JSON.stringify(action)})`)
+            .catch(() => undefined),
+        );
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.allSettled(renders),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, 100);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
     // Bounded cursor animation; authorization is rechecked after this wait.
     if (animate) await new Promise<void>((resolve) => setTimeout(resolve, 180));

@@ -202,11 +202,19 @@ describe("private computer host channel", () => {
       },
     });
     const answer = { requestId: "request", backendIncarnation: "incarnation", decisions: [] };
+    expect(h.channel.accessRequest("profile", answer).apps).toEqual([
+      { appId: "notes", name: "Notes", tier: "full" },
+    ]);
+    expect(() => h.channel.accessRequest("other", answer)).toThrow();
+    expect(() =>
+      h.channel.accessRequest("profile", { ...answer, backendIncarnation: "old" }),
+    ).toThrow();
     expect(() => h.channel.answerAccess("other", answer)).toThrow();
     expect(() =>
       h.channel.answerAccess("profile", { ...answer, backendIncarnation: "old" }),
     ).toThrow();
     h.channel.answerAccess("profile", answer);
+    expect(() => h.channel.accessRequest("profile", answer)).toThrow();
     expect(() => h.channel.answerAccess("profile", answer)).toThrow();
     expect(h.process.send).toHaveBeenCalledWith(
       { type: "accessAnswer", answer },

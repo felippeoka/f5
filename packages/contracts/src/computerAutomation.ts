@@ -278,6 +278,7 @@ export const ComputerAccessRequested = Schema.Struct({
   threadId: Id,
   reason: Schema.String.check(Schema.isMaxLength(500)),
   kind: Schema.Literals(["apps", "session-actions", "chrome-setup"]),
+  typingRequested: Schema.optionalKey(Schema.Boolean),
   chromeSetup: Schema.optionalKey(
     Schema.Struct({
       provider: Schema.Literals(["claude", "codex"]),

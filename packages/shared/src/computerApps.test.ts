@@ -13,6 +13,22 @@ import {
 } from "./computerGeometry";
 
 describe("computer app catalog", () => {
+  it.each(["co.zeit.hyper", "org.tabby", "dev.zed.Zed", "com.exafunction.windsurf"])(
+    "restricts additional command-capable macOS app %s",
+    (id) => expect(appTier(id, "darwin")).toBe("click"),
+  );
+  it.each([
+    "hyper.exe",
+    "tabby.exe",
+    "mintty.exe",
+    "wsl.exe",
+    "bash.exe",
+    "zed.exe",
+    "windsurf.exe",
+    "Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe!App",
+  ])("restricts additional Windows shell/IDE %s", (id) =>
+    expect(appTier(id, "win32")).toBe("click"),
+  );
   it("prefers exact app IDs and names without silently granting fuzzy matches", () => {
     const apps = [
       { appId: "code", name: "Code", tier: "click" as const, running: true, frontmost: false },

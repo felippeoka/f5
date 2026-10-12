@@ -139,9 +139,13 @@ the availability probe can return true. That runtime wiring is still pending.
 ### App consent and protection tiers
 
 Observe `computer_status` first, then `computer_list_apps` and `computer_request_access`.
-Requests show a desktop dialog and a timeline card. Only a trusted user gesture in the
-owning profile's registered main-frame renderer can answer, through preload and main's
-private host channel. Web clients show “Answer on the computer running F5”. Requests
+Requests show a desktop dialog and a timeline card. **Review access** opens native dialogs
+owned by Electron main. The renderer only identifies the pending request; its allowance,
+typing, remembering and session-action fields are ignored. Native dialog choices alone
+produce the answer on the owning profile's private host channel. Requesting app consent
+releases existing native execution before the dialog is shown. Cancel defaults to deny;
+main revalidates request expiry and backend incarnation after every dialog. Resume of actual
+computer control also requires a native confirmation, independently of renderer gestures. Web clients show “Answer on the computer running F5”. Requests
 expire after 300 seconds; turn/session end closes them. Full-access runtime mode never
 bypasses app consent, pause or protected targets. Other runtime modes also require a
 session-actions approval; plan mode permits observation only.
@@ -157,11 +161,19 @@ The authoritative catalog is `packages/shared/src/computerApps.ts`, generated in
 native builds and checked for drift in CI. Dock, menu-bar status items, Control Center,
 Notification Center, Spotlight, Start, tray and desktop shell surfaces are never
 application grants. Browsers carry “This app can act on sites you are signed in to”.
-Typing into a click-tier app can run commands, so its typing checkbox starts off.
+Typing into a click-tier app can run commands. Its native dialog defaults to Deny and
+separates **Allow clicks** from **Allow clicks and typing**; remembering defaults off.
+`computer_request_access` accepts `typing: true` to request a typing upgrade after click-only
+access. Ordinary duplicate requests do not prompt again, and a declined typing upgrade is
+not prompted again within the same turn. Full-tier native approval explicitly says
+**Allow control and typing**. Unknown apps retain the plan's full-tier ceiling; identity
+classification is not a sandbox and consent is required for every app.
 
 Grants last for the provider session, across turns. “Always allow in this project” writes
 server-owned `computer-access.json` under `ServerConfig.stateDir`, through serialized
-atomic writes. Session deny overrides a remembered grant. Revoke narrows live access;
+atomic writes. Invalid or incompatible files are quarantined with their original bytes
+preserved and startup continues without remembered grants. If quarantine fails, remembering
+is disabled until storage is repaired. Session deny overrides a remembered grant. Revoke narrows live access;
 Forget removes a remembered grant from project settings. Restart retains remembered
 grants and drops session grants. Settings patches and model tool calls cannot add grants.
 An agent with unrestricted filesystem write access can still edit these files; the
@@ -211,7 +223,9 @@ Capture images are at most 8 MiB encoded; inspect is bounded to 400 nodes, depth
 256 KiB; other results are 64 KiB and complete tool responses 16 MiB. Screenshot results
 reach the model intact. Persisted images use the existing attachment pipeline, with a
 200-image and 64 MiB per-thread budget; excess images count as `mcpImagesOmitted`. Computer
-screenshots in plan mode are not persisted.
+screenshots in plan mode are not persisted. The native NDJSON line limit is separately
+12 MiB; both helpers return a correlated `ResultTooLarge` for oversized responses.
+This differs from the complete MCP tool-response limit of 16 MiB.
 
 ### Stop, pause and failure handling
 
@@ -243,7 +257,20 @@ disconnection cancels work and releases that backend's lease. Losing host/helper
 mutation reports `OutcomeUnknown`: take a screenshot before retrying. Mutations are never
 retried automatically after ambiguity. Duplicate request IDs join the admitted result;
 different payload hashes are rejected and evicted IDs remain tombstones for their
-execution generation.
+execution generation. Transport dispatchers keep at most 65,536 invocation tombstones per
+MCP initialization and refuse new IDs at saturation. Completed observation IDs are retained
+as well: expiring an ID could change a late retry from rejected into a fresh call. MCP
+re-initialization creates a new invocation identity scope, rejects retired session headers,
+and does not deduplicate calls made with a new scope. After `OutcomeUnknown`, a client must
+observe before deliberately issuing any new action; it must never automatically re-submit
+a mutation after reconnect. This boundary is covered by the mutation re-initialization test.
+Preview-only pause/resume remains available with missing or unhealthy computer helpers;
+remote resume is refused for a held native/Chrome lease or a main-authoritative computer pause.
+
+Overlay rendering is bounded to 280 ms and cancellation releases its queue slot without
+allowing late dispatch. If an observation worker blocks in another app (including Windows
+`PrintWindow`), the 10 s supervisor timeout suspends and retires the helper; replacements
+start suspended and no action is retried. Three such failures in 60 s require explicit Retry.
 
 Screen Recording/Accessibility permission failures and periodic macOS Screen Recording
 re-prompts report `missing-permissions`. F5 opens the appropriate Settings pane only on
@@ -264,6 +291,9 @@ persistence. Typed text, semantic values, inspect names/values and raw error str
 removed, including nested fields. Codex built-in `cua_repl` JavaScript and text output are
 entirely omitted. This does not modify model-facing results or erase provider-managed
 conversation history. Look-alike project server names do not acquire trusted provenance.
+The sanitizer retains at most 65,536 item/block identities across active sessions. At
+saturation it conservatively redacts subsequent events for affected computer-enabled
+threads until session release, rather than forgetting an identity and leaking late results.
 Before queue admission, both adapters store bounded computer screenshots through the
 attachment registry and enqueue only sanitized summaries and attachment references.
 Missing storage, unknown threads, plan mode, or exhausted image budgets produce an

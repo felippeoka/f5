@@ -4784,8 +4784,16 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.previewAutomationSetPaused: {
         const body = stripRequestTag(request.body);
-        if (!body.paused && Option.isSome(computerAutomationBroker))
-          computerAutomationBroker.value.assertRemoteResumeAllowed(body.threadId);
+        if (!body.paused && Option.isSome(computerAutomationBroker)) {
+          const broker = computerAutomationBroker.value;
+          yield* Effect.try({
+            try: () => broker.assertRemoteResumeAllowed(body.threadId),
+            catch: () =>
+              new RouteRequestError({
+                message: "Resume computer control on the computer running F5.",
+              }),
+          });
+        }
         yield* previewAutomationBroker.setPaused(body.threadId, body.paused);
         if (Option.isSome(computerAutomationBroker))
           computerAutomationBroker.value.setPaused(body.threadId, body.paused);

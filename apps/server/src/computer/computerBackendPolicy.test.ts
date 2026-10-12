@@ -1,6 +1,35 @@
+import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
-import { resolveComputerBackendSelection } from "./computerBackendPolicy";
+import * as availability from "./computerBuiltinAvailability";
+import {
+  resolveComputerBackendSelection,
+  resolveProviderComputerBackendSelection,
+} from "./computerBackendPolicy";
+
+describe("computer configuration provider scope", () => {
+  it.each(["opencode", "cursor", "grok", "antigravity", undefined] as const)(
+    "never probes or produces restart state for %s",
+    async (provider) => {
+      const probe = vi.spyOn(availability, "probeComputerBuiltin");
+      try {
+        for (const enabled of [false, true])
+          for (const nativeStatus of [
+            { available: true as const },
+            { available: false as const, reason: "helper-crashed" as const },
+          ])
+            expect(
+              await Effect.runPromise(
+                resolveProviderComputerBackendSelection(provider, { enabled, nativeStatus }),
+              ),
+            ).toBeUndefined();
+        expect(probe).not.toHaveBeenCalled();
+      } finally {
+        probe.mockRestore();
+      }
+    },
+  );
+});
+
 describe("computer installation fingerprint", () => {
   it("does not restart provider sessions for recoverable native health changes", async () => {
     const initial = await Effect.runPromise(

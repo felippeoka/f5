@@ -45,6 +45,7 @@ export class ComputerHelperClient implements ComputerHelper {
   private ready = false;
   private closing = false;
   private terminalFailure = false;
+  private observationRecovery: ChildProcessWithoutNullStreams | undefined;
   constructor(
     private readonly root: string,
     private readonly executable: string,
@@ -136,7 +137,7 @@ export class ComputerHelperClient implements ComputerHelper {
       if (this.closing) return;
       if (this.terminalFailure) return;
       this.crashes = this.crashes.filter((time) => this.now() - time < 60_000);
-      this.crashes.push(this.now());
+      if (this.observationRecovery !== child) this.crashes.push(this.now());
       if (this.crashes.length < 3)
         this.restartTimer = setTimeout(() => this.start(), 500 * 2 ** (this.crashes.length - 1));
     });
@@ -240,6 +241,7 @@ export class ComputerHelperClient implements ComputerHelper {
     timeout: number,
     mutation: boolean,
   ): Promise<unknown> {
+    const child = this.child;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
@@ -251,10 +253,28 @@ export class ComputerHelperClient implements ComputerHelper {
               : { _tag: "Execution", message: "Observation timed out." },
           ),
         );
+        // Cancel cannot interrupt PrintWindow/AX calls stuck inside another app.
+        // Retire that process; a replacement starts suspended and receives no retries.
+        if (!mutation && message.type === "request" && child && this.child === child)
+          void this.recoverObservation(child);
       }, timeout);
       this.pending.set(id, { resolve, reject, timer, mutation });
       this.control(message);
     });
+  }
+  private async recoverObservation(child: ChildProcessWithoutNullStreams): Promise<void> {
+    if (this.child !== child || this.observationRecovery === child) return;
+    this.observationRecovery = child;
+    this.crashes = this.crashes.filter((time) => this.now() - time < 60_000);
+    this.crashes.push(this.now());
+    if (this.crashes.length >= 3) this.terminalFailure = true;
+    this.fail({
+      available: false,
+      reason: "helper-crashed",
+      detail: "Observation worker timed out.",
+    });
+    await this.suspend();
+    if (this.child === child) child.kill("SIGKILL");
   }
   async suspend(): Promise<void> {
     const child = this.child;
@@ -265,13 +285,16 @@ export class ComputerHelperClient implements ComputerHelper {
     } catch {
       if (this.child !== child) return;
       this.child = null;
+      this.ready = false;
       child.kill("SIGKILL");
       this.fail({ available: false, reason: "helper-crashed" });
-      if (!this.closing) this.restartTimer = setTimeout(() => this.start(), 250);
+      if (!this.closing && !this.terminalFailure)
+        this.restartTimer = setTimeout(() => this.start(), 250);
     }
   }
   retry(): void {
     this.crashes = [];
+    this.observationRecovery = undefined;
     clearTimeout(this.restartTimer);
     const child = this.child;
     this.child = null;

@@ -114,6 +114,7 @@ export class ComputerAccessService {
     apps: ReadonlyArray<ComputerApp>,
     reason: string,
     kind: "apps" | "session-actions" = "apps",
+    typing = false,
   ): Promise<ComputerAccessAnswer | null> {
     const binding = this.bindings.get(threadId);
     if (!binding) throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
@@ -127,10 +128,15 @@ export class ComputerAccessService {
             (grant) =>
               grant.appId === app.appId &&
               grant.tier ===
-                restrictComputerTier(app.tier, appTier(app.appId, this.options.platform)),
+                restrictComputerTier(app.tier, appTier(app.appId, this.options.platform)) &&
+              (!typing || grant.tier !== "click" || grant.allowTyping),
           ),
       )
-      .filter((app) => !this.deniedThisTurn.has(`${threadId}\0${turnId}\0${app.appId}`));
+      .filter(
+        (app) =>
+          !this.deniedThisTurn.has(`${threadId}\0${turnId}\0${app.appId}`) &&
+          (!typing || !this.deniedThisTurn.has(`${threadId}\0${turnId}\0${app.appId}\0typing`)),
+      );
     if (kind === "apps" && !candidates.length) return null;
     if (
       kind === "session-actions" &&
@@ -149,6 +155,7 @@ export class ComputerAccessService {
       threadId,
       reason: reason.slice(0, 500),
       kind,
+      ...(typing ? { typingRequested: true } : {}),
       apps: candidates.slice(0, 10).map((app) => ({
         appId: app.appId,
         name: app.name,
@@ -226,6 +233,10 @@ export class ComputerAccessService {
             this.options.changed(threadId);
           }
       for (const decision of decisions) {
+        if (pending.request.typingRequested && !decision.allowTyping)
+          this.deniedThisTurn.add(
+            `${pending.request.threadId}\0${pending.turnId}\0${decision.appId}\0typing`,
+          );
         const app = pending.request.apps.find((entry) => entry.appId === decision.appId)!;
         binding.overrides.set(
           app.appId,

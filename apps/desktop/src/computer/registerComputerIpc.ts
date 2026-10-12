@@ -12,9 +12,9 @@ export function registerComputerIpc(
   input: {
     authorize: (event: IpcMainInvokeEvent) => string;
     status: () => ComputerAutomationBackendStatus;
-    retry: () => void;
-    answer: (profileId: string, answer: ComputerAccessAnswer) => void;
-    pause: (profileId: string, threadId: string, paused: boolean) => void;
+    retry: () => void | Promise<void>;
+    answer: (profileId: string, answer: ComputerAccessAnswer) => void | Promise<void>;
+    pause: (profileId: string, threadId: string, paused: boolean) => void | Promise<void>;
   },
 ): void {
   const register = (
@@ -36,7 +36,7 @@ export function registerComputerIpc(
   register("retry", () => input.retry());
   register("answer", (profile, args) => {
     if (args[1] !== true) throw new Error("Computer access requires a trusted user gesture.");
-    input.answer(profile, Schema.decodeUnknownSync(ComputerAccessAnswer)(args[0]));
+    return input.answer(profile, Schema.decodeUnknownSync(ComputerAccessAnswer)(args[0]));
   });
   register("pause", (profile, args) => {
     if (typeof args[0] !== "string" || args[0].length === 0 || typeof args[1] !== "boolean")

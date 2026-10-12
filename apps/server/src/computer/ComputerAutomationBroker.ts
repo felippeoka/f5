@@ -25,6 +25,7 @@ import { resolveAgentBrowserPolicy, type AgentBrowserPolicy } from "../mcp/brows
 import { AutomationQueue } from "../mcp/automationQueue";
 import { AgentControlPause, AgentControlPauseService } from "../mcp/agentControlPause";
 import { DesktopComputerHost } from "./DesktopComputerHost";
+import { computerAccessStorage } from "./computerAccessStorage";
 import { ComputerAccessService } from "./ComputerAccessService";
 
 export interface ComputerInvocationContext {
@@ -85,6 +86,7 @@ export class ComputerAutomationBrokerRuntime {
   >();
   private readonly listeners = new Set<(event: ComputerBrokerEvent) => void>();
   private readonly endedTurns = new Set<string>();
+  private readonly nativePaused = new Set<string>();
   private mainHolder: ComputerLeaseHolder | null = null;
   private chromeHolder: ChromeLeaseHolder | null = null;
   private readonly setupConsents = new Map<
@@ -188,6 +190,8 @@ export class ComputerAutomationBrokerRuntime {
         else void this.access.answerFromHost(message.answer).catch(() => undefined);
       }
       if (message.type === "pauseChanged") {
+        if (message.paused) this.nativePaused.add(message.threadId);
+        else this.nativePaused.delete(message.threadId);
         this.pause.set(message.threadId, message.paused);
         const binding = this.bindings.get(message.threadId);
         if (binding && message.paused)
@@ -277,6 +281,8 @@ export class ComputerAutomationBrokerRuntime {
     if (!binding || binding.generation !== sessionGeneration)
       throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
     const ctx = await this.options.resolve(threadId, sessionGeneration, binding.provider);
+    if (this.bindings.get(threadId) !== binding)
+      throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
     this.access.bind(threadId, ctx.projectId, sessionGeneration);
     return ctx;
   }
@@ -333,7 +339,9 @@ export class ComputerAutomationBrokerRuntime {
     }
     if (input.op === "status") return status;
     const mutation = isComputerMutation(input.op);
-    const binding = this.bindings.get(threadId)!;
+    const binding = this.bindings.get(threadId);
+    if (!binding || binding.generation !== generation)
+      throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
     if (ctx.turnId !== "observation") binding.turnId = ctx.turnId;
     if (mutation) {
       if (ctx.turnId === "observation" || this.endedTurns.has(`${generation}\0${ctx.turnId}`))
@@ -446,6 +454,7 @@ export class ComputerAutomationBrokerRuntime {
     generation: string,
     queries: ReadonlyArray<string>,
     reason: string,
+    typing = false,
   ): Promise<unknown> {
     const ctx = await this.context(threadId, generation);
     const apps = (await this.invoke(threadId, generation, {
@@ -459,7 +468,10 @@ export class ComputerAutomationBrokerRuntime {
       return { query, matches, app };
     });
     const candidates = resolutions.flatMap(({ app }) => (app ? [app] : []));
-    await this.access.requestAccess(threadId, ctx.turnId, candidates, reason);
+    // User interaction with a consent dialog must not race continuing native input.
+    // Keep this turn's denial history, while cancelling queued/in-flight execution.
+    this.cancelTurn(threadId, generation, ctx.turnId, "paused", false, false);
+    await this.access.requestAccess(threadId, ctx.turnId, candidates, reason, "apps", typing);
     const grants = this.access.grants(threadId);
     return {
       grants,
@@ -472,9 +484,21 @@ export class ComputerAutomationBrokerRuntime {
             ? "ambiguous"
             : app.tier === "blocked" || appTier(app.appId, this.options.platform) === "blocked"
               ? "blocked"
-              : before.some((grant) => grant.appId === app.appId)
+              : before.some(
+                    (grant) =>
+                      grant.appId === app.appId &&
+                      (!typing ||
+                        grant.tier === "full" ||
+                        (grant.tier === "click" && grant.allowTyping)),
+                  )
                 ? "already-granted"
-                : grants.some((grant) => grant.appId === app.appId)
+                : grants.some(
+                      (grant) =>
+                        grant.appId === app.appId &&
+                        (!typing ||
+                          grant.tier === "full" ||
+                          (grant.tier === "click" && grant.allowTyping)),
+                    )
                   ? "allowed"
                   : "denied",
         ...(!app && matches.length
@@ -484,7 +508,11 @@ export class ComputerAutomationBrokerRuntime {
     };
   }
   assertRemoteResumeAllowed(threadId: string): void {
-    if (this.bindings.has(threadId) || this.chromeHolder?.threadId === threadId)
+    if (
+      this.nativePaused.has(threadId) ||
+      this.mainHolder?.threadId === threadId ||
+      this.chromeHolder?.threadId === threadId
+    )
       throw new Error("Resume computer control on the computer running F5.");
   }
   setPaused(threadId: string, paused: boolean): void {
@@ -493,7 +521,10 @@ export class ComputerAutomationBrokerRuntime {
       this.host.send({ type: "pauseChanged", threadId, paused });
       const binding = this.bindings.get(threadId);
       if (binding) this.cancelTurn(threadId, binding.generation, binding.turnId, "paused");
-    } else this.assertRemoteResumeAllowed(threadId);
+    } else {
+      this.assertRemoteResumeAllowed(threadId);
+      this.pause.set(threadId, false);
+    }
   }
   private cancelTurn(
     threadId: string,
@@ -501,6 +532,7 @@ export class ComputerAutomationBrokerRuntime {
     turnId: string | undefined,
     cause: "paused" | "turn-ended",
     cancelSetup = true,
+    finishAccessTurn = true,
   ): void {
     const binding = this.bindings.get(threadId);
     if (!binding || binding.generation !== generation || (turnId && binding.turnId !== turnId))
@@ -521,7 +553,7 @@ export class ComputerAutomationBrokerRuntime {
       this.host.send({ type: "leaseRelease", requestId: randomUUID(), holder: binding.holder });
       delete binding.holder;
     }
-    if (turnId) this.access.endTurn(threadId, turnId);
+    if (turnId && finishAccessTurn) this.access.endTurn(threadId, turnId);
   }
   endTurn(threadId: string, turnId: string, generation?: string): void {
     const binding = this.bindings.get(threadId);
@@ -542,6 +574,7 @@ export class ComputerAutomationBrokerRuntime {
     // Its adapter releases only after the CLI closes; disposing native tools
     // earlier must not expose an active native host to another profile.
     automationEventSanitizer.clear(threadId);
+    this.nativePaused.delete(threadId);
     const grantVersion = this.access.version(threadId) + 1;
     this.host.send({
       type: "grantsChanged",
@@ -625,22 +658,19 @@ export const ComputerAutomationBrokerLive = Layer.effect(
     const run = <A, E>(effect: Effect.Effect<A, E, Dependencies>) =>
       Effect.runPromise(effect.pipe(Effect.provide(services)));
     const file = path.join(config.stateDir, "computer-access.json");
-    const Stored = Schema.Array(
-      Schema.Struct({ ...ComputerGrant.fields, projectId: Schema.String }),
-    );
     const host = DesktopComputerHost.fromEnvironment(config.profile?.id ?? "default");
     const pause = yield* Effect.serviceOption(AgentControlPauseService);
     const broker = new ComputerAutomationBrokerRuntime(host, {
       ...(Option.isSome(pause) ? { pause: pause.value } : {}),
       platform: process.platform === "win32" ? "win32" : "darwin",
-      storage: {
-        load: async () => {
-          if (!(await run(fs.exists(file)))) return [];
-          return Schema.decodeUnknownSync(Stored)(JSON.parse(await run(fs.readFileString(file))));
-        },
-        save: (grants) =>
-          run(writeFileStringAtomically({ filePath: file, contents: JSON.stringify(grants) })),
-      },
+      storage: computerAccessStorage({
+        exists: () => run(fs.exists(file)),
+        read: () => run(fs.readFileString(file)),
+        quarantine: (suffix) =>
+          run(fs.rename(file, path.join(config.stateDir, `computer-access.${suffix}`))),
+        warn: (message) => console.warn(message),
+        write: (contents) => run(writeFileStringAtomically({ filePath: file, contents })),
+      }),
       resolve: async (threadId, sessionGeneration, provider) => {
         const rows = await run(
           sql<{

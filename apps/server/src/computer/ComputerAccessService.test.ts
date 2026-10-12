@@ -29,6 +29,50 @@ async function harness(
   return { service, requests, save, changed };
 }
 describe("server-owned computer grants", () => {
+  it("explicitly upgrades click-only access to typing without re-prompting ordinary duplicate requests", async () => {
+    const h = await harness([
+      { projectId: "p", appId: app.appId, tier: "click", allowTyping: false },
+    ]);
+    try {
+      expect(await h.service.requestAccess("t", "turn", [app], "Click")).toBeNull();
+      expect(h.requests).toHaveLength(0);
+      const before = h.service.version("t");
+      const upgrade = h.service.requestAccess("t", "turn", [app], "Typing needed", "apps", true);
+      expect(h.requests[0]?.typingRequested).toBe(true);
+      await h.service.answerFromHost({
+        requestId: h.requests[0]!.requestId,
+        backendIncarnation: "backend",
+        decisions: [{ appId: app.appId, allow: true, allowTyping: true, remember: false }],
+      });
+      await upgrade;
+      expect(() => h.service.require("t", app.appId, "type")).not.toThrow();
+      expect(h.service.version("t")).toBeGreaterThan(before);
+      expect(await h.service.requestAccess("t", "turn", [app], "Typing", "apps", true)).toBeNull();
+      expect(h.requests).toHaveLength(1);
+    } finally {
+      h.service.close();
+    }
+  });
+  it("does not re-prompt a declined typing upgrade in the same turn", async () => {
+    const h = await harness([
+      { projectId: "p", appId: app.appId, tier: "click", allowTyping: false },
+    ]);
+    try {
+      const upgrade = h.service.requestAccess("t", "turn", [app], "Typing", "apps", true);
+      await h.service.answerFromHost({
+        requestId: h.requests[0]!.requestId,
+        backendIncarnation: "backend",
+        decisions: [{ appId: app.appId, allow: true, allowTyping: false, remember: false }],
+      });
+      await upgrade;
+      expect(() => h.service.require("t", app.appId, "click")).not.toThrow();
+      expect(() => h.service.require("t", app.appId, "type")).toThrow();
+      expect(await h.service.requestAccess("t", "turn", [app], "Retry", "apps", true)).toBeNull();
+      expect(h.requests).toHaveLength(1);
+    } finally {
+      h.service.close();
+    }
+  });
   it("preserves native tier ceilings and normalizes remembered packaged identities", async () => {
     const rawId = "Vendor.PasswordManager_abcd!App";
     const h = await harness(

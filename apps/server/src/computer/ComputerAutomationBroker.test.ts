@@ -95,10 +95,37 @@ async function harness() {
   };
 }
 describe("computer broker safety boundaries", () => {
-  it("keeps native pause authoritative and refuses remote resume", async () => {
+  it("allows remote preview resume when computer tools were installed but never used", async () => {
     const h = await harness();
     try {
       h.broker.setPaused("t", true);
+      h.ipc.emit("message", {
+        type: "status",
+        status: { available: false, reason: "helper-missing" },
+      });
+      expect(() => h.broker.assertRemoteResumeAllowed("t")).not.toThrow();
+      expect(() => h.broker.setPaused("t", false)).not.toThrow();
+    } finally {
+      h.broker.close();
+    }
+  });
+  it("returns turn-ended when a session is released during context resolution", async () => {
+    const h = await harness();
+    try {
+      const pending = h.broker.invoke("t", "s", { op: "listApps" });
+      h.broker.releaseSession("t", "s");
+      await expect(pending).rejects.toMatchObject({
+        error: { _tag: "Interrupted", cause: "turn-ended" },
+      });
+      expect(h.broker.access.grants("t")).toEqual([]);
+    } finally {
+      h.broker.close();
+    }
+  });
+  it("keeps native pause authoritative and refuses remote resume", async () => {
+    const h = await harness();
+    try {
+      h.ipc.emit("message", { type: "pauseChanged", threadId: "t", paused: true });
       expect(() => h.broker.assertRemoteResumeAllowed("t")).toThrow("computer running F5");
       expect(() => h.broker.setPaused("t", false)).toThrow("computer running F5");
       expect(h.broker.pause.has("t")).toBe(true);

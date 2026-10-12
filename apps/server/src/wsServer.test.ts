@@ -7,6 +7,13 @@ import {
 import { SERVER_BOOTSTRAP } from "./wsServer/protocol";
 import * as Http from "node:http";
 import { createHash } from "node:crypto";
+import { EventEmitter } from "node:events";
+import {
+  ComputerAutomationBroker,
+  ComputerAutomationBrokerRuntime,
+  ComputerAutomationBrokerLive,
+} from "./computer/ComputerAutomationBroker";
+import { DesktopComputerHost } from "./computer/DesktopComputerHost";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -860,6 +867,7 @@ describe("WebSocket Server", () => {
       terminalManager?: TerminalManagerShape;
       observabilityEnabled?: boolean;
       createServerFactory?: typeof createServer;
+      computerAccess?: boolean;
     } = {},
   ): Promise<Http.Server> {
     if (serverScope) {
@@ -916,6 +924,9 @@ describe("WebSocket Server", () => {
     } satisfies ServerConfigShape);
     const infrastructureLayer = providerLayer.pipe(Layer.provideMerge(persistenceLayer));
     const runtimeOverrides = Layer.mergeAll(
+      options.computerAccess
+        ? ComputerAutomationBrokerLive.pipe(Layer.provide(persistenceLayer))
+        : Layer.empty,
       options.gitManager ? Layer.succeed(GitManager, options.gitManager) : Layer.empty,
       options.gitCore
         ? Layer.succeed(GitCore, options.gitCore as unknown as GitCoreShape)
@@ -966,6 +977,75 @@ describe("WebSocket Server", () => {
     serverScope = null;
     await Effect.runPromise(Scope.close(scope, Exit.void));
   }
+
+  it.each(['[{"appId":"private-sentinel"', '[{"tier":"future","appId":"x","projectId":"p"}]'])(
+    "starts the real headless backend with invalid remembered grants: %s",
+    async (contents) => {
+      const stateDir = makeTempDir("f5-corrupt-grants-");
+      fs.writeFileSync(path.join(stateDir, "computer-access.json"), contents);
+      server = await createTestServer({ stateDir, computerAccess: true });
+      const address = server.address();
+      const [ws] = await connectAndAwaitWelcome(
+        typeof address === "object" && address ? address.port : 0,
+      );
+      connections.push(ws);
+      expect(fs.existsSync(path.join(stateDir, "computer-access.json"))).toBe(false);
+      const saved = fs
+        .readdirSync(stateDir)
+        .find((name) => name.startsWith("computer-access.corrupt-"));
+      expect(saved).toBeDefined();
+      expect(fs.readFileSync(path.join(stateDir, saved!), "utf8")).toBe(contents);
+    },
+  );
+
+  it.each([false, true])(
+    "preview resume remains typed and only requires main approval for computer pause=%s",
+    async (computerPaused) => {
+      const ipc = Object.assign(new EventEmitter(), {
+        connected: true,
+        send: (_message: unknown, callback: (error: Error | null) => void) => {
+          callback(null);
+          return true;
+        },
+      });
+      const host = new DesktopComputerHost("profile", "backend", ipc, true);
+      const broker = new ComputerAutomationBrokerRuntime(host, {
+        platform: "darwin",
+        storage: { load: async () => [], save: async () => {} },
+        resolve: async () => {
+          throw new Error("Computer tools must not execute in this test.");
+        },
+      });
+      const threadId = ThreadId.makeUnsafe("preview-with-computer-tools");
+      broker.bindSession(threadId, "session", "claude");
+      ipc.emit("message", {
+        type: "status",
+        status: { available: false, reason: "helper-missing" },
+      });
+      if (computerPaused) ipc.emit("message", { type: "pauseChanged", threadId, paused: true });
+      try {
+        server = await createTestServer({
+          createServerFactory: () =>
+            createServer().pipe(Effect.provideService(ComputerAutomationBroker, broker)),
+        });
+        const address = server.address();
+        const [ws] = await connectAndAwaitWelcome(
+          typeof address === "object" && address ? address.port : 0,
+        );
+        connections.push(ws);
+        const response = await sendRequest(ws, WS_METHODS.previewAutomationSetPaused, {
+          threadId,
+          paused: false,
+        });
+        if (computerPaused) {
+          expect(response.error?.message).toContain("computer running F5");
+          expect(broker.pause.has(threadId)).toBe(true);
+        } else expect(response.error).toBeUndefined();
+      } finally {
+        broker.close();
+      }
+    },
+  );
 
   afterEach(async () => {
     for (const ws of connections) {

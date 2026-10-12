@@ -108,6 +108,20 @@ export class AutomationEventSanitizer {
   private readonly servers = new Map<string, ReadonlyArray<AutomationToolProvenance>>();
   private readonly items = new Map<string, AutomationToolProvenance>();
   private readonly blocks = new Map<string, AutomationToolProvenance>();
+  private readonly overflow = new Set<string>();
+  constructor(private readonly itemLimit = 65_536) {}
+  private remember(
+    threadId: string,
+    id: string,
+    provenance: AutomationToolProvenance,
+    block = false,
+  ): void {
+    const map = block ? this.blocks : this.items;
+    const key = `${threadId}\0${id}`;
+    if (map.has(key) || this.items.size + this.blocks.size < this.itemLimit)
+      map.set(key, provenance);
+    else this.overflow.add(threadId);
+  }
   register(threadId: string, provenance: AutomationToolProvenance): void {
     this.servers.set(threadId, [
       ...(this.servers.get(threadId) ?? []).filter(
@@ -118,6 +132,7 @@ export class AutomationEventSanitizer {
   }
   clear(threadId: string): void {
     this.servers.delete(threadId);
+    this.overflow.delete(threadId);
     for (const map of [this.items, this.blocks])
       for (const key of map.keys()) if (key.startsWith(`${threadId}\0`)) map.delete(key);
   }
@@ -176,7 +191,7 @@ export class AutomationEventSanitizer {
           ? servers.find((entry) => isComputerAutomationTool(name, entry))
           : undefined;
       const id = record.itemId ?? record.id;
-      if (match && typeof id === "string") this.items.set(`${threadId}\0${id}`, match);
+      if (match && typeof id === "string") this.remember(threadId, id, match);
       for (const key of [
         "message",
         "content",
@@ -219,13 +234,12 @@ export class AutomationEventSanitizer {
             : "";
       const itemId = record.tool_use_id ?? record.itemId ?? record.id;
       const provenance = lookup(record) ?? inherited;
-      if (provenance && typeof itemId === "string")
-        this.items.set(`${threadId}\0${itemId}`, provenance);
+      if (provenance && typeof itemId === "string") this.remember(threadId, itemId, provenance);
       if (record.type === "content_block_start" && typeof record.index === "number") {
         const block = record.content_block as Record<string, unknown> | undefined;
         const blockName = typeof block?.name === "string" ? block.name : "";
         const match = servers.find((entry) => isComputerAutomationTool(blockName, entry));
-        if (match) this.blocks.set(`${threadId}\0${record.index}`, match);
+        if (match) this.remember(threadId, String(record.index), match, true);
       }
       const blockProvenance =
         typeof record.index === "number"
@@ -313,10 +327,12 @@ export class AutomationEventSanitizer {
       }
       return result;
     };
-    return visit(value, 0);
+    // Eviction could expose a late result whose tool identity was forgotten.
+    // Once saturated, conservatively redact this thread until session release.
+    return visit(value, 0, this.overflow.has(threadId) ? servers[0] : undefined);
   }
   isComputerItem(threadId: string, itemId: string): boolean {
-    return this.items.has(`${threadId}\0${itemId}`);
+    return this.overflow.has(threadId) || this.items.has(`${threadId}\0${itemId}`);
   }
 }
 export const automationEventSanitizer = new AutomationEventSanitizer();

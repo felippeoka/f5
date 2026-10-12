@@ -56,10 +56,12 @@ struct Snapshot {
     elements: HashMap<String, String>,
 }
 fn emit(value: Value) {
-    let bytes = serde_json::to_vec(&value).unwrap_or_default();
-    if bytes.len() > 12 * 1024 * 1024 {
+    let Some(bytes) = crate::protocol::encode_packet(&value, 12 * 1024 * 1024) else {
+        if let Some(state) = STATE.get() {
+            state.permit.lock().unwrap().suspend();
+        }
         return;
-    }
+    };
     if let Some(queue) = OUTPUT_QUEUE.get() {
         if queue.try_send(bytes).is_err() {
             if let Some(state) = STATE.get() {

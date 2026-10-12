@@ -16,7 +16,7 @@ interface Backend {
   child: ChildProcess;
   incarnation: string;
   ready: boolean;
-  pendingAccess: Set<string>;
+  pendingAccess: Map<string, ComputerAccessRequested>;
 }
 /** Inherited private process IPC is the only registration, execute and consent transport. */
 export class ComputerHostChannel {
@@ -41,7 +41,7 @@ export class ComputerHostChannel {
       this.controller.disconnect(profileId);
       this.chrome.releaseProfile(profileId);
     }
-    const backend: Backend = { child, incarnation, ready: false, pendingAccess: new Set() };
+    const backend: Backend = { child, incarnation, ready: false, pendingAccess: new Map() };
     this.backends.set(profileId, backend);
     child.on("message", (raw: unknown) => {
       if (this.backends.get(profileId) !== backend) return;
@@ -171,7 +171,7 @@ export class ComputerHostChannel {
         case "resumeRequested":
           break;
         case "accessRequested":
-          backend.pendingAccess.add(message.request.requestId);
+          backend.pendingAccess.set(message.request.requestId, message.request);
           this.attention(profileId, message.request);
           break;
         default:
@@ -217,6 +217,13 @@ export class ComputerHostChannel {
   }
   broadcast(message: DesktopComputerHostMessage): void {
     for (const profileId of this.backends.keys()) this.send(profileId, message);
+  }
+  accessRequest(profileId: string, answer: ComputerAccessAnswer): ComputerAccessRequested {
+    const backend = this.backends.get(profileId);
+    const request = backend?.pendingAccess.get(answer.requestId);
+    if (!backend?.ready || answer.backendIncarnation !== backend.incarnation || !request)
+      throw new Error("This request expired or belongs to another backend.");
+    return request;
   }
   answerAccess(profileId: string, answer: ComputerAccessAnswer): void {
     const backend = this.backends.get(profileId);
