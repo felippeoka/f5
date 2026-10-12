@@ -5,6 +5,7 @@ import type {
 } from "@t3tools/contracts";
 import { readNativeTaskIdentity } from "@t3tools/shared/nativeTaskIdentity";
 
+import { isNativeOperationInFlight } from "../components/chat/NativeRuntimeTray.logic";
 import { toastManager } from "../components/ui/toast";
 import { readNativeApi } from "../nativeApi";
 
@@ -70,6 +71,56 @@ export async function stopNativeTask(
     report(errorMessage(cause, "The native operation failed."));
     return null;
   }
+}
+
+/** The Claude adapter waits up to 30s for a stop to settle. */
+const STOP_SETTLEMENT_TIMEOUT_MS = 35_000;
+const STOP_SETTLEMENT_POLL_MS = 250;
+
+/**
+ * `execute` returns once the server admits an operation; the stop settles
+ * later, and the thread's native-operation reservation is held until then.
+ * Polls until the record leaves the in-flight states. Resolves with null if it
+ * disappears, `isCancelled` reports true, or settlement times out.
+ */
+export async function waitForNativeOperationSettlement(
+  threadId: ThreadId,
+  operationId: string,
+  isCancelled: () => boolean = () => false,
+): Promise<NativeOperationRecord | null> {
+  const api = readNativeApi()?.nativeOperations;
+  if (!api) return null;
+  const deadline = Date.now() + STOP_SETTLEMENT_TIMEOUT_MS;
+  while (!isCancelled() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, STOP_SETTLEMENT_POLL_MS));
+    if (isCancelled()) return null;
+    try {
+      const record = (await api.list({ threadId })).find(
+        (entry) => entry.operationId === operationId,
+      );
+      if (!record) return null;
+      if (!isNativeOperationInFlight(record)) return record;
+    } catch {
+      /* A transient poll failure retries until the deadline. */
+    }
+  }
+  return null;
+}
+
+/**
+ * Stops a task and waits for the stop to settle, so a following stop on the
+ * same thread is not refused. Resolves true only for a cleanly settled stop.
+ */
+export async function stopNativeTaskAndSettle(
+  target: NativeTaskTarget,
+  isCancelled?: () => boolean,
+): Promise<boolean> {
+  const record = await stopNativeTask(target, { silent: true });
+  if (!record || record.error) return false;
+  const settled = isNativeOperationInFlight(record)
+    ? await waitForNativeOperationSettlement(target.threadId, record.operationId, isCancelled)
+    : record;
+  return settled !== null && !settled.error && settled.state === "completed";
 }
 
 export interface NativeTaskInspection {

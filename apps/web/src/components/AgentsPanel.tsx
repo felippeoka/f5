@@ -13,7 +13,7 @@ import {
   TerminalIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useAgentsPanelStore, type AgentsPanelScope } from "../agentsPanelStore";
 import {
@@ -30,6 +30,7 @@ import {
   canStopNativeTask,
   inspectNativeTask,
   stopNativeTask,
+  stopNativeTaskAndSettle,
   type NativeTaskInspection,
 } from "../lib/nativeTaskActions";
 import { cn } from "../lib/utils";
@@ -623,6 +624,20 @@ export function AgentsPanel(props: {
   );
   const [query, setQuery] = useState("");
   const [stoppingIds, setStoppingIds] = useState<ReadonlySet<string>>(EMPTY_STOPPING_IDS);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const stoppingThreadIds = useMemo(() => {
+    const threadIds = new Set<ThreadId>();
+    for (const entry of [...props.model.agents, ...props.model.backgroundTasks]) {
+      if (stoppingIds.has(entry.id)) threadIds.add(entry.threadId);
+    }
+    return threadIds;
+  }, [props.model, stoppingIds]);
   const threads = useStore((state) => state.threads);
   const capabilitiesByThreadId = useMemo(() => {
     const map = new Map<ThreadId, ProviderSessionCapabilities>();
@@ -661,27 +676,34 @@ export function AgentsPanel(props: {
       return next;
     });
 
-  const stopEntry = async (entry: AgentsPanelEntry, silent: boolean) => {
+  const stopEntry = async (entry: AgentsPanelEntry) => {
     const target = targetFor(entry);
-    if (!target) return false;
+    if (!target) return;
     setStopping(entry.id, true);
-    const record = await stopNativeTask(target, { silent });
-    const succeeded = record !== null && !record.error;
-    if (!succeeded) setStopping(entry.id, false);
-    return succeeded;
+    const record = await stopNativeTask(target);
+    if ((!record || record.error) && mounted.current) setStopping(entry.id, false);
   };
 
   const stopAll = async (entries: ReadonlyArray<AgentsPanelEntry>) => {
+    // Each thread holds one native-operation reservation until a stop settles,
+    // so stops go one at a time and each waits for the previous to finish.
     let succeeded = 0;
     for (const entry of entries) {
-      if (await stopEntry(entry, true)) succeeded += 1;
+      if (!mounted.current) return;
+      const target = targetFor(entry);
+      if (!target) continue;
+      setStopping(entry.id, true);
+      const stopped = await stopNativeTaskAndSettle(target, () => !mounted.current);
+      if (stopped) succeeded += 1;
+      else if (mounted.current) setStopping(entry.id, false);
     }
+    if (!mounted.current) return;
     const failed = entries.length - succeeded;
     toastManager.add(
       failed === 0
         ? {
             type: "success",
-            title: `Asked ${succeeded} ${succeeded === 1 ? "task" : "tasks"} to stop`,
+            title: `Stopped ${succeeded} ${succeeded === 1 ? "task" : "tasks"}`,
           }
         : {
             type: "error",
@@ -731,7 +753,10 @@ export function AgentsPanel(props: {
       backgroundTasksExpanded={backgroundTasksExpanded}
       stoppingIds={stoppingIds}
       canStop={(entry) =>
-        entry.live && canStopNativeTask(capabilitiesByThreadId.get(entry.threadId))
+        entry.live &&
+        canStopNativeTask(capabilitiesByThreadId.get(entry.threadId)) &&
+        // The thread's reservation is held until a pending stop settles.
+        !(stoppingThreadIds.has(entry.threadId) && !stoppingIds.has(entry.id))
       }
       canInspect={(entry) => canInspectNativeTask(capabilitiesByThreadId.get(entry.threadId))}
       onScopeChange={setScope}
@@ -741,7 +766,7 @@ export function AgentsPanel(props: {
       onRetry={props.onRetry}
       onNavigate={(entry) => navigateToThread(entry.threadId, entry.focusActivityId)}
       onOpenThread={(threadId) => navigateToThread(threadId, null)}
-      onStop={(entry) => void stopEntry(entry, false)}
+      onStop={(entry) => void stopEntry(entry)}
       onStopAll={(entries) => void stopAll(entries)}
       onDismiss={(entry) =>
         void dismiss({ threadId: entry.threadId, workItemIds: [...entry.workItemIds] })

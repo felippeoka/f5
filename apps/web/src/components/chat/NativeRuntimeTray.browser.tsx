@@ -2,19 +2,30 @@ import "../../index.css";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
-import { ThreadId, type NativeOperationRecord } from "@t3tools/contracts";
+import {
+  ThreadId,
+  type NativeOperationRecord,
+  type ThreadBackgroundWorkEntry,
+} from "@t3tools/contracts";
 
 import { toastManager } from "../ui/toast";
 import { NativeRuntimeTray } from "./NativeRuntimeTray";
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn(async (): Promise<readonly NativeOperationRecord[]> => []),
-  snapshot: vi.fn(async () => ({ entries: [] })),
+  snapshot: vi.fn(async () => ({ entries: [] as ThreadBackgroundWorkEntry[] })),
   resolve: vi.fn(),
+  execute: vi.fn(),
+  inspect: vi.fn(),
 }));
 vi.mock("../../nativeApi", () => ({
   readNativeApi: () => ({
-    nativeOperations: { list: mocks.list, resolve: mocks.resolve },
+    nativeOperations: {
+      list: mocks.list,
+      resolve: mocks.resolve,
+      execute: mocks.execute,
+      inspect: mocks.inspect,
+    },
     agents: { getSnapshot: mocks.snapshot },
   }),
 }));
@@ -42,12 +53,50 @@ const props = {
   onSuggestion: () => {},
 };
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+const taskProps = {
+  ...props,
+  capabilities: {
+    ...props.capabilities,
+    actions: [
+      { action: "childTaskInspection" as const, supported: true },
+      { action: "childTaskStop" as const, supported: true },
+    ],
+  },
+};
+const shellTask = (
+  taskId: string,
+  description: string,
+  startedSecondsAgo: number,
+): ThreadBackgroundWorkEntry => {
+  const startedAt = new Date(Date.now() - startedSecondsAgo * 1000).toISOString();
+  return {
+    threadId,
+    workItemId: taskId,
+    provider: "claudeAgent",
+    providerInstanceId: null,
+    providerSessionIdentity: null,
+    turnId: null,
+    classification: "monitoring",
+    ownership: "direct-subagent",
+    status: "monitoring",
+    active: true,
+    model: null,
+    phase: "local_bash",
+    latestOutput: description,
+    outputTruncated: false,
+    startedAt,
+    updatedAt: startedAt,
+    lastSeenAt: startedAt,
+    completedAt: null,
+  } as ThreadBackgroundWorkEntry;
+};
 
 describe("NativeRuntimeTray", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     mocks.list.mockResolvedValue([]);
+    mocks.snapshot.mockResolvedValue({ entries: [] });
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -112,5 +161,135 @@ describe("NativeRuntimeTray", () => {
       add.mockRestore();
       await screen.unmount();
     }
+  });
+
+  describe("background tasks", () => {
+    it("names a single shell by its description and stops it", async () => {
+      mocks.snapshot.mockResolvedValue({
+        entries: [shellTask("b1", "Run full browser suite", 192)],
+      });
+      mocks.execute.mockResolvedValue(
+        record("completed", { command: { kind: "stopTask", taskId: "b1" } }),
+      );
+      const screen = await render(<NativeRuntimeTray {...taskProps} />);
+      try {
+        await expect.element(page.getByText("Run full browser suite")).toBeVisible();
+        await expect.element(page.getByText(/^Shell · 3m/)).toBeVisible();
+        expect(screen.container.textContent).not.toContain("local_bash");
+        expect(screen.container.textContent).not.toContain("monitoring");
+        await page.getByRole("button", { name: "Stop Run full browser suite" }).click();
+        expect(mocks.execute).toHaveBeenCalledWith(
+          expect.objectContaining({ command: { kind: "stopTask", taskId: "b1" } }),
+        );
+      } finally {
+        await screen.unmount();
+      }
+    });
+
+    it("collapses several tasks into one expandable row", async () => {
+      mocks.snapshot.mockResolvedValue({
+        entries: [
+          shellTask("b1", "Watch typecheck", 340),
+          shellTask("b2", "Run full browser suite", 192),
+          shellTask("b3", "Run unit tests", 30),
+        ],
+      });
+      const screen = await render(<NativeRuntimeTray {...taskProps} />);
+      try {
+        const toggle = page.getByRole("button", { name: /3 background tasks/ });
+        await expect
+          .element(toggle)
+          .toHaveTextContent("3 background tasks · Run unit tests, +2 more");
+        await expect.element(toggle).toHaveAttribute("aria-expanded", "false");
+        expect(page.getByRole("button", { name: /^View output/ }).all()).toHaveLength(0);
+
+        await toggle.click();
+        await expect.element(toggle).toHaveAttribute("aria-expanded", "true");
+        await expect.element(page.getByRole("button", { name: "Stop all" })).toBeVisible();
+        expect(page.getByRole("button", { name: /^View output/ }).all()).toHaveLength(3);
+        await expect.element(page.getByText("Watch typecheck")).toBeVisible();
+      } finally {
+        await screen.unmount();
+      }
+    });
+
+    it("stops every task, waiting for each stop to settle before the next", async () => {
+      mocks.snapshot.mockResolvedValue({
+        entries: [
+          shellTask("b1", "Watch typecheck", 340),
+          shellTask("b2", "Run full browser suite", 192),
+          shellTask("b3", "Run unit tests", 30),
+        ],
+      });
+      // The server admits a stop as `requested` and holds the thread's
+      // reservation until the provider confirms it.
+      let listed: NativeOperationRecord[] = [];
+      mocks.list.mockImplementation(async () => listed);
+      mocks.execute.mockImplementation(
+        async (input: Pick<NativeOperationRecord, "operationId" | "command">) => {
+          const admitted = record("requested", {
+            operationId: input.operationId,
+            command: input.command,
+          });
+          listed = [admitted, ...listed];
+          return admitted;
+        },
+      );
+      const settleAll = () => {
+        listed = listed.map((entry) => ({ ...entry, state: "completed" }));
+      };
+      const stoppedTaskIds = () =>
+        mocks.execute.mock.calls.map(([input]) => (input as NativeOperationRecord).command);
+      const screen = await render(<NativeRuntimeTray {...taskProps} />);
+      try {
+        await page.getByRole("button", { name: /3 background tasks/ }).click();
+        const stopAll = page.getByRole("button", { name: "Stop all" });
+        await stopAll.click();
+        await expect.poll(() => mocks.execute.mock.calls.length).toBe(1);
+        await expect.element(stopAll).toBeDisabled();
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        expect(mocks.execute).toHaveBeenCalledTimes(1);
+
+        settleAll();
+        await expect.poll(() => mocks.execute.mock.calls.length).toBe(2);
+        settleAll();
+        await expect.poll(() => mocks.execute.mock.calls.length).toBe(3);
+        expect(stoppedTaskIds()).toEqual([
+          { kind: "stopTask", taskId: "b1" },
+          { kind: "stopTask", taskId: "b2" },
+          { kind: "stopTask", taskId: "b3" },
+        ]);
+        settleAll();
+        await expect.element(stopAll).toBeEnabled();
+      } finally {
+        await screen.unmount();
+      }
+    });
+
+    it("shows shell output as text with its truncation", async () => {
+      mocks.snapshot.mockResolvedValue({
+        entries: [shellTask("b1", "Run full browser suite", 192)],
+      });
+      mocks.inspect.mockResolvedValue({
+        entries: [
+          { output: "✓ ChatView.browser.tsx (88 tests)\n", totalBytes: 41_873, omitted: true },
+        ],
+        nextCursor: null,
+      });
+      const screen = await render(<NativeRuntimeTray {...taskProps} />);
+      try {
+        await page.getByRole("button", { name: "View output: Run full browser suite" }).click();
+        const dialog = page.getByRole("dialog");
+        await expect.element(dialog.getByText("✓ ChatView.browser.tsx (88 tests)")).toBeVisible();
+        await expect
+          .element(dialog.getByText(/Shell · running 3m.* · last 36 B of 41 KB/))
+          .toBeVisible();
+        expect(dialog.element().textContent).not.toContain('"entries"');
+        await expect.element(dialog.getByRole("button", { name: "Refresh" })).toBeVisible();
+        await expect.element(dialog.getByRole("button", { name: "Copy" })).toBeVisible();
+      } finally {
+        await screen.unmount();
+      }
+    });
   });
 });
