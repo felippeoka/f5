@@ -18,7 +18,8 @@ export function UserInputAttachments({
   attachments: readonly AttachmentUpload[];
   onChange: (update: (attachments: readonly AttachmentUpload[]) => AttachmentUpload[]) => void;
   disabled: boolean;
-  onDismiss: () => void;
+  /** Omitted when the caller renders its own Dismiss next to its primary action. */
+  onDismiss?: (() => void) | undefined;
   onUploadBusyChange?: ((busy: boolean) => void) | undefined;
 }) {
   const [uploading, setUploading] = useState(false);
@@ -28,15 +29,17 @@ export function UserInputAttachments({
       data-slot="user-input-attachments"
       className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
     >
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        disabled={disabled || uploading}
-        onClick={onDismiss}
-      >
-        Dismiss
-      </Button>
+      {onDismiss ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={disabled || uploading}
+          onClick={onDismiss}
+        >
+          Dismiss
+        </Button>
+      ) : null}
       <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-2 hover:bg-accent hover:text-foreground has-disabled:pointer-events-none has-disabled:opacity-50 has-focus-visible:ring-2 has-focus-visible:ring-ring sm:h-7">
         <PaperclipIcon aria-hidden="true" className="size-3.5" />
         {uploading ? "Uploading…" : "Attach to answer"}

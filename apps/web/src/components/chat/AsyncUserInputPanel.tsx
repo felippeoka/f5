@@ -4,11 +4,14 @@ import {
   type AttachmentUpload,
   type PendingUserInput,
   type ThreadId,
+  type UserInputQuestion,
 } from "@t3tools/contracts";
+import { ArrowRightIcon } from "lucide-react";
 import { readNativeApi } from "~/nativeApi";
 import { Button } from "../ui/button";
 import { COMPOSER_TRAY_PANEL_CLASS_NAME, type ComposerPanelVariant } from "./composer/ComposerTray";
 import { UserInputAttachments } from "./UserInputAttachments";
+import { UserInputQuestionStep } from "./UserInputQuestionStep";
 
 /** Message questions keep their drafts mounted while the conversation continues. */
 export function AsyncUserInputPanel({
@@ -22,10 +25,37 @@ export function AsyncUserInputPanel({
 }) {
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
+  const [customOpen, setCustomOpen] = useState<Record<string, boolean>>({});
+  const [questionIndex, setQuestionIndex] = useState(0);
   const [attachments, setAttachments] = useState<AttachmentUpload[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resolved, setResolved] = useState(false);
+
+  const questions = input.questions;
+  const activeIndex = Math.max(0, Math.min(questionIndex, questions.length - 1));
+  const activeQuestion = questions[activeIndex];
+  const isLastQuestion = activeIndex >= questions.length - 1;
+  // Typed text counts only while its field is open; options-free questions always are.
+  const customTextFor = (question: UserInputQuestion) =>
+    customOpen[question.id] || question.options.length === 0
+      ? (custom[question.id]?.trim() ?? "")
+      : "";
+  const answerFor = (question: UserInputQuestion) => {
+    const text = customTextFor(question);
+    return [...(answers[question.id] ?? []), ...(text ? [text] : [])];
+  };
+  const isAnswered = (question: UserInputQuestion) => answerFor(question).length > 0;
+  const canSend = questions.every((question) => question.optional || isAnswered(question));
+  const canAdvance =
+    activeQuestion !== undefined &&
+    (activeQuestion.optional === true || isAnswered(activeQuestion));
+  const hasOptionalQuestion = questions.some((question) => question.optional);
+  const answeredCount = questions.filter(isAnswered).length;
+
+  const goTo = (index: number) =>
+    setQuestionIndex(Math.max(0, Math.min(index, questions.length - 1)));
+
   const resolve = async (dismissed: boolean) => {
     const api = readNativeApi();
     if (!api || busy || resolved) return;
@@ -52,15 +82,7 @@ export function AsyncUserInputPanel({
               ...base,
               type: "thread.user-input.respond",
               answers: Object.fromEntries(
-                input.questions.map((question) => [
-                  question.id,
-                  {
-                    answers: [
-                      ...(answers[question.id] ?? []),
-                      ...(custom[question.id]?.trim() ? [custom[question.id]!.trim()] : []),
-                    ],
-                  },
-                ]),
+                questions.map((question) => [question.id, { answers: answerFor(question) }]),
               ),
               attachments: attachments.map((attachment) => ({
                 type: "upload" as const,
@@ -71,6 +93,7 @@ export function AsyncUserInputPanel({
       setAttachments([]);
       setAnswers({});
       setCustom({});
+      setCustomOpen({});
       setResolved(true);
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
@@ -78,7 +101,55 @@ export function AsyncUserInputPanel({
       setBusy(false);
     }
   };
+
+  const primaryAction = () => {
+    if (busy) return;
+    if (isLastQuestion) {
+      if (canSend) void resolve(false);
+      return;
+    }
+    if (canAdvance) goTo(activeIndex + 1);
+  };
+
   if (resolved) return null;
+
+  const primaryLabel = isLastQuestion
+    ? hasOptionalQuestion
+      ? `Send (${answeredCount}/${questions.length})`
+      : "Send"
+    : "Next";
+  const footer = (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <UserInputAttachments
+        threadId={threadId}
+        attachments={attachments}
+        onChange={setAttachments}
+        disabled={busy}
+        onUploadBusyChange={setBusy}
+      />
+      <div className="ml-auto flex items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onClick={() => void resolve(true)}
+        >
+          Dismiss
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          disabled={busy || (isLastQuestion ? !canSend : !canAdvance)}
+          onClick={primaryAction}
+        >
+          {primaryLabel}
+          {isLastQuestion ? null : <ArrowRightIcon aria-hidden="true" className="size-3.5" />}
+        </Button>
+      </div>
+    </div>
+  );
+
   return (
     <section
       className={
@@ -88,56 +159,53 @@ export function AsyncUserInputPanel({
       }
       aria-label="Question from agent"
     >
-      {input.questions.map((question) => (
-        <div key={question.id} className="mb-3">
-          <p className="mb-2 text-ui font-medium text-foreground">{question.question}</p>
-          <div className="flex flex-wrap gap-1.5">
-            {question.options.map((option) => (
-              <button
-                key={option.label}
-                disabled={busy}
-                type="button"
-                aria-pressed={answers[question.id]?.includes(option.label) ?? false}
-                className="h-7 rounded-md border border-border px-2 text-ui text-muted-foreground outline-none transition-colors duration-(--duration-fast) hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 aria-pressed:border-primary/60 aria-pressed:bg-primary/10 aria-pressed:text-foreground"
-                onClick={() =>
-                  setAnswers((current) => ({
-                    ...current,
-                    [question.id]: question.multiSelect
-                      ? current[question.id]?.includes(option.label)
-                        ? current[question.id]!.filter((value) => value !== option.label)
-                        : [...(current[question.id] ?? []), option.label]
-                      : [option.label],
-                  }))
-                }
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          <textarea
-            aria-label={`Answer: ${question.question}`}
-            className="mt-2 w-full rounded-md border border-input bg-background p-2 text-ui outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-            disabled={busy}
-            value={custom[question.id] ?? ""}
-            onChange={(event) =>
-              setCustom((current) => ({ ...current, [question.id]: event.target.value }))
-            }
-          />
-        </div>
-      ))}
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <Button type="button" size="sm" disabled={busy} onClick={() => void resolve(false)}>
-          Answer
-        </Button>
-        <UserInputAttachments
-          threadId={threadId}
-          attachments={attachments}
-          onChange={setAttachments}
+      {activeQuestion ? (
+        <UserInputQuestionStep
+          question={activeQuestion}
+          questionIndex={activeIndex}
+          questionCount={questions.length}
+          selectedOptionLabels={answers[activeQuestion.id] ?? []}
           disabled={busy}
-          onDismiss={() => void resolve(true)}
-          onUploadBusyChange={setBusy}
+          customMode="inline"
+          shortcutScope="panel"
+          suppressAutoSubmit
+          customAnswer={custom[activeQuestion.id] ?? ""}
+          customOpen={customOpen[activeQuestion.id] ?? false}
+          onCustomOpenChange={(open) => {
+            setCustomOpen((current) => ({ ...current, [activeQuestion.id]: open }));
+            // Single-select answers are either an option or the typed text.
+            if (open && !activeQuestion.multiSelect) {
+              setAnswers((current) => ({ ...current, [activeQuestion.id]: [] }));
+            }
+          }}
+          onCustomAnswerChange={(value) =>
+            setCustom((current) => ({ ...current, [activeQuestion.id]: value }))
+          }
+          onCustomSubmit={primaryAction}
+          onSelectOption={(label) => {
+            setAnswers((current) => ({ ...current, [activeQuestion.id]: [label] }));
+            setCustomOpen((current) => ({ ...current, [activeQuestion.id]: false }));
+            setCustom((current) => ({ ...current, [activeQuestion.id]: "" }));
+          }}
+          onToggleOption={(label) =>
+            setAnswers((current) => {
+              const selected = current[activeQuestion.id] ?? [];
+              return {
+                ...current,
+                [activeQuestion.id]: selected.includes(label)
+                  ? selected.filter((value) => value !== label)
+                  : [...selected, label],
+              };
+            })
+          }
+          onAdvance={() => goTo(activeIndex + 1)}
+          onBack={() => goTo(activeIndex - 1)}
+          onForward={canAdvance && !isLastQuestion ? () => goTo(activeIndex + 1) : undefined}
+          footer={footer}
         />
-      </div>
+      ) : (
+        footer
+      )}
       {error ? (
         <p role="alert" className="mt-2 text-xs text-destructive-foreground">
           {error}
