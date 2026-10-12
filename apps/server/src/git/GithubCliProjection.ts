@@ -2,13 +2,11 @@ import * as FS from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import * as Path from "node:path";
 import { randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { parse, stringify } from "yaml";
 import { Effect } from "effect";
 import type { ServerSecretStoreShape } from "../auth/Services/ServerSecretStore";
+import { runWindowsPowerShell, WINDOWS_JSON_SERIALIZER } from "../windowsPowerShell";
 
-const execute = promisify(execFile);
 export interface GithubProfilePaths {
   stateDir: string;
   secretsDir?: string;
@@ -23,8 +21,9 @@ export async function secureGithubPaths(paths: ProtectedPath[]): Promise<void> {
   }
   const items = JSON.stringify(paths).replaceAll("'", "''");
   const script =
-    `$ErrorActionPreference = 'Stop'; $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User; ` +
-    `$items = ConvertFrom-Json '${items}'; foreach ($item in $items) { ` +
+    WINDOWS_JSON_SERIALIZER +
+    `$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User; ` +
+    `$items = $json.DeserializeObject('${items}'); foreach ($item in $items) { ` +
     `if ($item.directory) { $acl = [System.Security.AccessControl.DirectorySecurity]::new(); $inheritance = 'ContainerInherit, ObjectInherit' } ` +
     `else { $acl = [System.Security.AccessControl.FileSecurity]::new(); $inheritance = 'None' }; ` +
     `$acl.SetOwner($sid); $acl.SetAccessRuleProtection($true, $false); ` +
@@ -32,20 +31,7 @@ export async function secureGithubPaths(paths: ProtectedPath[]): Promise<void> {
     `$acl.AddAccessRule($rule); ` +
     `if ($item.directory) { [System.IO.Directory]::SetAccessControl($item.path, $acl) } ` +
     `else { [System.IO.File]::SetAccessControl($item.path, $acl) } }`;
-  const pending = execute(
-    "powershell.exe",
-    [
-      "-NoProfile",
-      "-NonInteractive",
-      "-EncodedCommand",
-      Buffer.from(script, "utf16le").toString("base64"),
-    ],
-    { windowsHide: true, timeout: 30_000 },
-  );
-  // No console input is needed; close the inherited pipe so PowerShell exits
-  // promptly after applying the ACLs. Any failure still prevents publication.
-  pending.child.stdin?.end();
-  await pending;
+  await runWindowsPowerShell(script, { timeoutMs: 30_000 });
 }
 
 /**

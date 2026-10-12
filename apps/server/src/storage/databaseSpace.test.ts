@@ -25,37 +25,50 @@ const fill = (sql: SqlClient.SqlClient, rows: number) => sql`
 `;
 
 it.layer(SqliteClient.layer({ filename }))("databaseSpace", (it) => {
-  it.effect("switches an existing WAL database to incremental and then shrinks it in steps", () =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      yield* sql`PRAGMA journal_mode = WAL`;
-      // Created without the pragma, like databases from before it existed.
-      yield* sql`CREATE TABLE filler (value TEXT)`;
-      yield* fill(sql, 3_000);
-      yield* sql`DELETE FROM filler`;
-      const before = yield* readDatabasePages;
-      assert.equal(before.autoVacuum, 0);
-      assert.isAbove(before.freelistCount, 2_000);
-      // Not incremental yet: nothing to do in steps.
-      assert.equal(yield* incrementalVacuum({ maxDurationMs: 5_000 }), 0);
+  it.effect(
+    "switches an existing WAL database to incremental and then shrinks it in steps",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`PRAGMA journal_mode = WAL`;
+        // Created without the pragma, like databases from before it existed.
+        yield* sql`CREATE TABLE filler (value TEXT)`;
+        yield* fill(sql, 3_000);
+        yield* sql`DELETE FROM filler`;
+        const before = yield* readDatabasePages;
+        assert.equal(before.autoVacuum, 0);
+        assert.isAbove(before.freelistCount, 2_000);
+        // Not incremental yet: nothing to do in steps.
+        assert.equal(yield* incrementalVacuum({ maxDurationMs: 5_000 }), 0);
 
-      yield* vacuumToIncremental;
-      const converted = yield* readDatabasePages;
-      assert.equal(converted.autoVacuum, AUTO_VACUUM_INCREMENTAL);
-      assert.equal(converted.freelistCount, 0);
-      assert.isBelow(converted.pageCount, before.pageCount / 2);
-      assert.isBelow(NodeFS.statSync(`${filename}-wal`).size, 64 * 1024);
+        yield* vacuumToIncremental;
+        const converted = yield* readDatabasePages;
+        assert.equal(converted.autoVacuum, AUTO_VACUUM_INCREMENTAL);
+        assert.equal(converted.freelistCount, 0);
+        assert.isBelow(converted.pageCount, before.pageCount / 2);
+        assert.isBelow(NodeFS.statSync(`${filename}-wal`).size, 64 * 1024);
 
-      yield* fill(sql, 2_000);
-      yield* sql`DELETE FROM filler`;
-      const freed = yield* readDatabasePages;
-      assert.isAbove(freed.freelistCount, 1_000);
-      const released = yield* incrementalVacuum({ maxDurationMs: 5_000 });
-      assert.equal(released, freed.freelistCount);
-      const after = yield* readDatabasePages;
-      assert.equal(after.freelistCount, 0);
-      assert.isBelow(after.pageCount, freed.pageCount);
-    }),
+        yield* fill(sql, 2_000);
+        yield* sql`DELETE FROM filler`;
+        const freed = yield* readDatabasePages;
+        assert.isAbove(freed.freelistCount, 1_000);
+        let released = 0;
+        // A bounded pass may reclaim only part of this fixture on a slower disk.
+        // Subsequent passes must make progress and reclaim exactly the remainder.
+        for (let pass = 0; pass < 4; pass++) {
+          const remaining = (yield* readDatabasePages).freelistCount;
+          if (remaining === 0) break;
+          const reclaimed = yield* incrementalVacuum({ maxDurationMs: 5_000 });
+          assert.isAbove(reclaimed, 0);
+          assert.equal((yield* readDatabasePages).freelistCount, remaining - reclaimed);
+          released += reclaimed;
+        }
+        assert.equal(released, freed.freelistCount);
+        const after = yield* readDatabasePages;
+        assert.equal(after.freelistCount, 0);
+        assert.isBelow(after.pageCount, freed.pageCount);
+      }),
+    { timeout: 60_000 },
   );
 });
 

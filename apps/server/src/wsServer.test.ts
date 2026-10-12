@@ -3805,7 +3805,7 @@ describe("WebSocket Server", () => {
         const sentTurns: Array<Parameters<ProviderServiceShape["sendTurn"]>[0]> = [];
         const ws = await startServer({ repo, sentTurns });
         await createProject(ws, repo, {
-          command: "echo SECRET=1 > .env && sleep 30",
+          command: `"${process.execPath}" -e "require('node:fs').writeFileSync('.env', 'SECRET=1\\n'); setTimeout(() => {}, 30000)"`,
           async: false,
         });
         await sendRequest(
@@ -3827,7 +3827,7 @@ describe("WebSocket Server", () => {
         expect(settled.phase).toBe("cancelled_kept");
         expect(settled.error).toContain(".env");
         expect(fs.readFileSync(path.join(running!.worktreePath!, ".env"), "utf8")).toBe(
-          process.platform === "win32" ? "SECRET=1 \r\n" : "SECRET=1\n",
+          "SECRET=1\n",
         );
       });
 
