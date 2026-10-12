@@ -98,9 +98,9 @@ function processStart(pid: number): string {
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`,
+            `[System.Diagnostics.Process]::GetProcessById(${pid}).StartTime.ToUniversalTime().Ticks`,
           ],
-          { encoding: "utf8" },
+          { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10_000 },
         )
       : execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
           encoding: "utf8",
