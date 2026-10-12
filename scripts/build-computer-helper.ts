@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { checkComputerHelperProtocol } from "./computer-helper-protocol";
+import { checkComputerHelperProtocol } from "./computer-helper-protocol.ts";
 import { mkdirSync, copyFileSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
