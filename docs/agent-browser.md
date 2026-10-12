@@ -525,6 +525,17 @@ experience, physical kill-chord latency, real-app/multi-display/multi-profile ma
 Windows desktop behavior or installed-build permission attribution. Signing remains
 deferred, and every release gate stays closed.
 
+The [2026-10-12 correlated-response evidence](computer-certification/2026-10-12-macos-provider-correlated-results.json)
+records a fresh passing run for both providers after strengthening the rehearsal's
+result checks. Both received valid successful native capture responses, nonempty
+accessible inspection of their exact fixture, and successful input responses matched
+by request ID. Each fixture independently observed exactly one press and the expected
+Unicode text, and both workers released their leases. Claude's model-facing image was
+observed again; Codex issued five catalog-specific approvals, all accepted once.
+This replaces the historical dispatch-only limitation for these narrow response checks.
+Scripted consent, the absence of real Electron UI/overlays and the other release
+certification limitations still apply; no release gate is opened.
+
 The human-assisted physical-stop rehearsal observes only event timings inside a
 temporary synthetic AppKit window. The helper reports its monotonic recognition time
 before releasing held input; the fixture records native event-creation and app-delivery
@@ -544,7 +555,10 @@ resumes input. The frozen-backend mode uses the real broker/host IPC classes, gr
 its own fixture, SIGSTOPs that worker during typing, verifies its stopped OS process
 state before and after the chord, then SIGCONTs it only for cleanup. It uses no provider
 account/quota. A separate `--stall-host` mode blocks the test supervisor for 700 ms.
-Clock offset bounds come from a native-fixture round trip; both recognition events must
+In this mode the countdown holds before red; the supervisor first waits for a fresh
+heartbeat, flushes the red-cue command, and immediately blocks. This avoids prompting
+the operator while a heartbeat wait still delays the stall. Clock offset bounds come
+from a native-fixture round trip; both recognition events must
 fall conservatively inside that interval, otherwise the stalled-host check fails.
 Execution permits retain the production one-second expiry and 250 ms renewal cadence.
 No renderer or real overlay is launched in either mode.
@@ -557,7 +571,13 @@ it is not an exact zero-time cancellation measurement. Both runs observed the fu
 interrupted the action, refused further typing and released the lease. The operator
 reported no system action during the first two attempts. The three supervisor-stall
 attempts stayed below 100 ms for stopping input but **failed** timing/arming coverage,
-so they do not certify a stalled supervisor. Signed installed-build attribution, real
+so they do not certify a stalled supervisor. The revised heartbeat-before-red sequence
+was retried with a 6.9 ms delivery tail but still failed interval coverage; this is
+recorded in the [cue-fix attempt](computer-certification/2026-10-12-macos-stalled-cue-attempt.json).
+Later reports include conservative relative recognition offsets from the stall start/end
+to distinguish early, late and clock-uncertain triggers. No absolute uptime or raw input
+trace is saved, and the historical failures remain unchanged.
+Signed installed-build attribution, real
 Electron renderer/backend failures, Windows and the full release matrix remain pending.
 No gate is opened by this unsigned evidence.
 

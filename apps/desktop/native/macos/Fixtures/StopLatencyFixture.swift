@@ -66,7 +66,7 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
           buffer.removeSubrange(...end)
           DispatchQueue.main.async {
             guard let self else { return }
-            if command == "COUNTDOWN" {
+            if command == "COUNTDOWN" || command == "COUNTDOWN_WAIT" {
               self.emit(["kind": "countdown", "observedAtMs": ProcessInfo.processInfo.systemUptime * 1000])
               for seconds in [3, 2, 1] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + Double(3 - seconds)) {
@@ -74,7 +74,10 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
                   self.window.backgroundColor = NSColor.systemYellow.withAlphaComponent(0.25)
                 }
               }
-              DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.prompt() }
+              DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                if command == "COUNTDOWN" { self.prompt() }
+                else { self.instruction.stringValue = "Ready. Wait for RED." }
+              }
             } else if command == "CALIBRATE" {
               self.emit(["kind": "calibration", "observedAtMs": ProcessInfo.processInfo.systemUptime * 1000])
             } else if command == "GO" {

@@ -116,6 +116,22 @@ export function measureStopLatency(evidence: StopLatencyEvidence) {
       ? {
           hostStallDurationMs: round(stall.endMs - stall.startMs),
           clockUncertaintyMs: round(stall.offsetMaxMs - stall.offsetMinMs),
+          ...(checks.stallClockCalibrated && finite(physicalAt)
+            ? {
+                physicalRecognitionAfterStallStartMs: {
+                  min: round(physicalAt - stall.startMs - stall.offsetMaxMs),
+                  max: round(physicalAt - stall.startMs - stall.offsetMinMs),
+                },
+              }
+            : {}),
+          ...(checks.stallClockCalibrated && finite(chordAt)
+            ? {
+                chordRecognitionAfterStallEndMs: {
+                  min: round(chordAt - stall.endMs - stall.offsetMaxMs),
+                  max: round(chordAt - stall.endMs - stall.offsetMinMs),
+                },
+              }
+            : {}),
         }
       : {}),
   };

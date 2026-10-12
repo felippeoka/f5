@@ -305,12 +305,18 @@ try {
   } else if (stalled) {
     process.stdout.write("Watch the fixture's 3, 2, 1 countdown; press only when it turns RED.\n");
     await waitFor(() => performance.now() - latestHeartbeat < 10);
-    fixture.child.stdin?.write("COUNTDOWN\n");
+    fixture.child.stdin?.write("COUNTDOWN_WAIT\n");
     await waitFor(() => countdownAtMs !== undefined);
     const cueAtPerfMs = countdownAtMs! + 3000 - (clock!.offsetMinMs + clock!.offsetMaxMs) / 2;
-    await waitFor(() => performance.now() >= cueAtPerfMs - 25);
+    await waitFor(() => performance.now() >= cueAtPerfMs);
     await waitFor(() => performance.now() - latestHeartbeat < 10);
     if (unexpectedPause || signalInterrupted) throw new Error("Input arrived before the stall.");
+    // The fixture holds its red cue until renewal is fresh and we are ready to
+    // block. Confirm the tiny command was flushed before blocking its pipe writer.
+    // Recognition still has to fall inside the measured stall; no timing grace.
+    await new Promise<void>((done, reject) => {
+      fixture!.child.stdin!.write("GO\n", (error) => (error ? reject(error) : done()));
+    });
     const startMs = performance.now();
     // Intentional, bounded main-thread stall. The native helper and fixture keep
     // running; no renewal or main-side stop can execute during this interval.

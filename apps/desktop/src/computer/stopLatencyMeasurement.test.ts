@@ -88,3 +88,33 @@ it("requires the backend to remain stopped when that mode is selected", () => {
   expect(measureStopLatency({ ...evidence, backendFrozenAtStop: true }).state).toBe("passed");
   expect(measureStopLatency({ ...evidence, backendFrozenAtStop: false }).state).toBe("failed");
 });
+it("reports conservative relative stall offsets without exposing native clock origins", () => {
+  const hostStall = { startMs: 100, endMs: 800, offsetMinMs: 1000, offsetMaxMs: 1002 };
+  expect(measureStopLatency({ ...evidence, hostStall })).toMatchObject({
+    physicalRecognitionAfterStallStartMs: { min: 98, max: 100 },
+    chordRecognitionAfterStallEndMs: { min: -562, max: -560 },
+  });
+  const uncertainEnd = measureStopLatency({
+    ...evidence,
+    hostStall: { ...hostStall, endMs: 239 },
+  });
+  expect(uncertainEnd.state).toBe("failed");
+  expect(uncertainEnd.chordRecognitionAfterStallEndMs).toEqual({ min: -1, max: 1 });
+});
+it("omits relative offsets when recognition or clock calibration is invalid", () => {
+  const missingRecognition = {
+    ...evidence,
+    hostStall: { startMs: 100, endMs: 800, offsetMinMs: 1000, offsetMaxMs: 1002 },
+  };
+  delete missingRecognition.physicalRecognizedAtMs;
+  delete missingRecognition.chordRecognizedAtMs;
+  for (const invalid of [
+    missingRecognition,
+    { ...evidence, hostStall: { startMs: 100, endMs: 800, offsetMinMs: 1000, offsetMaxMs: 1030 } },
+  ]) {
+    const measurement = measureStopLatency(invalid);
+    expect(measurement).not.toHaveProperty("physicalRecognitionAfterStallStartMs");
+    expect(measurement).not.toHaveProperty("chordRecognitionAfterStallEndMs");
+    expect(measurement.state).toBe("failed");
+  }
+});
