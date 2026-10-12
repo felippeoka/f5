@@ -5,6 +5,8 @@ import type {
   ThreadBackgroundWorkEntry,
 } from "@t3tools/contracts";
 
+import { formatDuration } from "../../session-logic";
+
 export type NativeRuntimeTrayRow =
   | { readonly kind: "suggestion"; readonly id: string; readonly summary: string }
   | {
@@ -14,7 +16,94 @@ export type NativeRuntimeTrayRow =
       readonly finishAcknowledgement: boolean;
     }
   | { readonly kind: "running"; readonly record: NativeOperationRecord }
-  | { readonly kind: "task"; readonly task: ThreadBackgroundWorkEntry };
+  | { readonly kind: "tasks"; readonly tasks: readonly ThreadBackgroundWorkEntry[] };
+
+export type BackgroundTaskKind = "shell" | "monitor" | "agent" | "workflow";
+
+export interface BackgroundTaskDescription {
+  readonly kind: BackgroundTaskKind;
+  readonly kindLabel: string;
+  readonly title: string;
+  readonly elapsed: string | null;
+}
+
+const BACKGROUND_TASK_KINDS: Record<
+  BackgroundTaskKind,
+  { readonly label: string; readonly fallbackTitle: string }
+> = {
+  shell: { label: "Shell", fallbackTitle: "Background shell" },
+  monitor: { label: "Monitor", fallbackTitle: "Monitor" },
+  agent: { label: "Agent", fallbackTitle: "Agent task" },
+  workflow: { label: "Workflow", fallbackTitle: "Workflow" },
+};
+
+const MAX_TASK_TITLE_LENGTH = 120;
+
+function backgroundTaskKind(
+  task: Pick<ThreadBackgroundWorkEntry, "ownership" | "classification" | "phase">,
+): BackgroundTaskKind {
+  if (task.ownership === "workflow") return "workflow";
+  // Progress events overwrite `phase` with the last tool name, so the stable
+  // classification decides between shells and agents.
+  if (task.classification === "monitoring") {
+    return task.phase?.toLowerCase().startsWith("monitor") ? "monitor" : "shell";
+  }
+  return "agent";
+}
+
+function backgroundTaskTitle(
+  task: Pick<ThreadBackgroundWorkEntry, "latestOutput" | "phase">,
+): string | null {
+  const line = task.latestOutput
+    ?.split("\n")
+    .map((entry) => entry.trim())
+    .find((entry) => entry.length > 0);
+  if (!line || line === task.phase) return null;
+  return line.length > MAX_TASK_TITLE_LENGTH
+    ? `${line.slice(0, MAX_TASK_TITLE_LENGTH - 1).trimEnd()}…`
+    : line;
+}
+
+/**
+ * User-facing name for a background task. The provider's task type
+ * (`local_bash`) and internal status (`monitoring`) are not shown.
+ */
+export function describeBackgroundTask(
+  task: Pick<
+    ThreadBackgroundWorkEntry,
+    "ownership" | "classification" | "phase" | "latestOutput" | "startedAt"
+  >,
+  nowMs: number,
+): BackgroundTaskDescription {
+  const kind = backgroundTaskKind(task);
+  const meta = BACKGROUND_TASK_KINDS[kind];
+  const startedAt = Date.parse(task.startedAt);
+  return {
+    kind,
+    kindLabel: meta.label,
+    title: backgroundTaskTitle(task) ?? meta.fallbackTitle,
+    elapsed:
+      Number.isNaN(startedAt) || startedAt > nowMs ? null : formatDuration(nowMs - startedAt),
+  };
+}
+
+export interface ShellOutputPage {
+  readonly output: string;
+  readonly totalBytes: number;
+  readonly omitted: boolean;
+}
+
+/** The bounded output tail a provider returns for a background shell. */
+export function readShellOutputPage(page: unknown): ShellOutputPage | null {
+  if (!page || typeof page !== "object" || !("entries" in page)) return null;
+  const { entries } = page;
+  if (!Array.isArray(entries) || entries.length !== 1) return null;
+  const entry: unknown = entries[0];
+  if (!entry || typeof entry !== "object") return null;
+  const { output, totalBytes, omitted } = entry as Record<string, unknown>;
+  if (typeof output !== "string" || typeof totalBytes !== "number") return null;
+  return { output, totalBytes, omitted: omitted === true };
+}
 
 const RUNNING_STATES: ReadonlySet<NativeOperationRecord["state"]> = new Set([
   "requested",
@@ -83,9 +172,10 @@ export function selectNativeRuntimeTrayRows(input: {
     }
   }
   if (input.canInspectTasks || input.canStopTasks) {
-    for (const task of input.tasks) {
-      if (task.active) rows.push({ kind: "task", task });
-    }
+    const tasks = input.tasks
+      .filter((task) => task.active)
+      .toSorted((left, right) => left.startedAt.localeCompare(right.startedAt));
+    if (tasks.length > 0) rows.push({ kind: "tasks", tasks });
   }
   return rows;
 }

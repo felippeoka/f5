@@ -7,6 +7,8 @@ import type {
 import { describe, expect, it } from "vitest";
 
 import {
+  describeBackgroundTask,
+  readShellOutputPage,
   selectNativeRuntimeTrayRows,
   selectNewlyFailedOperations,
 } from "./NativeRuntimeTray.logic";
@@ -25,8 +27,13 @@ const record = (
   command: NativeOperationCommand = { kind: "compact" },
 ) => ({ operationId, state, command }) as NativeOperationRecord;
 
-const task = (workItemId: string, active: boolean) =>
-  ({ workItemId, active, status: active ? "running" : "completed" }) as ThreadBackgroundWorkEntry;
+const task = (workItemId: string, active: boolean, startedAt = "2026-01-01T00:00:00Z") =>
+  ({
+    workItemId,
+    active,
+    startedAt,
+    status: active ? "running" : "completed",
+  }) as ThreadBackgroundWorkEntry;
 
 const base = {
   activities: [],
@@ -158,15 +165,102 @@ describe("selectNativeRuntimeTrayRows", () => {
   describe("child tasks", () => {
     const tasks = [task("live", true), task("done", false)];
 
-    it("lists only active tasks", () => {
-      expect(selectNativeRuntimeTrayRows({ ...base, tasks })).toMatchObject([
-        { kind: "task", task: { workItemId: "live" } },
+    it("groups only active tasks into one row, oldest first", () => {
+      const later = task("later", true, "2026-01-01T00:05:00Z");
+      expect(selectNativeRuntimeTrayRows({ ...base, tasks: [later, ...tasks] })).toMatchObject([
+        { kind: "tasks", tasks: [{ workItemId: "live" }, { workItemId: "later" }] },
       ]);
+    });
+
+    it("yields no row when no task is active", () => {
+      expect(kinds({ tasks: [task("done", false)] })).toEqual([]);
     });
 
     it("hides tasks when the provider can neither inspect nor stop them", () => {
       expect(kinds({ tasks, canInspectTasks: false, canStopTasks: false })).toEqual([]);
-      expect(kinds({ tasks, canInspectTasks: false })).toEqual(["task"]);
+      expect(kinds({ tasks, canInspectTasks: false })).toEqual(["tasks"]);
     });
+  });
+});
+
+describe("describeBackgroundTask", () => {
+  const nowMs = Date.parse("2026-01-01T00:03:12Z");
+  const entry = (overrides: Partial<ThreadBackgroundWorkEntry> = {}) =>
+    ({
+      ownership: "direct-subagent",
+      classification: "monitoring",
+      phase: "local_bash",
+      latestOutput: "Run full browser suite",
+      startedAt: "2026-01-01T00:00:00Z",
+      ...overrides,
+    }) as ThreadBackgroundWorkEntry;
+  const describeEntry = (overrides: Partial<ThreadBackgroundWorkEntry> = {}) =>
+    describeBackgroundTask(entry(overrides), nowMs);
+
+  it("names a background shell by its description", () => {
+    expect(describeEntry()).toEqual({
+      kind: "shell",
+      kindLabel: "Shell",
+      title: "Run full browser suite",
+      elapsed: "3m 12s",
+    });
+    expect(describeEntry({ phase: "shell" }).kind).toBe("shell");
+  });
+
+  it("maps monitors, agents and workflows", () => {
+    expect(describeEntry({ phase: "monitor_mcp" }).kind).toBe("monitor");
+    // Progress replaces an agent's phase with its last tool name.
+    expect(describeEntry({ classification: "working", phase: "Read" }).kind).toBe("agent");
+    expect(describeEntry({ ownership: "workflow", classification: "working" }).kind).toBe(
+      "workflow",
+    );
+  });
+
+  it("uses the first non-empty line, capped", () => {
+    expect(describeEntry({ latestOutput: "\n  Watch typecheck  \nmore" }).title).toBe(
+      "Watch typecheck",
+    );
+    const title = describeEntry({ latestOutput: "x".repeat(200) }).title;
+    expect(title).toHaveLength(120);
+    expect(title.endsWith("…")).toBe(true);
+  });
+
+  it("falls back to the kind when there is no description", () => {
+    expect(describeEntry({ latestOutput: null }).title).toBe("Background shell");
+    expect(describeEntry({ latestOutput: "local_bash" }).title).toBe("Background shell");
+    expect(describeEntry({ phase: "monitor", latestOutput: "  " }).title).toBe("Monitor");
+    expect(describeEntry({ classification: "working", latestOutput: null }).title).toBe(
+      "Agent task",
+    );
+  });
+
+  it("omits elapsed time for an invalid or future start", () => {
+    expect(describeEntry({ startedAt: "not a date" }).elapsed).toBeNull();
+    expect(describeEntry({ startedAt: "2026-01-01T01:00:00Z" }).elapsed).toBeNull();
+  });
+});
+
+describe("readShellOutputPage", () => {
+  it("reads a bounded shell tail", () => {
+    expect(
+      readShellOutputPage({
+        entries: [{ output: "ok\n", totalBytes: 41_873, omitted: true }],
+        nextCursor: null,
+      }),
+    ).toEqual({ output: "ok\n", totalBytes: 41_873, omitted: true });
+  });
+
+  it("rejects other output shapes", () => {
+    expect(readShellOutputPage(null)).toBeNull();
+    expect(readShellOutputPage({ entries: [] })).toBeNull();
+    expect(readShellOutputPage({ entries: [{ role: "assistant", text: "hi" }] })).toBeNull();
+    expect(
+      readShellOutputPage({
+        entries: [
+          { output: "a", totalBytes: 1 },
+          { output: "b", totalBytes: 1 },
+        ],
+      }),
+    ).toBeNull();
   });
 });

@@ -20,7 +20,14 @@ import type {
   ThreadBackgroundWorkEntry,
 } from "@t3tools/contracts";
 import { readNativeApi } from "../../nativeApi";
+import { describeBackgroundTask } from "./NativeRuntimeTray.logic";
 import { recentRuntimeNotices, resolveRuntimeModelReport } from "./runtimePresentation";
+
+/** Same names as the composer tray; settled tasks keep their outcome. */
+function backgroundTaskLabel(task: ThreadBackgroundWorkEntry): string {
+  const { title, kindLabel } = describeBackgroundTask(task, Date.now());
+  return task.active ? `${title} · ${kindLabel}` : `${title} · ${kindLabel} · ${task.status}`;
+}
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -212,9 +219,7 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
                     key={task.workItemId}
                     className="flex flex-wrap items-center gap-2 rounded-lg border p-3"
                   >
-                    <span className="min-w-0 flex-1 break-words">
-                      {task.phase ?? task.workItemId} · {task.status}
-                    </span>
+                    <span className="min-w-0 flex-1 break-words">{backgroundTaskLabel(task)}</span>
                     {supported("childTaskInspection") && (
                       <Button
                         variant="outline"
