@@ -70,6 +70,7 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
 function renderTraitsControl(
   Component: typeof TraitsMenuContent | typeof TraitsPicker,
   input: TraitsRenderInput,
+  presentation: { tintTrigger?: boolean } = {},
 ): ReactNode {
   const { provider, threadRef, draftId, model, models, modelOptions } = input;
   const hasTarget = threadRef !== undefined || draftId !== undefined;
@@ -84,6 +85,7 @@ function renderTraitsControl(
       {...(draftId ? { draftId } : {})}
       model={model}
       modelOptions={modelOptions}
+      {...presentation}
     />
   );
 }
@@ -93,5 +95,5 @@ export function renderProviderTraitsMenuContent(input: TraitsRenderInput): React
 }
 
 export function renderProviderTraitsPicker(input: TraitsRenderInput): ReactNode {
-  return renderTraitsControl(TraitsPicker, input);
+  return renderTraitsControl(TraitsPicker, input, { tintTrigger: true });
 }

@@ -94,6 +94,55 @@ describe("CodexTraitsPicker", () => {
     }
   });
 
+  it("ranks efforts high to low and fills the battery up to the selected level", async () => {
+    const mounted = await mountPicker({ model: "gpt-6.1-sol", effort: "high" });
+    const threadId = ThreadId.makeUnsafe("thread-codex-traits");
+    const filledLevels = () =>
+      [...document.querySelectorAll('[data-effort-filled="true"]')].map((segment) =>
+        segment.closest("[data-effort-level]")?.getAttribute("data-effort-level"),
+      );
+
+    try {
+      await expect.element(page.getByRole("button")).toHaveAttribute("data-effort-level", "high");
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        expect(
+          page
+            .getByRole("menuitemradio")
+            .elements()
+            .map((item) => item.getAttribute("data-effort-level")),
+        ).toEqual(["ultra", "max", "xhigh", "high", "medium", "low"]);
+        expect(filledLevels()).toEqual(["high", "medium", "low"]);
+      });
+
+      // Highlighting a higher level previews its fill without selecting it.
+      await page.getByRole("menuitemradio", { name: "Max" }).hover();
+      await vi.waitFor(() => {
+        expect(filledLevels()).toEqual(["max", "xhigh", "high", "medium", "low"]);
+      });
+      expect(
+        useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelOptions?.codex
+          ?.reasoningEffort,
+      ).toBe("high");
+
+      // Fast mode is a switch that keeps the menu open.
+      const fastMode = page.getByRole("menuitemcheckbox", { name: "Fast Mode" });
+      await expect.element(fastMode).toHaveAttribute("aria-checked", "false");
+      await fastMode.click();
+      await vi.waitFor(() => {
+        expect(
+          useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelOptions?.codex
+            ?.fastMode,
+        ).toBe(true);
+        expect(fastMode.element().getAttribute("aria-checked")).toBe("true");
+      });
+      expect(page.getByRole("button").element().textContent?.trim()).toBe("High");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("closes the menu after selecting a reasoning level", async () => {
     const mounted = await mountPicker({ effort: "high" });
 
@@ -126,7 +175,7 @@ describe("CodexTraitsPicker", () => {
       await vi.waitFor(() => {
         expect(document.body.textContent ?? "").not.toContain("Ultra");
         expect(document.body.textContent ?? "").toContain("Max");
-        expect(page.getByRole("menuitemradio").all()).toHaveLength(7);
+        expect(page.getByRole("menuitemradio").all()).toHaveLength(5);
       });
       await page.getByRole("menuitemradio", { name: "Max" }).click();
       await vi.waitFor(() => {
@@ -156,7 +205,7 @@ describe("CodexTraitsPicker", () => {
             .element()
             .getAttribute("aria-checked"),
         ).toBe("true");
-        expect(page.getByRole("menuitemradio").all()).toHaveLength(8);
+        expect(page.getByRole("menuitemradio").all()).toHaveLength(6);
       });
       expect(
         useComposerDraftStore.getState().draftsByThreadId[
@@ -175,7 +224,7 @@ describe("CodexTraitsPicker", () => {
       await page.getByRole("button").click();
       await vi.waitFor(() => {
         expect(document.body.textContent ?? "").toContain("Ultra");
-        expect(page.getByRole("menuitemradio").all()).toHaveLength(8);
+        expect(page.getByRole("menuitemradio").all()).toHaveLength(6);
       });
     } finally {
       await mounted.cleanup();

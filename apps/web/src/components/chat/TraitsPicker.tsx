@@ -13,10 +13,13 @@ import {
 } from "@t3tools/shared/model";
 import { memo, useCallback, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
-import { ChevronDownIcon, ZapIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
+import { EffortMenuSection, FastModeLabel, FastModeTriggerIcon } from "./EffortMenuSection";
+import { getEffortChipClass, isEffortDescriptor } from "./effortLevels";
 import {
   Menu,
+  MenuCheckboxItem,
   MenuGroup,
   MenuPopup,
   MenuRadioGroup,
@@ -170,6 +173,8 @@ export interface TraitsMenuContentProps {
   modelOptions?: ProviderOptions | null | undefined;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
+  /** Tint the trigger in the selected effort's colour (composer chips only). */
+  tintTrigger?: boolean;
 }
 
 export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
@@ -225,44 +230,48 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
       {selectDescriptors.map((descriptor, index) => (
         <div key={descriptor.id}>
           {index > 0 ? <MenuDivider /> : null}
-          <MenuGroup>
-            <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">
-              {descriptor.label}
-            </div>
-            <MenuRadioGroup
-              value={getDescriptorStringValue(descriptor) ?? ""}
+          {isEffortDescriptor(descriptor) ? (
+            <EffortMenuSection
+              options={descriptor.options}
+              value={getDescriptorStringValue(descriptor)}
               onValueChange={(value) => handleSelectChange(descriptor, value)}
-            >
-              {descriptor.options.map((option) => (
-                <MenuRadioItem key={option.id} value={option.id}>
-                  {option.label}
-                  {option.isDefault ? " (default)" : ""}
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
-          </MenuGroup>
+            />
+          ) : (
+            <MenuGroup>
+              <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">
+                {descriptor.label}
+              </div>
+              <MenuRadioGroup
+                value={getDescriptorStringValue(descriptor) ?? ""}
+                onValueChange={(value) => handleSelectChange(descriptor, value)}
+              >
+                {descriptor.options.map((option) => (
+                  <MenuRadioItem key={option.id} value={option.id}>
+                    {option.label}
+                    {option.isDefault ? " (default)" : ""}
+                  </MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
+            </MenuGroup>
+          )}
         </div>
       ))}
-      {booleanDescriptors.map((descriptor, index) => (
-        <div key={descriptor.id}>
-          {index > 0 || selectDescriptors.length > 0 ? <MenuDivider /> : null}
-          <MenuGroup>
-            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
-              {descriptor.label}
-            </div>
-            <MenuRadioGroup
-              value={descriptor.currentValue === true ? "on" : "off"}
-              onValueChange={(value) => {
-                updateDescriptors(
-                  replaceDescriptorCurrentValue(descriptors, descriptor.id, value === "on"),
-                );
-              }}
-            >
-              <MenuRadioItem value="on">On</MenuRadioItem>
-              <MenuRadioItem value="off">Off</MenuRadioItem>
-            </MenuRadioGroup>
-          </MenuGroup>
-        </div>
+      {booleanDescriptors.length > 0 && selectDescriptors.length > 0 ? <MenuDivider /> : null}
+      {booleanDescriptors.map((descriptor) => (
+        <MenuCheckboxItem
+          key={descriptor.id}
+          variant="switch"
+          checked={descriptor.currentValue === true}
+          onCheckedChange={(checked) => {
+            updateDescriptors(replaceDescriptorCurrentValue(descriptors, descriptor.id, checked));
+          }}
+        >
+          {descriptor.id === "fastMode" ? (
+            <FastModeLabel enabled={descriptor.currentValue === true} label={descriptor.label} />
+          ) : (
+            descriptor.label
+          )}
+        </MenuCheckboxItem>
       ))}
     </>
   );
@@ -275,6 +284,7 @@ export const TraitsPicker = memo(function TraitsPicker({
   modelOptions,
   triggerVariant,
   triggerClassName,
+  tintTrigger = false,
   disabled = false,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence & { disabled?: boolean }) {
@@ -311,6 +321,7 @@ export const TraitsPicker = memo(function TraitsPicker({
       .join(" · ") || "";
 
   const isCodexStyle = provider === "codex";
+  const effortTint = tintTrigger ? getEffortChipClass(descriptors) : null;
 
   return (
     <Menu
@@ -320,6 +331,7 @@ export const TraitsPicker = memo(function TraitsPicker({
       }}
     >
       <MenuTrigger
+        {...(effortTint ? { "data-effort-level": effortTint.level } : {})}
         render={
           <Button
             size="sm"
@@ -330,6 +342,7 @@ export const TraitsPicker = memo(function TraitsPicker({
                 ? "min-w-0 max-w-40 shrink justify-start overflow-hidden whitespace-nowrap px-2 text-muted-foreground hover:text-foreground sm:max-w-48 sm:px-3 [&_svg]:mx-0"
                 : "shrink-0 whitespace-nowrap px-2 text-muted-foreground hover:text-foreground sm:px-3",
               triggerClassName,
+              effortTint?.className,
             )}
           />
         }
@@ -337,17 +350,13 @@ export const TraitsPicker = memo(function TraitsPicker({
         {isCodexStyle ? (
           <span className="flex min-w-0 w-full items-center gap-2">
             <span className="truncate">{triggerLabel}</span>
-            {fastModeEnabled ? (
-              <ZapIcon aria-label="Fast mode enabled" className="size-3 shrink-0" />
-            ) : null}
+            {fastModeEnabled ? <FastModeTriggerIcon /> : null}
             <ChevronDownIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
           </span>
         ) : (
           <>
             <span>{triggerLabel}</span>
-            {fastModeEnabled ? (
-              <ZapIcon aria-label="Fast mode enabled" className="size-3 shrink-0" />
-            ) : null}
+            {fastModeEnabled ? <FastModeTriggerIcon /> : null}
             <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
           </>
         )}

@@ -37,6 +37,19 @@
   --color-success: var(--success);
   --color-info-foreground: var(--info-foreground);
   --color-info: var(--info);
+  /* Reasoning effort scale (effortLevels.ts): cool for fast, warm for deep. */
+  --color-effort-low: var(--effort-low);
+  --color-effort-low-foreground: var(--effort-low-foreground);
+  --color-effort-medium: var(--effort-medium);
+  --color-effort-medium-foreground: var(--effort-medium-foreground);
+  --color-effort-high: var(--effort-high);
+  --color-effort-high-foreground: var(--effort-high-foreground);
+  --color-effort-xhigh: var(--effort-xhigh);
+  --color-effort-xhigh-foreground: var(--effort-xhigh-foreground);
+  --color-effort-max: var(--effort-max);
+  --color-effort-max-foreground: var(--effort-max-foreground);
+  --color-effort-deepest: var(--effort-deepest);
+  --color-effort-deepest-foreground: var(--effort-deepest-foreground);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-ring: var(--ring);
   --color-input: var(--input);
@@ -260,6 +273,19 @@
   --success-foreground: var(--color-emerald-700);
   --warning: var(--color-amber-500);
   --warning-foreground: var(--color-amber-700);
+  /* Fixed across palettes so a level keeps its colour everywhere. */
+  --effort-low: var(--color-teal-500);
+  --effort-low-foreground: var(--color-teal-700);
+  --effort-medium: var(--color-sky-500);
+  --effort-medium-foreground: var(--color-sky-700);
+  --effort-high: var(--color-indigo-500);
+  --effort-high-foreground: var(--color-indigo-700);
+  --effort-xhigh: var(--color-violet-500);
+  --effort-xhigh-foreground: var(--color-violet-700);
+  --effort-max: var(--color-pink-500);
+  --effort-max-foreground: var(--color-pink-700);
+  --effort-deepest: var(--color-orange-500);
+  --effort-deepest-foreground: var(--color-orange-700);
   --safe-area-inset-top: env(safe-area-inset-top, 0px);
   --safe-area-inset-right: env(safe-area-inset-right, 0px);
   --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
@@ -292,6 +318,18 @@
     --success-foreground: var(--color-emerald-400);
     --warning: var(--color-amber-500);
     --warning-foreground: var(--color-amber-400);
+    --effort-low: var(--color-teal-400);
+    --effort-low-foreground: var(--color-teal-300);
+    --effort-medium: var(--color-sky-400);
+    --effort-medium-foreground: var(--color-sky-300);
+    --effort-high: var(--color-indigo-400);
+    --effort-high-foreground: var(--color-indigo-300);
+    --effort-xhigh: var(--color-violet-400);
+    --effort-xhigh-foreground: var(--color-violet-300);
+    --effort-max: var(--color-pink-400);
+    --effort-max-foreground: var(--color-pink-300);
+    --effort-deepest: var(--color-orange-400);
+    --effort-deepest-foreground: var(--color-orange-300);
   }
 }
 
