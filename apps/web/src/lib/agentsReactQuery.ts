@@ -1,8 +1,13 @@
-import { AgentsSnapshot as AgentsSnapshotSchema } from "@t3tools/contracts";
-import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  AgentsSnapshot as AgentsSnapshotSchema,
+  type AgentsDismissInput,
+  type ThreadId,
+} from "@t3tools/contracts";
+import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Schema } from "effect";
 import { useEffect, useMemo } from "react";
 
+import type { AgentsPanelScope } from "../agentsPanelStore";
 import { ensureNativeApi, readNativeApi } from "../nativeApi";
 import { useStore } from "../store";
 import type { Project, Thread } from "../types";
@@ -14,14 +19,19 @@ import {
 } from "./agentsModel";
 
 export const agentsQueryKeys = {
-  snapshot: ["agents", "snapshot"] as const,
+  all: ["agents", "snapshot"] as const,
+  global: ["agents", "snapshot", "all"] as const,
+  threads: ["agents", "snapshot", "thread"] as const,
+  thread: (threadId: ThreadId) => ["agents", "snapshot", "thread", threadId] as const,
 };
+
+type DecodedAgentsSnapshot = ReturnType<typeof decodeAgentsSnapshot>;
 
 const EMPTY_STORE_ITEMS: readonly never[] = [];
 const EMPTY_ACTIVITY_THREADS: ReadonlyArray<AgentActivityThreadSource> = [];
 
 export function selectAgentActivityThreads(input: {
-  readonly snapshot: ReturnType<typeof decodeAgentsSnapshot> | null;
+  readonly snapshot: DecodedAgentsSnapshot | null;
   readonly threads: ReadonlyArray<Thread>;
   readonly projects: ReadonlyArray<Project>;
 }): ReadonlyArray<AgentActivityThreadSource> {
@@ -51,18 +61,74 @@ export function decodeAgentsSnapshot(value: unknown) {
   return Schema.decodeUnknownSync(AgentsSnapshotSchema)(value);
 }
 
-export function agentsSnapshotQueryOptions() {
+export function agentsSnapshotQueryOptions(threadId: ThreadId | null = null) {
   return queryOptions({
-    queryKey: agentsQueryKeys.snapshot,
-    queryFn: async () => decodeAgentsSnapshot(await ensureNativeApi().agents.getSnapshot()),
+    queryKey: threadId ? agentsQueryKeys.thread(threadId) : agentsQueryKeys.global,
+    queryFn: async () =>
+      decodeAgentsSnapshot(
+        await ensureNativeApi().agents.getSnapshot(threadId ? { threadId } : undefined),
+      ),
     staleTime: 30_000,
   });
 }
 
-export function useAgentsPanelModel(options: { readonly includeActivityIndex?: boolean } = {}) {
+/** At most one thread-snapshot refetch per interval while pushes stream in. */
+export const THREAD_SNAPSHOT_REFRESH_MS = 400;
+
+const threadRefreshTimers = new WeakMap<QueryClient, ReturnType<typeof setTimeout>>();
+
+/**
+ * Applies a global push. The global snapshot is replaced outright. Thread
+ * snapshots are refetched instead of patched: the capped global push can
+ * leave out a thread's completions and can't express removals, while a
+ * refetch replaces the thread's rows authoritatively.
+ */
+export function applyPushedSnapshot(queryClient: QueryClient, decoded: DecodedAgentsSnapshot) {
+  queryClient.setQueryData<DecodedAgentsSnapshot>(agentsQueryKeys.global, (current) =>
+    current && current.generatedAt > decoded.generatedAt ? current : decoded,
+  );
+  if (threadRefreshTimers.has(queryClient)) return;
+  threadRefreshTimers.set(
+    queryClient,
+    setTimeout(() => {
+      threadRefreshTimers.delete(queryClient);
+      void refreshThreadSnapshots(queryClient);
+    }, THREAD_SNAPSHOT_REFRESH_MS),
+  );
+}
+
+async function refreshThreadSnapshots(queryClient: QueryClient) {
+  // A refetch reuses a first load that is still in flight instead of
+  // restarting it, and that load may predate the push. Cancel it so the
+  // refetch below starts fresh.
+  await queryClient.cancelQueries({
+    queryKey: agentsQueryKeys.threads,
+    predicate: (query) => query.state.data === undefined && query.state.fetchStatus === "fetching",
+  });
+  await queryClient.invalidateQueries({ queryKey: agentsQueryKeys.threads, refetchType: "active" });
+}
+
+export async function dismissAgentWork(queryClient: QueryClient, input: AgentsDismissInput) {
+  const result = await ensureNativeApi().agents.dismiss(input);
+  await queryClient.invalidateQueries({ queryKey: agentsQueryKeys.all, refetchType: "active" });
+  return result;
+}
+
+export function useAgentsPanelModel(options: {
+  readonly threadId: ThreadId;
+  readonly scope: AgentsPanelScope;
+  readonly includeActivityIndex?: boolean;
+}) {
   const includeActivityIndex = options.includeActivityIndex ?? true;
   const queryClient = useQueryClient();
-  const snapshotQuery = useQuery(agentsSnapshotQueryOptions());
+  // The global snapshot always lists live work first, so it also backs the live
+  // counts for both scopes; the thread query adds that thread's full history.
+  const globalQuery = useQuery(agentsSnapshotQueryOptions(null));
+  const threadQuery = useQuery({
+    ...agentsSnapshotQueryOptions(options.threadId),
+    enabled: options.scope === "thread",
+  });
+  const snapshotQuery = options.scope === "thread" ? threadQuery : globalQuery;
   const threads = useStore((state) => (includeActivityIndex ? state.threads : EMPTY_STORE_ITEMS));
   const projects = useStore((state) => (includeActivityIndex ? state.projects : EMPTY_STORE_ITEMS));
 
@@ -71,11 +137,7 @@ export function useAgentsPanelModel(options: { readonly includeActivityIndex?: b
     if (!api?.agents) return;
     return api.agents.onSnapshotUpdated((snapshot) => {
       try {
-        const decoded = decodeAgentsSnapshot(snapshot);
-        queryClient.setQueryData<ReturnType<typeof decodeAgentsSnapshot>>(
-          agentsQueryKeys.snapshot,
-          (current) => (current && current.generatedAt > decoded.generatedAt ? current : decoded),
-        );
+        applyPushedSnapshot(queryClient, decodeAgentsSnapshot(snapshot));
       } catch (error) {
         console.warn("Ignored an invalid agents snapshot update.", error);
       }
@@ -86,31 +148,54 @@ export function useAgentsPanelModel(options: { readonly includeActivityIndex?: b
     () =>
       onServerWelcome(() => {
         void queryClient.invalidateQueries({
-          queryKey: agentsQueryKeys.snapshot,
+          queryKey: agentsQueryKeys.all,
           refetchType: "active",
         });
       }),
     [queryClient],
   );
 
-  const activityThreads = useMemo<ReadonlyArray<AgentActivityThreadSource>>(() => {
-    if (!includeActivityIndex) return EMPTY_ACTIVITY_THREADS;
-    return selectAgentActivityThreads({
-      snapshot: snapshotQuery.data ?? null,
-      threads,
-      projects,
-    });
-  }, [includeActivityIndex, projects, snapshotQuery.data, threads]);
-  const activityIndex = useMemo(() => buildAgentActivityIndex(activityThreads), [activityThreads]);
-  const model = useMemo(
-    () =>
-      deriveAgentsPanelModel({
-        snapshot: snapshotQuery.data ?? null,
-        activityIndex,
-        threads: activityThreads,
-      }),
-    [activityIndex, activityThreads, snapshotQuery.data],
+  const globalModel = useDerivedAgentsModel(
+    globalQuery.data ?? null,
+    includeActivityIndex,
+    threads,
+    projects,
+  );
+  const threadModel = useDerivedAgentsModel(
+    options.scope === "thread" ? (threadQuery.data ?? null) : null,
+    includeActivityIndex,
+    threads,
+    projects,
+  );
+  const liveCounts = useMemo(
+    () => ({
+      thread:
+        globalModel.threads.find((group) => group.threadId === options.threadId)?.liveCount ?? 0,
+      all: globalModel.liveCount,
+    }),
+    [globalModel, options.threadId],
   );
 
-  return { model, snapshotQuery };
+  return {
+    model: options.scope === "thread" ? threadModel : globalModel,
+    liveCounts,
+    snapshotQuery,
+  };
+}
+
+function useDerivedAgentsModel(
+  snapshot: DecodedAgentsSnapshot | null,
+  includeActivityIndex: boolean,
+  threads: ReadonlyArray<Thread>,
+  projects: ReadonlyArray<Project>,
+) {
+  const activityThreads = useMemo<ReadonlyArray<AgentActivityThreadSource>>(() => {
+    if (!includeActivityIndex) return EMPTY_ACTIVITY_THREADS;
+    return selectAgentActivityThreads({ snapshot, threads, projects });
+  }, [includeActivityIndex, projects, snapshot, threads]);
+  const activityIndex = useMemo(() => buildAgentActivityIndex(activityThreads), [activityThreads]);
+  return useMemo(
+    () => deriveAgentsPanelModel({ snapshot, activityIndex, threads: activityThreads }),
+    [activityIndex, activityThreads, snapshot],
+  );
 }

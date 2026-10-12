@@ -220,6 +220,15 @@ describe("describeBackgroundTask", () => {
     );
   });
 
+  it("prefers the stored title over the latest progress output", () => {
+    expect(
+      describeEntry({ title: "Run full browser suite", latestOutput: "Reading files" }).title,
+    ).toBe("Run full browser suite");
+    expect(describeEntry({ title: null, latestOutput: "Reading files" }).title).toBe(
+      "Reading files",
+    );
+  });
+
   it("uses the first non-empty line, capped", () => {
     expect(describeEntry({ latestOutput: "\n  Watch typecheck  \nmore" }).title).toBe(
       "Watch typecheck",

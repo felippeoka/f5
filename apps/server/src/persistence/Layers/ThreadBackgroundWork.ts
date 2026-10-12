@@ -1,11 +1,17 @@
-import { MAX_AGENTS_SNAPSHOT_ENTRIES, ThreadBackgroundWorkEntry } from "@t3tools/contracts";
+import {
+  MAX_AGENTS_SNAPSHOT_ENTRIES,
+  ThreadBackgroundWorkEntry,
+  TrimmedNonEmptyString,
+} from "@t3tools/contracts";
 import { Effect, Layer, Schema, Struct } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
 import { toPersistenceDecodeError, toPersistenceSqlError } from "../Errors.ts";
 import {
+  DismissThreadBackgroundWorkInput,
   ExpireThreadBackgroundWorkInput,
+  ListThreadBackgroundWorkSnapshotInput,
   MarkThreadBackgroundWorkInactiveInput,
   ThreadBackgroundWorkFreshnessInput,
   ThreadBackgroundWorkRepository,
@@ -41,10 +47,14 @@ const make = Effect.gen(function* () {
         turn_id,
         classification,
         ownership,
+        kind,
         status,
         active,
         model,
         phase,
+        title,
+        prompt,
+        last_tool,
         latest_output,
         output_truncated,
         started_at,
@@ -60,10 +70,14 @@ const make = Effect.gen(function* () {
         ${row.turnId},
         ${row.classification ?? "working"},
         ${row.ownership ?? "direct-subagent"},
+        ${row.kind ?? "agent"},
         ${row.status},
         ${row.active ? 1 : 0},
         ${row.model ?? null},
         ${row.phase ?? null},
+        ${row.title ?? null},
+        ${row.prompt ?? null},
+        ${row.lastTool ?? null},
         ${row.latestOutput ?? null},
         ${row.outputTruncated === true ? 1 : 0},
         ${row.occurredAt},
@@ -91,6 +105,11 @@ const make = Effect.gen(function* () {
             THEN projection_thread_background_work.ownership
           ELSE excluded.ownership
         END,
+        kind = CASE
+          WHEN ${row.kind ?? null} IS NULL
+            THEN projection_thread_background_work.kind
+          ELSE excluded.kind
+        END,
         status = CASE
           WHEN projection_thread_background_work.classification = 'inert' AND excluded.active = 1
             THEN 'idle'
@@ -109,6 +128,19 @@ const make = Effect.gen(function* () {
           WHEN ${row.phase === undefined ? 1 : 0} = 1
             THEN projection_thread_background_work.phase
           ELSE excluded.phase
+        END,
+        -- Identity is written once: the first non-null title and prompt win.
+        title = COALESCE(projection_thread_background_work.title, excluded.title),
+        prompt = COALESCE(projection_thread_background_work.prompt, excluded.prompt),
+        last_tool = CASE
+          WHEN ${row.lastTool === undefined ? 1 : 0} = 1
+            THEN projection_thread_background_work.last_tool
+          ELSE excluded.last_tool
+        END,
+        dismissed_at = CASE
+          WHEN excluded.active = 1 AND projection_thread_background_work.classification <> 'inert'
+            THEN NULL
+          ELSE projection_thread_background_work.dismissed_at
         END,
         latest_output = CASE
           WHEN ${row.latestOutput === undefined ? 1 : 0} = 1
@@ -172,32 +204,65 @@ const make = Effect.gen(function* () {
   });
 
   const listSnapshotQuery = SqlSchema.findAll({
-    Request: Schema.Struct({}),
+    Request: ListThreadBackgroundWorkSnapshotInput,
     Result: ThreadBackgroundWorkDbRow,
-    execute: () => sql`
-      SELECT
-        thread_id AS "threadId",
-        provider_work_item_id AS "workItemId",
-        provider_name AS provider,
-        provider_instance_id AS "providerInstanceId",
-        provider_session_identity AS "providerSessionIdentity",
-        turn_id AS "turnId",
-        classification,
-        ownership,
-        status,
-        active,
-        model,
-        phase,
-        latest_output AS "latestOutput",
-        output_truncated AS "outputTruncated",
-        started_at AS "startedAt",
-        updated_at AS "updatedAt",
-        last_seen_at AS "lastSeenAt",
-        completed_at AS "completedAt"
-      FROM projection_thread_background_work
-      ORDER BY active DESC, updated_at DESC, thread_id ASC, provider_work_item_id ASC
-      LIMIT ${MAX_AGENTS_SNAPSHOT_ENTRIES}
-    `,
+    execute: ({ threadId }) => {
+      // Global snapshots are pushed to every client on each change, so they
+      // leave out the prompt; thread-scoped reads carry it for the detail view.
+      // Separate statements keep the thread filter usable by the visibility index.
+      const prompt = threadId === undefined ? sql`NULL` : sql`prompt`;
+      const threadFilter = threadId === undefined ? sql`` : sql`AND thread_id = ${threadId}`;
+      return sql`
+        SELECT
+          thread_id AS "threadId",
+          provider_work_item_id AS "workItemId",
+          provider_name AS provider,
+          provider_instance_id AS "providerInstanceId",
+          provider_session_identity AS "providerSessionIdentity",
+          turn_id AS "turnId",
+          classification,
+          ownership,
+          kind,
+          status,
+          active,
+          model,
+          phase,
+          title,
+          ${prompt} AS prompt,
+          last_tool AS "lastTool",
+          latest_output AS "latestOutput",
+          output_truncated AS "outputTruncated",
+          started_at AS "startedAt",
+          updated_at AS "updatedAt",
+          last_seen_at AS "lastSeenAt",
+          completed_at AS "completedAt"
+        FROM projection_thread_background_work
+        WHERE dismissed_at IS NULL ${threadFilter}
+        ORDER BY active DESC, updated_at DESC, thread_id ASC, provider_work_item_id ASC
+        LIMIT ${MAX_AGENTS_SNAPSHOT_ENTRIES}
+      `;
+    },
+  });
+
+  const dismissQuery = SqlSchema.findAll({
+    Request: DismissThreadBackgroundWorkInput,
+    Result: Schema.Struct({ workItemId: TrimmedNonEmptyString }),
+    execute: ({ threadId, workItemIds, dismissedAt }) => {
+      const threadFilter = threadId === undefined ? sql`1 = 1` : sql`thread_id = ${threadId}`;
+      const itemFilter =
+        workItemIds === undefined
+          ? sql`1 = 1`
+          : sql`provider_work_item_id IN ${sql.in(workItemIds)}`;
+      return sql`
+        UPDATE projection_thread_background_work
+        SET dismissed_at = ${dismissedAt}
+        WHERE active = 0
+          AND dismissed_at IS NULL
+          AND ${threadFilter}
+          AND ${itemFilter}
+        RETURNING provider_work_item_id AS "workItemId"
+      `;
+    },
   });
 
   const listProtectedThreadIdsQuery = SqlSchema.findAll({
@@ -273,8 +338,17 @@ const make = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ThreadBackgroundWorkRepository.expireStale")),
     );
 
-  const listSnapshot: ThreadBackgroundWorkRepositoryShape["listSnapshot"] = () =>
-    listSnapshotQuery({}).pipe(
+  const dismiss: ThreadBackgroundWorkRepositoryShape["dismiss"] = (input) =>
+    (input.workItemIds !== undefined && input.workItemIds.length === 0
+      ? Effect.succeed([])
+      : dismissQuery(input)
+    ).pipe(
+      Effect.mapError(toPersistenceSqlError("ThreadBackgroundWorkRepository.dismiss")),
+      Effect.map((rows) => rows.length),
+    );
+
+  const listSnapshot: ThreadBackgroundWorkRepositoryShape["listSnapshot"] = (input = {}) =>
+    listSnapshotQuery(input).pipe(
       Effect.mapError((cause) =>
         Schema.isSchemaError(cause)
           ? toPersistenceDecodeError("ThreadBackgroundWorkRepository.listSnapshot")(cause)
@@ -310,6 +384,7 @@ const make = Effect.gen(function* () {
     markThreadInactive,
     expireStale,
     listSnapshot,
+    dismiss,
     listProtectedThreadIds,
     hasFreshProtectingWork,
     prune,

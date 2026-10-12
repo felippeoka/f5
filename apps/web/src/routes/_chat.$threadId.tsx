@@ -44,6 +44,7 @@ import {
 } from "../diffRouteSearch";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useAgentsPanelStore } from "../agentsPanelStore";
 import { useAgentsPanelModel } from "../lib/agentsReactQuery";
 import { useThreadDetail } from "../lib/orchestrationReactQuery";
 import { useStartupReady } from "../lib/startupReady";
@@ -353,9 +354,19 @@ function ChatThreadRouteView() {
     rightPanelState.surfaces.some(
       (surface) => surface.id === rightPanelState.activeSurfaceId && surface.kind === "agents",
     );
-  const { model: agentsPanelModel, snapshotQuery: agentsSnapshotQuery } = useAgentsPanelModel({
+  const agentsPanelScope = useAgentsPanelStore((store) => store.scope);
+  const {
+    model: agentsPanelModel,
+    liveCounts: agentsLiveCounts,
+    snapshotQuery: agentsSnapshotQuery,
+  } = useAgentsPanelModel({
+    threadId,
+    scope: agentsPanelScope,
     includeActivityIndex: agentsPanelVisible,
   });
+  // The tab badge follows the scope the panel shows.
+  const agentsLiveBadgeCount =
+    agentsPanelScope === "thread" ? agentsLiveCounts.thread : agentsLiveCounts.all;
   const consumedDeepLinkKeyRef = useRef<string | null>(null);
   const threadActivities = thread?.activities ?? EMPTY_ACTIVITIES;
   const threadTasks = thread?.tasks ?? EMPTY_TASKS;
@@ -692,7 +703,9 @@ function ChatThreadRouteView() {
             ) : (
               <Suspense fallback={<DiffPanelLoadingState label="Loading agent activity..." />}>
                 <AgentsPanel
+                  threadId={threadId}
                   model={agentsPanelModel}
+                  liveCounts={agentsLiveCounts}
                   loading={agentsSnapshotQuery.isLoading}
                   error={agentsSnapshotQuery.isError}
                   fetching={agentsSnapshotQuery.isFetching}
@@ -705,6 +718,7 @@ function ChatThreadRouteView() {
     [
       activePlan,
       activeProposedPlan,
+      agentsLiveCounts,
       agentsPanelModel,
       agentsSnapshotQuery.isError,
       agentsSnapshotQuery.isFetching,
@@ -748,7 +762,7 @@ function ChatThreadRouteView() {
         diffAvailable={routeThreadExists}
         planAvailable={routeThreadExists}
         agentsAvailable={true}
-        liveAgentCount={agentsPanelModel.liveCount}
+        liveAgentCount={agentsLiveBadgeCount}
       />
     ),
     [
@@ -764,7 +778,7 @@ function ChatThreadRouteView() {
       openAgents,
       openPreview,
       previewAvailable,
-      agentsPanelModel.liveCount,
+      agentsLiveBadgeCount,
       renderRightPanelSurface,
       rightPanelState,
       routeThreadExists,
@@ -834,7 +848,7 @@ function ChatThreadRouteView() {
           <ChatView
             key={threadId}
             threadId={threadId}
-            liveAgentCount={agentsPanelModel.liveCount}
+            liveAgentCount={agentsLiveBadgeCount}
             focusTimelineEntryId={search.timelineEntryId}
             focusTimelineEntryKind={search.timelineEntryKind}
           />
@@ -858,7 +872,7 @@ function ChatThreadRouteView() {
         <ChatView
           key={threadId}
           threadId={threadId}
-          liveAgentCount={agentsPanelModel.liveCount}
+          liveAgentCount={agentsLiveBadgeCount}
           focusTimelineEntryId={search.timelineEntryId}
           focusTimelineEntryKind={search.timelineEntryKind}
         />

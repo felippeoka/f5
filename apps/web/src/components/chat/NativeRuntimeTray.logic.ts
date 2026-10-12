@@ -61,10 +61,10 @@ function backgroundTaskKind(
   task: Pick<ThreadBackgroundWorkEntry, "ownership" | "classification" | "phase">,
 ): BackgroundTaskKind {
   if (task.ownership === "workflow") return "workflow";
-  // Progress events overwrite `phase` with the last tool name, so the stable
-  // classification decides between shells and agents. Within it, only the
-  // shell task types are matched: a monitor whose phase became a tool name
-  // stays a monitor.
+  // Rows recorded before the server kept `phase` fixed may carry the last tool
+  // name there, so the stable classification decides between shells and
+  // agents. Within it, only the shell task types are matched: a monitor whose
+  // phase became a tool name stays a monitor.
   if (task.classification === "monitoring") {
     return task.phase !== null && SHELL_TASK_TYPES.has(task.phase) ? "shell" : "monitor";
   }
@@ -72,9 +72,13 @@ function backgroundTaskKind(
 }
 
 function backgroundTaskTitle(
-  task: Pick<ThreadBackgroundWorkEntry, "latestOutput" | "phase">,
+  task: Pick<ThreadBackgroundWorkEntry, "latestOutput" | "phase"> & {
+    readonly title?: string | null;
+  },
 ): string | null {
-  const line = task.latestOutput
+  // The title recorded at start is stable; latest output is the fallback for
+  // rows recorded before titles were stored.
+  const line = (task.title ?? task.latestOutput)
     ?.split("\n")
     // Settled agents report markdown; a heading marker is not part of the name.
     .map((entry) => entry.replace(/^\s*(?:#{1,6}\s+|[-*>]\s+)?/, "").trim())
@@ -93,7 +97,7 @@ export function describeBackgroundTask(
   task: Pick<
     ThreadBackgroundWorkEntry,
     "ownership" | "classification" | "phase" | "latestOutput" | "startedAt"
-  >,
+  > & { readonly title?: string | null },
   nowMs: number,
 ): BackgroundTaskDescription {
   const kind = backgroundTaskKind(task);

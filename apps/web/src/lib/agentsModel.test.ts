@@ -8,7 +8,13 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { buildAgentActivityIndex, deriveAgentsPanelModel } from "./agentsModel";
+import {
+  agentTypeLabel,
+  buildAgentActivityIndex,
+  countAgentsByStatus,
+  deriveAgentsPanelModel,
+  filterAgentsPanelEntries,
+} from "./agentsModel";
 
 const THREAD_ID = ThreadId.makeUnsafe("thread-agents");
 const TURN_ID = TurnId.makeUnsafe("turn-agents");
@@ -92,6 +98,10 @@ function snapshot(): AgentsSnapshot {
         turnId: TURN_ID,
         classification: "working",
         ownership: "direct-subagent",
+        kind: "agent",
+        title: null,
+        prompt: null,
+        lastTool: null,
         status: "running",
         active: true,
         model: "claude-sonnet",
@@ -112,6 +122,10 @@ function snapshot(): AgentsSnapshot {
         turnId: TURN_ID,
         classification: "working",
         ownership: "direct-subagent",
+        kind: "agent",
+        title: null,
+        prompt: null,
+        lastTool: null,
         status: "running",
         active: true,
         model: null,
@@ -132,6 +146,10 @@ function snapshot(): AgentsSnapshot {
         turnId: TURN_ID,
         classification: "working",
         ownership: "workflow",
+        kind: "workflow",
+        title: null,
+        prompt: null,
+        lastTool: null,
         status: "completed",
         active: false,
         model: null,
@@ -156,22 +174,24 @@ describe("agentsModel", () => {
       threads: [source],
     });
 
-    expect(model.directEntries).toHaveLength(1);
-    expect(model.directEntries[0]).toEqual(
+    const direct = model.agents.filter((entry) => entry.kind === "agent");
+    expect(direct).toHaveLength(1);
+    expect(direct[0]).toEqual(
       expect.objectContaining({
         title: "Review pagination",
         focusActivityId: "parent",
         threadTitle: "Parallel review",
         projectName: "f5",
+        live: true,
       }),
     );
-    expect(model.directEntries[0]?.workItemIds).toEqual(
+    expect(direct[0]?.workItemIds).toEqual(
       expect.arrayContaining(["provider-parent", "subagent:agent-thread-1"]),
     );
-    expect(model.workflowEntries).toHaveLength(1);
+    expect(model.agents.filter((entry) => entry.kind === "workflow")).toHaveLength(1);
+    expect(model.backgroundTasks).toHaveLength(0);
     expect(model.liveCount).toBe(1);
     expect(model.settledCount).toBe(1);
-    expect(model.coverageWindowLimited).toBe(true);
   });
 
   it("keeps distinct pre-id collaboration rows representable by parent and ordinal", () => {
@@ -199,6 +219,175 @@ describe("agentsModel", () => {
     expect([...new Set(index.byScopedWorkItemId.values())].map((entry) => entry.key)).toEqual([
       `${THREAD_ID}\u0000pre-id-a\u00000`,
       `${THREAD_ID}\u0000pre-id-b\u00000`,
+    ]);
+  });
+});
+
+const OTHER_THREAD_ID = ThreadId.makeUnsafe("thread-other");
+
+function workEntry(
+  overrides: Partial<AgentsSnapshot["entries"][number]> & { readonly workItemId: string },
+): AgentsSnapshot["entries"][number] {
+  return {
+    threadId: THREAD_ID,
+    provider: "claudeAgent",
+    providerInstanceId: null,
+    providerSessionIdentity: "claude|default",
+    turnId: null,
+    classification: "working",
+    ownership: "direct-subagent",
+    kind: "agent",
+    status: "completed",
+    active: false,
+    model: null,
+    phase: null,
+    title: null,
+    prompt: null,
+    lastTool: null,
+    latestOutput: null,
+    outputTruncated: false,
+    startedAt: "2026-08-15T10:00:00.000Z",
+    updatedAt: "2026-08-15T10:00:01.000Z",
+    lastSeenAt: "2026-08-15T10:00:01.000Z",
+    completedAt: "2026-08-15T10:00:01.000Z",
+    ...overrides,
+  };
+}
+
+function derive(entries: ReadonlyArray<AgentsSnapshot["entries"][number]>) {
+  return deriveAgentsPanelModel({
+    snapshot: { generatedAt: "2026-08-15T10:01:00.000Z", entries: [...entries] },
+    activityIndex: buildAgentActivityIndex([]),
+    threads: [
+      {
+        threadId: THREAD_ID,
+        threadTitle: "Parallel review",
+        projectName: "f5",
+        activities: [],
+        hasOlderActivities: false,
+      },
+      {
+        threadId: OTHER_THREAD_ID,
+        threadTitle: "Other work",
+        projectName: "f5",
+        activities: [],
+        hasOlderActivities: false,
+      },
+    ],
+  });
+}
+
+describe("agents panel model", () => {
+  it("prefers the durable title and humanizes the type only as a fallback", () => {
+    const model = derive([
+      workEntry({ workItemId: "titled", phase: "local_bash", title: "Run browser suite" }),
+      workEntry({ workItemId: "untitled-shell", phase: "local_bash", kind: "shell" }),
+      workEntry({ workItemId: "untitled-custom", phase: "code_reviewer" }),
+      workEntry({ workItemId: "bare" }),
+    ]);
+    const titleOf = (id: string) =>
+      [...model.agents, ...model.backgroundTasks].find((entry) => entry.nativeWorkItemId === id)
+        ?.title;
+    expect(titleOf("titled")).toBe("Run browser suite");
+    expect(titleOf("untitled-shell")).toBe("Shell command");
+    expect(titleOf("untitled-custom")).toBe("Code reviewer");
+    expect(titleOf("bare")).toBe("Subagent");
+    expect(agentTypeLabel("local_bash")).toBe("shell");
+    expect(agentTypeLabel("Explore")).toBe("Explore");
+  });
+
+  it("splits shells from agents and orders live work first", () => {
+    const model = derive([
+      workEntry({ workItemId: "old-agent", updatedAt: "2026-08-15T10:00:01.000Z" }),
+      workEntry({
+        workItemId: "live-agent",
+        status: "running",
+        active: true,
+        completedAt: null,
+        updatedAt: "2026-08-15T09:00:00.000Z",
+      }),
+      workEntry({
+        workItemId: "shell",
+        kind: "shell",
+        classification: "monitoring",
+        status: "monitoring",
+        active: true,
+        completedAt: null,
+      }),
+      workEntry({ workItemId: "workflow", kind: "workflow", ownership: "workflow" }),
+    ]);
+    expect(model.agents.map((entry) => entry.nativeWorkItemId)).toEqual([
+      "live-agent",
+      "old-agent",
+      "workflow",
+    ]);
+    expect(model.backgroundTasks.map((entry) => entry.nativeWorkItemId)).toEqual(["shell"]);
+    expect(model.liveCount).toBe(2);
+    expect(model.settledCount).toBe(2);
+  });
+
+  it("filters by search text and status chips", () => {
+    const model = derive([
+      workEntry({
+        workItemId: "running",
+        title: "Review pagination",
+        status: "running",
+        active: true,
+        completedAt: null,
+      }),
+      workEntry({ workItemId: "failed", title: "Run tests", status: "failed" }),
+      workEntry({
+        workItemId: "done",
+        title: "Summarize",
+        prompt: "Summarize the pagination change",
+      }),
+      workEntry({ workItemId: "stopped", title: "Lint", status: "stopped" }),
+    ]);
+    const all = [...model.agents];
+    const ids = (entries: ReadonlyArray<{ readonly nativeWorkItemId: string }>) =>
+      entries.map((entry) => entry.nativeWorkItemId).toSorted();
+
+    expect(countAgentsByStatus(all)).toEqual({ all: 4, running: 1, failed: 1, done: 2 });
+    expect(ids(filterAgentsPanelEntries(all, { query: "PAGINATION", status: "all" }))).toEqual([
+      "done",
+      "running",
+    ]);
+    expect(ids(filterAgentsPanelEntries(all, { query: "", status: "running" }))).toEqual([
+      "running",
+    ]);
+    expect(ids(filterAgentsPanelEntries(all, { query: "", status: "failed" }))).toEqual(["failed"]);
+    expect(ids(filterAgentsPanelEntries(all, { query: "", status: "done" }))).toEqual([
+      "done",
+      "stopped",
+    ]);
+    expect(ids(filterAgentsPanelEntries(all, { query: "other work", status: "all" }))).toEqual([]);
+  });
+
+  it("groups by thread with live threads first, then most recent", () => {
+    const model = derive([
+      workEntry({ workItemId: "recent", updatedAt: "2026-08-15T12:00:00.000Z" }),
+      workEntry({
+        workItemId: "other-live",
+        threadId: OTHER_THREAD_ID,
+        status: "running",
+        active: true,
+        completedAt: null,
+        updatedAt: "2026-08-15T08:00:00.000Z",
+      }),
+      workEntry({
+        workItemId: "other-shell",
+        threadId: OTHER_THREAD_ID,
+        kind: "shell",
+        updatedAt: "2026-08-15T07:00:00.000Z",
+      }),
+    ]);
+    expect(model.threads.map((group) => group.threadId)).toEqual([OTHER_THREAD_ID, THREAD_ID]);
+    expect(model.threads[0]).toEqual(
+      expect.objectContaining({ threadTitle: "Other work", liveCount: 1 }),
+    );
+    expect(model.threads[0]?.agents.map((entry) => entry.nativeWorkItemId)).toEqual(["other-live"]);
+    expect(model.threads[0]?.backgroundTasks.map((entry) => entry.nativeWorkItemId)).toEqual([
+      "other-shell",
     ]);
   });
 });

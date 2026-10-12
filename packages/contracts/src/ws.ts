@@ -257,6 +257,7 @@ import { WorktreeSetupThreadInput, WorktreeSetupUpdatedPayload } from "./worktre
 import {
   AGENTS_WS_CHANNELS,
   AGENTS_WS_METHODS,
+  AgentsDismissInput,
   AgentsGetSnapshotInput,
   AgentsSnapshot,
 } from "./backgroundWork";
@@ -524,6 +525,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.providerAccountLogout, ProviderAccountStartInput),
   tagRequestBody(WS_METHODS.providerAccountStatus, ProviderAccountStartInput),
   tagRequestBody(AGENTS_WS_METHODS.getSnapshot, AgentsGetSnapshotInput),
+  tagRequestBody(AGENTS_WS_METHODS.dismiss, AgentsDismissInput),
   tagRequestBody(USAGE_WS_METHODS.consumeResetCredit, UsageConsumeResetCreditInput),
   tagRequestBody(USAGE_WS_METHODS.getAccounts, UsageGetAccountsInput),
   tagRequestBody(USAGE_WS_METHODS.getSummary, UsageGetSummaryInput),

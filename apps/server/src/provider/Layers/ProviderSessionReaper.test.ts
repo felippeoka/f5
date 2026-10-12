@@ -113,6 +113,9 @@ function makeLayer(input: {
   const backgroundWork: ThreadBackgroundWorkShape = {
     recordProviderEvent: () => Effect.void,
     getSnapshot: Effect.succeed({ entries: [], generatedAt: "1970-01-01T00:00:00.000Z" }),
+    getThreadSnapshot: () =>
+      Effect.succeed({ entries: [], generatedAt: "1970-01-01T00:00:00.000Z" }),
+    dismiss: () => Effect.succeed({ dismissedCount: 0 }),
     expireStale: () => Effect.void,
     listProtectedThreadIds: () => Effect.succeed(input.protectedThreadIds ?? new Set()),
     hasFreshProtectingWork: () => Effect.succeed(input.hasFreshProtectingWork ?? false),

@@ -1,5 +1,6 @@
 import {
   BackgroundWorkClassification,
+  BackgroundWorkKind,
   BackgroundWorkOwnership,
   BackgroundWorkStatus,
   IsoDateTime,
@@ -24,10 +25,14 @@ export const ThreadBackgroundWorkTransition = Schema.Struct({
   turnId: Schema.NullOr(TurnId),
   classification: Schema.optional(BackgroundWorkClassification),
   ownership: Schema.optional(BackgroundWorkOwnership),
+  kind: Schema.optional(BackgroundWorkKind),
   status: BackgroundWorkStatus,
   active: Schema.Boolean,
   model: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   phase: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  title: Schema.optional(Schema.NullOr(Schema.String)),
+  prompt: Schema.optional(Schema.NullOr(Schema.String)),
+  lastTool: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   latestOutput: Schema.optional(Schema.NullOr(Schema.String)),
   outputTruncated: Schema.optional(Schema.Boolean),
   occurredAt: IsoDateTime,
@@ -60,6 +65,19 @@ export const MarkThreadBackgroundWorkInactiveInput = Schema.Struct({
 export type MarkThreadBackgroundWorkInactiveInput =
   typeof MarkThreadBackgroundWorkInactiveInput.Type;
 
+export const ListThreadBackgroundWorkSnapshotInput = Schema.Struct({
+  threadId: Schema.optional(ThreadId),
+});
+export type ListThreadBackgroundWorkSnapshotInput =
+  typeof ListThreadBackgroundWorkSnapshotInput.Type;
+
+export const DismissThreadBackgroundWorkInput = Schema.Struct({
+  threadId: Schema.optional(ThreadId),
+  workItemIds: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  dismissedAt: IsoDateTime,
+});
+export type DismissThreadBackgroundWorkInput = typeof DismissThreadBackgroundWorkInput.Type;
+
 export interface ThreadBackgroundWorkRepositoryShape {
   readonly upsertTransition: (
     transition: ThreadBackgroundWorkTransition,
@@ -70,10 +88,14 @@ export interface ThreadBackgroundWorkRepositoryShape {
   readonly expireStale: (
     input: ExpireThreadBackgroundWorkInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
-  readonly listSnapshot: () => Effect.Effect<
-    ReadonlyArray<ThreadBackgroundWorkEntry>,
-    ProjectionRepositoryError
-  >;
+  /** Visible (non-dismissed) work, active first, capped at the snapshot limit. */
+  readonly listSnapshot: (
+    input?: ListThreadBackgroundWorkSnapshotInput,
+  ) => Effect.Effect<ReadonlyArray<ThreadBackgroundWorkEntry>, ProjectionRepositoryError>;
+  /** Hides settled work from snapshots; active rows are never dismissed. */
+  readonly dismiss: (
+    input: DismissThreadBackgroundWorkInput,
+  ) => Effect.Effect<number, ProjectionRepositoryError>;
   readonly listProtectedThreadIds: (
     input: ThreadBackgroundWorkFreshnessInput,
   ) => Effect.Effect<ReadonlyArray<ThreadId>, ProjectionRepositoryError>;
