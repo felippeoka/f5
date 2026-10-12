@@ -741,6 +741,19 @@ those ephemeral WebSocket codes separately from native IPC outcomes. Prompts exp
 use the exact app ID in every app argument and request post-activation captures instead
 of leaving those choices to the model. These changes improve reproducibility and
 diagnosis; they do not retroactively identify this attempt's cause or weaken any check.
+The [instrumented attempt](computer-certification/2026-10-12-macos-instrumented-pre-type-failure.json)
+at `daa20cec52` observed successful capture, inspection and two semantic-action
+responses and emitted one thumbnail. It then ended without a typing request or a tagged tool failure, so it
+remains failed. Inspection of the access result found a misleading representation:
+full-tier grants permit typing, but their stored `allowTyping` flag is false because
+that flag is only an extra click-tier permission. Access results now report derived
+`typingAllowed`, using the existing authorization predicate, and tool descriptions
+explain the distinction. Stored grants, helper authorization, click-tier consent and
+secure-field protections are unchanged. A regression confirms a full-tier grant reports
+effective typing permission without changing its stored flag or opening another consent
+request. This is a demonstrated presentation defect, not proof of why that model turn
+stopped. Future failed runs also record content-free thumbnail visibility/load booleans
+at cleanup, separately from the overall workflow checks.
 
 For background inspection without changing focus or starting a provider session:
 

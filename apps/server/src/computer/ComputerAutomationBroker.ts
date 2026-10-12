@@ -1,4 +1,4 @@
-import { selectComputerApp, appTier } from "@t3tools/shared/computerApps";
+import { selectComputerApp, appTier, grantAllows } from "@t3tools/shared/computerApps";
 import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
 import { createHash, randomUUID } from "node:crypto";
 import { Effect, FileSystem, Layer, Option, Path, Schema, ServiceMap } from "effect";
@@ -475,7 +475,11 @@ export class ComputerAutomationBrokerRuntime {
     await this.access.requestAccess(threadId, ctx.turnId, candidates, reason, "apps", typing);
     const grants = this.access.grants(threadId);
     return {
-      grants,
+      grants: grants.map((grant) => ({
+        ...grant,
+        // The stored flag is an extra click-tier permission, not the full tier's rights.
+        typingAllowed: grantAllows(grant.tier, grant.allowTyping, "type"),
+      })),
       apps: resolutions.map(({ query, matches, app }) => ({
         query,
         ...(app ? { appId: app.appId, name: app.name } : {}),

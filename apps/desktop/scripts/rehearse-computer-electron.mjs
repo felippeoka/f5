@@ -108,6 +108,8 @@ let threadObservation;
 let consentObservation;
 let providerErrorCodes;
 let toolOutcomeErrors;
+let thumbnailObservation;
+let fixtureObservation;
 const checks = {};
 const halt = () => {
   interrupted = true;
@@ -683,6 +685,14 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
   process.off("SIGTERM", halt);
   if (application) nativeObservation = await observer().catch(() => undefined);
   if (page && application) {
+    const image = page.getByAltText("Last captured computer action");
+    thumbnailObservation = await image
+      .isVisible()
+      .then(async (visible) => ({
+        visible,
+        loaded: visible && (await image.evaluate((img) => img.complete && img.naturalWidth > 0)),
+      }))
+      .catch(() => ({ visible: false, loaded: false }));
     const tail = await rpc(ORCHESTRATION_WS_METHODS.getThreadTailDetails, {
       threadId,
       messageLimit: 0,
@@ -749,6 +759,11 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       .catch(() => {});
   if (application) await application.close().catch(() => {});
   if (failureStage) process.stdout.write("Test closed. You can use your computer again.\n");
+  if (fixture)
+    fixtureObservation = {
+      presses: Math.min(100, fixture.presses()),
+      expectedSyntheticTextReceived: fixture.typed(),
+    };
   fixture?.child.kill();
   await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   const passed = !failureStage && !interrupted && Object.values(checks).every(Boolean);
@@ -786,6 +801,8 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         consentObservation,
         providerErrorCodes,
         toolOutcomeErrors,
+        thumbnailObservation,
+        fixtureObservation,
         checks,
         ...(controlsOnly ? { controlsOnly: true } : {}),
         ...(actionsOnly ? { actionsOnly: true } : {}),

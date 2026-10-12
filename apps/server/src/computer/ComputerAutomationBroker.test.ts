@@ -95,6 +95,39 @@ async function harness() {
   };
 }
 describe("computer broker safety boundaries", () => {
+  it("reports full-tier typing rights without changing the stored click-tier flag", async () => {
+    const h = await harness();
+    h.ipc.appResults = [
+      {
+        appId: "com.apple.TextEdit",
+        name: "TextEdit",
+        tier: "full",
+        running: true,
+        frontmost: false,
+      },
+    ];
+    try {
+      const result = await h.broker.requestAccess(
+        "t",
+        "s",
+        ["com.apple.TextEdit"],
+        "Synthetic typing test",
+        true,
+      );
+      expect(result).toMatchObject({
+        grants: [
+          { appId: "com.apple.TextEdit", tier: "full", allowTyping: false, typingAllowed: true },
+        ],
+        apps: [{ status: "already-granted" }],
+      });
+      expect(h.broker.access.grants("t")).toEqual([
+        { appId: "com.apple.TextEdit", tier: "full", allowTyping: false },
+      ]);
+      expect(h.ipc.messages.some((message) => message.type === "accessRequested")).toBe(false);
+    } finally {
+      h.broker.close();
+    }
+  });
   it("publishes tool-boundary outcome codes only for the matching session", async () => {
     const h = await harness();
     const events = vi.fn();
