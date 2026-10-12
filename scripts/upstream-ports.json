@@ -994,8 +994,8 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "evidence": [
-        "apps/server/src/orchestration/projectSkills.ts:499",
-        "apps/server/src/orchestration/projectSkills.test.ts:275"
+        "apps/server/src/orchestration/projectSkills.ts:532",
+        "apps/server/src/orchestration/projectSkills.test.ts:213"
       ],
       "f5Shas": [
         "c21d537fafb5bfef6280239040cbd0a92c9a38e3",
@@ -1116,7 +1116,7 @@
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "3c",
-      "evidence": ["apps/web/src/components/Sidebar.tsx:2831"],
+      "evidence": ["apps/web/src/components/sidebar/SidebarProjectItem.tsx:482"],
       "f5Shas": ["de26827bdc26045fcaef20ae12dfd5032648e0cd"]
     },
     {
@@ -9152,7 +9152,7 @@
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "3f",
-      "evidence": ["apps/web/src/components/Sidebar.tsx:1567"],
+      "evidence": ["apps/web/src/components/Sidebar.tsx:626"],
       "f5Shas": ["de26827bdc26045fcaef20ae12dfd5032648e0cd"]
     },
     {
@@ -10275,7 +10275,7 @@
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "3f",
-      "evidence": ["apps/web/src/components/Sidebar.tsx:2396"],
+      "evidence": ["apps/web/src/components/sidebar/SidebarProjectItem.tsx:307"],
       "f5Shas": ["de26827bdc26045fcaef20ae12dfd5032648e0cd"]
     },
     {
@@ -11856,7 +11856,7 @@
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "6",
-      "evidence": ["apps/web/src/components/Sidebar.tsx:3534"],
+      "evidence": ["apps/web/src/components/Sidebar.tsx:1164"],
       "f5Shas": ["553ee4c282c6a3e5e811903ef80abc1b659bf11a"]
     },
     {
@@ -15125,7 +15125,7 @@
       "disposition": "ported",
       "plannedWorkstream": "1d",
       "evidence": [
-        "apps/web/src/components/Sidebar.tsx:1419",
+        "apps/web/src/components/sidebar/useSidebarThreadActions.ts:296",
         "apps/web/src/archiveActions.test.ts:1"
       ],
       "f5Shas": [
@@ -18488,7 +18488,7 @@
       "reviewStatus": "reviewed",
       "disposition": "not-applicable",
       "plannedWorkstream": "3f",
-      "evidence": ["apps/web/src/components/Sidebar.tsx:1234"]
+      "evidence": ["apps/web/src/components/Sidebar.tsx:481"]
     },
     {
       "upstreamSha": "e6987965f65914861f0dabd0db03729fe5cd2508",
