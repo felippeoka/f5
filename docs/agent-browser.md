@@ -1186,6 +1186,23 @@ frozen-renderer coverage, the broader app/privacy/profile matrix, Windows runtim
 checks and installed-build signing/TCC attribution remain pending. All release gates
 stay closed; signing remains deferred.
 
+The [current-helper frozen-renderer run](computer-certification/2026-10-13-macos-current-helper-electron-renderer-stop-passed.json)
+at clean `d69b11dd7b` also passed every check with the same helper hash. Real human
+consent settled and the lease banner appeared. The isolated renderer was OS-verified
+frozen for 407.0 ms, covering physical recognition and the independently observed
+full chord. The session observer recorded Escape with Control and Command 387 ms
+after RED. Recorded emission tails after physical and chord recognition were 0 ms;
+app delivery stopped within 1.8 ms. Quiet-tail observation, interrupted in-flight
+typing, subsequent paused-mutation refusal, mirrored pause, released lease and native
+frontmost receipt passed. No resume was performed.
+
+Together these two reports complete the narrow unsigned macOS/Codex/synthetic-fixture
+frozen-main and frozen-renderer stop checkpoints for the current helper. Having two
+displays connected does not establish the complete display matrix. UI Pause/Resume,
+broader app/privacy/profile coverage, Windows runtime checks, provider-built-in and
+Chrome certification, and installed-build signing/TCC attribution remain separate
+gates. Earlier failed reports remain preserved and all release gates stay closed.
+
 Coordinate with the operator before launching. The real consent dialog must be answered
 by a human for the single synthetic fixture. The operator then leaves input idle and
 follows the window's instructions for Pause and Resume. Turns go through the real
