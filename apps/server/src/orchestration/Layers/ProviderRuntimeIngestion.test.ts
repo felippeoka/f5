@@ -266,6 +266,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   async function createHarness(options?: {
     readonly startIngestion?: boolean;
+    readonly seedSession?: boolean;
     readonly refreshAccount?: UsageServiceShape["refreshAccount"];
     readonly settings?: Partial<import("@t3tools/contracts").ServerSettings>;
     /** Isolated state dir for tests that write attachments. */
@@ -363,23 +364,24 @@ describe("ProviderRuntimeIngestion", () => {
         createdAt,
       }),
     );
-    await Effect.runPromise(
-      engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.makeUnsafe("cmd-session-seed"),
-        threadId: ThreadId.makeUnsafe("thread-1"),
-        session: {
+    if (options?.seedSession !== false)
+      await Effect.runPromise(
+        engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.makeUnsafe("cmd-session-seed"),
           threadId: ThreadId.makeUnsafe("thread-1"),
-          status: "ready",
-          providerName: "codex",
-          runtimeMode: "approval-required",
-          activeTurnId: null,
-          updatedAt: createdAt,
-          lastError: null,
-        },
-        createdAt,
-      }),
-    );
+          session: {
+            threadId: ThreadId.makeUnsafe("thread-1"),
+            status: "ready",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: null,
+            updatedAt: createdAt,
+            lastError: null,
+          },
+          createdAt,
+        }),
+      );
     provider.setSession({
       provider: "codex",
       status: "ready",
@@ -1905,6 +1907,61 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.estimatedContextTokens).toBe(550);
     expect(thread.session?.tokenUsageSource).toBe("provider");
     expect(thread.estimatedContextTokens).toBe(550);
+  });
+
+  it.each(["session.started", "session.state.changed", "runtime.error"])(
+    "preserves the requested approval mode when %s arrives before session binding",
+    async (type) => {
+      const harness = await createHarness({ seedSession: false });
+      const initial = (await Effect.runPromise(harness.engine.getReadModel())).threads[0]!;
+      expect(initial.session).toBeNull();
+      expect(initial.runtimeMode).toBe("approval-required");
+      harness.emit({
+        type,
+        eventId: asEventId(`cold-${type}`),
+        provider: "codex",
+        threadId: initial.id,
+        createdAt: new Date().toISOString(),
+        payload:
+          type === "runtime.error" ? { message: "Synthetic startup failure" } : { state: "ready" },
+      });
+      const thread = await waitForThread(harness.engine, (entry) => entry.session !== null);
+      expect(thread.session?.runtimeMode).toBe("approval-required");
+    },
+  );
+
+  it("preserves requested approval mode for a terminal event without a bound session", async () => {
+    const harness = await createHarness({ seedSession: false });
+    const thread = (await Effect.runPromise(harness.engine.getReadModel())).threads[0]!;
+    const event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }> = {
+      type: "turn.completed",
+      eventId: asEventId("cold-completed"),
+      provider: "codex",
+      threadId: thread.id,
+      turnId: asTurnId("cold-turn"),
+      createdAt: new Date().toISOString(),
+      payload: { state: "completed" },
+    };
+    expect(makeTurnCompletedSessionSetCommand({ event, thread }).session.runtimeMode).toBe(
+      "approval-required",
+    );
+    expect(
+      makeTurnCompletedSessionSetCommand({
+        event,
+        thread: {
+          ...thread,
+          session: {
+            threadId: thread.id,
+            providerName: "codex",
+            status: "ready",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: event.createdAt,
+          },
+        },
+      }).session.runtimeMode,
+    ).toBe("full-access");
   });
 
   it("applies provider session.state.changed transitions directly", async () => {

@@ -580,14 +580,28 @@ remains available until a real unmarked user click, or the phase fails its timeo
 Claude's first development attempt passed genuine app consent and denied session
 actions without input, then failed: approved activation returned NotGranted after
 the observer saw a second provider-session generation. No lease, capture or input
-occurred, and cleanup was confirmed. The cause of replacement is not yet established;
-the observer now records opaque per-request session ordinals and only known restart
+occurred, and cleanup was confirmed. A read-only diagnostic then observed a
+runtime-mode-changed restart between its first two turns, without any consent or
+input. Four regression cases reproduce lifecycle/terminal events creating full-access
+metadata before a session is bound even when the thread requests approval-required.
+Ingestion now falls back to the requested thread mode, while preserving an explicitly
+bound session's mode. Live continuity and approved delivery still require validation.
+The harness also explicitly chooses Supervised through the ordinary composer control
+and observes the actual submitted modes; configuration alone cannot prove approval
+mode. Neither step answers app/session consent. The observer records opaque per-request
+session ordinals and only known restart
 flags from backend logs, never raw messages, identities or paths. These are diagnostic
 hints, not qualifying evidence. Codex's phase is still unrun. Neither proves approval
 reset after a replacement session nor consent
 expiry, typing upgrades or the full consent matrix. Installed candidates require
 their own observation driver. Neither this phase nor grant-memory can open a gate
 alone. Any extra provider approval prompt must also receive a genuine user answer.
+
+Development backends inherit stdio. The diagnostic observes Electron's parent output
+pipes separately and drops everything except allowlisted lifecycle/restart labels;
+watching a child's absent stdout pipe produced no diagnostic evidence. The new
+approval-mode read-only diagnostic performs three metadata turns without app consent,
+capture or input. It is not a qualifying release phase.
 
     bun run computer:certify run --output <prepared-suite> \
       --group workflows --scenario session-actions.claude

@@ -183,6 +183,8 @@ const grantMemoryConsentReceipts = [];
 let sessionActionsObservation;
 let sessionActionsFailures;
 let approvalModeVerifiedTurns = 0;
+let approvalComposerInitiallySupervised;
+let submittedRuntimeModes;
 let externalSubmissions = 0;
 let interrupted = false;
 let stage = "preparation";
@@ -751,11 +753,37 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         toolOutcomeErrors: [],
         toolFailures: [],
         toolFailuresOverflow: false,
+        submittedRuntimeModes: [],
         leaseSeen: false,
         consentSettled: false,
         consentAllowed: false,
         fixtureGranted: false,
       });
+      const originalSend = WebSocket.prototype.send;
+      WebSocket.prototype.send = function (data) {
+        // Observe the composer's actual command, not just the configured thread.
+        // Do not alter messages or retain message text, IDs or tool parameters.
+        if (typeof data === "string") {
+          try {
+            const command = JSON.parse(data)?.body?.command;
+            if (
+              command?.type === "thread.turn.start" &&
+              command.threadId === rehearsalThreadId &&
+              state.submittedRuntimeModes.length < 16
+            )
+              state.submittedRuntimeModes.push(
+                ["approval-required", "full-access", "auto", "auto-accept-edits"].includes(
+                  command.runtimeMode,
+                )
+                  ? command.runtimeMode
+                  : "unknown",
+              );
+          } catch {
+            /* Non-JSON messages are simply forwarded. */
+          }
+        }
+        return originalSend.call(this, data);
+      };
       const url = new URL(window.desktopBridge.getWsUrl());
       url.searchParams.set("protocol", String(protocol));
       const socket = new WebSocket(url);
@@ -859,6 +887,23 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
   await page.evaluate((id) => {
     window.location.hash = `/${id}`;
   }, threadId);
+  if (sessionActions || approvalDiagnostic) {
+    // Creating a server thread does not set the local composer's draft override.
+    // Choose the authorized, narrower mode through the ordinary UI before send.
+    stage = "approval-mode-composer-setup";
+    const picker = page.locator('[data-composer-control="runtimeMode"]');
+    await picker.waitFor({ state: "visible", timeout: 15000 });
+    approvalComposerInitiallySupervised =
+      (await picker.getAttribute("title"))?.startsWith("Supervised") === true;
+    if (!approvalComposerInitiallySupervised) {
+      await picker.click();
+      await page.getByRole("menuitemradio", { name: /^Supervised/ }).click();
+    }
+    await waitFor(
+      async () => (await picker.getAttribute("title"))?.startsWith("Supervised") === true,
+      5000,
+    );
+  }
   if (sessionActions) {
     sessionActionsObservation = await runSessionActions({
       appId,
@@ -1633,6 +1678,15 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       .evaluate(() => globalThis.__computerRehearsalRealApps.snapshot())
       .catch(() => undefined);
   if (page && application && !appWindowsClosed) {
+    if (sessionActions || approvalDiagnostic) {
+      const modes = (submittedRuntimeModes = await page
+        .evaluate(() => window.__computerRehearsal.submittedRuntimeModes)
+        .catch(() => []));
+      checks.approvalModeActuallySubmitted =
+        modes.length === composerSubmissions &&
+        composerSubmissions > 0 &&
+        modes.every((mode) => mode === "approval-required");
+    }
     const image = page.getByAltText("Last captured computer action");
     thumbnailObservation = await image
       .isVisible()
@@ -1899,6 +1953,9 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         signed: false,
         certified: false,
         provider,
+        ...(sessionActions || approvalDiagnostic
+          ? { approvalComposerInitiallySupervised, submittedRuntimeModes }
+          : {}),
         ...(sessionActions
           ? {
               sessionActionsObservation,

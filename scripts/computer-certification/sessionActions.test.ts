@@ -169,6 +169,7 @@ it("admits independent safe receipts and rejects stale, incomplete or broader ex
   const sessionActionsObservation = await runSessionActions(driver);
   const raw = {
     runtimeMode: "approval-required",
+    submittedRuntimeModes: Array(4).fill("approval-required"),
     composerSubmissions: 4,
     approvalModeVerifiedTurns: 4,
     sessionActionsObservation,
@@ -185,6 +186,14 @@ it("admits independent safe receipts and rejects stale, incomplete or broader ex
   expect(sessionActionsReceiptsComplete(raw)).toBe(true);
   for (const patch of [
     { runtimeMode: "full-access" },
+    {
+      submittedRuntimeModes: [
+        "full-access",
+        "approval-required",
+        "approval-required",
+        "approval-required",
+      ],
+    },
     { approvalModeVerifiedTurns: 3 },
     { composerSubmissions: 5 },
     { providerTailObserved: false },

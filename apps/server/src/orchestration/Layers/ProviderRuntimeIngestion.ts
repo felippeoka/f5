@@ -4023,7 +4023,7 @@ const make = Effect.gen(function* () {
                 providerName: event.provider,
                 providerInstanceId:
                   event.providerInstanceId ?? thread.session?.providerInstanceId ?? null,
-                runtimeMode: thread.session?.runtimeMode ?? "full-access",
+                runtimeMode: thread.session?.runtimeMode ?? thread.runtimeMode,
                 ...(workflowExecutionProfile ? { workflowExecutionProfile } : {}),
                 activeTurnId: nextActiveTurnId,
                 lastError,
@@ -4800,7 +4800,7 @@ const make = Effect.gen(function* () {
               providerName: event.provider,
               providerInstanceId:
                 event.providerInstanceId ?? thread.session?.providerInstanceId ?? null,
-              runtimeMode: thread.session?.runtimeMode ?? "full-access",
+              runtimeMode: thread.session?.runtimeMode ?? thread.runtimeMode,
               activeTurnId: eventTurnId ?? null,
               lastError: runtimeErrorMessage,
               lastErrorId: event.eventId,

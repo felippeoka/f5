@@ -170,7 +170,7 @@ export function makeTurnCompletedSessionSetCommand(input: {
       status,
       providerName: event.provider,
       providerInstanceId: event.providerInstanceId ?? thread.session?.providerInstanceId ?? null,
-      runtimeMode: thread.session?.runtimeMode ?? "full-access",
+      runtimeMode: thread.session?.runtimeMode ?? thread.runtimeMode,
       activeTurnId: null,
       lastError,
       lastErrorId: failed ? event.eventId : null,

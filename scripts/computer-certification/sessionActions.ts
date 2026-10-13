@@ -189,6 +189,9 @@ export function sessionActionsReceiptsComplete(raw: unknown): boolean {
     raw.runtimeMode === "approval-required" &&
     raw.composerSubmissions === 4 &&
     raw.approvalModeVerifiedTurns === 4 &&
+    Array.isArray(raw.submittedRuntimeModes) &&
+    raw.submittedRuntimeModes.length === 4 &&
+    raw.submittedRuntimeModes.every((mode) => mode === "approval-required") &&
     summary.expectedDeniedActions === 1 &&
     summary.deliveredPresses === 1 &&
     raw.fixtureObservation.presses === 1 &&

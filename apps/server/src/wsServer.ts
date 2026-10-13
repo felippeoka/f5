@@ -1108,12 +1108,14 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
                 Deferred.await(orchestrationRuntime).pipe(
                   Effect.flatMap(({ orchestrationEngine }) =>
                     computer.generation(interrupted.threadId) === interrupted.sessionGeneration
-                      ? orchestrationEngine.dispatch({
-                          type: "thread.turn.interrupt",
-                          commandId: CommandId.makeUnsafe(crypto.randomUUID()),
-                          threadId: ThreadId.makeUnsafe(interrupted.threadId),
-                          createdAt: new Date().toISOString(),
-                        })
+                      ? orchestrationEngine
+                          .dispatch({
+                            type: "thread.turn.interrupt",
+                            commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+                            threadId: ThreadId.makeUnsafe(interrupted.threadId),
+                            createdAt: new Date().toISOString(),
+                          })
+                          .pipe(Effect.asVoid)
                       : Effect.void,
                   ),
                 ),
@@ -1142,12 +1144,14 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
                 Deferred.await(orchestrationRuntime).pipe(
                   Effect.flatMap(({ orchestrationEngine }) =>
                     computer.matchesTurn(killed.threadId, killed.sessionGeneration, killed.turnId)
-                      ? orchestrationEngine.dispatch({
-                          type: "thread.turn.interrupt",
-                          commandId: CommandId.makeUnsafe(crypto.randomUUID()),
-                          threadId: ThreadId.makeUnsafe(killed.threadId),
-                          createdAt: new Date().toISOString(),
-                        })
+                      ? orchestrationEngine
+                          .dispatch({
+                            type: "thread.turn.interrupt",
+                            commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+                            threadId: ThreadId.makeUnsafe(killed.threadId),
+                            createdAt: new Date().toISOString(),
+                          })
+                          .pipe(Effect.asVoid)
                       : Effect.void,
                   ),
                 ),

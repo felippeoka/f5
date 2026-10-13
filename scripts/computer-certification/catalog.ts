@@ -196,6 +196,7 @@ export const SCENARIOS: readonly Scenario[] = [
       "sessionActionsGrantsCleared",
       "sessionActionsCompleteNativeTrace",
       "sessionActionsApprovalModeVerified",
+      "approvalModeActuallySubmitted",
       "sessionActionsProviderTailObserved",
       "sessionActionsOnlyExpectedDenial",
       "sessionActionsFinishAcknowledged",
