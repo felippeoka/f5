@@ -1,5 +1,6 @@
 import { ComputerControlError } from "@t3tools/shared/computerControl";
 import type { ComputerInspectResult } from "@t3tools/contracts";
+import { isAbsolute } from "node:path";
 
 export const BROWSER_PROTECTION_IDS = {
   browser: "com.google.Chrome",
@@ -8,6 +9,30 @@ export const BROWSER_PROTECTION_IDS = {
 export const BROWSER_SECURE_LABEL = "F5 browser secure fixture";
 export const BROWSER_MARKER_LABEL = "F5 browser capture marker";
 export const BROWSER_SECURE_SENTINEL = "F5_SYNTHETIC_PASSWORD_SENTINEL";
+
+/** Exact fixture-only arguments shared by headless setup and the desktop check.
+ * The mock keychain is a Chrome test flag, never a production backend setting. */
+export function protectionChromeArguments(
+  profile: string,
+  url: string,
+  mode: "headless" | "desktop",
+) {
+  if (!isAbsolute(profile) || !/^http:\/\/127\.0\.0\.1:\d{1,5}\/[a-f0-9]{32}\/fixture$/.test(url))
+    throw new Error("Invalid private fixture launch.");
+  return [
+    `--user-data-dir=${profile}`,
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-sync",
+    "--disable-background-networking",
+    "--disable-extensions",
+    "--use-mock-keychain",
+    ...(mode === "headless"
+      ? ["--headless=new", "--dump-dom"]
+      : ["--new-window", "--window-size=800,600", "--window-position=650,100"]),
+    url,
+  ];
+}
 
 /** A different failure (or an unavailable helper) is never protection proof. */
 export function expectedProtectionRefusal(

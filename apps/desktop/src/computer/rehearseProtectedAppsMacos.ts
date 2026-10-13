@@ -1,7 +1,6 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { release, tmpdir } from "node:os";
 import { promisify } from "node:util";
@@ -18,15 +17,14 @@ import {
 import { ComputerControlError } from "@t3tools/shared/computerControl";
 import { ComputerHelperClient } from "./ComputerHelperClient";
 import { createRehearsalFixture } from "./rehearsalFixture";
+import { createBrowserProtectionFixture } from "./rehearsalBrowserFixture";
 import {
   BROWSER_PROTECTION_IDS,
   BROWSER_SECURE_LABEL,
   BROWSER_MARKER_LABEL,
-  browserProtectionHtml,
   browserSecureInspection,
   expectedProtectionRefusal,
-  protectionFixtureState,
-  type ProtectionFixtureState,
+  protectionChromeArguments,
 } from "./rehearsalProtection";
 
 // Opt-in native-helper boundary checks, not provider consent or release certification.
@@ -58,45 +56,7 @@ const helper = new ComputerHelperClient(dirname(resolve(helperPath)), resolve(he
 const nativeSource = resolve(import.meta.dirname, "../../native/macos/Fixtures");
 const appVerifier = join(root, "app-verifier");
 const captureVerifier = join(root, "capture-verifier");
-const nonce = randomBytes(16).toString("hex");
-const pagePath = `/${nonce}/fixture`;
-const statePath = `/${nonce}/state`;
-let pageState: ProtectionFixtureState | undefined;
-let lastPageObservation = 0;
-const server = createServer((request, response) => {
-  if (request.method === "GET" && request.url === pagePath) {
-    response.writeHead(200, {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store",
-      "Content-Security-Policy":
-        "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'none'; base-uri 'none'",
-    });
-    response.end(browserProtectionHtml(statePath));
-  } else if (request.method === "POST" && request.url === statePath) {
-    let body = "";
-    request.setEncoding("utf8");
-    request.on("error", () => {});
-    request.on("data", (chunk: string) => {
-      body += chunk;
-      if (Buffer.byteLength(body) > 2048) request.destroy();
-    });
-    request.on("end", () => {
-      try {
-        const state = protectionFixtureState(JSON.parse(body));
-        if (!state) throw new Error("Invalid fixture observation.");
-        pageState = state;
-        lastPageObservation = performance.now();
-        response.writeHead(204).end();
-      } catch {
-        response.writeHead(400).end();
-      }
-    });
-  } else {
-    response.writeHead(404).end();
-  }
-});
-server.requestTimeout = 5000;
-server.headersTimeout = 5000;
+let browserFixture: Awaited<ReturnType<typeof createBrowserProtectionFixture>> | undefined;
 const checks: Array<{
   name: string;
   state: "passed" | "failed";
@@ -112,6 +72,7 @@ let renewal: ReturnType<typeof setInterval> | undefined;
 let startedTerminalPid: number | undefined;
 let terminalLaunchAttempted = false;
 let startedChromePid: number | undefined;
+let browserOwnedProcessObserved = false;
 let retainedTerminal = false;
 let retainedChrome = false;
 let metadata: Record<string, unknown> = {};
@@ -259,6 +220,7 @@ try {
       [
         ["rehearsal", import.meta.filename],
         ["protection", join(import.meta.dirname, "rehearsalProtection.ts")],
+        ["browserFixture", join(import.meta.dirname, "rehearsalBrowserFixture.ts")],
         ["apps", join(nativeSource, "ProtectionAppVerifier.swift")],
         ["pixels", join(nativeSource, "CaptureVerifier.swift")],
         ["excludedFixture", join(nativeSource, "ComputerControlFixture.swift")],
@@ -360,27 +322,11 @@ try {
   excluded = await createRehearsalFixture({ root, appId: excludedId, ungranted: true });
   const excludedGrant: ComputerGrant = { appId: excludedId, tier: "full", allowTyping: false };
   setGrants([browserGrant, excludedGrant]);
-  await new Promise<void>((done, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", done);
-  });
-  const address = server.address();
-  assert(address && typeof address !== "string");
+  browserFixture = await createBrowserProtectionFixture();
   // Fixed isolated profile; no Chrome automation port, extension or default-profile state.
   chrome = spawn(
     chromeBinary,
-    [
-      `--user-data-dir=${join(root, "chrome-profile")}`,
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-sync",
-      "--disable-background-networking",
-      "--disable-extensions",
-      "--new-window",
-      "--window-size=800,600",
-      "--window-position=650,100",
-      `http://127.0.0.1:${address.port}${pagePath}`,
-    ],
+    protectionChromeArguments(join(root, "chrome-profile"), browserFixture.url, "desktop"),
     { stdio: "ignore" },
   );
   chrome.on("error", () => {
@@ -389,10 +335,11 @@ try {
   startedChromePid = chrome.pid;
   await waitFor(async () => {
     const pids = (await appPids())[BROWSER_PROTECTION_IDS.browser];
-    return pids?.length === 1 && pids[0] === chrome?.pid && pageState?.ready === true;
+    browserOwnedProcessObserved ||= pids?.length === 1 && pids[0] === chrome?.pid;
+    return pids?.length === 1 && pids[0] === chrome?.pid && browserFixture?.state()?.ready === true;
   });
   await request({ op: "activateApp", appId: BROWSER_PROTECTION_IDS.browser });
-  await waitFor(() => pageState?.secureFocused === true);
+  await waitFor(() => browserFixture?.state()?.secureFocused === true);
   let browserSnapshot: ComputerInspectResult | undefined;
   await check(
     "Chrome inspection identifies the synthetic secure field and omits its value",
@@ -420,13 +367,17 @@ try {
     "Focused Chrome password refuses keyboard typing with unchanged DOM value",
     async () => {
       await requireFrontmost(BROWSER_PROTECTION_IDS.browser);
-      assert(pageState?.secureFocused && pageState.secureUnchanged && pageState.inputEvents === 0);
+      const state = browserFixture?.state();
+      assert(state?.secureFocused && state.secureUnchanged && state.inputEvents === 0);
       await requireRefusal({ op: "type", text: "F5_REJECTED_INPUT" }, "secure-field");
       await delay(350);
       const after = performance.now();
-      await waitFor(() => lastPageObservation > after);
+      await waitFor(() => (browserFixture?.lastObservationAt() ?? 0) > after);
       await requireFrontmost(BROWSER_PROTECTION_IDS.browser);
-      assert(pageState?.secureFocused && pageState.secureUnchanged && pageState.inputEvents === 0);
+      const afterState = browserFixture?.state();
+      assert(
+        afterState?.secureFocused && afterState.secureUnchanged && afterState.inputEvents === 0,
+      );
     },
   );
   browserSnapshot = await inspect(BROWSER_PROTECTION_IDS.browser);
@@ -526,10 +477,7 @@ try {
     if (id === BROWSER_PROTECTION_IDS.terminal) retainedTerminal = retained;
     else retainedChrome = retained;
   }
-  await new Promise<void>((done) => {
-    server.close(() => done());
-    server.closeAllConnections();
-  });
+  await browserFixture?.close();
   if (retainedChrome)
     process.stdout.write(
       `Private Chrome test profile retained at ${join(root, "chrome-profile")}; close the test browser before removing it.\n`,
@@ -543,6 +491,7 @@ try {
     !physicalInterruption &&
     checks.length === 12 &&
     checks.every((item) => item.state === "passed") &&
+    browserFixture?.observation().stateRejected === false &&
     !retainedChrome &&
     !retainedTerminal;
   await writeFile(
@@ -563,13 +512,23 @@ try {
         physicalInterruption,
         retainedTerminal,
         retainedChrome,
-        browserFixture: pageState
-          ? { secureValueUnchanged: pageState.secureUnchanged, inputEvents: pageState.inputEvents }
+        mockKeychain: true,
+        browserStartup: {
+          ...browserFixture?.observation(),
+          ownedProcessObserved: browserOwnedProcessObserved,
+          launcherExited: !!chrome && (chrome.exitCode !== null || chrome.signalCode !== null),
+          launcherSignal: chrome?.signalCode ?? null,
+        },
+        browserFixture: browserFixture?.state()
+          ? {
+              secureValueUnchanged: browserFixture.state()!.secureUnchanged,
+              inputEvents: browserFixture.state()!.inputEvents,
+            }
           : undefined,
         checks,
         limitations: [
           "Scripted native-helper grants and permit; no F5 renderer consent, provider transport, overlay or cross-profile proof",
-          "Fresh local Chrome fixture/profile only; no signed-in sites, extensions, popups or arbitrary browser/app trees tested",
+          "Fresh local Chrome fixture/profile with test-only mock keychain; no real keychain, autofill, signed-in sites, extensions, popups or arbitrary browser/app trees tested",
           "Single display, fixed app windows; no moving-window, multi-display, system-surface or complete capture privacy matrix",
           "Terminal typing remains disabled; no command, chord or allow-typing workflow tested",
           "Unsigned development helper only; signed installed-build attribution, Windows runtime and all release gates remain pending",

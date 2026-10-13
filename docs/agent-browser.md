@@ -728,6 +728,11 @@ requires exact `NotGranted(type)` responses to keyboard typing and semantic `set
 It checks the foreground identity around keyboard refusal; it sends no command, Enter
 or other chord. Chrome uses a new private profile with extensions disabled and only a
 local synthetic password page. No signed-in browser profile is opened.
+The temporary test process uses `--use-mock-keychain`, the macOS test flag in
+[Google's Chrome launcher](https://github.com/GoogleChrome/chrome-launcher/blob/main/src/flags.ts),
+so the fixture does not depend on or modify the real login keychain. This flag is
+confined to the rehearsal; it is not a production setting or Chrome integration bridge.
+Real keychain, autofill and password-manager behavior remain outside this checkpoint.
 
 ```sh
 F5_COMPUTER_PROTECTION_REHEARSAL=1 bun apps/desktop/src/computer/rehearseProtectedAppsMacos.ts --helper apps/desktop/dist-native/mac-arm64/f5-computer-helper --output /tmp/f5-protected-apps.json
@@ -763,6 +768,31 @@ remains failed/incomplete and proves no Chrome masking or exclusion result. Apps
 were retained, including the temporary private browser profile, without forced
 termination. A retained browser is now detached from the completed rehearsal CLI
 so it does not keep that CLI running; it is neither killed nor resumed.
+
+The [idle Terminal/Chrome retry](computer-certification/2026-10-13-macos-terminal-chrome-protection-startup-attempt.json)
+on clean `03f52ac0e2` again passed all four Terminal/prerequisite checks, then failed
+before Chrome inspection or capture, with no physical interruption. The operator
+reported a missing-keychain prompt in the test-created Chrome. The attempt remains
+failed and does not prove Chrome protection. No real keychain was created or changed.
+Headless diagnostics without the mock flag did not reach the page; adding the
+installed browser's supported mock-keychain flag reached the fixture with valid
+readiness in both the inherited and OS-login environment experiments. Those temporary
+experiments are setup observations, not release or desktop protection proof.
+
+The [checked-in headless setup diagnostic](computer-certification/2026-10-13-macos-chrome-headless-startup-dirty-passed.json)
+then passed all six startup checks with uncommitted rehearsal changes. Headless and
+desktop checks now share the same loopback fixture and private-profile/mock-keychain
+arguments. Fixed startup booleans distinguish page delivery, valid/rejected observations,
+process identity and launcher exit; no raw error, process argument or page value is saved.
+The shared fixture has no execute path and rejects unrelated routes and invalid/oversized
+observations. This preflight can run while the operator works:
+
+```sh
+bun apps/desktop/src/computer/rehearseBrowserProtectionStartupMacos.ts --output /tmp/f5-chrome-protection-startup.json
+```
+
+It exercises no helper, grants, AX, capture or OS input. A clean-revision desktop run
+is still required for Chrome password refusal and pixel masking/exclusion evidence.
 
 The helper rehearsal's `--privacy-only` mode runs the existing pixel-verification
 checks without its semantic/keyboard/pointer actions. It uses only two temporary

@@ -9,6 +9,7 @@ import {
   browserSecureInspection,
   expectedProtectionRefusal,
   protectionFixtureState,
+  protectionChromeArguments,
 } from "./rehearsalProtection";
 
 it("requires the exact protection refusal rather than an unrelated failure", () => {
@@ -27,6 +28,21 @@ it("requires the exact protection refusal rather than an unrelated failure", () 
     expect(expectedProtectionRefusal(failure, "view-grant")).toBe(index === 2);
   }
   expect(expectedProtectionRefusal(new Error("NotGranted"), "typing-grant")).toBe(false);
+});
+
+it("confines both browser modes to a private local fixture without real-keychain access", () => {
+  const url = `http://127.0.0.1:12345/${"a".repeat(32)}/fixture`;
+  for (const mode of ["headless", "desktop"] as const) {
+    const args = protectionChromeArguments(process.cwd(), url, mode);
+    expect(args).toContain(`--user-data-dir=${process.cwd()}`);
+    expect(args).toContain("--use-mock-keychain");
+    expect(args).not.toContain("--no-sandbox");
+    expect(args.at(-1)).toBe(url);
+  }
+  expect(() => protectionChromeArguments("relative", url, "desktop")).toThrow();
+  expect(() =>
+    protectionChromeArguments(process.cwd(), "https://example.com", "desktop"),
+  ).toThrow();
 });
 
 it("keeps only bounded independent page observations", () => {
