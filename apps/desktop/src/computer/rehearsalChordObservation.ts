@@ -1,5 +1,6 @@
 /** Fixed Escape modifier booleans only. No key codes, characters or raw packets. */
 export class RehearsalChordObservation {
+  constructor(private readonly activeStop = false) {}
   invalid = false;
   monitorHealthy = true;
   chordObserved = false;
@@ -53,7 +54,12 @@ export class RehearsalChordObservation {
     } else if (event.kind === "finished") {
       this.finished = true;
       this.frontmost = event.frontmost === true;
-    } else if (event.kind !== "physical" && event.kind !== "countdown") this.invalid = true;
+    } else if (
+      event.kind !== "physical" &&
+      event.kind !== "countdown" &&
+      !(this.activeStop && (event.kind === "injected" || event.kind === "calibration"))
+    )
+      this.invalid = true;
   }
   summary() {
     return {

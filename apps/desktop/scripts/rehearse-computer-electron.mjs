@@ -18,6 +18,7 @@ import {
 } from "../src/computer/rehearsalRealAppsObservation.ts";
 import { createRehearsalFixture } from "../src/computer/rehearsalFixture.ts";
 import { RehearsalStopObservation } from "../src/computer/rehearsalStopObservation.ts";
+import { RehearsalChordObservation } from "../src/computer/rehearsalChordObservation.ts";
 import { measureStopLatency } from "../src/computer/stopLatencyMeasurement.ts";
 import {
   rehearsalProviderErrorCodes,
@@ -46,6 +47,7 @@ const actionsOnly = args.includes("--actions-only");
 const stopMain = args.includes("--stop-main");
 const stopRenderer = args.includes("--stop-renderer");
 const stopOnly = stopMain || stopRenderer;
+const diagnoseChord = args.includes("--diagnose-chord");
 const realApps = args.includes("--real-apps");
 if (
   process.platform !== "darwin" ||
@@ -54,6 +56,7 @@ if (
   !output ||
   !sourceHome ||
   !binary ||
+  (diagnoseChord && !stopOnly) ||
   [statusOnly, controlsOnly, actionsOnly, stopMain, stopRenderer, realApps].filter(Boolean).length >
     1
 ) {
@@ -149,6 +152,7 @@ async function verifyRealApp(...args) {
   return JSON.parse(result.stdout);
 }
 const stopTrace = new RehearsalStopObservation();
+const chordTrace = diagnoseChord ? new RehearsalChordObservation(true) : undefined;
 let stopMeasurement;
 let frozenPid;
 let restoreTimer;
@@ -265,6 +269,14 @@ try {
         ["stopObserverSource", join(desktopDir, "src/computer/rehearsalStopObservation.ts")],
         ["stopMeasurementSource", join(desktopDir, "src/computer/stopLatencyMeasurement.ts")],
         ["stopFixtureSource", join(desktopDir, "native/macos/Fixtures/StopLatencyFixture.swift")],
+        ...(diagnoseChord
+          ? [
+              [
+                "chordObservationSource",
+                join(desktopDir, "src/computer/rehearsalChordObservation.ts"),
+              ],
+            ]
+          : []),
         ...(provider === "claude"
           ? [["claudeLaunchSource", join(repo, "packages/shared/src/computerRehearsalClaude.ts")]]
           : []),
@@ -365,6 +377,7 @@ try {
       appId,
       expectedText: "F5_ELECTRON_REHEARSAL Ω🙂",
       observeChord: stopOnly,
+      diagnoseChord,
       sourceFile: join(
         desktopDir,
         stopOnly
@@ -373,6 +386,9 @@ try {
       ),
     });
   if (stopOnly) {
+    fixture.child.stdin.on("error", () => {
+      stopTrace.evidence.overflow = true;
+    });
     let buffer = "";
     fixture.child.stdout.on("data", (chunk) => {
       buffer += chunk;
@@ -382,7 +398,11 @@ try {
         buffer = buffer.slice(end + 1);
         if (line === "FIXTURE_READY") continue;
         try {
-          stopTrace.fixture(JSON.parse(line));
+          const event = JSON.parse(line);
+          chordTrace?.receive(event);
+          if (!chordTrace || event.kind !== "chordCandidate") stopTrace.fixture(event);
+          if (chordTrace && (!chordTrace.monitorHealthy || chordTrace.invalid))
+            stopTrace.evidence.overflow = true;
         } catch {
           stopTrace.evidence.overflow = true;
         }
@@ -1138,6 +1158,22 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
   process.exitCode = 1;
 } finally {
   restoreProcess();
+  // Preserve a native focus receipt even when waiting for the chord failed.
+  // This observation cannot turn a failed stage into a successful run.
+  if (
+    stopOnly &&
+    fixture &&
+    !interrupted &&
+    stopTrace.evidence.observationEndedAtMs === undefined &&
+    fixture.child.exitCode === null &&
+    fixture.child.signalCode === null &&
+    !fixture.child.stdin.destroyed
+  ) {
+    fixture.child.stdin.write("FINISH\n");
+    await waitFor(() => stopTrace.evidence.observationEndedAtMs !== undefined, 1000).catch(
+      () => {},
+    );
+  }
   if (stopOnly) stopMeasurement = measureStopLatency(stopTrace.evidence);
   process.off("SIGINT", halt);
   process.off("SIGTERM", halt);
@@ -1300,6 +1336,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
             }
           : {}),
         ...(stopOnly ? { stopMeasurement } : {}),
+        ...(chordTrace ? { chordObservation: chordTrace.summary() } : {}),
         checks,
         ...(controlsOnly ? { controlsOnly: true } : {}),
         ...(actionsOnly ? { actionsOnly: true } : {}),

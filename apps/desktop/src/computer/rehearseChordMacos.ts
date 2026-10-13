@@ -78,6 +78,7 @@ try {
     sourceFile: source,
     observeChord: true,
     diagnoseChord: true,
+    passiveChord: true,
   });
   fixture.child.stdin?.on("error", () => {
     trace.invalid = true;

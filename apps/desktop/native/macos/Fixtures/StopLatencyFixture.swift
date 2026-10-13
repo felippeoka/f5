@@ -14,6 +14,7 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
   let field = NSTextField(frame: NSRect(x: 30, y: 80, width: 600, height: 40))
   var finished = false
   let diagnoseChord = CommandLine.arguments.contains("--diagnose-chord")
+  let passiveChord = CommandLine.arguments.contains("--passive-chord")
   func prompt() {
     instruction.stringValue = "Press Control + Command + Escape NOW."
     window.backgroundColor = NSColor.systemRed.withAlphaComponent(0.5)
@@ -65,7 +66,7 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
     return CGEvent.tapIsEnabled(tap: tap)
   }
   func showStopped() {
-    instruction.stringValue = diagnoseChord
+    instruction.stringValue = passiveChord
       ? "Chord observed. Release the keys. No agent input was sent."
       : "Stopped. Release the keys; measuring the final input tail."
     window.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.25)
@@ -78,7 +79,7 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
     window = NSWindow(
       contentRect: NSRect(x: 120, y: 120, width: 660, height: 240),
       styleMask: [.titled, .closable], backing: .buffered, defer: false)
-    window.title = diagnoseChord
+    window.title = passiveChord
       ? "F5 chord observer — no agent input"
       : "F5 physical stop check — synthetic input only"
     window.center()
@@ -146,7 +147,7 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
               self.prompt()
             } else if command == "FINISH" {
               self.finished = true
-              self.instruction.stringValue = CommandLine.arguments.contains("--observe-chord") && !self.diagnoseChord
+              self.instruction.stringValue = CommandLine.arguments.contains("--observe-chord") && !self.passiveChord
                 ? "Input stopped. Verifying pause; keep input idle."
                 : "Check complete. You can use your computer again."
               self.emit([

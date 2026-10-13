@@ -69,3 +69,21 @@ it("fails closed on disabled monitoring, malformed traces, injected input and ov
   expect(bounded.summary().candidates).toHaveLength(16);
   expect(bounded.summary().traceValid).toBe(false);
 });
+
+it("active-stop diagnostics accept timing-only calibration and input packets without retaining their data", () => {
+  const trace = new RehearsalChordObservation(true);
+  trace.receive({ kind: "calibration", observedAtMs: 1, text: "PRIVATE_SENTINEL" });
+  trace.receive({ kind: "injected", observedAtMs: 2, text: "PRIVATE_SENTINEL", keyCode: 0 });
+  trace.receive({ kind: "prompt", observedAtMs: 3 });
+  trace.receive({
+    kind: "chordCandidate",
+    observedAtMs: 4,
+    observer: "session",
+    control: true,
+    command: false,
+  });
+  expect(trace.summary()).toMatchObject({ traceValid: true, chordObserved: false });
+  expect(JSON.stringify(trace.summary())).not.toMatch(
+    /PRIVATE_SENTINEL|keyCode|injected|calibration/,
+  );
+});

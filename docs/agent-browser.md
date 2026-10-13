@@ -1148,6 +1148,24 @@ Coordinate the physical press before launching. A successful passive diagnostic 
 only observation without active agent typing or a lease; it cannot certify kill-switch
 latency, global-shortcut coexistence during a lease or frozen-process interruption.
 
+The [clean passive diagnostic](computer-certification/2026-10-13-macos-passive-chord-passed.json)
+at `09b7cd98b4` passed: both the session tap and AppKit window observed Escape carrying
+Control and Command, respectively 289 ms and 296 ms after the red cue. Monitoring and
+the trace stayed valid, and the native finish receipt confirmed the fixture was still
+frontmost. This confirms fixed-chord observation without active typing or a lease; it
+does not establish the cause of the missing chord in the earlier frozen-main attempt.
+
+The real Electron stop rehearsal accepts `--diagnose-chord` with `--stop-main` or
+`--stop-renderer` to retain the same bounded modifier observations while agent input is
+active. Candidate packets are routed to a separate safe observer, and existing stop
+timing, trace completeness and success conditions remain enforced. Calibration and
+injected timing packets are accepted only in this active observer mode and their
+arbitrary fields are discarded; the passive mode still rejects marked injection.
+Even when chord recognition fails, the runner attempts a native frontmost receipt
+before teardown. This observation does not clear the original failed stage or make
+unperformed follow-up mutation checks pass. The active UI continues to say input is
+running; the passive "no agent input" wording is used only for passive mode.
+
 Coordinate with the operator before launching. The real consent dialog must be answered
 by a human for the single synthetic fixture. The operator then leaves input idle and
 follows the window's instructions for Pause and Resume. Turns go through the real
