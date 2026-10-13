@@ -291,6 +291,42 @@ it("records lease admission failures separately from native action responses", (
   expect(JSON.stringify(observer.snapshot())).not.toContain("PRIVATE_SENTINEL");
 });
 
+it("distinguishes session-actions approval from app consent without retaining content", () => {
+  const observer = new ElectronRehearsalObservation();
+  for (const allow of [false, true]) {
+    const requestId = String(allow);
+    observer.receive({
+      type: "accessRequested",
+      request: {
+        requestId,
+        threadId: "PRIVATE_SENTINEL",
+        reason: "PRIVATE_SENTINEL",
+        kind: "session-actions",
+        apps: [],
+      },
+    });
+    observer.receive({
+      type: "accessAnswer",
+      answer: {
+        requestId,
+        backendIncarnation: "PRIVATE_SENTINEL",
+        decisions: [],
+        allowSessionActions: allow,
+      },
+    });
+  }
+  expect(observer.snapshot().accessAnswerSummaries).toEqual(
+    [false, true].map((allowSessionActions) => ({
+      kind: "session-actions",
+      appCount: 0,
+      allowed: 0,
+      remembered: 0,
+      allowSessionActions,
+    })),
+  );
+  expect(JSON.stringify(observer.snapshot())).not.toContain("PRIVATE_SENTINEL");
+});
+
 it("correlates semantic action enums and retains missing responses without retaining values", () => {
   const observer = new ElectronRehearsalObservation();
   for (const action of ["press", "focus", "setValue"] as const) {

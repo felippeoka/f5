@@ -134,6 +134,7 @@ export function commandsFor(
       "electron-real-apps": ["--real-apps"],
       "electron-chromium": ["--chromium-fixture"],
       "electron-grant-memory": ["--grant-memory"],
+      "electron-session-actions": ["--session-actions"],
       "windows-closed": ["--windows-closed"],
       "electron-main-stop": ["--stop-main", "--diagnose-chord"],
       "electron-renderer-stop": ["--stop-renderer", "--diagnose-chord"],

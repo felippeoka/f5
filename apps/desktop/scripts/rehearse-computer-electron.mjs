@@ -24,6 +24,7 @@ import { closeRehearsalChild } from "../src/computer/rehearsalCleanup.ts";
 import { RehearsalExternalClient } from "../src/computer/rehearsalExternalClient.ts";
 import { windowlessChecks } from "../../../scripts/computer-certification/windowlessEvidence.ts";
 import { runGrantMemory } from "../../../scripts/computer-certification/grantMemory.ts";
+import { runSessionActions } from "../../../scripts/computer-certification/sessionActions.ts";
 import {
   readChromiumFixture,
   createRehearsalChromiumFixture,
@@ -65,6 +66,8 @@ const clusterWorkflows = args.includes("--cluster-workflows");
 const chromiumFixture = args.includes("--chromium-fixture");
 const windowless = args.includes("--windows-closed");
 const grantMemory = args.includes("--grant-memory");
+const sessionActions = args.includes("--session-actions");
+const runtimeMode = sessionActions ? "approval-required" : "full-access";
 const includesRealApps = realApps || clusterWorkflows;
 if (
   process.platform !== "darwin" ||
@@ -82,7 +85,7 @@ if (
       clusterWorkflows ||
       controlsOnly ||
       actionsOnly)) ||
-  ((windowless || grantMemory) && chromiumFixture) ||
+  ((windowless || grantMemory || sessionActions) && chromiumFixture) ||
   [
     statusOnly,
     controlsOnly,
@@ -93,6 +96,7 @@ if (
     clusterWorkflows,
     windowless,
     grantMemory,
+    sessionActions,
   ].filter(Boolean).length > 1
 ) {
   process.stderr.write(
@@ -172,6 +176,9 @@ let windowlessStopObservation;
 let providerTailObserved = false;
 let grantMemoryObservation;
 const grantMemoryConsentReceipts = [];
+let sessionActionsObservation;
+let sessionActionsFailures;
+let approvalModeVerifiedTurns = 0;
 let externalSubmissions = 0;
 let interrupted = false;
 let stage = "preparation";
@@ -305,6 +312,13 @@ const modelSelection = {
 async function startTurn(text) {
   if (interrupted) throw new Error("Rehearsal interrupted.");
   const snapshot = await rpc(ORCHESTRATION_WS_METHODS.getSnapshot);
+  if (sessionActions) {
+    if (
+      snapshot.threads.find((thread) => thread.id === threadId)?.runtimeMode !== "approval-required"
+    )
+      throw new Error("Session actions require approval mode.");
+    approvalModeVerifiedTurns++;
+  }
   previousTurnId = snapshot.threads.find((thread) => thread.id === threadId)?.latestTurn?.turnId;
   if (appWindowsClosed) {
     await dispatch({
@@ -312,7 +326,7 @@ async function startTurn(text) {
       threadId,
       message: { messageId: randomUUID(), role: "user", text, attachments: [] },
       modelSelection,
-      runtimeMode: "full-access",
+      runtimeMode,
       interactionMode: "default",
     });
     externalSubmissions++;
@@ -328,6 +342,60 @@ async function startTurn(text) {
     })
     .click();
   composerSubmissions++;
+}
+async function reviewedTurn({ kind = "apps", allow, instructionsText, prompt }) {
+  await page.evaluate(() => {
+    Object.assign(window.__computerRehearsal, {
+      consent: undefined,
+      trustedConsent: false,
+      trustedConsentVisible: false,
+      consentSettled: false,
+      consentAllowed: false,
+    });
+  });
+  await instructions(instructionsText);
+  await startTurn(prompt);
+  await waitFor(
+    async () => !!(await page.evaluate(() => window.__computerRehearsal.consent)),
+    90000,
+  );
+  const requested = await page.evaluate(() => window.__computerRehearsal.consent);
+  if (
+    requested.kind !== kind ||
+    requested.threadId !== threadId ||
+    requested.apps.length !== (kind === "apps" ? 1 : 0) ||
+    (kind === "apps" && requested.apps[0].appId !== appId)
+  )
+    throw new Error("Unexpected certification consent request.");
+  const visible = await page.getByRole("dialog").isVisible();
+  await waitFor(
+    async () => (await page.evaluate(() => window.__computerRehearsal.consentSettled)) === true,
+    90000,
+  );
+  const receipt = await page.evaluate(() => ({
+    trustedReview: window.__computerRehearsal.trustedConsent === true,
+    visibleAtReview: window.__computerRehearsal.trustedConsentVisible === true,
+    settled: window.__computerRehearsal.consentSettled === true,
+    allowed: window.__computerRehearsal.consentAllowed === true,
+  }));
+  if (receipt.allowed !== allow) throw new Error("Unexpected certification consent answer.");
+  await waitTurn();
+  return {
+    ...receipt,
+    kind,
+    appCount: requested.apps.length,
+    visible: visible || receipt.visibleAtReview,
+  };
+}
+async function stopOwnedSession() {
+  await dispatch({ type: "thread.session.stop", threadId });
+  await waitFor(async () => {
+    const snapshot = await rpc(ORCHESTRATION_WS_METHODS.getSnapshot);
+    return (
+      snapshot.threads.find((thread) => thread.id === threadId)?.session?.status === "stopped" &&
+      !(await observer()).held
+    );
+  }, 15000);
 }
 try {
   repositoryCommit = (await exec("git", ["rev-parse", "HEAD"], { cwd: repo })).stdout.trim();
@@ -348,6 +416,7 @@ try {
         ["responseSource", join(desktopDir, "src/computer/rehearsalResponses.ts")],
         ["externalClientSource", join(desktopDir, "src/computer/rehearsalExternalClient.ts")],
         ["grantMemorySource", join(repo, "scripts/computer-certification/grantMemory.ts")],
+        ["sessionActionsSource", join(repo, "scripts/computer-certification/sessionActions.ts")],
         [
           "windowlessEvidenceSource",
           join(repo, "scripts/computer-certification/windowlessEvidence.ts"),
@@ -660,6 +729,8 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         activitySeen: false,
         thumbnailSeen: false,
         toolOutcomeErrors: [],
+        toolFailures: [],
+        toolFailuresOverflow: false,
         leaseSeen: false,
         consentSettled: false,
         consentAllowed: false,
@@ -714,6 +785,10 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           state.activitySeen = true;
           if (typeof message.data.outcome === "string" && state.toolOutcomeErrors.length < 128)
             state.toolOutcomeErrors.push(message.data.outcome.slice(0, 64));
+          if (message.data.status === "failed") {
+            if (state.toolFailures.length >= 128) state.toolFailuresOverflow = true;
+            else state.toolFailures.push({ op: message.data.op, outcome: message.data.outcome });
+          }
           state.thumbnailSeen ||=
             typeof message.data.thumbnailDataUrl === "string" &&
             message.data.thumbnailDataUrl.startsWith("data:image/jpeg;base64,") &&
@@ -756,7 +831,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     title: "F5 computer UI rehearsal",
     model: modelSelection.model,
     modelSelection,
-    runtimeMode: "full-access",
+    runtimeMode,
     interactionMode: statusOnly ? "plan" : "default",
     branch: null,
     worktreePath: null,
@@ -764,7 +839,68 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
   await page.evaluate((id) => {
     window.location.hash = `/${id}`;
   }, threadId);
-  if (grantMemory) {
+  if (sessionActions) {
+    sessionActionsObservation = await runSessionActions({
+      appId,
+      projectId,
+      threadId,
+      checks,
+      rpc,
+      observer,
+      stage: (name) => {
+        stage = name;
+      },
+      presses: () => fixture.presses(),
+      failures: () =>
+        page.evaluate(() => {
+          const state = window.__computerRehearsal;
+          if (state.toolFailuresOverflow) throw new Error("Incomplete activity trace.");
+          return state.toolFailures;
+        }),
+      review: async (kind, allow) =>
+        reviewedTurn({
+          kind,
+          allow,
+          instructionsText:
+            kind === "apps"
+              ? "READY: Review access and allow only Computer Control Test Fixture. Leave Always allow off. No app input in this turn."
+              : allow
+                ? "RED: Review access and Allow this session to control separately approved apps. After Allow, stay idle: the agent will activate only the synthetic fixture and capture it once."
+                : "READY: Review access and Deny this session's actions. The agent must receive NotGranted without activating any app.",
+          prompt:
+            kind === "apps"
+              ? `Approval-mode consent test for exact app ${appId}. Call computer_status once and computer_request_access exactly once for only this exact app ID, reason Synthetic session approval test. Do not activate, inspect, capture or send input. No shell, files, network or other apps. Stop on any failure, never retry. Finish READY.`
+              : `Approval-mode session test for already granted exact app ${appId}. Call computer_activate_app exactly once for this app ID with screenshot:true. F5 will ask for genuine session-actions approval; the user will ${allow ? "allow" : "deny"}. ${allow ? "After success finish READY." : "Expect NotGranted after denial; report that tag and finish READY. Do not retry or substitute another tool after the denial."} No other action, screenshot tool, shell, files, network or other apps. Stop on any other error.`,
+        }),
+      pressTurn: async () => {
+        await instructions(
+          "READY: Session approval should survive into this next turn. Stay idle during the countdown.",
+        );
+        for (const seconds of [3, 2, 1]) {
+          await instructions(`Countdown ${seconds}: keep mouse and keyboard idle.`);
+          await delay(1000);
+        }
+        await instructions(
+          "RED: One semantic button press in the fixture. No additional F5 session-actions dialog should appear.",
+        );
+        await startTurn(
+          `Continue in the same approved session using only exact app ${appId}. Call computer_inspect once on this exact app ID, then use its snapshot and element reference to press Rehearsal press exactly once with computer_element_action, action press, screenshot:false. No other input, typing, activation, shell, files, network or apps. Do not request access again. Stop immediately on any failure or ambiguity; never retry. Finish READY.`,
+        );
+        await waitTurn();
+      },
+      stopSession: stopOwnedSession,
+    });
+    sessionActionsFailures = await page.evaluate(() => window.__computerRehearsal.toolFailures);
+    checks.sessionActionsApprovalModeVerified =
+      composerSubmissions === 4 && approvalModeVerifiedTurns === 4;
+    stage = "finished";
+    await instructions(
+      "FINISHED: The provider session is stopped. Click Finish check in the synthetic fixture; it stays available until you acknowledge it. You can use your computer.",
+    );
+    fixture.child.stdin.write("WINDOWLESS_FINISHED\n");
+    await waitFor(() => fixture.acknowledged(), 90000);
+    checks.sessionActionsFinishAcknowledged = true;
+  } else if (grantMemory) {
     grantMemoryObservation = await runGrantMemory({
       appId,
       projectId,
@@ -777,56 +913,20 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         stage = name;
       },
       review: async ({ allow, remember, repeat }) => {
-        await page.evaluate(() => {
-          Object.assign(window.__computerRehearsal, {
-            consent: undefined,
-            trustedConsent: false,
-            trustedConsentVisible: false,
-            consentSettled: false,
-            consentAllowed: false,
-          });
-        });
-        await instructions(
-          allow
+        const receipt = await reviewedTurn({
+          allow,
+          instructionsText: allow
             ? "Click Review access. In the native dialog for only Computer Control Test Fixture, check Always allow in this project and allow control. This phase sends no app input."
             : "Click Review access. Deny only Computer Control Test Fixture in the native dialog. This phase sends no app input.",
-        );
-        await startTurn(
-          `Consent-only test for exact app ID ${appId}. Call computer_status once and computer_request_access for only this exact app with reason Synthetic grant memory test. ${repeat === 2 ? "The user will deny this request. After that normal denial result, call computer_request_access once more for the same exact app in this turn to verify no second prompt appears. Do not retry any failed or interrupted tool." : "Call request access exactly once; the user will answer the genuine F5 dialog."} Do not activate, launch, inspect, capture or send input. Do not use shell, files, network or other apps. Finish READY.`,
-        );
-        await waitFor(
-          async () => !!(await page.evaluate(() => window.__computerRehearsal.consent)),
-          90000,
-        );
-        const requested = await page.evaluate(() => window.__computerRehearsal.consent);
-        if (
-          requested.kind !== "apps" ||
-          requested.threadId !== threadId ||
-          requested.apps.length !== 1 ||
-          requested.apps[0].appId !== appId
-        )
-          throw new Error("Unexpected grant memory consent request.");
-        const visible = await page.getByRole("dialog").isVisible();
-        await waitFor(
-          async () =>
-            (await page.evaluate(() => window.__computerRehearsal.consentSettled)) === true,
-          90000,
-        );
-        const receipt = await page.evaluate(() => ({
-          trustedReview: window.__computerRehearsal.trustedConsent === true,
-          visibleAtReview: window.__computerRehearsal.trustedConsentVisible === true,
-          settled: window.__computerRehearsal.consentSettled === true,
-          allowed: window.__computerRehearsal.consentAllowed === true,
-        }));
+          prompt: `Consent-only test for exact app ID ${appId}. Call computer_status once and computer_request_access for only this exact app with reason Synthetic grant memory test. ${repeat === 2 ? "The user will deny this request. After that normal denial result, call computer_request_access once more for the same exact app in this turn to verify no second prompt appears. Do not retry any failed or interrupted tool." : "Call request access exactly once; the user will answer the genuine F5 dialog."} Do not activate, launch, inspect, capture or send input. Do not use shell, files, network or other apps. Finish READY.`,
+        });
         grantMemoryConsentReceipts.push({
           ...receipt,
           appCount: 1,
-          visible: visible || receipt.visibleAtReview,
+          visible: receipt.visible,
           rememberRequested: remember,
         });
-        if (receipt.allowed !== allow) throw new Error("Unexpected grant memory consent answer.");
-        await waitTurn();
-        return (visible || receipt.visibleAtReview) && receipt.settled && receipt.trustedReview;
+        return receipt.visible && receipt.settled && receipt.trustedReview;
       },
       rememberedTurn: async () => {
         await instructions(
@@ -837,16 +937,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         );
         await waitTurn();
       },
-      stopSession: async () => {
-        await dispatch({ type: "thread.session.stop", threadId });
-        await waitFor(async () => {
-          const snapshot = await rpc(ORCHESTRATION_WS_METHODS.getSnapshot);
-          return (
-            snapshot.threads.find((thread) => thread.id === threadId)?.session?.status ===
-              "stopped" && !(await observer()).held
-          );
-        }, 15000);
-      },
+      stopSession: stopOwnedSession,
     });
     checks.grantMemoryFourTurns = composerSubmissions === 4;
     stage = "finished";
@@ -1531,6 +1622,23 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       checks.grantMemoryProviderTailObserved = providerTailObserved;
       checks.grantMemoryNoTaggedProviderErrors = providerErrorCodes.length === 0;
     }
+    if (sessionActions) {
+      providerTailObserved = Array.isArray(tail?.activities);
+      checks.sessionActionsProviderTailObserved = providerTailObserved;
+      checks.sessionActionsOnlyExpectedDenial =
+        providerTailObserved && providerErrorCodes.every((code) => code === "NotGranted");
+      sessionActionsFailures = await page
+        .evaluate(() => {
+          if (window.__computerRehearsal.toolFailuresOverflow)
+            throw new Error("Incomplete activity trace.");
+          return window.__computerRehearsal.toolFailures;
+        })
+        .catch(() => undefined);
+      checks.sessionActionsOnlyExpectedDenial &&=
+        sessionActionsFailures?.length === 1 &&
+        sessionActionsFailures[0]?.op === "activateApp" &&
+        sessionActionsFailures[0]?.outcome === "NotGranted";
+    }
     toolOutcomeErrors = await page
       .evaluate(() => window.__computerRehearsal.toolOutcomeErrors)
       .then((codes) => [...new Set(codes.filter(Schema.is(ComputerToolOutcomeCode)))].sort())
@@ -1648,7 +1756,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     fixtureObservation = {
       presses: Math.min(100, fixture.presses()),
       expectedSyntheticTextReceived: fixture.typed(),
-      ...(windowless ? { humanFinishAcknowledged: fixture.acknowledged() } : {}),
+      ...(windowless || sessionActions ? { humanFinishAcknowledged: fixture.acknowledged() } : {}),
     };
   const fixtureClosed = await closeRehearsalChild(fixture?.child);
   if (documentRoot) {
@@ -1719,6 +1827,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       }),
     );
   if (grantMemory) checks.grantMemoryCleanup = cleanup.confirmed;
+  if (sessionActions) checks.sessionActionsCleanup = cleanup.confirmed;
   externalClient?.close();
   const passed =
     !failureStage && !interrupted && cleanup.confirmed && Object.values(checks).every(Boolean);
@@ -1730,23 +1839,25 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         reportVersion: 1,
         admissionId: process.env.F5_COMPUTER_CERTIFICATION_ADMISSION,
         recordedAt: new Date().toISOString(),
-        scope: grantMemory
-          ? `unsigned-real-electron-${provider}-grant-memory`
-          : windowless
-            ? `unsigned-real-electron-${provider}-all-app-windows-closed`
-            : clusterWorkflows
-              ? "unsigned-real-electron-clustered-workflows"
-              : realApps
-                ? `unsigned-real-electron-${provider}-textedit-and-calculator`
-                : stopOnly
-                  ? `unsigned-real-electron-${provider}-${stopMain ? "main" : "renderer"}-frozen-physical-stop`
-                  : statusOnly
-                    ? `unsigned-real-electron-${provider}-read-only-discovery-diagnostic`
-                    : controlsOnly
-                      ? `unsigned-real-electron-${provider}-human-consent-and-controls`
-                      : actionsOnly
-                        ? `unsigned-real-electron-${provider}-human-consent-and-actions`
-                        : `unsigned-real-electron-${provider}-human-consent-synthetic-app`,
+        scope: sessionActions
+          ? `unsigned-real-electron-${provider}-session-actions`
+          : grantMemory
+            ? `unsigned-real-electron-${provider}-grant-memory`
+            : windowless
+              ? `unsigned-real-electron-${provider}-all-app-windows-closed`
+              : clusterWorkflows
+                ? "unsigned-real-electron-clustered-workflows"
+                : realApps
+                  ? `unsigned-real-electron-${provider}-textedit-and-calculator`
+                  : stopOnly
+                    ? `unsigned-real-electron-${provider}-${stopMain ? "main" : "renderer"}-frozen-physical-stop`
+                    : statusOnly
+                      ? `unsigned-real-electron-${provider}-read-only-discovery-diagnostic`
+                      : controlsOnly
+                        ? `unsigned-real-electron-${provider}-human-consent-and-controls`
+                        : actionsOnly
+                          ? `unsigned-real-electron-${provider}-human-consent-and-actions`
+                          : `unsigned-real-electron-${provider}-human-consent-synthetic-app`,
         platform: process.platform,
         arch: process.arch,
         osVersion: release(),
@@ -1757,6 +1868,15 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         signed: false,
         certified: false,
         provider,
+        ...(sessionActions
+          ? {
+              sessionActionsObservation,
+              sessionActionsFailures,
+              providerTailObserved,
+              composerSubmissions,
+              approvalModeVerifiedTurns,
+            }
+          : {}),
         ...(grantMemory
           ? { grantMemoryObservation, grantMemoryConsentReceipts, providerTailObserved }
           : {}),
@@ -1770,7 +1890,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
             }
           : {}),
         ...(claudeAuthentication ? { claudeAuthentication } : {}),
-        runtimeMode: "full-access",
+        runtimeMode,
         state: passed ? "passed" : "failed",
         interrupted,
         ...(failureStage ? { failureStage } : {}),
@@ -1812,15 +1932,17 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
                 ]
               : [
                   "One real provider and one synthetic AppKit app, on the current display only",
-                  grantMemory
-                    ? "Genuine app denial and remembering, authenticated narrowing APIs and provider session restarts only; no OS capture/input, session-actions approval, expiry, stale-answer or web-client proof"
-                    : windowless
-                      ? "Human app consent; app windows closed during one provider turn, followed by session stop after completed actions; no in-flight stop latency proof"
-                      : stopOnly
-                        ? "Human app consent and physical chord; UI Pause/Resume is excluded"
-                        : actionsOnly
-                          ? "Human app consent; Pause/Resume is excluded from this actions-only run"
-                          : "Human app consent and pause/resume; no session-actions consent in full-access mode",
+                  sessionActions
+                    ? "Genuine app and session-actions reviews in approval-required mode; denied activation, one allowed activation/capture and next-turn semantic press; no expiry, stale-answer, typing-upgrade or session-restart approval reset proof"
+                    : grantMemory
+                      ? "Genuine app denial and remembering, authenticated narrowing APIs and provider session restarts only; no OS capture/input, session-actions approval, expiry, stale-answer or web-client proof"
+                      : windowless
+                        ? "Human app consent; app windows closed during one provider turn, followed by session stop after completed actions; no in-flight stop latency proof"
+                        : stopOnly
+                          ? "Human app consent and physical chord; UI Pause/Resume is excluded"
+                          : actionsOnly
+                            ? "Human app consent; Pause/Resume is excluded from this actions-only run"
+                            : "Human app consent and pause/resume; no session-actions consent in full-access mode",
                   ...(actionsOnly ? ["No session-actions consent in full-access mode"] : []),
                   ...(controlsOnly
                     ? [

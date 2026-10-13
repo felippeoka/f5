@@ -528,7 +528,10 @@ returned other-instance with the same helper hash. This is a development build f
 not signature/TCC certification. Hosted Windows refused replacement while the test
 held the old file open (EPERM). Its regression now requires that explicit refusal,
 unchanged old bytes and cleaned staging, then successful publication after closure;
-it does not skip the byte-preservation assertions. Fresh Windows CI must confirm it.
+it does not skip the byte-preservation assertions. Hosted Windows CI at edee9ef4ca
+passed this regression and its full integration suite; macOS and quality jobs passed
+too (see the commit-specific receipt in docs/computer-certification). These are
+software checks, not interactive Windows or release certification.
 The read-only prerequisite probe also latches its
 first terminal result, requires a versioned hello and rejects unexpected crash exits;
 late pipe errors cannot turn a validated refusal into misleading availability.
@@ -548,11 +551,33 @@ remembered grant state checks, pushed revocation/forget changes, no helper mutat
 and confirmed cleanup. Observer summaries retain only enums, booleans and counts,
 not grant/session identities or tool content. Sequencing fakes prove no machine or
 human-consent gate. This driver is prepared but has not run against either provider.
-Session-actions, expiry, click-tier typing upgrades, stale answers and web-only consent
-remain separate missing checks; this phase cannot complete the consent release gate.
+Expiry, click-tier typing upgrades, stale answers and web-only consent remain separate
+missing checks; this phase cannot complete the consent release gate.
 
     bun run computer:certify run --output <prepared-suite> \
       --group workflows --scenario grant-memory.claude
+
+The separate development `session-actions` phase is also prepared for each provider.
+It creates an approval-required thread, verifies that mode before every composer
+submission, obtains genuine app consent without remembering, then requests one
+activation that the user denies through F5's native session-actions dialog. Admission
+requires the correlated NotGranted activity and no native mutation or lease. In a
+new turn the user genuinely approves session actions, permitting one activation with
+a successful capture. A following turn inspects the fixture and presses its button
+once without another session-actions prompt. The fixture's independent press count,
+native response trace, matched consent kinds/decisions and provider diagnostics must
+agree; unexpected errors or ambiguous mutations stop the phase without retry.
+Session stop must clear the grants and lease. A persistent fixture Finish button
+remains available until a real unmarked user click, or the phase fails its timeout.
+
+This is preparation, not live evidence. No machine check has run against this new
+driver. It proves neither approval reset after a replacement session nor consent
+expiry, typing upgrades or the full consent matrix. Installed candidates require
+their own observation driver. Neither this phase nor grant-memory can open a gate
+alone. Any extra provider approval prompt must also receive a genuine user answer.
+
+    bun run computer:certify run --output <prepared-suite> \
+      --group workflows --scenario session-actions.claude
 
 Resume checks helper, provider binaries, desktop/server bundles, every served client
 asset, Electron runtime, prepared fixtures, source hashes, architecture and target identity.

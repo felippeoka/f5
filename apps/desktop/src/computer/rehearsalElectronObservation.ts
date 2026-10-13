@@ -29,10 +29,13 @@ export class ElectronRehearsalObservation {
   private overflow = false;
   private readonly accessRequests = new Set<string>();
   private readonly accessAnswers = new Set<string>();
+  private readonly accessKinds = new Map<string, string>();
   private readonly accessAnswerSummaries: Array<{
+    kind: string;
     appCount: number;
     allowed: number;
     remembered: number;
+    allowSessionActions?: boolean;
   }> = [];
   private readonly sessions = new Set<string>();
   private grantChanges = 0;
@@ -50,7 +53,10 @@ export class ElectronRehearsalObservation {
       if (raw.activity.outcome) this.toolOutcomeErrors.add(raw.activity.outcome);
     } else if (raw.type === "accessRequested") {
       if (this.accessRequests.size >= 128) this.overflow = true;
-      else this.accessRequests.add(raw.request.requestId);
+      else {
+        this.accessRequests.add(raw.request.requestId);
+        this.accessKinds.set(raw.request.requestId, raw.request.kind);
+      }
     } else if (raw.type === "accessAnswer") {
       if (
         this.accessRequests.has(raw.answer.requestId) &&
@@ -58,10 +64,14 @@ export class ElectronRehearsalObservation {
       ) {
         this.accessAnswers.add(raw.answer.requestId);
         this.accessAnswerSummaries.push({
+          kind: this.accessKinds.get(raw.answer.requestId)!,
           appCount: raw.answer.decisions.length,
           allowed: raw.answer.decisions.filter((decision) => decision.allow).length,
           remembered: raw.answer.decisions.filter((decision) => decision.allow && decision.remember)
             .length,
+          ...(this.accessKinds.get(raw.answer.requestId) === "session-actions"
+            ? { allowSessionActions: raw.answer.allowSessionActions === true }
+            : {}),
         });
       }
     } else if (raw.type === "grantsChanged") {

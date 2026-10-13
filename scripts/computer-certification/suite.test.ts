@@ -234,6 +234,44 @@ describe("certification inventory and coverage", () => {
     expect(summarizeEvidence(s, manifest, raw).state).toBe("failed");
   });
 
+  it("prepares approval-mode consent separately without crediting the complete consent gate", () => {
+    const s = scenario("session-actions.claude");
+    const launches = { claude: { home: "/selected", binary: "/claude" } };
+    const commands = commandsFor(
+      s,
+      { repo: "/repo", platform: "darwin" },
+      "/result",
+      launches,
+      "darwin",
+    );
+    if (typeof commands === "string") throw new Error("No session actions driver");
+    expect(commands[0]?.args).toContain("--session-actions");
+    expect(
+      commandsFor(
+        s,
+        { repo: "/repo", platform: "darwin", app: "/Installed.app" },
+        "/result",
+        launches,
+        "darwin",
+      ),
+    ).toBe("installed-observation-driver-required");
+    expect(
+      coverage(manifest, [result(s.key)]).requirements.find((r) => r.requirement === "consent")
+        ?.state,
+    ).toBe("pending");
+    expect(
+      summarizeEvidence(s, manifest, {
+        reportVersion: 1,
+        platform: "darwin",
+        helperSha256: hash,
+        state: "passed",
+        scope: "unsigned-real-electron-claude-session-actions",
+        checks: result(s.key).checks,
+        cleanup: { confirmed: true },
+      }).state,
+    ).toBe("failed");
+  });
+
   it("requires independent windowless receipts, never only passing assertion flags", () => {
     const s = scenario("windows-closed.claude");
     const raw = {
