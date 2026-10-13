@@ -12,7 +12,22 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegat
       contentRect: NSRect(x: 120, y: 120, width: 500, height: 300),
       styleMask: [.titled, .closable], backing: .buffered, defer: false)
     window.title = "Computer Control Test Fixture"
-    window.center()
+    let requestedDisplayIndex = CommandLine.arguments.firstIndex(of: "--display-id")
+    let requestedScreen: NSScreen?
+    if let index = requestedDisplayIndex {
+      guard index + 1 < CommandLine.arguments.count,
+        let number = UInt32(CommandLine.arguments[index + 1]),
+        let selected = NSScreen.screens.first(where: {
+          ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == number
+        })
+      else { NSApplication.shared.terminate(nil); return }
+      requestedScreen = selected
+      window.setFrameOrigin(NSPoint(x: selected.visibleFrame.midX - window.frame.width / 2,
+        y: selected.visibleFrame.midY - window.frame.height / 2))
+    } else {
+      requestedScreen = nil
+      window.center()
+    }
     let content = window.contentView!
     let ungranted = CommandLine.arguments.contains("--ungranted")
     let marker = NSBox(frame: NSRect(x: 30, y: 260, width: 400, height: 24))
@@ -22,7 +37,7 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegat
     marker.setAccessibilityElement(true)
     marker.setAccessibilityLabel("Rehearsal capture marker")
     content.addSubview(marker)
-    if ungranted, let screen = NSScreen.main {
+    if ungranted, let screen = requestedScreen ?? NSScreen.main {
       window.setFrameOrigin(NSPoint(x: screen.visibleFrame.minX + 20, y: window.frame.minY))
     }
     let field = NSTextField(frame: NSRect(x: 30, y: 205, width: 400, height: 28))

@@ -325,7 +325,6 @@ try {
   };
   stage = "isolated-browser-setup";
   const excludedId = `org.example.protection-excluded.${randomUUID()}`;
-  excluded = await createRehearsalFixture({ root, appId: excludedId, ungranted: true });
   const excludedGrant: ComputerGrant = { appId: excludedId, tier: "full", allowTyping: false };
   setGrants([browserGrant, excludedGrant]);
   browserFixture = await createBrowserProtectionFixture();
@@ -386,19 +385,46 @@ try {
       );
     },
   );
+  stage = "capture-fixture-setup";
   browserSnapshot = await inspect(BROWSER_PROTECTION_IDS.browser);
   const secure = browserSnapshot.nodes.find((node) => node.name === BROWSER_SECURE_LABEL);
   const marker = browserSnapshot.nodes.find((node) => node.name === BROWSER_MARKER_LABEL);
+  metadata.captureTargets = {
+    secureBoundsKnown: Boolean(secure?.bounds),
+    browserMarkerBoundsKnown: Boolean(marker?.bounds),
+    secureDisplayId: secure?.displayId,
+    browserMarkerDisplayId: marker?.displayId,
+  };
+  assert(secure?.displayId);
+  excluded = await createRehearsalFixture({
+    root,
+    appId: excludedId,
+    ungranted: true,
+    background: true,
+    displayId: secure.displayId,
+  });
   const excludedSnapshot = await inspect(excludedId);
   const green = excludedSnapshot.nodes.find((node) => node.name === "Rehearsal capture marker");
-  assert(
-    secure?.bounds &&
-      secure.displayId &&
-      marker?.bounds &&
-      green?.bounds &&
-      secure.displayId === marker.displayId &&
-      secure.displayId === green.displayId,
-  );
+  metadata.captureTargets = {
+    secureBoundsKnown: Boolean(secure?.bounds),
+    browserMarkerBoundsKnown: Boolean(marker?.bounds),
+    fixtureMarkerBoundsKnown: Boolean(green?.bounds),
+    secureDisplayId: secure?.displayId,
+    browserMarkerDisplayId: marker?.displayId,
+    fixtureMarkerDisplayId: green?.displayId,
+  };
+  await check("Capture targets have known bounds on the same display", async () => {
+    assert(
+      secure?.bounds &&
+        secure.displayId &&
+        marker?.bounds &&
+        green?.bounds &&
+        secure.displayId === marker.displayId &&
+        secure.displayId === green.displayId,
+    );
+  });
+  // Revalidate below even when the earlier check established the bounds.
+  assert(secure.bounds && marker?.bounds && green?.bounds);
   const rects = { secureRect: secure.bounds, blueRect: marker.bounds, greenRect: green.bounds };
   await check(
     "Capture positive control includes both granted markers and masks Chrome password",
@@ -495,7 +521,7 @@ try {
   const passed =
     !failureStage &&
     !physicalInterruption &&
-    checks.length === 12 &&
+    checks.length === 13 &&
     checks.every((item) => item.state === "passed") &&
     browserFixture?.observation().stateRejected === false &&
     !retainedChrome &&

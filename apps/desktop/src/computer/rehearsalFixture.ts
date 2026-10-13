@@ -9,11 +9,14 @@ export async function createRehearsalFixture(options: {
   appId: string;
   ungranted?: boolean;
   background?: boolean;
+  displayId?: string;
   executableSource?: string;
   expectedText?: string;
   sourceFile?: string;
   observeChord?: boolean;
 }) {
+  if (options.displayId !== undefined && !/^\d{1,10}$/.test(options.displayId))
+    throw new Error("Invalid fixture display id.");
   const contents = join(options.root, options.appId, "Fixture.app", "Contents");
   const executable = join(contents, "MacOS", "Fixture");
   await mkdir(join(contents, "MacOS"), { recursive: true });
@@ -37,6 +40,7 @@ export async function createRehearsalFixture(options: {
     );
   const args = [
     ...(options.background ? ["--background"] : []),
+    ...(options.displayId ? ["--display-id", options.displayId] : []),
     ...(options.ungranted ? ["--ungranted"] : []),
     ...(options.expectedText ? ["--expected-text", options.expectedText] : []),
     ...(options.observeChord ? ["--observe-chord"] : []),

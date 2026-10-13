@@ -869,7 +869,7 @@ display edges, partial overlap and negative display origins.
 Capture failures additionally retain only an API-stage enum, a normalized error-domain
 enum and numeric code. Native and transport tests confirm that localized descriptions,
 arbitrary domains, userInfo and extra native message fields are not retained. A separate
-read-only background probe uses one temporary view-tier synthetic app and a suspended
+read-only background probe uses one temporary synthetic app and a suspended
 helper. It captures each connected display and requires a positive marker in at least
 one, without granting, activating or inspecting existing apps, renewing a permit, or
 injecting input. Images remain in memory. It can run while the operator works:
@@ -897,6 +897,32 @@ suite hit a WebSocket setup connection failure; all 119 WebSocket cases then pas
 isolation, followed by a clean-environment full-suite pass including all 136 exhaustive
 Git tests. No WebSocket implementation or test was changed. The full Terminal/Chrome
 protection checkpoint and broader release certification remain pending.
+
+The [first full run with the fixed helper](computer-certification/2026-10-13-macos-terminal-chrome-protection-capture-setup-attempt.json)
+at clean `88722a415a` passed all seven input-protection checks and recorded no physical
+interruption, unchanged synthetic DOM value and zero input events. It stopped during
+capture-target setup, before requesting a screenshot. The report's `failureStage`
+incorrectly retained the preceding passed check's name; no geometry diagnostics were
+recorded, so the precise missing/mismatched target cannot be identified from that run.
+Both apps closed normally. This remains a failed/incomplete attempt.
+
+The harness now records capture setup separately, retains only bounds-presence booleans
+and display IDs, and counts a separate same-display geometry check. The green fixture
+is created in the background on Chrome's inspected display, using an explicit native
+display ID rather than default window placement. Unknown IDs fail instead of selecting
+another display. The background probe accepts optional `--display-id <id>` to verify
+this fixture placement without input or app activation. No helper authorization,
+capture policy, stop path or release gate is changed by this harness correction.
+
+The background development checks then verified explicit placement and AX marker
+bounds independently on the [external display](computer-certification/2026-10-13-macos-background-capture-external-geometry-dirty-passed.json)
+and [laptop display](computer-certification/2026-10-13-macos-background-capture-laptop-geometry-dirty-passed.json).
+Each run saw a positive marker on the requested display and verified every decoded pixel
+neutral on the other display. The helper stayed suspended. For inspection, this probe
+uses the synthetic app's actual catalog tier (`full`); it never provides an execution
+permit or resumes input. Earlier capture-only probes used a `view` grant and did not
+test AX inspection. These development checks do not prove the cause of the earlier
+setup failure or the complete Terminal/Chrome protection workflow.
 
 The helper rehearsal's `--privacy-only` mode runs the existing pixel-verification
 checks without its semantic/keyboard/pointer actions. It uses only two temporary

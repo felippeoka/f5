@@ -6,7 +6,11 @@ import { release, tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
 import { promisify } from "node:util";
 import { Schema } from "effect";
-import { ComputerScreenshot, type ComputerAutomationRequest } from "@t3tools/contracts";
+import {
+  ComputerScreenshot,
+  ComputerInspectResult,
+  type ComputerAutomationRequest,
+} from "@t3tools/contracts";
 import { createRehearsalFixture } from "./rehearsalFixture";
 import { protectionFailureSummary } from "./rehearsalProtection";
 import { ComputerHelperClient } from "./ComputerHelperClient";
@@ -20,6 +24,7 @@ const argument = (key: string) => {
 };
 const executable = argument("--helper");
 const output = argument("--output");
+const displayId = argument("--display-id");
 if (process.platform !== "darwin" || !executable || !output) {
   process.stderr.write(
     "Usage: bun apps/desktop/src/computer/rehearseGrantedCaptureMacos.ts --helper <dev helper> --output <new report.json>\n",
@@ -85,7 +90,13 @@ try {
     timeout: 30000,
   });
   const appId = `org.example.background-capture.${randomUUID()}`;
-  fixture = await createRehearsalFixture({ root, appId, background: true });
+  fixture = await createRehearsalFixture({
+    root,
+    appId,
+    background: true,
+    ...(displayId ? { displayId } : {}),
+  });
+  if (displayId) metadata.fixtureDisplayId = displayId;
   helper.start();
   const deadline = performance.now() + 5000;
   while (!helper.status().available && performance.now() < deadline)
@@ -101,9 +112,33 @@ try {
     turnId: "observe",
     executionGeneration: 0,
     grantVersion: 1,
-    grants: [{ appId, tier: "view" as const, allowTyping: false }],
+    grants: [{ appId, tier: "full" as const, allowTyping: false }],
   };
   helper.control({ type: "grantsChanged", authorization });
+  const snapshot = Schema.decodeUnknownSync(ComputerInspectResult)(
+    await helper.request(
+      {
+        op: "inspect",
+        appId,
+        maxNodes: 100,
+        requestId: randomUUID(),
+        payloadHash: "fixture-geometry-observation",
+        authorization,
+        deadlineAtMs: Date.now() + 10000,
+        agent: { provider: "codex", threadTitle: "Background fixture geometry" },
+      },
+      { f5Pids: [process.pid], f5BundlePath: join(root, "protected-host"), overlayWindowIds: [] },
+    ),
+  );
+  const marker = snapshot.nodes.find((node) => node.name === "Rehearsal capture marker");
+  metadata.fixtureMarker = { boundsKnown: Boolean(marker?.bounds), displayId: marker?.displayId };
+  if (
+    !snapshot.accessible ||
+    !marker?.bounds ||
+    !marker.displayId ||
+    (displayId && marker.displayId !== displayId)
+  )
+    throw new Error("Fixture geometry unavailable or on a different display.");
   for (const display of status.displays) {
     try {
       const request = {
@@ -168,8 +203,9 @@ try {
       throw error;
     }
   }
-} catch {
+} catch (error) {
   failed = true;
+  metadata.failure = protectionFailureSummary(error, helper.status());
 } finally {
   helper.close();
   fixture?.child.kill();
@@ -200,7 +236,7 @@ try {
         heartbeats,
         checks,
         limitations: [
-          "One background synthetic view-tier app only; no existing app, provider, consent, overlay, OS input or active lease tested",
+          "One background synthetic app with its catalog full-tier grant; helper stays suspended without any permit, input or active lease",
           "Each connected display capture checked with at least one synthetic positive marker; not Chrome, password masking or complete multi-display privacy proof",
           "No signed installed-build attribution, real-keychain/autofill, Windows or complete release certification",
         ],
