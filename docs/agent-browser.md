@@ -1128,6 +1128,26 @@ physical-input auto-pause evidence during a verified main freeze, not a current-
 kill-chord certification. The earlier passing stop results remain pinned to their older
 helper hashes. All release gates remain closed; signing stays deferred.
 
+The operator reported pressing the full chord in that attempt. This human report is
+kept separate from the missing machine receipts; no operator error is assumed.
+A passive diagnostic isolates fixed-chord observation before another frozen-process
+run. It launches only a temporary observer window, never a helper/provider, grant,
+lease, execution permit, typing action or process freeze. At the red cue the operator
+presses the chord once; the cue stays visible for approximately twelve seconds. The
+observer retains only Escape's Control/Command booleans, a session/window source enum,
+relative timings and a frontmost receipt. It never retains arbitrary key codes,
+characters, raw packets or app content. Disabled monitoring, malformed traces and
+unexpected marked injection fail the check. The additional candidate packets are
+opt-in and ordinary stop rehearsals keep their existing protocol.
+
+```sh
+F5_CHORD_DIAGNOSTIC=1 bun apps/desktop/src/computer/rehearseChordMacos.ts --output /tmp/f5-passive-chord.json
+```
+
+Coordinate the physical press before launching. A successful passive diagnostic proves
+only observation without active agent typing or a lease; it cannot certify kill-switch
+latency, global-shortcut coexistence during a lease or frozen-process interruption.
+
 Coordinate with the operator before launching. The real consent dialog must be answered
 by a human for the single synthetic fixture. The operator then leaves input idle and
 follows the window's instructions for Pause and Resume. Turns go through the real

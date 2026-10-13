@@ -14,6 +14,7 @@ export async function createRehearsalFixture(options: {
   expectedText?: string;
   sourceFile?: string;
   observeChord?: boolean;
+  diagnoseChord?: boolean;
 }) {
   if (options.displayId !== undefined && !/^\d{1,10}$/.test(options.displayId))
     throw new Error("Invalid fixture display id.");
@@ -44,6 +45,7 @@ export async function createRehearsalFixture(options: {
     ...(options.ungranted ? ["--ungranted"] : []),
     ...(options.expectedText ? ["--expected-text", options.expectedText] : []),
     ...(options.observeChord ? ["--observe-chord"] : []),
+    ...(options.diagnoseChord ? ["--diagnose-chord"] : []),
   ];
   const child = spawn(executable, args, { stdio: ["pipe", "pipe", "ignore"] });
   let presses = 0;

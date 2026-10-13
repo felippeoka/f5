@@ -13,6 +13,7 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
   let instruction = NSTextField(labelWithString: "Preparing. Keep the mouse and keyboard idle.")
   let field = NSTextField(frame: NSRect(x: 30, y: 80, width: 600, height: 40))
   var finished = false
+  let diagnoseChord = CommandLine.arguments.contains("--diagnose-chord")
   func prompt() {
     instruction.stringValue = "Press Control + Command + Escape NOW."
     window.backgroundColor = NSColor.systemRed.withAlphaComponent(0.5)
@@ -39,9 +40,17 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
           NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(),
           type == .keyDown,
           event.getIntegerValueField(.eventSourceUserData) != 0xF5C0,
-          event.getIntegerValueField(.keyboardEventKeycode) == 53,
-          event.flags.contains([.maskControl, .maskCommand])
+          event.getIntegerValueField(.keyboardEventKeycode) == 53
         else { return Unmanaged.passUnretained(event) }
+        if delegate.diagnoseChord {
+          delegate.emit(["kind": "chordCandidate", "observer": "session",
+            "control": event.flags.contains(.maskControl),
+            "command": event.flags.contains(.maskCommand),
+            "observedAtMs": ProcessInfo.processInfo.systemUptime * 1000])
+        }
+        guard event.flags.contains([.maskControl, .maskCommand]) else {
+          return Unmanaged.passUnretained(event)
+        }
         delegate.emit([
           "kind": "chord", "eventAtMs": Double(event.timestamp) / 1_000_000,
           "observedAtMs": ProcessInfo.processInfo.systemUptime * 1000, "keyDown": true,
@@ -56,7 +65,9 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
     return CGEvent.tapIsEnabled(tap: tap)
   }
   func showStopped() {
-    instruction.stringValue = "Stopped. Release the keys; measuring the final input tail."
+    instruction.stringValue = diagnoseChord
+      ? "Chord observed. Release the keys. No agent input was sent."
+      : "Stopped. Release the keys; measuring the final input tail."
     window.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.25)
   }
   func applicationDidFinishLaunching(_ notification: Notification) {
@@ -67,7 +78,9 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
     window = NSWindow(
       contentRect: NSRect(x: 120, y: 120, width: 660, height: 240),
       styleMask: [.titled, .closable], backing: .buffered, defer: false)
-    window.title = "F5 physical stop check — synthetic input only"
+    window.title = diagnoseChord
+      ? "F5 chord observer — no agent input"
+      : "F5 physical stop check — synthetic input only"
     window.center()
     instruction.frame = NSRect(x: 30, y: 145, width: 600, height: 55)
     instruction.font = NSFont.systemFont(ofSize: 20)
@@ -82,6 +95,11 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
       let marked = native.getIntegerValueField(.eventSourceUserData) == 0xF5C0
       let chord = !marked && event.type == .keyDown && event.keyCode == 53
         && event.modifierFlags.contains([.control, .command])
+      if self.diagnoseChord && !marked && event.type == .keyDown && event.keyCode == 53 {
+        self.emit(["kind": "chordCandidate", "observer": "window",
+          "control": event.modifierFlags.contains(.control),
+          "command": event.modifierFlags.contains(.command), "observedAtMs": observedAtMs])
+      }
       if chord && self.chordTap != nil { return event }
       self.emit([
         "kind": marked ? "injected" : chord ? "chord" : "physical",
@@ -128,7 +146,7 @@ final class StopFixtureDelegate: NSObject, NSApplicationDelegate {
               self.prompt()
             } else if command == "FINISH" {
               self.finished = true
-              self.instruction.stringValue = CommandLine.arguments.contains("--observe-chord")
+              self.instruction.stringValue = CommandLine.arguments.contains("--observe-chord") && !self.diagnoseChord
                 ? "Input stopped. Verifying pause; keep input idle."
                 : "Check complete. You can use your computer again."
               self.emit([
