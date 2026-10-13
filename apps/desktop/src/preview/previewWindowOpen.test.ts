@@ -73,6 +73,7 @@ function popupHarness(options: { agent: boolean; allowed: (url: string) => boole
           listeners.set(event, listener),
         ),
         getURL: () => url,
+        isDestroyed: vi.fn(() => false),
         stop: vi.fn(),
       },
     };
@@ -113,6 +114,23 @@ it("keeps agent-driven popups inside the parent tab's allowlist for their whole 
   allowedHosts = [];
   harness.controller.enforcePolicy();
   expect(child.destroy).toHaveBeenCalled();
+});
+
+it("stops a refused agent popup navigation only after did-start-navigation returns", async () => {
+  const harness = popupHarness({ agent: true, allowed: (url) => url.includes("login") });
+  harness.handler()({ url: "https://login.example.test/", disposition: "new-window" });
+  const { child, listeners } = harness.makeChild("https://login.example.test/");
+
+  listeners.get("did-start-navigation")!({
+    url: "https://evil.test/",
+    isMainFrame: true,
+    isSameDocument: false,
+  });
+  // Stopping inside Chromium's observer loop frees the request DevTools still reads.
+  expect(child.webContents.stop).not.toHaveBeenCalled();
+  expect(harness.blocked).toHaveBeenCalledWith("https://evil.test/");
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(child.webContents.stop).toHaveBeenCalledTimes(1);
 });
 
 it("leaves user-opened sign-in popups with the user", () => {

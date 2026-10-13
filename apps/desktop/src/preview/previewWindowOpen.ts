@@ -18,6 +18,19 @@ export interface PreviewPopupController {
   readonly enforcePolicy: () => void;
 }
 
+/**
+ * Cancels a navigation from a `did-start-navigation` listener. Electron runs that listener
+ * inside Chromium's DidStartNavigation observer loop, and stopping there frees the
+ * NavigationRequest that later observers still read: an attached DevTools session (debugger,
+ * screencast, color-scheme emulation) then segfaults the main process. The navigation cannot
+ * commit within the current task, so stopping on the next turn still cancels it.
+ */
+export function stopNavigationAfterObservers(contents: WebContents): void {
+  setImmediate(() => {
+    if (!contents.isDestroyed()) contents.stop();
+  });
+}
+
 function httpUrl(url: string): URL | null {
   try {
     const target = new URL(url);
@@ -92,7 +105,7 @@ export function registerPreviewWindowOpen(
       });
       child.webContents.on("did-start-navigation", (details) => {
         if (details.isMainFrame && !details.isSameDocument && refuse(details.url)) {
-          child.webContents.stop();
+          stopNavigationAfterObservers(child.webContents);
         }
       });
     }

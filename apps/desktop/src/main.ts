@@ -15,7 +15,10 @@ import { pathToFileURL } from "node:url";
 import { installGuestControls } from "./preview/guestControls";
 import { BrowserProfiles } from "./preview/BrowserProfiles";
 import { BrowserImport } from "./browserImport/BrowserImport";
-import { registerPreviewWindowOpen } from "./preview/previewWindowOpen";
+import {
+  registerPreviewWindowOpen,
+  stopNavigationAfterObservers,
+} from "./preview/previewWindowOpen";
 import { captureMacWindow } from "./snapShot/MacSnapShot";
 import { profileStateDir } from "@t3tools/shared/profilePaths";
 import { closeWindowsForQuit } from "./quitPreflight";
@@ -766,7 +769,7 @@ function registerPreviewWebContents(tabId: string, webContentsId: number): boole
     // Backstop for navigations that bypass will-navigate (history, reload, renderer-initiated).
     if (getSafePreviewUrl(details.url, previewTabExternalHosts(tabId))) return;
     if (isAgentPreviewNavigation(tabId)) recordBlockedAgentNavigation(tabId, details.url);
-    guest.stop();
+    stopNavigationAfterObservers(guest);
   };
   const onConsoleMessage = (
     details: Electron.Event<Electron.WebContentsConsoleMessageEventParams>,
