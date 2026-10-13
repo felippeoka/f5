@@ -754,6 +754,16 @@ grants/permit. It does not prove provider consent, overlays, signed-in-site priv
 popups, moving-window/profile/display isolation, installed-build attribution or the
 complete protected-target matrix. Release gates remain closed.
 
+The [first Terminal/Chrome protection attempt](computer-certification/2026-10-13-macos-terminal-chrome-protection-interrupted.json)
+on clean `528b75ac0e` passed the closed-app prerequisite, Terminal opening/inspection,
+and exact typing/semantic-value refusals with typing disabled. The helper then
+detected physical input during isolated Chrome setup and stopped before Chrome
+inspection or pixel checks. The operator confirmed mouse/keyboard use. The attempt
+remains failed/incomplete and proves no Chrome masking or exclusion result. Apps
+were retained, including the temporary private browser profile, without forced
+termination. A retained browser is now detached from the completed rehearsal CLI
+so it does not keep that CLI running; it is neither killed nor resumed.
+
 The helper rehearsal's `--privacy-only` mode runs the existing pixel-verification
 checks without its semantic/keyboard/pointer actions. It uses only two temporary
 synthetic apps with scripted helper-level grants: a positive control includes both

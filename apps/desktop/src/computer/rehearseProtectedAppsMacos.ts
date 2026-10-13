@@ -535,6 +535,9 @@ try {
       `Private Chrome test profile retained at ${join(root, "chrome-profile")}; close the test browser before removing it.\n`,
     );
   else await rm(root, { recursive: true, force: true });
+  // The retained browser belongs to the operator now. Do not keep the completed
+  // CLI alive merely because its child-process handle is still referenced.
+  if (retainedChrome) chrome?.unref();
   const passed =
     !failureStage &&
     !physicalInterruption &&
