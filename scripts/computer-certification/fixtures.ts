@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Target } from "./identity";
 import { cleanEnvironment } from "./process";
+import { record } from "./model";
 
 export const FIXTURE_NAMES = [
   "ComputerControlFixture",
@@ -12,6 +13,48 @@ export const FIXTURE_NAMES = [
   "ProtectionAppVerifier",
   "RealAppVerifier",
 ] as const;
+
+/** Metadata-only probes; never launches apps, changes focus, captures or posts input. */
+export async function probeFixtureProtocols(
+  directory: string,
+  executeFile: (
+    binary: string,
+    args: readonly string[],
+    options: { env: NodeJS.ProcessEnv; timeout: number; maxBuffer: number },
+  ) => Promise<{ stdout: string | Buffer }> = promisify(execFile),
+): Promise<boolean> {
+  try {
+    const options = { env: cleanEnvironment(), timeout: 5000, maxBuffer: 4096 };
+    const processes: unknown = JSON.parse(
+      (
+        await executeFile(join(directory, "ProtectionAppVerifier"), ["--status"], options)
+      ).stdout.toString(),
+    );
+    const apps: unknown = JSON.parse(
+      (
+        await executeFile(join(directory, "RealAppVerifier"), ["--status"], options)
+      ).stdout.toString(),
+    );
+    return (
+      record(processes) &&
+      [
+        "com.apple.Terminal",
+        "com.google.Chrome",
+        "com.apple.TextEdit",
+        "com.apple.calculator",
+      ].every(
+        (id) =>
+          Array.isArray(processes[id]) &&
+          processes[id].every((pid: unknown) => Number.isSafeInteger(pid) && Number(pid) > 0),
+      ) &&
+      record(apps) &&
+      typeof apps.textEditRunning === "boolean" &&
+      typeof apps.calculatorRunning === "boolean"
+    );
+  } catch {
+    return false;
+  }
+}
 /** Compile once before readiness. Never starts an app, grant, permit or input. */
 export async function prepareFixtures(target: Target, directory: string): Promise<boolean> {
   if (process.platform !== "darwin" || target.platform !== "darwin") return false;
@@ -42,5 +85,5 @@ export async function prepareFixtures(target: Target, directory: string): Promis
       return false;
     }
   }
-  return true;
+  return probeFixtureProtocols(directory);
 }

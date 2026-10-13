@@ -3,6 +3,23 @@ import type { Manifest, ScenarioResult } from "./model";
 import type { ScenarioInstance } from "./catalog";
 
 const safeKey = /^[a-zA-Z0-9][a-zA-Z0-9.-]{0,100}$/;
+const STOP_CHECKS = [
+  "traceComplete",
+  "clocksValid",
+  "syntheticInputObserved",
+  "physicalInputRecognized",
+  "chordRecognized",
+  "promptedBeforeInterruption",
+  "typingActiveAtTrigger",
+  "physicalStopUnder100Ms",
+  "chordStopUnder100Ms",
+  "appDeliveryStoppedUnder100Ms",
+  "quietTailObserved",
+  "inFlightMutationInterrupted",
+  "pausedMutationRefused",
+  "leaseReleased",
+  "fixtureStillFrontmost",
+];
 function checksOf(raw: unknown): Record<string, boolean> {
   if (!record(raw) || Object.keys(raw).length > 256) return {};
   return Object.fromEntries(
@@ -10,7 +27,12 @@ function checksOf(raw: unknown): Record<string, boolean> {
   ) as Record<string, boolean>;
 }
 /** Whitelist summaries; raw tool IO, titles, text, error strings and images never enter the suite. */
-export function summarizeEvidence(scenario: ScenarioInstance, manifest: Manifest, raw: unknown) {
+export function summarizeEvidence(
+  scenario: ScenarioInstance,
+  manifest: Manifest,
+  raw: unknown,
+  admission?: { id: string; startedAt: string; finishedAt: string },
+) {
   if (
     !record(raw) ||
     raw.reportVersion !== 1 ||
@@ -18,13 +40,32 @@ export function summarizeEvidence(scenario: ScenarioInstance, manifest: Manifest
     raw.helperSha256 !== manifest.identity.files.helper
   )
     throw new Error("Evidence identity mismatch");
+  if (admission) {
+    const recordedAt = typeof raw.recordedAt === "string" ? Date.parse(raw.recordedAt) : NaN;
+    const start = Date.parse(admission.startedAt);
+    const finish = Date.parse(admission.finishedAt);
+    if (
+      raw.admissionId !== admission.id ||
+      !Number.isFinite(recordedAt) ||
+      !Number.isFinite(start) ||
+      !Number.isFinite(finish) ||
+      finish < start ||
+      recordedAt < start ||
+      recordedAt > finish ||
+      raw.arch !== manifest.identity.arch ||
+      (scenario.selectedProvider && raw.provider !== scenario.selectedProvider)
+    )
+      throw new Error("Evidence admission mismatch");
+  }
   let checks: Record<string, boolean> = {};
   const phase = record(raw.phaseEvidence)
     ? raw.phaseEvidence[scenario.id === "real-apps" ? "realApps" : "fixture"]
     : undefined;
   const assertions = record(phase) ? phase.checks : raw.checks;
   let passed =
-    (record(phase) ? phase.state : raw.state) === "passed" &&
+    (scenario.id === "backend-stop" || (record(phase) ? phase.state : raw.state) === "passed") &&
+    (!raw.failure || record(phase)) &&
+    (!raw.failureStage || record(phase)) &&
     !raw.interrupted &&
     !raw.physicalInterruption;
   if (Array.isArray(raw.checks)) {
@@ -46,7 +87,10 @@ export function summarizeEvidence(scenario: ScenarioInstance, manifest: Manifest
   } else {
     checks = checksOf(assertions);
     // Don't silently discard malformed assertion values.
-    if (!record(assertions) || Object.keys(checks).length !== Object.keys(assertions).length)
+    if (
+      scenario.id !== "backend-stop" &&
+      (!record(assertions) || Object.keys(checks).length !== Object.keys(assertions).length)
+    )
       passed = false;
     passed &&= scenario.expectedChecks.every((key) => checks[key] === true);
   }
@@ -59,9 +103,9 @@ export function summarizeEvidence(scenario: ScenarioInstance, manifest: Manifest
   if (stop) {
     const stopChecks = checksOf(stop.checks);
     for (const [key, value] of Object.entries(stopChecks)) checks["stop." + key] = value;
-    passed =
+    passed &&=
       stop.state === "passed" &&
-      Object.keys(stopChecks).length >= 16 &&
+      STOP_CHECKS.every((key) => stopChecks[key] === true) &&
       Object.values(stopChecks).every(Boolean) &&
       !raw.failure &&
       !raw.interrupted;
@@ -79,6 +123,23 @@ export function summarizeEvidence(scenario: ScenarioInstance, manifest: Manifest
     }
     for (const key of ["physicalInputTailMs", "killChordTailMs", "appDeliveryTailMs"])
       passed &&= typeof measurements[key] === "number" && measurements[key]! < 100;
+    if (scenario.id === "main-stop")
+      passed &&=
+        stopChecks.stallClockCalibrated === true &&
+        stopChecks.physicalAndChordDuringHostStall === true &&
+        typeof measurements.clockUncertaintyMs === "number" &&
+        measurements.clockUncertaintyMs <= 25 &&
+        typeof measurements.hostStallDurationMs === "number" &&
+        measurements.hostStallDurationMs > 0;
+    if (scenario.id === "renderer-stop")
+      passed &&=
+        stopChecks.rendererClockCalibrated === true &&
+        stopChecks.physicalAndChordDuringRendererFreeze === true &&
+        typeof measurements.rendererFreezeDurationMs === "number" &&
+        measurements.rendererFreezeDurationMs > 0;
+    if (scenario.id === "backend-stop") passed &&= stopChecks.backendFrozenAtStop === true;
+  } else if (["main-stop", "renderer-stop", "backend-stop"].includes(scenario.id)) {
+    passed = false;
   }
   const cleanup =
     record(raw.cleanup) && raw.cleanup.confirmed === true ? "confirmed" : "unconfirmed";

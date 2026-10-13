@@ -167,7 +167,7 @@ async function verifyRealAppProcesses(...args) {
   return JSON.parse(result.stdout);
 }
 async function rememberRealAppProcess(appId) {
-  const pids = (await verifyRealAppProcesses("--pids"))[appId];
+  const pids = (await verifyRealAppProcesses("--status"))[appId];
   if (!Array.isArray(pids) || pids.length !== 1 || !Number.isInteger(pids[0]) || pids[0] <= 0)
     throw new Error("Owned app process could not be confirmed.");
   realAppOwnedPids[appId] = pids[0];
@@ -1392,7 +1392,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     const deadline = Date.now() + 5000;
     let pids;
     do {
-      pids = await verifyRealAppProcesses("--pids").catch(() => undefined);
+      pids = await verifyRealAppProcesses("--status").catch(() => undefined);
       realAppsClosed =
         !!pids &&
         REAL_APP_REHEARSAL_IDS.every((id) => Array.isArray(pids[id]) && pids[id].length === 0);
@@ -1426,6 +1426,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     JSON.stringify(
       {
         reportVersion: 1,
+        admissionId: process.env.F5_COMPUTER_CERTIFICATION_ADMISSION,
         recordedAt: new Date().toISOString(),
         scope: clusterWorkflows
           ? "unsigned-real-electron-clustered-workflows"

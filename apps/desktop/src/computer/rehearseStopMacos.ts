@@ -401,6 +401,7 @@ try {
     JSON.stringify(
       {
         reportVersion: 1,
+        admissionId: process.env.F5_COMPUTER_CERTIFICATION_ADMISSION,
         recordedAt: new Date().toISOString(),
         platform: process.platform,
         arch: process.arch,

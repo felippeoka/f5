@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { GROUPS, type Group } from "./catalog";
@@ -62,6 +63,7 @@ export async function runSuite(options: {
   group: Group;
   resume: boolean;
   retry?: string;
+  scenario?: string;
   operatorReady: boolean;
 }) {
   const { directory, target, launches, group } = options;
@@ -81,7 +83,7 @@ export async function runSuite(options: {
       )
     )
       throw new Error("Interrupted admission; use resume");
-    const selected = pending(manifest, results, group, options.retry);
+    const selected = pending(manifest, results, group, options.retry, options.scenario);
     if (options.retry && selected.length === 0)
       throw new Error("Retry must name an existing nonpassed scenario in this group");
     // No readiness question until current prerequisites are observed. All computer
@@ -95,6 +97,7 @@ export async function runSuite(options: {
         Math.max(0, ...results.filter((r) => r.scenario === scenario.key).map((r) => r.attempt)) +
         1;
       const start = new Date().toISOString();
+      const admissionId = randomUUID();
       const base: ScenarioResult = {
         version: 1,
         suiteId: manifest.suiteId,
@@ -163,10 +166,10 @@ export async function runSuite(options: {
         if (!ready) break;
       }
       // Reserve before spawn; a killed coordinator cannot silently rerun input.
-      await writeExclusive(
-        join(directory, attemptName(scenario.key, attempt) + ".started.json"),
-        base,
-      );
+      await writeExclusive(join(directory, attemptName(scenario.key, attempt) + ".started.json"), {
+        ...base,
+        admissionId,
+      });
       const pairedBase: ScenarioResult | undefined = paired
         ? { ...base, scenario: paired.key, attempt: 1 }
         : undefined;
@@ -180,7 +183,13 @@ export async function runSuite(options: {
       let executionFailed = false;
       let interrupted = false;
       for (const command of commands as Exclude<typeof commands, string>) {
-        const result = await execute(command, target.repo);
+        const result = await execute(
+          {
+            ...command,
+            env: { ...command.env, F5_COMPUTER_CERTIFICATION_ADMISSION: admissionId },
+          },
+          target.repo,
+        );
         if (command.check)
           checks[command.check] = result.code === 0 && !result.interrupted && !result.timedOut;
         if (result.code !== 0 || result.interrupted || result.timedOut) {
@@ -201,7 +210,11 @@ export async function runSuite(options: {
         };
       } else {
         try {
-          const summary = summarizeEvidence(scenario, manifest, await readJson(output));
+          const summary = summarizeEvidence(scenario, manifest, await readJson(output), {
+            id: admissionId,
+            startedAt: start,
+            finishedAt: new Date().toISOString(),
+          });
           result = {
             ...base,
             ...summary,
@@ -253,7 +266,11 @@ export async function runSuite(options: {
           } else {
             second = {
               ...pairedBase,
-              ...summarizeEvidence(paired, manifest, raw),
+              ...summarizeEvidence(paired, manifest, raw, {
+                id: admissionId,
+                startedAt: start,
+                finishedAt: new Date().toISOString(),
+              }),
               finishedAt: new Date().toISOString(),
             };
             if (interrupted || result.reason === "identity-changed")

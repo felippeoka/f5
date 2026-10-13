@@ -358,7 +358,7 @@ tracks. It never changes release flags. Use a new directory outside the checkout
     bun run computer:certify report --output /tmp/f5-certification-suite
 
 Development preparation builds the app bundles before pinning them, then compiles the
-five native fixture executables once, observes the suspended
+five native fixture executables once, verifies their read-only status protocols, observes the suspended
 helper's permissions and display geometry, and checks each configured provider's own
 account scope. It sends no grant, permit, resume, capture or input. The private launch
 configuration contains selected paths but is omitted from coverage reports.
@@ -385,6 +385,24 @@ is failed as outcome-unknown on recovery, without repeating an action:
     # Only after inspecting the failure, restoring prerequisites and coordinating again:
     bun run computer:certify resume --output /tmp/f5-certification-suite \
       --group workflows --retry real-apps.codex
+
+To run a single unattempted phase, use --scenario real-apps.codex. Selection does not
+retry a prior failed attempt, rerun completed phases or remove missing rows from the
+coverage report. Each machine receipt carries a fresh admission identifier and must
+match its execution interval, platform, architecture, helper hash and provider. Stop
+proof also requires the named clock, input and freeze assertions; arbitrary passing
+booleans or a stop measurement cannot override failed workflow assertions.
+
+The [first combined workflow attempt](computer-certification/2026-10-13-macos-cluster-workflows-attempt.json)
+at clean source 9c5ea1562b passed three read-only discovery turns through each provider.
+Codex then passed the synthetic fixture actions, genuine Pause/Resume, fresh screenshot,
+activity thumbnails and semantic/coordinate overlay checks. The overall attempt failed
+before TextEdit input: PID tracking called the native process verifier with --pids,
+while its supported metadata command is --status. The seeded test document remained
+open, so cleanup was unconfirmed and neither input phase received passing suite credit.
+That failed attempt remains immutable. The runner now uses --status, preparation probes
+the compiled verifier protocols, and phase selection permits a focused subsequent
+real-app run. No release gate changed.
 
 Resume checks helper, provider binaries, desktop/server bundles, every served client
 asset, prepared fixtures, source hashes, architecture and target identity. Changed

@@ -522,6 +522,7 @@ try {
   if (root) await rm(root, { recursive: true, force: true });
   const report = {
     reportVersion: 1,
+    admissionId: process.env.F5_COMPUTER_CERTIFICATION_ADMISSION,
     recordedAt: new Date().toISOString(),
     platform: process.platform,
     arch: process.arch,

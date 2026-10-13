@@ -270,10 +270,21 @@ export function pending(
   results: readonly ScenarioResult[],
   group: Group,
   retry: string | undefined,
+  selectedScenario?: string,
 ): ScenarioInstance[] {
+  if (selectedScenario && retry)
+    throw new Error("Invalid combination of scenario selection and retry");
+  if (
+    selectedScenario &&
+    !inventory(manifest.identity.platform, manifest.providers).some(
+      (scenario) => scenario.group === group && scenario.key === selectedScenario,
+    )
+  )
+    throw new Error("Unknown scenario in this group");
   const latest = coverage(manifest, results).rows;
   return inventory(manifest.identity.platform, manifest.providers).filter((scenario) => {
     if (scenario.group !== group) return false;
+    if (selectedScenario && scenario.key !== selectedScenario) return false;
     const row = latest.find((r) => r.scenario === scenario.key)!;
     if (retry) return scenario.key === retry && row.state !== "passed";
     // Never repeat completed, failed, blocked or ambiguously interrupted work automatically.

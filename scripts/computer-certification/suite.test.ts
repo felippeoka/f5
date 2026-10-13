@@ -76,6 +76,27 @@ afterEach(async () => {
 });
 
 describe("certification inventory and coverage", () => {
+  it("runs a selected new phase without redoing prior phases or hiding missing coverage", () => {
+    expect(
+      pending(manifest, [], "workflows", undefined, "real-apps.codex").map((s) => s.key),
+    ).toEqual(["real-apps.codex"]);
+    expect(
+      pending(
+        manifest,
+        [result("real-apps.codex", "failed")],
+        "workflows",
+        undefined,
+        "real-apps.codex",
+      ),
+    ).toEqual([]);
+    expect(coverage(manifest, [result("real-apps.codex")]).nativeReleaseReady).toBe(false);
+    expect(() => pending(manifest, [], "recovery", undefined, "real-apps.codex")).toThrow(
+      "Unknown",
+    );
+    expect(() => pending(manifest, [], "workflows", "real-apps.codex", "real-apps.codex")).toThrow(
+      "Invalid",
+    );
+  });
   it("contains both providers and keeps permission revocation last in recovery", () => {
     const mac = inventory("darwin", manifest.providers);
     expect(new Set(mac.map((s) => s.key)).size).toBe(mac.length);
@@ -175,6 +196,41 @@ describe("certification inventory and coverage", () => {
   });
 });
 describe("proof validation", () => {
+  it("accepts only a current admitted receipt for the matching architecture and provider", () => {
+    const s = scenario("fixture-workflow.codex");
+    const admission = {
+      id: "new-admission",
+      startedAt: "2026-10-13T12:00:00Z",
+      finishedAt: "2026-10-13T12:01:00Z",
+    };
+    const raw = {
+      reportVersion: 1,
+      admissionId: admission.id,
+      recordedAt: "2026-10-13T12:00:30Z",
+      platform: "darwin",
+      arch: "arm64",
+      provider: "codex",
+      helperSha256: hash,
+      state: "passed",
+      checks: result(s.key).checks,
+      cleanup: { confirmed: true },
+    };
+    expect(summarizeEvidence(s, manifest, raw, admission).state).toBe("passed");
+    for (const patch of [
+      { admissionId: "old-admission" },
+      { recordedAt: undefined },
+      { recordedAt: "2026-10-13T11:59:59Z" },
+      { recordedAt: "2026-10-13T12:01:01Z" },
+      { arch: "x64" },
+      { provider: "claude" },
+    ])
+      expect(() => summarizeEvidence(s, manifest, { ...raw, ...patch }, admission)).toThrow(
+        "admission",
+      );
+    expect(() =>
+      summarizeEvidence(s, manifest, raw, { ...admission, finishedAt: "2026-10-13T11:59:59Z" }),
+    ).toThrow("admission");
+  });
   it.each([
     { checks: {} },
     { checks: { format: true } },
@@ -266,6 +322,64 @@ describe("proof validation", () => {
     expect(() => summarizeEvidence(s, manifest, { ...raw, helperSha256: "0".repeat(64) })).toThrow(
       "identity",
     );
+  });
+  it("does not replace failed workflow assertions with a passing stop measurement", () => {
+    const s = scenario("main-stop.codex");
+    const stopChecks = Object.fromEntries(
+      [
+        "traceComplete",
+        "clocksValid",
+        "syntheticInputObserved",
+        "physicalInputRecognized",
+        "chordRecognized",
+        "promptedBeforeInterruption",
+        "typingActiveAtTrigger",
+        "physicalStopUnder100Ms",
+        "chordStopUnder100Ms",
+        "appDeliveryStoppedUnder100Ms",
+        "quietTailObserved",
+        "inFlightMutationInterrupted",
+        "pausedMutationRefused",
+        "leaseReleased",
+        "fixtureStillFrontmost",
+        "stallClockCalibrated",
+        "physicalAndChordDuringHostStall",
+      ].map((key) => [key, true]),
+    );
+    const raw = {
+      reportVersion: 1,
+      platform: "darwin",
+      helperSha256: hash,
+      state: "passed",
+      checks: result(s.key).checks,
+      cleanup: { confirmed: true },
+      stopMeasurement: {
+        state: "passed",
+        checks: stopChecks,
+        physicalInputTailMs: 0,
+        killChordTailMs: 0,
+        appDeliveryTailMs: 0,
+        clockUncertaintyMs: 1,
+        hostStallDurationMs: 700,
+      },
+    };
+    expect(summarizeEvidence(s, manifest, raw).state).toBe("passed");
+    expect(summarizeEvidence(s, manifest, { ...raw, checks: {} }).state).toBe("failed");
+    expect(
+      summarizeEvidence(s, manifest, {
+        ...raw,
+        stopMeasurement: { ...raw.stopMeasurement, clockUncertaintyMs: 26 },
+      }).state,
+    ).toBe("failed");
+    expect(
+      summarizeEvidence(s, manifest, {
+        ...raw,
+        stopMeasurement: {
+          ...raw.stopMeasurement,
+          checks: Object.fromEntries(Array.from({ length: 17 }, (_, i) => ["arbitrary" + i, true])),
+        },
+      }).state,
+    ).toBe("failed");
   });
   it("never launches the development wrapper against an installed app", () => {
     expect(

@@ -37,6 +37,7 @@ async function main() {
     "--codex-binary",
     "--codex-model",
     "--retry",
+    "--scenario",
   ];
   for (let i = 0; i < args.length; i++) {
     const name = args[i]!;
@@ -57,7 +58,7 @@ async function main() {
   const directory = values.get("--output");
   if (!directory || !["prepare", "run", "resume", "report"].includes(command ?? ""))
     throw new Error(
-      "Usage: bun scripts/computer-certification.ts prepare|run|resume|report --output <suite-directory> [--platform darwin|win32] [--group automated|workflows|protection|recovery|builtin|chrome] [--provider both|claude|codex] [--app <installed-app> | --helper <dev-helper>] [--<provider>-home <selected-home> --<provider>-binary <cli>] [--operator-ready] [--retry <scenario>]",
+      "Usage: bun scripts/computer-certification.ts prepare|run|resume|report --output <suite-directory> [--platform darwin|win32] [--group automated|workflows|protection|recovery|builtin|chrome] [--provider both|claude|codex] [--app <installed-app> | --helper <dev-helper>] [--<provider>-home <selected-home> --<provider>-binary <cli>] [--operator-ready] [--scenario <new-phase> | --retry <failed-phase>]",
     );
   const output = resolve(directory);
   if (command === "report") {
@@ -169,6 +170,7 @@ async function main() {
   const group = values.get("--group");
   if (!group || !GROUPS.includes(group as Group)) throw new Error("Choose a certification group");
   const retry = values.get("--retry");
+  const scenario = values.get("--scenario");
   const summary = await runSuite({
     directory: output,
     target,
@@ -176,10 +178,19 @@ async function main() {
     group: group as Group,
     resume: command === "resume",
     operatorReady: flags.has("--operator-ready"),
+    ...(scenario ? { scenario } : {}),
     ...(retry ? { retry } : {}),
   });
   process.stdout.write(JSON.stringify(summary, null, 2) + "\n");
-  if (summary.rows.some((row) => row.group === group && row.state !== "passed"))
+  const selectedScenario = scenario ?? retry;
+  if (
+    summary.rows.some(
+      (row) =>
+        row.group === group &&
+        (!selectedScenario || row.scenario === selectedScenario) &&
+        row.state !== "passed",
+    )
+  )
     process.exitCode = 1;
 }
 if (import.meta.main)
