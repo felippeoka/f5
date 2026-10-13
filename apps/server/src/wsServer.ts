@@ -3079,10 +3079,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
               const retryAt = Date.parse(refreshed.nextAllowedAt ?? "");
               if (
                 (result.outcome === "reset" || result.outcome === "alreadyRedeemed") &&
-                Number.isFinite(retryAt) &&
-                retryAt > Date.now()
+                Number.isFinite(retryAt)
               )
-                yield* Effect.sleep(retryAt - Date.now()).pipe(
+                // The hint can elapse between the capability's refusal and this
+                // check. Retry through its real throttle instead of dropping it.
+                yield* Effect.sleep(Math.max(50, retryAt - Date.now())).pipe(
                   Effect.andThen(Effect.suspend(refreshResumes)),
                   Effect.forkIn(subscriptionsScope),
                 );

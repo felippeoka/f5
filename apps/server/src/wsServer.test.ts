@@ -628,7 +628,7 @@ function connectWsOnce(
       if (vi.isMockFunction(console.log))
         console.log("test websocket closed", code, String(reason));
     });
-    ws.once("error", () => reject(new Error("WebSocket connection failed")));
+    ws.once("error", (cause) => reject(new Error("WebSocket connection failed", { cause })));
   });
 }
 
@@ -1196,15 +1196,16 @@ describe("WebSocket Server", () => {
   });
 
   it.each([
-    ["reset", false],
-    ["alreadyRedeemed", false],
-    ["nothingToReset", false],
-    ["noCredit", false],
-    ["reset", true],
-    ["alreadyRedeemed", true],
+    ["reset", false, false],
+    ["alreadyRedeemed", false, false],
+    ["nothingToReset", false, false],
+    ["noCredit", false, false],
+    ["reset", true, false],
+    ["alreadyRedeemed", true, false],
+    ["reset", true, true],
   ] as const)(
-    "refreshes after reset-credit outcome %s (recent refresh: %s) with the real account throttle",
-    async (outcome, recentRefresh) => {
+    "refreshes after reset-credit outcome %s (recent refresh: %s; elapsed retry hint: %s) with the real account throttle",
+    async (outcome, recentRefresh, elapsedRetryHint) => {
       const instanceId = ProviderInstanceId.makeUnsafe("claudeAgent-credit-test");
       let refreshCalls = 0;
       let probeCalls = 0;
@@ -1268,7 +1269,17 @@ describe("WebSocket Server", () => {
               ...capability,
               refreshAccount: (permits) => {
                 refreshCalls++;
-                return capability.refreshAccount!(permits);
+                const refresh = capability.refreshAccount!(permits);
+                // Reproduce crossing the deadline between capability refusal and
+                // the route inspecting its hint. Keep the real five-second gate.
+                return elapsedRetryHint && refreshCalls === 1
+                  ? refresh.pipe(
+                      Effect.map((reply) => ({
+                        ...reply,
+                        nextAllowedAt: new Date(0).toISOString(),
+                      })),
+                    )
+                  : refresh;
               },
             },
           } as ProviderInstance;
