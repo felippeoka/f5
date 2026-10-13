@@ -689,6 +689,20 @@ requires an independently visible zero with 42 absent before the calculation tur
 It records only fixed accessibility/result booleans for that baseline. This strengthens
 the baseline, keeps failed actions nonretryable and adds no production authorization.
 
+The [Claude real-app retry](computer-certification/2026-10-13-macos-claude-electron-real-apps-passed.json)
+on clean `80c4be85cc` passed all 16 checks with the unchanged updated helper hash
+`a11ef2e783c9d344372f9b12a86e0a1a67ec40ddecaafc1e0f5a27cfcd8d7c9e`.
+Human consent approved only TextEdit and Calculator. Saved Unicode file bytes matched
+exactly and the owned document closed. Calculator's zero baseline and final 42 were
+verified independently, with eight correlated semantic presses including baseline
+clear. Four composer turns, three captures, six inspections, surviving grants, visible
+loaded activity imagery and lease cleanup were observed, with no tagged errors or
+unexpected app input. This is one unsigned macOS two-app Claude checkpoint, using the
+explicitly selected account through the temporary rehearsal bootstrap. It does not
+prove production credential isolation, the full provider/app/protection matrix,
+multi-profile/display privacy, Windows desktop execution or signed installed-build
+attribution. Earlier failures remain unchanged and no release gate is opened.
+
 The `--real-apps` mode checks TextEdit and Calculator through the compiled Electron
 app and the selected provider session. Both apps must initially be closed; a read-only verifier
 checks this before Electron launch and again after consent. The first composer turn
