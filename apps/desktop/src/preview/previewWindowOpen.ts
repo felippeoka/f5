@@ -1,5 +1,7 @@
 import type { BrowserWindow, WebContents } from "electron";
 
+import { createDeferredNavigationStopper, gateMainFrameRequests } from "./previewNavigationGuard";
+
 /**
  * The parent tab's live navigation policy. Popups opened while the agent drives the tab
  * are bound to it for their whole lifetime; popups the user opens stay with the user.
@@ -71,11 +73,14 @@ export function registerPreviewWindowOpen(
     const agent = nextPopupIsAgent && policy !== undefined;
     nextPopupIsAgent = false;
     if (agent) agentPopups.add(child);
-    const refuse = (url: string): boolean => {
+    const isRefused = (url: string): boolean => {
       const target = httpUrl(url);
-      if (!target) return true;
-      if (!agent || policy!.isAllowedUrl(target.href)) return false;
-      policy!.onBlocked(target.href);
+      return !target || (agent && !policy!.isAllowedUrl(target.href));
+    };
+    const refuse = (url: string): boolean => {
+      if (!isRefused(url)) return false;
+      const target = httpUrl(url);
+      if (target) policy!.onBlocked(target.href);
       return true;
     };
     child.webContents.setWindowOpenHandler(({ url }) => {
@@ -87,13 +92,21 @@ export function registerPreviewWindowOpen(
       if (refuse(url)) event.preventDefault();
     });
     if (agent) {
+      const navigationStopper = createDeferredNavigationStopper(child.webContents);
+      gateMainFrameRequests(child.webContents, isRefused);
       child.webContents.on("will-redirect", (details) => {
         if (details.isMainFrame && refuse(details.url)) details.preventDefault();
       });
       child.webContents.on("did-start-navigation", (details) => {
-        if (details.isMainFrame && !details.isSameDocument && refuse(details.url)) {
-          child.webContents.stop();
-        }
+        if (!details.isMainFrame || details.isSameDocument) return;
+        navigationStopper.navigationStarted();
+        if (refuse(details.url)) navigationStopper.stopCurrentNavigation();
+      });
+      // Fail closed if a refused page commits anyway; nothing else rechecks a popup's page
+      // until the policy changes.
+      child.webContents.on("did-navigate", (_event, url) => {
+        if (url === "about:blank" || !refuse(url)) return;
+        if (!child.isDestroyed()) child.destroy();
       });
     }
     const close = () => {

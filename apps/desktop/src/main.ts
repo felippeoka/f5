@@ -15,6 +15,10 @@ import { pathToFileURL } from "node:url";
 import { installGuestControls } from "./preview/guestControls";
 import { BrowserProfiles } from "./preview/BrowserProfiles";
 import { BrowserImport } from "./browserImport/BrowserImport";
+import {
+  createDeferredNavigationStopper,
+  gateMainFrameRequests,
+} from "./preview/previewNavigationGuard";
 import { registerPreviewWindowOpen } from "./preview/previewWindowOpen";
 import { captureMacWindow } from "./snapShot/MacSnapShot";
 import { profileStateDir } from "@t3tools/shared/profilePaths";
@@ -754,19 +758,23 @@ function registerPreviewWebContents(tabId: string, webContentsId: number): boole
     if (!details.isMainFrame) return;
     if (blockDisallowedNavigation(details.url)) details.preventDefault();
   };
+  // F5 itself loads about:blank to leave pages the allowlist no longer permits.
+  const isRefusedPreviewUrl = (url: string): boolean =>
+    url !== "about:blank" && !getSafePreviewUrl(url, previewTabExternalHosts(tabId));
+  const navigationStopper = createDeferredNavigationStopper(guest);
+  const removeRequestGate = gateMainFrameRequests(guest, isRefusedPreviewUrl);
   const onDidStartNavigation = (
     details: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>,
   ) => {
     if (!details.isMainFrame || details.isSameDocument) return;
+    navigationStopper.navigationStarted();
     // A load that starts agent-driven stays so through every redirect until it settles.
     const currentEntry = lookupPreviewTabEntry(tabId);
     if (currentEntry && isAgentPreviewNavigation(tabId)) currentEntry.agentNavigationActive = true;
-    // F5 itself loads about:blank to leave pages the allowlist no longer permits.
-    if (details.url === "about:blank") return;
     // Backstop for navigations that bypass will-navigate (history, reload, renderer-initiated).
-    if (getSafePreviewUrl(details.url, previewTabExternalHosts(tabId))) return;
+    if (!isRefusedPreviewUrl(details.url)) return;
     if (isAgentPreviewNavigation(tabId)) recordBlockedAgentNavigation(tabId, details.url);
-    guest.stop();
+    navigationStopper.stopCurrentNavigation();
   };
   const onConsoleMessage = (
     details: Electron.Event<Electron.WebContentsConsoleMessageEventParams>,
@@ -836,6 +844,7 @@ function registerPreviewWebContents(tabId: string, webContentsId: number): boole
     () => guest.off("will-navigate", onWillNavigate),
     () => guest.off("will-redirect", onWillRedirect),
     () => guest.off("did-start-navigation", onDidStartNavigation),
+    removeRequestGate,
     () => guest.off("console-message", onConsoleMessage),
     () => guest.off("did-fail-load", onDidFailLoad),
     () => guest.off("destroyed", onDestroyed),
