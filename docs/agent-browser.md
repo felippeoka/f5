@@ -1166,6 +1166,26 @@ before teardown. This observation does not clear the original failed stage or ma
 unperformed follow-up mutation checks pass. The active UI continues to say input is
 running; the passive "no agent input" wording is used only for passive mode.
 
+The [instrumented current-helper frozen-main run](computer-certification/2026-10-13-macos-current-helper-electron-main-stop-passed.json)
+at clean `898c3874b1` passed every check using helper
+`42e5f28a123a74b947ce93d0962494c497ab5f889fb68f6576c3ceb3793e48c5`.
+Real human consent settled, the lease banner appeared, and Electron main was
+OS-verified frozen for 707.2 ms. Physical input recognition occurred 407.2–408.4 ms
+after the freeze began; full-chord recognition also occurred during the freeze,
+228.2–229.4 ms before restoration, with 1.2 ms clock uncertainty. The independent
+session observer recorded Escape with both Control and Command 475 ms after RED.
+Recorded emission stopped within 5.2 ms of physical recognition and 0 ms of chord
+recognition; app delivery stopped within 10.5 ms. The quiet tail, native frontmost
+receipt, interrupted in-flight typing, subsequent paused-mutation refusal, mirrored
+pause and released lease all passed. No resume was performed.
+
+This establishes the narrow unsigned macOS/Codex/synthetic-fixture frozen-main stop
+checkpoint for the current helper in the two-display environment. It does not explain
+the preceding missing-chord attempt, which remains unchanged. Current-helper
+frozen-renderer coverage, the broader app/privacy/profile matrix, Windows runtime
+checks and installed-build signing/TCC attribution remain pending. All release gates
+stay closed; signing remains deferred.
+
 Coordinate with the operator before launching. The real consent dialog must be answered
 by a human for the single synthetic fixture. The operator then leaves input idle and
 follows the window's instructions for Pause and Resume. Turns go through the real
