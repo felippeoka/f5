@@ -774,7 +774,8 @@ export function createWsNativeApi(): NativeApi {
       query: (input) => transport.request(WS_METHODS.globalSearchQuery, input),
     },
     agents: {
-      getSnapshot: () => transport.request(AGENTS_WS_METHODS.getSnapshot),
+      getSnapshot: (input) => transport.request(AGENTS_WS_METHODS.getSnapshot, input ?? {}),
+      dismiss: (input) => transport.request(AGENTS_WS_METHODS.dismiss, input),
       onSnapshotUpdated: (callback) => {
         agentsSnapshotUpdatedListeners.add(callback);
         const latest = transport.getLatestPush(AGENTS_WS_CHANNELS.snapshotUpdated)?.data ?? null;

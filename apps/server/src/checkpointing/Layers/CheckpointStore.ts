@@ -501,6 +501,7 @@ const makeCheckpointStore = Effect.gen(function* () {
 
 export const CheckpointStoreLiveWithGitService = Layer.effect(CheckpointStore, makeCheckpointStore);
 
-export const CheckpointStoreLive = CheckpointStoreLiveWithGitService.pipe(
+/** Credential-free test harness; production runtimes must supply their configured Git service. */
+export const CheckpointStoreLiveWithoutCredentials = CheckpointStoreLiveWithGitService.pipe(
   Layer.provideMerge(GitServiceLive),
 );

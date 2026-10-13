@@ -162,16 +162,37 @@ function MenuRadioGroup(props: MenuPrimitive.RadioGroup.Props) {
   return <MenuPrimitive.RadioGroup data-slot="menu-radio-group" {...props} />;
 }
 
-function MenuRadioItem({ className, children, ...props }: MenuPrimitive.RadioItem.Props) {
+function MenuRadioItem({
+  className,
+  children,
+  variant = "default",
+  ...props
+}: MenuPrimitive.RadioItem.Props & {
+  /** `plain` drops the checkmark column; the children must show the selection. */
+  variant?: "default" | "plain";
+}) {
   return (
     <MenuPrimitive.RadioItem
       className={cn(
-        "grid min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-default grid-cols-[1rem_1fr] items-center gap-2 rounded-sm py-1 ps-2 pe-4 text-base text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-default items-center gap-2 rounded-sm py-1 ps-2 pe-4 text-base text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        variant === "plain" ? "flex" : "grid grid-cols-[1rem_1fr]",
         className,
       )}
       data-slot="menu-radio-item"
       {...props}
     >
+      {variant === "plain" ? (
+        children
+      ) : (
+        <MenuRadioItemCheckmarkColumns>{children}</MenuRadioItemCheckmarkColumns>
+      )}
+    </MenuPrimitive.RadioItem>
+  );
+}
+
+function MenuRadioItemCheckmarkColumns({ children }: { children: React.ReactNode }) {
+  return (
+    <>
       <MenuPrimitive.RadioItemIndicator className="col-start-1">
         <svg
           fill="none"
@@ -188,7 +209,7 @@ function MenuRadioItem({ className, children, ...props }: MenuPrimitive.RadioIte
         </svg>
       </MenuPrimitive.RadioItemIndicator>
       <span className="col-start-2">{children}</span>
-    </MenuPrimitive.RadioItem>
+    </>
   );
 }
 

@@ -2,6 +2,8 @@ import { AgentComputerLiveCard } from "./AgentComputerLiveCard";
 import { ComputerAccessTimeline } from "./ComputerAccessCard";
 import { parseNativeReviewTarget } from "@t3tools/shared/nativeReviewTarget";
 import { NativeRuntimePanel } from "./chat/NativeRuntimePanel";
+import { NativeRuntimeTray } from "./chat/NativeRuntimeTray";
+import { latestNativeGoal, resolveNativeGoalMenuState } from "./chat/nativeGoal";
 import { TranscriptRepairAction } from "./TranscriptRepairAction";
 import { isSessionActionSupported } from "@t3tools/shared/providerRuntimeCapabilities";
 import { isBlockingUserInput } from "@t3tools/shared/pendingUserInputs";
@@ -33,6 +35,7 @@ import { ChatComposer } from "./chat/composer/ChatComposer";
 import type {
   ComposerAttachments,
   ComposerModeControls,
+  ComposerNativeGoalControls,
   ComposerModelControls,
   ComposerPendingInteraction,
   ComposerSendControls,
@@ -55,6 +58,7 @@ import {
   type ProjectScript,
   type ModelSlug,
   type ModelSelection,
+  type NativeOperationCommand,
   type ResolvedKeybindingsConfig,
   type ProviderApprovalDecision,
   type ServerProvider,
@@ -213,7 +217,12 @@ import { isWsInteractionBlocked, useWsConnectionState } from "../wsConnectionSta
 import BranchToolbar from "./BranchToolbar";
 import { useChatViewBranchDriftGuard } from "./ChatViewBranchDriftGuard";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
-import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
+import {
+  selectSurfaceHeaderState,
+  selectThreadRightPanelState,
+  useRightPanelStore,
+} from "../rightPanelStore";
+import { setSearchParamsForSurface } from "../rightPanelNavigation";
 import { canStartImplementation, workflowContainsThread } from "./workflow/workflowUtils";
 import { codeReviewWorkflowContainsThread } from "./workflow/codeReviewWorkflowUtils";
 import { investigationWorkflowContainsThread } from "./workflow/investigationWorkflowUtils";
@@ -1038,18 +1047,18 @@ export default function ChatView({
   const isServerThread = serverThread !== undefined;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
-  const diffOpen = useRightPanelStore((store) => {
-    const state = selectThreadRightPanelState(store.byThreadId, threadId);
-    return state.isOpen && state.surfaces.some((surface) => surface.id === "diff");
-  });
-  const filesOpen = useRightPanelStore((store) => {
-    const state = selectThreadRightPanelState(store.byThreadId, threadId);
-    return state.isOpen && state.surfaces.some((surface) => surface.id === "files");
-  });
-  const agentsOpen = useRightPanelStore((store) => {
-    const state = selectThreadRightPanelState(store.byThreadId, threadId);
-    return state.isOpen && state.surfaces.some((surface) => surface.id === "agents");
-  });
+  const diffState = useRightPanelStore((store) =>
+    selectSurfaceHeaderState(selectThreadRightPanelState(store.byThreadId, threadId), "diff"),
+  );
+  const filesState = useRightPanelStore((store) =>
+    selectSurfaceHeaderState(selectThreadRightPanelState(store.byThreadId, threadId), "files"),
+  );
+  const agentsState = useRightPanelStore((store) =>
+    selectSurfaceHeaderState(selectThreadRightPanelState(store.byThreadId, threadId), "agents"),
+  );
+  const previewState = useRightPanelStore((store) =>
+    selectSurfaceHeaderState(selectThreadRightPanelState(store.byThreadId, threadId), "preview"),
+  );
   const activeThreadId = activeThread?.id ?? null;
   const activeLatestTurn = activeThread?.latestTurn ?? null;
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
@@ -1709,6 +1718,7 @@ export default function ChatView({
   const nowIso = new Date(nowTick).toISOString();
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const threadTasks = activeThread?.tasks ?? EMPTY_TASKS;
+  const nativeGoal = useMemo(() => latestNativeGoal(threadActivities), [threadActivities]);
   const latestConfiguredRuntimeActivity = useMemo(() => {
     for (let index = threadActivities.length - 1; index >= 0; index -= 1) {
       const activity = threadActivities[index];
@@ -2632,8 +2642,21 @@ export default function ChatView({
     () => shortcutLabelForCommand(keybindings, "chat.scrollToBottom"),
     [keybindings],
   );
+  // Header toggles: a visible tab closes, a background tab comes to front, a closed one opens.
   const onToggleDiff = useCallback(() => {
-    if (diffOpen) {
+    if (diffState === "background") {
+      // Same as clicking the tab: keep the selected turn/scope, drop any file-view params.
+      useRightPanelStore.getState().activateSurface(threadId, "diff");
+      void navigate({
+        to: "/$threadId",
+        params: { threadId },
+        replace: true,
+        search: (previous) => setSearchParamsForSurface(previous, { id: "diff", kind: "diff" }),
+      });
+      return;
+    }
+    const closing = diffState === "active";
+    if (closing) {
       useRightPanelStore.getState().closeSurface(threadId, "diff");
     } else {
       useRightPanelStore.getState().open(threadId, "diff");
@@ -2644,24 +2667,33 @@ export default function ChatView({
       replace: true,
       search: (previous) => {
         const rest = clearTurnDiffSearchParams(previous);
-        return diffOpen ? rest : { ...rest, diff: "1", diffScope: "working-tree" };
+        return closing
+          ? rest
+          : { ...clearFileViewSearchParams(rest), diff: "1", diffScope: "working-tree" };
       },
     });
-  }, [diffOpen, navigate, threadId]);
+  }, [diffState, navigate, threadId]);
   const onToggleFiles = useCallback(() => {
-    if (filesOpen) {
+    if (filesState === "active") {
       useRightPanelStore.getState().closeSurface(threadId, "files");
       return;
     }
     useRightPanelStore.getState().open(threadId, "files");
-  }, [filesOpen, threadId]);
+  }, [filesState, threadId]);
   const onToggleAgents = useCallback(() => {
-    if (agentsOpen) {
+    if (agentsState === "active") {
       useRightPanelStore.getState().closeSurface(threadId, "agents");
       return;
     }
     useRightPanelStore.getState().open(threadId, "agents");
-  }, [agentsOpen, threadId]);
+  }, [agentsState, threadId]);
+  const onTogglePreview = useCallback(() => {
+    if (previewState === "active") {
+      useRightPanelStore.getState().closeSurface(threadId, "preview");
+      return;
+    }
+    useRightPanelStore.getState().open(threadId, "preview");
+  }, [previewState, threadId]);
 
   const envLocked = Boolean(
     activeThread &&
@@ -4539,6 +4571,82 @@ export default function ChatView({
     isRevertingCheckpoint,
     phase,
     setThreadError,
+  ]);
+
+  /** Runs a goal command; resolves true once the provider admitted it. */
+  const [nativeGoalRequestPending, setNativeGoalRequestPending] = useState(false);
+  const nativeGoalRequestInFlight = useRef(false);
+  const executeNativeGoalCommand = useCallback(
+    async (command: NativeOperationCommand): Promise<boolean> => {
+      const title =
+        command.kind === "goalClear" ? "Goal could not be cleared" : "Goal could not start";
+      const api = readNativeApi();
+      const capabilities = activeThread?.session?.capabilities;
+      if (!api?.nativeOperations || !activeThread || !capabilities) {
+        toastManager.add({
+          type: "error",
+          title,
+          description: "Goals are unavailable until the provider session is ready.",
+        });
+        return false;
+      }
+      if (nativeGoalRequestInFlight.current) return false;
+      nativeGoalRequestInFlight.current = true;
+      setNativeGoalRequestPending(true);
+      try {
+        const record = await api.nativeOperations.execute({
+          threadId: activeThread.id,
+          operationId: crypto.randomUUID(),
+          generation: capabilities.generation,
+          command,
+        });
+        if (["requested", "dispatched", "running", "completed"].includes(record.state)) {
+          return true;
+        }
+        toastManager.add({ type: "error", title, description: record.error ?? record.state });
+      } catch (cause) {
+        toastManager.add({
+          type: "error",
+          title,
+          description:
+            cause instanceof Error ? cause.message : "Retry after the current operation settles.",
+        });
+      } finally {
+        nativeGoalRequestInFlight.current = false;
+        setNativeGoalRequestPending(false);
+      }
+      return false;
+    },
+    [activeThread],
+  );
+  const nativeGoalControls = useMemo<ComposerNativeGoalControls | null>(() => {
+    const state = resolveNativeGoalMenuState({
+      supported:
+        activeThread?.session?.capabilities?.actions.some(
+          (action) => action.action === "nativeGoals" && action.supported,
+        ) === true,
+      goal: nativeGoal,
+      turnBusy: isWorking || isRevertingCheckpoint || hasPendingTurnDispatch,
+      requestPending: nativeGoalRequestPending,
+    });
+    return state
+      ? {
+          ...state,
+          onSet: (objective, tokenBudget) =>
+            executeNativeGoalCommand({ kind: "goalSet", objective, tokenBudget }),
+          onClear: async () => {
+            await executeNativeGoalCommand({ kind: "goalClear" });
+          },
+        }
+      : null;
+  }, [
+    activeThread?.session?.capabilities,
+    executeNativeGoalCommand,
+    hasPendingTurnDispatch,
+    isRevertingCheckpoint,
+    isWorking,
+    nativeGoal,
+    nativeGoalRequestPending,
   ]);
 
   const onSend = async (
@@ -6840,6 +6948,7 @@ export default function ChatView({
     togglePlanSidebar,
     canCompactConversation,
     onCompactConversation,
+    nativeGoal: nativeGoalControls,
   };
   const composerSendControls: ComposerSendControls = {
     onSend,
@@ -6958,22 +7067,9 @@ export default function ChatView({
             isServerThread={isServerThread}
             activeThreadId={activeThread.id}
             activeThreadTitle={activeThread.title}
-            nativeGoalSummary={(() => {
-              const payload = activeThread.activities.findLast(
-                (activity) =>
-                  activity.kind === "native.metadata" &&
-                  activity.payload &&
-                  typeof activity.payload === "object" &&
-                  "nativeGoal" in activity.payload,
-              )?.payload;
-              const goal =
-                payload && typeof payload === "object" && "nativeGoal" in payload
-                  ? payload.nativeGoal
-                  : null;
-              return goal && typeof goal === "object" && "objective" in goal && "status" in goal
-                ? `Goal: ${String(goal.objective)} · ${String(goal.status)}`
-                : undefined;
-            })()}
+            nativeGoalSummary={
+              nativeGoal ? `Goal: ${nativeGoal.objective} · ${nativeGoal.status}` : undefined
+            }
             activeProjectId={activeProject?.id}
             activeProjectIcon={activeProject?.icon}
             activeProjectName={activeProject?.name}
@@ -6998,13 +7094,15 @@ export default function ChatView({
             terminalAvailable={activeProject != null}
             terminalOpen={terminalState.terminalOpen}
             workspaceFilesAvailable={workspaceRoot !== undefined}
-            filesOpen={filesOpen}
-            agentsOpen={agentsOpen}
+            filesState={filesState}
+            agentsState={agentsState}
+            previewState={previewState}
+            previewAvailable={Boolean(window.desktopBridge?.preview)}
             liveAgentCount={liveAgentCount}
             terminalToggleShortcutLabel={terminalToggleShortcutLabel}
             diffToggleShortcutLabel={diffPanelShortcutLabel}
             gitCwd={gitCwd}
-            diffOpen={diffOpen}
+            diffState={diffState}
             threadActionItems={headerThreadActionItems}
             onThreadAction={handleHeaderThreadAction}
             onRenameThread={handleHeaderRenameThread}
@@ -7015,6 +7113,7 @@ export default function ChatView({
             onToggleTerminal={toggleTerminalVisibility}
             onToggleFiles={onToggleFiles}
             onToggleAgents={onToggleAgents}
+            onTogglePreview={onTogglePreview}
             onToggleDiff={onToggleDiff}
           />
         </AppTitlebar>
@@ -7038,10 +7137,6 @@ export default function ChatView({
               runtime={latestConfiguredRuntimeActivity}
               requestedModel={activeThread.model}
               outcome={activeThread.latestTurn?.state}
-              prompt={prompt}
-              latestMessageAt={activeThread.messages.at(-1)?.createdAt}
-              onSuggestion={setPrompt}
-              onStop={onInterrupt}
             />
           </div>
         )}
@@ -7281,6 +7376,14 @@ export default function ChatView({
                           />
                         ))
                       : null}
+                    <NativeRuntimeTray
+                      threadId={activeThread.id}
+                      capabilities={activeThread.session?.capabilities}
+                      activities={activeThread.activities}
+                      prompt={prompt}
+                      latestMessageAt={activeThread.messages.at(-1)?.createdAt}
+                      onSuggestion={setPrompt}
+                    />
                   </ComposerTray>
                   <ChatComposer
                     redesignEnabled={composerRedesign}

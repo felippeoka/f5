@@ -1,4 +1,10 @@
-import type { AgentsSnapshot, ProviderRuntimeEvent, ThreadId } from "@t3tools/contracts";
+import type {
+  AgentsDismissInput,
+  AgentsDismissResult,
+  AgentsSnapshot,
+  ProviderRuntimeEvent,
+  ThreadId,
+} from "@t3tools/contracts";
 import { ServiceMap } from "effect";
 import type { Effect, Stream } from "effect";
 
@@ -14,6 +20,12 @@ export interface ThreadBackgroundWorkShape {
     event: ProviderRuntimeEvent,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
   readonly getSnapshot: Effect.Effect<AgentsSnapshot, ProjectionRepositoryError>;
+  readonly getThreadSnapshot: (
+    threadId: ThreadId,
+  ) => Effect.Effect<AgentsSnapshot, ProjectionRepositoryError>;
+  readonly dismiss: (
+    input: AgentsDismissInput,
+  ) => Effect.Effect<AgentsDismissResult, ProjectionRepositoryError>;
   readonly expireStale: (
     input: ExpireThreadBackgroundWorkInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;

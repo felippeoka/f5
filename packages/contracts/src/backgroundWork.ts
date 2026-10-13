@@ -6,6 +6,7 @@ import { ProviderInstanceId } from "./providerInstance";
 
 export const AGENTS_WS_METHODS = {
   getSnapshot: "agents.getSnapshot",
+  dismiss: "agents.dismiss",
 } as const;
 
 export const AGENTS_WS_CHANNELS = {
@@ -20,6 +21,10 @@ export type BackgroundWorkClassification = typeof BackgroundWorkClassification.T
 
 export const BackgroundWorkOwnership = Schema.Literals(["direct-subagent", "workflow"]);
 export type BackgroundWorkOwnership = typeof BackgroundWorkOwnership.Type;
+
+/** What the work is: a delegated agent, a background shell/monitor, or workflow work. */
+export const BackgroundWorkKind = Schema.Literals(["agent", "shell", "workflow"]);
+export type BackgroundWorkKind = typeof BackgroundWorkKind.Type;
 
 export const BackgroundWorkStatus = Schema.Literals([
   "running",
@@ -41,10 +46,23 @@ export const ThreadBackgroundWorkEntry = Schema.Struct({
   turnId: Schema.NullOr(TurnId),
   classification: BackgroundWorkClassification,
   ownership: BackgroundWorkOwnership,
+  // Identity fields decode with defaults so snapshots from servers that predate
+  // them still load.
+  kind: BackgroundWorkKind.pipe(Schema.withDecodingDefault(() => "agent" as const)),
   status: BackgroundWorkStatus,
   active: Schema.Boolean,
   model: Schema.NullOr(TrimmedNonEmptyString),
+  /** Task or subagent type, fixed at start. */
   phase: Schema.NullOr(TrimmedNonEmptyString),
+  /** Human-readable title, fixed at start. */
+  title: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(() => null)),
+  /**
+   * Original instructions given to the work, bounded. Only thread-scoped
+   * snapshots carry it; global snapshots and pushes leave it null.
+   */
+  prompt: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(() => null)),
+  /** Most recent tool the work used. */
+  lastTool: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => null)),
   latestOutput: Schema.NullOr(Schema.String),
   outputTruncated: Schema.Boolean,
   startedAt: IsoDateTime,
@@ -60,5 +78,23 @@ export const AgentsSnapshot = Schema.Struct({
 });
 export type AgentsSnapshot = typeof AgentsSnapshot.Type;
 
-export const AgentsGetSnapshotInput = Schema.Struct({});
+export const AgentsGetSnapshotInput = Schema.Struct({
+  threadId: Schema.optional(ThreadId),
+});
 export type AgentsGetSnapshotInput = typeof AgentsGetSnapshotInput.Type;
+
+/**
+ * Hide settled work from the agents panel. Specific work items, every settled
+ * item in one thread, or every settled item when both fields are omitted.
+ * Active work is never dismissed.
+ */
+export const AgentsDismissInput = Schema.Struct({
+  threadId: Schema.optional(ThreadId),
+  workItemIds: Schema.optional(Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(500))),
+});
+export type AgentsDismissInput = typeof AgentsDismissInput.Type;
+
+export const AgentsDismissResult = Schema.Struct({
+  dismissedCount: Schema.Number,
+});
+export type AgentsDismissResult = typeof AgentsDismissResult.Type;

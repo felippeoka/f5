@@ -247,9 +247,18 @@ describe("ClaudeTraitsPicker", () => {
         expect(text).toContain("Reasoning");
         for (const label of ["Low", "Medium", "High", "Extra High", "Max", "Ultrathink"])
           expect(text).toContain(label);
-        expect(text).toContain("Fast Mode");
-        expect(text).toContain("Off");
-        expect(text).toContain("On");
+        expect(
+          page
+            .getByRole("menuitemradio")
+            .elements()
+            .map((item) => item.getAttribute("data-effort-level")),
+        ).toEqual(["ultrathink", "max", "xhigh", "high", "medium", "low"]);
+        expect(
+          page
+            .getByRole("menuitemcheckbox", { name: "Fast Mode" })
+            .element()
+            .getAttribute("aria-checked"),
+        ).toBe("false");
         expect(text).not.toContain("Context Window");
         expect(text).not.toContain("Thinking");
       });
@@ -271,9 +280,7 @@ describe("ClaudeTraitsPicker", () => {
       await vi.waitFor(() => {
         const text = document.body.textContent ?? "";
         expect(text).toContain("Reasoning");
-        expect(text).toContain("Fast Mode");
-        expect(text).toContain("Off");
-        expect(text).toContain("On");
+        expect(page.getByRole("menuitemcheckbox", { name: "Fast Mode" }).element()).toBeTruthy();
         expect(text).not.toContain("Context Window");
         expect(text).not.toContain("Thinking");
       });
@@ -405,7 +412,7 @@ describe("ClaudeTraitsPicker", () => {
     }
   });
 
-  it("shows a thinking on/off dropdown for Haiku", async () => {
+  it("shows a thinking switch for Haiku", async () => {
     const mounted = await mountPicker({
       model: "claude-haiku-4-5",
       thinkingEnabled: true,
@@ -417,11 +424,11 @@ describe("ClaudeTraitsPicker", () => {
       });
       await page.getByRole("button").click();
 
+      const thinkingSwitch = page.getByRole("menuitemcheckbox", { name: "Thinking" });
+      await expect.element(thinkingSwitch).toHaveAttribute("aria-checked", "true");
+      await thinkingSwitch.click();
       await vi.waitFor(() => {
-        const text = document.body.textContent ?? "";
-        expect(text).toContain("Thinking");
-        expect(text).toContain("On");
-        expect(text).toContain("Off");
+        expect(page.getByRole("button").element().textContent).toContain("Thinking Off");
       });
     } finally {
       await mounted.cleanup();

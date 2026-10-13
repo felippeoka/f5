@@ -18,8 +18,7 @@ import { Effect, FileSystem, Layer, Path, PlatformError } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
-import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery";
-import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore";
+import { makeServerGitLayers } from "./serverGitLayers.ts";
 import { ServerConfig } from "./config";
 import { OrchestrationCommandReceiptRepositoryLive } from "./persistence/Layers/OrchestrationCommandReceipts";
 import { OrchestrationEventStoreLive } from "./persistence/Layers/OrchestrationEventStore";
@@ -27,7 +26,6 @@ import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/Provi
 import { ProviderTerminalEventRepositoryLive } from "./persistence/Layers/ProviderTerminalEvents";
 import { ProviderTerminalEventRepository } from "./persistence/Services/ProviderTerminalEvents";
 import { ProjectMcpConfigRepositoryLive } from "./persistence/Layers/ProjectMcpConfigs";
-import { ProjectionCheckpointRepositoryLive } from "./persistence/Layers/ProjectionCheckpoints";
 import { ProjectionProjectRepositoryLive } from "./persistence/Layers/ProjectionProjects";
 import { ProjectionThreadRepositoryLive } from "./persistence/Layers/ProjectionThreads";
 import { ProjectionThreadSessionRepositoryLive } from "./persistence/Layers/ProjectionThreadSessions";
@@ -93,10 +91,8 @@ import { ForgeAccountsLive } from "./sourceControl/accountRouting";
 import { TerminalManagerLive } from "./terminal/Layers/Manager";
 import { KeybindingsLive } from "./keybindings";
 import { GitManagerLive } from "./git/Layers/GitManager";
-import { GitCoreLive } from "./git/Layers/GitCore";
 import { GitHubCliLive } from "./git/Layers/GitHubCli";
 import { TextGenerationLive } from "./git/Layers/TextGenerationLive";
-import { GitServiceLive } from "./git/Layers/GitService";
 import { ObservabilityLive } from "./observability/Layers/Observability";
 import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScriptRunner";
 import { PtyAdapter } from "./terminal/Services/PTY";
@@ -295,20 +291,13 @@ export function makeServerProviderLayer(): Layer.Layer<
   }).pipe(Effect.provide(ProviderTerminalEventRepositoryLive), Layer.unwrap);
 }
 
+/** Build the server services used by WebSocket routes and background queries. */
 export function makeServerRuntimeServicesLayer() {
-  const gitCoreLayer = GitCoreLive.pipe(
-    Layer.provideMerge(GitServiceLive.pipe(Layer.provideMerge(ServerSecretStoreLive))),
-  );
   const forgeAccountsLayer = ForgeAccountsLive.pipe(Layer.provideMerge(ServerSecretStoreLive));
   const githubCliLayer = GitHubCliLive.pipe(Layer.provideMerge(ServerSecretStoreLive));
   const textGenerationLayer = TextGenerationLive;
 
-  const checkpointDiffQueryLayer = CheckpointDiffQueryLive.pipe(
-    Layer.provideMerge(ProjectionThreadRepositoryLive),
-    Layer.provideMerge(ProjectionProjectRepositoryLive),
-    Layer.provideMerge(ProjectionCheckpointRepositoryLive),
-    Layer.provideMerge(CheckpointStoreLive),
-  );
+  const { gitLayer, checkpointDiffQueryLayer } = makeServerGitLayers();
   const threadCommandExecutionQueryLayer = ThreadCommandExecutionQueryLive.pipe(
     Layer.provideMerge(ProjectionThreadCommandExecutionRepositoryLive),
   );
@@ -322,7 +311,7 @@ export function makeServerRuntimeServicesLayer() {
     Layer.provideMerge(forgeAccountsLayer),
     Layer.provideMerge(ProjectionProjectRepositoryLive),
     Layer.provideMerge(ProjectionThreadRepositoryLive),
-    Layer.provideMerge(gitCoreLayer),
+    Layer.provideMerge(gitLayer),
     Layer.provideMerge(githubCliLayer),
     Layer.provideMerge(textGenerationLayer),
   );
@@ -332,7 +321,7 @@ export function makeServerRuntimeServicesLayer() {
     Layer.provide(PrHubDiscoveryLive),
     Layer.provide(PrHubRepositoryLive),
     Layer.provide(PrHubJobCoordinatorLive),
-    Layer.provideMerge(gitCoreLayer),
+    Layer.provideMerge(gitLayer),
     Layer.provideMerge(githubCliLayer),
     Layer.provideMerge(ProjectionProjectRepositoryLive),
   );
@@ -349,9 +338,8 @@ export function makeServerRuntimeServicesLayer() {
     ProjectionWorkspaceQueryLive,
     threadCommandExecutionQueryLayer,
     threadFileChangeQueryLayer,
-    CheckpointStoreLive,
     checkpointDiffQueryLayer,
-    gitCoreLayer,
+    gitLayer,
     gitManagerLayer,
     prHubLayer,
     prHubExtensionsLayer,
@@ -363,6 +351,7 @@ export function makeServerRuntimeServicesLayer() {
   ).pipe(Layer.provideMerge(NodeServices.layer));
 }
 
+/** Build orchestration workers with the same credential-aware Git composition as server routes. */
 export function makeServerOrchestrationRuntimeLayer() {
   const textGenerationLayer = TextGenerationLive;
   const providerSessionDirectoryLayer = ProviderSessionDirectoryLive.pipe(
@@ -373,15 +362,7 @@ export function makeServerOrchestrationRuntimeLayer() {
     Layer.provideMerge(providerSessionDirectoryLayer),
   );
   const usageServiceLayer = UsageServiceLive;
-  const gitCoreLayer = GitCoreLive.pipe(
-    Layer.provideMerge(GitServiceLive.pipe(Layer.provideMerge(ServerSecretStoreLive))),
-  );
-  const checkpointDiffQueryLayer = CheckpointDiffQueryLive.pipe(
-    Layer.provideMerge(ProjectionThreadRepositoryLive),
-    Layer.provideMerge(ProjectionProjectRepositoryLive),
-    Layer.provideMerge(ProjectionCheckpointRepositoryLive),
-    Layer.provideMerge(CheckpointStoreLive),
-  );
+  const { gitLayer, checkpointDiffQueryLayer } = makeServerGitLayers();
   const orchestrationLayer = OrchestrationEngineLive.pipe(
     Layer.provide(NextTurnQueueStoreLive),
     Layer.provide(projectionSnapshotQueryLayer),
@@ -399,7 +380,7 @@ export function makeServerOrchestrationRuntimeLayer() {
     threadBackgroundWorkLayer,
     StorageMaintenanceLive.pipe(
       Layer.provideMerge(orchestrationLayer),
-      Layer.provideMerge(gitCoreLayer),
+      Layer.provideMerge(gitLayer),
       Layer.provideMerge(OrchestrationEventStoreLive),
     ),
   );
@@ -418,7 +399,7 @@ export function makeServerOrchestrationRuntimeLayer() {
     Layer.provideMerge(orchestrationLayer),
     Layer.provideMerge(projectionSnapshotQueryLayer),
     Layer.provideMerge(textGenerationLayer),
-    Layer.provideMerge(gitCoreLayer),
+    Layer.provideMerge(gitLayer),
     Layer.provideMerge(checkpointDiffQueryLayer),
   );
   const codeReviewWorkflowServiceBaseLayer = CodeReviewWorkflowServiceLive.pipe(
@@ -487,15 +468,15 @@ export function makeServerOrchestrationRuntimeLayer() {
   const worktreeSetupLayer = WorktreeSetupLive.pipe(
     Layer.provideMerge(worktreeSetupGateLayer),
     Layer.provideMerge(nextTurnQueueDispatcherLayer),
-    Layer.provideMerge(gitCoreLayer),
+    Layer.provideMerge(gitLayer),
   );
   const storageCleanupWorkerLayer = StorageCleanupWorkerLive.pipe(
     Layer.provideMerge(nextTurnQueueDispatcherLayer),
-    Layer.provideMerge(gitCoreLayer),
+    Layer.provideMerge(gitLayer),
   );
   const defaultBranchAutoPullLayer = DefaultBranchAutoPullLive.pipe(
     Layer.provideMerge(nextTurnQueueDispatcherLayer),
-    Layer.provideMerge(gitCoreLayer),
+    Layer.provideMerge(gitLayer),
   );
 
   return Layer.mergeAll(

@@ -7,10 +7,10 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { CheckpointRef } from "@t3tools/contracts";
 import { Effect, Layer } from "effect";
 import { expect, it } from "vitest";
-import { CheckpointStoreLive } from "../../../src/checkpointing/Layers/CheckpointStore.ts";
+import { CheckpointStoreLiveWithoutCredentials } from "../../../src/checkpointing/Layers/CheckpointStore.ts";
 import { CheckpointStore } from "../../../src/checkpointing/Services/CheckpointStore.ts";
 
-const layer = CheckpointStoreLive.pipe(Layer.provide(NodeServices.layer));
+const layer = CheckpointStoreLiveWithoutCredentials.pipe(Layer.provide(NodeServices.layer));
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 function init(cwd: string) {

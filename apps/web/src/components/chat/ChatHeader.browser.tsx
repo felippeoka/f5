@@ -43,13 +43,15 @@ function makeProps(overrides: Partial<ChatHeaderProps> = {}): ChatHeaderProps {
     terminalAvailable: false,
     terminalOpen: false,
     workspaceFilesAvailable: false,
-    filesOpen: false,
-    agentsOpen: false,
+    filesState: "closed",
+    agentsState: "closed",
+    previewState: "closed",
+    previewAvailable: false,
     liveAgentCount: 0,
     terminalToggleShortcutLabel: null,
     diffToggleShortcutLabel: null,
     gitCwd: null,
-    diffOpen: false,
+    diffState: "closed",
     threadActionItems: [],
     onThreadAction: () => {},
     onRenameThread: () => {},
@@ -60,6 +62,7 @@ function makeProps(overrides: Partial<ChatHeaderProps> = {}): ChatHeaderProps {
     onToggleTerminal: () => {},
     onToggleFiles: () => {},
     onToggleAgents: () => {},
+    onTogglePreview: () => {},
     onToggleDiff: () => {},
     ...overrides,
   };
@@ -135,6 +138,83 @@ describe("ChatHeader", () => {
       expect(agentsToggle.element().textContent).toContain("3");
       await agentsToggle.click();
       expect(onToggleAgents).toHaveBeenCalledTimes(1);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("groups side-panel toggles, including Preview, apart from the terminal", async () => {
+    const onTogglePreview = vi.fn();
+    const screen = await renderHeader({
+      previewAvailable: true,
+      previewState: "active",
+      agentsState: "background",
+      onTogglePreview,
+    });
+
+    try {
+      const sideGroup = page.getByRole("group", { name: "Side panel" });
+      const previewToggle = sideGroup.getByRole("button", { name: "Toggle preview" });
+      await expect.element(previewToggle).toHaveAttribute("aria-pressed", "true");
+      await previewToggle.click();
+      expect(onTogglePreview).toHaveBeenCalledTimes(1);
+
+      const agentsToggle = sideGroup.getByRole("button", {
+        name: "Toggle Agents panel, open in background",
+        exact: true,
+      });
+      await expect.element(agentsToggle).toHaveAttribute("aria-pressed", "false");
+      await expect.element(agentsToggle).toHaveAttribute("data-in-background", "");
+      await agentsToggle.hover();
+      await expect.element(page.getByText("Agents · open in background")).toBeVisible();
+
+      await expect
+        .element(sideGroup.getByRole("button", { name: "Toggle terminal drawer" }))
+        .not.toBeInTheDocument();
+      await expect
+        .element(page.getByRole("button", { name: "Toggle terminal drawer" }))
+        .toBeInTheDocument();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("hides the Preview toggle when the preview host is unavailable", async () => {
+    const screen = await renderHeader({ previewAvailable: false }, 320);
+
+    try {
+      expect(document.querySelector('[aria-label="Toggle preview"]')).toBeNull();
+      await page.getByRole("button", { name: "Panels" }).click();
+      await expect
+        .element(page.getByRole("menuitemcheckbox", { name: "Toggle diff panel" }))
+        .toBeVisible();
+      await expect
+        .element(page.getByRole("menuitemcheckbox", { name: "Toggle preview" }))
+        .not.toBeInTheDocument();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("groups the narrow Panels menu by side panel and bottom drawer", async () => {
+    const screen = await renderHeader(
+      { previewAvailable: true, previewState: "active", agentsState: "background" },
+      320,
+    );
+
+    try {
+      await page.getByRole("button", { name: "Panels" }).click();
+      await expect.element(page.getByText("Side panel", { exact: true })).toBeVisible();
+      await expect.element(page.getByText("Bottom", { exact: true })).toBeVisible();
+      await expect
+        .element(page.getByRole("menuitemcheckbox", { name: "Toggle preview" }))
+        .toHaveAttribute("aria-checked", "true");
+      const agentsItem = page.getByRole("menuitemcheckbox", {
+        name: "Toggle Agents panel, open in background",
+        exact: true,
+      });
+      await expect.element(agentsItem).toHaveAttribute("aria-checked", "false");
+      expect(agentsItem.element().textContent).toContain("in background");
     } finally {
       await screen.unmount();
     }

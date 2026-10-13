@@ -1,5 +1,4 @@
 import { Button } from "../ui/button";
-import { Input } from "../ui/input";
 import {
   Dialog,
   DialogTrigger,
@@ -11,12 +10,9 @@ import {
 } from "../ui/dialog";
 import type { CompactRuntimeConfiguredActivityPayload } from "@t3tools/contracts";
 import { SlidersHorizontalIcon } from "lucide-react";
-import { parseNativeReviewTarget } from "@t3tools/shared/nativeReviewTarget";
 import { readNativeTaskIdentity } from "@t3tools/shared/nativeTaskIdentity";
-import { useEffect, useRef, useState } from "react";
-import { CommandId } from "@t3tools/contracts";
+import { useEffect, useState } from "react";
 import type {
-  NativeOperationCommand,
   NativeOperationRecord,
   ProviderSessionCapabilities,
   ThreadId,
@@ -24,7 +20,24 @@ import type {
   ThreadBackgroundWorkEntry,
 } from "@t3tools/contracts";
 import { readNativeApi } from "../../nativeApi";
+import { describeBackgroundTask } from "./NativeRuntimeTray.logic";
 import { recentRuntimeNotices, resolveRuntimeModelReport } from "./runtimePresentation";
+
+/**
+ * Same names as the composer tray, plus the agent's own type so finished
+ * agents stay distinguishable; settled tasks keep their outcome.
+ */
+function backgroundTaskLabel(task: ThreadBackgroundWorkEntry): string {
+  const { title, kindLabel, agentName } = describeBackgroundTask(task, Date.now());
+  return [
+    title,
+    kindLabel,
+    agentName !== title ? agentName : null,
+    task.active ? null : task.status,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -35,22 +48,23 @@ interface NativeRuntimePanelProps {
   requestedModel: string;
   runtime: CompactRuntimeConfiguredActivityPayload | null;
   outcome?: string | undefined;
-  prompt: string;
-  latestMessageAt?: string | undefined;
-  onSuggestion: (text: string) => void;
-  onStop: () => Promise<void>;
 }
 
+/**
+ * Read-only runtime diagnostics behind a header button: reported model and
+ * settings, provider notices, background task output and operation history.
+ * Actions (suggestions, recovery, task stop, goals) live in the composer
+ * tray and Add menu.
+ */
 export function NativeRuntimePanel(props: NativeRuntimePanelProps) {
   return <NativeRuntimePanelContent key={props.threadId} {...props} />;
 }
 
 function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
   const [open, setOpen] = useState(false);
-  const { threadId, capabilities, activities, prompt } = props;
+  const { threadId, capabilities, activities } = props;
   const [records, setRecords] = useState<readonly NativeOperationRecord[]>([]);
   const [tasks, setTasks] = useState<readonly ThreadBackgroundWorkEntry[]>([]);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<unknown>(null);
   const [inspection, setInspection] = useState<{
@@ -58,17 +72,6 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
     nextCursor: string | null;
   } | null>(null);
   const [reading, setReading] = useState(false);
-  const [objective, setObjective] = useState("");
-  const [budget, setBudget] = useState(10000);
-  const [reviewTarget, setReviewTarget] = useState("");
-  const [usedSuggestion, setUsedSuggestion] = useState<string | null>(null);
-  const mutationVersion = useRef(0);
-  const promptBefore = useRef(prompt);
-  const suggestion = activities.findLast((entry) => entry.kind === "prompt.suggestion");
-  useEffect(() => {
-    if (promptBefore.current !== prompt && suggestion) setUsedSuggestion(suggestion.id);
-    promptBefore.current = prompt;
-  }, [prompt, suggestion]);
   useEffect(() => {
     let alive = true;
     let refreshing = false;
@@ -81,15 +84,12 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
         return;
       }
       try {
-        const version = mutationVersion.current;
         const [next, snapshot] = await Promise.all([
           api.nativeOperations.list({ threadId }),
           open ? api.agents.getSnapshot() : Promise.resolve({ entries: [] }),
         ]);
         if (alive) {
-          // Ignore a poll started before a local receipt arrived. The next poll
-          // replaces the snapshot authoritatively, including missing records.
-          if (version === mutationVersion.current) setRecords(next);
+          setRecords(next);
           setTasks(snapshot.entries.filter((entry) => entry.threadId === threadId));
         }
       } catch {
@@ -107,66 +107,6 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
   }, [threadId, capabilities?.generation, open]);
   const supported = (action: string) =>
     capabilities?.actions.some((entry) => entry.action === action && entry.supported) === true;
-  const execute = async (command: NativeOperationCommand) => {
-    const api = readNativeApi()?.nativeOperations;
-    if (!api || !capabilities || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const record = await api.execute({
-        threadId,
-        operationId: crypto.randomUUID(),
-        generation: capabilities.generation,
-        command,
-      });
-      mutationVersion.current++;
-      setRecords((current) => [
-        record,
-        ...current.filter((entry) => entry.operationId !== record.operationId),
-      ]);
-      if (record.error) setError(record.error);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The native operation failed.");
-    } finally {
-      setBusy(false);
-    }
-  };
-  const review = async () => {
-    try {
-      await execute({ kind: "review", target: parseNativeReviewTarget(reviewTarget) });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Review target is invalid.");
-    }
-  };
-  const resolve = async (record: NativeOperationRecord, action: "reconcile" | "acknowledge") => {
-    const api = readNativeApi()?.nativeOperations;
-    if (!api?.resolve || !capabilities || busy) return;
-    if (
-      action === "acknowledge" &&
-      !window.confirm(
-        "Stop the provider and accept this uncertain outcome? Files, conversation or forks may already have changed. F5 will release the reservation without repeating the operation. Inspect any affected workspace before continuing.",
-      )
-    )
-      return;
-    setBusy(true);
-    setError(null);
-    try {
-      const next = await api.resolve({
-        threadId,
-        operationId: record.operationId,
-        generation: capabilities.generation,
-        action,
-      });
-      mutationVersion.current++;
-      setRecords((current) =>
-        current.map((entry) => (entry.operationId === next.operationId ? next : entry)),
-      );
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Outcome resolution failed.");
-    } finally {
-      setBusy(false);
-    }
-  };
   const inspect = async (nativeId: string, cursor?: string) => {
     if (!capabilities) return;
     const api = readNativeApi()?.nativeOperations;
@@ -175,6 +115,7 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
       return;
     }
     setReading(true);
+    setError(null);
     try {
       const identity = readNativeTaskIdentity(nativeId);
       const page = await api.inspect({
@@ -204,56 +145,26 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
   const requested = normalized?.requested;
   const warnings = recentRuntimeNotices(activities);
   const modelReport = resolveRuntimeModelReport({ configuredRuntime: info, activities });
-  const goal = object(
-    activities.findLast(
-      (entry) => entry.kind === "native.metadata" && "nativeGoal" in object(entry.payload),
-    )?.payload,
-  ).nativeGoal;
   const attachments = activities.filter(
     (entry) => entry.kind === "native.metadata" && "nativeAttachment" in object(entry.payload),
   );
-  const visibleSuggestion =
-    suggestion &&
-    usedSuggestion !== suggestion.id &&
-    !prompt &&
-    (!props.latestMessageAt || suggestion.createdAt > props.latestMessageAt);
-  const running =
-    busy ||
-    records.some((record) =>
-      ["requested", "dispatched", "running", "indeterminate"].includes(record.state),
-    );
+  const pending = records.some((record) =>
+    ["requested", "dispatched", "running", "indeterminate"].includes(record.state),
+  );
   return (
     <div
       data-slot="native-runtime-controls"
       className="flex h-7 min-w-0 max-w-full items-center gap-2 px-2 text-xs text-muted-foreground"
     >
-      {visibleSuggestion && (
-        <Button
-          variant="ghost"
-          size="xs"
-          className="min-w-0 max-w-64 shrink"
-          onClick={() => {
-            setUsedSuggestion(suggestion.id);
-            props.onSuggestion(suggestion.summary);
-          }}
-        >
-          <span className="truncate">Suggested prompt: {suggestion.summary}</span>
-        </Button>
-      )}
-      {goal != null && (
-        <span className="min-w-0 max-w-48 truncate" title={String(object(goal).objective ?? "")}>
-          Goal · {String(object(goal).status ?? "unknown")}
-        </span>
-      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogTrigger render={<Button variant="ghost" size="xs" />}>
-          <SlidersHorizontalIcon /> Runtime details{running ? " · pending" : ""}
+          <SlidersHorizontalIcon /> Runtime details{pending ? " · pending" : ""}
         </DialogTrigger>
         <DialogPopup className="max-h-[min(80dvh,48rem)] max-w-2xl">
           <DialogHeader>
             <DialogTitle>Runtime details</DialogTitle>
             <DialogDescription>
-              Session settings, provider notices and native actions.
+              Session settings, provider notices and native operation history.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-5 text-sm">
@@ -310,121 +221,6 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
                 ))}
               </section>
             )}
-            {(supported("nativeCompaction") ||
-              supported("nativeReview") ||
-              supported("nativeGoals") ||
-              running) && (
-              <section aria-label="Native actions" className="space-y-3">
-                <h3 className="font-medium">Native actions</h3>
-                {supported("nativeCompaction") && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={running}
-                    onClick={() => {
-                      const api = readNativeApi();
-                      if (!api) {
-                        setError("Compaction API is unavailable.");
-                        return;
-                      }
-                      void api.orchestration
-                        .dispatchCommand({
-                          type: "thread.compact.request",
-                          commandId: CommandId.makeUnsafe(crypto.randomUUID()),
-                          threadId,
-                          trigger: "manual",
-                          createdAt: new Date().toISOString(),
-                        })
-                        .catch((cause: unknown) =>
-                          setError(cause instanceof Error ? cause.message : "Compaction failed."),
-                        );
-                    }}
-                  >
-                    Compact conversation
-                  </Button>
-                )}
-                {supported("nativeReview") && (
-                  <div className="space-y-2">
-                    <label htmlFor={`review-target-${threadId}`} className="text-muted-foreground">
-                      Review target
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        id={`review-target-${threadId}`}
-                        aria-label="Review base branch or commit"
-                        placeholder="Branch, commit:<SHA>, or blank for changes"
-                        value={reviewTarget}
-                        onChange={(event) => setReviewTarget(event.target.value)}
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={running}
-                        onClick={() => void review()}
-                      >
-                        Review
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                {supported("nativeGoals") && (
-                  <div className="space-y-2">
-                    <label htmlFor={`goal-${threadId}`} className="text-muted-foreground">
-                      Goal objective
-                    </label>
-                    <Input
-                      id={`goal-${threadId}`}
-                      aria-label="Goal objective"
-                      placeholder="What should the agent achieve?"
-                      value={objective}
-                      onChange={(event) => setObjective(event.target.value)}
-                    />
-                    <div className="flex flex-wrap items-center gap-2">
-                      <label htmlFor={`goal-budget-${threadId}`} className="text-muted-foreground">
-                        Token budget
-                      </label>
-                      <Input
-                        id={`goal-budget-${threadId}`}
-                        aria-label="Goal token budget"
-                        className="w-28"
-                        type="number"
-                        min={1}
-                        value={budget}
-                        onChange={(event) => setBudget(Number(event.target.value))}
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={
-                          running ||
-                          !objective.trim() ||
-                          !Number.isSafeInteger(budget) ||
-                          budget < 1
-                        }
-                        onClick={() =>
-                          void execute({ kind: "goalSet", objective, tokenBudget: budget })
-                        }
-                      >
-                        Start goal
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={running}
-                        onClick={() => void execute({ kind: "goalClear" })}
-                      >
-                        Clear settled goal
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                {running && (
-                  <Button variant="outline" size="sm" onClick={() => void props.onStop()}>
-                    Interrupt conversation turn
-                  </Button>
-                )}
-              </section>
-            )}
             {tasks.length > 0 && (
               <section aria-label="Background tasks" className="space-y-2">
                 <h3 className="font-medium">Background tasks</h3>
@@ -433,9 +229,7 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
                     key={task.workItemId}
                     className="flex flex-wrap items-center gap-2 rounded-lg border p-3"
                   >
-                    <span className="min-w-0 flex-1 break-words">
-                      {task.phase ?? task.workItemId} · {task.status}
-                    </span>
+                    <span className="min-w-0 flex-1 break-words">{backgroundTaskLabel(task)}</span>
                     {supported("childTaskInspection") && (
                       <Button
                         variant="outline"
@@ -444,21 +238,6 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
                         onClick={() => void inspect(task.workItemId)}
                       >
                         Inspect output
-                      </Button>
-                    )}
-                    {task.active && supported("childTaskStop") && (
-                      <Button
-                        variant="outline"
-                        size="xs"
-                        disabled={busy}
-                        onClick={() =>
-                          void execute({
-                            kind: "stopTask",
-                            ...readNativeTaskIdentity(task.workItemId),
-                          })
-                        }
-                      >
-                        Stop task
                       </Button>
                     )}
                   </div>
@@ -490,29 +269,6 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
                       <p className="break-words text-muted-foreground">
                         Preserved workspace: {record.command.cwd}
                       </p>
-                    )}
-                    {(record.state === "indeterminate" ||
-                      (record.state === "cancelled" && record.command.kind === "revertFiles")) && (
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="outline"
-                          size="xs"
-                          disabled={busy || !capabilities}
-                          onClick={() => void resolve(record, "reconcile")}
-                        >
-                          Recheck outcome
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="xs"
-                          disabled={busy || !capabilities}
-                          onClick={() => void resolve(record, "acknowledge")}
-                        >
-                          {record.state === "cancelled"
-                            ? "Finish acknowledgement"
-                            : "Stop provider and acknowledge"}
-                        </Button>
-                      </div>
                     )}
                   </div>
                 ))}

@@ -1,3 +1,4 @@
+import Migration0111 from "./Migrations/111_ThreadBackgroundWorkIdentity.ts";
 import Migration0110 from "./Migrations/110_NativeOperations.ts";
 import Migration0107 from "./Migrations/107_DatabaseCompaction.ts";
 import Migration0106 from "./Migrations/106_StorageAutomationAuditCodexStaging.ts";
@@ -143,6 +144,7 @@ import Migration0102 from "./Migrations/102_ForgeAccounts.ts";
 import Migration0101 from "./Migrations/101_UsageResetCreditRequests.ts";
 
 export const MIGRATIONS = {
+  "111_ThreadBackgroundWorkIdentity": Migration0111,
   "110_NativeOperations": Migration0110,
   "109_AttachmentOwnerActivity": Migration0109,
   "102_ForgeAccounts": Migration0102,

@@ -1,12 +1,12 @@
 import { type ApprovalRequestId } from "@t3tools/contracts";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo } from "react";
 import { type PendingUserInput } from "../../session-logic";
 import {
   derivePendingUserInputProgress,
   type PendingUserInputDraftAnswer,
 } from "../../pendingUserInput";
-import { CheckIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
+import { UserInputQuestionStep } from "./UserInputQuestionStep";
 
 interface PendingUserInputPanelProps {
   pendingUserInputs: PendingUserInput[];
@@ -45,6 +45,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
   );
 });
 
+/** Blocking questions: custom answers are typed in the composer below. */
 const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard({
   prompt,
   isResponding,
@@ -62,213 +63,49 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   onToggleOption: (questionId: string, optionLabel: string) => void;
   onAdvance: () => void;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
-  const isMultiSelect = activeQuestion?.multiSelect === true;
-  const autoAdvanceTimerRef = useRef<number | null>(null);
-  // Track which question the pending auto-advance was armed for so a fast
-  // question switch inside the 200ms window doesn't fire `onAdvance()` with
-  // an unrelated active question.
-  const autoAdvanceQuestionIdRef = useRef<string | null>(null);
+  if (!activeQuestion) return null;
 
-  // Clear auto-advance timer on unmount
-  useEffect(() => {
-    return () => {
-      if (autoAdvanceTimerRef.current !== null) {
-        window.clearTimeout(autoAdvanceTimerRef.current);
-      }
-    };
-  }, []);
-
-  // Cancel any pending auto-advance whenever the active question changes,
-  // so selecting option 1 on question A and immediately navigating to
-  // question B doesn't fire the advance callback against B's context.
-  const activeQuestionId = activeQuestion?.id ?? null;
-  useEffect(() => {
-    if (
-      autoAdvanceTimerRef.current !== null &&
-      autoAdvanceQuestionIdRef.current !== activeQuestionId
-    ) {
-      window.clearTimeout(autoAdvanceTimerRef.current);
-      autoAdvanceTimerRef.current = null;
-      autoAdvanceQuestionIdRef.current = null;
-    }
-  }, [activeQuestionId]);
-
-  const selectOptionAndAutoAdvance = useCallback(
-    (questionId: string, optionLabel: string) => {
-      onSelectOption(questionId, optionLabel);
-      if (autoAdvanceTimerRef.current !== null) {
-        window.clearTimeout(autoAdvanceTimerRef.current);
-      }
-      autoAdvanceQuestionIdRef.current = questionId;
-      autoAdvanceTimerRef.current = window.setTimeout(() => {
-        autoAdvanceTimerRef.current = null;
-        // Guard against firing after the active question changed in the
-        // 200ms window (e.g. user clicked back to a previous question).
-        if (autoAdvanceQuestionIdRef.current !== questionId) {
-          autoAdvanceQuestionIdRef.current = null;
-          return;
-        }
-        autoAdvanceQuestionIdRef.current = null;
-        onAdvance();
-      }, 200);
-    },
-    [onSelectOption, onAdvance],
-  );
-
-  // Keyboard shortcut: number keys 1-9 select corresponding option. Single-select
-  // also auto-advances; multi-select toggles without advancing so the user can
-  // pick several before pressing Enter (handled elsewhere) or clicking Continue.
-  useEffect(() => {
-    if (!activeQuestion || isResponding || collapsed) return;
-    const handler = (event: globalThis.KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-        return;
-      }
-      // If the user has started typing a custom answer in the contenteditable
-      // composer, let digit keys pass through so they can type numbers.
-      if (target instanceof HTMLElement && target.isContentEditable) {
-        const hasCustomText = progress.customAnswer.length > 0;
-        if (hasCustomText) return;
-      }
-      const digit = Number.parseInt(event.key, 10);
-      if (Number.isNaN(digit) || digit < 1 || digit > 9) return;
-      const optionIndex = digit - 1;
-      if (optionIndex >= activeQuestion.options.length) return;
-      const option = activeQuestion.options[optionIndex];
-      if (!option) return;
-      event.preventDefault();
-      if (isMultiSelect) {
-        onToggleOption(activeQuestion.id, option.label);
-      } else {
-        selectOptionAndAutoAdvance(activeQuestion.id, option.label);
-      }
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [
-    activeQuestion,
-    collapsed,
-    isMultiSelect,
-    isResponding,
-    onToggleOption,
-    selectOptionAndAutoAdvance,
-    progress.customAnswer.length,
-  ]);
-
-  if (!activeQuestion) {
-    return null;
-  }
-
-  const selectedSet = new Set(progress.selectedOptionLabels);
+  const isMultiSelect = activeQuestion.multiSelect === true;
   const continueLabel = progress.isLastQuestion ? "Submit" : "Continue";
-  const canContinue = isMultiSelect ? progress.canAdvance && !isResponding : false;
+  const canContinue = progress.canAdvance && !isResponding;
 
   return (
     <div className="px-4 py-3 sm:px-5">
-      <button
-        type="button"
-        className="flex w-full items-center gap-3 text-left"
-        aria-expanded={!collapsed}
-        onClick={() => {
-          if (autoAdvanceTimerRef.current !== null)
-            window.clearTimeout(autoAdvanceTimerRef.current);
-          autoAdvanceTimerRef.current = null;
-          setCollapsed((value) => !value);
-        }}
-      >
-        <div className="flex items-center gap-2">
-          {prompt.questions.length > 1 ? (
-            <span className="flex h-5 items-center rounded-md bg-muted/60 px-1.5 text-2xs font-medium tabular-nums text-muted-foreground">
-              {questionIndex + 1}/{prompt.questions.length}
-            </span>
-          ) : null}
-          <span className="text-2xs font-semibold tracking-widest text-muted-foreground uppercase">
-            {activeQuestion.header}
-          </span>
-          {isMultiSelect ? (
-            <span className="text-2xs font-medium tracking-wide text-muted-foreground uppercase">
-              Select all that apply
-            </span>
-          ) : null}
-        </div>
-      </button>
-      <div hidden={collapsed}>
-        <p className="mt-1.5 text-sm text-foreground">{activeQuestion.question}</p>
-        <div className="mt-3 space-y-1">
-          {activeQuestion.options.map((option, index) => {
-            const isSelected = isMultiSelect
-              ? selectedSet.has(option.label)
-              : progress.selectedOptionLabels[0] === option.label;
-            const shortcutKey = index < 9 ? index + 1 : null;
-            return (
+      <UserInputQuestionStep
+        question={activeQuestion}
+        questionIndex={progress.questionIndex}
+        questionCount={prompt.questions.length}
+        selectedOptionLabels={progress.selectedOptionLabels}
+        disabled={isResponding}
+        customMode="composer"
+        shortcutScope="document"
+        hasComposerCustomAnswer={progress.customAnswer.length > 0}
+        onSelectOption={(label) => onSelectOption(activeQuestion.id, label)}
+        onToggleOption={(label) => onToggleOption(activeQuestion.id, label)}
+        // Previous/Next live in the composer's primary action, so no header arrows.
+        onAdvance={onAdvance}
+        footer={
+          isMultiSelect ? (
+            <div className="flex items-center justify-end">
               <button
-                key={`${activeQuestion.id}:${option.label}`}
                 type="button"
-                disabled={isResponding}
-                aria-pressed={isMultiSelect ? isSelected : undefined}
-                onClick={() => {
-                  if (isMultiSelect) {
-                    onToggleOption(activeQuestion.id, option.label);
-                  } else {
-                    selectOptionAndAutoAdvance(activeQuestion.id, option.label);
-                  }
-                }}
+                disabled={!canContinue}
+                onClick={() => onAdvance()}
                 className={cn(
-                  "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-all duration-150",
-                  isSelected
-                    ? "border-info/40 bg-info/8 text-foreground"
-                    : "border-transparent bg-muted/20 text-foreground hover:bg-muted/40 hover:border-border/40",
-                  isResponding && "opacity-50 cursor-not-allowed",
+                  "rounded-md px-3 py-1.5 text-xs font-medium transition-colors duration-150",
+                  canContinue
+                    ? "bg-info/15 text-info-foreground hover:bg-info/25"
+                    : "bg-muted/30 text-muted-foreground cursor-not-allowed",
                 )}
               >
-                {shortcutKey !== null ? (
-                  <kbd
-                    className={cn(
-                      "flex size-5 shrink-0 items-center justify-center rounded text-2xs font-medium tabular-nums transition-colors duration-150",
-                      isSelected
-                        ? "bg-info/20 text-info-foreground"
-                        : "bg-muted/40 text-muted-foreground group-hover:bg-muted/60 group-hover:text-foreground",
-                    )}
-                  >
-                    {shortcutKey}
-                  </kbd>
-                ) : null}
-                <div className="min-w-0 flex-1">
-                  <span className="text-sm font-medium">{option.label}</span>
-                  {option.description && option.description !== option.label ? (
-                    <span className="ml-2 text-xs text-muted-foreground">{option.description}</span>
-                  ) : null}
-                </div>
-                {isSelected ? (
-                  <CheckIcon className="size-3.5 shrink-0 text-info-foreground" />
-                ) : null}
+                {continueLabel}
               </button>
-            );
-          })}
-        </div>
-        {isMultiSelect ? (
-          <div className="mt-3 flex items-center justify-end">
-            <button
-              type="button"
-              disabled={!canContinue}
-              onClick={() => onAdvance()}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-xs font-medium transition-colors duration-150",
-                canContinue
-                  ? "bg-info/15 text-info-foreground hover:bg-info/25"
-                  : "bg-muted/30 text-muted-foreground cursor-not-allowed",
-              )}
-            >
-              {continueLabel}
-            </button>
-          </div>
-        ) : null}
-      </div>
+            </div>
+          ) : null
+        }
+      />
     </div>
   );
 });

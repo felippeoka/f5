@@ -146,7 +146,15 @@ describe("wsNativeApi", () => {
     const api = createWsNativeApi();
 
     await expect(api.agents.getSnapshot()).resolves.toEqual(snapshot);
-    expect(requestMock).toHaveBeenCalledWith(AGENTS_WS_METHODS.getSnapshot);
+    expect(requestMock).toHaveBeenCalledWith(AGENTS_WS_METHODS.getSnapshot, {});
+
+    const threadId = ThreadId.makeUnsafe("thread-agents");
+    await api.agents.getSnapshot({ threadId });
+    expect(requestMock).toHaveBeenCalledWith(AGENTS_WS_METHODS.getSnapshot, { threadId });
+
+    requestMock.mockResolvedValueOnce({ dismissedCount: 2 });
+    await expect(api.agents.dismiss({ threadId })).resolves.toEqual({ dismissedCount: 2 });
+    expect(requestMock).toHaveBeenCalledWith(AGENTS_WS_METHODS.dismiss, { threadId });
 
     const listener = vi.fn();
     const unsubscribe = api.agents.onSnapshotUpdated(listener);

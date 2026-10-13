@@ -27,12 +27,23 @@ describe("buildCodexCliMcpConfigArgs", () => {
       ),
     ).toEqual([
       "-c",
-      'mcp_servers={"filesystem"={"type"="stdio","command"="npx","args"=["@modelcontextprotocol/server-filesystem","/repo"]}}',
+      'mcp_servers={"filesystem"={"command"="npx","args"=["@modelcontextprotocol/server-filesystem","/repo"]}}',
       "-c",
       "mcp_oauth_callback_port=3118",
       "-c",
       'mcp_oauth_callback_url="http://127.0.0.1:3118/callback"',
     ]);
+  });
+
+  it("omits the internal transport discriminant Codex does not recognize", () => {
+    const [, serialized] = buildCodexCliMcpConfigArgs({
+      local: { type: "stdio", command: "node" },
+      remote: { type: "http", url: "http://127.0.0.1:3000/mcp" },
+    });
+    expect(serialized).toBe(
+      'mcp_servers={"local"={"command"="node"},"remote"={"url"="http://127.0.0.1:3000/mcp"}}',
+    );
+    expect(serialized).not.toContain('"type"');
   });
 
   it("quotes keys with TOML-significant characters", () => {
@@ -48,7 +59,7 @@ describe("buildCodexCliMcpConfigArgs", () => {
       }),
     ).toEqual([
       "-c",
-      'mcp_servers={"danger = key, } \\"quoted\\""={"type"="http","url"="https://mcp.example.test","headers"={"X Danger.Key \\"quoted\\""="Bearer secret"}}}',
+      'mcp_servers={"danger = key, } \\"quoted\\""={"url"="https://mcp.example.test","headers"={"X Danger.Key \\"quoted\\""="Bearer secret"}}}',
     ]);
   });
 
