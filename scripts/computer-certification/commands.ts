@@ -104,6 +104,7 @@ export function commandsFor(
       electron: clusterWorkflow ? ["--cluster-workflows"] : [],
       "electron-discovery": ["--status-only"],
       "electron-real-apps": ["--real-apps"],
+      "electron-chromium": ["--chromium-fixture"],
       "electron-main-stop": ["--stop-main", "--diagnose-chord"],
       "electron-renderer-stop": ["--stop-renderer", "--diagnose-chord"],
     };

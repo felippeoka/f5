@@ -300,6 +300,10 @@ persistence. Typed text, semantic values, inspect names/values and raw error str
 removed, including nested fields. Codex built-in `cua_repl` JavaScript and text output are
 entirely omitted. This does not modify model-facing results or erase provider-managed
 conversation history. Look-alike project server names do not acquire trusted provenance.
+Verified tool identities survive nested Claude and Codex lifecycle envelopes, so MCP
+cards show the server/tool name and sanitized summaries. Redacted historical metadata
+cannot be reconstructed from the stored generic card. Raw tool I/O remains available
+to the model but is never restored to these persisted cards.
 The sanitizer retains at most 65,536 item/block identities across active sessions. At
 saturation it conservatively redacts subsequent events for affected computer-enabled
 threads until session release, rather than forgetting an identity and leaking late results.
@@ -385,6 +389,19 @@ TextEdit and Calculator, then uses one provider session for fixture/UI controls 
 the real-app sequence. Fixture and real-app phase results remain separate. A failed
 fixture phase prevents the real-app phase. A failed later phase does not erase completed
 earlier proof when cleanup is confirmed.
+
+The separate `chromium-workflow.<provider>` phase uses a suite-owned Electron app,
+not the AppKit fixture or F5 itself. Preparation copies the development runtime into
+a new synthetic bundle with its own app identity, packages an isolated/sandboxed
+preload and static UI, verifies syntax and the copied bundle's ad-hoc signature,
+and hashes the whole prepared fixture. It never starts Electron or posts input.
+Execution uses a private copy with private user/session data, genuine F5 app consent,
+the normal provider/native tools, and trusted DOM receipts for the button and exact
+synthetic Unicode value. Receipts contain only fixed labels and booleans; no typed
+or password values leave the fixture. The phase also checks Pause/Resume, coordinate
+actions and overlays. Ad-hoc fixture signing and fake-DOM receipt tests do not prove
+installed F5 signatures, TCC attribution, real accessibility behavior or input delivery.
+Those require the separately recorded machine run; no such run is credited yet.
 
 Each scenario admission is reserved before execution and each attempt is written
 exclusively. Completed attempts cannot be overwritten. A process-interrupted admission

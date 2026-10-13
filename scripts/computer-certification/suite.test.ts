@@ -131,6 +131,30 @@ describe("certification inventory and coverage", () => {
     if (typeof commands === "string") throw new Error("No driver");
     expect(commands[0]?.args).toContain("--cluster-workflows");
   });
+  it("keeps Chromium controls distinct from AppKit and never launches its dev driver against installed apps", () => {
+    const s = scenario("chromium-workflow.claude");
+    expect(s.expectedChecks).toContain("chromiumFixtureNativeInputObserved");
+    const launch = { claude: { home: "/selected", binary: "/claude" } };
+    const commands = commandsFor(
+      s,
+      { repo: "/repo", platform: "darwin", fixtureDirectory: "/prepared" },
+      "/result",
+      launch,
+      "darwin",
+    );
+    if (typeof commands === "string") throw new Error("No Chromium driver");
+    expect(commands[0]?.args).toContain("--chromium-fixture");
+    expect(commands[0]?.args).not.toContain("--cluster-workflows");
+    expect(
+      commandsFor(
+        s,
+        { repo: "/repo", platform: "darwin", app: "/Installed.app" },
+        "/result",
+        launch,
+        "darwin",
+      ),
+    ).toBe("installed-observation-driver-required");
+  });
   it("keeps completed fixture proof separate when the later real-app phase fails", () => {
     const s = scenario("fixture-workflow.codex");
     const checks = result(s.key).checks;

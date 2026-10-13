@@ -113,7 +113,10 @@ export async function identify(target: Target): Promise<Identity> {
   }
   files["suite-source"] = await hashTree(join(target.repo, "scripts/computer-certification"));
   if (target.fixtureDirectory && process.platform === target.platform)
-    files["prepared-fixtures"] = await hashTree(target.fixtureDirectory);
+    files["prepared-fixtures"] = await hashTree(target.fixtureDirectory, true);
+  files["chromium-fixture-source"] = await hashTree(
+    join(target.repo, "apps/desktop/native/electron"),
+  );
   files["electron-runner"] = await hashFile(
     join(target.repo, "apps/desktop/scripts/rehearse-computer-electron.mjs"),
   );

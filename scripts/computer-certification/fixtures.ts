@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import type { Target } from "./identity";
 import { cleanEnvironment } from "./process";
 import { record } from "./model";
+import { prepareElectronFixture } from "./electronFixture";
 
 export const FIXTURE_NAMES = [
   "ComputerControlFixture",
@@ -85,5 +86,10 @@ export async function prepareFixtures(target: Target, directory: string): Promis
       return false;
     }
   }
-  return probeFixtureProtocols(directory);
+  if (!(await probeFixtureProtocols(directory))) return false;
+  try {
+    return await prepareElectronFixture(target.repo, directory);
+  } catch {
+    return false;
+  }
 }

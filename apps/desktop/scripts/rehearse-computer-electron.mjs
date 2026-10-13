@@ -21,6 +21,10 @@ import {
   prepareRehearsalExecutable,
 } from "../src/computer/rehearsalFixture.ts";
 import { closeRehearsalChild } from "../src/computer/rehearsalCleanup.ts";
+import {
+  readChromiumFixture,
+  createRehearsalChromiumFixture,
+} from "../src/computer/rehearsalChromiumFixture.ts";
 import { RehearsalStopObservation } from "../src/computer/rehearsalStopObservation.ts";
 import { RehearsalChordObservation } from "../src/computer/rehearsalChordObservation.ts";
 import { measureStopLatency } from "../src/computer/stopLatencyMeasurement.ts";
@@ -55,6 +59,7 @@ const stopOnly = stopMain || stopRenderer;
 const diagnoseChord = args.includes("--diagnose-chord");
 const realApps = args.includes("--real-apps");
 const clusterWorkflows = args.includes("--cluster-workflows");
+const chromiumFixture = args.includes("--chromium-fixture");
 const includesRealApps = realApps || clusterWorkflows;
 if (
   process.platform !== "darwin" ||
@@ -64,6 +69,14 @@ if (
   !sourceHome ||
   !binary ||
   (diagnoseChord && !stopOnly) ||
+  (chromiumFixture &&
+    (!fixtureBinDirectory ||
+      stopOnly ||
+      statusOnly ||
+      realApps ||
+      clusterWorkflows ||
+      controlsOnly ||
+      actionsOnly)) ||
   [
     statusOnly,
     controlsOnly,
@@ -131,7 +144,9 @@ const threadId = randomUUID();
 const projectId = randomUUID();
 const appId = realApps
   ? REAL_APP_REHEARSAL_IDS[0]
-  : `org.example.computer-rehearsal.${randomUUID()}`;
+  : chromiumFixture
+    ? (await readChromiumFixture(fixtureBinDirectory)).appId
+    : `org.example.computer-rehearsal.${randomUUID()}`;
 const consentApps = clusterWorkflows
   ? [appId, ...REAL_APP_REHEARSAL_IDS]
   : realApps
@@ -403,20 +418,26 @@ try {
     { mode: 0o600 },
   );
   if (!statusOnly && !realApps)
-    fixture = await createRehearsalFixture({
-      root,
-      appId,
-      ...(fixtureBinDirectory ? { preparedDirectory: fixtureBinDirectory } : {}),
-      expectedText: "F5_ELECTRON_REHEARSAL Ω🙂",
-      observeChord: stopOnly,
-      diagnoseChord,
-      sourceFile: join(
-        desktopDir,
-        stopOnly
-          ? "native/macos/Fixtures/StopLatencyFixture.swift"
-          : "native/macos/Fixtures/ComputerControlFixture.swift",
-      ),
-    });
+    fixture = chromiumFixture
+      ? await createRehearsalChromiumFixture({
+          root,
+          appId,
+          preparedDirectory: fixtureBinDirectory,
+        })
+      : await createRehearsalFixture({
+          root,
+          appId,
+          ...(fixtureBinDirectory ? { preparedDirectory: fixtureBinDirectory } : {}),
+          expectedText: "F5_ELECTRON_REHEARSAL Ω🙂",
+          observeChord: stopOnly,
+          diagnoseChord,
+          sourceFile: join(
+            desktopDir,
+            stopOnly
+              ? "native/macos/Fixtures/StopLatencyFixture.swift"
+              : "native/macos/Fixtures/ComputerControlFixture.swift",
+          ),
+        });
   if (stopOnly) {
     fixture.child.stdin.on("error", () => {
       stopTrace.evidence.overflow = true;
@@ -1094,6 +1115,9 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         } else {
           checks.firstTurnNativeResponses = Object.values(first.responses).every(Boolean);
           checks.fixtureReceivedOnePressAndUnicode = fixture.presses() === 1 && fixture.typed();
+          if (chromiumFixture)
+            checks.chromiumFixtureNativeInputObserved =
+              checks.firstTurnNativeResponses && checks.fixtureReceivedOnePressAndUnicode;
         }
         if (
           !checks.humanTrustedConsent ||

@@ -1,4 +1,5 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, type ChildProcessByStdio } from "node:child_process";
+import type { Readable, Writable } from "node:stream";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve, basename } from "node:path";
 import { promisify } from "node:util";
@@ -58,6 +59,14 @@ export async function createRehearsalFixture(options: {
     ...(options.passiveChord ? ["--passive-chord"] : []),
   ];
   const child = spawn(executable, args, { stdio: ["pipe", "pipe", "ignore"] });
+  return observeRehearsalFixture(child, executable);
+}
+
+/** Bounded synthetic receipts shared by AppKit and Chromium fixtures. */
+export async function observeRehearsalFixture(
+  child: ChildProcessByStdio<Writable, Readable, Readable | null>,
+  executable: string,
+) {
   let presses = 0;
   let typed = false;
   let buffer = "";
@@ -74,6 +83,12 @@ export async function createRehearsalFixture(options: {
     child.stdout?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {
       buffer += chunk;
+      if (buffer.length > 8192) {
+        clearTimeout(timer);
+        reject(new Error("Synthetic fixture receipt overflow."));
+        child.kill();
+        return;
+      }
       let end: number;
       while ((end = buffer.indexOf("\n")) >= 0) {
         const line = buffer.slice(0, end);
