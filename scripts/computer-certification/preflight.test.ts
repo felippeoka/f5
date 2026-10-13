@@ -2,7 +2,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { codexAuthenticationReady } from "./preflight";
+import { codexAuthenticationReady, suspendedProbe } from "./preflight";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import type { spawn } from "node:child_process";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -47,4 +50,79 @@ it("fails readiness without credentials or when the CLI status probe fails", asy
     false,
   );
   expect(execute).toHaveBeenCalledOnce();
+});
+
+function probeChild() {
+  const child = Object.assign(new EventEmitter(), {
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    kill: vi.fn(() => true),
+  });
+  const start = vi.fn(() => child) as unknown as typeof spawn;
+  const pending = suspendedProbe("/fixture/helper", start);
+  const message = (value: unknown) => child.stdout.write(JSON.stringify(value) + "\n");
+  return { child, pending, message };
+}
+
+it("preserves terminal unavailability when stdin closes after a valid helper status", async () => {
+  const { child, pending, message } = probeChild();
+  message({ type: "hello", protocolVersion: 1, helperVersion: "test" });
+  message({ type: "status", status: { available: false, reason: "other-instance" } });
+  child.stdin.emit("error", new Error("PRIVATE_EPIPE_SENTINEL"));
+  child.emit("close", 0);
+  expect(await pending).toEqual({ available: false, reason: "other-instance" });
+  const sent = child.stdin.read()?.toString();
+  expect(JSON.parse(sent).request).toEqual({ op: "status", requestId: "suite-preflight" });
+  expect(child.kill).toHaveBeenCalledOnce();
+});
+
+it("never upgrades a protocol failure with a later status from the same frame", async () => {
+  const { child, pending } = probeChild();
+  child.stdout.write(
+    JSON.stringify({ type: "hello", protocolVersion: 99 }) +
+      "\n" +
+      JSON.stringify({
+        type: "response",
+        requestId: "suite-preflight",
+        result: { available: true },
+      }) +
+      "\n",
+  );
+  child.emit("close", 0);
+  expect(await pending).toEqual({ available: false, reason: "helper-crashed" });
+});
+
+it("does not credit availability when the helper exits unsuccessfully", async () => {
+  const { child, pending, message } = probeChild();
+  message({ type: "hello", protocolVersion: 1, helperVersion: "test" });
+  message({ type: "response", requestId: "suite-preflight", result: { available: true } });
+  child.emit("close", 1);
+  expect(await pending).toEqual({ available: false, reason: "helper-crashed" });
+});
+
+it("requires a versioned handshake before accepting availability", async () => {
+  const { child, pending, message } = probeChild();
+  message({ type: "response", requestId: "suite-preflight", result: { available: true } });
+  child.emit("close", 0);
+  expect(await pending).toEqual({ available: false, reason: "helper-crashed" });
+});
+
+it.each(["SIGSEGV", "SIGKILL"])(
+  "rejects availability followed by an unexpected %s exit",
+  async (signal) => {
+    const { child, pending, message } = probeChild();
+    message({ type: "hello", protocolVersion: 1, helperVersion: "test" });
+    message({ type: "response", requestId: "suite-preflight", result: { available: true } });
+    child.emit("close", null, signal);
+    expect(await pending).toEqual({ available: false, reason: "helper-crashed" });
+  },
+);
+
+it("accepts a valid status after the probe's own normal suspension-only exit", async () => {
+  const { child, pending, message } = probeChild();
+  message({ type: "hello", protocolVersion: 1, helperVersion: "test" });
+  message({ type: "response", requestId: "suite-preflight", result: { available: true } });
+  child.emit("close", null, "SIGTERM");
+  expect(await pending).toEqual({ available: true });
 });

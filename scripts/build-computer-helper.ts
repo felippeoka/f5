@@ -3,6 +3,7 @@ import { checkComputerHelperProtocol } from "./computer-helper-protocol.ts";
 import { mkdirSync, copyFileSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stageComputerHelper } from "./stage-computer-helper.ts";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const args = process.argv.slice(2);
@@ -59,14 +60,25 @@ async function main(): Promise<void> {
       if (!existsSync(input)) throw new Error("Swift build produced no helper.");
       inputs.push(input);
     }
-    if (inputs.length === 1) copyFileSync(inputs[0]!, binary);
-    else if (!run("lipo", ["-create", ...inputs, "-output", binary], cwd)) return;
+    if (
+      !stageComputerHelper(binary, (staged) => {
+        if (inputs.length === 1) {
+          copyFileSync(inputs[0]!, staged);
+          return true;
+        }
+        return run("lipo", ["-create", ...inputs, "-output", staged], cwd);
+      })
+    )
+      return;
   } else {
     if (arch === "universal") throw new Error("Windows requires one architecture.");
     const cwd = join(root, "apps/desktop/native/windows");
     const target = `${arch === "x64" ? "x86_64" : "aarch64"}-pc-windows-msvc`;
     if (!run("cargo", ["build", "--release", "--target", target], cwd)) return;
-    copyFileSync(join(cwd, "target", target, "release", "f5-computer-helper.exe"), binary);
+    stageComputerHelper(binary, (staged) => {
+      copyFileSync(join(cwd, "target", target, "release", "f5-computer-helper.exe"), staged);
+      return true;
+    });
   }
   if (args.includes("--check")) {
     await checkComputerHelperProtocol(binary);

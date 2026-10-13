@@ -519,6 +519,16 @@ Use a separately prepared provider phase for Codex. Prerequisites must pass befo
 readiness or consent; another running development helper holding the device lock
 prevents this isolated instance from executing.
 
+Preparation also exposed an executable publication issue while another development
+helper was running: the rebuilt helper at its overwritten path exited with SIGKILL
+before hello, while a byte-identical fresh copy returned other-instance. The build now
+stages a fresh file and renames it into place, preserving an existing process's mapped
+file and retaining the prior binary on build failure. The rebuilt original path then
+returned other-instance with the same helper hash. This is a development build fix,
+not signature/TCC certification. The read-only prerequisite probe also latches its
+first terminal result, requires a versioned hello and rejects unexpected crash exits;
+late pipe errors cannot turn a validated refusal into misleading availability.
+
 Resume checks helper, provider binaries, desktop/server bundles, every served client
 asset, Electron runtime, prepared fixtures, source hashes, architecture and target identity.
 Installed identity covers the whole app, including frameworks and DLLs outside its

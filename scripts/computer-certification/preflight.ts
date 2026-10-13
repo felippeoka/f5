@@ -33,9 +33,9 @@ export async function codexAuthenticationReady(
 }
 
 /** Never sends grants, permit, resume, capture or input. Starts and exits suspended. */
-export async function suspendedProbe(path: string) {
+export async function suspendedProbe(path: string, spawnProbe: typeof spawn = spawn) {
   return new Promise<ComputerAutomationBackendStatus>((done) => {
-    const child = spawn(path, [], {
+    const child = spawnProbe(path, [], {
       stdio: ["pipe", "pipe", "pipe"],
       env: cleanEnvironment(),
       windowsHide: true,
@@ -43,10 +43,15 @@ export async function suspendedProbe(path: string) {
     let buffer = "";
     let result: ComputerAutomationBackendStatus = { available: false, reason: "helper-missing" };
     let replied = false;
+    let helloReceived = false;
+    let requestedStop = false;
     const stop = (value: ComputerAutomationBackendStatus) => {
+      // An exiting helper can close stdin immediately after sending other-instance.
+      // A late EPIPE must not replace that already validated terminal status.
+      if (replied) return;
       result = value;
       replied = true;
-      child.kill();
+      requestedStop = child.kill();
     };
     const timeout = setTimeout(() => stop({ available: false, reason: "helper-crashed" }), 5000);
     const force = setTimeout(() => child.kill("SIGKILL"), 6000);
@@ -62,20 +67,28 @@ export async function suspendedProbe(path: string) {
       }
       let end;
       while ((end = buffer.indexOf("\n")) >= 0) {
+        if (replied) return;
         const line = buffer.slice(0, end);
         buffer = buffer.slice(end + 1);
         try {
           const message: unknown = JSON.parse(line);
           if (!record(message)) throw new Error("Invalid helper packet");
           if (message.type === "hello") {
-            if (message.protocolVersion !== 1) throw new Error("Protocol mismatch");
+            if (
+              helloReceived ||
+              message.protocolVersion !== 1 ||
+              typeof message.helperVersion !== "string"
+            )
+              throw new Error("Protocol mismatch");
+            helloReceived = true;
             child.stdin.write(
               JSON.stringify({
                 type: "request",
                 request: { op: "status", requestId: "suite-preflight" },
               }) + "\n",
             );
-          } else if (message.type === "response" && message.requestId === "suite-preflight") {
+          } else if (!helloReceived) throw new Error("Missing helper handshake");
+          else if (message.type === "response" && message.requestId === "suite-preflight") {
             stop(Schema.decodeUnknownSync(ComputerAutomationBackendStatus)(message.result));
           } else if (message.type === "status") {
             const status = Schema.decodeUnknownSync(ComputerAutomationBackendStatus)(
@@ -88,11 +101,11 @@ export async function suspendedProbe(path: string) {
         }
       }
     });
-    child.once("close", (code) => {
+    child.once("close", (code, signal) => {
       clearTimeout(timeout);
       clearTimeout(force);
       done(
-        replied && (code === 0 || code === null)
+        replied && (code === 0 || (code === null && signal === "SIGTERM" && requestedStop))
           ? result
           : { available: false, reason: "helper-crashed" },
       );
