@@ -585,17 +585,34 @@ runtime-mode-changed restart between its first two turns, without any consent or
 input. Four regression cases reproduce lifecycle/terminal events creating full-access
 metadata before a session is bound even when the thread requests approval-required.
 Ingestion now falls back to the requested thread mode, while preserving an explicitly
-bound session's mode. Live continuity and approved delivery still require validation.
+bound session's mode. At clean source cf7b9172a8, the
+[fresh read-only diagnostic](computer-certification/2026-10-13-macos-claude-approval-readonly-continuity-passed.json)
+passed three actual Supervised submissions in one session without a restart. The
+[Claude session-actions phase](computer-certification/2026-10-13-macos-session-actions-claude-passed.json)
+then passed all 18 admission checks: genuine app consent, denied activation without
+input, approved activation/capture, one independently observed next-turn semantic
+press, four actual Supervised submissions, and grant/lease cleanup. These results
+are scoped to the recorded unsigned build and do not open a release gate.
 The harness also explicitly chooses Supervised through the ordinary composer control
 and observes the actual submitted modes; configuration alone cannot prove approval
 mode. Neither step answers app/session consent. The observer records opaque per-request
 session ordinals and only known restart
 flags from backend logs, never raw messages, identities or paths. These are diagnostic
-hints, not qualifying evidence. Codex's phase is still unrun. Neither proves approval
-reset after a replacement session nor consent
+hints, not qualifying evidence. The
+[Codex attempt](computer-certification/2026-10-13-macos-session-actions-codex-failed.json)
+passed genuine app consent, but its second turn completed without activation reaching
+F5 or a session-actions request. It timed out waiting for consent with no lease,
+capture or input, and confirmed cleanup. The cause and any additional provider
+approval behavior remain unestablished; this attempt stays failed. Neither phase
+proves approval reset after a replacement session nor consent
 expiry, typing upgrades or the full consent matrix. Installed candidates require
 their own observation driver. Neither this phase nor grant-memory can open a gate
 alone. Any extra provider approval prompt must also receive a genuine user answer.
+Future session-actions attempts additionally record bounded activity-tail counts of
+tool starts/completions, failed/declined tools, provider approvals and user-input
+requests per opaque turn ordinal. They retain no messages, IDs, arguments, results
+or approval contents and do not infer the cause of the preserved failed attempt.
+These counts are diagnostics, never a substitute for native or human receipts.
 
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;

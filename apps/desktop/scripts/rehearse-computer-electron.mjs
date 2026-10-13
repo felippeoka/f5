@@ -34,6 +34,7 @@ import { RehearsalChordObservation } from "../src/computer/rehearsalChordObserva
 import { measureStopLatency } from "../src/computer/stopLatencyMeasurement.ts";
 import {
   rehearsalProviderErrorCodes,
+  rehearsalProviderActivityCounts,
   rehearsalSessionErrorCode,
   rehearsalHarnessFailureCode,
   ElectronRehearsalObservation,
@@ -178,6 +179,7 @@ let windowlessConsent;
 let windowlessObservation;
 let windowlessStopObservation;
 let providerTailObserved = false;
+let providerActivityCounts;
 let grantMemoryObservation;
 const grantMemoryConsentReceipts = [];
 let sessionActionsObservation;
@@ -1702,6 +1704,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       activityLimit: 100,
     }).catch(() => undefined);
     providerErrorCodes = rehearsalProviderErrorCodes(tail?.activities);
+    providerActivityCounts = rehearsalProviderActivityCounts(tail?.activities);
     if (grantMemory) {
       providerTailObserved = Array.isArray(tail?.activities);
       checks.grantMemoryProviderTailObserved = providerTailObserved;
@@ -1960,6 +1963,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           ? {
               sessionActionsObservation,
               sessionActionsFailures,
+              providerActivityCounts,
               providerTailObserved,
               composerSubmissions,
               approvalModeVerifiedTurns,

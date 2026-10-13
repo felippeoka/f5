@@ -3,9 +3,56 @@ import type { ComputerAutomationRequest } from "@t3tools/contracts";
 import {
   ElectronRehearsalObservation,
   rehearsalProviderErrorCodes,
+  rehearsalProviderActivityCounts,
   rehearsalSessionErrorCode,
   rehearsalHarnessFailureCode,
 } from "./rehearsalElectronObservation";
+
+it("keeps provider tool and approval diagnostics bounded and content-free", () => {
+  const events = [
+    "tool.started",
+    "tool.completed",
+    "approval.requested",
+    "approval.resolved",
+    "user-input.requested",
+    "user-input.resolved",
+    "__proto__",
+  ].map((kind) => ({
+    kind,
+    turnId: "PRIVATE_TURN",
+    summary: "PRIVATE_SUMMARY",
+    payload: { status: "declined", text: "PRIVATE_VALUE", error: "PRIVATE_ERROR" },
+  }));
+  const summary = rehearsalProviderActivityCounts(events);
+  expect(summary).toMatchObject({
+    observed: true,
+    boundedOrMalformed: false,
+    turns: [
+      {
+        turnOrdinal: 1,
+        toolStarted: 1,
+        toolCompleted: 1,
+        toolDeclined: 1,
+        toolFailed: 0,
+        approvalsRequested: 1,
+        approvalsResolved: 1,
+        userInputsRequested: 1,
+        userInputsResolved: 1,
+        other: 1,
+      },
+    ],
+  });
+  expect(JSON.stringify(summary)).not.toContain("PRIVATE");
+  expect(rehearsalProviderActivityCounts(undefined).observed).toBe(false);
+  expect(rehearsalProviderActivityCounts([null, {}]).boundedOrMalformed).toBe(true);
+  expect(rehearsalProviderActivityCounts(Array(101).fill(events[0])).boundedOrMalformed).toBe(true);
+  const manyTurns = Array.from({ length: 20 }, (_, index) => ({
+    ...events[0],
+    turnId: String(index),
+  }));
+  expect(rehearsalProviderActivityCounts(manyTurns).turns).toHaveLength(16);
+  expect(rehearsalProviderActivityCounts(manyTurns).boundedOrMalformed).toBe(true);
+});
 
 it("keeps harness failure diagnostics content-free", () => {
   expect(rehearsalHarnessFailureCode(new Error("strict mode violation: PRIVATE_SENTINEL"))).toBe(

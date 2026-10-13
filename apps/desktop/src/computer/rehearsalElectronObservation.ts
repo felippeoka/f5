@@ -322,3 +322,63 @@ export function rehearsalProviderErrorCodes(activities: unknown): string[] {
   walk(activities, 0);
   return [...codes].sort();
 }
+
+/** Diagnostic counts from the ordinary activity tail, not proof of execution.
+ * Never retain IDs, summaries, tool arguments/results or approval contents. */
+export function rehearsalProviderActivityCounts(activities: unknown) {
+  const kinds: Record<string, string> = {
+    "tool.started": "toolStarted",
+    "tool.completed": "toolCompleted",
+    "approval.requested": "approvalsRequested",
+    "approval.resolved": "approvalsResolved",
+    "user-input.requested": "userInputsRequested",
+    "user-input.resolved": "userInputsResolved",
+  };
+  const turns = new Map<string | null, Record<string, number>>();
+  let boundedOrMalformed = !Array.isArray(activities) || activities.length >= 100;
+  for (const activity of Array.isArray(activities) ? activities.slice(0, 100) : []) {
+    if (
+      !activity ||
+      typeof activity !== "object" ||
+      typeof activity.kind !== "string" ||
+      !(
+        activity.turnId === null ||
+        (typeof activity.turnId === "string" && activity.turnId.length <= 256)
+      )
+    ) {
+      boundedOrMalformed = true;
+      continue;
+    }
+    let counts = turns.get(activity.turnId);
+    if (!counts) {
+      if (turns.size >= 16) {
+        boundedOrMalformed = true;
+        continue;
+      }
+      counts = {
+        toolStarted: 0,
+        toolCompleted: 0,
+        toolFailed: 0,
+        toolDeclined: 0,
+        approvalsRequested: 0,
+        approvalsResolved: 0,
+        userInputsRequested: 0,
+        userInputsResolved: 0,
+        other: 0,
+      };
+      turns.set(activity.turnId, counts);
+    }
+    const key = Object.hasOwn(kinds, activity.kind) ? kinds[activity.kind]! : "other";
+    counts[key] = (counts[key] ?? 0) + 1;
+    if (activity.kind === "tool.completed") {
+      const status = activity.payload?.status;
+      if (status === "failed") counts.toolFailed!++;
+      if (status === "declined") counts.toolDeclined!++;
+    }
+  }
+  return {
+    observed: Array.isArray(activities),
+    boundedOrMalformed,
+    turns: [...turns.values()].map((counts, index) => ({ turnOrdinal: index + 1, ...counts })),
+  };
+}
