@@ -678,8 +678,16 @@ the bundled SDK and the scoped test bootstrap described above. That diagnostic r
 with uncommitted rehearsal changes and is not machine certification or proof of
 production profile isolation. The earlier failures remain failed; the successful
 read-only run does not establish their exact causes. The [earlier dirty read-only failure](computer-certification/2026-10-13-macos-claude-readonly-dirty-failed.json) also remains failed.
-Real-app consent and actions
-through Claude still require a separate run.
+The [clean-revision read-only run](computer-certification/2026-10-13-macos-claude-readonly-clean-passed.json)
+on `02f40fb83b` then passed the same seven checks. The [Claude real-app attempt](computer-certification/2026-10-13-macos-claude-real-apps-baseline-attempt.json)
+on that revision passed trusted app consent, capture, inspection, exact saved Unicode
+document bytes, document closure and Calculator launch. It stopped before arithmetic
+because its distinguishable-baseline check failed. That report does not distinguish
+an inaccessible baseline from an already-visible result and remains failed; no cause
+is claimed. The fixture now requests an offered semantic Clear/All Clear press and
+requires an independently visible zero with 42 absent before the calculation turn.
+It records only fixed accessibility/result booleans for that baseline. This strengthens
+the baseline, keeps failed actions nonretryable and adds no production authorization.
 
 The `--real-apps` mode checks TextEdit and Calculator through the compiled Electron
 app and the selected provider session. Both apps must initially be closed; a read-only verifier
@@ -689,7 +697,8 @@ setup opens its own temporary UTF-8 text file in TextEdit. A read-only AX verifi
 confirm that this file is the focused document before the provider's editing turn.
 Provider F5 tools perform inspection, Unicode typing and saving; the coordinator checks
 the saved file bytes directly. A subsequent turn closes only that saved test document
-and launches Calculator. The test records a distinguishable baseline before semantic
+and launches Calculator, then clears it through an offered semantic button. The test
+requires an independently verified zero baseline with 42 absent before semantic
 button presses calculate 12 + 30; an independent AX check verifies 42. Four composer
 turns, correlated per-app native outcomes, captures, surviving grants and lease cleanup
 are required. The verifier emits only booleans, bounded counts and fixed state codes.

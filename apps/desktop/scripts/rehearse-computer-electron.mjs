@@ -136,6 +136,7 @@ let thumbnailObservation;
 let fixtureObservation;
 let realAppObservation;
 let realAppPrerequisites;
+let calculatorBaselineObservation;
 let claudeAuthentication;
 let realAppVerifier;
 let documentRoot;
@@ -796,15 +797,24 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           throw new Error("Test document lost focus before closing.");
         stage = "real-app-close-and-calculator-launch";
         await startTurn(
-          `Use only F5 computer tools. Activate com.apple.TextEdit, inspect and confirm only F5_REAL_APP_TEST.txt remains focused. Close that saved test document using a semantic press on its Close button if offered; otherwise use CMD+W once. Request screenshot:false for the closing action. Do not quit apps or touch another document. Then computer_open_app for exact app com.apple.calculator with screenshot:true; take a fresh screenshot and inspect Calculator. Do not perform arithmetic yet. Finish READY. Never use shell, filesystem, network or other apps. Stop on any interruption or failed action; never retry.`,
+          `Use only F5 computer tools. Activate com.apple.TextEdit, inspect and confirm only F5_REAL_APP_TEST.txt remains focused. Close that saved test document using a semantic press on its Close button if offered; otherwise use CMD+W once. Request screenshot:false for the closing action. Do not quit apps or touch another document. Then computer_open_app for exact app com.apple.calculator with screenshot:true; take a fresh screenshot and inspect Calculator. Press its offered semantic Clear/All Clear button once to establish a zero baseline, and inspect again to confirm zero. Do not calculate yet or use keyboard/coordinate fallback in Calculator. Finish READY. Never use shell, filesystem, network or other apps. Stop on any interruption, ambiguity or failed action; never retry.`,
         );
         await waitTurn();
         documentClosed =
           (await verifyRealApp("--document-state", documentPath)).documentState === "closed";
         checks.ownedTestDocumentClosed = documentClosed;
         if (!documentClosed) throw new Error("Test document closure could not be confirmed.");
+        const zeroBaseline = await verifyRealApp("--verify-calculator", "0");
         const beforeCalculation = await verifyRealApp("--verify-calculator", "42");
+        calculatorBaselineObservation = {
+          zeroAccessible: zeroBaseline.accessible === true,
+          zeroVisible: zeroBaseline.expectedResultVisible === true,
+          resultAccessible: beforeCalculation.accessible === true,
+          resultAlreadyVisible: beforeCalculation.expectedResultVisible === true,
+        };
         checks.calculatorResultInitiallyDifferent =
+          zeroBaseline.accessible === true &&
+          zeroBaseline.expectedResultVisible === true &&
           beforeCalculation.accessible === true &&
           beforeCalculation.expectedResultVisible === false;
         if (!checks.calculatorResultInitiallyDifferent)
@@ -1284,6 +1294,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           ? {
               realAppObservation,
               realAppPrerequisites,
+              calculatorBaselineObservation,
               retainedTestDocument: !!documentRoot && !documentClosed,
               setupOpenedTemporaryDocument: documentOpened,
             }
