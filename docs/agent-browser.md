@@ -924,6 +924,30 @@ permit or resumes input. Earlier capture-only probes used a `view` grant and did
 test AX inspection. These development checks do not prove the cause of the earlier
 setup failure or the complete Terminal/Chrome protection workflow.
 
+The [clean explicit-display background check](computer-certification/2026-10-13-macos-background-capture-external-geometry-clean-passed.json)
+at `1c964b078d` verified the marker's AX bounds and positive pixels on the requested
+external display, and every decoded pixel neutral on the laptop display, with the helper
+suspended. The [full corrected protection rehearsal](computer-certification/2026-10-13-macos-terminal-chrome-protection-passed.json)
+on that same clean revision passed all 13 checks with helper
+`42e5f28a123a74b947ce93d0962494c497ab5f889fb68f6576c3ceb3793e48c5`.
+Terminal keyboard and semantic typing were refused without typing rights. Chrome
+secure-field values were omitted from inspection, semantic/keyboard input was refused,
+the synthetic DOM value remained unchanged with zero input events, and JPEG captures
+and PNG zoom masked the password field. Positive capture markers passed; revocation
+refused inspection and excluded the fixture/browser markers, including after all grants
+were removed. No physical interruption occurred and both apps closed normally.
+
+This completes the narrow unsigned Terminal/isolated-Chrome protection checkpoint.
+It uses scripted helper grants/permits and fixed app windows on one target display in a
+two-display environment. It does not certify F5 renderer consent, provider transport,
+overlay isolation, moving windows, real keychains/autofill or signed-in browser sites,
+the complete system-surface/profile/display matrix, Windows runtime, or signed
+installed-build attribution. Prior failed reports remain failed. Older stop/provider
+measurements stay pinned to their original helper hashes and do not certify this binary.
+All native, built-in and Chrome integration release gates remain closed; signing stays
+deferred. Formatting, lint, typecheck and the full suite (136 exhaustive Git tests) passed
+before this clean run; the subsequent evidence change is documentation only.
+
 The helper rehearsal's `--privacy-only` mode runs the existing pixel-verification
 checks without its semantic/keyboard/pointer actions. It uses only two temporary
 synthetic apps with scripted helper-level grants: a positive control includes both
