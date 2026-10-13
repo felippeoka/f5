@@ -82,6 +82,15 @@ Windows. Linux reports `unsupported-platform`. The native implementation targets
 14+ and Windows 10 2004+. Setting `F5_COMPUTER_CONTROL_DEV=1` enables local engineering
 validation only in unpackaged builds; it cannot enable a packaged release.
 
+For local use from this checkout, build with `bun run build:desktop`, quit any
+existing F5 instance, then launch with
+`F5_COMPUTER_CONTROL_DEV=1 bun run --cwd apps/desktop start`. Enable **Computer use**
+in Settings → Integrations, grant the missing OS permissions, and start a new
+provider session. The root desktop launch also passes this development flag
+through Turbo. A running app must be restarted to receive the flag; setting it
+in a different shell cannot change the existing process. This remains an
+uncertified development path, and the flag is ignored by packaged builds.
+
 Electron main is the device authority. Every profile backend inherits a private Node IPC
 channel with an incarnation UUID and a versioned hello. There is no network computer host
 registration and no renderer execute method. Claude's native tools use the in-process
