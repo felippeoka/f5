@@ -54,6 +54,32 @@ it("keeps provider tool and approval diagnostics bounded and content-free", () =
   expect(rehearsalProviderActivityCounts(manyTurns).boundedOrMalformed).toBe(true);
 });
 
+it("distinguishes recorded provider approval decisions without keeping arbitrary values", () => {
+  const summary = rehearsalProviderActivityCounts(
+    [
+      "accept",
+      "acceptForSession",
+      "acceptAlways",
+      "decline",
+      "cancel",
+      "PRIVATE_DECISION",
+      undefined,
+    ].map((decision) => ({
+      kind: "approval.resolved",
+      turnId: "PRIVATE_TURN",
+      payload: { decision, detail: "PRIVATE_CONTENT" },
+    })),
+  );
+  expect(summary.turns[0]).toMatchObject({
+    approvalsResolved: 7,
+    approvalsAccepted: 3,
+    approvalsDeclined: 1,
+    approvalsCancelled: 1,
+    approvalsUnknown: 2,
+  });
+  expect(JSON.stringify(summary)).not.toContain("PRIVATE");
+});
+
 it("keeps harness failure diagnostics content-free", () => {
   expect(rehearsalHarnessFailureCode(new Error("strict mode violation: PRIVATE_SENTINEL"))).toBe(
     "ambiguous-locator",

@@ -623,6 +623,14 @@ approve only Codex's named F5 tool call first, then follow the allow/deny instru
 in F5's separate native Computer access dialog. Later semantic input may likewise
 need a genuine Codex tool approval. No prompt is auto-answered; both attempts remain
 failed until a fresh run completes the actual F5 denial/approval checks.
+The [fresh attempt with separated instructions](computer-certification/2026-10-14-macos-codex-distinct-consent-attempt-failed.json)
+again completed its second turn with a resolved provider approval and a failed tool
+before F5 session consent, with no lease, capture or input and confirmed cleanup.
+Its provider approval decision was not recorded, so its cause remains unestablished.
+The observer now counts only schema-validated accept, decline and cancel decisions,
+with an explicit unknown bucket for missing or malformed decisions. This adds no
+prompt contents or authorization behavior and cannot retroactively classify a failed
+attempt. No further live retry starts without fresh readiness.
 
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;

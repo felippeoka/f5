@@ -6,6 +6,7 @@ import {
   ComputerApp,
   ComputerActionResult,
   DesktopComputerHostMessage,
+  ProviderApprovalDecision,
   type ComputerAutomationRequest,
 } from "@t3tools/contracts";
 import { RehearsalResponses, rehearsalExecutionCode } from "./rehearsalResponses";
@@ -362,6 +363,10 @@ export function rehearsalProviderActivityCounts(activities: unknown) {
         toolDeclined: 0,
         approvalsRequested: 0,
         approvalsResolved: 0,
+        approvalsAccepted: 0,
+        approvalsDeclined: 0,
+        approvalsCancelled: 0,
+        approvalsUnknown: 0,
         userInputsRequested: 0,
         userInputsResolved: 0,
         other: 0,
@@ -370,6 +375,17 @@ export function rehearsalProviderActivityCounts(activities: unknown) {
     }
     const key = Object.hasOwn(kinds, activity.kind) ? kinds[activity.kind]! : "other";
     counts[key] = (counts[key] ?? 0) + 1;
+    if (activity.kind === "approval.resolved") {
+      const decision: unknown = activity.payload?.decision;
+      const field = !Schema.is(ProviderApprovalDecision)(decision)
+        ? "approvalsUnknown"
+        : decision === "decline"
+          ? "approvalsDeclined"
+          : decision === "cancel"
+            ? "approvalsCancelled"
+            : "approvalsAccepted";
+      counts[field] = (counts[field] ?? 0) + 1;
+    }
     if (activity.kind === "tool.completed") {
       const status = activity.payload?.status;
       if (status === "failed") counts.toolFailed!++;
