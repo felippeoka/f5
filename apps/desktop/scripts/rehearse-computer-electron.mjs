@@ -19,8 +19,14 @@ import {
 import { createRehearsalFixture } from "../src/computer/rehearsalFixture.ts";
 import { RehearsalStopObservation } from "../src/computer/rehearsalStopObservation.ts";
 import { measureStopLatency } from "../src/computer/stopLatencyMeasurement.ts";
-import { rehearsalProviderErrorCodes } from "../src/computer/rehearsalElectronObservation.ts";
-import { prepareRehearsalClaude } from "@t3tools/shared/computerRehearsalClaude";
+import {
+  rehearsalProviderErrorCodes,
+  rehearsalSessionErrorCode,
+} from "../src/computer/rehearsalElectronObservation.ts";
+import {
+  prepareRehearsalClaude,
+  rehearsalClaudeBackendBootstrap,
+} from "@t3tools/shared/computerRehearsalClaude";
 
 // Run with Bun, like the native rehearsals. The launched Electron app loads its
 // actual compiled main/preload/renderer/server. No execution or consent shortcut.
@@ -291,7 +297,9 @@ try {
       isolatedHome: home,
       root,
     });
-    providerBinary = prepared.binary;
+    // Real F5 profiles require the bundled certified SDK, so do not configure
+    // the standalone probe's custom launcher as the provider executable.
+    providerBinary = "";
     claudeAuthentication = prepared.authentication;
     if (claudeAuthentication.status !== "authenticated")
       throw new Error("Fresh isolated Claude process cannot authenticate.");
@@ -424,6 +432,17 @@ try {
       { timeout: 30000 },
     );
   const wrapper = join(root, "launch.cjs");
+  const claudeBackendLaunch = join(root, "claude-backend-launch.cjs");
+  if (provider === "claude")
+    await writeFile(
+      claudeBackendLaunch,
+      rehearsalClaudeBackendBootstrap(
+        join(repo, "apps/server/dist/index.mjs"),
+        join(root, "app"),
+        join(resolve(sourceHome), ".claude"),
+      ),
+      { mode: 0o600, flag: "wx" },
+    );
   await writeFile(
     wrapper,
     `
@@ -442,7 +461,16 @@ const realEvidence=globalThis.__computerRehearsalRealApps=new RehearsalRealAppsO
 }
 const observe=m=>{evidence.receive(m);${realApps ? "realEvidence.receive(m);" : ""}};
 const cp=require('node:child_process'),spawn=cp.spawn;
-cp.spawn=function(...args){const child=spawn.apply(this,args);if(args[2]?.env?.F5_DESKTOP_COMPUTER_HOST==='ipc'){
+cp.spawn=function(...args){
+${
+  provider === "claude"
+    ? `if(args[2]?.env?.F5_DESKTOP_COMPUTER_HOST==='ipc'&&Array.isArray(args[1])&&typeof args[1][0]==='string'){
+if(args[1][0]!==${JSON.stringify(join(repo, "apps/server/dist/index.mjs"))})throw new Error('Unexpected rehearsal backend entry');
+args[1]=[${JSON.stringify(claudeBackendLaunch)},...args[1].slice(1)];}
+`
+    : ""
+}
+const child=spawn.apply(this,args);if(args[2]?.env?.F5_DESKTOP_COMPUTER_HOST==='ipc'){
 child.on('message',m=>observe(m));
 const send=child.send.bind(child);child.send=function(m,...args){observe(m);
 return send(m,...args);};}
@@ -591,7 +619,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     model: modelSelection.model,
     modelSelection,
     runtimeMode: "full-access",
-    interactionMode: "default",
+    interactionMode: statusOnly ? "plan" : "default",
     branch: null,
     worktreePath: null,
   });
@@ -689,10 +717,14 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           ? `Explicitly authorized real-app check. This turn is consent only. Use only F5 computer tools: computer_status, then computer_request_access for exactly ${JSON.stringify(consentApps)} with reason Temporary TextEdit document and Calculator test. Do not launch, activate, capture or send input yet. Finish READY once both apps are allowed. Never use shell, files, network or other apps. Stop on any interruption or failure. The user will answer F5 consent manually.`
           : `Explicitly authorized isolated F5 UI rehearsal. Use only F5 computer tools, only app ID ${appId}. This turn is for consent only: call computer_status, request access for that exact ID with reason Synthetic Electron UI rehearsal, then finish READY once access is allowed. Do not activate apps or execute input in this turn. Never use shell, files, network, any other app or the secure field. Stop immediately on any interruption, ambiguity or failure. The user will answer F5 consent manually.`,
       );
-      await waitFor(
-        async () => Boolean(await page.evaluate(() => window.__computerRehearsal.consent)),
-        90000,
-      );
+      await waitFor(async () => {
+        if (await page.evaluate(() => window.__computerRehearsal.consent)) return true;
+        const snapshot = await rpc(ORCHESTRATION_WS_METHODS.getSnapshot);
+        const turn = snapshot.threads.find((thread) => thread.id === threadId)?.latestTurn;
+        if (turn?.state === "error" || turn?.state === "interrupted")
+          throw new Error("Provider turn failed before requesting consent.");
+        return false;
+      }, 90000);
       const requested = await page.evaluate(() => window.__computerRehearsal.consent);
       if (
         requested.kind !== "apps" ||
@@ -1167,11 +1199,23 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
               ? thread.latestTurn.state
               : "unknown",
             pendingUserInputs: Math.min(100, thread.pendingUserInputs?.length ?? 0),
+            hasUsageLimit: !!thread.session?.usageLimit,
+            requestedInstance: ["codex", "claudeAgent"].includes(thread.modelSelection?.instanceId)
+              ? thread.modelSelection.instanceId
+              : "unknown",
+            sessionInstance: ["codex", "claudeAgent"].includes(thread.session?.providerInstanceId)
+              ? thread.session.providerInstanceId
+              : "unknown",
           };
         },
         [ORCHESTRATION_WS_METHODS.getSnapshot, threadId],
       )
       .catch(() => undefined);
+    const failureSnapshot = await rpc(ORCHESTRATION_WS_METHODS.getSnapshot).catch(() => undefined);
+    if (threadObservation)
+      threadObservation.sessionErrorCode = rehearsalSessionErrorCode(
+        failureSnapshot?.threads.find((thread) => thread.id === threadId)?.session?.lastError,
+      );
   }
   if (page)
     await page

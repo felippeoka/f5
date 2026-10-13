@@ -625,9 +625,12 @@ F5_COMPUTER_ELECTRON_REHEARSAL=1 bun apps/desktop/scripts/rehearse-computer-elec
 
 The same runner supports `--provider claude --claude-home <selected-profile-home>
 --claude-binary <native-sdk-cli>`, with optional `--model`. It retains temporary F5
-and Claude config/transcript state, copies only the selected credential file if one
-exists, and uses an isolated launch wrapper to select that profile's secure storage.
-The wrapper preserves the real macOS login home/name; it never copies settings,
+and Claude config/transcript state and copies only the selected credential file if one
+exists. Standalone probes use a `.js` launcher. The Electron run keeps F5's default
+bundled SDK executable and compatibility checks; a test-only backend bootstrap supplies
+the selected secure-storage namespace only to absolute Claude executable spawns whose
+config directory is inside the temporary installation. It preserves the executable,
+arguments and real macOS login home/name; it never copies settings,
 plugins, transcripts or keychain contents. A read-only authentication preflight runs
 before Electron, consent or desktop actions. Missing/unknown authentication fails
 closed rather than falling back to another account. The full-access runtime and
@@ -658,8 +661,28 @@ executables regardless of the supplied Node executable option. The rehearsal
 wrapper now uses `.js`; a regression checks its prepared suffix and private,
 credential-only copy. Account readiness alone does not prove SDK launch readiness.
 
+The [corrected SDK launch preflight](computer-certification/2026-10-13-macos-claude-sdk-launch-passed.json)
+passed on clean revision `6826b08a0d`: selected-profile authentication, SDK
+initialization and selected model metadata, with zero model turns or desktop input.
+The [next Electron attempt](computer-certification/2026-10-13-macos-claude-electron-pre-consent-attempt.json)
+on that same revision still failed in its first F5 provider turn before requesting
+consent. No native operation, lease or document setup occurred. Its report remains
+failed; SDK launch readiness does not prove the complete F5 session-start path.
+The runner now fails promptly on a pre-consent turn error and keeps a fixed diagnostic
+category derived from the session error, never its contents. Its read-only status
+mode uses plan interaction mode, which independently refuses native mutations.
+
+A [subsequent read-only diagnostic](computer-certification/2026-10-13-macos-claude-readonly-dirty-passed.json) passed three F5 Claude composer turns with correlated
+app-metadata responses, no consent request and no computer lease or input. It used
+the bundled SDK and the scoped test bootstrap described above. That diagnostic ran
+with uncommitted rehearsal changes and is not machine certification or proof of
+production profile isolation. The earlier failures remain failed; the successful
+read-only run does not establish their exact causes. The [earlier dirty read-only failure](computer-certification/2026-10-13-macos-claude-readonly-dirty-failed.json) also remains failed.
+Real-app consent and actions
+through Claude still require a separate run.
+
 The `--real-apps` mode checks TextEdit and Calculator through the compiled Electron
-app and a real Codex session. Both apps must initially be closed; a read-only verifier
+app and the selected provider session. Both apps must initially be closed; a read-only verifier
 checks this before Electron launch and again after consent. The first composer turn
 requests exactly these two app IDs and executes no input. After real human consent,
 setup opens its own temporary UTF-8 text file in TextEdit. A read-only AX verifier must

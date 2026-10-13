@@ -129,6 +129,35 @@ export class ElectronRehearsalObservation {
   }
 }
 
+/** Diagnostic categories only, never raw session errors. These hints do not
+ * participate in authorization or certify the underlying cause. */
+export function rehearsalSessionErrorCode(error: unknown): string {
+  if (typeof error !== "string" || !error.trim()) return "none";
+  const text = error.slice(0, 8192);
+  if (/usage limit|hit.*limit|quota|rate.?limit|credits/i.test(text)) return "usage-limit";
+  if (/disabled in settings|provider.*not implemented|provider.*unavailable/i.test(text))
+    return "provider-unavailable";
+  if (/unsupported-isolation|profile.?isolation|certified Agent SDK/i.test(text))
+    return "profile-isolation";
+  if (/context.?guard|delivery.?guard/i.test(text)) return "context-guard";
+  if (
+    /failed to spawn|failed to launch|process exited|executable|ENOENT|EACCES|ReferenceError/i.test(
+      text,
+    )
+  )
+    return "cli-launch";
+  if (/not logged in|authentication|unauthori[sz]ed|invalid (api key|credentials)/i.test(text))
+    return "authentication";
+  if (
+    /unknown model|invalid model|model.{0,100}(not found|unsupported|unavailable|does not exist)/i.test(
+      text,
+    )
+  )
+    return "model-unavailable";
+  if (/mcp server|tool schema|sdk mcp/i.test(text)) return "mcp";
+  return "unknown";
+}
+
 /** Already-sanitized provider activities can contain pre-host tool failures. Keep
  * only known error tags, never their detail strings or arbitrary provider fields. */
 export function rehearsalProviderErrorCodes(activities: unknown): string[] {

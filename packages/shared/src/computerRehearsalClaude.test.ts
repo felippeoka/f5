@@ -8,6 +8,7 @@ import {
   rehearsalClaudeLaunch,
   rehearsalClaudeAuthentication,
   prepareRehearsalClaude,
+  rehearsalClaudeBackendBootstrap,
 } from "./computerRehearsalClaude";
 
 it("keeps transcript state isolated and forwards CLI arguments with only selected credentials", async () => {
@@ -119,6 +120,66 @@ it("prepares an SDK-recognized script and copies only the selected credential fi
       );
     await expect(stat(join(isolatedHome, ".claude/settings.json"))).rejects.toMatchObject({
       code: "ENOENT",
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+it("keeps the bundled CLI and backend entry intact and scopes account borrowing to the private installation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "f5-claude-backend-test-"));
+  try {
+    const app = join(root, "app");
+    const account = join(root, "selected-account");
+    const bootstrap = join(root, "bootstrap.cjs");
+    const backend = join(root, "backend.cjs");
+    const launcher = join(root, "test.cjs");
+    const cli = join(root, "sdk", "claude");
+    const config = join(app, "userdata", "provider-homes", "claude", ".claude");
+    const outside = join(root, "application", ".claude");
+    await writeFile(
+      bootstrap,
+      rehearsalClaudeBackendBootstrap(backend, app, account).replace(
+        ".catch(()=>process.exit(1))",
+        ".catch(error=>{console.error(error);process.exit(1)})",
+      ),
+    );
+    await writeFile(
+      backend,
+      `
+const cp=require('node:child_process'),calls=globalThis.calls;
+const env={CLAUDE_CONFIG_DIR:${JSON.stringify(config)},CLAUDE_SECURESTORAGE_CONFIG_DIR:'private',HOME:'private',USER:'private'};
+cp.spawn(${JSON.stringify(cli)},['--sdk'],{env});
+cp.spawn(${JSON.stringify(cli)},['--version'],{env:{...env,CLAUDE_CONFIG_DIR:${JSON.stringify(outside)}}});
+cp.spawn(${JSON.stringify(process.execPath)},['hook.js'],{env});
+cp.spawn('claude',['--sdk'],{env});
+const user=require('node:os').userInfo();
+process.stdout.write(JSON.stringify({
+  entryPreserved:process.argv[1]===${JSON.stringify(backend)},
+  cliUnchanged:calls[0].file===${JSON.stringify(cli)}&&calls[0].args[0]==='--sdk',
+  configUnchanged:calls[0].options.env.CLAUDE_CONFIG_DIR===env.CLAUDE_CONFIG_DIR,
+  selectedAccount:calls[0].options.env.CLAUDE_SECURESTORAGE_CONFIG_DIR===${JSON.stringify(account)},
+  realLoginContext:calls[0].options.env.HOME===user.homedir&&calls[0].options.env.USER===user.username,
+  outsideUnchanged:calls[1].options.env.CLAUDE_SECURESTORAGE_CONFIG_DIR==='private',
+  hookUnchanged:calls[2].options.env===env,relativeCliUnchanged:calls[3].options.env===env,
+  originalUnchanged:env.CLAUDE_SECURESTORAGE_CONFIG_DIR==='private'
+}));`,
+    );
+    await writeFile(
+      launcher,
+      `globalThis.calls=[];require('node:child_process').spawn=(file,args,options)=>{
+globalThis.calls.push({file,args,options});return {};};require(${JSON.stringify(bootstrap)});`,
+    );
+    const { stdout } = await promisify(execFile)(process.execPath, [launcher], { timeout: 10000 });
+    expect(JSON.parse(stdout)).toEqual({
+      entryPreserved: true,
+      cliUnchanged: true,
+      configUnchanged: true,
+      selectedAccount: true,
+      realLoginContext: true,
+      outsideUnchanged: true,
+      hookUnchanged: true,
+      relativeCliUnchanged: true,
+      originalUnchanged: true,
     });
   } finally {
     await rm(root, { recursive: true, force: true });

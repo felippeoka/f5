@@ -89,3 +89,37 @@ child.once('error',()=>process.exit(1));
 child.once('exit',code=>process.exit(code??1));
 `;
 }
+
+/** Keep F5's bundled SDK selection and profile compatibility checks intact.
+ * This test-only bootstrap supplies the explicitly selected account namespace
+ * to Claude processes in this one isolated home, leaving config/transcripts private. */
+export function rehearsalClaudeBackendBootstrap(
+  backendEntry: string,
+  isolatedRoot: string,
+  credentialDirectory: string,
+): string {
+  if (![backendEntry, isolatedRoot, credentialDirectory].every(isAbsolute))
+    throw new Error("Rehearsal paths must be absolute.");
+  return `
+const cp=require('node:child_process');
+const {basename,relative,isAbsolute,sep}=require('node:path');
+const {userInfo}=require('node:os');
+const {syncBuiltinESMExports}=require('node:module');
+const {pathToFileURL}=require('node:url');
+const spawn=cp.spawn;
+cp.spawn=function(file,args,options){
+  const config=options?.env?.CLAUDE_CONFIG_DIR;
+  const scope=typeof config==='string'?relative(${JSON.stringify(isolatedRoot)},config):null;
+  if(typeof file==='string'&&isAbsolute(file)&&basename(file)==='claude'&&
+     scope!==null&&scope!==''&&scope!=='..'&&!scope.startsWith('..'+sep)&&!isAbsolute(scope)){
+    const user=userInfo();
+    options={...options,env:{...options.env,HOME:user.homedir,USER:user.username,
+      CLAUDE_SECURESTORAGE_CONFIG_DIR:${JSON.stringify(credentialDirectory)}}};
+  }
+  return spawn.call(this,file,args,options);
+};
+syncBuiltinESMExports();
+process.argv[1]=${JSON.stringify(backendEntry)};
+import(pathToFileURL(process.argv[1]).href).catch(()=>process.exit(1));
+`;
+}

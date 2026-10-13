@@ -3,6 +3,7 @@ import type { ComputerAutomationRequest } from "@t3tools/contracts";
 import {
   ElectronRehearsalObservation,
   rehearsalProviderErrorCodes,
+  rehearsalSessionErrorCode,
 } from "./rehearsalElectronObservation";
 
 const request = (
@@ -142,6 +143,27 @@ it("retains only known host status reasons and pre-host provider error codes", (
       { _tag: "PRIVATE_SENTINEL" },
     ]),
   ).toEqual(["ReplayRejected"]);
+});
+it("reduces session failures to fixed categories without retaining their contents", () => {
+  const examples = [
+    ["usage limit reached PRIVATE_SENTINEL", "usage-limit"],
+    ["provider unavailable PRIVATE_SENTINEL", "provider-unavailable"],
+    ["unsupported-isolation: PRIVATE_SENTINEL", "profile-isolation"],
+    ["delivery guard rejected PRIVATE_SENTINEL", "context-guard"],
+    ["Failed to launch executable PRIVATE_SENTINEL", "cli-launch"],
+    ["authentication required PRIVATE_SENTINEL", "authentication"],
+    ["unknown model PRIVATE_SENTINEL", "model-unavailable"],
+    ["SDK MCP server failed PRIVATE_SENTINEL", "mcp"],
+    ["PRIVATE_SENTINEL", "unknown"],
+  ];
+  for (const [message, expected] of examples) {
+    const code = rehearsalSessionErrorCode(message);
+    expect(code).toBe(expected);
+    expect(code).not.toContain("PRIVATE_SENTINEL");
+  }
+  for (const value of [null, undefined, {}, " "])
+    expect(rehearsalSessionErrorCode(value)).toBe("none");
+  expect(rehearsalSessionErrorCode("x".repeat(8192) + "unknown model")).toBe("unknown");
 });
 
 it("records correlated outcome codes without input, images, accessibility values or error details", () => {
