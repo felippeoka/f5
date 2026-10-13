@@ -10,6 +10,7 @@ import {
   ComputerApp,
   ComputerInspectResult,
   ComputerScreenshot,
+  type ComputerAutomationError,
   type ComputerAutomationRequest,
   type ComputerAuthorization,
   type ComputerGrant,
@@ -63,6 +64,7 @@ const checks: Array<{
   outcome?: string;
   unavailableReason?: string;
   missing?: readonly string[];
+  captureFailure?: Extract<ComputerAutomationError, { _tag: "Unavailable" }>["captureFailure"];
   helperAvailable?: boolean;
   helperUnavailableReason?: string;
   elapsedMs: number;

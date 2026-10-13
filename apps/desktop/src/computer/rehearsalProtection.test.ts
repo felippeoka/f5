@@ -19,6 +19,7 @@ it("records safe unavailable enums without persisting error messages or status d
       _tag: "Unavailable",
       reason: "missing-permissions",
       missing: ["screen-recording"],
+      captureFailure: { stage: "image-capture", domain: "screen-capture-kit", code: -3801 },
     }),
     { available: false, reason: "monitor-unhealthy", detail: "PRIVATE_SENTINEL" },
   );
@@ -26,6 +27,7 @@ it("records safe unavailable enums without persisting error messages or status d
     outcome: "Unavailable",
     unavailableReason: "missing-permissions",
     missing: ["screen-recording"],
+    captureFailure: { stage: "image-capture", domain: "screen-capture-kit", code: -3801 },
     helperAvailable: false,
     helperUnavailableReason: "monitor-unhealthy",
   });

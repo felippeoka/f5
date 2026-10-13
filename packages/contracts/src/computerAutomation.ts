@@ -224,6 +224,13 @@ export const ComputerAutomationError = Schema.Union([
     _tag: Schema.Literal("Unavailable"),
     reason: ComputerAutomationUnavailableReason,
     missing: Schema.optional(Schema.Array(ComputerPermission)),
+    captureFailure: Schema.optional(
+      Schema.Struct({
+        stage: Schema.Literals(["permission-preflight", "shareable-content", "image-capture"]),
+        domain: Schema.optional(Schema.Literals(["screen-capture-kit", "other"])),
+        code: Schema.optional(Schema.Int),
+      }),
+    ),
   }),
   Schema.Struct({
     _tag: Schema.Literal("Busy"),

@@ -6,9 +6,11 @@ import ScreenCaptureKit
 
 struct Failure: Error {
   let payload: [String: Any]
-  init(_ tag: String, _ key: String? = nil, _ value: Any? = nil) {
+  init(_ tag: String, _ key: String? = nil, _ value: Any? = nil,
+    captureFailure: [String: Any]? = nil) {
     var payload: [String: Any] = ["_tag": tag]
     if let key, let value { payload[key] = value }
+    if let captureFailure { payload["captureFailure"] = captureFailure }
     if tag == "Unavailable", key == "reason", value as? String == "missing-permissions" {
       let missing =
         (CGPreflightScreenCaptureAccess() ? [] : ["screen-recording"])
@@ -656,7 +658,8 @@ func elementAction(_ request: [String: Any], _ host: [String: Any]) throws {
 func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws -> [String: Any] {
   try checkGrants(request)
   guard CGPreflightScreenCaptureAccess() else {
-    throw Failure("Unavailable", "reason", "missing-permissions")
+    throw Failure("Unavailable", "reason", "missing-permissions",
+      captureFailure: computerCaptureFailureDiagnostic(stage: .permissionPreflight))
   }
   let target = try display(string(request, "displayId"))
   let grants = authorization(request)["grants"] as? [[String: Any]] ?? []
@@ -664,13 +667,24 @@ func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws ->
   let content: SCShareableContent
   do {
     content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
-  } catch { throw Failure("Unavailable", "reason", "missing-permissions") }
+  } catch {
+    throw Failure("Unavailable", "reason", "missing-permissions",
+      captureFailure: computerCaptureFailureDiagnostic(stage: .shareableContent, error: error))
+  }
   let apps = content.applications.filter { app in
     !f5Pids.contains(Int(app.processID)) && tier(app.bundleIdentifier) != "blocked"
       && grants.contains(where: { string($0, "appId") == app.bundleIdentifier })
   }
   guard let screen = content.displays.first(where: { $0.displayID == target.id }) else {
     throw Failure("GeometryChanged")
+  }
+  // An include-app filter with no windows on this display can fail in SCK.
+  // Establish emptiness from fresh on-screen metadata, never from a capture error.
+  let captureApps = apps.filter { app in
+    content.windows.contains { window in
+      window.owningApplication?.processID == app.processID
+        && computerCaptureWindowIntersectsDisplay(window: window.frame, display: target.bounds)
+    }
   }
   let zoom = string(request, "op") == "zoom"
   let captureScale = min(1.0, 2560.0 / Double(max(target.pixelWidth, target.pixelHeight)))
@@ -681,24 +695,25 @@ func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws ->
   let canvas: CGContext
   do {
     canvas = try await authorizedComputerCaptureCanvas(
-      width: captureWidth, height: captureHeight, applicationCount: apps.count
+      width: captureWidth, height: captureHeight, applicationCount: captureApps.count
     ) {
-      let filter = SCContentFilter(display: screen, including: apps, exceptingWindows: [])
+      let filter = SCContentFilter(display: screen, including: captureApps, exceptingWindows: [])
       if #available(macOS 14.2, *) {
         filter.includeMenuBar =
           NSWorkspace.shared.frontmostApplication.map { front in
-            apps.contains(where: { $0.processID == front.processIdentifier })
+            captureApps.contains(where: { $0.processID == front.processIdentifier })
           } ?? false
       }
-      let configuration = SCStreamConfiguration()
-      configuration.width = captureWidth
-      configuration.height = captureHeight
-      configuration.showsCursor = false
-      configuration.backgroundColor = CGColor(gray: 0.45, alpha: 1)
-      do {
-        return try await SCScreenshotManager.captureImage(
-          contentFilter: filter, configuration: configuration)
-      } catch { throw Failure("Unavailable", "reason", "missing-permissions") }
+      return try await withComputerCaptureConfiguration(width: captureWidth, height: captureHeight) {
+        configuration in
+        do {
+          return try await SCScreenshotManager.captureImage(
+            contentFilter: filter, configuration: configuration)
+        } catch {
+          throw Failure("Unavailable", "reason", "missing-permissions",
+            captureFailure: computerCaptureFailureDiagnostic(stage: .imageCapture, error: error))
+        }
+      }
     }
   } catch let error as Failure { throw error }
   catch { throw Failure("Execution", "message", "Unable to encode capture.") }

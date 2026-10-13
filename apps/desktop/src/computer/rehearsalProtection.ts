@@ -19,6 +19,17 @@ export function protectionFailureSummary(error: unknown, status: ComputerAutomat
       ? {
           unavailableReason: result.reason,
           ...(result.missing ? { missing: result.missing } : {}),
+          ...(result.captureFailure
+            ? {
+                captureFailure: {
+                  stage: result.captureFailure.stage,
+                  ...(result.captureFailure.domain ? { domain: result.captureFailure.domain } : {}),
+                  ...(result.captureFailure.code !== undefined
+                    ? { code: result.captureFailure.code }
+                    : {}),
+                },
+              }
+            : {}),
         }
       : {}),
     helperAvailable: status.available,

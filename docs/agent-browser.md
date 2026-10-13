@@ -847,6 +847,47 @@ status detail. These diagnostics do not silently retry or weaken capture protect
 Release gates remain closed. The complete protection workflow still needs a passing
 run after the nonempty capture failure is diagnosed; signing remains deferred.
 
+The [background diagnostic before the fix](computer-certification/2026-10-13-macos-background-capture-crashed-dirty.json)
+reproduced a helper crash without any input or active lease. The [content-free crash diagnosis](computer-certification/2026-10-13-macos-capture-crash-diagnosis.json)
+records selected native symbols from that crash and the preceding protection run:
+`CFRetain`, `CGColorCreateCopy`, and `SCStreamConfiguration.copyWithZone:` during
+`SCScreenshotManager` setup. The installed SDK declares `backgroundColor` as an
+`assign` (non-retaining) `CGColorRef`; assigning a temporary color left its lifetime
+unprotected. The helper now retains the color through completion of the asynchronous
+capture, including failure. Native tests suspend and then copy the actual configuration,
+and verify that capture errors propagate.
+
+The [next background probe](computer-certification/2026-10-13-macos-background-capture-empty-display-dirty.json)
+captured the authorized synthetic marker on the external display but returned SCK
+error `-3811` on the laptop display, which had no granted window. Fresh on-screen
+shareable-content metadata now establishes which authorized apps have windows
+intersecting each display. If none do, the helper generates the neutral canvas before
+calling image capture. Errors when eligible windows exist still fail closed; no error
+causes a blank fallback or retry. Boundary tests cover empty rectangles, adjoining
+display edges, partial overlap and negative display origins.
+
+Capture failures additionally retain only an API-stage enum, a normalized error-domain
+enum and numeric code. Native and transport tests confirm that localized descriptions,
+arbitrary domains, userInfo and extra native message fields are not retained. A separate
+read-only background probe uses one temporary view-tier synthetic app and a suspended
+helper. It captures each connected display and requires a positive marker in at least
+one, without granting, activating or inspecting existing apps, renewing a permit, or
+injecting input. Images remain in memory. It can run while the operator works:
+
+```sh
+bun apps/desktop/src/computer/rehearseGrantedCaptureMacos.ts --helper apps/desktop/dist-native/mac-arm64/f5-computer-helper --output /tmp/f5-background-capture.json
+```
+
+This probe does not certify Chrome password masking, F5 consent, providers, overlays,
+complete display isolation, stop latency, or signed installed-build attribution. The
+full protection rehearsal remains a separate checkpoint; all release gates stay closed.
+
+The [fixed background development run](computer-certification/2026-10-13-macos-background-capture-fixed-dirty-passed.json)
+passed captures on both connected displays, with the synthetic marker present on the
+external display and the helper suspended throughout. It used uncommitted fixes and
+helper `42e5f28a123a74b947ce93d0962494c497ab5f889fb68f6576c3ceb3793e48c5`;
+the report's actual binary hash is authoritative. It is narrow capture evidence only.
+
 The helper rehearsal's `--privacy-only` mode runs the existing pixel-verification
 checks without its semantic/keyboard/pointer actions. It uses only two temporary
 synthetic apps with scripted helper-level grants: a positive control includes both

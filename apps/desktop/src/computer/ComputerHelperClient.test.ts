@@ -50,6 +50,38 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("computer helper supervision", () => {
+  it("preserves bounded capture failure metadata while discarding native messages", async () => {
+    const h = make();
+    ready(h);
+    const pending = h.client.request(request("capture-failure", "screenshot"), extra);
+    const failure = expect(pending).rejects.toMatchObject({
+      error: {
+        _tag: "Unavailable",
+        reason: "missing-permissions",
+        captureFailure: { stage: "image-capture", domain: "screen-capture-kit", code: -3801 },
+      },
+    });
+    h.emit({
+      type: "response",
+      requestId: "capture-failure",
+      error: {
+        _tag: "Unavailable",
+        reason: "missing-permissions",
+        message: "PRIVATE_SENTINEL",
+        captureFailure: {
+          stage: "image-capture",
+          domain: "screen-capture-kit",
+          code: -3801,
+          localizedDescription: "PRIVATE_SENTINEL",
+        },
+      },
+    });
+    await failure;
+    await pending.catch((error) =>
+      expect(JSON.stringify(error.error)).not.toContain("PRIVATE_SENTINEL"),
+    );
+    expect(h.process.kill).not.toHaveBeenCalled();
+  });
   it("bounds repeated blocked-worker recovery to three failures and requires Retry", async () => {
     const h = make();
     ready(h);
