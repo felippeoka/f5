@@ -721,6 +721,39 @@ provider/application state is always removed. Apps are not forcibly quit. Grants
 app-wide, so this workflow does not establish capture privacy or the complete real-app
 matrix. Coordinate an idle window with the operator before starting.
 
+The separate opt-in protection rehearsal exercises the native helper against Terminal
+and real Chrome, without a provider turn or F5 consent shortcut. Terminal and Chrome
+must both be closed before starting. It grants Terminal `click` with typing off and
+requires exact `NotGranted(type)` responses to keyboard typing and semantic `setValue`.
+It checks the foreground identity around keyboard refusal; it sends no command, Enter
+or other chord. Chrome uses a new private profile with extensions disabled and only a
+local synthetic password page. No signed-in browser profile is opened.
+
+```sh
+F5_COMPUTER_PROTECTION_REHEARSAL=1 bun apps/desktop/src/computer/rehearseProtectedAppsMacos.ts --helper apps/desktop/dist-native/mac-arm64/f5-computer-helper --output /tmp/f5-protected-apps.json
+```
+
+Chrome inspection must identify the focused secure field, omit its value and offer no
+actions. Semantic `setValue` and keyboard typing must return `TargetBlocked(secure-field)`;
+the page independently reports only whether its synthetic value changed and an input
+event count. Captures require positive controls in both granted apps, then exclusion of
+the revoked app while retaining the Chrome marker and secure-field mask. Password zoom
+must be masked; revoking Chrome must refuse inspection and remove its marker too.
+The pixel verifier scopes color searches to known AX marker rectangles so unrelated
+Chrome icons cannot stand in for a fixture. Existing unscoped modes are unchanged.
+Swift synthetic bitmap tests check positive controls, region scoping, an exposed secure
+area and invalid bounds without reading a screen.
+
+Any physical input or unexpected outcome aborts without automatic resume or retry.
+Cleanup requests normal termination only for identified test-created app processes;
+after physical input it leaves those apps alone. If Chrome cannot be confirmed closed,
+the private profile is retained and its location printed locally. No image bytes,
+typed text, raw errors, AX names/values or account details are saved in the report.
+This is unsigned native-helper coverage on fixed windows and one display, with scripted
+grants/permit. It does not prove provider consent, overlays, signed-in-site privacy,
+popups, moving-window/profile/display isolation, installed-build attribution or the
+complete protected-target matrix. Release gates remain closed.
+
 The helper rehearsal's `--privacy-only` mode runs the existing pixel-verification
 checks without its semantic/keyboard/pointer actions. It uses only two temporary
 synthetic apps with scripted helper-level grants: a positive control includes both

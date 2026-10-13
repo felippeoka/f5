@@ -6,6 +6,8 @@ struct CaptureInput: Decodable {
   let data: String
   let mimeType: String
   let secureRect: Rect?
+  let blueRect: Rect?
+  let greenRect: Rect?
   let requireBlue: Bool
 }
 let input = try JSONDecoder().decode(
@@ -18,13 +20,22 @@ func color(_ x: Int, _ y: Int) -> NSColor? {
 }
 var blue = 0
 var green = 0
+func contains(_ rect: CaptureInput.Rect?, _ x: Int, _ y: Int) -> Bool {
+  guard let rect else { return true }
+  return x >= rect.x && y >= rect.y && x < rect.x + rect.width && y < rect.y + rect.height
+}
+for rect in [input.blueRect, input.greenRect].compactMap({ $0 }) {
+  guard rect.width > 8, rect.height > 8, rect.x >= 0, rect.y >= 0,
+    rect.x + rect.width <= image.pixelsWide, rect.y + rect.height <= image.pixelsHigh
+  else { exit(1) }
+}
 for y in stride(from: 0, to: image.pixelsHigh, by: 3) {
   for x in stride(from: 0, to: image.pixelsWide, by: 3) {
     guard let pixel = color(x, y) else { exit(1) }
-    if pixel.blueComponent > 0.7 && pixel.redComponent < 0.2 && pixel.greenComponent < 0.2 {
+    if contains(input.blueRect, x, y), pixel.blueComponent > 0.7 && pixel.redComponent < 0.2 && pixel.greenComponent < 0.2 {
       blue += 1
     }
-    if pixel.greenComponent > 0.7 && pixel.redComponent < 0.2 && pixel.blueComponent < 0.2 {
+    if contains(input.greenRect, x, y), pixel.greenComponent > 0.7 && pixel.redComponent < 0.2 && pixel.blueComponent < 0.2 {
       green += 1
     }
   }
@@ -68,6 +79,7 @@ if let rect = input.secureRect {
 }
 let outcomes: [String: Any] = [
   "grantedMarkerVisible": !input.requireBlue || blue > 20,
+  "blueMarkerVisible": blue > 20,
   "ungrantedMarkerAbsent": green == 0,
   "greenMarkerVisible": green > 20,
   "secureMasked": secureMasked,
