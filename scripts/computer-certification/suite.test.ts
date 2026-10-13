@@ -168,6 +168,130 @@ describe("certification inventory and coverage", () => {
       ),
     ).toBe("installed-observation-driver-required");
   });
+  it("runs the windowless observer only in an unpackaged macOS provider phase", () => {
+    const s = scenario("windows-closed.claude");
+    const launches = { claude: { home: "/selected", binary: "/claude" } };
+    const commands = commandsFor(
+      s,
+      { repo: "/repo", platform: "darwin" },
+      "/result",
+      launches,
+      "darwin",
+    );
+    if (typeof commands === "string") throw new Error("No windowless driver");
+    expect(commands[0]?.args).toContain("--windows-closed");
+    expect(
+      commandsFor(
+        s,
+        { repo: "/repo", platform: "darwin", app: "/Installed.app" },
+        "/result",
+        launches,
+        "darwin",
+      ),
+    ).toBe("installed-observation-driver-required");
+    expect(s.expectedChecks).toContain("humanFinishAcknowledged");
+    expect(s.expectedChecks).toContain("externalSubmissionsOnce");
+  });
+
+  it("requires independent windowless receipts, never only passing assertion flags", () => {
+    const s = scenario("windows-closed.claude");
+    const raw = {
+      reportVersion: 1,
+      platform: "darwin",
+      helperSha256: hash,
+      scope: "unsigned-real-electron-claude-all-app-windows-closed",
+      state: "passed",
+      checks: result(s.key).checks,
+      cleanup: { confirmed: true },
+      externalSubmissions: 1,
+      providerTailObserved: true,
+      providerErrorCodes: [],
+      stopScope: "session-stop-after-completed-native-actions",
+      consentObservation: {
+        requested: true,
+        trustedClick: true,
+        settled: true,
+        allowed: true,
+        fixtureGranted: true,
+      },
+      windowlessObservation: {
+        active: true,
+        reopened: false,
+        inputWithWindow: false,
+        mutationAdmissions: 4,
+        finalWindowCount: 0,
+      },
+      windowlessStopObservation: { sessionStopped: true, grantsCleared: true, leaseReleased: true },
+      fixtureObservation: {
+        presses: 1,
+        expectedSyntheticTextReceived: true,
+        humanFinishAcknowledged: true,
+      },
+      nativeObservation: {
+        pendingResponses: 0,
+        traceComplete: true,
+        responses: {
+          nativeCaptureSucceeded: true,
+          nativeInspectionSucceeded: true,
+          nativeInputSucceeded: true,
+        },
+        operations: [
+          { op: "activateApp", outcome: "ok", actionCompleted: true, actionCaptureSucceeded: true },
+          { op: "screenshot", outcome: "ok" },
+          { op: "inspect", outcome: "ok" },
+          { op: "elementAction", action: "press", outcome: "ok" },
+          { op: "elementAction", action: "focus", outcome: "ok" },
+          { op: "type", outcome: "ok" },
+        ],
+      },
+    };
+    expect(summarizeEvidence(s, manifest, raw).state).toBe("passed");
+    for (const patch of [
+      { nativeObservation: undefined },
+      { nativeObservation: { ...raw.nativeObservation, pendingResponses: 1 } },
+      {
+        nativeObservation: {
+          ...raw.nativeObservation,
+          operations: [...raw.nativeObservation.operations, { op: "type", outcome: "ok" }],
+        },
+      },
+      {
+        nativeObservation: {
+          ...raw.nativeObservation,
+          operations: raw.nativeObservation.operations.filter((op) => op.action !== "focus"),
+        },
+      },
+      {
+        nativeObservation: {
+          ...raw.nativeObservation,
+          operations: [
+            ...raw.nativeObservation.operations,
+            { op: "inspect", outcome: "Execution" },
+          ],
+        },
+      },
+      { windowlessObservation: { ...raw.windowlessObservation, reopened: true } },
+      { windowlessObservation: { ...raw.windowlessObservation, inputWithWindow: true } },
+      { windowlessObservation: { ...raw.windowlessObservation, finalWindowCount: 1 } },
+      { windowlessStopObservation: { ...raw.windowlessStopObservation, grantsCleared: false } },
+      { consentObservation: { ...raw.consentObservation, trustedClick: false } },
+      { fixtureObservation: { ...raw.fixtureObservation, humanFinishAcknowledged: false } },
+      { externalSubmissions: 2 },
+      { providerTailObserved: false },
+      { providerErrorCodes: ["OutcomeUnknown"] },
+      { stopScope: "in-flight-under-100ms" },
+      { scope: "fake-host" },
+    ])
+      expect(summarizeEvidence(s, manifest, { ...raw, ...patch }).state).toBe("failed");
+    expect(
+      summarizeEvidence(
+        s,
+        { ...manifest, identity: { ...manifest.identity, target: "installed" } },
+        raw,
+      ).state,
+    ).toBe("failed");
+  });
+
   it("keeps completed fixture proof separate when the later real-app phase fails", () => {
     const s = scenario("fixture-workflow.codex");
     const checks = result(s.key).checks;

@@ -124,7 +124,7 @@ export function commandsFor(
   // The development wrapper must NEVER be used against installed/signed apps.
   if (target.app) return "installed-observation-driver-required";
   if (target.platform === "win32") return "windows-interactive-driver-required";
-  if (s.runner.startsWith("electron")) {
+  if (s.runner.startsWith("electron") || s.runner === "windows-closed") {
     const provider = s.selectedProvider!;
     const launch = launches[provider];
     if (!launch) return "provider-launch-not-configured";
@@ -133,6 +133,7 @@ export function commandsFor(
       "electron-discovery": ["--status-only"],
       "electron-real-apps": ["--real-apps"],
       "electron-chromium": ["--chromium-fixture"],
+      "windows-closed": ["--windows-closed"],
       "electron-main-stop": ["--stop-main", "--diagnose-chord"],
       "electron-renderer-stop": ["--stop-renderer", "--diagnose-chord"],
     };

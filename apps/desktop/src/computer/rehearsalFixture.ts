@@ -69,6 +69,7 @@ export async function observeRehearsalFixture(
 ) {
   let presses = 0;
   let typed = false;
+  let acknowledged = false;
   let buffer = "";
   const ready = new Promise<void>((done, reject) => {
     const timer = setTimeout(() => reject(new Error("Synthetic fixture startup timed out.")), 5000);
@@ -98,6 +99,7 @@ export async function observeRehearsalFixture(
           done();
         } else if (line === "FIXTURE_PRESSED") presses++;
         else if (line === "FIXTURE_TYPED") typed = true;
+        else if (line === "FIXTURE_ACKNOWLEDGED") acknowledged = true;
       }
     });
   });
@@ -107,5 +109,11 @@ export async function observeRehearsalFixture(
     child.kill();
     throw error;
   }
-  return { child, executable, presses: () => presses, typed: () => typed };
+  return {
+    child,
+    executable,
+    presses: () => presses,
+    typed: () => typed,
+    acknowledged: () => acknowledged,
+  };
 }

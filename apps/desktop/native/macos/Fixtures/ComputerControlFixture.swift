@@ -7,6 +7,8 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegat
   let counter = NSTextField(labelWithString: "presses: 0")
   let secure = NSSecureTextField(frame: NSRect(x: 30, y: 150, width: 400, height: 28))
   var presses = 0
+  let instruction = NSTextField(labelWithString: "Follow the F5 test instructions.")
+  var finishButton: NSButton!
   func applicationDidFinishLaunching(_ notification: Notification) {
     window = NSWindow(
       contentRect: NSRect(x: 120, y: 120, width: 500, height: 300),
@@ -56,6 +58,32 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegat
     content.addSubview(focusSecure)
     counter.frame = NSRect(x: 30, y: 40, width: 400, height: 28)
     content.addSubview(counter)
+    instruction.frame = NSRect(x: 30, y: 4, width: 310, height: 28)
+    content.addSubview(instruction)
+    finishButton = NSButton(title: "Finish check", target: self, action: #selector(acknowledge))
+    finishButton.frame = NSRect(x: 350, y: 4, width: 120, height: 28)
+    finishButton.isEnabled = false
+    content.addSubview(finishButton)
+    DispatchQueue.global(qos: .utility).async { [weak self] in
+      while let line = readLine() {
+        guard line.count <= 128 else { return }
+        let instructions = [
+          "WINDOWLESS_READY": "Ready. Keep input idle.",
+          "WINDOWLESS_COUNTDOWN_3": "Starting in 3. Keep input idle.",
+          "WINDOWLESS_COUNTDOWN_2": "Starting in 2. Keep input idle.",
+          "WINDOWLESS_COUNTDOWN_1": "Starting in 1. Keep input idle.",
+          "WINDOWLESS_RUNNING": "RED — running. Keep input idle.",
+          "WINDOWLESS_FINISHED": "Finished. Click Finish check.",
+        ]
+        guard let message = instructions[line] else { continue }
+        DispatchQueue.main.async {
+          guard let self else { return }
+          self.instruction.stringValue = message
+          self.instruction.textColor = line == "WINDOWLESS_RUNNING" ? .systemRed : .labelColor
+          self.finishButton.isEnabled = line == "WINDOWLESS_FINISHED"
+        }
+      }
+    }
     let background = CommandLine.arguments.contains("--background")
     if background { window.orderBack(nil) } else { window.makeKeyAndOrderFront(nil) }
     window.makeFirstResponder(field)
@@ -79,6 +107,14 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegat
     FileHandle.standardOutput.write(Data("FIXTURE_TYPED\n".utf8))
   }
   @objc func focusSecureField() { window.makeFirstResponder(secure) }
+  @objc func acknowledge() {
+    guard finishButton.isEnabled, let event = NSApplication.shared.currentEvent,
+      event.type == .leftMouseUp, let cgEvent = event.cgEvent,
+      cgEvent.getIntegerValueField(.eventSourceUserData) != 0xF5C0 else { return }
+    finishButton.isEnabled = false
+    instruction.stringValue = "Finished. You can use your computer."
+    FileHandle.standardOutput.write(Data("FIXTURE_ACKNOWLEDGED\n".utf8))
+  }
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
 let application = NSApplication.shared

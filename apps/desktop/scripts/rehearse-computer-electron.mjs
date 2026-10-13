@@ -21,6 +21,8 @@ import {
   prepareRehearsalExecutable,
 } from "../src/computer/rehearsalFixture.ts";
 import { closeRehearsalChild } from "../src/computer/rehearsalCleanup.ts";
+import { RehearsalExternalClient } from "../src/computer/rehearsalExternalClient.ts";
+import { windowlessChecks } from "../../../scripts/computer-certification/windowlessEvidence.ts";
 import {
   readChromiumFixture,
   createRehearsalChromiumFixture,
@@ -60,6 +62,7 @@ const diagnoseChord = args.includes("--diagnose-chord");
 const realApps = args.includes("--real-apps");
 const clusterWorkflows = args.includes("--cluster-workflows");
 const chromiumFixture = args.includes("--chromium-fixture");
+const windowless = args.includes("--windows-closed");
 const includesRealApps = realApps || clusterWorkflows;
 if (
   process.platform !== "darwin" ||
@@ -77,6 +80,7 @@ if (
       clusterWorkflows ||
       controlsOnly ||
       actionsOnly)) ||
+  (windowless && chromiumFixture) ||
   [
     statusOnly,
     controlsOnly,
@@ -85,6 +89,7 @@ if (
     stopRenderer,
     realApps,
     clusterWorkflows,
+    windowless,
   ].filter(Boolean).length > 1
 ) {
   process.stderr.write(
@@ -155,6 +160,14 @@ const consentApps = clusterWorkflows
 let application;
 let page;
 let fixture;
+let externalClient;
+let externalPaused = false;
+let appWindowsClosed = false;
+let windowlessConsent;
+let windowlessObservation;
+let windowlessStopObservation;
+let providerTailObserved = false;
+let externalSubmissions = 0;
 let interrupted = false;
 let stage = "preparation";
 let failureStage;
@@ -252,7 +265,9 @@ async function instructions(text) {
   }, text);
 }
 const rpc = (method, body = {}) =>
-  page.evaluate(([name, input]) => window.__computerRehearsal.rpc(name, input), [method, body]);
+  externalClient
+    ? externalClient.rpc(method, body)
+    : page.evaluate(([name, input]) => window.__computerRehearsal.rpc(name, input), [method, body]);
 const dispatch = (command) => {
   if (interrupted) throw new Error("Rehearsal interrupted.");
   return rpc(ORCHESTRATION_WS_METHODS.dispatchCommand, {
@@ -264,7 +279,9 @@ let previousTurnId;
 let composerSubmissions = 0;
 async function waitTurn() {
   await waitFor(async () => {
-    const paused = await page.evaluate(() => window.__computerRehearsal.paused);
+    const paused = externalClient
+      ? externalPaused
+      : await page.evaluate(() => window.__computerRehearsal.paused);
     if (paused) throw new Error("Physical input interrupted the active turn.");
     const snapshot = await rpc(ORCHESTRATION_WS_METHODS.getSnapshot);
     const turn = snapshot.threads.find((thread) => thread.id === threadId)?.latestTurn;
@@ -284,6 +301,18 @@ async function startTurn(text) {
   if (interrupted) throw new Error("Rehearsal interrupted.");
   const snapshot = await rpc(ORCHESTRATION_WS_METHODS.getSnapshot);
   previousTurnId = snapshot.threads.find((thread) => thread.id === threadId)?.latestTurn?.turnId;
+  if (appWindowsClosed) {
+    await dispatch({
+      type: "thread.turn.start",
+      threadId,
+      message: { messageId: randomUUID(), role: "user", text, attachments: [] },
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+    });
+    externalSubmissions++;
+    return;
+  }
   await page.getByTestId("composer-editor").fill(text);
   // A kill chord interrupts the turn and pauses the turn queue. "Send now"
   // submits the verification turn; it does not resume computer authorization.
@@ -312,6 +341,11 @@ try {
         ["rehearsalSource", join(desktopDir, "scripts/rehearse-computer-electron.mjs")],
         ["observerSource", join(desktopDir, "src/computer/rehearsalElectronObservation.ts")],
         ["responseSource", join(desktopDir, "src/computer/rehearsalResponses.ts")],
+        ["externalClientSource", join(desktopDir, "src/computer/rehearsalExternalClient.ts")],
+        [
+          "windowlessEvidenceSource",
+          join(repo, "scripts/computer-certification/windowlessEvidence.ts"),
+        ],
         ["stopObserverSource", join(desktopDir, "src/computer/rehearsalStopObservation.ts")],
         ["stopMeasurementSource", join(desktopDir, "src/computer/stopLatencyMeasurement.ts")],
         ["stopFixtureSource", join(desktopDir, "native/macos/Fixtures/StopLatencyFixture.swift")],
@@ -520,7 +554,7 @@ try {
   await writeFile(
     wrapper,
     `
-const {app}=require('electron');
+const {app,BrowserWindow}=require('electron');
 const setPath=app.setPath.bind(app);
 app.setPath=(key,value)=>setPath(key,key==='userData'?${JSON.stringify(join(root, "electron"))}:value);
 const {ElectronRehearsalObservation}=require(${JSON.stringify(compiledObserver)});
@@ -535,7 +569,23 @@ let realEvidence=globalThis.__computerRehearsalRealApps=new RehearsalRealAppsObs
 globalThis.__computerRehearsalResetRealApps=()=>{realEvidence=globalThis.__computerRehearsalRealApps=new RehearsalRealAppsObservation(${JSON.stringify(threadId)});};`
     : ""
 }
-const observe=m=>{evidence.receive(m);${includesRealApps ? "realEvidence.receive(m);" : ""}};
+${
+  windowless
+    ? `const windowless=globalThis.__computerRehearsalWindowless={active:false,reopened:false,inputWithWindow:false,mutationAdmissions:0};
+const mutationOps=new Set(['click','move','drag','scroll','type','key','elementAction','openApp','activateApp']);
+const appWindows=globalThis.__computerRehearsalAppWindows=()=>BrowserWindow.getAllWindows().filter(win=>win.isFocusable()||win.webContents.getURL().startsWith('t3:'));
+app.on('browser-window-created',(_event,win)=>{
+if(windowless.active&&win.isFocusable())windowless.reopened=true;
+win.webContents.on('did-finish-load',()=>{if(windowless.active&&!win.isDestroyed()&&win.webContents.getURL().startsWith('t3:'))windowless.reopened=true;});});`
+    : ""
+}
+const observe=m=>{evidence.receive(m);${includesRealApps ? "realEvidence.receive(m);" : ""}
+${
+  windowless
+    ? `if(windowless.active&&m.type==='request'&&mutationOps.has(m.request?.op)){
+windowless.mutationAdmissions++;windowless.inputWithWindow||=appWindows().length>0;}`
+    : ""
+}};
 const cp=require('node:child_process'),spawn=cp.spawn;
 cp.spawn=function(...args){
 ${
@@ -943,7 +993,98 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         stage = "finished";
         await instructions("Real-app check finished. You can use your computer again.");
       }
-      if (realApps) {
+      if (windowless) {
+        stage = "external-observer-connection";
+        windowlessConsent = await page.evaluate(() => ({
+          requested: !!window.__computerRehearsal.consent,
+          trustedClick: window.__computerRehearsal.trustedConsent === true,
+          settled: window.__computerRehearsal.consentSettled === true,
+          allowed: window.__computerRehearsal.consentAllowed === true,
+          fixtureGranted: window.__computerRehearsal.fixtureGranted === true,
+        }));
+        if (!Object.values(windowlessConsent).every(Boolean))
+          throw new Error("Windowless consent prerequisite incomplete.");
+        externalClient = await RehearsalExternalClient.connect(
+          await page.evaluate(() => window.desktopBridge.getWsUrl()),
+          (channel, data) => {
+            if (channel === "preview.automation.pauseChanged" && data?.threadId === threadId) {
+              if (typeof data.paused !== "boolean") throw new Error("Invalid pause observation.");
+              externalPaused = data.paused === true;
+            }
+          },
+        );
+        await instructions(
+          "F5's test windows will close. Keep input idle. After the check stops its session, click Finish check in the synthetic fixture when it becomes enabled.",
+        );
+        stage = "close-app-windows";
+        await application.evaluate(() => {
+          globalThis.__computerRehearsalWindowless.active = true;
+          for (const win of globalThis.__computerRehearsalAppWindows()) win.close();
+        });
+        await waitFor(
+          async () =>
+            application.evaluate(() => globalThis.__computerRehearsalAppWindows().length === 0),
+          5000,
+        );
+        appWindowsClosed = true;
+        fixture.child.stdin.write("WINDOWLESS_READY\n");
+        await delay(1000);
+        for (const seconds of [3, 2, 1]) {
+          if (interrupted || externalPaused) throw new Error("Windowless countdown interrupted.");
+          fixture.child.stdin.write(`WINDOWLESS_COUNTDOWN_${seconds}\n`);
+          await delay(1000);
+        }
+        fixture.child.stdin.write("WINDOWLESS_RUNNING\n");
+        stage = "windowless-provider-actions";
+        await startTurn(
+          `Use only F5 computer tools for exact app ${appId}. The F5 app windows are now closed, but your genuine app grant remains in this session. Call computer_status, activate the exact app with screenshot:true, take a fresh computer_screenshot using its displayId, inspect the exact app. Press Rehearsal press once with a semantic action, focus Rehearsal input semantically, and type exactly F5_ELECTRON_REHEARSAL Ω🙂. Do not press Finish check or the secure-field control. Never use shell, files, network, other apps or the secure field. Stop on interruption, ambiguity or any failed tool; never retry. Finish READY.`,
+        );
+        await waitTurn();
+        const observed = await observer();
+        checks["native-receipt"] = windowlessChecks({
+          nativeObservation: observed,
+          fixtureObservation: {
+            presses: fixture.presses(),
+            expectedSyntheticTextReceived: fixture.typed(),
+          },
+        })["native-receipt"];
+        if (!checks["native-receipt"]) throw new Error("Windowless native outcomes incomplete.");
+        stage = "windowless-session-stop";
+        await dispatch({ type: "thread.session.stop", threadId });
+        await waitFor(async () => {
+          const snapshot = await rpc(ORCHESTRATION_WS_METHODS.getSnapshot);
+          return (
+            snapshot.threads.find((thread) => thread.id === threadId)?.session?.status === "stopped"
+          );
+        }, 15000);
+        await waitFor(async () => {
+          const grants = await rpc("computer.access.list", { threadId });
+          return Array.isArray(grants) && grants.length === 0 && !(await observer()).held;
+        }, 5000);
+        windowlessStopObservation = {
+          sessionStopped: true,
+          grantsCleared: true,
+          leaseReleased: true,
+        };
+        checks.stop = true;
+        windowlessObservation = await application.evaluate(() => {
+          const observed = globalThis.__computerRehearsalWindowless;
+          return {
+            ...observed,
+            finalWindowCount: globalThis.__computerRehearsalAppWindows().length,
+          };
+        });
+        checks["windows-closed"] = windowlessChecks({ windowlessObservation })["windows-closed"];
+        if (!checks["windows-closed"]) throw new Error("F5 windows reopened during the check.");
+        stage = "windowless-finish-acknowledgement";
+        fixture.child.stdin.write("WINDOWLESS_FINISHED\n");
+        await waitFor(() => fixture.acknowledged(), 90000);
+        checks.humanFinishAcknowledged = true;
+        stage = "finished";
+        process.stdout.write(
+          "Test closed. Windowless check finished; you can use your computer again.\n",
+        );
+      } else if (realApps) {
         await runRealAppPhase();
       } else if (stopOnly) {
         stage = "stop-clock-calibration";
@@ -1271,7 +1412,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     realAppObservation = await application
       .evaluate(() => globalThis.__computerRehearsalRealApps.snapshot())
       .catch(() => undefined);
-  if (page && application) {
+  if (page && application && !appWindowsClosed) {
     const image = page.getByAltText("Last captured computer action");
     thumbnailObservation = await image
       .isVisible()
@@ -1352,6 +1493,18 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         failureSnapshot?.threads.find((thread) => thread.id === threadId)?.session?.lastError,
       );
   }
+  if (appWindowsClosed && externalClient) {
+    consentObservation = windowlessConsent;
+    const tail = await rpc(ORCHESTRATION_WS_METHODS.getThreadTailDetails, {
+      threadId,
+      messageLimit: 0,
+      checkpointLimit: 0,
+      activityLimit: 100,
+    }).catch(() => undefined);
+    providerErrorCodes = rehearsalProviderErrorCodes(tail?.activities);
+    providerTailObserved = Array.isArray(tail?.activities);
+    checks.noTaggedProviderErrors = providerTailObserved && providerErrorCodes.length === 0;
+  }
   if (page)
     await page
       .evaluate((id) => window.desktopBridge.computerAutomation.setPaused(id, true), threadId)
@@ -1392,6 +1545,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     fixtureObservation = {
       presses: Math.min(100, fixture.presses()),
       expectedSyntheticTextReceived: fixture.typed(),
+      ...(windowless ? { humanFinishAcknowledged: fixture.acknowledged() } : {}),
     };
   const fixtureClosed = await closeRehearsalChild(fixture?.child);
   if (documentRoot) {
@@ -1445,6 +1599,23 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     process.stdout.write(
       "Test state retained because process/document cleanup was not confirmed.\n",
     );
+  if (windowless)
+    Object.assign(
+      checks,
+      windowlessChecks({
+        nativeObservation,
+        fixtureObservation,
+        consentObservation,
+        windowlessObservation,
+        windowlessStopObservation,
+        externalSubmissions,
+        providerTailObserved,
+        providerErrorCodes,
+        stopScope: "session-stop-after-completed-native-actions",
+        cleanup,
+      }),
+    );
+  externalClient?.close();
   const passed =
     !failureStage && !interrupted && cleanup.confirmed && Object.values(checks).every(Boolean);
   if (!passed) process.exitCode = 1;
@@ -1455,19 +1626,21 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         reportVersion: 1,
         admissionId: process.env.F5_COMPUTER_CERTIFICATION_ADMISSION,
         recordedAt: new Date().toISOString(),
-        scope: clusterWorkflows
-          ? "unsigned-real-electron-clustered-workflows"
-          : realApps
-            ? `unsigned-real-electron-${provider}-textedit-and-calculator`
-            : stopOnly
-              ? `unsigned-real-electron-${provider}-${stopMain ? "main" : "renderer"}-frozen-physical-stop`
-              : statusOnly
-                ? `unsigned-real-electron-${provider}-read-only-discovery-diagnostic`
-                : controlsOnly
-                  ? `unsigned-real-electron-${provider}-human-consent-and-controls`
-                  : actionsOnly
-                    ? `unsigned-real-electron-${provider}-human-consent-and-actions`
-                    : `unsigned-real-electron-${provider}-human-consent-synthetic-app`,
+        scope: windowless
+          ? `unsigned-real-electron-${provider}-all-app-windows-closed`
+          : clusterWorkflows
+            ? "unsigned-real-electron-clustered-workflows"
+            : realApps
+              ? `unsigned-real-electron-${provider}-textedit-and-calculator`
+              : stopOnly
+                ? `unsigned-real-electron-${provider}-${stopMain ? "main" : "renderer"}-frozen-physical-stop`
+                : statusOnly
+                  ? `unsigned-real-electron-${provider}-read-only-discovery-diagnostic`
+                  : controlsOnly
+                    ? `unsigned-real-electron-${provider}-human-consent-and-controls`
+                    : actionsOnly
+                      ? `unsigned-real-electron-${provider}-human-consent-and-actions`
+                      : `unsigned-real-electron-${provider}-human-consent-synthetic-app`,
         platform: process.platform,
         arch: process.arch,
         osVersion: release(),
@@ -1478,6 +1651,15 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         signed: false,
         certified: false,
         provider,
+        ...(windowless
+          ? {
+              externalSubmissions,
+              providerTailObserved,
+              windowlessObservation,
+              windowlessStopObservation,
+              stopScope: "session-stop-after-completed-native-actions",
+            }
+          : {}),
         ...(claudeAuthentication ? { claudeAuthentication } : {}),
         runtimeMode: "full-access",
         state: passed ? "passed" : "failed",
@@ -1521,11 +1703,13 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
                 ]
               : [
                   "One real provider and one synthetic AppKit app, on the current display only",
-                  stopOnly
-                    ? "Human app consent and physical chord; UI Pause/Resume is excluded"
-                    : actionsOnly
-                      ? "Human app consent; Pause/Resume is excluded from this actions-only run"
-                      : "Human app consent and pause/resume; no session-actions consent in full-access mode",
+                  windowless
+                    ? "Human app consent; app windows closed during one provider turn, followed by session stop after completed actions; no in-flight stop latency proof"
+                    : stopOnly
+                      ? "Human app consent and physical chord; UI Pause/Resume is excluded"
+                      : actionsOnly
+                        ? "Human app consent; Pause/Resume is excluded from this actions-only run"
+                        : "Human app consent and pause/resume; no session-actions consent in full-access mode",
                   ...(actionsOnly ? ["No session-actions consent in full-access mode"] : []),
                   ...(controlsOnly
                     ? [

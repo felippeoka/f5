@@ -127,6 +127,14 @@ export async function identify(target: Target): Promise<Identity> {
   files["electron-runner"] = await hashFile(
     join(target.repo, "apps/desktop/scripts/rehearse-computer-electron.mjs"),
   );
+  // These development observer modules are loaded directly, outside the app bundles.
+  for (const name of [
+    "rehearsalExternalClient",
+    "rehearsalElectronObservation",
+    "rehearsalFixture",
+    "rehearsalResponses",
+  ])
+    files[name] = await hashFile(join(target.repo, "apps/desktop/src/computer", name + ".ts"));
   files["native-fixtures"] = await hashTree(
     join(
       target.repo,

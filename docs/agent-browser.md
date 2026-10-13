@@ -407,9 +407,10 @@ the isolated and complete 687-test browser suite in a Linux container. A control
 stale anchor reproduced the missing historical row and plan button; resetting only
 the reused browser fixture thread's module-level anchor made both pass. The full-app
 test setup now resets that state along with localStorage and its other stores. No
-production timeline behavior or assertion changed. Remote CI must still confirm the
-fix under its original scheduling conditions; a local passing rerun alone is not a
-release pass.
+production timeline behavior or assertion changed. Hosted CI subsequently confirmed the
+fix in the quality/browser job and the SQLite fix in the Windows job at
+[910d42e18b](computer-certification/2026-10-13-ci-910d42e18b-passed.json).
+Those software passes do not establish native input/capture or installed-build safety.
 
 Before input, current permission/account prerequisites and all executable identities
 are checked again. In a terminal, the runner waits for READY. An orchestrating agent
@@ -490,8 +491,33 @@ results. The earlier remote Windows cleanup assertion assumed a process exit wit
 20 ms. The test now separates deterministic missing-exit rejection from real process
 exit, retaining the actual POSIX nonresponsive-child case; no runtime deadline changed.
 The remote browser scroll failure passed both isolated and full local reproductions.
-No production scroll change or inferred failure cause is claimed; fresh remote CI must
-still confirm the pushed tree.
+No production scroll change was made. The subsequent hosted run at 910d42e18b passed
+all three jobs; the source identities of earlier machine evidence remain unchanged.
+
+The macOS development `windows-closed` phase now has an external observer. It obtains
+genuine app consent in the production UI before closing every app window of its owned
+F5 instance. The observer then submits one ordinary provider turn through the existing
+authenticated loopback orchestration API. It cannot answer consent, change grants or
+send native execution/lease messages. The fixture keeps Ready, countdown, RED and
+finished instructions visible; Finish check stays enabled until a genuine click is
+acknowledged or the phase times out as failed. Only synthetic fixture values are used.
+
+Acceptance requires correlated capture/inspection results, exactly one activation,
+semantic press, semantic focus and typing action, plus independent fixture outcomes.
+Observation records whether any app window reopened or remained at a mutation
+admission. After the turn completes, ordinary session stop must clear grants and the
+lease. This stop check does not measure interruption of in-flight input. Missing
+responses, extra mutations, lost transport, incomplete cleanup or absent human
+acknowledgement cannot pass. All direct-loaded observer dependencies are hashed for
+resume. The driver and its fake-transport/receipt tests are prepared; no real windowless
+provider run or signed installed windowless result is claimed yet. Select it with:
+
+    bun run computer:certify run --output <prepared-suite> \
+      --group workflows --scenario windows-closed.claude
+
+Use a separately prepared provider phase for Codex. Prerequisites must pass before
+readiness or consent; another running development helper holding the device lock
+prevents this isolated instance from executing.
 
 Resume checks helper, provider binaries, desktop/server bundles, every served client
 asset, Electron runtime, prepared fixtures, source hashes, architecture and target identity.
@@ -506,7 +532,8 @@ ordering keeps permission revocation last.
 Coverage retains every required scenario, including those without a qualifying driver.
 Current executable drivers cover automated checks, macOS provider discovery, clustered
 fixture/real-app workflows, native capture/protected-app checks and physical-stop
-rehearsals. Real grant-lifecycle/profile/persistence/windowless observers, the complete
+rehearsals. The new windowless driver still needs real provider/machine validation.
+Real grant-lifecycle/profile/persistence observers, the complete
 recipient/system-surface/display/recovery/permission matrix, Windows interactive drivers
 and installed-app observation still need implementation and machine validation; they
 are explicitly blocked, never credited from unit tests. Installed targets do not use

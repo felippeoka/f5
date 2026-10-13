@@ -5,10 +5,12 @@ use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::HiDpi::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 const STATUS: u32 = WM_APP + 1;
+const CLOSE_REQUEST: u32 = WM_APP + 2;
 const INPUT_ID: usize = 100;
 const PRESS_ID: usize = 101;
 const SECURE_ID: usize = 102;
@@ -229,7 +231,7 @@ pub fn run(mode: Mode) -> windows::core::Result<()> {
             "ready",
             Some(serde_json::json!({ "pid": std::process::id(), "protocolVersion": 1 })),
         );
-        let own = hwnd.0 as usize;
+        let gui_thread = GetCurrentThreadId();
         std::thread::spawn(move || {
             // Observation/control of this fixture only. No arbitrary HWND, file,
             // shell, helper message, consent answer or input API is accepted.
@@ -239,20 +241,23 @@ pub fn run(mode: Mode) -> windows::core::Result<()> {
                 };
                 let message = match line.as_str() {
                     "status" => STATUS,
-                    "close" => WM_CLOSE,
+                    "close" => CLOSE_REQUEST,
                     _ => {
                         emit("invalid-command", None);
                         continue;
                     }
                 };
-                if PostMessageW(Some(HWND(own as *mut _)), message, WPARAM(0), LPARAM(0)).is_err() {
+                // A window handle can be reused after closure. Only the fixture's
+                // process-lifetime GUI thread receives stdin commands; it resolves
+                // its own window on that thread before closing anything.
+                if PostThreadMessageW(gui_thread, message, WPARAM(0), LPARAM(0)).is_err() {
                     return;
                 }
-                if message == WM_CLOSE {
+                if message == CLOSE_REQUEST {
                     return;
                 }
             }
-            let _ = PostMessageW(Some(HWND(own as *mut _)), WM_CLOSE, WPARAM(0), LPARAM(0));
+            let _ = PostThreadMessageW(gui_thread, CLOSE_REQUEST, WPARAM(0), LPARAM(0));
         });
         let mut message = MSG::default();
         loop {
@@ -262,6 +267,20 @@ pub fn run(mode: Mode) -> windows::core::Result<()> {
             }
             if result == 0 {
                 break;
+            }
+            if message.hwnd.0.is_null() {
+                match message.message {
+                    STATUS => {
+                        STATE.with(|slot| {
+                            if let Some(state) = slot.borrow().as_ref() {
+                                emit("status", Some(state.receipt.summary()));
+                            }
+                        });
+                    }
+                    CLOSE_REQUEST => DestroyWindow(hwnd)?,
+                    _ => {}
+                }
+                continue;
             }
             let _ = TranslateMessage(&message);
             DispatchMessageW(&message);

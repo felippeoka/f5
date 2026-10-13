@@ -290,3 +290,64 @@ it("records lease admission failures separately from native action responses", (
   expect(observer.snapshot().responses.nativeInputSucceeded).toBe(false);
   expect(JSON.stringify(observer.snapshot())).not.toContain("PRIVATE_SENTINEL");
 });
+
+it("correlates semantic action enums and retains missing responses without retaining values", () => {
+  const observer = new ElectronRehearsalObservation();
+  for (const action of ["press", "focus", "setValue"] as const) {
+    observer.receive({
+      type: "request",
+      request: {
+        ...request("type", action),
+        op: "elementAction",
+        appId: "fixture",
+        snapshotId: "snapshot",
+        elementRef: "element",
+        action,
+        value: "PRIVATE_SENTINEL",
+      },
+    });
+  }
+  expect(observer.snapshot().pendingResponses).toBe(3);
+  for (const action of ["press", "focus"])
+    observer.receive({
+      type: "response",
+      requestId: action,
+      result: {
+        displayId: "display",
+        geometryGeneration: "geometry",
+        frontmostApp: null,
+        cursor: null,
+      },
+    });
+  expect(observer.snapshot().operations).toEqual([
+    { op: "elementAction", outcome: "ok", action: "press" },
+    { op: "elementAction", outcome: "ok", action: "focus" },
+  ]);
+  expect(observer.snapshot().pendingResponses).toBe(1);
+  expect(JSON.stringify(observer.snapshot())).not.toContain("PRIVATE_SENTINEL");
+});
+
+it("rejects malformed or explicitly uncompleted native action receipts", () => {
+  const observer = new ElectronRehearsalObservation();
+  for (const [id, result] of [
+    ["malformed", {}],
+    [
+      "uncompleted",
+      {
+        displayId: "display",
+        geometryGeneration: "geometry",
+        frontmostApp: null,
+        cursor: null,
+        actionCompleted: false,
+      },
+    ],
+  ] as const) {
+    observer.receive({ type: "request", request: request("type", id) });
+    observer.receive({ type: "response", requestId: id, result });
+  }
+  expect(observer.snapshot().operations.map((op) => op.outcome)).toEqual([
+    "invalid-action",
+    "invalid-action",
+  ]);
+  expect(observer.snapshot().pendingResponses).toBe(0);
+});

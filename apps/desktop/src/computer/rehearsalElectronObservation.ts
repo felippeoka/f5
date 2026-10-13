@@ -4,6 +4,7 @@ import {
   ComputerInspectResult,
   ComputerScreenshot,
   ComputerApp,
+  ComputerActionResult,
   DesktopComputerHostMessage,
   type ComputerAutomationRequest,
 } from "@t3tools/contracts";
@@ -14,6 +15,7 @@ export class ElectronRehearsalObservation {
   private readonly responses = new RehearsalResponses();
   private readonly admitted = new Set<string>();
   private readonly pending = new Map<string, ComputerAutomationRequest["op"] | "leaseAcquire">();
+  private readonly elementActions = new Map<string, string>();
   private readonly operations: Array<Record<string, string | number | boolean>> = [];
   private held = false;
   private leaseObserved = false;
@@ -54,12 +56,19 @@ export class ElectronRehearsalObservation {
       this.admitted.add(requestId);
       this.pending.set(requestId, raw.type === "request" ? raw.request.op : "leaseAcquire");
       if (raw.type === "request") this.responses.request(raw.request);
+      if (raw.type === "request" && raw.request.op === "elementAction")
+        this.elementActions.set(requestId, raw.request.action);
     } else if (raw.type === "response") {
       const op = this.pending.get(raw.requestId);
       if (!op) return;
       this.pending.delete(raw.requestId);
       this.responses.response(raw);
       const summary: Record<string, string | number | boolean> = { op, outcome: "ok" };
+      const action = this.elementActions.get(raw.requestId);
+      if (action) {
+        summary.action = action;
+        this.elementActions.delete(raw.requestId);
+      }
       if (raw.error !== undefined) {
         if (Schema.is(ComputerAutomationError)(raw.error)) {
           const error = raw.error;
@@ -83,6 +92,9 @@ export class ElectronRehearsalObservation {
           if (typeof error === "string" && rehearsalProviderErrorCodes([{ _tag: error }]).length)
             summary.screenshotError = error;
         }
+      } else if (op === "type" || op === "elementAction") {
+        if (!Schema.is(ComputerActionResult)(raw.result) || raw.result.actionCompleted === false)
+          summary.outcome = "invalid-action";
       } else if (op === "listApps") {
         const valid = Schema.is(Schema.Array(ComputerApp))(raw.result);
         summary.validApps = valid;
@@ -122,6 +134,7 @@ export class ElectronRehearsalObservation {
       activityThumbnails: this.activityThumbnails,
       toolOutcomeErrors: [...this.toolOutcomeErrors].sort(),
       traceComplete: !this.overflow,
+      pendingResponses: this.pending.size,
       accessRequests: this.accessRequests.size,
       accessAnswersForwarded: this.accessAnswers.size,
       operations: this.operations.map((operation) => ({ ...operation })),

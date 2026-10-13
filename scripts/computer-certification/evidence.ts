@@ -1,6 +1,7 @@
 import { record, digest } from "./model";
 import type { Manifest, ScenarioResult } from "./model";
 import type { ScenarioInstance } from "./catalog";
+import { windowlessChecks } from "./windowlessEvidence";
 
 const safeKey = /^[a-zA-Z0-9][a-zA-Z0-9.-]{0,100}$/;
 const STOP_CHECKS = [
@@ -93,6 +94,14 @@ export function summarizeEvidence(
     )
       passed = false;
     passed &&= scenario.expectedChecks.every((key) => checks[key] === true);
+  }
+  if (scenario.id === "windows-closed") {
+    const receipts = windowlessChecks(raw);
+    for (const [key, value] of Object.entries(receipts)) checks["receipt." + key] = value;
+    passed &&=
+      Object.values(receipts).every(Boolean) &&
+      raw.scope === `unsigned-real-electron-${scenario.selectedProvider}-all-app-windows-closed` &&
+      manifest.identity.target === "development";
   }
   const stop = record(raw.stopMeasurement)
     ? raw.stopMeasurement

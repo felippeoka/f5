@@ -209,7 +209,16 @@ export const SCENARIOS: readonly Scenario[] = [
     operator: true,
     runner: "windows-closed",
     requirements: ["windowless"],
-    expectedChecks: ["windows-closed", "native-receipt", "stop", "cleanup"],
+    expectedChecks: [
+      "windows-closed",
+      "native-receipt",
+      "stop",
+      "cleanup",
+      "genuineConsent",
+      "externalSubmissionsOnce",
+      "humanFinishAcknowledged",
+      "noTaggedProviderErrors",
+    ],
   },
   {
     id: "protected-apps",
