@@ -31,6 +31,34 @@ it("keeps harness failure diagnostics content-free", () => {
   expect(rehearsalHarnessFailureCode("PRIVATE_SENTINEL")).toBe("unknown");
 });
 
+it("extracts restart flags from split backend logs without retaining messages or identities", () => {
+  const observer = new ElectronRehearsalObservation();
+  observer.backendLog("PRIVATE_SENTINEL ordinary log\nprovider command reactor rest");
+  observer.backendLog(
+    "arting provider session\n  threadId: PRIVATE_SENTINEL\n  shouldRestartForModelOptionsChange: true\n  shouldRestartForComputerUseChange: false\n",
+  );
+  observer.backendLog('  "runtimeModeChanged": true,\n  unknownFlag: true\n');
+  expect(observer.snapshot().backendRestarts).toEqual([
+    { reasons: ["model-options-changed", "runtime-mode-changed"] },
+  ]);
+  expect(JSON.stringify(observer.snapshot())).not.toContain("PRIVATE_SENTINEL");
+});
+
+it("reports opaque session ordinals for native requests", () => {
+  const observer = new ElectronRehearsalObservation();
+  for (const [index, session] of ["PRIVATE_ONE", "PRIVATE_ONE", "PRIVATE_TWO"].entries()) {
+    const req = request("listApps", String(index));
+    observer.receive({
+      type: "request",
+      request: { ...req, authorization: { ...req.authorization, sessionGeneration: session } },
+    });
+  }
+  expect(observer.snapshot().requestSessions).toEqual(
+    [1, 1, 2].map((sessionOrdinal) => ({ op: "listApps", sessionOrdinal })),
+  );
+  expect(JSON.stringify(observer.snapshot())).not.toContain("PRIVATE_");
+});
+
 const request = (
   op: "screenshot" | "inspect" | "type" | "listApps" | "activateApp",
   requestId: string = op,

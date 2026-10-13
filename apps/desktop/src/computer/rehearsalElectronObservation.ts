@@ -38,6 +38,50 @@ export class ElectronRehearsalObservation {
     allowSessionActions?: boolean;
   }> = [];
   private readonly sessions = new Set<string>();
+  private readonly requestSessions: Array<{ op: string; sessionOrdinal: number }> = [];
+  private backendLogBuffer = "";
+  private restartLinesRemaining = 0;
+  private readonly backendRestarts: Array<{ reasons: string[] }> = [];
+  /** Observe existing backend stdout without retaining text, paths or IDs. */
+  backendLog(chunk: string): void {
+    this.backendLogBuffer += chunk;
+    if (this.backendLogBuffer.length > 64 * 1024) {
+      this.backendLogBuffer = "";
+      this.restartLinesRemaining = 0;
+      return;
+    }
+    let end;
+    while ((end = this.backendLogBuffer.indexOf("\n")) >= 0) {
+      const line = this.backendLogBuffer.slice(0, end).replace(/\u001b\[[0-9;]*m/g, "");
+      this.backendLogBuffer = this.backendLogBuffer.slice(end + 1);
+      if (line.includes("provider command reactor restarting provider session")) {
+        if (this.backendRestarts.length >= 16) continue;
+        this.backendRestarts.push({ reasons: [] });
+        this.restartLinesRemaining = 64;
+      }
+      if (this.restartLinesRemaining <= 0) continue;
+      this.restartLinesRemaining--;
+      const current = this.backendRestarts.at(-1)!;
+      for (const [flag, reason] of [
+        ["runtimeModeChanged", "runtime-mode-changed"],
+        ["providerChanged", "provider-changed"],
+        ["instanceChanged", "instance-changed"],
+        ["shouldRestartForModelChange", "model-changed"],
+        ["shouldRestartForModelOptionsChange", "model-options-changed"],
+        ["shouldRestartForProviderOptionsChange", "provider-options-changed"],
+        ["shouldRestartForProjectMcpChange", "project-mcp-changed"],
+        ["shouldRestartForComputerUseChange", "computer-use-changed"],
+        ["shouldRestartForCwdChange", "cwd-changed"],
+        ["shouldRestartForWorkflowExecutionProfileChange", "workflow-execution-profile-changed"],
+      ] as const) {
+        if (
+          new RegExp(`\\b${flag}["']?\\s*[:=]\\s*true\\b`).test(line) &&
+          !current.reasons.includes(reason)
+        )
+          current.reasons.push(reason);
+      }
+    }
+  }
   private grantChanges = 0;
   private lastGrantCount = 0;
   private hostStatus: { available: boolean; reason?: string } | undefined;
@@ -89,6 +133,11 @@ export class ElectronRehearsalObservation {
       if (raw.type === "request") {
         this.responses.request(raw.request);
         this.sessions.add(raw.request.authorization.sessionGeneration);
+        this.requestSessions.push({
+          op: raw.request.op,
+          sessionOrdinal:
+            [...this.sessions].indexOf(raw.request.authorization.sessionGeneration) + 1,
+        });
       }
       if (raw.type === "request" && raw.request.op === "elementAction")
         this.elementActions.set(requestId, raw.request.action);
@@ -173,6 +222,8 @@ export class ElectronRehearsalObservation {
       accessAnswersForwarded: this.accessAnswers.size,
       accessAnswerSummaries: this.accessAnswerSummaries.map((summary) => ({ ...summary })),
       sessionGenerationsObserved: this.sessions.size,
+      requestSessions: this.requestSessions.map((request) => ({ ...request })),
+      backendRestarts: this.backendRestarts.map((restart) => ({ reasons: [...restart.reasons] })),
       grantChanges: this.grantChanges,
       lastGrantCount: this.lastGrantCount,
       operations: this.operations.map((operation) => ({ ...operation })),

@@ -684,6 +684,7 @@ const child=spawn.apply(this,args);
 if(child.pid){globalThis.__computerRehearsalChildPids.add(child.pid);
 child.once('exit',()=>globalThis.__computerRehearsalChildPids.delete(child.pid));}
 if(args[2]?.env?.F5_DESKTOP_COMPUTER_HOST==='ipc'){
+child.stdout?.on('data',chunk=>evidence.backendLog(chunk.toString()));
 child.on('message',m=>observe(m));
 const send=child.send.bind(child);child.send=function(m,...args){observe(m);
 return send(m,...args);};}

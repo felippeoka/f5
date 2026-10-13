@@ -550,7 +550,14 @@ distinct provider-session generations, five completed app resolutions, effective
 remembered grant state checks, pushed revocation/forget changes, no helper mutations,
 and confirmed cleanup. Observer summaries retain only enums, booleans and counts,
 not grant/session identities or tool content. Sequencing fakes prove no machine or
-human-consent gate. This driver is prepared but has not run against either provider.
+human-consent gate. Both providers passed the genuine development phase at a5dadb91dd:
+three native reviews, three session generations, all five app resolutions and
+confirmed cleanup, with no capture or input. The earlier Claude review attempt failed
+at the second popup and remains recorded; its original exception was not retained.
+Popup observation now targets computer-consent dialogs rather than every dialog and
+records only a sanitized failure category. A headless two-dialog reproduction rejects
+the old global lookup and accepts the narrowed observation; this does not establish
+the original attempt's exact exception.
 Expiry, click-tier typing upgrades, stale answers and web-only consent remain separate
 missing checks; this phase cannot complete the consent release gate.
 
@@ -570,8 +577,14 @@ agree; unexpected errors or ambiguous mutations stop the phase without retry.
 Session stop must clear the grants and lease. A persistent fixture Finish button
 remains available until a real unmarked user click, or the phase fails its timeout.
 
-This is preparation, not live evidence. No machine check has run against this new
-driver. It proves neither approval reset after a replacement session nor consent
+Claude's first development attempt passed genuine app consent and denied session
+actions without input, then failed: approved activation returned NotGranted after
+the observer saw a second provider-session generation. No lease, capture or input
+occurred, and cleanup was confirmed. The cause of replacement is not yet established;
+the observer now records opaque per-request session ordinals and only known restart
+flags from backend logs, never raw messages, identities or paths. These are diagnostic
+hints, not qualifying evidence. Codex's phase is still unrun. Neither proves approval
+reset after a replacement session nor consent
 expiry, typing upgrades or the full consent matrix. Installed candidates require
 their own observation driver. Neither this phase nor grant-memory can open a gate
 alone. Any extra provider approval prompt must also receive a genuine user answer.

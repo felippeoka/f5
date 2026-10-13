@@ -1562,7 +1562,8 @@ async function waitForComposerTransitions(form: HTMLElement): Promise<void> {
 /**
  * Holds the composer's transitions at a fraction of their duration, then waits
  * until that frame's observers (the dock's end pin) have run. Deterministic
- * regardless of how many frames a slow runner paints in 180ms.
+ * The transition must still exist: callers inspecting an early frame should
+ * hold the animation clock before triggering a change on a slow runner.
  */
 async function seekComposerTransitions(form: HTMLElement, fraction: number): Promise<void> {
   for (const transition of composerTransitions(form)) {
@@ -2517,6 +2518,10 @@ describe("ChatView timeline (full app)", () => {
         await waitForComposerTransitions(form);
         expect(getComputedStyle(tray).visibility).toBe("hidden");
         expect(tray.getBoundingClientRect().height).toBe(0);
+        // Hold time before the click. Playwright and React can take longer than
+        // 180ms on CI; seeking after a transition finished otherwise does nothing.
+        await cdp().send("Animation.enable");
+        await cdp().send("Animation.setPlaybackRate", { playbackRate: 0 });
         await button.click();
         await vi.waitFor(() => expect(form.dataset.composerCollapsed).toBe("false"));
         // Early in expansion the chips are full size inside a short tray; they
@@ -2524,10 +2529,12 @@ describe("ChatView timeline (full app)", () => {
         await seekComposerTransitions(form, 0.05);
         expect(tray.getBoundingClientRect().height).toBeLessThan(tray.scrollHeight);
         expect(getComputedStyle(tray).overflow).toBe("clip");
+        await cdp().send("Animation.setPlaybackRate", { playbackRate: 1 });
         await waitForComposerTransitions(form);
         expect(getComputedStyle(tray).visibility).toBe("visible");
         expect(tray.getBoundingClientRect().height).toBeGreaterThan(0);
       } finally {
+        await cdp().send("Animation.setPlaybackRate", { playbackRate: 1 });
         await mounted.cleanup();
       }
     });
