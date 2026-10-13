@@ -1,5 +1,5 @@
 import { ComputerControlError } from "@t3tools/shared/computerControl";
-import type { ComputerInspectResult } from "@t3tools/contracts";
+import type { ComputerAutomationBackendStatus, ComputerInspectResult } from "@t3tools/contracts";
 import { isAbsolute } from "node:path";
 
 export const BROWSER_PROTECTION_IDS = {
@@ -9,6 +9,22 @@ export const BROWSER_PROTECTION_IDS = {
 export const BROWSER_SECURE_LABEL = "F5 browser secure fixture";
 export const BROWSER_MARKER_LABEL = "F5 browser capture marker";
 export const BROWSER_SECURE_SENTINEL = "F5_SYNTHETIC_PASSWORD_SENTINEL";
+
+/** Keep permission/error enums, never native messages, app content or status detail. */
+export function protectionFailureSummary(error: unknown, status: ComputerAutomationBackendStatus) {
+  const result = error instanceof ComputerControlError ? error.error : undefined;
+  return {
+    outcome: result?._tag ?? "ProtectionCheckFailed",
+    ...(result?._tag === "Unavailable"
+      ? {
+          unavailableReason: result.reason,
+          ...(result.missing ? { missing: result.missing } : {}),
+        }
+      : {}),
+    helperAvailable: status.available,
+    ...(!status.available ? { helperUnavailableReason: status.reason } : {}),
+  };
+}
 
 /** Exact fixture-only arguments shared by headless setup and the desktop check.
  * The mock keychain is a Chrome test flag, never a production backend setting. */

@@ -828,8 +828,24 @@ new binary certification. The read-only diagnostic can run while the operator wo
 bun apps/desktop/src/computer/rehearseEmptyCaptureMacos.ts --helper apps/desktop/dist-native/mac-arm64/f5-computer-helper --output /tmp/f5-empty-capture.json
 ```
 
-Release gates remain closed. The complete corrected desktop workflow still requires
-an idle run, and signing remains deferred.
+The [clean empty-capture diagnostic](computer-certification/2026-10-13-macos-empty-capture-clean-passed.json)
+on `5b60b4bebf` also passed all four neutral JPEG/PNG checks across the two connected
+displays, with the helper suspended. This confirms the empty-grant fix on that revision.
+
+The [subsequent idle protection run](computer-certification/2026-10-13-macos-terminal-chrome-protection-capture-unavailable-attempt.json)
+on the same clean revision and helper passed the first seven checks, including exact
+Terminal typing/value denials and Chrome secure-field inspection, semantic/keyboard
+denials and unchanged synthetic DOM value with zero input events. The first nonempty
+capture returned `Unavailable` before pixel verification; the run stopped without
+retrying and both apps closed normally. No physical interruption was recorded. This
+report contains only the error tag, so it does not establish which capture API failed
+or why. The preceding 11-check attempt remains separate evidence; its success is not
+attributed to this later binary. Future failed checks retain the unavailable reason,
+missing-permission enums and helper availability, while dropping raw messages and
+status detail. These diagnostics do not silently retry or weaken capture protections.
+
+Release gates remain closed. The complete protection workflow still needs a passing
+run after the nonempty capture failure is diagnosed; signing remains deferred.
 
 The helper rehearsal's `--privacy-only` mode runs the existing pixel-verification
 checks without its semantic/keyboard/pointer actions. It uses only two temporary

@@ -14,7 +14,6 @@ import {
   type ComputerAuthorization,
   type ComputerGrant,
 } from "@t3tools/contracts";
-import { ComputerControlError } from "@t3tools/shared/computerControl";
 import { ComputerHelperClient } from "./ComputerHelperClient";
 import { createRehearsalFixture } from "./rehearsalFixture";
 import { createBrowserProtectionFixture } from "./rehearsalBrowserFixture";
@@ -25,6 +24,7 @@ import {
   browserSecureInspection,
   expectedProtectionRefusal,
   protectionChromeArguments,
+  protectionFailureSummary,
 } from "./rehearsalProtection";
 
 // Opt-in native-helper boundary checks, not provider consent or release certification.
@@ -61,6 +61,10 @@ const checks: Array<{
   name: string;
   state: "passed" | "failed";
   outcome?: string;
+  unavailableReason?: string;
+  missing?: readonly string[];
+  helperAvailable?: boolean;
+  helperUnavailableReason?: string;
   elapsedMs: number;
 }> = [];
 let stage = "prerequisites";
@@ -113,7 +117,7 @@ async function check(name: string, run: () => Promise<void>) {
       name,
       state: "failed",
       elapsedMs: Math.round(performance.now() - start),
-      outcome: error instanceof ComputerControlError ? error.error._tag : "ProtectionCheckFailed",
+      ...protectionFailureSummary(error, helper.status()),
     });
     throw error;
   }

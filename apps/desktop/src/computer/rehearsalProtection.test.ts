@@ -10,7 +10,31 @@ import {
   expectedProtectionRefusal,
   protectionFixtureState,
   protectionChromeArguments,
+  protectionFailureSummary,
 } from "./rehearsalProtection";
+
+it("records safe unavailable enums without persisting error messages or status details", () => {
+  const summary = protectionFailureSummary(
+    new ComputerControlError({
+      _tag: "Unavailable",
+      reason: "missing-permissions",
+      missing: ["screen-recording"],
+    }),
+    { available: false, reason: "monitor-unhealthy", detail: "PRIVATE_SENTINEL" },
+  );
+  expect(summary).toEqual({
+    outcome: "Unavailable",
+    unavailableReason: "missing-permissions",
+    missing: ["screen-recording"],
+    helperAvailable: false,
+    helperUnavailableReason: "monitor-unhealthy",
+  });
+  expect(JSON.stringify(summary)).not.toContain("PRIVATE_SENTINEL");
+  expect(protectionFailureSummary(new Error("PRIVATE_SENTINEL"), { available: true })).toEqual({
+    outcome: "ProtectionCheckFailed",
+    helperAvailable: true,
+  });
+});
 
 it("requires the exact protection refusal rather than an unrelated failure", () => {
   const errors: ComputerAutomationError[] = [
