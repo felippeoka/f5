@@ -4,7 +4,32 @@ import {
   ElectronRehearsalObservation,
   rehearsalProviderErrorCodes,
   rehearsalSessionErrorCode,
+  rehearsalHarnessFailureCode,
 } from "./rehearsalElectronObservation";
+
+it("keeps harness failure diagnostics content-free", () => {
+  expect(rehearsalHarnessFailureCode(new Error("strict mode violation: PRIVATE_SENTINEL"))).toBe(
+    "ambiguous-locator",
+  );
+  expect(rehearsalHarnessFailureCode(new Error("PRIVATE_SENTINEL timed out"))).toBe("timeout");
+  expect(rehearsalHarnessFailureCode(new Error("Unexpected certification consent request."))).toBe(
+    "unexpected-consent",
+  );
+  expect(rehearsalHarnessFailureCode(new Error("Unexpected certification consent answer."))).toBe(
+    "unexpected-consent-answer",
+  );
+  expect(
+    rehearsalHarnessFailureCode(new Error("Physical input interrupted the active turn.")),
+  ).toBe("physical-input");
+  expect(rehearsalHarnessFailureCode(new Error("Provider turn did not complete."))).toBe(
+    "provider-turn-incomplete",
+  );
+  expect(rehearsalHarnessFailureCode(new Error("Session actions receipt incomplete."))).toBe(
+    "incomplete-receipt",
+  );
+  expect(rehearsalHarnessFailureCode(new Error("PRIVATE_SENTINEL"))).toBe("unknown");
+  expect(rehearsalHarnessFailureCode("PRIVATE_SENTINEL")).toBe("unknown");
+});
 
 const request = (
   op: "screenshot" | "inspect" | "type" | "listApps" | "activateApp",

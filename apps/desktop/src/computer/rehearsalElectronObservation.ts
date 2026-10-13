@@ -209,6 +209,21 @@ export function rehearsalSessionErrorCode(error: unknown): string {
   return "unknown";
 }
 
+/** Harness diagnostics are enums only. Playwright messages can contain DOM text,
+ * tool content or paths and must never be retained in certification evidence. */
+export function rehearsalHarnessFailureCode(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown";
+  const message = error.message.slice(0, 8192);
+  if (/strict mode violation/i.test(message)) return "ambiguous-locator";
+  if (/timed out|timeout/i.test(message)) return "timeout";
+  if (message === "Unexpected certification consent request.") return "unexpected-consent";
+  if (message === "Unexpected certification consent answer.") return "unexpected-consent-answer";
+  if (message === "Physical input interrupted the active turn.") return "physical-input";
+  if (message === "Provider turn did not complete.") return "provider-turn-incomplete";
+  if (/receipt incomplete\.$/.test(message)) return "incomplete-receipt";
+  return "unknown";
+}
+
 /** Already-sanitized provider activities can contain pre-host tool failures. Keep
  * only known error tags, never their detail strings or arbitrary provider fields. */
 export function rehearsalProviderErrorCodes(activities: unknown): string[] {

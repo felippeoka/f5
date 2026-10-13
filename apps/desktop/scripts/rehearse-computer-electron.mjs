@@ -35,6 +35,7 @@ import { measureStopLatency } from "../src/computer/stopLatencyMeasurement.ts";
 import {
   rehearsalProviderErrorCodes,
   rehearsalSessionErrorCode,
+  rehearsalHarnessFailureCode,
 } from "../src/computer/rehearsalElectronObservation.ts";
 import {
   prepareRehearsalClaude,
@@ -183,6 +184,7 @@ let externalSubmissions = 0;
 let interrupted = false;
 let stage = "preparation";
 let failureStage;
+let failureCode;
 let permissionStatus;
 let helperSha256;
 let buildHashes;
@@ -367,7 +369,14 @@ async function reviewedTurn({ kind = "apps", allow, instructionsText, prompt }) 
     (kind === "apps" && requested.apps[0].appId !== appId)
   )
     throw new Error("Unexpected certification consent request.");
-  const visible = await page.getByRole("dialog").isVisible();
+  // WebSocket delivery can precede React's popup replacement. Only observe
+  // computer-consent popups; a global strict locator can reject unrelated or
+  // overlapping exit-transition dialogs before the operator can review access.
+  const visible = await page.evaluate(() =>
+    [
+      ...document.querySelectorAll('[role="dialog"]:has([data-testid="computer-access-card"])'),
+    ].some((dialog) => dialog.checkVisibility()),
+  );
   await waitFor(
     async () => (await page.evaluate(() => window.__computerRehearsal.consentSettled)) === true,
     90000,
@@ -1572,8 +1581,9 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       await Promise.race([overlayPoll, delay(1000)]);
     }
   }
-} catch {
+} catch (cause) {
   failureStage = stage;
+  failureCode = rehearsalHarnessFailureCode(cause);
   process.exitCode = 1;
 } finally {
   restoreProcess();
@@ -1893,7 +1903,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         runtimeMode,
         state: passed ? "passed" : "failed",
         interrupted,
-        ...(failureStage ? { failureStage } : {}),
+        ...(failureStage ? { failureStage, failureCode } : {}),
         permissionStatus,
         nativeObservation,
         threadObservation,
