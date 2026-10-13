@@ -645,6 +645,21 @@ entry, argv and inherited IPC; it supplies no result, consent or execution permi
 It runs only in the guarded unsigned Codex approval diagnostics, is source-hashed,
 and must first pass a read-only live check. It provides diagnostic evidence only;
 installed candidates continue to require their separate observation driver.
+The [read-only Codex transport diagnostic](computer-certification/2026-10-14-macos-codex-mcp-transport-readonly-passed.json)
+passed on clean source `3df3c60a88`: three approval-required turns, one session,
+six successful tool-call HTTP responses, no consent, lease, capture or input, and
+confirmed cleanup. A separate other-method 405 response did not prevent these calls;
+it does not establish the cause of any previous failure.
+The [subsequent session-actions attempt](computer-certification/2026-10-14-macos-codex-session-actions-recorded-decline.json)
+records acceptance of Codex's app-access approval and genuine F5 app consent, followed
+by an explicit decline of Codex's activation approval, which the operator subsequently
+confirmed was intentional. That activation never reached
+the MCP endpoint or F5's session-actions dialog. The phase remains failed because the
+planned F5 denial and later allowed action were not exercised. No lease, capture or
+input occurred; cleanup succeeded. This decision receipt applies only to this attempt,
+not earlier attempts or the operator's earlier report. Neither diagnostic qualifies
+public release, and no mutation is retried automatically.
+
 Software validation also reproduced an existing reset-credit refresh race: a valid
 retry hint that elapsed before the route checked it dropped the retry entirely.
 The separate fix schedules a minimum 50 ms retry through the existing capability
