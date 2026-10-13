@@ -423,6 +423,19 @@ failures remain separate and content-free. These stronger assertions have regres
 coverage; the recorded machine runs above retain their original source and artifact
 identities rather than being relabelled as runs of the updated observer.
 
+The [merged-source automated cluster](computer-certification/2026-10-13-macos-cluster-merged-automated.json)
+at clean 42472bb485 passed formatting, lint, typecheck, full tests, the complete browser
+suite, desktop smoke, profile lifecycle, Swift tests, tier drift and helper protocol.
+It includes the same main-branch changes tested by PR CI and pins the complete Electron
+runtime. Packaging remains blocked by deferred signing. Provider homes were deliberately
+not configured for this software-only run; its readiness flags are not account-login
+results. The earlier remote Windows cleanup assertion assumed a process exit within
+20 ms. The test now separates deterministic missing-exit rejection from real process
+exit, retaining the actual POSIX nonresponsive-child case; no runtime deadline changed.
+The remote browser scroll failure passed both isolated and full local reproductions.
+No production scroll change or inferred failure cause is claimed; fresh remote CI must
+still confirm the pushed tree.
+
 Resume checks helper, provider binaries, desktop/server bundles, every served client
 asset, Electron runtime, prepared fixtures, source hashes, architecture and target identity.
 Installed identity covers the whole app, including frameworks and DLLs outside its
