@@ -25,6 +25,7 @@ import { RehearsalExternalClient } from "../src/computer/rehearsalExternalClient
 import { windowlessChecks } from "../../../scripts/computer-certification/windowlessEvidence.ts";
 import { runGrantMemory } from "../../../scripts/computer-certification/grantMemory.ts";
 import { runSessionActions } from "../../../scripts/computer-certification/sessionActions.ts";
+import { rehearsalMcpBackendBootstrap } from "../src/computer/rehearsalMcpTransport.ts";
 import {
   readChromiumFixture,
   createRehearsalChromiumFixture,
@@ -71,6 +72,7 @@ const chromiumFixture = args.includes("--chromium-fixture");
 const windowless = args.includes("--windows-closed");
 const grantMemory = args.includes("--grant-memory");
 const sessionActions = args.includes("--session-actions");
+const observeMcpTransport = provider === "codex" && (sessionActions || approvalDiagnostic);
 const runtimeMode = sessionActions || approvalDiagnostic ? "approval-required" : "full-access";
 const includesRealApps = realApps || clusterWorkflows;
 if (
@@ -431,6 +433,7 @@ try {
         ["rendererIndex", join(repo, "apps/web/dist/index.html")],
         ["rehearsalSource", join(desktopDir, "scripts/rehearse-computer-electron.mjs")],
         ["observerSource", join(desktopDir, "src/computer/rehearsalElectronObservation.ts")],
+        ["transportObserverSource", join(desktopDir, "src/computer/rehearsalMcpTransport.ts")],
         ["responseSource", join(desktopDir, "src/computer/rehearsalResponses.ts")],
         ["externalClientSource", join(desktopDir, "src/computer/rehearsalExternalClient.ts")],
         ["grantMemorySource", join(repo, "scripts/computer-certification/grantMemory.ts")],
@@ -644,6 +647,26 @@ try {
       ),
       { mode: 0o600, flag: "wx" },
     );
+  const codexBackendLaunch = join(root, "codex-backend-launch.cjs");
+  if (observeMcpTransport) {
+    const transportObserver = join(root, "mcp-transport-observer.cjs");
+    await exec(
+      "bun",
+      [
+        "build",
+        join(desktopDir, "src/computer/rehearsalMcpTransport.ts"),
+        "--target=node",
+        "--format=cjs",
+        `--outfile=${transportObserver}`,
+      ],
+      { timeout: 30000 },
+    );
+    await writeFile(
+      codexBackendLaunch,
+      rehearsalMcpBackendBootstrap(join(repo, "apps/server/dist/index.mjs"), transportObserver),
+      { mode: 0o600, flag: "wx" },
+    );
+  }
   await writeFile(
     wrapper,
     `
@@ -682,10 +705,10 @@ windowless.mutationAdmissions++;windowless.inputWithWindow||=appWindows().length
 const cp=require('node:child_process'),spawn=cp.spawn;
 cp.spawn=function(...args){
 ${
-  provider === "claude"
+  provider === "claude" || observeMcpTransport
     ? `if(args[2]?.env?.F5_DESKTOP_COMPUTER_HOST==='ipc'&&Array.isArray(args[1])&&typeof args[1][0]==='string'){
 if(args[1][0]!==${JSON.stringify(join(repo, "apps/server/dist/index.mjs"))})throw new Error('Unexpected rehearsal backend entry');
-args[1]=[${JSON.stringify(claudeBackendLaunch)},...args[1].slice(1)];}
+args[1]=[${JSON.stringify(provider === "claude" ? claudeBackendLaunch : codexBackendLaunch)},...args[1].slice(1)];}
 `
     : ""
 }
@@ -1680,6 +1703,10 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     nativeObservation.backendLifecycle = [
       ...new Set([...stdout.backendLifecycle, ...stderr.backendLifecycle]),
     ].sort();
+    const transport = [...stdout.mcpTransport, ...stderr.mcpTransport];
+    nativeObservation.mcpTransport = transport.slice(0, 128);
+    nativeObservation.mcpTransportOverflow =
+      stdout.mcpTransportOverflow || stderr.mcpTransportOverflow || transport.length > 128;
   }
   if (includesRealApps && application)
     realAppObservation = await application

@@ -72,10 +72,7 @@
   },
   "failureStage": "session-actions-denial",
   "failureCode": "timeout",
-  "submittedRuntimeModes": [
-    "approval-required",
-    "approval-required"
-  ],
+  "submittedRuntimeModes": ["approval-required", "approval-required"],
   "composerSubmissions": 2,
   "providerActivityCounts": {
     "observed": true,

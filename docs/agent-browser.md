@@ -631,6 +631,28 @@ The observer now counts only schema-validated accept, decline and cancel decisio
 with an explicit unknown bucket for missing or malformed decisions. This adds no
 prompt contents or authorization behavior and cannot retroactively classify a failed
 attempt. No further live retry starts without fresh readiness.
+The operator subsequently reported approving Codex's tool call in that attempt;
+this is a human report, not a captured transport decision. Before another input run,
+the development diagnostic now observes the real computer MCP HTTP endpoint as well
+as canonical approval decisions. Its receipts contain only method categories, status,
+session-header presence, bounded/decoded flags and known outcome codes. Raw request
+and response bytes remain transient, capped at 64 KiB and discarded after decoding;
+tokens, arguments, images and error text never leave the observer. Fixed outcomes
+distinguish expired MCP sessions, credential refusal, RPC errors and tagged tool
+errors without guessing their cause. Tests compare actual HTTP bytes, headers and
+callbacks, including a throwing diagnostic sink. The wrapper preserves the production
+entry, argv and inherited IPC; it supplies no result, consent or execution permit.
+It runs only in the guarded unsigned Codex approval diagnostics, is source-hashed,
+and must first pass a read-only live check. It provides diagnostic evidence only;
+installed candidates continue to require their separate observation driver.
+Software validation also reproduced an existing reset-credit refresh race: a valid
+retry hint that elapsed before the route checked it dropped the retry entirely.
+The separate fix schedules a minimum 50 ms retry through the existing capability
+throttle; it keeps the real five-second probe gate. The forced expired-hint regression
+fails before the fix and passes after it, alongside all six original cases and their
+unchanged exact probe-count assertions. This usage fix also applies when computer use
+is disabled and provides no computer-control certification evidence. WebSocket test
+connection failures now retain their original cause for complete diagnostics.
 
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;

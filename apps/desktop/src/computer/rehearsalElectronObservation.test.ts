@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import type { ComputerAutomationRequest } from "@t3tools/contracts";
+import { MCP_DIAGNOSTIC_PREFIX } from "./rehearsalMcpTransport";
 import {
   ElectronRehearsalObservation,
   rehearsalProviderErrorCodes,
@@ -7,6 +8,34 @@ import {
   rehearsalSessionErrorCode,
   rehearsalHarnessFailureCode,
 } from "./rehearsalElectronObservation";
+
+it("validates bounded transport diagnostics and discards extra private fields", () => {
+  const receipt = {
+    method: "tools/call",
+    sessionHeader: true,
+    status: 404,
+    bounded: true,
+    requestDecoded: true,
+    responseDecoded: true,
+    outcome: "expired-session",
+    completed: true,
+    secret: "PRIVATE_SENTINEL",
+  };
+  const observer = new ElectronRehearsalObservation();
+  observer.backendLog(MCP_DIAGNOSTIC_PREFIX.slice(0, 8));
+  observer.backendLog(MCP_DIAGNOSTIC_PREFIX.slice(8) + JSON.stringify(receipt) + "\n");
+  expect(observer.snapshot().mcpTransport).toHaveLength(1);
+  expect(observer.snapshot().mcpTransport[0]?.outcome).toBe("expired-session");
+  expect(JSON.stringify(observer.snapshot())).not.toContain("PRIVATE_SENTINEL");
+  observer.backendLog(
+    MCP_DIAGNOSTIC_PREFIX + JSON.stringify({ ...receipt, outcome: "PRIVATE_SENTINEL" }) + "\n",
+  );
+  expect(observer.snapshot().mcpTransport).toHaveLength(1);
+  expect(observer.snapshot().mcpTransportOverflow).toBe(true);
+  for (let i = 0; i < 130; i++)
+    observer.backendLog(MCP_DIAGNOSTIC_PREFIX + JSON.stringify(receipt) + "\n");
+  expect(observer.snapshot().mcpTransport).toHaveLength(128);
+});
 
 it("keeps provider tool and approval diagnostics bounded and content-free", () => {
   const events = [

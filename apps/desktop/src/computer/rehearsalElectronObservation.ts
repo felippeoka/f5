@@ -10,6 +10,7 @@ import {
   type ComputerAutomationRequest,
 } from "@t3tools/contracts";
 import { RehearsalResponses, rehearsalExecutionCode } from "./rehearsalResponses";
+import { MCP_DIAGNOSTIC_PREFIX, RehearsalMcpTransportReceipt } from "./rehearsalMcpTransport";
 
 /** Development-only IPC observer. Never changes messages or keeps raw tool I/O. */
 export class ElectronRehearsalObservation {
@@ -44,18 +45,42 @@ export class ElectronRehearsalObservation {
   private restartLinesRemaining = 0;
   private readonly backendRestarts: Array<{ reasons: string[] }> = [];
   private readonly backendLifecycle = new Set<string>();
+  private readonly mcpTransport: RehearsalMcpTransportReceipt[] = [];
+  private mcpTransportOverflow = false;
   /** Observe existing backend stdout without retaining text, paths or IDs. */
   backendLog(chunk: string): void {
     this.backendLogBuffer += chunk;
     if (this.backendLogBuffer.length > 64 * 1024) {
       this.backendLogBuffer = "";
       this.restartLinesRemaining = 0;
+      this.mcpTransportOverflow = true;
       return;
     }
     let end;
     while ((end = this.backendLogBuffer.indexOf("\n")) >= 0) {
       const line = this.backendLogBuffer.slice(0, end).replace(/\u001b\[[0-9;]*m/g, "");
       this.backendLogBuffer = this.backendLogBuffer.slice(end + 1);
+      if (line.startsWith(MCP_DIAGNOSTIC_PREFIX)) {
+        try {
+          const receipt: unknown = JSON.parse(line.slice(MCP_DIAGNOSTIC_PREFIX.length));
+          if (!Schema.is(RehearsalMcpTransportReceipt)(receipt) || this.mcpTransport.length >= 128)
+            this.mcpTransportOverflow = true;
+          else
+            this.mcpTransport.push({
+              method: receipt.method,
+              sessionHeader: receipt.sessionHeader,
+              status: receipt.status,
+              bounded: receipt.bounded,
+              requestDecoded: receipt.requestDecoded,
+              responseDecoded: receipt.responseDecoded,
+              completed: receipt.completed,
+              outcome: receipt.outcome,
+            });
+        } catch {
+          this.mcpTransportOverflow = true;
+        }
+        continue;
+      }
       for (const [message, code] of [
         ["provider launch identity changed; replacing active session", "launch-identity-changed"],
         [
@@ -239,6 +264,8 @@ export class ElectronRehearsalObservation {
       requestSessions: this.requestSessions.map((request) => ({ ...request })),
       backendRestarts: this.backendRestarts.map((restart) => ({ reasons: [...restart.reasons] })),
       backendLifecycle: [...this.backendLifecycle].sort(),
+      mcpTransport: this.mcpTransport.map((receipt) => ({ ...receipt })),
+      mcpTransportOverflow: this.mcpTransportOverflow,
       grantChanges: this.grantChanges,
       lastGrantCount: this.lastGrantCount,
       operations: this.operations.map((operation) => ({ ...operation })),

@@ -131,6 +131,7 @@ export async function identify(target: Target): Promise<Identity> {
   for (const name of [
     "rehearsalExternalClient",
     "rehearsalElectronObservation",
+    "rehearsalMcpTransport",
     "rehearsalFixture",
     "rehearsalResponses",
   ])
