@@ -1110,6 +1110,24 @@ renderer. It retains the same installed-build, signing, real-app, Windows, mixed
 and provider-backend limitations; it does not open release gates or replace the original
 failed reports.
 
+The [current-helper frozen-main attempt](computer-certification/2026-10-13-macos-current-helper-electron-main-stop-no-chord-attempt.json)
+at clean `a21530116b` used helper
+`42e5f28a123a74b947ce93d0962494c497ab5f889fb68f6576c3ceb3793e48c5`, freshly
+built Electron/server/renderer artifacts, and the two-display environment. Real human
+consent settled and the isolated Electron main was OS-verified frozen for 703.4 ms.
+Physical input was recognized 492.0–493.3 ms after the freeze began, with 1.2 ms clock
+uncertainty. Both recorded emission and app-delivery tails after recognition were 0 ms.
+The typing operation returned `Interrupted(user-input)`.
+
+The overall attempt remains failed/incomplete: neither helper nor independent fixture
+observer recorded the full chord. The runner stopped while waiting for chord recognition,
+before the quiet-tail/frontmost receipt and subsequent paused-mutation refusal checks.
+Those unperformed checks must not be interpreted as measured failures or passed cleanup
+proof. No reason for the absent chord is established by this report. This is narrow
+physical-input auto-pause evidence during a verified main freeze, not a current-binary
+kill-chord certification. The earlier passing stop results remain pinned to their older
+helper hashes. All release gates remain closed; signing stays deferred.
+
 Coordinate with the operator before launching. The real consent dialog must be answered
 by a human for the single synthetic fixture. The operator then leaves input idle and
 follows the window's instructions for Pause and Resume. Turns go through the real
