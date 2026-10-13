@@ -888,6 +888,16 @@ external display and the helper suspended throughout. It used uncommitted fixes 
 helper `42e5f28a123a74b947ce93d0962494c497ab5f889fb68f6576c3ceb3793e48c5`;
 the report's actual binary hash is authoritative. It is narrow capture evidence only.
 
+The [clean background capture run](computer-certification/2026-10-13-macos-background-capture-clean-passed.json)
+at `e205dbe2b4` passed both displays with the same helper, a positive synthetic marker
+on the external display, and every decoded pixel neutral on the laptop display. The
+helper remained suspended. Formatting, lint, typecheck, all 36 Swift tests, 17 targeted
+helper/diagnostic tests and the universal build/protocol check passed. The initial full
+suite hit a WebSocket setup connection failure; all 119 WebSocket cases then passed in
+isolation, followed by a clean-environment full-suite pass including all 136 exhaustive
+Git tests. No WebSocket implementation or test was changed. The full Terminal/Chrome
+protection checkpoint and broader release certification remain pending.
+
 The helper rehearsal's `--privacy-only` mode runs the existing pixel-verification
 checks without its semantic/keyboard/pointer actions. It uses only two temporary
 synthetic apps with scripted helper-level grants: a positive control includes both
