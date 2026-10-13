@@ -1,5 +1,7 @@
 import type { BrowserWindow, WebContents } from "electron";
 
+import { createDeferredNavigationStopper, gateMainFrameRequests } from "./previewNavigationGuard";
+
 /**
  * The parent tab's live navigation policy. Popups opened while the agent drives the tab
  * are bound to it for their whole lifetime; popups the user opens stay with the user.
@@ -16,19 +18,6 @@ export interface PreviewPopupPolicy {
 export interface PreviewPopupController {
   /** Closes agent popups whose page is no longer allowed (after a policy change). */
   readonly enforcePolicy: () => void;
-}
-
-/**
- * Cancels a navigation from a `did-start-navigation` listener. Electron runs that listener
- * inside Chromium's DidStartNavigation observer loop, and stopping there frees the
- * NavigationRequest that later observers still read: an attached DevTools session (debugger,
- * screencast, color-scheme emulation) then segfaults the main process. The navigation cannot
- * commit within the current task, so stopping on the next turn still cancels it.
- */
-export function stopNavigationAfterObservers(contents: WebContents): void {
-  setImmediate(() => {
-    if (!contents.isDestroyed()) contents.stop();
-  });
 }
 
 function httpUrl(url: string): URL | null {
@@ -84,11 +73,14 @@ export function registerPreviewWindowOpen(
     const agent = nextPopupIsAgent && policy !== undefined;
     nextPopupIsAgent = false;
     if (agent) agentPopups.add(child);
-    const refuse = (url: string): boolean => {
+    const isRefused = (url: string): boolean => {
       const target = httpUrl(url);
-      if (!target) return true;
-      if (!agent || policy!.isAllowedUrl(target.href)) return false;
-      policy!.onBlocked(target.href);
+      return !target || (agent && !policy!.isAllowedUrl(target.href));
+    };
+    const refuse = (url: string): boolean => {
+      if (!isRefused(url)) return false;
+      const target = httpUrl(url);
+      if (target) policy!.onBlocked(target.href);
       return true;
     };
     child.webContents.setWindowOpenHandler(({ url }) => {
@@ -100,13 +92,21 @@ export function registerPreviewWindowOpen(
       if (refuse(url)) event.preventDefault();
     });
     if (agent) {
+      const navigationStopper = createDeferredNavigationStopper(child.webContents);
+      gateMainFrameRequests(child.webContents, isRefused);
       child.webContents.on("will-redirect", (details) => {
         if (details.isMainFrame && refuse(details.url)) details.preventDefault();
       });
       child.webContents.on("did-start-navigation", (details) => {
-        if (details.isMainFrame && !details.isSameDocument && refuse(details.url)) {
-          stopNavigationAfterObservers(child.webContents);
-        }
+        if (!details.isMainFrame || details.isSameDocument) return;
+        navigationStopper.navigationStarted();
+        if (refuse(details.url)) navigationStopper.stopCurrentNavigation();
+      });
+      // Fail closed if a refused page commits anyway; nothing else rechecks a popup's page
+      // until the policy changes.
+      child.webContents.on("did-navigate", (_event, url) => {
+        if (url === "about:blank" || !refuse(url)) return;
+        if (!child.isDestroyed()) child.destroy();
       });
     }
     const close = () => {

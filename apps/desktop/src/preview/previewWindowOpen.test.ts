@@ -61,24 +61,40 @@ function popupHarness(options: { agent: boolean; allowed: (url: string) => boole
       onBlocked: blocked,
     },
   );
+  let nextWebContentsId = 1;
   const makeChild = (url: string) => {
     const listeners = new Map<string, (...args: any[]) => void>();
+    let requestGate: any;
     const child = {
       once: vi.fn(),
       isDestroyed: vi.fn(() => false),
       destroy: vi.fn(),
       webContents: {
+        id: nextWebContentsId++,
+        session: {
+          webRequest: { onBeforeRequest: vi.fn((_filter, listener) => (requestGate = listener)) },
+        },
         setWindowOpenHandler: vi.fn(),
         on: vi.fn((event: string, listener: (...args: any[]) => void) =>
           listeners.set(event, listener),
         ),
+        once: vi.fn(),
+        off: vi.fn(),
         getURL: () => url,
         isDestroyed: vi.fn(() => false),
         stop: vi.fn(),
       },
     };
     created(child);
-    return { child, listeners };
+    const requestCancelled = (requestUrl: string) => {
+      let cancel: boolean | undefined;
+      requestGate(
+        { url: requestUrl, webContentsId: child.webContents.id },
+        (response: { cancel: boolean }) => (cancel = response.cancel),
+      );
+      return cancel;
+    };
+    return { child, listeners, requestCancelled };
   };
   return { handler: () => handler, makeChild, external, blocked, controller, state };
 }
@@ -116,21 +132,54 @@ it("keeps agent-driven popups inside the parent tab's allowlist for their whole 
   expect(child.destroy).toHaveBeenCalled();
 });
 
+const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+const mainFrameStart = (url: string) => ({ url, isMainFrame: true, isSameDocument: false });
+
 it("stops a refused agent popup navigation only after did-start-navigation returns", async () => {
   const harness = popupHarness({ agent: true, allowed: (url) => url.includes("login") });
   harness.handler()({ url: "https://login.example.test/", disposition: "new-window" });
   const { child, listeners } = harness.makeChild("https://login.example.test/");
 
-  listeners.get("did-start-navigation")!({
-    url: "https://evil.test/",
-    isMainFrame: true,
-    isSameDocument: false,
-  });
-  // Stopping inside Chromium's observer loop frees the request DevTools still reads.
+  listeners.get("did-start-navigation")!(mainFrameStart("https://evil.test/"));
+  // Stopping inside Chromium's DidStartNavigation frees the request it is still using.
   expect(child.webContents.stop).not.toHaveBeenCalled();
   expect(harness.blocked).toHaveBeenCalledWith("https://evil.test/");
-  await new Promise((resolve) => setImmediate(resolve));
+  await nextTurn();
   expect(child.webContents.stop).toHaveBeenCalledTimes(1);
+});
+
+it("never lets a pending stop cancel a newer allowed popup navigation", async () => {
+  const harness = popupHarness({ agent: true, allowed: (url) => url.includes("login") });
+  harness.handler()({ url: "https://login.example.test/", disposition: "new-window" });
+  const { child, listeners } = harness.makeChild("https://login.example.test/");
+
+  listeners.get("did-start-navigation")!(mainFrameStart("https://evil.test/"));
+  listeners.get("did-start-navigation")!(mainFrameStart("https://login.example.test/next"));
+  await nextTurn();
+  expect(child.webContents.stop).not.toHaveBeenCalled();
+});
+
+it("cancels refused agent popup requests before they reach the network", () => {
+  const harness = popupHarness({ agent: true, allowed: (url) => url.includes("login") });
+  harness.handler()({ url: "https://login.example.test/", disposition: "new-window" });
+  const { requestCancelled } = harness.makeChild("https://login.example.test/");
+
+  expect(requestCancelled("https://evil.test/")).toBe(true);
+  expect(requestCancelled("https://login.example.test/next")).toBe(false);
+  // The request gate only checks; the did-start-navigation backstop records the block.
+  expect(harness.blocked).not.toHaveBeenCalled();
+});
+
+it("closes an agent popup whose refused page commits anyway", () => {
+  const harness = popupHarness({ agent: true, allowed: (url) => url.includes("login") });
+  harness.handler()({ url: "https://login.example.test/", disposition: "new-window" });
+  const { child, listeners } = harness.makeChild("https://login.example.test/");
+
+  listeners.get("did-navigate")!({}, "https://login.example.test/next");
+  expect(child.destroy).not.toHaveBeenCalled();
+  listeners.get("did-navigate")!({}, "https://evil.test/");
+  expect(child.destroy).toHaveBeenCalledTimes(1);
+  expect(harness.blocked).toHaveBeenCalledWith("https://evil.test/");
 });
 
 it("leaves user-opened sign-in popups with the user", () => {
@@ -145,4 +194,7 @@ it("leaves user-opened sign-in popups with the user", () => {
   harness.controller.enforcePolicy();
   expect(child.destroy).not.toHaveBeenCalled();
   expect(harness.blocked).not.toHaveBeenCalled();
+  // User popups get no request gate or navigation backstop.
+  expect(child.webContents.session.webRequest.onBeforeRequest).not.toHaveBeenCalled();
+  expect(listeners.has("did-start-navigation")).toBe(false);
 });
