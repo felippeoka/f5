@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { readFile, readdir, realpath, lstat } from "node:fs/promises";
-import { join, relative, isAbsolute, resolve } from "node:path";
+import { readFile, readdir, realpath, lstat, readlink } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { dirname, join, relative, isAbsolute, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { Identity } from "./model";
 import type { Platform } from "./catalog";
@@ -11,18 +12,38 @@ export const hashFile = async (path: string) =>
   createHash("sha256")
     .update(await readFile(path))
     .digest("hex");
-async function hashTree(root: string): Promise<string> {
+export async function hashTree(root: string, allowBundleLinks = false): Promise<string> {
   const hash = createHash("sha256");
+  const canonicalRoot = await realpath(root);
+  const field = (value: string) => {
+    const bytes = Buffer.from(value);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(bytes.length);
+    hash.update(length);
+    hash.update(bytes);
+  };
   async function walk(path: string) {
     for (const entry of (await readdir(path, { withFileTypes: true })).sort((a, b) =>
       a.name.localeCompare(b.name, "en"),
     )) {
       const full = join(path, entry.name);
-      hash.update(relative(root, full));
-      if (entry.isSymbolicLink())
-        throw new Error("Unexpected symbolic link in certification payload");
-      if (entry.isDirectory()) await walk(full);
-      else if (entry.isFile()) hash.update(await readFile(full));
+      field(relative(root, full));
+      if (entry.isSymbolicLink()) {
+        if (!allowBundleLinks) throw new Error("Unexpected symbolic link in certification payload");
+        const destination = relative(canonicalRoot, await realpath(full));
+        if (destination === ".." || destination.startsWith(".." + sep) || isAbsolute(destination))
+          throw new Error("Certification bundle link escaped its root");
+        // Framework aliases are recorded but not traversed twice or allowed to
+        // create cycles. Their real files are hashed at their ordinary paths.
+        field("link");
+        field(await readlink(full));
+      } else if (entry.isDirectory()) {
+        field("directory");
+        await walk(full);
+      } else if (entry.isFile()) {
+        field("file");
+        field(await hashFile(full));
+      } else throw new Error("Unsupported certification payload entry");
     }
   }
   await walk(root);
@@ -65,7 +86,7 @@ export async function identify(target: Target): Promise<Identity> {
     const rel = relative(await realpath(resourceRoot), helper);
     if (rel.startsWith("..") || isAbsolute(rel))
       throw new Error("Installed helper escaped resources");
-    files["installed-payload"] = await hashTree(resourceRoot);
+    files["installed-payload"] = await hashTree(target.app, true);
     const executableRoot =
       target.platform === "darwin" ? join(target.app, "Contents/MacOS") : target.app;
     for (const name of (await readdir(executableRoot)).sort()) {
@@ -81,6 +102,14 @@ export async function identify(target: Target): Promise<Identity> {
     // Hash the served client, including every JS/CSS asset, not only web/dist/index.html.
     files["served-client"] = await hashTree(join(target.repo, "apps/server/dist/client"));
     files["desktop-preload"] = await hashTree(join(target.repo, "apps/desktop/dist-electron"));
+    const runtime: unknown = createRequire(join(target.repo, "apps/desktop/package.json"))(
+      "electron",
+    );
+    if (typeof runtime !== "string") throw new Error("Invalid Electron runtime");
+    files["electron-runtime"] = await hashTree(
+      target.platform === "darwin" ? resolve(dirname(runtime), "../..") : dirname(runtime),
+      true,
+    );
   }
   files["suite-source"] = await hashTree(join(target.repo, "scripts/computer-certification"));
   if (target.fixtureDirectory && process.platform === target.platform)

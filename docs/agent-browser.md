@@ -424,7 +424,10 @@ coverage; the recorded machine runs above retain their original source and artif
 identities rather than being relabelled as runs of the updated observer.
 
 Resume checks helper, provider binaries, desktop/server bundles, every served client
-asset, prepared fixtures, source hashes, architecture and target identity. Changed
+asset, Electron runtime, prepared fixtures, source hashes, architecture and target identity.
+Installed identity covers the whole app, including frameworks and DLLs outside its
+Resources directory. Framework aliases are hashed without recursive traversal and
+must resolve inside the app; escaping or malformed links are refused. Changed
 identity requires a new suite. A live runner lock cannot be stolen. Cleanup requires
 actual process/document receipts; sending a signal alone does not qualify. Failed
 cleanup or uncertain receipts halt execution before another input phase. Recovery
