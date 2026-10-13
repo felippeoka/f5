@@ -117,6 +117,13 @@ export async function identify(target: Target): Promise<Identity> {
   files["chromium-fixture-source"] = await hashTree(
     join(target.repo, "apps/desktop/native/electron"),
   );
+  files["windows-fixture-source"] = await hashTree(
+    join(target.repo, "apps/desktop/native/windows/fixture/src"),
+  );
+  for (const name of ["Cargo.toml", "Cargo.lock"])
+    files["windows-fixture-" + name.replace(".", "-")] = await hashFile(
+      join(target.repo, "apps/desktop/native/windows/fixture", name),
+    );
   files["electron-runner"] = await hashFile(
     join(target.repo, "apps/desktop/scripts/rehearse-computer-electron.mjs"),
   );

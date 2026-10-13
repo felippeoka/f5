@@ -448,6 +448,15 @@ export function inventory(platform: Platform, providers: readonly Provider[]) {
   ).flatMap((scenario) =>
     (scenario.provider ? providers : [undefined]).map((provider) => ({
       ...scenario,
+      ...(platform === "win32" && scenario.id === "native-tests"
+        ? {
+            expectedChecks: [
+              ...scenario.expectedChecks,
+              "native-fixture-tests",
+              "native-fixture-protocol",
+            ],
+          }
+        : {}),
       key: provider ? scenario.id + "." + provider : scenario.id,
       ...(provider ? { selectedProvider: provider } : {}),
     })),

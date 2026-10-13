@@ -44,3 +44,4 @@ apps/desktop/dist-native/
 apps/desktop/native-bin/
 apps/desktop/native/macos/.build/
 apps/desktop/native/windows/target/
+apps/desktop/native/windows/fixture/target/

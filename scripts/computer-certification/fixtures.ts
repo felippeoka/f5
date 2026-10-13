@@ -6,6 +6,7 @@ import type { Target } from "./identity";
 import { cleanEnvironment } from "./process";
 import { record } from "./model";
 import { prepareElectronFixture } from "./electronFixture";
+import { prepareWindowsFixtures } from "./windowsFixtures";
 
 export const FIXTURE_NAMES = [
   "ComputerControlFixture",
@@ -58,6 +59,7 @@ export async function probeFixtureProtocols(
 }
 /** Compile once before readiness. Never starts an app, grant, permit or input. */
 export async function prepareFixtures(target: Target, directory: string): Promise<boolean> {
+  if (target.platform === "win32") return prepareWindowsFixtures(target, directory);
   if (process.platform !== "darwin" || target.platform !== "darwin") return false;
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const exec = promisify(execFile);

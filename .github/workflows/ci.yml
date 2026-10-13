@@ -135,6 +135,11 @@ jobs:
           cargo test --manifest-path apps/desktop/native/windows/Cargo.toml
           node scripts/build-computer-helper.ts --platform win --arch x64 --check
 
+      - name: Build and check synthetic Windows fixture without opening windows
+        run: |
+          cargo test --locked --manifest-path apps/desktop/native/windows/fixture/Cargo.toml
+          cargo run --locked --manifest-path apps/desktop/native/windows/fixture/Cargo.toml -- --check
+
       - name: Typecheck
         run: bun run typecheck
 

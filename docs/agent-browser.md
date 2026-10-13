@@ -380,6 +380,37 @@ target's bundled helper. Specifying --platform win32 --arch x64 prepares the Win
 inventory on another host without pretending its software or machine checks ran on
 Windows. A new suite must be prepared on the actual Windows machine.
 
+Windows preparation now builds a separate Rust/Win32 synthetic fixture with native
+editable/password controls, a button and granted/ungranted capture markers. Shaped
+and layered click-through modes provide owned recipient fixtures. Its default command
+refuses to open a window: only explicit `--run` may do so, and `--check` reports fixed
+metadata without creating windows, capturing, requesting access or posting input.
+Stdin accepts only status and closure of that fixture's own window. Receipts contain
+bounded counters and an exact-synthetic-Unicode boolean, never field contents.
+The fixture source, Cargo manifest/lock and prepared binary are included in identity
+hashes. Hosted Windows readiness builds/tests it and invokes its metadata-only branch.
+Cross-target compilation and portable receipt tests do not establish UIA behavior,
+recipient safety, capture alignment or real input delivery. The interactive Windows
+driver and cloaked/elevated/packaged-app, composition and monitor scenarios still need
+implementation and execution on an interactive machine; preparation grants no proof
+for those coverage rows.
+
+The hosted Windows storage failure also exposed a SQLite adapter issue: its normal
+zero-column execution used `StatementSync.run()`, which stops after one intermediate
+step of `incremental_vacuum(N)`. The adapter now drains normal/positional execution
+with `all()` while retaining its empty public result and raw write metadata. Real
+SQLite regressions fail on the original adapter and pass on the fix; the existing
+bounded vacuum/page-count assertions and native interruption thresholds are unchanged.
+
+For the repeated Linux historical-timeline assertions, the exact CI source passed
+the isolated and complete 687-test browser suite in a Linux container. A controlled
+stale anchor reproduced the missing historical row and plan button; resetting only
+the reused browser fixture thread's module-level anchor made both pass. The full-app
+test setup now resets that state along with localStorage and its other stores. No
+production timeline behavior or assertion changed. Remote CI must still confirm the
+fix under its original scheduling conditions; a local passing rerun alone is not a
+release pass.
+
 Before input, current permission/account prerequisites and all executable identities
 are checked again. In a terminal, the runner waits for READY. An orchestrating agent
 may use --operator-ready only after an explicit, current human readiness response;

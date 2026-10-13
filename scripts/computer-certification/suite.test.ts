@@ -111,6 +111,19 @@ describe("certification inventory and coverage", () => {
       false,
     );
   });
+  it("includes native Windows fixture tests and no-window protocol checks in readiness", () => {
+    const s = inventory("win32", manifest.providers).find((item) => item.id === "native-tests")!;
+    expect(s.expectedChecks).toContain("native-fixture-tests");
+    expect(s.expectedChecks).toContain("native-fixture-protocol");
+    const commands = commandsFor(s, { repo: "/repo", platform: "win32" }, "/result", {}, "win32");
+    if (typeof commands === "string") throw new Error("No native readiness driver");
+    const probe = commands.find((item) => item.check === "native-fixture-protocol");
+    expect(probe?.args).toContain("--check");
+    expect(probe?.args).not.toContain("--run");
+    expect(commandsFor(s, { repo: "/repo", platform: "win32" }, "/result", {}, "darwin")).toBe(
+      "interactive-platform-unavailable",
+    );
+  });
   it("clusters UI and real-app checks with separate acceptance sets", () => {
     const s = scenario("fixture-workflow.codex");
     expect(scenario("real-apps.codex").expectedChecks).toContain(

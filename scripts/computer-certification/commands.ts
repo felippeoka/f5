@@ -83,6 +83,34 @@ export function commandsFor(
         check: "helper-protocol",
         timeoutMs: 300000,
       },
+      ...(target.platform === "win32"
+        ? [
+            {
+              executable: "cargo",
+              args: [
+                "test",
+                "--locked",
+                "--manifest-path",
+                "apps/desktop/native/windows/fixture/Cargo.toml",
+              ],
+              check: "native-fixture-tests",
+              timeoutMs: 300000,
+            },
+            {
+              executable: "cargo",
+              args: [
+                "run",
+                "--locked",
+                "--manifest-path",
+                "apps/desktop/native/windows/fixture/Cargo.toml",
+                "--",
+                "--check",
+              ],
+              check: "native-fixture-protocol",
+              timeoutMs: 300000,
+            },
+          ]
+        : []),
     ];
   }
   if (s.runner === "builtin") return "supported-launch-consent-veto-unavailable";
