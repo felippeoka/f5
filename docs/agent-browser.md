@@ -660,6 +660,18 @@ input occurred; cleanup succeeded. This decision receipt applies only to this at
 not earlier attempts or the operator's earlier report. Neither diagnostic qualifies
 public release, and no mutation is retried automatically.
 
+The [fresh Codex session-actions phase](computer-certification/2026-10-14-macos-session-actions-codex-passed.json)
+subsequently passed all 18 correlated checks on clean source `cd8c79d9b4` with the
+same helper hash. Four genuine approval-required turns stayed in one provider session.
+Codex's named calls were approved; F5's separate session-actions denial returned
+`NotGranted` without acquiring a lease or sending input. The subsequent genuine F5
+allow produced exactly one successful activation and capture; one independently
+observed semantic button press succeeded in the next turn without another F5
+session-actions prompt. Stop cleared grants, the operator acknowledged Finish, and
+cleanup was confirmed. Both providers now have passing unsigned session-actions
+proof. Prior failures remain preserved. This does not qualify signed installed
+builds or the remaining independent privacy, recovery and display requirements.
+
 Software validation also reproduced an existing reset-credit refresh race: a valid
 retry hint that elapsed before the route checked it dropped the retry entirely.
 The separate fix schedules a minimum 50 ms retry through the existing capability
