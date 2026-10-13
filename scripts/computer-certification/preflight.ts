@@ -1,4 +1,4 @@
-import { spawn, execFile } from "node:child_process";
+import { spawn, execFile, type ExecFileOptions } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { access, mkdtemp, rm } from "node:fs/promises";
@@ -9,7 +9,28 @@ import { prepareRehearsalClaude } from "@t3tools/shared/computerRehearsalClaude"
 import { cleanEnvironment } from "./process";
 import { helperPath, signature, type Target } from "./identity";
 import { record } from "./model";
-import type { Launches } from "./commands";
+import type { Launches, ProviderLaunch } from "./commands";
+
+export async function codexAuthenticationReady(
+  launch: ProviderLaunch,
+  executeFile: (
+    binary: string,
+    args: readonly string[],
+    options: ExecFileOptions,
+  ) => Promise<{ stdout: string | Buffer; stderr: string | Buffer }> = promisify(execFile),
+) {
+  try {
+    await access(join(launch.home, "auth.json"));
+    const result = await executeFile(launch.binary, ["login", "status"], {
+      env: cleanEnvironment({ CODEX_HOME: launch.home }),
+      timeout: 15000,
+      maxBuffer: 8192,
+    });
+    return /logged in/i.test(result.stdout.toString() + result.stderr.toString());
+  } catch {
+    return false;
+  }
+}
 
 /** Never sends grants, permit, resume, capture or input. Starts and exits suspended. */
 export async function suspendedProbe(path: string) {
@@ -106,13 +127,7 @@ export async function preflight(target: Target, launches: Launches) {
       if (!found) continue;
       versions[provider] = found[0];
       if (provider === "codex") {
-        await access(join(launch.home, "auth.json"));
-        const auth = await exec(launch.binary, ["auth", "status"], {
-          env: cleanEnvironment({ CODEX_HOME: launch.home }),
-          timeout: 15000,
-          maxBuffer: 8192,
-        });
-        checks["codex-ready"] = /logged in/i.test(auth.stdout + auth.stderr);
+        checks["codex-ready"] = await codexAuthenticationReady(launch);
       } else {
         const root = await mkdtemp(join(tmpdir(), "f5-suite-claude-preflight-"));
         try {
