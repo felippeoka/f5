@@ -38,10 +38,20 @@ it("extracts restart flags from split backend logs without retaining messages or
     "arting provider session\n  threadId: PRIVATE_SENTINEL\n  shouldRestartForModelOptionsChange: true\n  shouldRestartForComputerUseChange: false\n",
   );
   observer.backendLog('  "runtimeModeChanged": true,\n  unknownFlag: true\n');
+  observer.backendLog(
+    "provider launch identity changed; replacing active session PRIVATE_SENTINEL\n",
+  );
+  observer.backendLog(
+    "provider service resumed provider session from persisted binding PRIVATE_SENTINEL\n",
+  );
   expect(observer.snapshot().backendRestarts).toEqual([
     { reasons: ["model-options-changed", "runtime-mode-changed"] },
   ]);
   expect(JSON.stringify(observer.snapshot())).not.toContain("PRIVATE_SENTINEL");
+  expect(observer.snapshot().backendLifecycle).toEqual([
+    "launch-identity-changed",
+    "persisted-session-resumed",
+  ]);
 });
 
 it("reports opaque session ordinals for native requests", () => {

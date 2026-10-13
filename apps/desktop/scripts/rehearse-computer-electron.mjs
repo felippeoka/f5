@@ -36,6 +36,7 @@ import {
   rehearsalProviderErrorCodes,
   rehearsalSessionErrorCode,
   rehearsalHarnessFailureCode,
+  ElectronRehearsalObservation,
 } from "../src/computer/rehearsalElectronObservation.ts";
 import {
   prepareRehearsalClaude,
@@ -55,7 +56,8 @@ const provider = arg("--provider") ?? "codex";
 const driver = provider === "claude" ? "claudeAgent" : "codex";
 const sourceHome = arg(provider === "claude" ? "--claude-home" : "--codex-home");
 const binary = arg(provider === "claude" ? "--claude-binary" : "--codex-binary");
-const statusOnly = args.includes("--status-only");
+const approvalDiagnostic = args.includes("--approval-diagnostic");
+const statusOnly = args.includes("--status-only") || approvalDiagnostic;
 const controlsOnly = args.includes("--controls-only");
 const actionsOnly = args.includes("--actions-only");
 const stopMain = args.includes("--stop-main");
@@ -68,7 +70,7 @@ const chromiumFixture = args.includes("--chromium-fixture");
 const windowless = args.includes("--windows-closed");
 const grantMemory = args.includes("--grant-memory");
 const sessionActions = args.includes("--session-actions");
-const runtimeMode = sessionActions ? "approval-required" : "full-access";
+const runtimeMode = sessionActions || approvalDiagnostic ? "approval-required" : "full-access";
 const includesRealApps = realApps || clusterWorkflows;
 if (
   process.platform !== "darwin" ||
@@ -78,6 +80,7 @@ if (
   !sourceHome ||
   !binary ||
   (diagnoseChord && !stopOnly) ||
+  (approvalDiagnostic && args.includes("--status-only")) ||
   (chromiumFixture &&
     (!fixtureBinDirectory ||
       stopOnly ||
@@ -191,6 +194,8 @@ let buildHashes;
 let repositoryCommit;
 let workingTreeDirty;
 let nativeObservation;
+const stdoutObservation = new ElectronRehearsalObservation();
+const stderrObservation = new ElectronRehearsalObservation();
 let threadObservation;
 let consentObservation;
 let providerErrorCodes;
@@ -314,7 +319,7 @@ const modelSelection = {
 async function startTurn(text) {
   if (interrupted) throw new Error("Rehearsal interrupted.");
   const snapshot = await rpc(ORCHESTRATION_WS_METHODS.getSnapshot);
-  if (sessionActions) {
+  if (sessionActions || approvalDiagnostic) {
     if (
       snapshot.threads.find((thread) => thread.id === threadId)?.runtimeMode !== "approval-required"
     )
@@ -684,7 +689,6 @@ const child=spawn.apply(this,args);
 if(child.pid){globalThis.__computerRehearsalChildPids.add(child.pid);
 child.once('exit',()=>globalThis.__computerRehearsalChildPids.delete(child.pid));}
 if(args[2]?.env?.F5_DESKTOP_COMPUTER_HOST==='ipc'){
-child.stdout?.on('data',chunk=>evidence.backendLog(chunk.toString()));
 child.on('message',m=>observe(m));
 const send=child.send.bind(child);child.send=function(m,...args){observe(m);
 return send(m,...args);};}
@@ -709,8 +713,14 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     },
     timeout: 60000,
   });
-  application.process().stdout?.resume();
-  application.process().stderr?.resume();
+  // Unpackaged backend stdio is inherited, so observe Electron's output pipes.
+  // Keep the two streams separate; only enums survive into the final report.
+  application
+    .process()
+    .stdout?.on("data", (chunk) => stdoutObservation.backendLog(chunk.toString()));
+  application
+    .process()
+    .stderr?.on("data", (chunk) => stderrObservation.backendLog(chunk.toString()));
   page = await application.firstWindow({ timeout: 60000 });
   await page
     .getByRole("button", { name: "Add your first project", exact: true })
@@ -842,7 +852,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     model: modelSelection.model,
     modelSelection,
     runtimeMode,
-    interactionMode: statusOnly ? "plan" : "default",
+    interactionMode: statusOnly && !approvalDiagnostic ? "plan" : "default",
     branch: null,
     worktreePath: null,
   });
@@ -971,6 +981,8 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       (await observer()).operations.filter(
         (entry) => entry.op === "listApps" && entry.outcome === "ok" && entry.validApps === true,
       ).length === 3;
+    if (approvalDiagnostic)
+      checks.approvalDiagnosticSameSession = (await observer()).sessionGenerationsObserved === 1;
     stage = "finished";
   } else {
     stage = "human-consent-and-first-turn";
@@ -1608,6 +1620,14 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
   process.off("SIGINT", halt);
   process.off("SIGTERM", halt);
   if (application) nativeObservation = await observer().catch(() => undefined);
+  if (nativeObservation) {
+    const stdout = stdoutObservation.snapshot();
+    const stderr = stderrObservation.snapshot();
+    nativeObservation.backendRestarts = [...stdout.backendRestarts, ...stderr.backendRestarts];
+    nativeObservation.backendLifecycle = [
+      ...new Set([...stdout.backendLifecycle, ...stderr.backendLifecycle]),
+    ].sort();
+  }
   if (includesRealApps && application)
     realAppObservation = await application
       .evaluate(() => globalThis.__computerRehearsalRealApps.snapshot())
@@ -1863,7 +1883,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
                   : stopOnly
                     ? `unsigned-real-electron-${provider}-${stopMain ? "main" : "renderer"}-frozen-physical-stop`
                     : statusOnly
-                      ? `unsigned-real-electron-${provider}-read-only-discovery-diagnostic`
+                      ? `unsigned-real-electron-${provider}-${approvalDiagnostic ? "approval-mode-" : ""}read-only-discovery-diagnostic`
                       : controlsOnly
                         ? `unsigned-real-electron-${provider}-human-consent-and-controls`
                         : actionsOnly
@@ -1887,6 +1907,9 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
               composerSubmissions,
               approvalModeVerifiedTurns,
             }
+          : {}),
+        ...(approvalDiagnostic
+          ? { approvalDiagnostic: true, approvalModeVerifiedTurns, composerSubmissions }
           : {}),
         ...(grantMemory
           ? { grantMemoryObservation, grantMemoryConsentReceipts, providerTailObserved }

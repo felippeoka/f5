@@ -42,6 +42,7 @@ export class ElectronRehearsalObservation {
   private backendLogBuffer = "";
   private restartLinesRemaining = 0;
   private readonly backendRestarts: Array<{ reasons: string[] }> = [];
+  private readonly backendLifecycle = new Set<string>();
   /** Observe existing backend stdout without retaining text, paths or IDs. */
   backendLog(chunk: string): void {
     this.backendLogBuffer += chunk;
@@ -54,6 +55,18 @@ export class ElectronRehearsalObservation {
     while ((end = this.backendLogBuffer.indexOf("\n")) >= 0) {
       const line = this.backendLogBuffer.slice(0, end).replace(/\u001b\[[0-9;]*m/g, "");
       this.backendLogBuffer = this.backendLogBuffer.slice(end + 1);
+      for (const [message, code] of [
+        ["provider launch identity changed; replacing active session", "launch-identity-changed"],
+        [
+          "provider service resumed provider session from persisted binding",
+          "persisted-session-resumed",
+        ],
+        ["provider service adopted existing provider session", "existing-session-adopted"],
+        ["ignored Claude stream exit because the session already stopped", "retired-stream-exit"],
+        ["claude session ended", "claude-session-ended"],
+      ] as const) {
+        if (line.includes(message)) this.backendLifecycle.add(code);
+      }
       if (line.includes("provider command reactor restarting provider session")) {
         if (this.backendRestarts.length >= 16) continue;
         this.backendRestarts.push({ reasons: [] });
@@ -224,6 +237,7 @@ export class ElectronRehearsalObservation {
       sessionGenerationsObserved: this.sessions.size,
       requestSessions: this.requestSessions.map((request) => ({ ...request })),
       backendRestarts: this.backendRestarts.map((restart) => ({ reasons: [...restart.reasons] })),
+      backendLifecycle: [...this.backendLifecycle].sort(),
       grantChanges: this.grantChanges,
       lastGrantCount: this.lastGrantCount,
       operations: this.operations.map((operation) => ({ ...operation })),
