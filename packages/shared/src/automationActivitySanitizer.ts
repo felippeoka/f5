@@ -226,7 +226,7 @@ export class AutomationEventSanitizer {
       if (depth > 32 || node === null || typeof node !== "object") return inherited ? {} : node;
       if (Array.isArray(node)) return node.map((entry) => visit(entry, depth + 1, inherited));
       const record = node as Record<string, unknown>;
-      const name =
+      let name =
         typeof record.toolName === "string"
           ? record.toolName
           : typeof record.name === "string"
@@ -234,6 +234,17 @@ export class AutomationEventSanitizer {
             : "";
       const itemId = record.tool_use_id ?? record.itemId ?? record.id;
       const provenance = lookup(record) ?? inherited;
+      // Codex reports the server and tool separately inside data.item. Rebuild
+      // the identity only for the server registered by this session's adapter.
+      if (
+        !name &&
+        provenance &&
+        (record.server ?? record.serverName) === provenance.serverName &&
+        typeof record.tool === "string" &&
+        record.tool.length > 0 &&
+        record.tool.length <= 200
+      )
+        name = `mcp__${provenance.serverName}__${record.tool}`;
       if (provenance && typeof itemId === "string") this.remember(threadId, itemId, provenance);
       if (record.type === "content_block_start" && typeof record.index === "number") {
         const block = record.content_block as Record<string, unknown> | undefined;
@@ -264,7 +275,7 @@ export class AutomationEventSanitizer {
         )
           result[key] = entry;
         else if (
-          ["payload", "event", "raw", "content_block"].includes(key) &&
+          ["payload", "event", "raw", "content_block", "data", "item"].includes(key) &&
           entry !== null &&
           typeof entry === "object"
         )

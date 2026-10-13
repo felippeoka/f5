@@ -3,6 +3,7 @@ import { automationEventSanitizer } from "@t3tools/shared/automationActivitySani
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAutomationRuntimeEventPreparer } from "./prepareAutomationRuntimeEvent";
+import { compactThreadActivityPayload } from "@t3tools/shared/orchestrationActivityPayload";
 
 const png =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
@@ -56,6 +57,19 @@ describe("computer event queue admission", () => {
       expect(serialized).not.toContain("PRIVATE_");
       const logged = automationEventSanitizer.sanitize(threadId, queued) as typeof queued;
       expect(logged.payload.mcpImages).toEqual(queued.payload.mcpImages);
+      // The actual timeline consumes the twice-sanitized data envelope. Tool
+      // identity and safe summaries must survive without reintroducing raw IO.
+      const activity = compactThreadActivityPayload({
+        kind: "tool.completed",
+        payload: logged.payload,
+      });
+      expect(activity).toMatchObject({
+        mcpServerName: "f5_computer",
+        mcpToolName: "computer_screenshot",
+      });
+      expect(activity.mcpInput).toContain("sanitized");
+      expect(activity.mcpResult).toContain("sanitized");
+      expect(JSON.stringify(activity)).not.toContain("PRIVATE_");
       automationEventSanitizer.clear(threadId);
       expect(automationEventSanitizer.sanitize(threadId, queued)).toEqual(queued);
       expect(JSON.stringify(event)).toContain(png); // Model-facing input was not changed.

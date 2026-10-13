@@ -5,6 +5,78 @@ import {
 } from "./automationActivitySanitizer";
 const provenance = { serverName: "f5_computer", verified: true, kind: "f5-computer" } as const;
 describe("computer persistence sanitization", () => {
+  it("reconstructs Codex identities only from the registered server and strips raw arguments", () => {
+    const sanitizer = new AutomationEventSanitizer();
+    sanitizer.register("a", { ...provenance, serverName: "__f5_computer" });
+    const safe = sanitizer.sanitize("a", {
+      type: "item.completed",
+      itemId: "call",
+      threadId: "a",
+      payload: {
+        itemType: "mcp_tool_call",
+        data: {
+          item: {
+            id: "call",
+            server: "__f5_computer",
+            tool: "computer_type",
+            arguments: { text: "SENTINEL" },
+            result: { text: "SENTINEL" },
+          },
+        },
+      },
+    });
+    expect(safe).toMatchObject({
+      payload: {
+        data: {
+          item: {
+            toolName: "mcp____f5_computer__computer_type",
+            server: "__f5_computer",
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(safe)).not.toContain("SENTINEL");
+  });
+  it("keeps verified tool identities through lifecycle data envelopes and repeated sanitization", () => {
+    const sanitizer = new AutomationEventSanitizer();
+    sanitizer.register("a", provenance);
+    const event = {
+      type: "item.updated",
+      threadId: "a",
+      itemId: "computer-status",
+      payload: {
+        itemType: "mcp_tool_call",
+        status: "completed",
+        title: "SENTINEL",
+        data: {
+          toolName: "mcp__f5_computer__computer_status",
+          input: { text: "SENTINEL", x: 4 },
+          result: {
+            error: { _tag: "Unavailable", detail: "SENTINEL" },
+            nodes: [{ name: "SENTINEL" }],
+          },
+        },
+      },
+    };
+    const once = sanitizer.sanitize("a", event);
+    const twice = sanitizer.sanitize("a", once);
+    expect(twice).toMatchObject({
+      payload: {
+        data: {
+          toolName: "mcp__f5_computer__computer_status",
+          input: { x: 4, sanitized: true },
+          result: { error: { _tag: "Unavailable" }, sanitized: true },
+        },
+      },
+    });
+    expect(JSON.stringify(twice)).not.toContain("SENTINEL");
+    const lookalike = {
+      payload: {
+        data: { toolName: "mcp__f5_computer_other__computer_type", input: { text: "ordinary" } },
+      },
+    };
+    expect(sanitizer.sanitize("a", lookalike)).toEqual(lookalike);
+  });
   it("bounds identity memory and keeps late results redacted after saturation", () => {
     const sanitizer = new AutomationEventSanitizer(2);
     sanitizer.register("a", provenance);
