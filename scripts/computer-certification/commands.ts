@@ -133,6 +133,7 @@ export function commandsFor(
       "electron-discovery": ["--status-only"],
       "electron-real-apps": ["--real-apps"],
       "electron-chromium": ["--chromium-fixture"],
+      "electron-grant-memory": ["--grant-memory"],
       "windows-closed": ["--windows-closed"],
       "electron-main-stop": ["--stop-main", "--diagnose-chord"],
       "electron-renderer-stop": ["--stop-renderer", "--diagnose-chord"],

@@ -525,9 +525,34 @@ before hello, while a byte-identical fresh copy returned other-instance. The bui
 stages a fresh file and renames it into place, preserving an existing process's mapped
 file and retaining the prior binary on build failure. The rebuilt original path then
 returned other-instance with the same helper hash. This is a development build fix,
-not signature/TCC certification. The read-only prerequisite probe also latches its
+not signature/TCC certification. Hosted Windows refused replacement while the test
+held the old file open (EPERM). Its regression now requires that explicit refusal,
+unchanged old bytes and cleaned staging, then successful publication after closure;
+it does not skip the byte-preservation assertions. Fresh Windows CI must confirm it.
+The read-only prerequisite probe also latches its
 first terminal result, requires a versioned hello and rejects unexpected crash exits;
 late pipe errors cannot turn a validated refusal into misleading availability.
+
+The separate development `grant-memory` phase prepares a consent-only sequence for
+each provider: genuinely deny, verify a second request in that turn does not reprompt,
+genuinely allow with remembering, revoke the session grant, restart and observe the
+remembered grant without a new dialog, forget it, restart again and genuinely deny a
+fresh request. It uses only its own synthetic app/project/thread and authenticated
+listing/narrowing APIs. It never supplies an access answer; main's native dialog owns
+approval and the remembering checkbox. The existing wrapper's ordinary composer and
+session-stop path drive all four provider turns.
+
+Admission requires three matched native consent answers, trusted reviews, three
+distinct provider-session generations, five completed app resolutions, effective and
+remembered grant state checks, pushed revocation/forget changes, no helper mutations,
+and confirmed cleanup. Observer summaries retain only enums, booleans and counts,
+not grant/session identities or tool content. Sequencing fakes prove no machine or
+human-consent gate. This driver is prepared but has not run against either provider.
+Session-actions, expiry, click-tier typing upgrades, stale answers and web-only consent
+remain separate missing checks; this phase cannot complete the consent release gate.
+
+    bun run computer:certify run --output <prepared-suite> \
+      --group workflows --scenario grant-memory.claude
 
 Resume checks helper, provider binaries, desktop/server bundles, every served client
 asset, Electron runtime, prepared fixtures, source hashes, architecture and target identity.
@@ -542,8 +567,8 @@ ordering keeps permission revocation last.
 Coverage retains every required scenario, including those without a qualifying driver.
 Current executable drivers cover automated checks, macOS provider discovery, clustered
 fixture/real-app workflows, native capture/protected-app checks and physical-stop
-rehearsals. The new windowless driver still needs real provider/machine validation.
-Real grant-lifecycle/profile/persistence observers, the complete
+rehearsals. The new windowless and remembered-grant drivers still need real provider/
+machine validation. Remaining grant-lifecycle/profile/persistence observers, the complete
 recipient/system-surface/display/recovery/permission matrix, Windows interactive drivers
 and installed-app observation still need implementation and machine validation; they
 are explicitly blocked, never credited from unit tests. Installed targets do not use

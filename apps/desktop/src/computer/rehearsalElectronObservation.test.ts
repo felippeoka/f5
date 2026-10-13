@@ -351,3 +351,26 @@ it("rejects malformed or explicitly uncompleted native action receipts", () => {
   ]);
   expect(observer.snapshot().pendingResponses).toBe(0);
 });
+
+it("counts session and grant changes without retaining grant or session identities", () => {
+  const observer = new ElectronRehearsalObservation();
+  for (const id of ["PRIVATE_SESSION_ONE", "PRIVATE_SESSION_TWO"]) {
+    const req = request("listApps", id);
+    const authorization = {
+      ...req.authorization,
+      sessionGeneration: id,
+      grants: id.endsWith("ONE")
+        ? [{ appId: "PRIVATE_APP", tier: "full" as const, allowTyping: false }]
+        : [],
+    };
+    observer.receive({ type: "request", request: { ...req, authorization } });
+    observer.receive({ type: "response", requestId: id, result: [] });
+    observer.receive({ type: "grantsChanged", authorization });
+  }
+  expect(observer.snapshot()).toMatchObject({
+    sessionGenerationsObserved: 2,
+    grantChanges: 2,
+    lastGrantCount: 0,
+  });
+  expect(JSON.stringify(observer.snapshot())).not.toContain("PRIVATE_");
+});

@@ -29,6 +29,14 @@ export class ElectronRehearsalObservation {
   private overflow = false;
   private readonly accessRequests = new Set<string>();
   private readonly accessAnswers = new Set<string>();
+  private readonly accessAnswerSummaries: Array<{
+    appCount: number;
+    allowed: number;
+    remembered: number;
+  }> = [];
+  private readonly sessions = new Set<string>();
+  private grantChanges = 0;
+  private lastGrantCount = 0;
   private hostStatus: { available: boolean; reason?: string } | undefined;
   receive(raw: unknown): void {
     if (!Schema.is(DesktopComputerHostMessage)(raw)) return;
@@ -44,8 +52,21 @@ export class ElectronRehearsalObservation {
       if (this.accessRequests.size >= 128) this.overflow = true;
       else this.accessRequests.add(raw.request.requestId);
     } else if (raw.type === "accessAnswer") {
-      if (this.accessRequests.has(raw.answer.requestId))
+      if (
+        this.accessRequests.has(raw.answer.requestId) &&
+        !this.accessAnswers.has(raw.answer.requestId)
+      ) {
         this.accessAnswers.add(raw.answer.requestId);
+        this.accessAnswerSummaries.push({
+          appCount: raw.answer.decisions.length,
+          allowed: raw.answer.decisions.filter((decision) => decision.allow).length,
+          remembered: raw.answer.decisions.filter((decision) => decision.allow && decision.remember)
+            .length,
+        });
+      }
+    } else if (raw.type === "grantsChanged") {
+      this.grantChanges++;
+      this.lastGrantCount = raw.authorization.grants.length;
     } else if (raw.type === "request" || raw.type === "leaseAcquire") {
       const requestId = raw.type === "request" ? raw.request.requestId : raw.requestId;
       if (this.admitted.has(requestId)) return;
@@ -55,7 +76,10 @@ export class ElectronRehearsalObservation {
       }
       this.admitted.add(requestId);
       this.pending.set(requestId, raw.type === "request" ? raw.request.op : "leaseAcquire");
-      if (raw.type === "request") this.responses.request(raw.request);
+      if (raw.type === "request") {
+        this.responses.request(raw.request);
+        this.sessions.add(raw.request.authorization.sessionGeneration);
+      }
       if (raw.type === "request" && raw.request.op === "elementAction")
         this.elementActions.set(requestId, raw.request.action);
     } else if (raw.type === "response") {
@@ -137,6 +161,10 @@ export class ElectronRehearsalObservation {
       pendingResponses: this.pending.size,
       accessRequests: this.accessRequests.size,
       accessAnswersForwarded: this.accessAnswers.size,
+      accessAnswerSummaries: this.accessAnswerSummaries.map((summary) => ({ ...summary })),
+      sessionGenerationsObserved: this.sessions.size,
+      grantChanges: this.grantChanges,
+      lastGrantCount: this.lastGrantCount,
       operations: this.operations.map((operation) => ({ ...operation })),
     };
   }

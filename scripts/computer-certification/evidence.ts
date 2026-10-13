@@ -2,6 +2,7 @@ import { record, digest } from "./model";
 import type { Manifest, ScenarioResult } from "./model";
 import type { ScenarioInstance } from "./catalog";
 import { windowlessChecks } from "./windowlessEvidence";
+import { grantMemoryReceiptsComplete } from "./grantMemory";
 
 const safeKey = /^[a-zA-Z0-9][a-zA-Z0-9.-]{0,100}$/;
 const STOP_CHECKS = [
@@ -102,6 +103,13 @@ export function summarizeEvidence(
       Object.values(receipts).every(Boolean) &&
       raw.scope === `unsigned-real-electron-${scenario.selectedProvider}-all-app-windows-closed` &&
       manifest.identity.target === "development";
+  }
+  if (scenario.id === "grant-memory") {
+    checks.grantMemoryReceiptsComplete = grantMemoryReceiptsComplete(raw);
+    passed &&=
+      checks.grantMemoryReceiptsComplete &&
+      manifest.identity.target === "development" &&
+      raw.scope === `unsigned-real-electron-${scenario.selectedProvider}-grant-memory`;
   }
   const stop = record(raw.stopMeasurement)
     ? raw.stopMeasurement

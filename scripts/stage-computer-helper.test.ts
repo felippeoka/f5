@@ -22,22 +22,37 @@ function fixture() {
 }
 afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
 
-it("publishes the new helper without modifying the file held by an existing process", () => {
+it("preserves a held helper, using replacement or an explicit Windows refusal", () => {
   const { root, binary } = fixture();
   const previous = openSync(binary, "r");
+  const publish = () =>
+    stageComputerHelper(binary, (staged) => {
+      writeFileSync(staged, "replacement");
+      return true;
+    });
   try {
-    expect(
-      stageComputerHelper(binary, (staged) => {
-        writeFileSync(staged, "replacement");
-        return true;
-      }),
-    ).toBe(true);
-    expect(readFileSync(binary, "utf8")).toBe("replacement");
+    if (process.platform === "win32") {
+      let error: unknown;
+      try {
+        publish();
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toMatchObject({ code: "EPERM", syscall: "rename" });
+      expect(readFileSync(binary, "utf8")).toBe("previous");
+    } else {
+      expect(publish()).toBe(true);
+      expect(readFileSync(binary, "utf8")).toBe("replacement");
+    }
     expect(readFileSync(previous, "utf8")).toBe("previous");
     expect(readdirSync(root)).toEqual(["helper"]);
   } finally {
     closeSync(previous);
   }
+  // Once the old handle is closed, both platforms must publish successfully.
+  expect(publish()).toBe(true);
+  expect(readFileSync(binary, "utf8")).toBe("replacement");
+  expect(readdirSync(root)).toEqual(["helper"]);
 });
 
 it("keeps the old helper when the build declines publication", () => {

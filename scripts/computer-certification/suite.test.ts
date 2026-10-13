@@ -193,6 +193,47 @@ describe("certification inventory and coverage", () => {
     expect(s.expectedChecks).toContain("externalSubmissionsOnce");
   });
 
+  it("keeps the prepared grant memory phase separate from the complete consent matrix", () => {
+    const s = scenario("grant-memory.claude");
+    const launches = { claude: { home: "/selected", binary: "/claude" } };
+    const commands = commandsFor(
+      s,
+      { repo: "/repo", platform: "darwin" },
+      "/result",
+      launches,
+      "darwin",
+    );
+    if (typeof commands === "string") throw new Error("No grant memory driver");
+    expect(commands[0]?.args).toContain("--grant-memory");
+    expect(commands[0]?.args).not.toContain("--cluster-workflows");
+    expect(
+      commandsFor(
+        s,
+        { repo: "/repo", platform: "darwin", app: "/Installed.app" },
+        "/result",
+        launches,
+        "darwin",
+      ),
+    ).toBe("installed-observation-driver-required");
+    expect(scenario("grant-lifecycle.claude").expectedChecks).toContain("session-actions");
+    expect(s.expectedChecks).not.toContain("session-actions");
+    expect(
+      coverage(manifest, [result(s.key)]).requirements.find(
+        (requirement) => requirement.requirement === "consent",
+      )?.state,
+    ).toBe("pending");
+    const raw = {
+      reportVersion: 1,
+      platform: "darwin",
+      helperSha256: hash,
+      state: "passed",
+      scope: "unsigned-real-electron-claude-grant-memory",
+      checks: result(s.key).checks,
+      cleanup: { confirmed: true },
+    };
+    expect(summarizeEvidence(s, manifest, raw).state).toBe("failed");
+  });
+
   it("requires independent windowless receipts, never only passing assertion flags", () => {
     const s = scenario("windows-closed.claude");
     const raw = {

@@ -23,6 +23,7 @@ import {
 import { closeRehearsalChild } from "../src/computer/rehearsalCleanup.ts";
 import { RehearsalExternalClient } from "../src/computer/rehearsalExternalClient.ts";
 import { windowlessChecks } from "../../../scripts/computer-certification/windowlessEvidence.ts";
+import { runGrantMemory } from "../../../scripts/computer-certification/grantMemory.ts";
 import {
   readChromiumFixture,
   createRehearsalChromiumFixture,
@@ -63,6 +64,7 @@ const realApps = args.includes("--real-apps");
 const clusterWorkflows = args.includes("--cluster-workflows");
 const chromiumFixture = args.includes("--chromium-fixture");
 const windowless = args.includes("--windows-closed");
+const grantMemory = args.includes("--grant-memory");
 const includesRealApps = realApps || clusterWorkflows;
 if (
   process.platform !== "darwin" ||
@@ -80,7 +82,7 @@ if (
       clusterWorkflows ||
       controlsOnly ||
       actionsOnly)) ||
-  (windowless && chromiumFixture) ||
+  ((windowless || grantMemory) && chromiumFixture) ||
   [
     statusOnly,
     controlsOnly,
@@ -90,6 +92,7 @@ if (
     realApps,
     clusterWorkflows,
     windowless,
+    grantMemory,
   ].filter(Boolean).length > 1
 ) {
   process.stderr.write(
@@ -167,6 +170,8 @@ let windowlessConsent;
 let windowlessObservation;
 let windowlessStopObservation;
 let providerTailObserved = false;
+let grantMemoryObservation;
+const grantMemoryConsentReceipts = [];
 let externalSubmissions = 0;
 let interrupted = false;
 let stage = "preparation";
@@ -342,6 +347,7 @@ try {
         ["observerSource", join(desktopDir, "src/computer/rehearsalElectronObservation.ts")],
         ["responseSource", join(desktopDir, "src/computer/rehearsalResponses.ts")],
         ["externalClientSource", join(desktopDir, "src/computer/rehearsalExternalClient.ts")],
+        ["grantMemorySource", join(repo, "scripts/computer-certification/grantMemory.ts")],
         [
           "windowlessEvidenceSource",
           join(repo, "scripts/computer-certification/windowlessEvidence.ts"),
@@ -648,6 +654,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         paused: false,
         consent: undefined,
         trustedConsent: false,
+        trustedConsentVisible: false,
         trustedPause: false,
         trustedResume: false,
         activitySeen: false,
@@ -719,8 +726,10 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           if (!event.isTrusted || !(event.target instanceof Element)) return;
           const button = event.target.closest("button");
           const name = button?.textContent?.trim();
-          if (name === "Review access" && button?.closest('[data-testid="computer-access-card"]'))
+          if (name === "Review access" && button?.closest('[data-testid="computer-access-card"]')) {
             state.trustedConsent = true;
+            state.trustedConsentVisible = button.checkVisibility();
+          }
           if (name === "Pause") state.trustedPause = true;
           if (name === "Resume") state.trustedResume = true;
         },
@@ -755,7 +764,96 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
   await page.evaluate((id) => {
     window.location.hash = `/${id}`;
   }, threadId);
-  if (statusOnly) {
+  if (grantMemory) {
+    grantMemoryObservation = await runGrantMemory({
+      appId,
+      projectId,
+      threadId,
+      checks,
+      rpc,
+      observer,
+      waitFor,
+      stage: (name) => {
+        stage = name;
+      },
+      review: async ({ allow, remember, repeat }) => {
+        await page.evaluate(() => {
+          Object.assign(window.__computerRehearsal, {
+            consent: undefined,
+            trustedConsent: false,
+            trustedConsentVisible: false,
+            consentSettled: false,
+            consentAllowed: false,
+          });
+        });
+        await instructions(
+          allow
+            ? "Click Review access. In the native dialog for only Computer Control Test Fixture, check Always allow in this project and allow control. This phase sends no app input."
+            : "Click Review access. Deny only Computer Control Test Fixture in the native dialog. This phase sends no app input.",
+        );
+        await startTurn(
+          `Consent-only test for exact app ID ${appId}. Call computer_status once and computer_request_access for only this exact app with reason Synthetic grant memory test. ${repeat === 2 ? "The user will deny this request. After that normal denial result, call computer_request_access once more for the same exact app in this turn to verify no second prompt appears. Do not retry any failed or interrupted tool." : "Call request access exactly once; the user will answer the genuine F5 dialog."} Do not activate, launch, inspect, capture or send input. Do not use shell, files, network or other apps. Finish READY.`,
+        );
+        await waitFor(
+          async () => !!(await page.evaluate(() => window.__computerRehearsal.consent)),
+          90000,
+        );
+        const requested = await page.evaluate(() => window.__computerRehearsal.consent);
+        if (
+          requested.kind !== "apps" ||
+          requested.threadId !== threadId ||
+          requested.apps.length !== 1 ||
+          requested.apps[0].appId !== appId
+        )
+          throw new Error("Unexpected grant memory consent request.");
+        const visible = await page.getByRole("dialog").isVisible();
+        await waitFor(
+          async () =>
+            (await page.evaluate(() => window.__computerRehearsal.consentSettled)) === true,
+          90000,
+        );
+        const receipt = await page.evaluate(() => ({
+          trustedReview: window.__computerRehearsal.trustedConsent === true,
+          visibleAtReview: window.__computerRehearsal.trustedConsentVisible === true,
+          settled: window.__computerRehearsal.consentSettled === true,
+          allowed: window.__computerRehearsal.consentAllowed === true,
+        }));
+        grantMemoryConsentReceipts.push({
+          ...receipt,
+          appCount: 1,
+          visible: visible || receipt.visibleAtReview,
+          rememberRequested: remember,
+        });
+        if (receipt.allowed !== allow) throw new Error("Unexpected grant memory consent answer.");
+        await waitTurn();
+        return (visible || receipt.visibleAtReview) && receipt.settled && receipt.trustedReview;
+      },
+      rememberedTurn: async () => {
+        await instructions(
+          "Remembered-access restart. No new consent dialog should appear; no app input is requested.",
+        );
+        await startTurn(
+          `Read-only grant memory test for exact app ${appId}. Call computer_status once and computer_request_access once for only this exact app, which was genuinely remembered in this project. It should already be granted. Do not activate, launch, inspect, capture or send input. No shell, files, network or other apps. Stop on any interruption or failed tool; never retry. Finish READY.`,
+        );
+        await waitTurn();
+      },
+      stopSession: async () => {
+        await dispatch({ type: "thread.session.stop", threadId });
+        await waitFor(async () => {
+          const snapshot = await rpc(ORCHESTRATION_WS_METHODS.getSnapshot);
+          return (
+            snapshot.threads.find((thread) => thread.id === threadId)?.session?.status ===
+              "stopped" && !(await observer()).held
+          );
+        }, 15000);
+      },
+    });
+    checks.grantMemoryFourTurns = composerSubmissions === 4;
+    stage = "finished";
+    await instructions(
+      "Grant memory check finished. Denial, remembering, revocation, forgetting and session cleanup were observed. You can use your computer.",
+    );
+  } else if (statusOnly) {
     stage = "read-only-status-turns";
     await instructions(
       "Read-only diagnostics: the provider will check computer status and list app metadata. No consent, screenshots or input are requested.",
@@ -1428,6 +1526,11 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       activityLimit: 100,
     }).catch(() => undefined);
     providerErrorCodes = rehearsalProviderErrorCodes(tail?.activities);
+    if (grantMemory) {
+      providerTailObserved = Array.isArray(tail?.activities);
+      checks.grantMemoryProviderTailObserved = providerTailObserved;
+      checks.grantMemoryNoTaggedProviderErrors = providerErrorCodes.length === 0;
+    }
     toolOutcomeErrors = await page
       .evaluate(() => window.__computerRehearsal.toolOutcomeErrors)
       .then((codes) => [...new Set(codes.filter(Schema.is(ComputerToolOutcomeCode)))].sort())
@@ -1615,6 +1718,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         cleanup,
       }),
     );
+  if (grantMemory) checks.grantMemoryCleanup = cleanup.confirmed;
   externalClient?.close();
   const passed =
     !failureStage && !interrupted && cleanup.confirmed && Object.values(checks).every(Boolean);
@@ -1626,21 +1730,23 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         reportVersion: 1,
         admissionId: process.env.F5_COMPUTER_CERTIFICATION_ADMISSION,
         recordedAt: new Date().toISOString(),
-        scope: windowless
-          ? `unsigned-real-electron-${provider}-all-app-windows-closed`
-          : clusterWorkflows
-            ? "unsigned-real-electron-clustered-workflows"
-            : realApps
-              ? `unsigned-real-electron-${provider}-textedit-and-calculator`
-              : stopOnly
-                ? `unsigned-real-electron-${provider}-${stopMain ? "main" : "renderer"}-frozen-physical-stop`
-                : statusOnly
-                  ? `unsigned-real-electron-${provider}-read-only-discovery-diagnostic`
-                  : controlsOnly
-                    ? `unsigned-real-electron-${provider}-human-consent-and-controls`
-                    : actionsOnly
-                      ? `unsigned-real-electron-${provider}-human-consent-and-actions`
-                      : `unsigned-real-electron-${provider}-human-consent-synthetic-app`,
+        scope: grantMemory
+          ? `unsigned-real-electron-${provider}-grant-memory`
+          : windowless
+            ? `unsigned-real-electron-${provider}-all-app-windows-closed`
+            : clusterWorkflows
+              ? "unsigned-real-electron-clustered-workflows"
+              : realApps
+                ? `unsigned-real-electron-${provider}-textedit-and-calculator`
+                : stopOnly
+                  ? `unsigned-real-electron-${provider}-${stopMain ? "main" : "renderer"}-frozen-physical-stop`
+                  : statusOnly
+                    ? `unsigned-real-electron-${provider}-read-only-discovery-diagnostic`
+                    : controlsOnly
+                      ? `unsigned-real-electron-${provider}-human-consent-and-controls`
+                      : actionsOnly
+                        ? `unsigned-real-electron-${provider}-human-consent-and-actions`
+                        : `unsigned-real-electron-${provider}-human-consent-synthetic-app`,
         platform: process.platform,
         arch: process.arch,
         osVersion: release(),
@@ -1651,6 +1757,9 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         signed: false,
         certified: false,
         provider,
+        ...(grantMemory
+          ? { grantMemoryObservation, grantMemoryConsentReceipts, providerTailObserved }
+          : {}),
         ...(windowless
           ? {
               externalSubmissions,
@@ -1703,13 +1812,15 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
                 ]
               : [
                   "One real provider and one synthetic AppKit app, on the current display only",
-                  windowless
-                    ? "Human app consent; app windows closed during one provider turn, followed by session stop after completed actions; no in-flight stop latency proof"
-                    : stopOnly
-                      ? "Human app consent and physical chord; UI Pause/Resume is excluded"
-                      : actionsOnly
-                        ? "Human app consent; Pause/Resume is excluded from this actions-only run"
-                        : "Human app consent and pause/resume; no session-actions consent in full-access mode",
+                  grantMemory
+                    ? "Genuine app denial and remembering, authenticated narrowing APIs and provider session restarts only; no OS capture/input, session-actions approval, expiry, stale-answer or web-client proof"
+                    : windowless
+                      ? "Human app consent; app windows closed during one provider turn, followed by session stop after completed actions; no in-flight stop latency proof"
+                      : stopOnly
+                        ? "Human app consent and physical chord; UI Pause/Resume is excluded"
+                        : actionsOnly
+                          ? "Human app consent; Pause/Resume is excluded from this actions-only run"
+                          : "Human app consent and pause/resume; no session-actions consent in full-access mode",
                   ...(actionsOnly ? ["No session-actions consent in full-access mode"] : []),
                   ...(controlsOnly
                     ? [
