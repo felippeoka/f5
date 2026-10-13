@@ -191,4 +191,42 @@ final class AuthorizationTests: XCTestCase {
     }
   }
 
+  func testOwnershipChangingToF5OrUnknownCannotReuseThePreviousRecipient() {
+    let recipients: [(Int, [Int: Int], String?)] = [
+      (10, [10: 200], "com.example.Notes"),
+      (10, [10: 300], "com.t3tools.t3code.beta"),
+      (10, [:], nil),
+    ]
+    var delivered = 0
+    for (window, owners, app) in recipients {
+      guard let pid = computerRecipientPid(windowId: window, owners: owners, overlayWindowIds: []),
+        computerTargetBlock(appId: app, pid: pid, f5Pids: [300], helperPid: 1) == nil else { break }
+      delivered += 1
+    }
+    XCTAssertEqual(delivered, 1)
+    XCTAssertNil(computerRecipientPid(windowId: 10, owners: [:], overlayWindowIds: []))
+  }
+
+  func testFocusBecomingSecureBetweenEventsStopsBeforeTheNextDelivery() {
+    let focus = [
+      (20, false, "AXTextField"), (20, false, "AXSecureTextField"),
+      (21, false, "AXTextField"),
+    ]
+    var delivered = 0
+    for (pid, secure, role) in focus {
+      guard computerFocusBlock(frontPid: 20, focusedPid: pid, secureInput: secure,
+        role: role, subrole: nil) == nil else { break }
+      delivered += 1
+    }
+    XCTAssertEqual(delivered, 1)
+  }
+
+  func testRevokedGrantCannotAuthorizeSemanticOrCoordinateActions() {
+    for needed in ["click", "type"] {
+      XCTAssertFalse(allowsComputerGrant(tier: "view", allowTyping: true, needed: needed))
+      XCTAssertFalse(allowsComputerGrant(tier: "blocked", allowTyping: true, needed: needed))
+    }
+    XCTAssertFalse(allowsComputerGrant(tier: "full", allowTyping: true, needed: "arbitrary"))
+  }
+
 }

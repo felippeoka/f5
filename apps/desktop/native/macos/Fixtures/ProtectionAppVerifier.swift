@@ -3,7 +3,7 @@ import AppKit
 // Fixed app identities, process metadata only. Normal termination is allowed
 // only for a caller-identified process that was launched after a closed-app preflight.
 // The coordinator never requests termination after physical input or PID drift.
-let ids = ["com.apple.Terminal", "com.google.Chrome"]
+let ids = ["com.apple.Terminal", "com.google.Chrome", "com.apple.TextEdit", "com.apple.calculator"]
 let args = CommandLine.arguments
 func emit(_ result: [String: Any]) {
   if let bytes = try? JSONSerialization.data(withJSONObject: result) {

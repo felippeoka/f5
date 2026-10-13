@@ -16,7 +16,11 @@ import {
   REAL_APP_REHEARSAL_IDS,
   REAL_APP_REHEARSAL_TEXT,
 } from "../src/computer/rehearsalRealAppsObservation.ts";
-import { createRehearsalFixture } from "../src/computer/rehearsalFixture.ts";
+import {
+  createRehearsalFixture,
+  prepareRehearsalExecutable,
+} from "../src/computer/rehearsalFixture.ts";
+import { closeRehearsalChild } from "../src/computer/rehearsalCleanup.ts";
 import { RehearsalStopObservation } from "../src/computer/rehearsalStopObservation.ts";
 import { RehearsalChordObservation } from "../src/computer/rehearsalChordObservation.ts";
 import { measureStopLatency } from "../src/computer/stopLatencyMeasurement.ts";
@@ -37,6 +41,7 @@ const arg = (name) => {
   return i < 0 ? undefined : args[i + 1];
 };
 const output = arg("--output");
+const fixtureBinDirectory = arg("--fixture-bin-dir");
 const provider = arg("--provider") ?? "codex";
 const driver = provider === "claude" ? "claudeAgent" : "codex";
 const sourceHome = arg(provider === "claude" ? "--claude-home" : "--codex-home");
@@ -49,6 +54,8 @@ const stopRenderer = args.includes("--stop-renderer");
 const stopOnly = stopMain || stopRenderer;
 const diagnoseChord = args.includes("--diagnose-chord");
 const realApps = args.includes("--real-apps");
+const clusterWorkflows = args.includes("--cluster-workflows");
+const includesRealApps = realApps || clusterWorkflows;
 if (
   process.platform !== "darwin" ||
   process.env.F5_COMPUTER_ELECTRON_REHEARSAL !== "1" ||
@@ -57,8 +64,15 @@ if (
   !sourceHome ||
   !binary ||
   (diagnoseChord && !stopOnly) ||
-  [statusOnly, controlsOnly, actionsOnly, stopMain, stopRenderer, realApps].filter(Boolean).length >
-    1
+  [
+    statusOnly,
+    controlsOnly,
+    actionsOnly,
+    stopMain,
+    stopRenderer,
+    realApps,
+    clusterWorkflows,
+  ].filter(Boolean).length > 1
 ) {
   process.stderr.write(
     "Human coordination and real quota required: F5_COMPUTER_ELECTRON_REHEARSAL=1 bun apps/desktop/scripts/rehearse-computer-electron.mjs [--provider codex|claude] --<provider>-home <selected profile home> --<provider>-binary <path> --output <new report.json>\n",
@@ -118,7 +132,11 @@ const projectId = randomUUID();
 const appId = realApps
   ? REAL_APP_REHEARSAL_IDS[0]
   : `org.example.computer-rehearsal.${randomUUID()}`;
-const consentApps = realApps ? [...REAL_APP_REHEARSAL_IDS] : [appId];
+const consentApps = clusterWorkflows
+  ? [appId, ...REAL_APP_REHEARSAL_IDS]
+  : realApps
+    ? [...REAL_APP_REHEARSAL_IDS]
+    : [appId];
 let application;
 let page;
 let fixture;
@@ -142,6 +160,18 @@ let realAppPrerequisites;
 let calculatorBaselineObservation;
 let claudeAuthentication;
 let realAppVerifier;
+let realAppProcessVerifier;
+const realAppOwnedPids = {};
+async function verifyRealAppProcesses(...args) {
+  const result = await exec(realAppProcessVerifier, args, { timeout: 5000, maxBuffer: 4096 });
+  return JSON.parse(result.stdout);
+}
+async function rememberRealAppProcess(appId) {
+  const pids = (await verifyRealAppProcesses("--pids"))[appId];
+  if (!Array.isArray(pids) || pids.length !== 1 || !Number.isInteger(pids[0]) || pids[0] <= 0)
+    throw new Error("Owned app process could not be confirmed.");
+  realAppOwnedPids[appId] = pids[0];
+}
 let documentRoot;
 let documentPath;
 let documentOpened = false;
@@ -169,6 +199,7 @@ const restoreProcess = () => {
   }
 };
 const checks = {};
+const phaseEvidence = {};
 const halt = () => {
   interrupted = true;
   restoreProcess();
@@ -280,7 +311,7 @@ try {
         ...(provider === "claude"
           ? [["claudeLaunchSource", join(repo, "packages/shared/src/computerRehearsalClaude.ts")]]
           : []),
-        ...(realApps
+        ...(includesRealApps
           ? [
               [
                 "realAppVerifierSource",
@@ -325,18 +356,18 @@ try {
       { mode: 0o600 },
     );
   }
-  if (realApps) {
+  if (includesRealApps) {
     realAppVerifier = join(root, "real-app-verifier");
-    await exec(
-      "swiftc",
-      [
-        "-framework",
-        "AppKit",
-        join(desktopDir, "native/macos/Fixtures/RealAppVerifier.swift"),
-        "-o",
-        realAppVerifier,
-      ],
-      { timeout: 30000 },
+    realAppProcessVerifier = join(root, "real-app-process-verifier");
+    await prepareRehearsalExecutable(
+      join(desktopDir, "native/macos/Fixtures/ProtectionAppVerifier.swift"),
+      realAppProcessVerifier,
+      fixtureBinDirectory,
+    );
+    await prepareRehearsalExecutable(
+      join(desktopDir, "native/macos/Fixtures/RealAppVerifier.swift"),
+      realAppVerifier,
+      fixtureBinDirectory,
     );
     const status = await verifyRealApp("--status");
     realAppPrerequisites = {
@@ -375,6 +406,7 @@ try {
     fixture = await createRehearsalFixture({
       root,
       appId,
+      ...(fixtureBinDirectory ? { preparedDirectory: fixtureBinDirectory } : {}),
       expectedText: "F5_ELECTRON_REHEARSAL Ω🙂",
       observeChord: stopOnly,
       diagnoseChord,
@@ -440,7 +472,7 @@ try {
     { timeout: 30000 },
   );
   const compiledRealAppObserver = join(root, "real-app-observer.cjs");
-  if (realApps)
+  if (includesRealApps)
     await exec(
       "bun",
       [
@@ -472,15 +504,17 @@ const setPath=app.setPath.bind(app);
 app.setPath=(key,value)=>setPath(key,key==='userData'?${JSON.stringify(join(root, "electron"))}:value);
 const {ElectronRehearsalObservation}=require(${JSON.stringify(compiledObserver)});
 const evidence=globalThis.__computerRehearsalNative=new ElectronRehearsalObservation();
+globalThis.__computerRehearsalChildPids=new Set();
 const {RehearsalStopObservation}=require(${JSON.stringify(compiledStopObserver)});
 const stopEvidence=globalThis.__computerRehearsalStop=new RehearsalStopObservation();
 ${
-  realApps
+  includesRealApps
     ? `const {RehearsalRealAppsObservation}=require(${JSON.stringify(compiledRealAppObserver)});
-const realEvidence=globalThis.__computerRehearsalRealApps=new RehearsalRealAppsObservation(${JSON.stringify(threadId)});`
+let realEvidence=globalThis.__computerRehearsalRealApps=new RehearsalRealAppsObservation(${JSON.stringify(threadId)});
+globalThis.__computerRehearsalResetRealApps=()=>{realEvidence=globalThis.__computerRehearsalRealApps=new RehearsalRealAppsObservation(${JSON.stringify(threadId)});};`
     : ""
 }
-const observe=m=>{evidence.receive(m);${realApps ? "realEvidence.receive(m);" : ""}};
+const observe=m=>{evidence.receive(m);${includesRealApps ? "realEvidence.receive(m);" : ""}};
 const cp=require('node:child_process'),spawn=cp.spawn;
 cp.spawn=function(...args){
 ${
@@ -491,7 +525,10 @@ args[1]=[${JSON.stringify(claudeBackendLaunch)},...args[1].slice(1)];}
 `
     : ""
 }
-const child=spawn.apply(this,args);if(args[2]?.env?.F5_DESKTOP_COMPUTER_HOST==='ipc'){
+const child=spawn.apply(this,args);
+if(child.pid){globalThis.__computerRehearsalChildPids.add(child.pid);
+child.once('exit',()=>globalThis.__computerRehearsalChildPids.delete(child.pid));}
+if(args[2]?.env?.F5_DESKTOP_COMPUTER_HOST==='ipc'){
 child.on('message',m=>observe(m));
 const send=child.send.bind(child);child.send=function(m,...args){observe(m);
 return send(m,...args);};}
@@ -668,9 +705,11 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
   } else {
     stage = "human-consent-and-first-turn";
     await instructions(
-      realApps
-        ? "Click Review access, then approve only TextEdit and Calculator in the native F5 dialog. Leave remembering off. Keep input idle until the check finishes."
-        : "Click Review access when the Computer access card appears, then approve only Computer Control Test Fixture in the native F5 dialog. Leave remembering off. Then keep mouse and keyboard idle until prompted.",
+      clusterWorkflows
+        ? "Click Review access, then approve only Computer Control Test Fixture, TextEdit and Calculator. Leave remembering off. Follow Pause/Resume instructions, then stay idle for the real-app phase."
+        : realApps
+          ? "Click Review access, then approve only TextEdit and Calculator in the native F5 dialog. Leave remembering off. Keep input idle until the check finishes."
+          : "Click Review access when the Computer access card appears, then approve only Computer Control Test Fixture in the native F5 dialog. Leave remembering off. Then keep mouse and keyboard idle until prompted.",
     );
     let overlayTimer;
     let overlayPoll = Promise.resolve();
@@ -734,7 +773,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     }, 100);
     try {
       await startTurn(
-        realApps
+        includesRealApps
           ? `Explicitly authorized real-app check. This turn is consent only. Use only F5 computer tools: computer_status, then computer_request_access for exactly ${JSON.stringify(consentApps)} with reason Temporary TextEdit document and Calculator test. Do not launch, activate, capture or send input yet. Finish READY once both apps are allowed. Never use shell, files, network or other apps. Stop on any interruption or failure. The user will answer F5 consent manually.`
           : `Explicitly authorized isolated F5 UI rehearsal. Use only F5 computer tools, only app ID ${appId}. This turn is for consent only: call computer_status, request access for that exact ID with reason Synthetic Electron UI rehearsal, then finish READY once access is allowed. Do not activate apps or execute input in this turn. Never use shell, files, network, any other app or the secure field. Stop immediately on any interruption, ambiguity or failure. The user will answer F5 consent manually.`,
       );
@@ -784,7 +823,8 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           : "Access confirmed. Keep mouse and keyboard idle; the agent will now use only the fixture.",
       );
       await delay(2000);
-      if (realApps) {
+      async function runRealAppPhase() {
+        const captureBaseline = (await observer()).captureResponses;
         stage = "real-app-document-setup";
         const status = await verifyRealApp("--status");
         if (status.textEditRunning !== false || status.calculatorRunning !== false)
@@ -804,6 +844,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           10000,
         );
         checks.ownedTextEditDocumentFocusedBeforeInput = true;
+        await rememberRealAppProcess(REAL_APP_REHEARSAL_IDS[0]);
         stage = "real-app-textedit-turn";
         await startTurn(
           `Use only F5 computer tools for com.apple.TextEdit and the single already-open document F5_REAL_APP_TEST.txt, seeded with F5_REAL_APP_INITIAL Ω🙂. Activate TextEdit with screenshot:true, take a fresh screenshot, inspect com.apple.TextEdit. Confirm this exact test document and seed text before editing; stop if any dialog or different document is focused. Focus its text area using a semantic action if offered. Send CMD+A, then computer_type exactly ${expectedRealAppText}, then CMD+S to save this existing test file (not Save As). Do not close yet. Finish READY. Never use shell, filesystem, network, another document or other apps. Stop on interruption, ambiguity, OutcomeUnknown or any failed action; never retry.`,
@@ -824,6 +865,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           (await verifyRealApp("--document-state", documentPath)).documentState === "closed";
         checks.ownedTestDocumentClosed = documentClosed;
         if (!documentClosed) throw new Error("Test document closure could not be confirmed.");
+        await rememberRealAppProcess(REAL_APP_REHEARSAL_IDS[1]);
         const zeroBaseline = await verifyRealApp("--verify-calculator", "0");
         const beforeCalculation = await verifyRealApp("--verify-calculator", "42");
         calculatorBaselineObservation = {
@@ -863,14 +905,22 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           realAppObservation.calculatorInspected &&
           realAppObservation.calculatorPresses >= 7;
         const after = await observer();
-        checks.realAppCapturesReceived = after.captureResponses >= 3;
+        checks.realAppCapturesReceived = after.captureResponses - captureBaseline >= 3;
         checks.realAppTurnLeaseReleased = after.leaseObserved && !after.held;
-        checks.realAppComposerSubmittedFourTurns = composerSubmissions === 4;
+        checks.realAppComposerSubmittedFourTurns =
+          composerSubmissions === (clusterWorkflows ? 6 : 4);
         checks.realAppGrantsSurvivedTurns = await page.evaluate(
           () => window.__computerRehearsal.fixtureGranted,
         );
+        phaseEvidence.realApps = {
+          checks: { ...checks },
+          state: Object.values(checks).every(Boolean) ? "passed" : "failed",
+        };
         stage = "finished";
         await instructions("Real-app check finished. You can use your computer again.");
+      }
+      if (realApps) {
+        await runRealAppPhase();
       } else if (stopOnly) {
         stage = "stop-clock-calibration";
         let clock;
@@ -1146,7 +1196,19 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
             ),
         );
         stage = "finished";
-        await instructions("Check finished. You can use your computer again.");
+        if (clusterWorkflows) {
+          phaseEvidence.fixture = {
+            checks: { ...checks },
+            state: Object.values(checks).every(Boolean) ? "passed" : "failed",
+          };
+          if (phaseEvidence.fixture.state !== "passed")
+            throw new Error("Fixture phase incomplete; real-app phase will not run.");
+          await instructions(
+            "Fixture and UI checks finished. Keep input idle for the real-app phase.",
+          );
+          await application.evaluate(() => globalThis.__computerRehearsalResetRealApps());
+          await runRealAppPhase();
+        } else await instructions("Check finished. You can use your computer again.");
       }
     } finally {
       clearInterval(overlayTimer);
@@ -1178,7 +1240,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
   process.off("SIGINT", halt);
   process.off("SIGTERM", halt);
   if (application) nativeObservation = await observer().catch(() => undefined);
-  if (realApps && application)
+  if (includesRealApps && application)
     realAppObservation = await application
       .evaluate(() => globalThis.__computerRehearsalRealApps.snapshot())
       .catch(() => undefined);
@@ -1267,14 +1329,44 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     await page
       .evaluate((id) => window.desktopBridge.computerAutomation.setPaused(id, true), threadId)
       .catch(() => {});
-  if (application) await application.close().catch(() => {});
+  const ownedPids = application
+    ? await application
+        .evaluate(() => [...globalThis.__computerRehearsalChildPids])
+        .catch(() => undefined)
+    : [];
+  let applicationClosed = !application;
+  if (application) {
+    try {
+      await application.close();
+      applicationClosed = true;
+    } catch {
+      /* No exit proof. Never mark failed cleanup as passed. */
+    }
+  }
+  let childrenClosed =
+    Array.isArray(ownedPids) &&
+    ownedPids.length <= 32 &&
+    ownedPids.every((pid) => Number.isInteger(pid) && pid > 0);
+  if (childrenClosed) {
+    const deadline = Date.now() + 5000;
+    const alive = (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (error) {
+        return error?.code !== "ESRCH";
+      }
+    };
+    while (ownedPids.some(alive) && Date.now() < deadline) await delay(50);
+    childrenClosed = ownedPids.every((pid) => !alive(pid));
+  }
   if (failureStage) process.stdout.write("Test closed. You can use your computer again.\n");
   if (fixture)
     fixtureObservation = {
       presses: Math.min(100, fixture.presses()),
       expectedSyntheticTextReceived: fixture.typed(),
     };
-  fixture?.child.kill();
+  const fixtureClosed = await closeRehearsalChild(fixture?.child);
   if (documentRoot) {
     const state = documentOpened
       ? await verifyRealApp("--document-state", documentPath).catch(() => undefined)
@@ -1283,8 +1375,51 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     if (documentClosed) await rm(documentRoot, { recursive: true, force: true });
     else process.stdout.write(`Test document retained: ${documentPath}\n`);
   }
-  await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  const passed = !failureStage && !interrupted && Object.values(checks).every(Boolean);
+  let realAppsClosed = !includesRealApps;
+  if (includesRealApps && realAppProcessVerifier) {
+    if (!failureStage && !interrupted && documentClosed) {
+      for (const [id, pid] of Object.entries(realAppOwnedPids)) {
+        const safe =
+          id === REAL_APP_REHEARSAL_IDS[0]
+            ? (await verifyRealApp("--textedit-has-no-windows").catch(() => undefined))
+                ?.safeToTerminate === true
+            : (await verifyRealApp("--verify-calculator", "42").catch(() => undefined))
+                ?.expectedResultVisible === true;
+        if (safe)
+          await verifyRealAppProcesses("--terminate-owned", id, String(pid)).catch(() => undefined);
+      }
+    }
+    const deadline = Date.now() + 5000;
+    let pids;
+    do {
+      pids = await verifyRealAppProcesses("--pids").catch(() => undefined);
+      realAppsClosed =
+        !!pids &&
+        REAL_APP_REHEARSAL_IDS.every((id) => Array.isArray(pids[id]) && pids[id].length === 0);
+      if (!realAppsClosed) await delay(50);
+    } while (!realAppsClosed && Date.now() < deadline);
+  }
+  const cleanup = {
+    applicationClosed,
+    childrenClosed,
+    fixtureClosed,
+    realAppsClosed,
+    documentClosed: !documentRoot || documentClosed,
+    confirmed:
+      applicationClosed &&
+      childrenClosed &&
+      fixtureClosed &&
+      realAppsClosed &&
+      (!documentRoot || documentClosed),
+  };
+  if (cleanup.confirmed)
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  else
+    process.stdout.write(
+      "Test state retained because process/document cleanup was not confirmed.\n",
+    );
+  const passed =
+    !failureStage && !interrupted && cleanup.confirmed && Object.values(checks).every(Boolean);
   if (!passed) process.exitCode = 1;
   await writeFile(
     resolve(output),
@@ -1292,17 +1427,19 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       {
         reportVersion: 1,
         recordedAt: new Date().toISOString(),
-        scope: realApps
-          ? `unsigned-real-electron-${provider}-textedit-and-calculator`
-          : stopOnly
-            ? `unsigned-real-electron-${provider}-${stopMain ? "main" : "renderer"}-frozen-physical-stop`
-            : statusOnly
-              ? `unsigned-real-electron-${provider}-read-only-discovery-diagnostic`
-              : controlsOnly
-                ? `unsigned-real-electron-${provider}-human-consent-and-controls`
-                : actionsOnly
-                  ? `unsigned-real-electron-${provider}-human-consent-and-actions`
-                  : `unsigned-real-electron-${provider}-human-consent-synthetic-app`,
+        scope: clusterWorkflows
+          ? "unsigned-real-electron-clustered-workflows"
+          : realApps
+            ? `unsigned-real-electron-${provider}-textedit-and-calculator`
+            : stopOnly
+              ? `unsigned-real-electron-${provider}-${stopMain ? "main" : "renderer"}-frozen-physical-stop`
+              : statusOnly
+                ? `unsigned-real-electron-${provider}-read-only-discovery-diagnostic`
+                : controlsOnly
+                  ? `unsigned-real-electron-${provider}-human-consent-and-controls`
+                  : actionsOnly
+                    ? `unsigned-real-electron-${provider}-human-consent-and-actions`
+                    : `unsigned-real-electron-${provider}-human-consent-synthetic-app`,
         platform: process.platform,
         arch: process.arch,
         osVersion: release(),
@@ -1326,7 +1463,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         toolOutcomeErrors,
         thumbnailObservation,
         fixtureObservation,
-        ...(realApps
+        ...(includesRealApps
           ? {
               realAppObservation,
               realAppPrerequisites,
@@ -1338,10 +1475,12 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         ...(stopOnly ? { stopMeasurement } : {}),
         ...(chordTrace ? { chordObservation: chordTrace.summary() } : {}),
         checks,
+        ...(clusterWorkflows ? { phaseEvidence } : {}),
+        cleanup,
         ...(controlsOnly ? { controlsOnly: true } : {}),
         ...(actionsOnly ? { actionsOnly: true } : {}),
         limitations: [
-          ...(realApps
+          ...(includesRealApps
             ? [
                 "One real provider, TextEdit and Calculator, on the current display only",
                 "Real human app consent; full-access mode excludes the session-actions consent test",

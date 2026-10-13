@@ -343,6 +343,79 @@ paths do not enable an integration while the gates remain closed.
 
 ## Certification and validation
 
+### Clustered certification coordinator
+
+The coordinator groups checks into automated readiness, workflows/consent/isolation,
+protection/capture/displays and recovery/permissions, with separate built-in and Chrome
+tracks. It never changes release flags. Use a new directory outside the checkout:
+
+    bun run computer:certify prepare --output /tmp/f5-certification-suite \
+      --platform darwin --provider both \
+      --codex-home <selected-profile-codex-home> --codex-binary <codex-cli> \
+      --claude-home <selected-profile-claude-home> --claude-binary <claude-cli>
+    bun run computer:certify run --output /tmp/f5-certification-suite --group automated
+    bun run computer:certify run --output /tmp/f5-certification-suite --group workflows
+    bun run computer:certify report --output /tmp/f5-certification-suite
+
+Development preparation builds the app bundles before pinning them, then compiles the
+five native fixture executables once, observes the suspended
+helper's permissions and display geometry, and checks each configured provider's own
+account scope. It sends no grant, permit, resume, capture or input. The private launch
+configuration contains selected paths but is omitted from coverage reports.
+The --app option selects an installed target; --helper cannot replace that
+target's bundled helper. Specifying --platform win32 --arch x64 prepares the Windows
+inventory on another host without pretending its software or machine checks ran on
+Windows. A new suite must be prepared on the actual Windows machine.
+
+Before input, current permission/account prerequisites and all executable identities
+are checked again. In a terminal, the runner waits for READY. An orchestrating agent
+may use --operator-ready only after an explicit, current human readiness response;
+it is never app consent. Each provider still receives genuine native app consent.
+The workflow runner's --cluster-workflows mode requests only the synthetic fixture,
+TextEdit and Calculator, then uses one provider session for fixture/UI controls and
+the real-app sequence. Fixture and real-app phase results remain separate. A failed
+fixture phase prevents the real-app phase. A failed later phase does not erase completed
+earlier proof when cleanup is confirmed.
+
+Each scenario admission is reserved before execution and each attempt is written
+exclusively. Completed attempts cannot be overwritten. A process-interrupted admission
+is failed as outcome-unknown on recovery, without repeating an action:
+
+    bun run computer:certify resume --output /tmp/f5-certification-suite --group workflows
+    # Only after inspecting the failure, restoring prerequisites and coordinating again:
+    bun run computer:certify resume --output /tmp/f5-certification-suite \
+      --group workflows --retry real-apps.codex
+
+Resume checks helper, provider binaries, desktop/server bundles, every served client
+asset, prepared fixtures, source hashes, architecture and target identity. Changed
+identity requires a new suite. A live runner lock cannot be stolen. Cleanup requires
+actual process/document receipts; sending a signal alone does not qualify. Failed
+cleanup or uncertain receipts halt execution before another input phase. Recovery
+ordering keeps permission revocation last.
+
+Coverage retains every required scenario, including those without a qualifying driver.
+Current executable drivers cover automated checks, macOS provider discovery, clustered
+fixture/real-app workflows, native capture/protected-app checks and physical-stop
+rehearsals. Real grant-lifecycle/profile/persistence/windowless observers, the complete
+recipient/system-surface/display/recovery/permission matrix, Windows interactive drivers
+and installed-app observation still need implementation and machine validation; they
+are explicitly blocked, never credited from unit tests. Installed targets do not use
+the development Electron wrapper. Signing stays deferred. Current unsigned stop reports
+remain historical evidence and are not imported or repeated merely to populate a suite.
+
+Only a clean installed target with both providers, signatures, complete installed
+machine evidence, remote CI and security-review proof may report native release
+readiness. Even then, gate activation is a separate reviewed change. The coordinator
+currently has no path to manufacture these missing approvals or integration proofs.
+
+The October 13 integration recheck still found Claude's interactive-only computer
+launch and ChatGPT-managed Codex computer/Chrome runtimes. OpenAI's
+[hook documentation](https://learn.chatgpt.com/docs/hooks) documents callback failures
+that can allow execution and specialized paths outside hook coverage; hooks alone
+do not establish F5's required veto. Claude's
+[computer-use documentation](https://code.claude.com/docs/en/computer-use) excludes
+non-interactive SDK use. Built-in and Chrome gates remain closed.
+
 No signed-build certification is claimed. Native platform flags, provider built-in
 records and Chrome descriptors remain closed until the tests below pass. Hosted CI and
 unit tests do not establish TCC attribution, consent integrity, capture isolation or real

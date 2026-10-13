@@ -17,6 +17,7 @@ import { ComputerLeaseAuthority } from "./ComputerLeaseAuthority";
 import { ComputerHostChannel } from "./ComputerHostChannel";
 import { rehearsalAccessAnswer } from "./rehearsalConsent";
 import { createRehearsalFixture } from "./rehearsalFixture";
+import { closeRehearsalChild } from "./rehearsalCleanup";
 import {
   measureStopLatency,
   type StopInputSample,
@@ -30,6 +31,7 @@ const argument = (name: string) => {
 };
 const helperPath = argument("--helper");
 const output = argument("--output");
+const fixtureBinDirectory = argument("--fixture-bin-dir");
 const stalled = args.includes("--stall-host");
 const freezeBackend = args.includes("--freeze-backend");
 if (
@@ -154,6 +156,7 @@ try {
   fixture = await createRehearsalFixture({
     root,
     appId,
+    ...(fixtureBinDirectory ? { preparedDirectory: fixtureBinDirectory } : {}),
     sourceFile: resolve(
       import.meta.dirname,
       "../../native/macos/Fixtures/StopLatencyFixture.swift",
@@ -381,11 +384,18 @@ try {
   if (typing) await Promise.race([typing, pause(2000)]);
   if (backend && backend.exitCode === null && backend.signalCode === null) backend.kill("SIGKILL");
   offHelper();
-  helper.close();
-  fixture?.child.kill();
+  const helperClosed = await helper.closeAndWait();
+  const fixtureClosed = await closeRehearsalChild(fixture?.child);
+  const backendClosed = await closeRehearsalChild(backend);
+  const cleanup = {
+    helperClosed,
+    fixtureClosed,
+    backendClosed,
+    confirmed: helperClosed && fixtureClosed && backendClosed,
+  };
   if (root) await rm(root, { recursive: true, force: true });
   const measurement = measureStopLatency(evidence);
-  if (measurement.state !== "passed") process.exitCode = 1;
+  if (measurement.state !== "passed" || !cleanup.confirmed) process.exitCode = 1;
   await writeFile(
     resolve(output),
     JSON.stringify(
@@ -403,6 +413,7 @@ try {
         backendFrozen: freezeBackend,
         ...(failure ? { failure } : {}),
         measurement,
+        cleanup,
         limitations: [
           "Measures native event creation and app delivery from helper recognition; not a hardware-to-OS interrupt measurement",
           "The first physical modifier can pause input before the complete kill chord",

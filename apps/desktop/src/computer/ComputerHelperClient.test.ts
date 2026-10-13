@@ -50,6 +50,21 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("computer helper supervision", () => {
+  it("requires the helper exit receipt before confirming rehearsal cleanup", async () => {
+    const h = make();
+    ready(h);
+    const cleanup = h.client.closeAndWait(2000);
+    expect(h.process.kill).toHaveBeenCalledWith("SIGKILL");
+    h.process.emit("exit", null, "SIGKILL");
+    await expect(cleanup).resolves.toBe(true);
+  });
+  it("reports unconfirmed cleanup when a killed helper has no exit receipt", async () => {
+    const h = make();
+    ready(h);
+    const cleanup = h.client.closeAndWait(2000);
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(cleanup).resolves.toBe(false);
+  });
   it("preserves bounded capture failure metadata while discarding native messages", async () => {
     const h = make();
     ready(h);

@@ -283,4 +283,22 @@ mod keyboard_tests {
             Some("secure-field")
         );
     }
+    #[test]
+    fn focused_owner_or_password_change_stops_before_the_next_event() {
+        for changed in [(Some(21), Some(false)), (Some(20), Some(true)), (Some(20), None)] {
+            let states = [(Some(20), Some(false)), changed];
+            let delivered = states.iter().take_while(|(pid, password)| {
+                focused_element_block(20, *pid, *password).is_none()
+            }).count();
+            assert_eq!(delivered, 1);
+        }
+    }
+    #[test]
+    fn independently_removed_hooks_cannot_borrow_the_other_acknowledgement() {
+        for probe in 1..100 {
+            assert!(!hooks_healthy(probe, probe - 1, probe));
+            assert!(!hooks_healthy(probe - 1, probe, probe));
+            assert!(hooks_healthy(probe, probe, probe));
+        }
+    }
 }

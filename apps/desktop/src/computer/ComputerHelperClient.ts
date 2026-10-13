@@ -46,6 +46,7 @@ export class ComputerHelperClient implements ComputerHelper {
   private closing = false;
   private terminalFailure = false;
   private observationRecovery: ChildProcessWithoutNullStreams | undefined;
+  private childExited: Promise<void> = Promise.resolve();
   constructor(
     private readonly root: string,
     private readonly executable: string,
@@ -82,6 +83,7 @@ export class ComputerHelperClient implements ComputerHelper {
       windowsHide: true,
     });
     this.child = child;
+    this.childExited = new Promise<void>((done) => child.once("exit", () => done()));
     this.ready = false;
     this.terminalFailure = false;
     this.state = {
@@ -306,6 +308,22 @@ export class ComputerHelperClient implements ComputerHelper {
   onEvent(callback: (message: Record<string, unknown>) => void): () => void {
     this.listeners.add(callback);
     return () => this.listeners.delete(callback);
+  }
+  /** Test supervisors can require an actual exit receipt without changing stop behavior. */
+  async closeAndWait(timeoutMs = 2000): Promise<boolean> {
+    const exited = this.childExited;
+    this.close();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        exited.then(() => true),
+        new Promise<boolean>((done) => {
+          timer = setTimeout(() => done(false), timeoutMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
   close(): void {
     this.closing = true;

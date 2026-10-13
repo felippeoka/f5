@@ -16,7 +16,8 @@ import {
   type ComputerGrant,
 } from "@t3tools/contracts";
 import { ComputerHelperClient } from "./ComputerHelperClient";
-import { createRehearsalFixture } from "./rehearsalFixture";
+import { createRehearsalFixture, prepareRehearsalExecutable } from "./rehearsalFixture";
+import { closeRehearsalChild } from "./rehearsalCleanup";
 import { createBrowserProtectionFixture } from "./rehearsalBrowserFixture";
 import {
   BROWSER_PROTECTION_IDS,
@@ -38,6 +39,7 @@ const argument = (key: string) => {
 };
 const helperPath = argument("--helper");
 const output = argument("--output");
+const fixtureBinDirectory = argument("--fixture-bin-dir");
 const chromeBinary = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 if (
   process.platform !== "darwin" ||
@@ -260,15 +262,15 @@ try {
   ).stdout.trim();
   assert(/^\d{1,4}(\.\d{1,8}){1,4}$/.test(chromeVersion));
   metadata.chromeVersion = chromeVersion;
-  await exec(
-    "swiftc",
-    ["-framework", "AppKit", join(nativeSource, "ProtectionAppVerifier.swift"), "-o", appVerifier],
-    { timeout: 30000 },
+  await prepareRehearsalExecutable(
+    join(nativeSource, "ProtectionAppVerifier.swift"),
+    appVerifier,
+    fixtureBinDirectory,
   );
-  await exec(
-    "swiftc",
-    ["-framework", "AppKit", join(nativeSource, "CaptureVerifier.swift"), "-o", captureVerifier],
-    { timeout: 30000 },
+  await prepareRehearsalExecutable(
+    join(nativeSource, "CaptureVerifier.swift"),
+    captureVerifier,
+    fixtureBinDirectory,
   );
   await check("Terminal and Chrome initially closed", async () => {
     const pids = await appPids();
@@ -402,6 +404,7 @@ try {
     ungranted: true,
     background: true,
     displayId: secure.displayId,
+    ...(fixtureBinDirectory ? { preparedDirectory: fixtureBinDirectory } : {}),
   });
   const excludedSnapshot = await inspect(excludedId);
   const green = excludedSnapshot.nodes.find((node) => node.name === "Rehearsal capture marker");
@@ -477,8 +480,8 @@ try {
 } finally {
   clearInterval(renewal);
   await helper.suspend();
-  helper.close();
-  excluded?.child.kill();
+  const helperClosed = await helper.closeAndWait();
+  const fixtureClosed = await closeRehearsalChild(excluded?.child);
   if (terminalLaunchAttempted && !startedTerminalPid) retainedTerminal = true;
   // Never force-quit or adopt a pre-existing app. If physical input occurred or
   // a process cannot be identified/closed, retain it and its private state.
@@ -526,6 +529,12 @@ try {
     browserFixture?.observation().stateRejected === false &&
     !retainedChrome &&
     !retainedTerminal;
+  const cleanup = {
+    helperClosed,
+    fixtureClosed,
+    appsClosed: !retainedChrome && !retainedTerminal,
+    confirmed: helperClosed && fixtureClosed && !retainedChrome && !retainedTerminal,
+  };
   await writeFile(
     resolve(output),
     JSON.stringify(
@@ -539,7 +548,8 @@ try {
         scope: "unsigned-native-helper-terminal-and-isolated-chrome-protection",
         signed: false,
         certified: false,
-        state: passed ? "passed" : "failed",
+        state: passed && cleanup.confirmed ? "passed" : "failed",
+        cleanup,
         ...(failureStage ? { failureStage } : {}),
         physicalInterruption,
         retainedTerminal,

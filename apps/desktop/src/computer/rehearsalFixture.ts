@@ -1,7 +1,20 @@
 import { execFile, spawn } from "node:child_process";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, resolve, basename } from "node:path";
 import { promisify } from "node:util";
+
+export async function prepareRehearsalExecutable(
+  source: string,
+  output: string,
+  preparedDirectory?: string,
+) {
+  if (preparedDirectory)
+    await copyFile(join(preparedDirectory, basename(source, ".swift")), output);
+  else
+    await promisify(execFile)("swiftc", ["-framework", "AppKit", source, "-o", output], {
+      timeout: 30000,
+    });
+}
 
 /** A temporary app containing synthetic content only; never adopts a user app. */
 export async function createRehearsalFixture(options: {
@@ -16,6 +29,7 @@ export async function createRehearsalFixture(options: {
   observeChord?: boolean;
   diagnoseChord?: boolean;
   passiveChord?: boolean;
+  preparedDirectory?: string;
 }) {
   if (options.displayId !== undefined && !/^\d{1,10}$/.test(options.displayId))
     throw new Error("Invalid fixture display id.");
@@ -28,17 +42,11 @@ export async function createRehearsalFixture(options: {
   );
   if (options.executableSource) await copyFile(options.executableSource, executable);
   else
-    await promisify(execFile)(
-      "swiftc",
-      [
-        "-framework",
-        "AppKit",
-        options.sourceFile ??
-          resolve(import.meta.dirname, "../../native/macos/Fixtures/ComputerControlFixture.swift"),
-        "-o",
-        executable,
-      ],
-      { timeout: 30000 },
+    await prepareRehearsalExecutable(
+      options.sourceFile ??
+        resolve(import.meta.dirname, "../../native/macos/Fixtures/ComputerControlFixture.swift"),
+      executable,
+      options.preparedDirectory,
     );
   const args = [
     ...(options.background ? ["--background"] : []),

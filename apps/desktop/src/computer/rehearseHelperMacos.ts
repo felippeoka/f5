@@ -12,7 +12,8 @@ import type {
 } from "@t3tools/contracts";
 import { ComputerControlError } from "@t3tools/shared/computerControl";
 import { ComputerHelperClient } from "./ComputerHelperClient";
-import { createRehearsalFixture } from "./rehearsalFixture";
+import { createRehearsalFixture, prepareRehearsalExecutable } from "./rehearsalFixture";
+import { closeRehearsalChild } from "./rehearsalCleanup";
 
 const exec = promisify(execFile);
 const args = process.argv.slice(2);
@@ -22,6 +23,7 @@ const argument = (name: string) => {
 };
 const helperPath = argument("--helper");
 const output = argument("--output");
+const fixtureBinDirectory = argument("--fixture-bin-dir");
 const privacyOnly = args.includes("--privacy-only");
 if (process.platform !== "darwin" || !helperPath || !output) {
   process.stderr.write(
@@ -166,16 +168,10 @@ try {
     },
   );
   const captureVerifier = join(root, "capture-verifier");
-  await exec(
-    "swiftc",
-    [
-      "-framework",
-      "AppKit",
-      resolve(import.meta.dirname, "../../native/macos/Fixtures/CaptureVerifier.swift"),
-      "-o",
-      captureVerifier,
-    ],
-    { timeout: 30000 },
+  await prepareRehearsalExecutable(
+    resolve(import.meta.dirname, "../../native/macos/Fixtures/CaptureVerifier.swift"),
+    captureVerifier,
+    fixtureBinDirectory,
   );
   const verifyCapture = (
     image: ComputerScreenshot,
@@ -218,7 +214,11 @@ try {
       );
     });
   const ungrantedFixtureId = `org.example.ungranted-rehearsal.${randomUUID()}`;
-  const granted = await createRehearsalFixture({ root, appId: fixtureId });
+  const granted = await createRehearsalFixture({
+    root,
+    appId: fixtureId,
+    ...(fixtureBinDirectory ? { preparedDirectory: fixtureBinDirectory } : {}),
+  });
   fixture = granted.child;
   const excluded = await createRehearsalFixture({
     root,
@@ -513,19 +513,12 @@ try {
 } finally {
   clearInterval(renewal);
   await helper.suspend();
-  helper.close();
-  fixture?.kill();
-  ungrantedFixture?.kill();
-  for (const child of [fixture, ungrantedFixture]) {
-    if (child && child.exitCode === null && child.signalCode === null)
-      await new Promise<void>((done) => {
-        const timeout = setTimeout(done, 2000);
-        child.once("exit", () => {
-          clearTimeout(timeout);
-          done();
-        });
-      });
-  }
+  const helperClosed = await helper.closeAndWait();
+  const fixturesClosed = (
+    await Promise.all([closeRehearsalChild(fixture), closeRehearsalChild(ungrantedFixture)])
+  ).every(Boolean);
+  const cleanup = { helperClosed, fixturesClosed, confirmed: helperClosed && fixturesClosed };
+  if (!cleanup.confirmed) process.exitCode = 1;
   if (root) await rm(root, { recursive: true, force: true });
   const report = {
     reportVersion: 1,
@@ -546,6 +539,7 @@ try {
     certified: false,
     checks,
     physicalInterruption,
+    cleanup,
     remaining: [
       ...(privacyOnly
         ? ["Capture-only mode excludes semantic, keyboard and coordinate input checks"]

@@ -1,0 +1,328 @@
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtemp, rm, readdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { inventory } from "./catalog";
+import {
+  coverage,
+  decodeManifest,
+  decodeResult,
+  digest,
+  pending,
+  sameIdentity,
+  type Manifest,
+  type ScenarioResult,
+} from "./model";
+import { commandsFor } from "./commands";
+import { summarizeEvidence } from "./evidence";
+import {
+  initialize,
+  loadManifest,
+  loadResults,
+  saveResult,
+  writeExclusive,
+  attemptName,
+  lockSuite,
+} from "./store";
+import { recoverInterrupted } from "./suite";
+import { cleanEnvironment } from "./process";
+
+const hash = "a".repeat(64);
+const manifest: Manifest = {
+  version: 1,
+  suiteId: "test-suite",
+  preparedAt: "2026-10-13T12:00:00Z",
+  identity: {
+    platform: "darwin",
+    arch: "arm64",
+    commit: "b".repeat(40),
+    dirty: false,
+    target: "development",
+    files: { helper: hash },
+  },
+  providers: ["codex", "claude"],
+  prerequisites: {},
+};
+const scenario = (id: string) => inventory("darwin", manifest.providers).find((s) => s.key === id)!;
+function result(
+  key = "quality",
+  state: ScenarioResult["state"] = "passed",
+  attempt = 1,
+): ScenarioResult {
+  return {
+    version: 1,
+    suiteId: manifest.suiteId,
+    scenario: key,
+    attempt,
+    identityHash: digest(manifest.identity),
+    state,
+    evidenceKind: key === "quality" ? "automated" : "provider-desktop",
+    startedAt: manifest.preparedAt,
+    finishedAt: manifest.preparedAt,
+    checks: Object.fromEntries(scenario(key).expectedChecks.map((c) => [c, true])),
+    measurements: {},
+    cleanup: "confirmed",
+    evidenceSha256: hash,
+  };
+}
+const roots: string[] = [];
+async function directory() {
+  const root = await mkdtemp(join(tmpdir(), "f5-certification-test-"));
+  roots.push(root);
+  return root;
+}
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true })));
+});
+
+describe("certification inventory and coverage", () => {
+  it("contains both providers and keeps permission revocation last in recovery", () => {
+    const mac = inventory("darwin", manifest.providers);
+    expect(new Set(mac.map((s) => s.key)).size).toBe(mac.length);
+    expect(mac.some((s) => s.key === "fixture-workflow.codex")).toBe(true);
+    expect(mac.some((s) => s.key === "fixture-workflow.claude")).toBe(true);
+    expect(mac.filter((s) => s.group === "recovery").at(-1)?.id).toBe("permissions");
+    expect(mac.some((s) => s.id === "windows-recipients")).toBe(false);
+    expect(inventory("win32", manifest.providers).some((s) => s.id === "windows-recipients")).toBe(
+      true,
+    );
+    expect(inventory("win32", manifest.providers).some((s) => s.id === "windows-closed")).toBe(
+      false,
+    );
+  });
+  it("clusters UI and real-app checks with separate acceptance sets", () => {
+    const s = scenario("fixture-workflow.codex");
+    expect(scenario("real-apps.codex").expectedChecks).toContain(
+      "savedTestDocumentMatchesExpectedText",
+    );
+    expect(s.expectedChecks).toContain("humanPauseMirrored");
+    expect(
+      inventory("darwin", manifest.providers).filter((r) => r.id === "real-apps"),
+    ).toHaveLength(2);
+    const commands = commandsFor(
+      s,
+      { repo: "/repo", platform: "darwin" },
+      "/tmp/result",
+      { codex: { home: "/selected", binary: "/codex" } },
+      "darwin",
+      true,
+    );
+    if (typeof commands === "string") throw new Error("No driver");
+    expect(commands[0]?.args).toContain("--cluster-workflows");
+  });
+  it("keeps completed fixture proof separate when the later real-app phase fails", () => {
+    const s = scenario("fixture-workflow.codex");
+    const checks = result(s.key).checks;
+    const raw = {
+      reportVersion: 1,
+      platform: "darwin",
+      helperSha256: hash,
+      state: "failed",
+      checks: { ...checks, later: false },
+      cleanup: { confirmed: true },
+      phaseEvidence: {
+        fixture: { checks, state: "passed" },
+        realApps: { checks: { later: false }, state: "failed" },
+      },
+    };
+    expect(summarizeEvidence(s, manifest, raw).state).toBe("passed");
+    expect(summarizeEvidence(scenario("real-apps.codex"), manifest, raw).state).toBe("failed");
+  });
+  it("does not equate a passing software suite with machine or installed proof", () => {
+    const report = coverage(manifest, [result()]);
+    expect(report.requirements.find((r) => r.requirement === "consent")?.state).toBe("pending");
+    expect(report.nativeReleaseReady).toBe(false);
+    expect(report.gatesChanged).toBe(false);
+  });
+  it("requires both provider records, signed installed evidence and final review", () => {
+    expect(coverage({ ...manifest, providers: ["codex"] }, [result()]).nativeReleaseReady).toBe(
+      false,
+    );
+    expect(
+      coverage(
+        {
+          ...manifest,
+          identity: { ...manifest.identity, target: "installed" },
+          prerequisites: { "app-signature": true, "helper-signature": true },
+        },
+        [],
+      ).nativeReleaseReady,
+    ).toBe(false);
+  });
+  it("preserves failures and uses only the latest explicit attempt", () => {
+    const attempts = [result("quality", "failed"), result("quality", "passed", 2)];
+    expect(coverage(manifest, attempts).rows.find((r) => r.scenario === "quality")).toMatchObject({
+      state: "passed",
+      attempts: 2,
+    });
+    expect(attempts[0]?.state).toBe("failed");
+    expect(
+      pending(manifest, attempts, "automated", undefined).some((r) => r.key === "quality"),
+    ).toBe(false);
+    expect(() => coverage(manifest, [result(), result()])).toThrow("Duplicate");
+  });
+  it("does not automatically retry failed, blocked or interrupted work", () => {
+    for (const state of ["failed", "blocked", "not-run"] as const) {
+      expect(
+        pending(manifest, [result("quality", state)], "automated", undefined).some(
+          (r) => r.key === "quality",
+        ),
+      ).toBe(false);
+      expect(
+        pending(manifest, [result("quality", state)], "automated", "quality").map((r) => r.key),
+      ).toEqual(["quality"]);
+    }
+  });
+});
+describe("proof validation", () => {
+  it.each([
+    { checks: {} },
+    { checks: { format: true } },
+    { checks: { format: "true" } },
+    { cleanup: "unconfirmed" },
+    { evidenceSha256: undefined },
+    { identityHash: "0".repeat(64) },
+    { finishedAt: "invalid" },
+    { finishedAt: "2020-01-01T00:00:00Z" },
+    { measurements: { tail: Infinity } },
+    { measurements: { tail: -1 } },
+    { attempt: 0 },
+    { scenario: "unknown" },
+    { reason: "sensitive detail" },
+    { evidenceKind: "installed" },
+  ])("rejects missing, malformed or stale evidence %j", (patch) => {
+    expect(() => decodeResult({ ...result(), ...patch }, manifest)).toThrow();
+  });
+  it("rejects a fake/native host summary for a provider desktop workflow", () => {
+    expect(() =>
+      decodeResult(
+        { ...result("fixture-workflow.codex"), evidenceKind: "native-helper" },
+        manifest,
+      ),
+    ).toThrow("Incomplete");
+  });
+  it("drops arbitrary payloads and credentials from saved summaries", () => {
+    const decoded = decodeResult(
+      {
+        ...result(),
+        text: "SECRET_SENTINEL",
+        nested: { error: "SECRET_SENTINEL" },
+        data: "SECRET_SENTINEL",
+      },
+      manifest,
+    );
+    expect(JSON.stringify(decoded)).not.toContain("SECRET_SENTINEL");
+    expect(JSON.stringify(decodeManifest({ ...manifest, home: "SECRET_SENTINEL" }))).not.toContain(
+      "SECRET_SENTINEL",
+    );
+  });
+  it("detects hash, source, architecture and target changes", () => {
+    expect(
+      sameIdentity(manifest.identity, { ...manifest.identity, files: { helper: "0".repeat(64) } }),
+    ).toBe(false);
+    expect(sameIdentity(manifest.identity, { ...manifest.identity, arch: "x64" })).toBe(false);
+    expect(sameIdentity(manifest.identity, { ...manifest.identity, target: "installed" })).toBe(
+      false,
+    );
+  });
+  it("requires cleanup and the complete native protection assertion list", () => {
+    const s = scenario("protected-apps");
+    const raw = {
+      reportVersion: 1,
+      platform: "darwin",
+      helperSha256: hash,
+      state: "passed",
+      checks: Array.from({ length: 13 }, () => ({ state: "passed" })),
+      cleanup: { confirmed: true },
+      text: "SECRET_SENTINEL",
+    };
+    expect(summarizeEvidence(s, manifest, raw).state).toBe("passed");
+    expect(summarizeEvidence(s, manifest, { ...raw, checks: [{ state: "passed" }] }).state).toBe(
+      "failed",
+    );
+    expect(summarizeEvidence(s, manifest, { ...raw, cleanup: { confirmed: false } }).state).toBe(
+      "failed",
+    );
+    expect(JSON.stringify(summarizeEvidence(s, manifest, raw))).not.toContain("SECRET_SENTINEL");
+  });
+  it("rejects a passing stop label with uncertain timing or absent clock checks", () => {
+    const s = scenario("main-stop.codex");
+    const raw = {
+      reportVersion: 1,
+      platform: "darwin",
+      helperSha256: hash,
+      state: "passed",
+      checks: result(s.key).checks,
+      cleanup: { confirmed: true },
+      stopMeasurement: {
+        state: "passed",
+        checks: { clocksValid: false },
+        physicalInputTailMs: 0,
+        killChordTailMs: 0,
+        appDeliveryTailMs: 0,
+      },
+    };
+    expect(summarizeEvidence(s, manifest, raw).state).toBe("failed");
+    expect(() => summarizeEvidence(s, manifest, { ...raw, helperSha256: "0".repeat(64) })).toThrow(
+      "identity",
+    );
+  });
+  it("never launches the development wrapper against an installed app", () => {
+    expect(
+      commandsFor(
+        scenario("fixture-workflow.codex"),
+        { repo: "/repo", platform: "darwin", app: "/F5.app" },
+        "/tmp/result",
+        {},
+        "darwin",
+      ),
+    ).toBe("installed-observation-driver-required");
+  });
+  it("cleans leaked provider/profile env before child commands", () => {
+    process.env.F5_TEST_PROFILE_LEAK = "SECRET_SENTINEL";
+    try {
+      expect(cleanEnvironment()).not.toHaveProperty("F5_TEST_PROFILE_LEAK");
+    } finally {
+      delete process.env.F5_TEST_PROFILE_LEAK;
+    }
+  });
+});
+describe("immutable admissions and interrupted recovery", () => {
+  it("refuses manifest/result replacement and reads only valid attempts", async () => {
+    const root = await directory();
+    await initialize(root, manifest);
+    expect(await loadManifest(root)).toEqual(manifest);
+    await expect(initialize(root, manifest)).rejects.toThrow();
+    await saveResult(root, manifest, result());
+    await expect(saveResult(root, manifest, result())).rejects.toThrow();
+    expect(await loadResults(root, manifest)).toEqual([result()]);
+    expect((await readdir(root)).some((name) => name.endsWith(".tmp"))).toBe(false);
+  });
+  it("latches an unfinished admission as outcome-unknown without retrying input", async () => {
+    const root = await directory();
+    await initialize(root, manifest);
+    const started = result("fixture-workflow.codex", "not-run");
+    await writeExclusive(join(root, attemptName(started.scenario, 1) + ".started.json"), started);
+    const results: ScenarioResult[] = [];
+    await recoverInterrupted(root, manifest, results);
+    expect(results[0]).toMatchObject({
+      state: "failed",
+      reason: "outcome-unknown",
+      cleanup: "unconfirmed",
+    });
+    expect(
+      pending(manifest, results, "workflows", undefined).some((r) => r.key === started.scenario),
+    ).toBe(false);
+    await recoverInterrupted(root, manifest, results);
+    expect((await readdir(root)).filter((n) => n.endsWith(".result.json"))).toHaveLength(1);
+  });
+  it("refuses concurrent runners and live-lock recovery", async () => {
+    const root = await directory();
+    const release = await lockSuite(root, false);
+    await expect(lockSuite(root, false)).rejects.toThrow("already admitted");
+    await expect(lockSuite(root, true)).rejects.toThrow("still be active");
+    await release();
+    const next = await lockSuite(root, false);
+    await next();
+  });
+});

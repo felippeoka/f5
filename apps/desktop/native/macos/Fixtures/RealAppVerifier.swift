@@ -43,6 +43,11 @@ func ownedDocument(_ window: AXUIElement, _ path: String) -> Bool {
 if arguments.contains("--status") {
   emit(["textEditRunning": running(textEditId) != nil,
     "calculatorRunning": running(calculatorId) != nil])
+} else if arguments.count == 2 && arguments[1] == "--textedit-has-no-windows" {
+  let empty = application(textEditId).flatMap {
+    attribute($0, kAXWindowsAttribute) as? [AXUIElement]
+  }.map { $0.isEmpty } ?? (running(textEditId) == nil)
+  emit(["safeToTerminate": empty])
 } else if arguments.count == 3 && arguments[1] == "--verify-document" {
   let app = application(textEditId)
   let window = app.flatMap(focusedWindow)
