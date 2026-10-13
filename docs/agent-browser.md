@@ -794,6 +794,43 @@ bun apps/desktop/src/computer/rehearseBrowserProtectionStartupMacos.ts --output 
 It exercises no helper, grants, AX, capture or OS input. A clean-revision desktop run
 is still required for Chrome password refusal and pixel masking/exclusion evidence.
 
+The [clean headless preflight](computer-certification/2026-10-13-macos-chrome-headless-startup-clean-passed.json)
+on `8453b5d0d4` passed all six startup checks. The [corrected desktop protection attempt](computer-certification/2026-10-13-macos-terminal-chrome-protection-empty-capture-attempt.json)
+on the same revision passed 11 checks: Terminal typing/value refusal, Chrome secure
+inspection/value omission, exact semantic and keyboard secure-field refusals, unchanged
+synthetic DOM value with zero input events, positive capture controls, JPEG masking,
+revoked-app omission/refused inspection and masked PNG zoom. It remains failed because
+the final capture with every grant revoked returned `Unavailable`. No physical input
+was observed and both test apps closed normally. The operator had connected an external
+monitor; the report records both displays, with the external monitor primary. These
+app/field checks target one display, not the full multi-display isolation matrix.
+
+A suspended, empty-grant probe reproduced `missing-permissions` for both capture and
+zoom while the helper still reported available. The helper had sent an empty application
+include list to ScreenCaptureKit's image capture. The empty case now generates the
+neutral canvas without invoking image capture. Permission preflight, shareable-content
+resolution, grant/version and geometry revalidation, encoding and zoom limits remain
+enforced. Nonempty capture failures still propagate; they never return a neutral fallback.
+Native callback/canvas tests exercise zero-app avoidance, authorized composition,
+invalid dimensions/counts and failed-capture propagation.
+
+The [development empty-capture diagnostic](computer-certification/2026-10-13-macos-empty-capture-dirty-passed.json)
+then passed JPEG and PNG neutral-frame verification on both connected displays, without
+grants, permit, resume, app launch or OS input. The helper stayed suspended across 24
+heartbeats. Every decoded pixel is checked against the neutral reference, including
+frame edges. That run used uncommitted changes and updated helper
+`1ad51ad9e98fed5820461304019f55708a7f6667908fccb5c6db199ade79c176`;
+it proves neither granted-app privacy on both displays nor a complete protection gate.
+Earlier stop/real-app evidence remains pinned to its original helper hashes; it is not
+new binary certification. The read-only diagnostic can run while the operator works:
+
+```sh
+bun apps/desktop/src/computer/rehearseEmptyCaptureMacos.ts --helper apps/desktop/dist-native/mac-arm64/f5-computer-helper --output /tmp/f5-empty-capture.json
+```
+
+Release gates remain closed. The complete corrected desktop workflow still requires
+an idle run, and signing remains deferred.
+
 The helper rehearsal's `--privacy-only` mode runs the existing pixel-verification
 checks without its semantic/keyboard/pointer actions. It uses only two temporary
 synthetic apps with scripted helper-level grants: a positive control includes both

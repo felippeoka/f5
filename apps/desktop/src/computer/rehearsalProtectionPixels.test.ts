@@ -11,6 +11,7 @@ describe.runIf(process.platform === "darwin")("protection pixel verifier", () =>
   let root: string;
   let verifier: string;
   let data: string;
+  let neutralData: string;
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), "f5-protection-pixels-test-"));
     verifier = join(root, "verifier");
@@ -20,8 +21,11 @@ describe.runIf(process.platform === "darwin")("protection pixel verifier", () =>
       generatorSource,
       `import AppKit
 let canvas=CGContext(data:nil,width:90,height:30,bitsPerComponent:8,bytesPerRow:0,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue)!
+canvas.setFillColor(CGColor(gray:0.45,alpha:1));canvas.fill(CGRect(x:0,y:0,width:90,height:30))
+if !CommandLine.arguments.contains("--neutral") {
 for (x,color) in [(0,CGColor(colorSpace:CGColorSpaceCreateDeviceRGB(),components:[0,0,1,1])!),(30,CGColor(red:0,green:1,blue:0,alpha:1)),(60,CGColor(gray:0.45,alpha:1))] {
   canvas.setFillColor(color);canvas.fill(CGRect(x:x,y:0,width:30,height:30))
+}
 }
 let bytes=NSBitmapImageRep(cgImage:canvas.makeImage()!).representation(using:.png,properties:[:])!
 FileHandle.standardOutput.write(Data(bytes.base64EncodedString().utf8))`,
@@ -43,6 +47,7 @@ FileHandle.standardOutput.write(Data(bytes.base64EncodedString().utf8))`,
       ),
     ]);
     data = (await exec(generator)).stdout;
+    neutralData = (await exec(generator, ["--neutral"])).stdout;
   }, 30000);
   afterAll(async () => {
     if (root) await rm(root, { recursive: true, force: true });
@@ -76,5 +81,11 @@ FileHandle.standardOutput.write(Data(bytes.base64EncodedString().utf8))`,
   it("rejects an exposed secure rectangle and off-image marker bounds", async () => {
     expect(await verify({ secureRect: rect(30) })).toMatchObject({ secureMasked: false });
     await expect(verify({ blueRect: rect(80) })).rejects.toThrow();
+  });
+  it("requires every pixel to be neutral for an empty-grant frame", async () => {
+    expect(await verify({ neutralFrame: true })).toMatchObject({ allNeutral: false });
+    expect(await verify({ neutralFrame: true, data: neutralData })).toMatchObject({
+      allNeutral: true,
+    });
   });
 });

@@ -8,6 +8,7 @@ struct CaptureInput: Decodable {
   let secureRect: Rect?
   let blueRect: Rect?
   let greenRect: Rect?
+  let neutralFrame: Bool?
   let requireBlue: Bool
 }
 let input = try JSONDecoder().decode(
@@ -61,6 +62,16 @@ let reference = [neutral.redComponent, neutral.greenComponent, neutral.blueCompo
 guard reference.allSatisfy({ $0 > 0.3 && $0 < 0.8 }),
   reference.max()! - reference.min()! < 0.04
 else { exit(1) }
+var allNeutral = input.neutralFrame == true
+if allNeutral {
+  for y in 0..<image.pixelsHigh {
+    for x in 0..<image.pixelsWide {
+      guard let pixel = color(x, y) else { exit(1) }
+      let components = [pixel.redComponent, pixel.greenComponent, pixel.blueComponent]
+      allNeutral = allNeutral && zip(components, reference).allSatisfy { abs($0.0 - $0.1) < 0.04 }
+    }
+  }
+}
 if let rect = input.secureRect {
   guard rect.width > 8, rect.height > 8, rect.x >= 0, rect.y >= 0,
     rect.x + rect.width <= image.pixelsWide, rect.y + rect.height <= image.pixelsHigh
@@ -83,6 +94,7 @@ let outcomes: [String: Any] = [
   "ungrantedMarkerAbsent": green == 0,
   "greenMarkerVisible": green > 20,
   "secureMasked": secureMasked,
+  "allNeutral": allNeutral,
   "width": image.pixelsWide, "height": image.pixelsHigh,
 ]
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: outcomes))

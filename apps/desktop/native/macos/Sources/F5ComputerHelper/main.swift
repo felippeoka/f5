@@ -672,42 +672,40 @@ func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws ->
   guard let screen = content.displays.first(where: { $0.displayID == target.id }) else {
     throw Failure("GeometryChanged")
   }
-  let filter = SCContentFilter(display: screen, including: apps, exceptingWindows: [])
-  if #available(macOS 14.2, *) {
-    filter.includeMenuBar =
-      NSWorkspace.shared.frontmostApplication.map { front in
-        apps.contains(where: { $0.processID == front.processIdentifier })
-      } ?? false
-  }
   let zoom = string(request, "op") == "zoom"
   let captureScale = min(1.0, 2560.0 / Double(max(target.pixelWidth, target.pixelHeight)))
   let captureWidth =
     zoom ? max(1, Int(floor(Double(target.pixelWidth) * captureScale))) : target.width
   let captureHeight =
     zoom ? max(1, Int(floor(Double(target.pixelHeight) * captureScale))) : target.height
-  let configuration = SCStreamConfiguration()
-  configuration.width = captureWidth
-  configuration.height = captureHeight
-  configuration.showsCursor = false
-  let background = CGColor(gray: 0.45, alpha: 1)
-  configuration.backgroundColor = background
-  let image: CGImage
+  let canvas: CGContext
   do {
-    image = try await SCScreenshotManager.captureImage(
-      contentFilter: filter, configuration: configuration)
-  } catch { throw Failure("Unavailable", "reason", "missing-permissions") }
+    canvas = try await authorizedComputerCaptureCanvas(
+      width: captureWidth, height: captureHeight, applicationCount: apps.count
+    ) {
+      let filter = SCContentFilter(display: screen, including: apps, exceptingWindows: [])
+      if #available(macOS 14.2, *) {
+        filter.includeMenuBar =
+          NSWorkspace.shared.frontmostApplication.map { front in
+            apps.contains(where: { $0.processID == front.processIdentifier })
+          } ?? false
+      }
+      let configuration = SCStreamConfiguration()
+      configuration.width = captureWidth
+      configuration.height = captureHeight
+      configuration.showsCursor = false
+      configuration.backgroundColor = CGColor(gray: 0.45, alpha: 1)
+      do {
+        return try await SCScreenshotManager.captureImage(
+          contentFilter: filter, configuration: configuration)
+      } catch { throw Failure("Unavailable", "reason", "missing-permissions") }
+    }
+  } catch let error as Failure { throw error }
+  catch { throw Failure("Execution", "message", "Unable to encode capture.") }
   try checkGrants(request)
   guard try display(String(target.id)).generation == target.generation else {
     throw Failure("GeometryChanged")
   }
-  guard
-    let canvas = CGContext(
-      data: nil, width: captureWidth, height: captureHeight, bitsPerComponent: 8, bytesPerRow: 0,
-      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-  else { throw Failure("Execution", "message", "Unable to encode capture.") }
-  canvas.setFillColor(CGColor(gray: 0.45, alpha: 1))
-  canvas.fill(CGRect(x: 0, y: 0, width: captureWidth, height: captureHeight))
-  canvas.draw(image, in: CGRect(x: 0, y: 0, width: captureWidth, height: captureHeight))
   // Mask secure fields; an incomplete tree cannot establish that remaining pixels are safe.
   var maskIncomplete = false
   func fillMask(_ rect: CGRect) {
