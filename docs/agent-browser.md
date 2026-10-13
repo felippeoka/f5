@@ -613,6 +613,16 @@ tool starts/completions, failed/declined tools, provider approvals and user-inpu
 requests per opaque turn ordinal. They retain no messages, IDs, arguments, results
 or approval contents and do not infer the cause of the preserved failed attempt.
 These counts are diagnostics, never a substitute for native or human receipts.
+The [instrumented Codex attempt](computer-certification/2026-10-13-macos-session-actions-codex-provider-approval-denied.json)
+also stopped before F5 session consent. Its second turn contains one resolved provider
+approval and one failed tool, with no native lease, capture or input and confirmed
+cleanup. The operator separately confirmed declining Codex's tool approval before
+the F5 dialog. That explains this attempt, not the unobserved decision in the earlier
+attempt. The persistent instructions now explicitly distinguish the two stages:
+approve only Codex's named F5 tool call first, then follow the allow/deny instruction
+in F5's separate native Computer access dialog. Later semantic input may likewise
+need a genuine Codex tool approval. No prompt is auto-answered; both attempts remain
+failed until a fresh run completes the actual F5 denial/approval checks.
 
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;

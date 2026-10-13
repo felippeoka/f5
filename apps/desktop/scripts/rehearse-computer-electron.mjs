@@ -929,11 +929,14 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           kind,
           allow,
           instructionsText:
-            kind === "apps"
+            (provider === "codex"
+              ? `FIRST: If Codex asks tool approval, allow only ${kind === "apps" ? "computer_request_access" : "computer_activate_app"}. This only lets the call reach F5; app and session consent remain separate. THEN follow the F5 Computer access dialog instructions below. `
+              : "") +
+            (kind === "apps"
               ? "READY: Review access and allow only Computer Control Test Fixture. Leave Always allow off. No app input in this turn."
               : allow
                 ? "RED: Review access and Allow this session to control separately approved apps. After Allow, stay idle: the agent will activate only the synthetic fixture and capture it once."
-                : "READY: Review access and Deny this session's actions. The agent must receive NotGranted without activating any app.",
+                : "READY: In F5's separate native Computer access dialog, Deny this session's actions. The agent must receive NotGranted without activating any app."),
           prompt:
             kind === "apps"
               ? `Approval-mode consent test for exact app ${appId}. Call computer_status once and computer_request_access exactly once for only this exact app ID, reason Synthetic session approval test. Do not activate, inspect, capture or send input. No shell, files, network or other apps. Stop on any failure, never retry. Finish READY.`
@@ -948,7 +951,10 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           await delay(1000);
         }
         await instructions(
-          "RED: One semantic button press in the fixture. No additional F5 session-actions dialog should appear.",
+          "RED: One semantic button press in the fixture. No additional F5 session-actions dialog should appear." +
+            (provider === "codex"
+              ? " If Codex asks approval for computer_element_action, allow only that named tool call, then stay idle."
+              : ""),
         );
         await startTurn(
           `Continue in the same approved session using only exact app ${appId}. Call computer_inspect once on this exact app ID, then use its snapshot and element reference to press Rehearsal press exactly once with computer_element_action, action press, screenshot:false. No other input, typing, activation, shell, files, network or apps. Do not request access again. Stop immediately on any failure or ambiguity; never retry. Finish READY.`,
