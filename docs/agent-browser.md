@@ -404,6 +404,25 @@ That failed attempt remains immutable. The runner now uses --status, preparation
 the compiled verifier protocols, and phase selection permits a focused subsequent
 real-app run. No release gate changed.
 
+The [focused real-app runs](computer-certification/2026-10-13-macos-cluster-real-apps-passed.json)
+at clean source c43f201351 then passed all 16 checks through each provider, with the
+current helper 42e5f28a123a74b947ce93d0962494c497ab5f889fb68f6576c3ceb3793e48c5.
+Both used genuine native consent, saved the exact synthetic Unicode document, verified
+its closure and Calculator's result independently, and confirmed process/app cleanup.
+Each typed once; no failed mutation or ambiguous outcome was recorded. Claude also
+made one read-only inspection that returned app-not-running after document closure and
+before Calculator launch, then continued. That limitation is retained explicitly: these
+passes do not certify strict stop-on-every-tool-error behavior, the wider app/privacy/
+profile/display/recovery matrix, Windows or signed installed-build attribution. The
+failed combined attempt remains failed; no release gate changed.
+
+The observer now retains failed/ambiguous mutation counts and distinct typing request
+counts, so a later success cannot hide a failed action or an accidental typing retry.
+Missing or malformed terminal responses leave the trace incomplete. Observation
+failures remain separate and content-free. These stronger assertions have regression
+coverage; the recorded machine runs above retain their original source and artifact
+identities rather than being relabelled as runs of the updated observer.
+
 Resume checks helper, provider binaries, desktop/server bundles, every served client
 asset, prepared fixtures, source hashes, architecture and target identity. Changed
 identity requires a new suite. A live runner lock cannot be stolen. Cleanup requires

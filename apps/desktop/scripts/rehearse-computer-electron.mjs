@@ -894,6 +894,9 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         );
         checks.realAppNativeResponsesCorrelated =
           realAppObservation.traceComplete &&
+          realAppObservation.failedMutations === 0 &&
+          realAppObservation.ambiguousMutations === 0 &&
+          realAppObservation.typingRequests === 1 &&
           !realAppObservation.unexpectedAppInput &&
           realAppObservation.textEditInspected &&
           realAppObservation.textEditTyping &&

@@ -43,6 +43,11 @@ export class RehearsalRealAppsObservation {
   private calculatorOpened = false;
   private calculatorPresses = 0;
   private unexpectedAppInput = false;
+  private failedMutations = 0;
+  private ambiguousMutations = 0;
+  private observationFailures = 0;
+  private typingRequests = 0;
+  private invalidResponses = 0;
   private overflow = false;
   constructor(private readonly threadId: string) {}
   receive(raw: unknown): void {
@@ -55,6 +60,7 @@ export class RehearsalRealAppsObservation {
         return;
       }
       this.admitted.add(request.requestId);
+      if (request.op === "type") this.typingRequests++;
       const app = "appId" in request ? appKind(request.appId) : undefined;
       this.pending.set(request.requestId, {
         op: request.op,
@@ -77,7 +83,13 @@ export class RehearsalRealAppsObservation {
       const request = this.pending.get(raw.requestId);
       if (!request) return;
       this.pending.delete(raw.requestId);
-      if (raw.error !== undefined) return;
+      if (raw.error !== undefined) {
+        if (isComputerMutation(request.op)) {
+          this.failedMutations++;
+          if (raw.error._tag === "OutcomeUnknown") this.ambiguousMutations++;
+        } else this.observationFailures++;
+        return;
+      }
       const result = raw.result;
       if (
         request.op === "inspect" &&
@@ -109,6 +121,12 @@ export class RehearsalRealAppsObservation {
         }
         if (request.op === "openApp" && app === "calculator") this.calculatorOpened = true;
         if (request.press && app === "calculator") this.calculatorPresses++;
+      } else if (
+        isComputerMutation(request.op) ||
+        (request.op === "inspect" &&
+          (!Schema.is(ComputerInspectResult)(result) || appKind(result.appId) !== request.app))
+      ) {
+        this.invalidResponses++;
       }
     }
   }
@@ -124,7 +142,11 @@ export class RehearsalRealAppsObservation {
       calculatorOpened: this.calculatorOpened,
       calculatorPresses: this.calculatorPresses,
       unexpectedAppInput: this.unexpectedAppInput,
-      traceComplete: !this.overflow,
+      failedMutations: this.failedMutations,
+      ambiguousMutations: this.ambiguousMutations,
+      observationFailures: this.observationFailures,
+      typingRequests: this.typingRequests,
+      traceComplete: !this.overflow && this.pending.size === 0 && this.invalidResponses === 0,
     };
   }
 }

@@ -90,6 +90,10 @@ it("requires correlated successful results for the expected app and keeps only s
     calculatorOpened: true,
     calculatorPresses: 1,
     unexpectedAppInput: false,
+    failedMutations: 0,
+    ambiguousMutations: 0,
+    observationFailures: 0,
+    typingRequests: 1,
     traceComplete: true,
   });
   expect(JSON.stringify(trace.snapshot())).not.toContain("PRIVATE_SENTINEL");
@@ -185,4 +189,44 @@ it("does not credit wrong modifiers, combined chords, failed input or another ap
     selectAllKeySucceeded: false,
     saveKeySucceeded: false,
   });
+});
+
+it("keeps ambiguous mutation failures latched even if a new request later succeeds", () => {
+  const trace = new RehearsalRealAppsObservation("thread");
+  trace.receive(request("type", textEdit, "first"));
+  trace.receive({ type: "response", requestId: "first", error: { _tag: "OutcomeUnknown" } });
+  trace.receive(request("type", textEdit, "second"));
+  trace.receive({ type: "response", requestId: "second", result: action(textEdit) });
+  expect(trace.snapshot()).toMatchObject({
+    textEditTyping: true,
+    failedMutations: 1,
+    ambiguousMutations: 1,
+    typingRequests: 2,
+  });
+  expect(JSON.stringify(trace.snapshot())).not.toContain("PRIVATE_SENTINEL");
+});
+
+it("does not mistake missing or malformed terminal responses for a complete trace", () => {
+  const trace = new RehearsalRealAppsObservation("thread");
+  trace.receive(request("inspect", textEdit));
+  expect(trace.snapshot().traceComplete).toBe(false);
+  trace.receive({ type: "response", requestId: "inspect", result: {} });
+  expect(trace.snapshot().traceComplete).toBe(false);
+});
+
+it("records a failed observation separately without losing successful input proof", () => {
+  const trace = new RehearsalRealAppsObservation("thread");
+  trace.receive(request("inspect", textEdit));
+  trace.receive({
+    type: "response",
+    requestId: "inspect",
+    error: { _tag: "Execution", message: "PRIVATE_SENTINEL" },
+  });
+  expect(trace.snapshot()).toMatchObject({
+    observationFailures: 1,
+    failedMutations: 0,
+    ambiguousMutations: 0,
+    traceComplete: true,
+  });
+  expect(JSON.stringify(trace.snapshot())).not.toContain("PRIVATE_SENTINEL");
 });
