@@ -39,6 +39,7 @@ import type { ReactNode } from "react";
 import type {} from "@vitest/browser-playwright"; // Types cdp() as a Playwright CDPSession.
 import { cdp, page, userEvent } from "vitest/browser";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { timelineScrollAnchors } from "./chat/timelineScrollAnchors";
 import { render } from "vitest-browser-react";
 
 import { type ComposerImageAttachment, useComposerDraftStore } from "../composerDraftStore";
@@ -2068,6 +2069,10 @@ describe("ChatView timeline (full app)", () => {
       changedFilesExpandedByThreadId: {},
     });
     resetLiveThreadWarmSchedulerForTests();
+    // Each snapshot represents a fresh test thread, despite reusing its ID.
+    // The module-level anchor survives localStorage/Zustand resets and can put
+    // later fixtures at a previous test's historical position instead of the tail.
+    timelineScrollAnchors.set(THREAD_ID, { rowId: null, top: 0, scroll: 0, atEnd: true });
   });
 
   afterEach(() => {
