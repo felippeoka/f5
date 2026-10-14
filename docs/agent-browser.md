@@ -895,8 +895,8 @@ single-worker test suite also passed, including all 136 exhaustive Git cases.
 A preceding two-worker run encountered a WebSocket 403 in a server test; its log was
 retained, and no authentication assertions were changed. This pass supports the
 new observation-transfer path but does not prove the precise earlier context-loss
-cause. Real lease contention and positive capture/privacy evidence remain pending;
-the diagnostic carries no release credit and opens no gate.
+cause. The diagnostic carries no release credit and opens no gate; real
+contention and positive capture/privacy evidence are recorded separately below.
 
 The [subsequent full isolation attempt](computer-certification/2026-10-14-macos-profile-isolation-validator-limit-failed.json)
 on clean `33add63096` reached real contention in both directions, positive owner
@@ -910,6 +910,22 @@ credit. Cleanup was confirmed. Observer and validator budgets now share one
 hashed constant; overflow and unexpected operations still fail, including move
 and scroll. The driver saves its final receipt before validating it. Regression
 coverage includes long valid traces, the exact cap, overflow and extra actions.
+
+The [fresh full isolation phase](computer-certification/2026-10-14-macos-codex-profile-isolation-passed.json)
+passed on clean `ba7e34bfff`, with two real isolated Codex profiles and genuine
+fixture consent. Both directions produced exactly one `Busy(other-profile)`
+while the other holder remained active. Each owner delivered a positive thumbnail
+on its own IPC and authenticated client stream; the other profile received only
+anonymous lease state, with no observed foreign activity, image, grant or private
+identity. Stopping the non-holder preserved the holder; turn/session cleanup
+released leases and cleared grants. Credential-file comparisons and private
+snapshots passed, a second helper refused the device lock with `other-instance`,
+fixtures received no press or typing, the operator acknowledged Finish, and all
+owned resources closed. Traces remained complete with no pending response.
+Formatting, lint, typecheck and full tests passed, including all 136 exhaustive
+Git cases. This is scoped unsigned macOS/Codex two-profile evidence, not an audit
+of arbitrary credential reads, cross-provider contention or signed installed
+behavior. Earlier failed attempts remain failed; public gates stay closed.
 
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;
