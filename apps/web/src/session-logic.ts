@@ -1151,8 +1151,11 @@ export type LiveWorkActivity =
   /** The provider is retrying a dropped model stream; `attempt` reads like "2/5". */
   | { kind: "reconnecting"; attempt: string | null }
   /**
-   * The turn runs with no item open: the model is producing its next step.
-   * Codex reports reasoning only once it has finished, so this covers it.
+   * The turn runs with no tool, reasoning, or hook open and does not wait on
+   * the user, so the model is most likely producing its next step. Codex
+   * reports reasoning only once it has finished, so this covers it. Work the
+   * activities do not show, such as provider context compaction, reads the
+   * same.
    */
   | { kind: "idle" }
   | null;
@@ -1212,17 +1215,58 @@ function activityChangedAt(activity: OrchestrationThreadActivity): string {
 }
 
 /**
+ * Activities that show the model stream produced something. Status and
+ * metadata activities (plans, MCP status, hooks, warnings) arrive without
+ * it, so they cannot prove that a stream retry recovered.
+ */
+const MODEL_PROGRESS_ACTIVITY_KINDS: ReadonlySet<string> = new Set([
+  REASONING_STATUS_ACTIVITY_KIND,
+  "tool.started",
+  "tool.updated",
+  "tool.completed",
+  "approval.requested",
+  "approval.resolved",
+  "user-input.requested",
+  "user-input.resolved",
+]);
+
+/**
+ * When an assistant message of the turn last showed output. Assistant text
+ * is a message rather than an activity, so it reaches the live label here.
+ */
+export function deriveLatestAssistantOutputAt(
+  messages: ReadonlyArray<Pick<ChatMessage, "role" | "turnId" | "createdAt" | "completedAt">>,
+  turnId: TurnId | undefined,
+): string | null {
+  if (!turnId) return null;
+  let latest: string | null = null;
+  for (const message of messages) {
+    if (message.role !== "assistant" || message.turnId !== turnId) continue;
+    const at = message.completedAt ?? message.createdAt;
+    if (!latest || at > latest) latest = at;
+  }
+  return latest;
+}
+
+/**
  * What the latest turn is doing right now: the most recently started item
  * that has not finished. A completion only closes its own item, so a
  * background tool finishing does not hide a newer tool or active reasoning.
  * A terminal status is final for its item: activities without a session
  * sequence can sort a start after its completion when timestamps tie.
- * With nothing open, a stream retry that nothing has followed yet reads as
- * reconnecting; otherwise the model is between items.
+ * With nothing open, a turn waiting on the user or running a hook reads as
+ * generic work; a stream retry that no model output has followed yet reads
+ * as reconnecting; otherwise the model is between items.
  */
 export function deriveLiveWorkActivity(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
+  options?: {
+    /** A pending approval, question, or blocking form. */
+    readonly awaitingUser?: boolean;
+    /** From {@link deriveLatestAssistantOutputAt}. */
+    readonly latestAssistantOutputAt?: string | null;
+  },
 ): LiveWorkActivity {
   if (!latestTurnId) return null;
   const ordered = activities
@@ -1236,11 +1280,24 @@ export function deriveLiveWorkActivity(
       activity: Exclude<LiveWorkActivity, null>;
     }
   >();
-  let lastProgressAt = "";
+  // The latest model progress; the index breaks timestamp ties.
+  let progressAt = "";
+  let progressIndex = -1;
+  const openHookIds = new Set<string>();
   ordered.forEach((activity, index) => {
-    if (isRetryingWarning(activity)) return;
-    const changedAt = activityChangedAt(activity);
-    if (changedAt > lastProgressAt) lastProgressAt = changedAt;
+    if (MODEL_PROGRESS_ACTIVITY_KINDS.has(activity.kind)) {
+      const changedAt = activityChangedAt(activity);
+      if (changedAt > progressAt || (changedAt === progressAt && index > progressIndex)) {
+        progressAt = changedAt;
+        progressIndex = index;
+      }
+    }
+    if (activity.kind === "hook.started" || activity.kind === "hook.completed") {
+      const hookId = asTrimmedString(asPayloadRecord(activity.payload)?.hookId);
+      if (hookId && activity.kind === "hook.started") openHookIds.add(hookId);
+      if (hookId && activity.kind === "hook.completed") openHookIds.delete(hookId);
+      return;
+    }
     if (activity.kind === REASONING_STATUS_ACTIVITY_KIND) {
       const payload = asPayloadRecord(activity.payload);
       const detail = asTrimmedString(payload?.detail) ?? null;
@@ -1298,12 +1355,22 @@ export function deriveLiveWorkActivity(
     if (!live || item.startIndex > live.startIndex) live = item;
   }
   if (live) return live.activity;
-  const retry = ordered.findLast(isRetryingWarning);
-  if (retry && retry.createdAt >= lastProgressAt) {
-    const message = asTrimmedString(asPayloadRecord(retry.payload)?.message);
-    const attempt = message?.match(/\d+\s*\/\s*\d+/)?.[0].replace(/\s+/g, "") ?? null;
-    return { kind: "reconnecting", attempt };
+  if (options?.awaitingUser) return null;
+  const retryIndex = ordered.findLastIndex(isRetryingWarning);
+  const retry = ordered[retryIndex];
+  if (retry) {
+    const assistantOutputAt = options?.latestAssistantOutputAt ?? "";
+    const recovered =
+      progressAt > retry.createdAt ||
+      (progressAt === retry.createdAt && progressIndex > retryIndex) ||
+      assistantOutputAt >= retry.createdAt;
+    if (!recovered) {
+      const message = asTrimmedString(asPayloadRecord(retry.payload)?.message);
+      const attempt = message?.match(/\d+\s*\/\s*\d+/)?.[0].replace(/\s+/g, "") ?? null;
+      return { kind: "reconnecting", attempt };
+    }
   }
+  if (openHookIds.size > 0) return null;
   return { kind: "idle" };
 }
 

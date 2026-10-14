@@ -137,6 +137,7 @@ import {
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  deriveLatestAssistantOutputAt,
   deriveLiveWorkActivity,
   deriveLiveWorkTurnId,
   type LiveWorkActivity,
@@ -2009,17 +2010,23 @@ export default function ChatView({
     }
   }, [isPendingTurnDispatchBlocked]);
   const liveTurnId = deriveLiveWorkTurnId(activeThread?.session, activeLatestTurn?.turnId);
+  // Includes blocking provider forms, which `blockingUserInputs` leaves out.
+  const isAwaitingUser =
+    activePendingApproval !== null || pendingUserInputs.some(isBlockingUserInput);
+  const latestAssistantOutputAt = useMemo(
+    () => deriveLatestAssistantOutputAt(activeThread?.messages ?? [], liveTurnId),
+    [activeThread?.messages, liveTurnId],
+  );
   // Unfiltered activities, so transcript and work-log filters cannot hide it.
   const derivedLiveActivity = useMemo(
-    () => deriveLiveWorkActivity(threadActivities, liveTurnId),
-    [threadActivities, liveTurnId],
+    () =>
+      deriveLiveWorkActivity(threadActivities, liveTurnId, {
+        awaitingUser: isAwaitingUser,
+        latestAssistantOutputAt,
+      }),
+    [threadActivities, liveTurnId, isAwaitingUser, latestAssistantOutputAt],
   );
-  // A turn waiting on an approval or an answer is not generating anything.
-  const isAwaitingUser = activePendingApproval !== null || activePendingUserInput !== null;
-  const liveActivityKind =
-    derivedLiveActivity?.kind === "idle" && isAwaitingUser
-      ? null
-      : (derivedLiveActivity?.kind ?? null);
+  const liveActivityKind = derivedLiveActivity?.kind ?? null;
   const liveActivityText =
     derivedLiveActivity?.kind === "thinking"
       ? derivedLiveActivity.detail

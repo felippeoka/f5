@@ -13,6 +13,7 @@ import {
   createLocalDispatchSnapshot,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  deriveLatestAssistantOutputAt,
   deriveLiveWorkActivity,
   deriveLiveWorkTurnId,
   PROVIDER_OPTIONS,
@@ -209,6 +210,53 @@ describe("deriveLiveWorkActivity", () => {
     expect(deriveLiveWorkActivity([tool("tool.started", "A", 1)], undefined)).toBeNull();
   });
 
+  it("reads as generic work while waiting on the user, but keeps an open item", () => {
+    expect(deriveLiveWorkActivity([], turnId, { awaitingUser: true })).toBeNull();
+    expect(
+      deriveLiveWorkActivity([tool("tool.started", "A", 1)], turnId, { awaitingUser: true }),
+    ).toEqual({ kind: "tool", providerItemId: "A", title: "A" });
+  });
+
+  it("reads as generic work while a hook runs", () => {
+    const hook = (kind: string, sequence: number) =>
+      makeActivity({
+        id: `${kind}-${sequence}`,
+        kind,
+        tone: "info",
+        payload: { hookId: "hook-1", hookEvent: "PreToolUse" },
+        turnId: "turn-live",
+        sequence,
+      });
+    expect(deriveLiveWorkActivity([hook("hook.started", 1)], turnId)).toBeNull();
+    expect(
+      deriveLiveWorkActivity([hook("hook.started", 1), hook("hook.completed", 2)], turnId),
+    ).toEqual({ kind: "idle" });
+  });
+
+  it("finds the latest assistant output of the turn", () => {
+    const message = (
+      role: "user" | "assistant",
+      createdAt: string,
+      completedAt?: string,
+      messageTurnId: TurnId | null = turnId,
+    ) => ({ role, turnId: messageTurnId, createdAt, completedAt });
+    expect(
+      deriveLatestAssistantOutputAt(
+        [
+          message("assistant", "2026-02-23T00:00:01.000Z", "2026-02-23T00:00:04.000Z"),
+          message("assistant", "2026-02-23T00:00:03.000Z"),
+          message("user", "2026-02-23T00:00:09.000Z"),
+          message("assistant", "2026-02-23T00:00:08.000Z", undefined, TurnId.makeUnsafe("old")),
+        ],
+        turnId,
+      ),
+    ).toBe("2026-02-23T00:00:04.000Z");
+    expect(deriveLatestAssistantOutputAt([], turnId)).toBeNull();
+    expect(
+      deriveLatestAssistantOutputAt([message("assistant", "2026-02-23T00:00:01.000Z")], undefined),
+    ).toBeNull();
+  });
+
   describe("stream retries", () => {
     const at = (second: number) => `2026-02-23T00:00:${String(second).padStart(2, "0")}.000Z`;
     const retry = (second: number, message = "Reconnecting... 2/5") =>
@@ -266,6 +314,54 @@ describe("deriveLiveWorkActivity", () => {
         attempt: "2/5",
       });
       expect(deriveLiveWorkActivity([status(1, 4), retry(3)], turnId)).toEqual({ kind: "idle" });
+    });
+
+    it("clears on assistant output that follows the retry", () => {
+      expect(
+        deriveLiveWorkActivity([retry(2)], turnId, { latestAssistantOutputAt: at(3) }),
+      ).toEqual({ kind: "idle" });
+      expect(
+        deriveLiveWorkActivity([retry(2)], turnId, { latestAssistantOutputAt: at(1) }),
+      ).toEqual({ kind: "reconnecting", attempt: "2/5" });
+    });
+
+    it("does not count status or metadata activities as recovery", () => {
+      const metadata = (kind: string) =>
+        makeActivity({ kind, tone: "info", turnId: "turn-live", createdAt: at(3) });
+      for (const kind of ["task.progress", "turn.plan.updated", "runtime.warning"]) {
+        expect(deriveLiveWorkActivity([retry(2), metadata(kind)], turnId)).toEqual({
+          kind: "reconnecting",
+          attempt: "2/5",
+        });
+      }
+    });
+
+    it("breaks timestamp ties by activity order", () => {
+      const tied = (id: string, kind: string, sequence: number) =>
+        makeActivity({
+          id,
+          kind,
+          tone: "info",
+          payload:
+            kind === "runtime.warning"
+              ? { message: "Reconnecting... 2/5", detail: { willRetry: true } }
+              : { itemType: "command_execution", providerItemId: "cmd" },
+          turnId: "turn-live",
+          createdAt: at(2),
+          sequence,
+        });
+      expect(
+        deriveLiveWorkActivity(
+          [tied("retry", "runtime.warning", 1), tied("done", "tool.completed", 2)],
+          turnId,
+        ),
+      ).toEqual({ kind: "idle" });
+      expect(
+        deriveLiveWorkActivity(
+          [tied("done", "tool.completed", 1), tied("retry", "runtime.warning", 2)],
+          turnId,
+        ),
+      ).toEqual({ kind: "reconnecting", attempt: "2/5" });
     });
 
     it("leaves an open item in charge and ignores warnings that will not retry", () => {
