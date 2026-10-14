@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { ORCHESTRATION_WS_METHODS } from "@t3tools/contracts";
+import { NextTurnQueueSubmitInput, ORCHESTRATION_WS_METHODS, WS_METHODS } from "@t3tools/contracts";
+import { Schema } from "effect";
 import { RehearsalExternalClient } from "./rehearsalExternalClient";
 
 class TestSocket extends EventTarget {
@@ -84,11 +85,83 @@ it("does not expose grants, leases, execution, consent answers or settings chang
   expect(socket.sent).toEqual([]);
   client.close();
 });
+const queuedTurn = () => ({
+  submissionId: "windowless-submission",
+  intent: "auto",
+  command: {
+    type: "thread.turn.start",
+    commandId: "windowless-command",
+    threadId: "windowless-thread",
+    message: {
+      messageId: "windowless-message",
+      role: "user",
+      text: "Synthetic check",
+      attachments: [],
+    },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    createdAt: "2026-10-14T00:00:00.000Z",
+  },
+});
+it("submits an established-thread turn through the ordinary queue exactly once", async () => {
+  const { client, socket } = await connected();
+  const input = queuedTurn();
+  expect(Schema.is(NextTurnQueueSubmitInput)(input)).toBe(true);
+  const reply = client.rpc(WS_METHODS.nextTurnQueueSubmit, input);
+  // Attach before any awaited work so a refusal is handled by the assertion.
+  const settled = reply.then(
+    (value) => ({ value }),
+    (error) => ({ error }),
+  );
+  await Promise.resolve();
+  expect(socket.sent).toHaveLength(1);
+  const request = JSON.parse(socket.sent[0]!);
+  expect(request.body).toEqual({ ...input, _tag: WS_METHODS.nextTurnQueueSubmit });
+  socket.message({
+    id: request.id,
+    result: { disposition: "started", submissionId: input.submissionId, sequence: 1 },
+  });
+  expect(await settled).toEqual({
+    value: { disposition: "started", submissionId: input.submissionId, sequence: 1 },
+  });
+  client.close();
+});
+it("refuses direct turn dispatch and queue bootstrap or ordering overrides", async () => {
+  const { client, socket } = await connected();
+  await expect(
+    client.rpc(ORCHESTRATION_WS_METHODS.dispatchCommand, { command: queuedTurn().command }),
+  ).rejects.toMatchObject({ outcome: "Unavailable" });
+  for (const input of [
+    { ...queuedTurn(), intent: "queue-head" },
+    { ...queuedTurn(), command: { ...queuedTurn().command, bootstrap: {} } },
+    { ...queuedTurn(), command: { ...queuedTurn().command, dispatchSource: "next-turn-queue" } },
+    { ...queuedTurn(), command: { ...queuedTurn().command, runtimeMode: "invalid" } },
+  ])
+    await expect(client.rpc(WS_METHODS.nextTurnQueueSubmit, input)).rejects.toMatchObject({
+      outcome: "Unavailable",
+    });
+  expect(socket.sent).toEqual([]);
+  client.close();
+});
+it("never resubmits an ambiguous queued turn", async () => {
+  const { client, socket } = await connected();
+  const input = queuedTurn();
+  const failed = expect(client.rpc(WS_METHODS.nextTurnQueueSubmit, input)).rejects.toMatchObject({
+    outcome: "OutcomeUnknown",
+  });
+  expect(socket.sent).toHaveLength(1);
+  socket.close();
+  await failed;
+  await expect(client.rpc(WS_METHODS.nextTurnQueueSubmit, input)).rejects.toMatchObject({
+    outcome: "Unavailable",
+  });
+  expect(socket.sent).toHaveLength(1);
+});
 it("reports a lost dispatch as unknown, fails observations and never retries", async () => {
   const { client, socket } = await connected();
   const write = expect(
     client.rpc(ORCHESTRATION_WS_METHODS.dispatchCommand, {
-      command: { type: "thread.turn.start" },
+      command: { type: "thread.session.stop" },
     }),
   ).rejects.toMatchObject({ outcome: "OutcomeUnknown" });
   const read = expect(client.rpc(ORCHESTRATION_WS_METHODS.getSnapshot)).rejects.toMatchObject({
@@ -99,7 +172,7 @@ it("reports a lost dispatch as unknown, fails observations and never retries", a
   expect(socket.sent).toHaveLength(2);
   await expect(
     client.rpc(ORCHESTRATION_WS_METHODS.dispatchCommand, {
-      command: { type: "thread.turn.start" },
+      command: { type: "thread.session.stop" },
     }),
   ).rejects.toMatchObject({ outcome: "Unavailable" });
   expect(socket.sent).toHaveLength(2);

@@ -307,6 +307,12 @@ export function rehearsalSessionErrorCode(error: unknown): string {
 export function rehearsalHarnessFailureCode(error: unknown): string {
   if (!(error instanceof Error)) return "unknown";
   const message = error.message.slice(0, 8192);
+  if (message === "External rehearsal transport Unavailable")
+    return "external-transport-unavailable";
+  if (message === "External rehearsal transport Interrupted")
+    return "external-transport-interrupted";
+  if (message === "External rehearsal transport OutcomeUnknown")
+    return "external-transport-outcome-unknown";
   if (/strict mode violation/i.test(message)) return "ambiguous-locator";
   if (/timed out|timeout/i.test(message)) return "timeout";
   if (message === "Unexpected certification consent request.") return "unexpected-consent";

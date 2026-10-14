@@ -515,6 +515,20 @@ provider run or signed installed windowless result is claimed yet. Select it wit
     bun run computer:certify run --output <prepared-suite> \
       --group workflows --scenario windows-closed.claude
 
+The [first Claude windowless attempt](computer-certification/2026-10-14-macos-claude-windowless-queue-admission-failed.json)
+on clean `555aa88116` obtained genuine fixture consent and stopped before native
+input, with confirmed cleanup. Inspection exposed a stale driver path: direct
+`thread.turn.start` dispatch is refused for established threads by the server's
+normal queue-admission gate. The corrected external client submits once through
+`nextTurnQueue.submit` with ordinary `auto` intent, verifies the correlated admission,
+and refuses direct turn dispatch, bootstrap and queue-order overrides. A lost or
+timed-out submission remains outcome-unknown and is never resent automatically.
+The existing real-server route regression proves direct-dispatch rejection; new
+external-client regressions failed before the correction and pass after it. These
+software results do not qualify the unfinished real windowless phase. Transport
+failure diagnostics now preserve only fixed unavailable/interrupted/outcome-unknown
+labels; the original failed receipt retains its original unknown label.
+
 Use a separately prepared provider phase for Codex. Prerequisites must pass before
 readiness or consent; another running development helper holding the device lock
 prevents this isolated instance from executing.

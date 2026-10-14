@@ -110,6 +110,20 @@ it("distinguishes recorded provider approval decisions without keeping arbitrary
 });
 
 it("keeps harness failure diagnostics content-free", () => {
+  expect(rehearsalHarnessFailureCode(new Error("External rehearsal transport Unavailable"))).toBe(
+    "external-transport-unavailable",
+  );
+  expect(rehearsalHarnessFailureCode(new Error("External rehearsal transport Interrupted"))).toBe(
+    "external-transport-interrupted",
+  );
+  expect(
+    rehearsalHarnessFailureCode(new Error("External rehearsal transport OutcomeUnknown")),
+  ).toBe("external-transport-outcome-unknown");
+  expect(
+    rehearsalHarnessFailureCode(
+      new Error("External rehearsal transport Unavailable PRIVATE_SENTINEL"),
+    ),
+  ).toBe("unknown");
   expect(rehearsalHarnessFailureCode(new Error("strict mode violation: PRIVATE_SENTINEL"))).toBe(
     "ambiguous-locator",
   );

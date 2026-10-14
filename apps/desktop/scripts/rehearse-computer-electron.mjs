@@ -10,6 +10,8 @@ import {
   F5_PROTOCOL_VERSION,
   ORCHESTRATION_WS_METHODS,
   ComputerToolOutcomeCode,
+  WS_METHODS,
+  TurnSubmissionResult,
 } from "@t3tools/contracts";
 import { Schema } from "effect";
 import {
@@ -334,15 +336,30 @@ async function startTurn(text) {
   }
   previousTurnId = snapshot.threads.find((thread) => thread.id === threadId)?.latestTurn?.turnId;
   if (appWindowsClosed) {
-    await dispatch({
-      type: "thread.turn.start",
-      threadId,
-      message: { messageId: randomUUID(), role: "user", text, attachments: [] },
-      modelSelection,
-      runtimeMode,
-      interactionMode: "default",
-    });
+    // Established-thread turns use the same queue admission as the composer.
+    // Submit once; an uncertain reply must never cause an automatic resend.
+    const submissionId = randomUUID();
     externalSubmissions++;
+    const admission = await rpc(WS_METHODS.nextTurnQueueSubmit, {
+      submissionId,
+      intent: "auto",
+      command: {
+        type: "thread.turn.start",
+        commandId: submissionId,
+        createdAt: new Date().toISOString(),
+        threadId,
+        message: { messageId: randomUUID(), role: "user", text, attachments: [] },
+        modelSelection,
+        runtimeMode,
+        interactionMode: "default",
+      },
+    });
+    if (
+      !Schema.is(TurnSubmissionResult)(admission) ||
+      admission.submissionId !== submissionId ||
+      !["started", "queued"].includes(admission.disposition)
+    )
+      throw new Error("Windowless queue admission incomplete.");
     return;
   }
   await page.getByTestId("composer-editor").fill(text);

@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { F5_PROTOCOL_VERSION, ORCHESTRATION_WS_METHODS, WS_METHODS } from "@t3tools/contracts";
+import {
+  F5_PROTOCOL_VERSION,
+  NextTurnQueueSubmitInput,
+  ORCHESTRATION_WS_METHODS,
+  WS_METHODS,
+} from "@t3tools/contracts";
+import { Schema } from "effect";
 
 type Socket = Pick<WebSocket, "send" | "close" | "addEventListener">;
 const READ_METHODS = new Set<string>([
@@ -7,7 +13,7 @@ const READ_METHODS = new Set<string>([
   ORCHESTRATION_WS_METHODS.getThreadTailDetails,
   WS_METHODS.computerAccessList,
 ]);
-const COMMANDS = new Set(["thread.turn.start", "thread.turn.interrupt", "thread.session.stop"]);
+const COMMANDS = new Set(["thread.turn.interrupt", "thread.session.stop"]);
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -146,14 +152,24 @@ export class RehearsalExternalClient {
     } else this.fail();
   }
   rpc(method: string, body: Record<string, unknown> = {}): Promise<unknown> {
-    const mutation = method === ORCHESTRATION_WS_METHODS.dispatchCommand;
+    const queuedTurn = method === WS_METHODS.nextTurnQueueSubmit;
+    const mutation = method === ORCHESTRATION_WS_METHODS.dispatchCommand || queuedTurn;
     if (!READ_METHODS.has(method) && !mutation)
       return Promise.reject(new RehearsalTransportError("Unavailable"));
     if (
+      !queuedTurn &&
       mutation &&
       (!record(body.command) ||
         typeof body.command.type !== "string" ||
         !COMMANDS.has(body.command.type))
+    )
+      return Promise.reject(new RehearsalTransportError("Unavailable"));
+    if (
+      queuedTurn &&
+      (!Schema.is(NextTurnQueueSubmitInput)(body) ||
+        body.intent !== "auto" ||
+        body.command.bootstrap !== undefined ||
+        body.command.dispatchSource !== undefined)
     )
       return Promise.reject(new RehearsalTransportError("Unavailable"));
     if (this.closed || !this.welcomed || this.pending.size >= 16)
