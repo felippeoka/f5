@@ -16,6 +16,7 @@ import {
   codexAuthenticationReady,
 } from "../../../scripts/computer-certification/preflight.ts";
 import { profileIsolationChecks } from "../../../scripts/computer-certification/profileIsolationEvidence.ts";
+import { profileProviderProgress } from "../src/computer/rehearsalProfileIsolation.ts";
 
 const fingerprint = async (path) =>
   createHash("sha256")
@@ -102,6 +103,13 @@ export async function runProfileIsolation(o) {
     .waitFor({ timeout: 60000 });
   await installRenderer(secondaryPage, [apps[1]], ids[1]);
   const pages = [page, secondaryPage];
+  o.registerPause(() =>
+    Promise.allSettled(
+      pages.map((p, i) =>
+        p.evaluate((id) => window.desktopBridge.computerAutomation.setPaused(id, true), ids[i]),
+      ),
+    ),
+  );
   const secondaryWorkspace = join(root, "isolation-workspace");
   await mkdir(secondaryWorkspace);
   const secondaryRpc = (method, body = {}) =>
@@ -134,6 +142,19 @@ export async function runProfileIsolation(o) {
   await secondaryPage.evaluate((id) => {
     window.location.hash = `/${id}`;
   }, ids[1]);
+  // Metadata-only turns can succeed even when a chat never mounted. Genuine
+  // approval/consent UI needs each requested conversation to be visible first.
+  stage("profile-isolation-chat-prerequisites");
+  for (const [i, p] of pages.entries()) {
+    await p.getByTestId("composer-editor").waitFor({ state: "visible", timeout: 15000 });
+    await waitFor(
+      () =>
+        p
+          .getByText(titles[i], { exact: true })
+          .evaluateAll((nodes) => nodes.some((node) => node.checkVisibility())),
+      15000,
+    );
+  }
   const clients = [];
   let pushWork = Promise.resolve();
   let pushFailed = false;
@@ -181,6 +202,22 @@ export async function runProfileIsolation(o) {
     (await clients[i].rpc(ORCHESTRATION_WS_METHODS.getSnapshot)).threads.find(
       (t) => t.id === ids[i],
     );
+  o.registerDiagnostics(async () => ({
+    channels: await snapshot(),
+    providerProgress: await Promise.all(
+      clients.map(async (client, i) => {
+        const tail = await client
+          .rpc(ORCHESTRATION_WS_METHODS.getThreadTailDetails, {
+            threadId: ids[i],
+            messageLimit: 0,
+            checkpointLimit: 0,
+            activityLimit: 100,
+          })
+          .catch(() => undefined);
+        return profileProviderProgress(await current(i).catch(() => undefined), tail?.activities);
+      }),
+    ),
+  }));
   const submit = async (i, text) => {
     const previous = (await current(i))?.latestTurn?.turnId;
     const submissionId = randomUUID();
@@ -251,6 +288,7 @@ export async function runProfileIsolation(o) {
         (await fingerprint(join(secondaryHome, "auth.json"))) === secondaryHash,
       profileSnapshotsPrivate,
       bothSessionsStopped: true,
+      bothChatSurfacesReady: true,
     };
   }
   const secondaryFixture = ownFixture(
@@ -258,6 +296,12 @@ export async function runProfileIsolation(o) {
   );
   const fixtures = [fixture, secondaryFixture];
   const consents = [];
+  o.record({
+    consents,
+    bothChatSurfacesReady: true,
+    distinctRendererProfiles: primaryId !== other.id,
+    isolatedProviderHomes: home !== secondaryHome,
+  });
   // Prepare both sessions and genuine grants before either provider can acquire.
   for (const i of [0, 1]) {
     stage(`profile-${i + 1}-consent`);
@@ -395,6 +439,7 @@ export async function runProfileIsolation(o) {
     secondHelperReason: device.reason,
     humanFinishAcknowledged: secondaryFixture.acknowledged(),
     fixturesUntouched: fixtures.every((f) => f.presses() === 0 && !f.typed()),
+    bothChatSurfacesReady: true,
   };
   const checks = profileIsolationChecks({
     profileIsolationObservation: receipt,

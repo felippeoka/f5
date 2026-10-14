@@ -52,6 +52,7 @@ const passing = () => {
       bothSessionsStopped: true,
       humanFinishAcknowledged: true,
       fixturesUntouched: true,
+      bothChatSurfacesReady: true,
     },
   };
 };
@@ -114,6 +115,7 @@ it("keeps read-only readiness distinct from actual isolation and refuses any nat
     cleanup: { confirmed: true },
     profileIsolationObservation: {
       readinessOnly: true,
+      bothChatSurfacesReady: true,
       distinctRendererProfiles: true,
       distinctBackendProcesses: true,
       isolatedProviderHomes: true,

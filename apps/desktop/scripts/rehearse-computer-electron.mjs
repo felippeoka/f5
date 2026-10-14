@@ -81,7 +81,8 @@ const grantMemory = args.includes("--grant-memory");
 const sessionActions = args.includes("--session-actions");
 const profileIsolationReadOnly = args.includes("--profile-isolation-readonly");
 const profileIsolation = args.includes("--profile-isolation") || profileIsolationReadOnly;
-const observeMcpTransport = provider === "codex" && (sessionActions || approvalDiagnostic);
+const observeMcpTransport =
+  provider === "codex" && (sessionActions || approvalDiagnostic || profileIsolation);
 const runtimeMode = sessionActions || approvalDiagnostic ? "approval-required" : "full-access";
 const includesRealApps = realApps || clusterWorkflows;
 if (
@@ -197,6 +198,8 @@ let grantMemoryObservation;
 const grantMemoryConsentReceipts = [];
 let sessionActionsObservation;
 let profileIsolationObservation;
+let profileIsolationDiagnostics;
+let profileIsolationPause;
 let installRenderer;
 const additionalFixtures = [];
 const additionalClients = [];
@@ -1039,6 +1042,15 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           }, text);
       },
       readinessOnly: profileIsolationReadOnly,
+      record: (value) => {
+        profileIsolationObservation = value;
+      },
+      registerDiagnostics: (value) => {
+        profileIsolationDiagnostics = value;
+      },
+      registerPause: (value) => {
+        profileIsolationPause = value;
+      },
       ownFixture: (value) => {
         additionalFixtures.push(value);
         return value;
@@ -1795,6 +1807,14 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
 } catch (cause) {
   failureStage = stage;
   failureCode = rehearsalHarnessFailureCode(cause);
+  // Narrow local device authority before waiting on server diagnostics.
+  if (profileIsolationPause) await Promise.race([profileIsolationPause(), delay(1000)]);
+  if (profileIsolationDiagnostics) {
+    const diagnostics = await profileIsolationDiagnostics().catch(() => ({
+      diagnosticsUnavailable: true,
+    }));
+    profileIsolationObservation = { ...profileIsolationObservation, ...diagnostics };
+  }
   process.exitCode = 1;
 } finally {
   restoreProcess();

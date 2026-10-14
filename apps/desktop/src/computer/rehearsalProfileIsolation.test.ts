@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { RehearsalProfileIsolation } from "./rehearsalProfileIsolation";
+import { RehearsalProfileIsolation, profileProviderProgress } from "./rehearsalProfileIsolation";
 const identities = [0, 1].map((i) => ({
   profileId: String(i + 1).repeat(32),
   threadId: `PRIVATE_THREAD_${i}`,
@@ -28,6 +28,28 @@ const activity = (i: number) => ({
   op: "activateApp",
   status: "completed",
   thumbnailDataUrl: "PRIVATE_IMAGE_BYTES",
+});
+it("preserves fixed pre-host provider progress and pending approval counts without messages", () => {
+  const result = profileProviderProgress(
+    {
+      runtimeMode: "full-access",
+      latestTurn: { state: "running", text: "PRIVATE_SENTINEL" },
+      session: { lastError: "PRIVATE_SENTINEL" },
+    },
+    [{ kind: "approval.requested", turnId: "PRIVATE_TURN", payload: { text: "PRIVATE_PROMPT" } }],
+  );
+  expect(result).toMatchObject({
+    threadObserved: true,
+    runtimeMode: "full-access",
+    turnState: "running",
+    activityCounts: { observed: true, turns: [{ approvalsRequested: 1, approvalsResolved: 0 }] },
+  });
+  expect(JSON.stringify(result)).not.toContain("PRIVATE");
+  expect(profileProviderProgress(undefined, undefined)).toMatchObject({
+    threadObserved: false,
+    turnState: "unknown",
+    activityCounts: { observed: false },
+  });
 });
 it("correlates both IPC directions and client observations without retaining identities or pixels", () => {
   const o = configured();

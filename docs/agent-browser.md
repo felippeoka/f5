@@ -747,6 +747,17 @@ contention or thumbnail isolation. The final live phase now enables Finish in th
 second/frontmost fixture, and requires both fixtures' press/text receipts untouched.
 That updated source needs a fresh suite identity. No passing real profile-isolation
 run is recorded yet; no public gate changed.
+The [first live consent attempt](computer-certification/2026-10-14-macos-profile-isolation-second-consent-timeout.json)
+allowed the first fixture and timed out in the second consent phase before that
+profile sent a native access request. No lease, capture or input occurred and
+cleanup was confirmed. The operator reported no second prompt. The exact cause
+remains unknown because per-profile pre-host progress was not retained. Failed
+receipt checks represent incomplete proof, not an observed disclosure. The driver
+now requires both named conversations and composers to be visible before any
+consent turn, retains partial consent/IPC evidence on failure, and records only
+fixed per-profile turn/mode states and canonical provider approval counts. It
+narrows device authority locally before awaiting those diagnostics. These changes
+must pass a fresh read-only setup check before another human consent attempt.
 
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;

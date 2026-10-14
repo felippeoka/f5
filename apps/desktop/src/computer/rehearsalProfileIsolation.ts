@@ -1,10 +1,37 @@
 import { Schema } from "effect";
 import { DesktopComputerHostMessage } from "@t3tools/contracts";
-import { ElectronRehearsalObservation } from "./rehearsalElectronObservation";
+import {
+  ElectronRehearsalObservation,
+  rehearsalProviderActivityCounts,
+  rehearsalSessionErrorCode,
+} from "./rehearsalElectronObservation";
 
 type Identity = { profileId: string; threadId: string; appId: string; privateTitle: string };
 const record = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v);
+
+/** Provider/UI failures can happen before any host call. Fixed states and
+ * canonical decision counts distinguish those cases without keeping content. */
+export function profileProviderProgress(thread: unknown, activities: unknown) {
+  const t = record(thread) ? thread : {};
+  const turn = record(t.latestTurn) ? t.latestTurn : {};
+  const session = record(t.session) ? t.session : {};
+  return {
+    threadObserved: record(thread),
+    turnState:
+      typeof turn.state === "string" &&
+      ["pending", "running", "completed", "interrupted", "error"].includes(turn.state)
+        ? turn.state
+        : "unknown",
+    runtimeMode:
+      typeof t.runtimeMode === "string" &&
+      ["full-access", "approval-required"].includes(t.runtimeMode)
+        ? t.runtimeMode
+        : "unknown",
+    sessionErrorCode: rehearsalSessionErrorCode(session.lastError),
+    activityCounts: rehearsalProviderActivityCounts(activities),
+  };
+}
 
 /** Unsigned observation only. No transport, authorization or result-writing methods.
  * Identities exist transiently for comparisons; snapshots retain counts/booleans only. */

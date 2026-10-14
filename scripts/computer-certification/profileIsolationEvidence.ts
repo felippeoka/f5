@@ -7,6 +7,7 @@ export function profileReadinessChecks(raw: unknown): Record<string, boolean> {
   const profiles = Array.isArray(channels.profiles) ? channels.profiles : [];
   return {
     "two-real-profiles":
+      receipt.bothChatSurfacesReady === true &&
       receipt.readinessOnly === true &&
       receipt.distinctRendererProfiles === true &&
       receipt.distinctBackendProcesses === true &&
@@ -75,6 +76,7 @@ export function profileIsolationChecks(raw: unknown): Record<string, boolean> {
     v.profiles[1].held === true;
   return {
     "two-real-profiles":
+      receipt.bothChatSurfacesReady === true &&
       receipt.distinctRendererProfiles === true &&
       receipt.distinctBackendProcesses === true &&
       receipt.isolatedProviderHomes === true,
