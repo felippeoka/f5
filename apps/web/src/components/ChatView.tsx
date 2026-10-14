@@ -1,5 +1,4 @@
 import { AgentComputerLiveCard } from "./AgentComputerLiveCard";
-import { ComputerAccessTimeline } from "./ComputerAccessCard";
 import { parseNativeReviewTarget } from "@t3tools/shared/nativeReviewTarget";
 import { NativeRuntimePanel } from "./chat/NativeRuntimePanel";
 import { NativeRuntimeTray } from "./chat/NativeRuntimeTray";
@@ -7203,7 +7202,6 @@ export default function ChatView({
             />
           </div>
         ) : null}
-        <ComputerAccessTimeline threadId={activeThread.id} />
         <AgentComputerLiveCard threadId={activeThread.id} />
         <AgentBrowserLiveCard threadId={activeThread.id} />
         {/* Main content area with optional plan sidebar */}
