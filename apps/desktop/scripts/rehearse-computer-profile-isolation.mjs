@@ -312,7 +312,7 @@ export async function runProfileIsolation(o) {
     );
     const previous = await submit(
       i,
-      `Consent-only isolation test for exact app ${apps[i]}. Call computer_status, then computer_request_access exactly once for only this app. The user will review genuine consent. Do not activate, inspect, capture, type or use any other tool. No shell/files/network. Stop on failure, never retry. Finish READY.`,
+      `Consent-only isolation test. Call computer_status with {}, then computer_request_access exactly once with these arguments: ${JSON.stringify({ apps: [apps[i]], reason: "Synthetic two-profile isolation test" })}. The apps field is an array of one exact app ID and reason is required. The user will review genuine consent. Do not activate, inspect, capture, type or use any other tool. No shell/files/network. Stop on failure, never retry. Finish READY.`,
     );
     await waitFor(
       async () => pages[i].evaluate(() => window.__computerRehearsal.consentSettled),

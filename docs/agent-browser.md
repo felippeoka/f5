@@ -759,6 +759,18 @@ fixed per-profile turn/mode states and canonical provider approval counts. It
 narrows device authority locally before awaiting those diagnostics. These changes
 must pass a fresh read-only setup check before another human consent attempt.
 
+The [instrumented read-only check](computer-certification/2026-10-14-macos-profile-readiness-ccb58fcbaf-passed.json)
+passed all eleven admitted checks on clean `ccb58fcbaf`, including both visible
+profile chats. The [following live attempt](computer-certification/2026-10-14-macos-profile-isolation-invalid-arguments.json)
+failed before the first app consent: a tool call failed strict argument validation,
+with no provider approval request, native access request, lease, capture or input.
+Cleanup was confirmed. Sanitized receipts do not retain argument values or the
+exact invalid field; they do not establish a transport or authorization defect.
+The consent-only prompt now supplies an explicit one-element `apps` array and
+required `reason`. Validation remains strict, consent remains genuine and failed
+invocations are never retried automatically. Full isolation validation remains
+pending; neither this failure nor metadata-only success qualifies release.
+
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;
 watching a child's absent stdout pipe produced no diagnostic evidence. The new
