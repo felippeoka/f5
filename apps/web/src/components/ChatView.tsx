@@ -2014,25 +2014,40 @@ export default function ChatView({
     () => deriveLiveWorkActivity(threadActivities, liveTurnId),
     [threadActivities, liveTurnId],
   );
-  const liveActivityKind = derivedLiveActivity?.kind ?? null;
-  const liveActivityDetail =
-    derivedLiveActivity?.kind === "thinking" ? derivedLiveActivity.detail : null;
+  // A turn waiting on an approval or an answer is not generating anything.
+  const isAwaitingUser = activePendingApproval !== null || activePendingUserInput !== null;
+  const liveActivityKind =
+    derivedLiveActivity?.kind === "idle" && isAwaitingUser
+      ? null
+      : (derivedLiveActivity?.kind ?? null);
+  const liveActivityText =
+    derivedLiveActivity?.kind === "thinking"
+      ? derivedLiveActivity.detail
+      : derivedLiveActivity?.kind === "tool"
+        ? derivedLiveActivity.title
+        : derivedLiveActivity?.kind === "reconnecting"
+          ? derivedLiveActivity.attempt
+          : null;
   const liveActivityProviderItemId =
     derivedLiveActivity?.kind === "tool" ? derivedLiveActivity.providerItemId : null;
-  const liveActivityTitle = derivedLiveActivity?.kind === "tool" ? derivedLiveActivity.title : null;
-  const liveActivity = useMemo<LiveWorkActivity>(
-    () =>
-      liveActivityKind === "thinking"
-        ? { kind: "thinking", detail: liveActivityDetail }
-        : liveActivityKind === "tool"
-          ? {
-              kind: "tool",
-              providerItemId: liveActivityProviderItemId,
-              title: liveActivityTitle ?? "",
-            }
-          : null,
-    [liveActivityKind, liveActivityDetail, liveActivityProviderItemId, liveActivityTitle],
-  );
+  const liveActivity = useMemo<LiveWorkActivity>(() => {
+    switch (liveActivityKind) {
+      case "thinking":
+        return { kind: "thinking", detail: liveActivityText };
+      case "tool":
+        return {
+          kind: "tool",
+          providerItemId: liveActivityProviderItemId,
+          title: liveActivityText ?? "",
+        };
+      case "reconnecting":
+        return { kind: "reconnecting", attempt: liveActivityText };
+      case "idle":
+        return { kind: "idle" };
+      default:
+        return null;
+    }
+  }, [liveActivityKind, liveActivityText, liveActivityProviderItemId]);
   const activeWorkStartedAt = useMemo(
     () =>
       deriveActiveWorkStartedAt(

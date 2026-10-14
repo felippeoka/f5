@@ -1148,6 +1148,13 @@ function correlateSubagentActivities(entries: ReadonlyArray<WorkLogEntry>): Work
 export type LiveWorkActivity =
   | { kind: "thinking"; detail: string | null }
   | { kind: "tool"; providerItemId: string | null; title: string }
+  /** The provider is retrying a dropped model stream; `attempt` reads like "2/5". */
+  | { kind: "reconnecting"; attempt: string | null }
+  /**
+   * The turn runs with no item open: the model is producing its next step.
+   * Codex reports reasoning only once it has finished, so this covers it.
+   */
+  | { kind: "idle" }
   | null;
 
 /**
@@ -1183,12 +1190,35 @@ function isTerminalItemStatus(status: RuntimeItemStatus | undefined): boolean {
   return status === "completed" || status === "failed" || status === "declined";
 }
 
+function asPayloadRecord(payload: unknown): Record<string, unknown> | null {
+  return payload && typeof payload === "object" ? (payload as Record<string, unknown>) : null;
+}
+
+/** A provider error it will retry, such as Codex's "Reconnecting... 2/5". */
+function isRetryingWarning(activity: OrchestrationThreadActivity): boolean {
+  return (
+    activity.kind === "runtime.warning" &&
+    asPayloadRecord(asPayloadRecord(activity.payload)?.detail)?.willRetry === true
+  );
+}
+
+/**
+ * When the activity last changed. The reasoning status is upserted in place
+ * and keeps its first `createdAt`, so its latest write carries `updatedAt`.
+ */
+function activityChangedAt(activity: OrchestrationThreadActivity): string {
+  if (activity.kind !== REASONING_STATUS_ACTIVITY_KIND) return activity.createdAt;
+  return asTrimmedString(asPayloadRecord(activity.payload)?.updatedAt) ?? activity.createdAt;
+}
+
 /**
  * What the latest turn is doing right now: the most recently started item
  * that has not finished. A completion only closes its own item, so a
  * background tool finishing does not hide a newer tool or active reasoning.
  * A terminal status is final for its item: activities without a session
  * sequence can sort a start after its completion when timestamps tie.
+ * With nothing open, a stream retry that nothing has followed yet reads as
+ * reconnecting; otherwise the model is between items.
  */
 export function deriveLiveWorkActivity(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
@@ -1206,12 +1236,13 @@ export function deriveLiveWorkActivity(
       activity: Exclude<LiveWorkActivity, null>;
     }
   >();
+  let lastProgressAt = "";
   ordered.forEach((activity, index) => {
+    if (isRetryingWarning(activity)) return;
+    const changedAt = activityChangedAt(activity);
+    if (changedAt > lastProgressAt) lastProgressAt = changedAt;
     if (activity.kind === REASONING_STATUS_ACTIVITY_KIND) {
-      const payload =
-        activity.payload && typeof activity.payload === "object"
-          ? (activity.payload as Record<string, unknown>)
-          : null;
+      const payload = asPayloadRecord(activity.payload);
       const detail = asTrimmedString(payload?.detail) ?? null;
       items.set(activity.id, {
         startIndex: index,
@@ -1266,7 +1297,14 @@ export function deriveLiveWorkActivity(
     if (item.status !== "inProgress") continue;
     if (!live || item.startIndex > live.startIndex) live = item;
   }
-  return live?.activity ?? null;
+  if (live) return live.activity;
+  const retry = ordered.findLast(isRetryingWarning);
+  if (retry && retry.createdAt >= lastProgressAt) {
+    const message = asTrimmedString(asPayloadRecord(retry.payload)?.message);
+    const attempt = message?.match(/\d+\s*\/\s*\d+/)?.[0].replace(/\s+/g, "") ?? null;
+    return { kind: "reconnecting", attempt };
+  }
+  return { kind: "idle" };
 }
 
 export function deriveWorkLogEntries(

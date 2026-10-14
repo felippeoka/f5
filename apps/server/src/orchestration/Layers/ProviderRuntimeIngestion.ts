@@ -2730,6 +2730,9 @@ const make = Effect.gen(function* () {
             state: input.entry.state,
             ...(input.entry.detail ? { detail: input.entry.detail } : {}),
             ...(input.entry.providerItemId ? { providerItemId: input.entry.providerItemId } : {}),
+            // createdAt stays at the first write; this orders the latest change
+            // against later activities, such as a reconnect warning.
+            updatedAt: input.event.createdAt,
           },
           turnId: input.turnId,
           ...(input.entry.sequence !== undefined ? { sequence: input.entry.sequence } : {}),

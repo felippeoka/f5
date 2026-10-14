@@ -282,8 +282,20 @@ describe("MessagesTimeline", () => {
         },
       } as unknown as TimelineEntry,
     ];
+    const streamingEntry: TimelineEntry = {
+      id: "streaming-entry",
+      kind: "message",
+      createdAt,
+      message: {
+        id: MessageId.makeUnsafe("assistant-streaming"),
+        role: "assistant",
+        text: "Partial answer",
+        createdAt,
+        streaming: true,
+      },
+    };
     const queryClient = new QueryClient();
-    const render = (liveActivity: LiveWorkActivity) =>
+    const render = (liveActivity: LiveWorkActivity, entries = timelineEntries) =>
       renderToStaticMarkup(
         <QueryClientProvider client={queryClient}>
           <MessagesTimeline
@@ -293,7 +305,7 @@ describe("MessagesTimeline", () => {
             liveActivity={liveActivity}
             listRef={{ current: null }}
             onIsAtEndChange={() => {}}
-            timelineEntries={timelineEntries}
+            timelineEntries={entries}
             completionDividerBeforeEntryId={null}
             completionSummary={null}
             turnDiffSummaryByAssistantMessageId={new Map()}
@@ -338,6 +350,15 @@ describe("MessagesTimeline", () => {
       workingActivity(render({ kind: "tool", providerItemId: "item-missing", title: "Grep" })),
     ).toBe("Grep");
     expect(workingActivity(render(null))).toBeNull();
+    expect(workingActivity(render({ kind: "reconnecting", attempt: "2/5" }))).toBe(
+      "Reconnecting (2/5)",
+    );
+    expect(workingActivity(render({ kind: "reconnecting", attempt: null }))).toBe("Reconnecting");
+    expect(workingActivity(render({ kind: "idle" }))).toBe("Thinking");
+    // Streaming text already shows what the model is doing.
+    expect(
+      workingActivity(render({ kind: "idle" }, [...timelineEntries, streamingEntry])),
+    ).toBeNull();
   });
 
   it("keeps file-change rows visible when routine work exceeds the page size", async () => {

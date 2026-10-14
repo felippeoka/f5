@@ -2065,6 +2065,14 @@ function workingActivityLabel(
   if (liveActivity.kind === "thinking") {
     return liveActivity.detail ? `Thinking: ${liveActivity.detail}` : "Thinking";
   }
+  if (liveActivity.kind === "reconnecting") {
+    return liveActivity.attempt ? `Reconnecting (${liveActivity.attempt})` : "Reconnecting";
+  }
+  if (liveActivity.kind === "idle") {
+    // Streaming text is the activity itself; the row stays generic under it.
+    const lastRow = rows.at(-1);
+    return lastRow?.kind === "message" && lastRow.message.streaming ? null : "Thinking";
+  }
   if (liveActivity.providerItemId) {
     for (let rowIndex = rows.length - 1; rowIndex >= 0; rowIndex -= 1) {
       const row = rows[rowIndex];

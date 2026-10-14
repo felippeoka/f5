@@ -83,7 +83,7 @@ describe("deriveLiveWorkActivity", () => {
       kind: "thinking",
       detail: "Inspecting",
     });
-    expect(deriveLiveWorkActivity([reasoning("idle", 1)], turnId)).toBeNull();
+    expect(deriveLiveWorkActivity([reasoning("idle", 1)], turnId)).toEqual({ kind: "idle" });
   });
 
   it("keeps the newer tool when an older one completes", () => {
@@ -173,7 +173,7 @@ describe("deriveLiveWorkActivity", () => {
         ],
         turnId,
       ),
-    ).toBeNull();
+    ).toEqual({ kind: "idle" });
   });
 
   it("closes tools without an item id when an id-less completion follows", () => {
@@ -196,7 +196,7 @@ describe("deriveLiveWorkActivity", () => {
         [idless("s", "tool.started", 1), idless("c", "tool.completed", 2)],
         turnId,
       ),
-    ).toBeNull();
+    ).toEqual({ kind: "idle" });
   });
 
   it("ignores activities from other turns", () => {
@@ -205,8 +205,89 @@ describe("deriveLiveWorkActivity", () => {
         [makeActivity({ kind: "tool.started", turnId: "turn-old", sequence: 1 })],
         turnId,
       ),
-    ).toBeNull();
+    ).toEqual({ kind: "idle" });
     expect(deriveLiveWorkActivity([tool("tool.started", "A", 1)], undefined)).toBeNull();
+  });
+
+  describe("stream retries", () => {
+    const at = (second: number) => `2026-02-23T00:00:${String(second).padStart(2, "0")}.000Z`;
+    const retry = (second: number, message = "Reconnecting... 2/5") =>
+      makeActivity({
+        id: `retry-${second}`,
+        kind: "runtime.warning",
+        summary: "Runtime warning",
+        tone: "info",
+        payload: { message, detail: { willRetry: true } },
+        turnId: "turn-live",
+        createdAt: at(second),
+      });
+    const status = (createdSecond: number, updatedSecond: number) =>
+      makeActivity({
+        id: "reasoning-status:thread-1:turn-live",
+        kind: "reasoning.status",
+        summary: "Thinking",
+        tone: "info",
+        payload: { state: "idle", updatedAt: at(updatedSecond) },
+        turnId: "turn-live",
+        createdAt: at(createdSecond),
+      });
+    const completedTool = (second: number) =>
+      makeActivity({
+        id: `tool-${second}`,
+        kind: "tool.completed",
+        payload: { itemType: "command_execution", providerItemId: `cmd-${second}` },
+        turnId: "turn-live",
+        createdAt: at(second),
+      });
+
+    it("reads as reconnecting until something follows the latest retry", () => {
+      expect(deriveLiveWorkActivity([completedTool(1), retry(2)], turnId)).toEqual({
+        kind: "reconnecting",
+        attempt: "2/5",
+      });
+      expect(
+        deriveLiveWorkActivity(
+          [retry(1), retry(3, "Reconnecting... 3 / 5"), completedTool(2)],
+          turnId,
+        ),
+      ).toEqual({ kind: "reconnecting", attempt: "3/5" });
+      expect(deriveLiveWorkActivity([retry(1, "Stream dropped")], turnId)).toEqual({
+        kind: "reconnecting",
+        attempt: null,
+      });
+      expect(deriveLiveWorkActivity([retry(1), completedTool(2)], turnId)).toEqual({
+        kind: "idle",
+      });
+    });
+
+    it("clears on a later reasoning update even though the status was created earlier", () => {
+      expect(deriveLiveWorkActivity([status(1, 2), retry(3)], turnId)).toEqual({
+        kind: "reconnecting",
+        attempt: "2/5",
+      });
+      expect(deriveLiveWorkActivity([status(1, 4), retry(3)], turnId)).toEqual({ kind: "idle" });
+    });
+
+    it("leaves an open item in charge and ignores warnings that will not retry", () => {
+      expect(deriveLiveWorkActivity([tool("tool.started", "A", 1), retry(2)], turnId)).toEqual({
+        kind: "tool",
+        providerItemId: "A",
+        title: "A",
+      });
+      expect(
+        deriveLiveWorkActivity(
+          [
+            makeActivity({
+              kind: "runtime.warning",
+              tone: "info",
+              payload: { message: "Heads up", detail: { willRetry: false } },
+              turnId: "turn-live",
+            }),
+          ],
+          turnId,
+        ),
+      ).toEqual({ kind: "idle" });
+    });
   });
 
   it("only exposes a live turn for a running session on the latest turn", () => {
