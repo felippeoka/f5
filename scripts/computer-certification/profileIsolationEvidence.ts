@@ -113,32 +113,34 @@ export function profileIsolationChecks(raw: unknown): Record<string, boolean> {
       receipt.isolatedCredentialsUnchanged === true &&
       receipt.profileSnapshotsPrivate === true,
     "device-lock": receipt.secondHelperReason === "other-instance",
-    "native-actions": both(
-      (p) =>
-        native(p).traceComplete === true &&
-        native(p).pendingResponses === 0 &&
-        ops(p).length > 0 &&
-        ops(p).length <= 128 &&
-        ops(p).every(
-          (op) =>
-            record(op) &&
-            (op.outcome === "ok" || (op.op === "leaseAcquire" && op.outcome === "Busy")),
-        ) &&
-        ops(p).filter((op) => record(op) && op.op === "activateApp").length === 1 &&
-        ops(p).some(
-          (op) =>
-            record(op) &&
-            op.op === "activateApp" &&
-            op.actionCompleted === true &&
-            op.actionCaptureSucceeded === true,
-        ) &&
-        !ops(p).some(
-          (op) =>
-            record(op) &&
-            ["type", "key", "click", "drag", "elementAction", "openApp"].includes(String(op.op)),
-        ) &&
-        noForeign(p),
-    ),
+    "native-actions":
+      receipt.fixturesUntouched === true &&
+      both(
+        (p) =>
+          native(p).traceComplete === true &&
+          native(p).pendingResponses === 0 &&
+          ops(p).length > 0 &&
+          ops(p).length <= 128 &&
+          ops(p).every(
+            (op) =>
+              record(op) &&
+              (op.outcome === "ok" || (op.op === "leaseAcquire" && op.outcome === "Busy")),
+          ) &&
+          ops(p).filter((op) => record(op) && op.op === "activateApp").length === 1 &&
+          ops(p).some(
+            (op) =>
+              record(op) &&
+              op.op === "activateApp" &&
+              op.actionCompleted === true &&
+              op.actionCaptureSucceeded === true,
+          ) &&
+          !ops(p).some(
+            (op) =>
+              record(op) &&
+              ["type", "key", "click", "drag", "elementAction", "openApp"].includes(String(op.op)),
+          ) &&
+          noForeign(p),
+      ),
     "stop-and-grants":
       both((p) => p.held === false && native(p).lastGrantCount === 0) &&
       receipt.bothSessionsStopped === true,

@@ -739,7 +739,14 @@ It neither answers consent nor manufactures leases, results or helper permits. D
 observer, fixtures and receipt validator are source-hashed. Initial live coverage uses
 Codex in both profiles; it does not qualify Claude profile-launch isolation, Windows,
 signed installed candidates or persistence/capture privacy beyond the measured streams.
-No passing real profile-isolation run is recorded yet; no public gate changed.
+The [first real read-only readiness run](computer-certification/2026-10-14-macos-profile-readiness-69553e2b8c-passed.json)
+passed on clean `69553e2b8c`: both actual Codex sessions returned native metadata,
+kept private snapshots and unchanged credential files, and stopped with confirmed
+cleanup. No access request, lease, capture or input occurred. It does not qualify
+contention or thumbnail isolation. The final live phase now enables Finish in the
+second/frontmost fixture, and requires both fixtures' press/text receipts untouched.
+That updated source needs a fresh suite identity. No passing real profile-isolation
+run is recorded yet; no public gate changed.
 
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;

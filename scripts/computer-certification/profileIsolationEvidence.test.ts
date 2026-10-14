@@ -51,6 +51,7 @@ const passing = () => {
       secondHelperReason: "other-instance",
       bothSessionsStopped: true,
       humanFinishAcknowledged: true,
+      fixturesUntouched: true,
     },
   };
 };
@@ -88,6 +89,8 @@ it("rejects lost traces, changed credentials, unconfirmed cleanup and non-holder
   expect(profileIsolationChecks(raw)["exact-release"]).toBe(false);
   raw.profileIsolationObservation.isolatedCredentialsUnchanged = false;
   expect(profileIsolationChecks(raw)["credential-files-unchanged"]).toBe(false);
+  raw.profileIsolationObservation.fixturesUntouched = false;
+  expect(profileIsolationChecks(raw)["native-actions"]).toBe(false);
   raw.profileIsolationObservation.channels.traceComplete = false;
   expect(profileIsolationChecks(raw)["no-foreign-images"]).toBe(false);
   raw.cleanup.confirmed = false;

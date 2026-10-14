@@ -371,10 +371,12 @@ export async function runProfileIsolation(o) {
     (s, i) => s.threads.some((t) => t.id === ids[i]) && !s.threads.some((t) => t.id === ids[1 - i]),
   );
   await instructions(
-    "FINISHED: Both sessions stopped. Click Finish check in the first synthetic fixture. You can use your computer.",
+    "FINISHED: Both sessions stopped. Click Finish check in the active synthetic fixture. You can use your computer.",
   );
-  fixture.child.stdin.write("WINDOWLESS_FINISHED\n");
-  await waitFor(() => fixture.acknowledged(), 90000);
+  // The second fixture is frontmost after the final owner turn. Keep its cue
+  // and control visible rather than enabling a covered/background window.
+  secondaryFixture.child.stdin.write("WINDOWLESS_FINISHED\n");
+  await waitFor(() => secondaryFixture.acknowledged(), 90000);
   const receipt = {
     channels: await snapshot(),
     consents,
@@ -391,7 +393,8 @@ export async function runProfileIsolation(o) {
       (await fingerprint(join(secondaryHome, "auth.json"))) === secondaryHash,
     profileSnapshotsPrivate,
     secondHelperReason: device.reason,
-    humanFinishAcknowledged: fixture.acknowledged(),
+    humanFinishAcknowledged: secondaryFixture.acknowledged(),
+    fixturesUntouched: fixtures.every((f) => f.presses() === 0 && !f.typed()),
   };
   const checks = profileIsolationChecks({
     profileIsolationObservation: receipt,
