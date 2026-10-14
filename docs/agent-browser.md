@@ -886,6 +886,18 @@ or missing results fail closed, and all receipt checks remain intact. Its
 unit round trip includes full-budget traces and negative isolation flags;
 that fake transport check does not qualify the real profile gate.
 
+The [real JSON-transfer diagnostic](computer-certification/2026-10-14-macos-profile-inspection-json-passed.json)
+passed on clean `5a40c2fcb5`: both profiles completed twenty correlated accessible
+fixture inspections after genuine consent, with plan mode verified. No lease,
+capture, input, activity or foreign data was observed; credential comparisons
+passed, both sessions stopped, grants cleared and cleanup completed. The complete
+single-worker test suite also passed, including all 136 exhaustive Git cases.
+A preceding two-worker run encountered a WebSocket 403 in a server test; its log was
+retained, and no authentication assertions were changed. This pass supports the
+new observation-transfer path but does not prove the precise earlier context-loss
+cause. Real lease contention and positive capture/privacy evidence remain pending;
+the diagnostic carries no release credit and opens no gate.
+
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;
 watching a child's absent stdout pipe produced no diagnostic evidence. The new
