@@ -1,5 +1,6 @@
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +10,22 @@ const requireDesktop = createRequire(join(desktopDir, "package.json"));
 const requireWeb = createRequire(resolve(desktopDir, "../web/package.json"));
 const { _electron } = requireWeb("playwright");
 const directory = mkdtempSync(join(tmpdir(), "f5-desktop-smoke-"));
+const overlayModule = join(directory, "computer-overlay.cjs");
+if (process.platform === "darwin") {
+  execFileSync(
+    "bun",
+    [
+      "build",
+      join(desktopDir, "src/computer/ComputerOverlay.ts"),
+      "--target=node",
+      "--format=cjs",
+      "--external=electron",
+      "--outfile",
+      overlayModule,
+    ],
+    { cwd: desktopDir, stdio: "pipe" },
+  );
+}
 const state = join(directory, "app", "userdata");
 mkdirSync(state, { recursive: true });
 writeFileSync(
@@ -84,6 +101,48 @@ try {
     { timeout: 60_000 },
   );
   await page.screenshot({ path: join(directory, "welcome.png") });
+  if (process.platform === "darwin") {
+    await application.evaluate(async ({ app, BrowserWindow, screen }, modulePath) => {
+      const require = process.getBuiltinModule("module").createRequire(modulePath);
+      const { ComputerOverlay } = require(modulePath);
+      const overlay = new ComputerOverlay();
+      const originalWindows = BrowserWindow.getAllWindows();
+      const checkDock = (phase) => {
+        if (!app.dock.isVisible()) throw new Error(`Computer overlay hid the Dock: ${phase}`);
+        if (originalWindows.some((window) => window.isDestroyed() || !window.isVisible()))
+          throw new Error(`Computer overlay hid an app window: ${phase}`);
+      };
+      checkDock("before overlay");
+      try {
+        for (let cycle = 0; cycle < 3; cycle++) {
+          overlay.show({ provider: "claude", executionGeneration: cycle + 1 });
+          checkDock("creating overlay");
+          const windows = BrowserWindow.getAllWindows().filter(
+            (window) => !originalWindows.includes(window),
+          );
+          if (windows.length !== screen.getAllDisplays().length)
+            throw new Error(
+              `Computer overlay window count ${windows.length} did not match display count ${screen.getAllDisplays().length} on cycle ${cycle}`,
+            );
+          await Promise.all(windows.map((window) => window.webContents.executeJavaScript("true")));
+          for (const window of windows) {
+            if (!window.isVisibleOnAllWorkspaces() || window.isFocusable())
+              throw new Error("Computer overlay lost its workspace or non-interactive behavior");
+          }
+          checkDock("showing overlay");
+          const closed = windows.map(
+            (window) => new Promise((resolve) => window.once("closed", resolve)),
+          );
+          overlay.clear();
+          await Promise.all(closed);
+          checkDock("clearing overlay");
+        }
+      } finally {
+        overlay.close();
+      }
+      checkDock("closing overlay");
+    }, overlayModule);
+  }
   await page.evaluate(async () => {
     const computer = window.desktopBridge.computerAutomation;
     if (
