@@ -58,8 +58,8 @@ export function profileProviderProgress(thread: unknown, activities: unknown) {
 export class RehearsalProfileIsolation {
   private identities: readonly Identity[] = [];
   private readonly native = [
-    new ElectronRehearsalObservation(),
-    new ElectronRehearsalObservation(),
+    new ElectronRehearsalObservation(1024),
+    new ElectronRehearsalObservation(1024),
   ];
   private readonly stats = [this.empty(), this.empty()];
   private messages = 0;

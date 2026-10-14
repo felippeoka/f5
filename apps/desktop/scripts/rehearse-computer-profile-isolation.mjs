@@ -399,9 +399,24 @@ export async function runProfileIsolation(o) {
     const contender = 1 - owner;
     stage(`profile-${owner + 1}-contention`);
     fixtures[owner].child.stdin.write("PROFILE_HOLD\n");
+    fixtures[contender].child.stdin.write("PROFILE_HOLD\n");
+    // Start the contender's real observation loop before acquiring. Its next
+    // inspection sees the fixture cue, without cold-starting a provider turn
+    // while the owner consumes its bounded observation budget.
+    const inspectionBaseline = (await snapshot()).profiles[contender].native.inspectionResponses;
+    const previousContender = await submit(
+      contender,
+      `Use only F5 computer tools for exact granted app ${apps[contender]}. Inspect only this app sequentially, one call at a time, at most 200 times, while its Rehearsal instruction says Isolation waiting. When this fixture says Isolation released, call computer_activate_app exactly once for this app with screenshot:false. Another profile should then hold the lease: expect Busy and finish READY immediately. If the inspection limit is reached, finish without activating. No fallback, retry, other tools, shell/files/network or apps. Stop on any error or interruption.`,
+      "contender",
+    );
+    await waitFor(
+      async () =>
+        (await snapshot()).profiles[contender].native.inspectionResponses > inspectionBaseline,
+      150000,
+    );
     const previousOwner = await submit(
       owner,
-      `Use only F5 computer tools for exact granted app ${apps[owner]}. Activate it exactly once with screenshot:true. Then inspect only this app repeatedly, at most 40 times, while the Rehearsal instruction says Isolation waiting. When it says Isolation released, finish READY immediately. Do not press, type, move, click or touch any other app. Do not request new access or use shell/files/network. Stop on any error/interruption/ambiguity, never retry.`,
+      `Use only F5 computer tools for exact granted app ${apps[owner]}. Activate it exactly once with screenshot:true. Then inspect only this app sequentially, one call at a time, at most 200 times, while the Rehearsal instruction says Isolation waiting. When it says Isolation released, finish READY immediately. If the inspection limit is reached, finish without further action. Do not press, type, move, click or touch any other app. Do not request new access or use shell/files/network. Stop on any error/interruption/ambiguity, never retry.`,
       "owner",
     );
     // Provider planning/queue admission is not a native execution latency check.
@@ -415,11 +430,9 @@ export async function runProfileIsolation(o) {
         ),
       150000,
     );
-    const previousContender = await submit(
-      contender,
-      `Use only computer_activate_app exactly once for already granted app ${apps[contender]} with screenshot:false. Another profile is holding the machine lease. Expect Busy; finish READY after the result. No fallback, retry, other tool, shell/files/network or apps.`,
-      "contender",
-    );
+    // Only fixture-owned instruction text changes here. The real provider must
+    // observe it and make its own ordinary call; no lease or result is injected.
+    fixtures[contender].child.stdin.write("PROFILE_RELEASE\n");
     await completed(contender, previousContender);
     const contention = await snapshot();
     if (

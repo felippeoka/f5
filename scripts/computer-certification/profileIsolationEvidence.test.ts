@@ -84,6 +84,14 @@ it("fails when either observation source detects a foreign image, identity or gr
     expect(Object.values(profileIsolationChecks(raw)).every(Boolean)).toBe(false);
   }
 });
+it("does not accept sequential activations as real contention", () => {
+  const raw = passing();
+  const contender = raw.profileIsolationObservation.channels.profiles[1]!;
+  contender.busy = 0;
+  contender.busyWhileForeignHeld = false;
+  contender.native.operations[0] = { op: "leaseAcquire", outcome: "ok" };
+  expect(profileIsolationChecks(raw)["lease-contention"]).toBe(false);
+});
 it("rejects lost traces, changed credentials, unconfirmed cleanup and non-holder stop losing the holder", () => {
   const raw = passing();
   raw.profileIsolationObservation.afterNonHolderStop.profiles[1]!.held = false;

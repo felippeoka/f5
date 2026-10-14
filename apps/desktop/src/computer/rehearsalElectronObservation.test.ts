@@ -9,6 +9,39 @@ import {
   rehearsalHarnessFailureCode,
 } from "./rehearsalElectronObservation";
 
+it("keeps expanded profile polling observations bounded without retaining native payloads", () => {
+  for (const limit of [128, 1024, 2048]) {
+    const observer = new ElectronRehearsalObservation(limit);
+    for (let i = 0; i <= limit; i++) {
+      observer.receive({
+        type: "leaseAcquire",
+        requestId: `request-${i}`,
+        holder: {
+          profileId: "profile",
+          threadId: "thread",
+          sessionGeneration: "session",
+          turnId: "turn",
+          executionGeneration: 1,
+          grantVersion: 1,
+          grants: [],
+          backend: "native",
+          threadTitle: "PRIVATE_SENTINEL",
+        },
+      });
+      observer.receive({ type: "response", requestId: `request-${i}`, result: true });
+      if (i === limit - 1) expect(observer.snapshot().traceComplete).toBe(true);
+    }
+    const result = observer.snapshot();
+    expect(result.operations).toHaveLength(limit);
+    expect(result.traceComplete).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("PRIVATE_SENTINEL");
+  }
+  for (const invalid of [0, 127, 2049, Infinity, 128.5])
+    expect(() => new ElectronRehearsalObservation(invalid)).toThrow(
+      "Invalid rehearsal observation limit.",
+    );
+});
+
 it("validates bounded transport diagnostics and discards extra private fields", () => {
   const receipt = {
     method: "tools/call",

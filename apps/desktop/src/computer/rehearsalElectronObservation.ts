@@ -47,6 +47,10 @@ export class ElectronRehearsalObservation {
   private readonly backendLifecycle = new Set<string>();
   private readonly mcpTransport: RehearsalMcpTransportReceipt[] = [];
   private mcpTransportOverflow = false;
+  constructor(private readonly admissionLimit = 128) {
+    if (!Number.isSafeInteger(admissionLimit) || admissionLimit < 128 || admissionLimit > 2048)
+      throw new Error("Invalid rehearsal observation limit.");
+  }
   /** Observe existing backend stdout without retaining text, paths or IDs. */
   backendLog(chunk: string): void {
     this.backendLogBuffer += chunk;
@@ -63,7 +67,10 @@ export class ElectronRehearsalObservation {
       if (line.startsWith(MCP_DIAGNOSTIC_PREFIX)) {
         try {
           const receipt: unknown = JSON.parse(line.slice(MCP_DIAGNOSTIC_PREFIX.length));
-          if (!Schema.is(RehearsalMcpTransportReceipt)(receipt) || this.mcpTransport.length >= 128)
+          if (
+            !Schema.is(RehearsalMcpTransportReceipt)(receipt) ||
+            this.mcpTransport.length >= this.admissionLimit
+          )
             this.mcpTransportOverflow = true;
           else
             this.mcpTransport.push({
@@ -163,7 +170,7 @@ export class ElectronRehearsalObservation {
     } else if (raw.type === "request" || raw.type === "leaseAcquire") {
       const requestId = raw.type === "request" ? raw.request.requestId : raw.requestId;
       if (this.admitted.has(requestId)) return;
-      if (this.admitted.size >= 128) {
+      if (this.admitted.size >= this.admissionLimit) {
         this.overflow = true;
         return;
       }

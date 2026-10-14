@@ -809,6 +809,24 @@ This establishes a runner defect, not the cause of the older `unknown` failure.
 Its result and release status remain unchanged. Production pause/authorization
 paths and the subsequent contention/privacy assertions are unchanged.
 
+The [next instrumented attempt](computer-certification/2026-10-14-macos-profile-isolation-poll-budget-exhausted.json)
+on clean `ab0a5c3575` completed both consents, the lock check, owner activation and
+capture, and positive owner IPC/client thumbnail delivery. The owner finished all
+40 inspection polls before the contender activated, so the latter legitimately
+acquired the released lease. The real `Busy` requirement failed; sequential
+successes are never accepted as contention. Monitor signal counts remained zero
+after the baseline and cleanup was confirmed. No foreign data was observed;
+complete two-owner image/isolation acceptance remains pending.
+The driver now first starts the contender's genuine, granted-app inspection loop,
+waits for a correlated accessible reply, and only then starts the owner. After a
+live owner lease is observed, fixture-owned instruction text cues the contender's
+ordinary activation call. Both inspection loops are sequential and capped at 200;
+an exhausted budget cannot pass. No tool reply, grant, lease or permit is injected
+or delayed. The 60-second idle release and all authorization/stop rules remain
+unchanged. Bounded observation capacities cover the larger phase (1024 admitted
+requests per profile, 2048 aggregate/transport receipts, 4096 IPC messages); any
+overflow still fails. Other rehearsal defaults remain 128 requests/receipts.
+
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;
 watching a child's absent stdout pipe produced no diagnostic evidence. The new

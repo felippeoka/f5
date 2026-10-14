@@ -218,8 +218,9 @@ let buildHashes;
 let repositoryCommit;
 let workingTreeDirty;
 let nativeObservation;
-const stdoutObservation = new ElectronRehearsalObservation();
-const stderrObservation = new ElectronRehearsalObservation();
+const profileObservationLimit = profileIsolation ? 2048 : 128;
+const stdoutObservation = new ElectronRehearsalObservation(profileObservationLimit);
+const stderrObservation = new ElectronRehearsalObservation(profileObservationLimit);
 let threadObservation;
 let consentObservation;
 let providerErrorCodes;
@@ -732,7 +733,7 @@ const {app,BrowserWindow}=require('electron');
 const setPath=app.setPath.bind(app);
 app.setPath=(key,value)=>setPath(key,key==='userData'?${JSON.stringify(join(root, "electron"))}:value);
 const {ElectronRehearsalObservation}=require(${JSON.stringify(compiledObserver)});
-const evidence=globalThis.__computerRehearsalNative=new ElectronRehearsalObservation();
+const evidence=globalThis.__computerRehearsalNative=new ElectronRehearsalObservation(${profileIsolation ? "2048" : ""});
 ${
   profileIsolation
     ? `const {RehearsalProfileIsolation}=require(${JSON.stringify(compiledIsolationObserver)});
@@ -1846,9 +1847,11 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       ...new Set([...stdout.backendLifecycle, ...stderr.backendLifecycle]),
     ].sort();
     const transport = [...stdout.mcpTransport, ...stderr.mcpTransport];
-    nativeObservation.mcpTransport = transport.slice(0, 128);
+    nativeObservation.mcpTransport = transport.slice(0, profileObservationLimit);
     nativeObservation.mcpTransportOverflow =
-      stdout.mcpTransportOverflow || stderr.mcpTransportOverflow || transport.length > 128;
+      stdout.mcpTransportOverflow ||
+      stderr.mcpTransportOverflow ||
+      transport.length > profileObservationLimit;
   }
   if (includesRealApps && application)
     realAppObservation = await application
