@@ -12,6 +12,7 @@ import { evaluateWhenNode, formatShortcutLabel } from "@t3tools/shared/keybindin
 import { useQuery } from "@tanstack/react-query";
 import { serverConfigQueryOptions } from "./lib/serverReactQuery";
 import { isMacPlatform } from "./lib/utils";
+import { WORKING_RIBBON_STAGE_SELECTOR } from "./lib/workingRibbon";
 
 export { formatShortcutLabel } from "@t3tools/shared/keybindings";
 
@@ -104,11 +105,23 @@ function matchesCommandShortcut(
   return resolveShortcutCommand(event, keybindings, options) === command;
 }
 
+/**
+ * A steered working ribbon owns every unmodified key while it has focus, so a
+ * bare binding (say `escape` for `thread.stop`) cannot fire under it. Global
+ * dispatchers run in the capture phase, before the ribbon sees the key.
+ */
+function isWorkingRibbonKey(event: ShortcutEventLike): boolean {
+  if (event.metaKey || event.ctrlKey || event.altKey) return false;
+  if (typeof document === "undefined") return false;
+  return Boolean(document.activeElement?.closest?.(WORKING_RIBBON_STAGE_SELECTOR));
+}
+
 export function resolveShortcutBinding(
   event: ShortcutEventLike,
   keybindings: ResolvedKeybindingsConfig,
   options?: ShortcutMatchOptions,
 ): ResolvedKeybindingRule | null {
+  if (isWorkingRibbonKey(event)) return null;
   const platform = resolvePlatform(options);
   const context = resolveContext(options);
 

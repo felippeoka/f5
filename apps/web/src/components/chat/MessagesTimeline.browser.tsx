@@ -14,9 +14,10 @@ import {
   type UserMessageSkillCall,
 } from "@t3tools/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
-import { useRef, useState } from "react";
+import { StrictMode, useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { page, userEvent } from "vitest/browser";
+import type {} from "@vitest/browser-playwright"; // Types cdp() as a Playwright CDPSession.
+import { cdp, page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
 import type { deriveTimelineEntries } from "../../session-logic";
@@ -24,9 +25,34 @@ import { parsePersistedAppSettings } from "../../appSettings";
 import type { TurnDiffSummary } from "../../types";
 import { readTimelineScrollAnchor } from "./timelineScrollAnchors";
 import { MessagesTimeline } from "./MessagesTimeline";
+import { ComposerDock } from "./composer/ComposerDock";
 import type { ImageAttachmentActionItem } from "./imageAttachmentActions";
 import { WORK_LOG_PAGE_SIZE } from "./workLogConstants";
 import { appendTerminalContextsToPrompt } from "../../lib/terminalContext";
+
+const reducedMotionStore = vi.hoisted(() => {
+  let value = false;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set: (next: boolean) => {
+      value = next;
+      for (const listener of listeners) listener();
+    },
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+});
+
+vi.mock("../../hooks/useReducedMotion", async () => {
+  const { useSyncExternalStore } = await import("react");
+  return {
+    useReducedMotion: () =>
+      useSyncExternalStore(reducedMotionStore.subscribe, reducedMotionStore.get),
+  };
+});
 
 const APP_SETTINGS_STORAGE_KEY = "t3code:app-settings:v1";
 
@@ -211,16 +237,23 @@ interface HarnessProps {
   revertReopenRequest?: { messageId: MessageId; restoreFiles: boolean; nonce: number } | null;
   onRevertReopenHandled?: (nonce: number) => void;
   latestMessageId?: MessageId | null;
+  initialNowIso?: string;
+  onWorkingRibbonFocusLost?: () => void;
 }
 
 interface TimelineHarnessApi {
   setEntries: (entries: TimelineEntry[]) => void;
   setHeaderContent: (content: React.ReactNode) => void;
   setHeight: (height: number) => void;
+  /** Height of the content inside the harness's real composer dock. */
+  setDockHeight: (height: number) => void;
+  /** Remounts the timeline the way ChatView does on a thread switch. */
+  setThreadId: (threadId: ThreadId) => void;
   setTimelineState: (nextState: {
-    entries: TimelineEntry[];
-    isWorking: boolean;
+    entries?: TimelineEntry[];
+    isWorking?: boolean;
     activeTurnStartedAt?: string | null;
+    nowIso?: string;
   }) => void;
 }
 
@@ -235,8 +268,13 @@ function TimelineHarness(
   const [height, setHeight] = useState(props.initialHeight ?? 400);
   const [isWorking, setIsWorking] = useState(props.initialIsWorking ?? false);
   const [activeTurnStartedAt, setActiveTurnStartedAt] = useState<string | null>(
-    props.initialActiveTurnStartedAt ?? "2026-03-04T12:00:00.000Z",
+    props.initialActiveTurnStartedAt === undefined
+      ? "2026-03-04T12:00:00.000Z"
+      : props.initialActiveTurnStartedAt,
   );
+  const [nowIso, setNowIso] = useState(props.initialNowIso ?? "2026-03-04T12:05:00.000Z");
+  const [dockHeight, setDockHeight] = useState(0);
+  const [threadId, setThreadId] = useState<ThreadId | undefined>(props.threadId);
   const [headerContent, setHeaderContent] = useState<React.ReactNode>(props.headerContent ?? null);
   const [expandedCommandExecutions, setExpandedCommandExecutions] = useState<
     Record<string, boolean>
@@ -260,9 +298,12 @@ function TimelineHarness(
       setEntries,
       setHeaderContent,
       setHeight,
+      setDockHeight,
+      setThreadId,
       setTimelineState: (nextState) => {
-        setEntries(nextState.entries);
-        setIsWorking(nextState.isWorking);
+        if (nextState.entries !== undefined) setEntries(nextState.entries);
+        if (nextState.isWorking !== undefined) setIsWorking(nextState.isWorking);
+        if (nextState.nowIso !== undefined) setNowIso(nextState.nowIso);
         if (Object.hasOwn(nextState, "activeTurnStartedAt")) {
           setActiveTurnStartedAt(nextState.activeTurnStartedAt ?? null);
         }
@@ -271,10 +312,17 @@ function TimelineHarness(
   }
 
   return (
-    <div style={{ height, display: "flex", flexDirection: "column" }}>
+    <div
+      data-composer-dock-host
+      style={{ height, display: "flex", flexDirection: "column", position: "relative" }}
+    >
       <QueryClientProvider client={queryClientRef.current}>
         <MessagesTimeline
-          {...(props.threadId ? { threadId: props.threadId } : {})}
+          key={threadId}
+          {...(threadId ? { threadId } : {})}
+          {...(props.onWorkingRibbonFocusLost
+            ? { onWorkingRibbonFocusLost: props.onWorkingRibbonFocusLost }
+            : {})}
           hasMessages={entries.length > 0}
           isWorking={isWorking}
           activeTurnStartedAt={activeTurnStartedAt}
@@ -285,7 +333,7 @@ function TimelineHarness(
           completionSummary={null}
           turnDiffSummaryByAssistantMessageId={new Map()}
           turnDiffSummaryByTurnId={props.turnDiffSummaryByTurnId ?? new Map()}
-          nowIso="2026-03-04T12:05:00.000Z"
+          nowIso={nowIso}
           expandedWorkGroups={expandedWorkGroups}
           onToggleWorkGroup={(groupId, paginatedEntryCount) => {
             setExpandedWorkGroups((current) => {
@@ -347,6 +395,9 @@ function TimelineHarness(
           }}
         />
       </QueryClientProvider>
+      <ComposerDock>
+        <div data-testid="harness-dock-content" style={{ height: dockHeight }} />
+      </ComposerDock>
     </div>
   );
 }
@@ -2573,6 +2624,720 @@ describe("MessagesTimeline (LegendList)", () => {
     } finally {
       await screen.unmount();
       host.remove();
+    }
+  });
+});
+
+describe("MessagesTimeline working ribbon", () => {
+  const TURN_START = "2026-03-04T12:00:00.000Z";
+  const at = (seconds: number) => new Date(Date.parse(TURN_START) + seconds * 1000).toISOString();
+
+  const grabButton = (host: HTMLElement) =>
+    host.querySelector<HTMLButtonElement>("[data-working-ribbon-grab]");
+  const plainLabel = (host: HTMLElement) =>
+    Array.from(host.querySelectorAll<HTMLElement>("span.tabular-nums")).find((element) =>
+      element.textContent?.startsWith("Working"),
+    ) ?? null;
+  const stage = (host: HTMLElement) =>
+    host.querySelector<HTMLElement>('[data-slot="working-ribbon"]');
+  const glyphs = (host: HTMLElement) =>
+    Array.from(host.querySelectorAll<HTMLElement>("[data-ribbon-glyph]"));
+  const ribbonText = (host: HTMLElement) =>
+    glyphs(host)
+      .map((glyph) => glyph.textContent)
+      .join("");
+
+  function glyphTranslate(glyph: HTMLElement): { x: number; y: number } {
+    const matrix = new DOMMatrixReadOnly(glyph.style.transform);
+    return { x: matrix.m41, y: matrix.m42 };
+  }
+
+  const headGlyph = (host: HTMLElement) => glyphTranslate(glyphs(host).at(-1)!);
+
+  function expectPlacedGlyphs(host: HTMLElement) {
+    for (const glyph of glyphs(host)) {
+      expect(glyph.style.transform).toContain("translate(");
+      const { x, y } = glyphTranslate(glyph);
+      expect(x !== 0 || y !== 0).toBe(true);
+    }
+  }
+
+  /** Every glyph's painted box (rotation included) lies inside the stage. */
+  function expectGlyphsInsideStage(host: HTMLElement) {
+    const bounds = stage(host)!.getBoundingClientRect();
+    for (const glyph of glyphs(host)) {
+      const rect = glyph.getBoundingClientRect();
+      expect(rect.left).toBeGreaterThanOrEqual(bounds.left - 0.5);
+      expect(rect.right).toBeLessThanOrEqual(bounds.right + 0.5);
+      expect(rect.top).toBeGreaterThanOrEqual(bounds.top - 0.5);
+      expect(rect.bottom).toBeLessThanOrEqual(bounds.bottom + 0.5);
+    }
+  }
+
+  async function nextFrames(count = 2) {
+    for (let index = 0; index < count; index += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  }
+
+  async function expectRibbonSettles(host: HTMLElement) {
+    await vi.waitFor(
+      async () => {
+        const before = headGlyph(host);
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        const after = headGlyph(host);
+        expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeLessThan(2);
+      },
+      { timeout: 5_000, interval: 50 },
+    );
+  }
+
+  async function mountWorkingTimeline(
+    options: {
+      entries?: TimelineEntry[];
+      initialNowIso?: string;
+      initialActiveTurnStartedAt?: string | null;
+      initialHeight?: number;
+      threadId?: ThreadId;
+      strict?: boolean;
+    } = {},
+  ) {
+    const host = document.createElement("div");
+    document.body.append(host);
+    let api: TimelineHarnessApi | null = null;
+    const focusLost = vi.fn();
+    const harness = (
+      <TimelineHarness
+        initialEntries={options.entries ?? [makeUserEntry("ribbon-user", "Keep going", 0)]}
+        initialIsWorking
+        initialHeight={options.initialHeight ?? 400}
+        {...(options.initialNowIso ? { initialNowIso: options.initialNowIso } : {})}
+        {...(options.initialActiveTurnStartedAt !== undefined
+          ? { initialActiveTurnStartedAt: options.initialActiveTurnStartedAt }
+          : {})}
+        {...(options.threadId ? { threadId: options.threadId } : {})}
+        onIsAtEndChangeSpy={() => {}}
+        onWorkingRibbonFocusLost={focusLost}
+        setApi={(next) => {
+          api = next;
+        }}
+      />
+    );
+    const screen = await render(options.strict ? <StrictMode>{harness}</StrictMode> : harness, {
+      container: host,
+    });
+    await vi.waitFor(() => {
+      expect(grabButton(host) ?? plainLabel(host)).not.toBeNull();
+    });
+    return {
+      host,
+      focusLost,
+      api: () => api!,
+      cleanup: async () => {
+        await screen.unmount();
+        host.remove();
+      },
+    };
+  }
+
+  async function grab(host: HTMLElement) {
+    await userEvent.click(grabButton(host)!);
+    await vi.waitFor(() => {
+      expect(stage(host)).not.toBeNull();
+      expect(document.activeElement).toBe(stage(host));
+    });
+  }
+
+  async function expectReleasedTo(host: HTMLElement, focused: () => Element | null) {
+    await vi.waitFor(() => {
+      expect(stage(host)).toBeNull();
+      expect(document.activeElement).toBe(focused());
+    });
+  }
+
+  beforeEach(async () => {
+    localStorage.clear();
+    persistAppSettings();
+    reducedMotionStore.set(false);
+    await page.viewport(1000, 800);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    reducedMotionStore.set(false);
+    document.body.innerHTML = "";
+  });
+
+  it("renders the grab button exactly like the plain label", async () => {
+    for (const startedAt of [TURN_START, null]) {
+      reducedMotionStore.set(false);
+      const mounted = await mountWorkingTimeline({
+        entries: [
+          makeUserEntry("ribbon-footprint-user", "Read it", 0),
+          makeReadWorkEntry("ribbon-footprint-read", "src/a.ts", 1),
+        ],
+        initialActiveTurnStartedAt: startedAt,
+      });
+      const { host } = mounted;
+      const measure = () => {
+        const label = (grabButton(host) ?? plainLabel(host))!;
+        const row = label.parentElement!;
+        const activity = row.querySelector<HTMLElement>("span.truncate");
+        const range = document.createRange();
+        range.selectNodeContents(label);
+        const text = range.getBoundingClientRect();
+        const rect = label.getBoundingClientRect();
+        return {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+          textLeft: text.left,
+          textTop: text.top,
+          textBottom: text.bottom,
+          rowHeight: row.parentElement!.offsetHeight,
+          activityLeft: activity?.getBoundingClientRect().left ?? -1,
+          activityWidth: activity?.getBoundingClientRect().width ?? -1,
+        };
+      };
+      try {
+        await vi.waitFor(() => {
+          expect(grabButton(host)).not.toBeNull();
+          expect(grabButton(host)!.parentElement!.querySelector("span.truncate")).not.toBeNull();
+        });
+        const asButton = measure();
+        reducedMotionStore.set(true);
+        await vi.waitFor(() => {
+          expect(grabButton(host)).toBeNull();
+          expect(plainLabel(host)).not.toBeNull();
+        });
+        const asSpan = measure();
+        expect(asButton).toEqual(asSpan);
+      } finally {
+        await mounted.cleanup();
+      }
+    }
+  });
+
+  it("picks the label up on click without moving the row or the list", async () => {
+    const mounted = await mountWorkingTimeline({ entries: makeOverflowEntries(30) });
+    const { host } = mounted;
+    try {
+      const scroller = await waitForScrollContainer(host);
+      await vi.waitFor(() => {
+        expect(grabButton(host)).not.toBeNull();
+      });
+      await nextFrames(4);
+      const button = grabButton(host)!;
+      const rowHeight = button.parentElement!.parentElement!.offsetHeight;
+      const scrollTop = scroller.scrollTop;
+
+      await grab(host);
+
+      expect(getComputedStyle(button).visibility).toBe("hidden");
+      expect(button.parentElement!.parentElement!.offsetHeight).toBe(rowHeight);
+      expect(scroller.scrollTop).toBe(scrollTop);
+      expect(ribbonText(host)).toBe("Working · 5m");
+      expectPlacedGlyphs(host);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("picks the label up with Enter or Space", async () => {
+    const mounted = await mountWorkingTimeline();
+    const { host } = mounted;
+    try {
+      grabButton(host)!.focus();
+      await userEvent.keyboard("{Enter}");
+      await vi.waitFor(() => {
+        expect(document.activeElement).toBe(stage(host));
+      });
+      await userEvent.keyboard("{Escape}");
+      await expectReleasedTo(host, () => grabButton(host));
+
+      await userEvent.keyboard("[Space]");
+      await vi.waitFor(() => {
+        expect(document.activeElement).toBe(stage(host));
+      });
+      await userEvent.keyboard("{Escape}");
+      await expectReleasedTo(host, () => grabButton(host));
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("does not re-grab when focus returns while Enter is still held", async () => {
+    const mounted = await mountWorkingTimeline();
+    const { host } = mounted;
+    try {
+      grabButton(host)!.focus();
+      await userEvent.keyboard("{Enter>}");
+      try {
+        await vi.waitFor(() => {
+          expect(document.activeElement).toBe(stage(host));
+        });
+        // The ribbon drops for lack of room and focus returns to the label
+        // while Enter is still down; its autorepeat must not grab again.
+        // (Chromium ignores button repeats by itself; the label's own
+        // repeat guard is for engines that do not.)
+        mounted.api().setDockHeight(395);
+        await expectReleasedTo(host, () => grabButton(host));
+        mounted.api().setDockHeight(0);
+        // A trusted autorepeat keydown; userEvent will not re-press a held key.
+        const repeats: boolean[] = [];
+        const onKeyDown = (event: KeyboardEvent) => {
+          if (event.key === "Enter") repeats.push(event.repeat);
+        };
+        window.addEventListener("keydown", onKeyDown, true);
+        try {
+          // With `text`, Chrome follows up with the keypress that activates
+          // the button, unless the keydown was default-prevented.
+          await cdp().send("Input.dispatchKeyEvent", {
+            type: "keyDown",
+            key: "Enter",
+            code: "Enter",
+            text: "\r",
+            windowsVirtualKeyCode: 13,
+            autoRepeat: true,
+          });
+        } finally {
+          window.removeEventListener("keydown", onKeyDown, true);
+        }
+        await nextFrames(3);
+        expect(repeats).toEqual([true]);
+        expect(stage(host)).toBeNull();
+        expect(document.activeElement).toBe(grabButton(host));
+      } finally {
+        await userEvent.keyboard("{/Enter}");
+      }
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("steers with the arrow keys and settles after release", async () => {
+    const mounted = await mountWorkingTimeline();
+    const { host } = mounted;
+    try {
+      await grab(host);
+      const start = headGlyph(host);
+      await userEvent.keyboard("{ArrowRight>}");
+      try {
+        await vi.waitFor(
+          () => {
+            expect(headGlyph(host).x).toBeGreaterThan(start.x + 30);
+          },
+          { timeout: 3_000 },
+        );
+      } finally {
+        await userEvent.keyboard("{/ArrowRight}");
+      }
+      await expectRibbonSettles(host);
+      expect(document.activeElement).toBe(stage(host));
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps steering keys from scrolling the list", async () => {
+    const mounted = await mountWorkingTimeline({ entries: makeOverflowEntries(30) });
+    const { host } = mounted;
+    // Captured on the way down; checked once dispatch has finished.
+    const arrowEvents: KeyboardEvent[] = [];
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "ArrowUp") arrowEvents.push(event);
+    };
+    try {
+      const scroller = await waitForScrollContainer(host);
+      await vi.waitFor(() => {
+        expect(grabButton(host)).not.toBeNull();
+      });
+      await nextFrames(4);
+      await grab(host);
+      const scrollTop = scroller.scrollTop;
+      window.addEventListener("keydown", onKeyDown, true);
+      await userEvent.keyboard("{ArrowUp>6/}");
+      await nextFrames(3);
+      expect(arrowEvents.length).toBeGreaterThan(1);
+      expect(arrowEvents.every((event) => event.defaultPrevented)).toBe(true);
+      expect(scroller.scrollTop).toBe(scrollTop);
+      expect(document.scrollingElement?.scrollTop ?? 0).toBe(0);
+    } finally {
+      window.removeEventListener("keydown", onKeyDown, true);
+      await mounted.cleanup();
+    }
+  });
+
+  it("stops steering when a modifier swallows the arrow's keyup", async () => {
+    const mounted = await mountWorkingTimeline();
+    const { host } = mounted;
+    try {
+      await grab(host);
+      const start = headGlyph(host);
+      await userEvent.keyboard("{ArrowRight>}");
+      try {
+        await vi.waitFor(() => {
+          expect(headGlyph(host).x).toBeGreaterThan(start.x + 10);
+        });
+        // macOS never delivers the arrow's keyup while Cmd is down: the
+        // ribbon must settle with no keyup for the arrow at all.
+        await userEvent.keyboard("{Meta>}{/Meta}");
+        await expectRibbonSettles(host);
+        // A stuck arrow would instead pin the head against the right edge.
+        expect(headGlyph(host).x).toBeLessThan(stage(host)!.clientWidth - 200);
+      } finally {
+        await userEvent.keyboard("{/ArrowRight}");
+      }
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the live timer in flight as glyphs come and go", async () => {
+    const mounted = await mountWorkingTimeline({ initialNowIso: at(9) });
+    const { host } = mounted;
+    try {
+      await grab(host);
+      expect(ribbonText(host)).toBe("Working · 9s");
+      expect(stage(host)!.textContent).toContain("Working · 9s");
+
+      for (const [seconds, label] of [
+        [10, "Working · 10s"],
+        [59, "Working · 59s"],
+        [60, "Working · 1m"],
+      ] as const) {
+        mounted.api().setTimelineState({ nowIso: at(seconds) });
+        await vi.waitFor(() => {
+          expect(ribbonText(host)).toBe(label);
+        });
+        expect(glyphs(host)).toHaveLength(Array.from(label).length);
+        expectPlacedGlyphs(host);
+        expectGlyphsInsideStage(host);
+      }
+      expect(document.activeElement).toBe(stage(host));
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the same stage when the turn's start time arrives mid-flight", async () => {
+    const mounted = await mountWorkingTimeline({ initialActiveTurnStartedAt: null });
+    const { host } = mounted;
+    try {
+      await grab(host);
+      expect(ribbonText(host)).toBe("Working…");
+      const stageNode = stage(host);
+      await userEvent.keyboard("{ArrowDown>}");
+      try {
+        mounted.api().setTimelineState({ activeTurnStartedAt: TURN_START });
+        await vi.waitFor(() => {
+          expect(ribbonText(host)).toBe("Working · 5m");
+        });
+        expect(stage(host)).toBe(stageNode);
+        expect(document.activeElement).toBe(stageNode);
+        expectPlacedGlyphs(host);
+        const before = headGlyph(host);
+        await vi.waitFor(() => {
+          expect(headGlyph(host).y).toBeGreaterThan(before.y + 20);
+        });
+      } finally {
+        await userEvent.keyboard("{/ArrowDown}");
+      }
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the playfield above the composer dock", async () => {
+    const mounted = await mountWorkingTimeline();
+    const { host } = mounted;
+    try {
+      await grab(host);
+      const dockHost = host.querySelector<HTMLElement>("[data-composer-dock-host]")!;
+      expect(stage(host)!.getBoundingClientRect().bottom).toBeCloseTo(
+        dockHost.getBoundingClientRect().bottom,
+        0,
+      );
+      mounted.api().setDockHeight(120);
+      await vi.waitFor(() => {
+        expect(stage(host)!.getBoundingClientRect().bottom).toBeCloseTo(
+          dockHost.getBoundingClientRect().bottom - 120,
+          0,
+        );
+      });
+      expect(document.activeElement).toBe(stage(host));
+
+      // A dock that leaves no room drops the ribbon back into its row.
+      mounted.api().setDockHeight(395);
+      await expectReleasedTo(host, () => grabButton(host));
+      expect(mounted.focusLost).not.toHaveBeenCalled();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps every glyph inside a stage that shrinks under a steered trail", async () => {
+    const mounted = await mountWorkingTimeline();
+    const { host } = mounted;
+    try {
+      await grab(host);
+      // Lay a long vertical trail, then shrink the stage below it.
+      await userEvent.keyboard("{ArrowDown>}");
+      try {
+        await vi.waitFor(
+          () => {
+            expect(headGlyph(host).y).toBeGreaterThan(300);
+          },
+          { timeout: 3_000 },
+        );
+      } finally {
+        await userEvent.keyboard("{/ArrowDown}");
+      }
+      mounted.api().setHeight(120);
+      await vi.waitFor(() => {
+        expect(stage(host)!.getBoundingClientRect().height).toBeCloseTo(120, 0);
+      });
+      await nextFrames(2);
+      expectGlyphsInsideStage(host);
+      // Still in bounds once the remaining momentum plays out.
+      await expectRibbonSettles(host);
+      expectGlyphsInsideStage(host);
+      expect(document.activeElement).toBe(stage(host));
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("drops the ribbon when the timeline gets too short", async () => {
+    const mounted = await mountWorkingTimeline();
+    const { host } = mounted;
+    try {
+      await grab(host);
+      mounted.api().setHeight(30);
+      await expectReleasedTo(host, () => grabButton(host));
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("re-measures when appearance settings change the root style", async () => {
+    const mounted = await mountWorkingTimeline();
+    const { host } = mounted;
+    const root = document.documentElement;
+    const previousFontSize = root.style.fontSize;
+    try {
+      await grab(host);
+      const spread = () => {
+        const all = glyphs(host);
+        return Math.abs(glyphTranslate(all.at(-1)!).x - glyphTranslate(all[0]!).x);
+      };
+      const before = spread();
+      root.style.fontSize = "24px";
+      await vi.waitFor(() => {
+        expect(spread()).toBeGreaterThan(before + 10);
+      });
+      expect(stage(host)).not.toBeNull();
+      expect(document.activeElement).toBe(stage(host));
+      expectGlyphsInsideStage(host);
+    } finally {
+      root.style.fontSize = previousFontSize;
+      await mounted.cleanup();
+    }
+  });
+
+  it("drops on Escape, returns focus, and claims the key", async () => {
+    const mounted = await mountWorkingTimeline();
+    const { host } = mounted;
+    // Captured on the way down; a bubbling window listener (the sidebar's
+    // Escape handler) must never see it.
+    let escapeEvent: KeyboardEvent | null = null;
+    let escapeReachedWindow = false;
+    const onCapture = (event: KeyboardEvent) => {
+      if (event.key === "Escape") escapeEvent = event;
+    };
+    const onBubble = (event: KeyboardEvent) => {
+      if (event.key === "Escape") escapeReachedWindow = true;
+    };
+    window.addEventListener("keydown", onCapture, true);
+    window.addEventListener("keydown", onBubble);
+    try {
+      await grab(host);
+      await userEvent.keyboard("{Escape}");
+      await expectReleasedTo(host, () => grabButton(host));
+      expect(escapeEvent).not.toBeNull();
+      expect(escapeEvent!.defaultPrevented).toBe(true);
+      expect(escapeReachedWindow).toBe(false);
+      expect(getComputedStyle(grabButton(host)!).visibility).toBe("visible");
+      expect(mounted.focusLost).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", onCapture, true);
+      window.removeEventListener("keydown", onBubble);
+      await mounted.cleanup();
+    }
+  });
+
+  it("drops when focus moves to another control", async () => {
+    const mounted = await mountWorkingTimeline();
+    const { host } = mounted;
+    try {
+      mounted.api().setHeaderContent(
+        <button type="button" data-testid="ribbon-header-button">
+          Header
+        </button>,
+      );
+      const headerButton = () =>
+        host.querySelector<HTMLButtonElement>('[data-testid="ribbon-header-button"]');
+      await vi.waitFor(() => {
+        expect(headerButton()).not.toBeNull();
+      });
+      await grab(host);
+      headerButton()!.focus();
+      await expectReleasedTo(host, headerButton);
+      await nextFrames(2);
+      expect(document.activeElement).toBe(headerButton());
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("drops when the window blurs or the tab is hidden", async () => {
+    const mounted = await mountWorkingTimeline();
+    const { host } = mounted;
+    try {
+      await grab(host);
+      window.dispatchEvent(new Event("blur"));
+      await vi.waitFor(() => {
+        expect(stage(host)).toBeNull();
+      });
+
+      await grab(host);
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+      try {
+        document.dispatchEvent(new Event("visibilitychange"));
+        await vi.waitFor(() => {
+          expect(stage(host)).toBeNull();
+        });
+      } finally {
+        Reflect.deleteProperty(document, "hidden");
+      }
+      expect(mounted.focusLost).not.toHaveBeenCalled();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("drops when the turn ends and hands focus back", async () => {
+    const mounted = await mountWorkingTimeline();
+    const { host } = mounted;
+    try {
+      await grab(host);
+      mounted.api().setTimelineState({ isWorking: false });
+      await vi.waitFor(() => {
+        expect(stage(host)).toBeNull();
+        expect(mounted.focusLost).toHaveBeenCalledTimes(1);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("drops when reduced motion turns on", async () => {
+    const mounted = await mountWorkingTimeline();
+    const { host } = mounted;
+    try {
+      await grab(host);
+      reducedMotionStore.set(true);
+      await vi.waitFor(() => {
+        expect(stage(host)).toBeNull();
+        expect(grabButton(host)).toBeNull();
+        expect(plainLabel(host)).not.toBeNull();
+        expect(mounted.focusLost).toHaveBeenCalledTimes(1);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("drops on a thread switch and starts inactive after remounting", async () => {
+    const mounted = await mountWorkingTimeline({
+      threadId: ThreadId.makeUnsafe("ribbon-thread-a"),
+    });
+    const { host } = mounted;
+    try {
+      await grab(host);
+      mounted.api().setThreadId(ThreadId.makeUnsafe("ribbon-thread-b"));
+      await vi.waitFor(() => {
+        expect(stage(host)).toBeNull();
+        expect(grabButton(host)).not.toBeNull();
+      });
+      await nextFrames(2);
+      expect(stage(host)).toBeNull();
+      expect(getComputedStyle(grabButton(host)!).visibility).toBe("visible");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("tears down its loop and observers on release", async () => {
+    const tickFrames = new Map<number, number>();
+    const originalRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) =>
+      originalRequestAnimationFrame((now) => {
+        if (callback.name === "tick") tickFrames.set(now, (tickFrames.get(now) ?? 0) + 1);
+        callback(now);
+      }),
+    );
+    const cancelSpy = vi.spyOn(window, "cancelAnimationFrame");
+    const resizeDisconnectSpy = vi.spyOn(ResizeObserver.prototype, "disconnect");
+    const mutationDisconnectSpy = vi.spyOn(MutationObserver.prototype, "disconnect");
+    const mounted = await mountWorkingTimeline();
+    const { host } = mounted;
+    const tickCount = () => [...tickFrames.values()].reduce((total, count) => total + count, 0);
+    try {
+      await grab(host);
+      await vi.waitFor(() => {
+        expect(tickCount()).toBeGreaterThan(3);
+      });
+      cancelSpy.mockClear();
+      resizeDisconnectSpy.mockClear();
+      mutationDisconnectSpy.mockClear();
+
+      await userEvent.keyboard("{Escape}");
+      await vi.waitFor(() => {
+        expect(stage(host)).toBeNull();
+      });
+      expect(cancelSpy).toHaveBeenCalled();
+      expect(resizeDisconnectSpy).toHaveBeenCalled();
+      expect(mutationDisconnectSpy).toHaveBeenCalled();
+      const ticksAtRelease = tickCount();
+      await nextFrames(5);
+      expect(tickCount()).toBe(ticksAtRelease);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("runs a single loop under Strict Mode", async () => {
+    const tickFrames = new Map<number, number>();
+    const originalRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) =>
+      originalRequestAnimationFrame((now) => {
+        if (callback.name === "tick") tickFrames.set(now, (tickFrames.get(now) ?? 0) + 1);
+        callback(now);
+      }),
+    );
+    const mounted = await mountWorkingTimeline({ strict: true });
+    const { host } = mounted;
+    try {
+      await grab(host);
+      await nextFrames(8);
+      expect(tickFrames.size).toBeGreaterThan(3);
+      expect(Math.max(...tickFrames.values())).toBe(1);
+      expect(document.activeElement).toBe(stage(host));
+      expect(mounted.focusLost).not.toHaveBeenCalled();
+    } finally {
+      await mounted.cleanup();
     }
   });
 });

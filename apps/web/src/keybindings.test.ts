@@ -1,4 +1,4 @@
-import { assert, describe, it } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import {
   type KeybindingCommand,
@@ -404,6 +404,63 @@ describe("chat/editor shortcuts", () => {
         context: { terminalFocus: true },
       }),
     );
+  });
+});
+
+describe("steered working ribbon", () => {
+  function plainShortcut(key: string): KeybindingShortcut {
+    return { ...modShortcut(key), modKey: false };
+  }
+
+  const bindings = compile([
+    { shortcut: plainShortcut("escape"), command: "thread.stop" },
+    { shortcut: plainShortcut("arrowright"), command: "diff.toggle" },
+    { shortcut: plainShortcut("w"), command: "chat.new" },
+    { shortcut: modShortcut("j"), command: "terminal.toggle" },
+  ]);
+  const options = { platform: "MacIntel" };
+
+  function withActiveElement(insideRibbon: boolean, run: () => void) {
+    vi.stubGlobal("document", {
+      activeElement: {
+        closest: (selector: string) =>
+          insideRibbon && selector === '[data-slot="working-ribbon"]' ? {} : null,
+      },
+    });
+    try {
+      run();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }
+
+  it("owns unmodified keys while the ribbon has focus", () => {
+    withActiveElement(true, () => {
+      assert.isNull(resolveShortcutBinding(event({ key: "Escape" }), bindings, options));
+      assert.isNull(resolveShortcutCommand(event({ key: "ArrowRight" }), bindings, options));
+      assert.isNull(resolveShortcutCommand(event({ key: "w" }), bindings, options));
+      assert.strictEqual(
+        resolveShortcutCommand(event({ key: "j", metaKey: true }), bindings, options),
+        "terminal.toggle",
+      );
+    });
+  });
+
+  it("resolves as usual elsewhere", () => {
+    withActiveElement(false, () => {
+      assert.strictEqual(
+        resolveShortcutCommand(event({ key: "Escape" }), bindings, options),
+        "thread.stop",
+      );
+      assert.strictEqual(
+        resolveShortcutCommand(event({ key: "ArrowRight" }), bindings, options),
+        "diff.toggle",
+      );
+      assert.strictEqual(
+        resolveShortcutCommand(event({ key: "w" }), bindings, options),
+        "chat.new",
+      );
+    });
   });
 });
 
