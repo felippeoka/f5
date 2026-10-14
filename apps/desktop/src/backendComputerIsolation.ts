@@ -8,6 +8,7 @@
 export const MAC_BACKEND_COMPUTER_SANDBOX = String.raw`(version 1)
 (allow default)
 (deny appleevent-send)
+(deny hid-control)
 (deny job-creation)
 (deny lsopen)
 (deny mach-priv-task-port)

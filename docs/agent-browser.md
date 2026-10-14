@@ -30,7 +30,7 @@ replaying its old receipt. Native dialogs identify the bundle ID/executable and
 quote the agent's unverified reason after F5's own instructions.
 
 Every macOS desktop backend and its descendants run under a kernel sandbox that
-blocks Apple Events, WindowServer/capture/accessibility service connections,
+blocks Apple Events, synthesized HID control, WindowServer/capture/accessibility service connections,
 LaunchServices GUI launch, launchd job creation and privileged task ports. It applies
 even when computer use is off, because another profile or SnapShot may already have
 obtained F5's permissions. Filesystem/network coding tools retain their existing
