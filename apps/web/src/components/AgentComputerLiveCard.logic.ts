@@ -1,4 +1,4 @@
-import type { ComputerActivity, ComputerAppTier } from "@t3tools/contracts";
+import type { ComputerActivity, ComputerAppTier, ComputerBackendKind } from "@t3tools/contracts";
 
 export type ComputerStatusTone = "ok" | "pending" | "warning" | "error" | "off";
 
@@ -9,30 +9,47 @@ export const COMPUTER_TIER_LABEL: Record<ComputerAppTier, string> = {
   blocked: "Blocked",
 };
 
-const COMPUTER_ACTION_VERB: Record<string, string> = {
-  screenshot: "Taking a screenshot",
-  zoom: "Zooming in",
-  inspect: "Reading the screen",
-  click: "Clicking",
-  move: "Moving the pointer",
-  drag: "Dragging",
-  scroll: "Scrolling",
-  type: "Typing",
-  key: "Pressing a key",
-  elementAction: "Using a control",
-  openApp: "Opening app",
-  activateApp: "Switching app",
-  listApps: "Listing apps",
-  resolveApps: "Finding apps",
-  status: "Checking status",
+/** Click-tier grants can separately allow typing, which can run commands. */
+export function computerGrantLabel(tier: ComputerAppTier, allowTyping: boolean): string {
+  return tier === "click" && allowTyping ? "Click + typing" : COMPUTER_TIER_LABEL[tier];
+}
+
+/** Built-in provider backends stop after the current action, so name them in the strip. */
+export function computerBackendLabel(backend: ComputerBackendKind | undefined): string | undefined {
+  if (backend === "claude-builtin") return "via Claude";
+  if (backend === "codex-builtin") return "via Codex";
+  return undefined;
+}
+
+/** Ongoing and finished wording, so a completed action does not read as still running. */
+const COMPUTER_ACTION_VERB: Record<string, readonly [ongoing: string, done: string]> = {
+  screenshot: ["Taking a screenshot", "Took a screenshot"],
+  zoom: ["Zooming in", "Zoomed in"],
+  inspect: ["Reading the screen", "Read the screen"],
+  click: ["Clicking", "Clicked"],
+  move: ["Moving the pointer", "Moved the pointer"],
+  drag: ["Dragging", "Dragged"],
+  scroll: ["Scrolling", "Scrolled"],
+  type: ["Typing", "Typed"],
+  key: ["Pressing a key", "Pressed a key"],
+  elementAction: ["Using a control", "Used a control"],
+  openApp: ["Opening app", "Opened app"],
+  activateApp: ["Switching app", "Switched app"],
+  listApps: ["Listing apps", "Listed apps"],
+  resolveApps: ["Finding apps", "Found apps"],
+  status: ["Checking status", "Checked status"],
+  requestAccess: ["Requesting access", "Requested access"],
 };
 
 function humanizeOp(op: string): string {
-  const words = op
+  return op
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .trim()
     .toLowerCase();
-  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Working";
+}
+
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 type ActivitySummary = Pick<ComputerActivity, "op" | "status">;
@@ -44,16 +61,20 @@ export function describeComputerAction(
 ): string {
   if (state.paused) return "You have control";
   if (!activity) return state.held ? "Agent is controlling this computer" : "Idle";
-  const base = COMPUTER_ACTION_VERB[activity.op] ?? humanizeOp(activity.op);
+  const words = humanizeOp(activity.op) || "action";
+  const [ongoing, done] = COMPUTER_ACTION_VERB[activity.op] ?? [
+    capitalize(words),
+    `Finished ${words}`,
+  ];
   switch (activity.status) {
     case "started":
-      return `${base}…`;
+      return `${ongoing}…`;
     case "failed":
-      return `${base} failed`;
+      return `${ongoing} failed`;
     case "interrupted":
-      return `${base} was interrupted`;
+      return `${ongoing} was interrupted`;
     case "completed":
-      return base;
+      return done;
   }
 }
 

@@ -113,7 +113,7 @@ it("renders an earlier capture after no-image actions and clears it on revoke", 
     store.record({ threadId, op: "type", status: "completed", backend: "native" });
     await expect.element(image).toBeVisible();
     await expect.element(page.getByTitle("Last capture · Synthetic fixture")).toBeVisible();
-    await expect.element(page.getByText("Typing", { exact: true })).toBeVisible();
+    await expect.element(page.getByText("Typed", { exact: true })).toBeVisible();
     store.setGrants(threadId, []);
     await expect.element(image).not.toBeInTheDocument();
   } finally {
@@ -130,42 +130,91 @@ const accessRequest = (requestId: string, reason: string) => ({
   apps: [{ appId: requestId, name: `App ${requestId}`, tier: "click" as const }],
 });
 
-it("lists allowed, denied and pending requests in the history popover", async () => {
+it("lists allowed, refused and pending requests in the history popover", async () => {
   const store = useAgentComputerActivityStore.getState();
-  store.setGrants(threadId, [{ appId: "a", tier: "click", allowTyping: false }]);
   store.request(accessRequest("a", "First reason"));
   store.request(accessRequest("b", "Second reason"));
   store.request(accessRequest("c", "Third reason"));
+  store.request({ ...accessRequest("d", "Fourth reason"), kind: "session-actions", apps: [] });
   store.settle({ requestId: "a", threadId, allowed: true });
   store.settle({ requestId: "b", threadId, allowed: false });
+  store.settle({ requestId: "d", threadId, allowed: true });
+  store.setGrants(threadId, [
+    { appId: "a", tier: "click", allowTyping: false },
+    { appId: "b", tier: "click", allowTyping: true },
+  ]);
   const screen = await render(<AgentComputerLiveCard threadId={threadId} />);
   try {
     await expect.element(page.getByText("App a · Click", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "History (3)", exact: true }).click();
+    await expect.element(page.getByText("App b · Click + typing", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "History (4)", exact: true }).click();
     const list = page.getByTestId("computer-access-history");
     await expect.element(list).toBeVisible();
     const rows = list.getByRole("listitem");
-    await expect.element(rows.nth(0)).toHaveTextContent("App c · ClickThird reason");
-    await expect.element(rows.nth(0).getByLabelText("Pending")).toBeInTheDocument();
-    await expect.element(rows.nth(1).getByLabelText("Denied")).toBeInTheDocument();
-    await expect.element(rows.nth(2).getByLabelText("Allowed")).toBeInTheDocument();
+    await expect.element(rows.nth(0)).toHaveTextContent("Requested: Session actionsFourth reason");
+    await expect.element(rows.nth(1)).toHaveTextContent("Requested: App c · ClickThird reason");
+    await expect.element(rows.nth(1).getByLabelText("Pending")).toBeInTheDocument();
+    await expect.element(rows.nth(2).getByLabelText("Not allowed")).toBeInTheDocument();
+    await expect.element(rows.nth(3).getByLabelText("Allowed")).toBeInTheDocument();
   } finally {
     await screen.unmount();
   }
 });
 
-it("shows a compact summary when only access history remains", async () => {
+it("shows a compact summary that follows the latest request when only history remains", async () => {
   const store = useAgentComputerActivityStore.getState();
   store.request(accessRequest("a", "Only reason"));
-  store.settle({ requestId: "a", threadId, allowed: false });
   const screen = await render(<AgentComputerLiveCard threadId={threadId} />);
   try {
     await expect
-      .element(page.getByText("Computer access · last request denied", { exact: true }))
+      .element(page.getByText("Computer access · last request pending", { exact: true }))
       .toBeVisible();
-    await expect.element(page.getByRole("button", { name: "History (1)" })).toBeVisible();
     await expect.element(page.getByTestId("computer-live-card")).not.toBeInTheDocument();
     await expect.element(page.getByRole("button", { name: "Pause" })).not.toBeInTheDocument();
+    await page.getByRole("button", { name: "History (1)" }).click();
+    const list = page.getByTestId("computer-access-history");
+    await expect.element(list.getByLabelText("Pending")).toBeInTheDocument();
+    store.settle({ requestId: "a", threadId, allowed: false });
+    await expect.element(list.getByLabelText("Not allowed")).toBeInTheDocument();
+    await expect
+      .element(page.getByText("Computer access · last request not allowed", { exact: true }))
+      .toBeVisible();
+  } finally {
+    await screen.unmount();
+  }
+});
+
+it("keeps Stop visible and clickable at a narrow width", async () => {
+  const store = useAgentComputerActivityStore.getState();
+  const setPaused = vi.fn(async () => {});
+  window.desktopBridge = { computerAutomation: { setPaused } } as never;
+  await page.viewport(320, 640);
+  store.request(accessRequest("a", "Only reason"));
+  store.settle({ requestId: "a", threadId, allowed: true });
+  store.setGrants(threadId, [{ appId: "a", tier: "click", allowTyping: true }]);
+  store.record({ threadId, op: "activateApp", status: "failed", backend: "native" });
+  const screen = await render(<AgentComputerLiveCard threadId={threadId} />);
+  try {
+    const stop = page.getByRole("button", { name: "Stop", exact: true });
+    await expect.element(stop).toBeVisible();
+    const rect = stop.element().getBoundingClientRect();
+    expect(rect.left).toBeGreaterThanOrEqual(0);
+    expect(rect.right).toBeLessThanOrEqual(window.innerWidth);
+    await stop.click();
+    expect(setPaused).toHaveBeenCalledWith(threadId, true);
+  } finally {
+    await screen.unmount();
+    await page.viewport(414, 896);
+  }
+});
+
+it("names a built-in backend in the strip", async () => {
+  const store = useAgentComputerActivityStore.getState();
+  store.record({ threadId, op: "click", status: "started", backend: "claude-builtin" });
+  const screen = await render(<AgentComputerLiveCard threadId={threadId} />);
+  try {
+    await expect.element(page.getByText("Clicking…", { exact: true })).toBeVisible();
+    await expect.element(page.getByText("· via Claude", { exact: true })).toBeVisible();
   } finally {
     await screen.unmount();
   }

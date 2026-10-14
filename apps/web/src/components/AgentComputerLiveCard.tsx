@@ -17,7 +17,8 @@ import {
 import { cn } from "../lib/utils";
 import { readNativeApi } from "../nativeApi";
 import {
-  COMPUTER_TIER_LABEL,
+  computerBackendLabel,
+  computerGrantLabel,
   computerStatusTone,
   describeComputerAction,
   type ComputerStatusTone,
@@ -80,23 +81,23 @@ export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
         data-testid="computer-access-summary"
       >
         <MonitorIcon className="size-3.5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">
+        <span className="min-w-0 flex-1 truncate" aria-live="polite">
           Computer access · last request{" "}
-          {!latest.settled ? "pending" : latest.allowed ? "allowed" : "denied"}
+          {!latest.settled ? "pending" : latest.allowed ? "allowed" : "not allowed"}
         </span>
         <ComputerAccessHistory history={history} />
       </div>
     );
   }
   const native = activity?.backend === "native";
+  const backendLabel = computerBackendLabel(activity?.backend);
   const tone = computerStatusTone(activity, { paused, held });
   return (
     <div
       className={cn(
-        "mx-auto mt-2 flex w-full max-w-3xl items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm shadow-xs",
+        "mx-auto mt-2 flex w-full max-w-3xl flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border bg-card px-3 py-2 text-sm shadow-xs",
         paused && "border-warning/50",
       )}
-      role="status"
       data-testid="computer-live-card"
     >
       {capture?.thumbnailDataUrl ? (
@@ -111,12 +112,15 @@ export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
           <MonitorIcon className="size-4 text-muted-foreground" />
         </div>
       )}
-      <div className="min-w-0 flex-1 space-y-1">
+      <div className="min-w-40 flex-1 space-y-1">
         <p className="flex items-center gap-1.5 truncate font-medium" aria-live="polite">
           <span className={cn("size-1.5 shrink-0 rounded-full", TONE_CLASS[tone])} />
           <span className="truncate">{describeComputerAction(activity, { paused, held })}</span>
           {activity?.appName && !paused ? (
             <span className="truncate font-normal text-muted-foreground">· {activity.appName}</span>
+          ) : null}
+          {backendLabel ? (
+            <span className="shrink-0 font-normal text-muted-foreground">· {backendLabel}</span>
           ) : null}
         </p>
         <div className="flex flex-wrap items-center gap-1">
@@ -127,7 +131,7 @@ export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
               const name = appNames[grant.appId] ?? grant.appId;
               return (
                 <Badge key={grant.appId} variant="outline" className="gap-1 pr-0.5">
-                  {name} · {COMPUTER_TIER_LABEL[grant.tier]}
+                  {name} · {computerGrantLabel(grant.tier, grant.allowTyping)}
                   <button
                     type="button"
                     aria-label={`Revoke ${name}`}
@@ -152,24 +156,27 @@ export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
           </p>
         ) : null}
       </div>
-      {history.length > 0 ? <ComputerAccessHistory history={history} /> : null}
-      <Button
-        size="xs"
-        variant="outline"
-        onClick={() => run(() => pauseComputerThread(threadId, !paused))}
-      >
-        {paused ? <PlayIcon /> : <PauseIcon />}
-        {paused ? "Resume" : "Pause"}
-      </Button>
-      <Button
-        size="xs"
-        variant="destructive"
-        title={native ? "Stop computer input" : "Stops after the current action"}
-        onClick={() => run(() => stopComputerTurn(threadId))}
-      >
-        <SquareIcon />
-        Stop
-      </Button>
+      {/* Kept unshrinkable so Stop stays reachable; wraps to its own row on narrow widths. */}
+      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {history.length > 0 ? <ComputerAccessHistory history={history} /> : null}
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() => run(() => pauseComputerThread(threadId, !paused))}
+        >
+          {paused ? <PlayIcon /> : <PauseIcon />}
+          {paused ? "Resume" : "Pause"}
+        </Button>
+        <Button
+          size="xs"
+          variant="destructive"
+          title={native ? "Stop computer input" : "Stops after the current action"}
+          onClick={() => run(() => stopComputerTurn(threadId))}
+        >
+          <SquareIcon />
+          Stop
+        </Button>
+      </div>
     </div>
   );
 }
@@ -199,15 +206,20 @@ function ComputerAccessHistory({ history }: { history: ReadonlyArray<AccessReque
                 <CheckIcon aria-label="Allowed" className="mt-0.5 size-3.5 shrink-0 text-success" />
               ) : (
                 <XIcon
-                  aria-label="Denied"
+                  aria-label="Not allowed"
                   className="mt-0.5 size-3.5 shrink-0 text-destructive-foreground"
                 />
               )}
               <div className="min-w-0 flex-1">
+                {/* Settlement is request-wide, so list what was asked for, not what was granted. */}
                 <p className="truncate font-medium">
+                  <span className="font-normal text-muted-foreground">Requested: </span>
                   {request.apps.length > 0
                     ? request.apps
-                        .map((app) => `${app.name} · ${COMPUTER_TIER_LABEL[app.tier]}`)
+                        .map(
+                          (app) =>
+                            `${app.name} · ${computerGrantLabel(app.tier, request.typingRequested ?? false)}`,
+                        )
                         .join(", ")
                     : KIND_LABEL[request.kind]}
                 </p>
