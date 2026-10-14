@@ -6,6 +6,16 @@
   "streaming": { "threads": 10, "updatesPerSecondPerThread": 20 },
   "terminal": { "count": 20, "chunksPerBatch": 40, "chunkBytes": 4096, "longLineBytes": 4325376 },
   "replay": { "events": 20000, "slowPauseEvery": 200, "disconnectAfter": 1000 },
+  "assistantStream": {
+    "threads": 4,
+    "seededMessages": 2000,
+    "deltasPerStream": 500,
+    "minDeltaChars": 8,
+    "maxDeltaChars": 64,
+    "toolEvery": 50,
+    "readModelThreads": 500,
+    "readModelMessages": 300
+  },
   "repository": { "files": 10000, "directories": 100, "nestedRepositories": 3, "submodules": 2 },
   "method": {
     "warmups": 5,

@@ -1,6 +1,13 @@
 import { CommandId, TurnId, type OrchestrationUsageLimit, type ThreadId } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { Cause, Duration, Effect, Layer, Option, PubSub, Schema, Stream } from "effect";
+import { Cause, Duration, Effect, Layer, Metric, Option, PubSub, Schema, Stream } from "effect";
+
+import {
+  deliveryAmbiguousTotal,
+  deliveryAttemptsActive,
+  deliveryOutboxRowsDecoded,
+  metricAttributes,
+} from "../../observability/Metrics.ts";
 
 import { reconcileAcceptedPendingTurnStartsBestEffort } from "../acceptedPendingTurnReconciliation.ts";
 import { ProviderTurnDeliveryError, ProviderAdapterRequestError } from "../../provider/Errors.ts";
@@ -60,6 +67,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const occurredAt = new Date().toISOString();
       yield* repository.markRejected({ ...input, occurredAt });
+      if (input.ambiguous) yield* Metric.update(deliveryAmbiguousTotal, 1);
       yield* PubSub.publish(outcomes, {
         deliveryId: input.deliveryId,
         commandId: input.commandId,
@@ -93,18 +101,18 @@ const make = Effect.gen(function* () {
       return added.length === 1 ? added[0]!.id : null;
     });
 
-  const processDelivery = (deliveryId: CommandId) =>
-    Effect.gen(function* () {
-      const actionable = yield* repository.listActionable;
-      const candidate = actionable.find((entry) => entry.deliveryId === deliveryId);
-      if (!candidate) return;
+  const listActionable = (source: "claim" | "sweep") =>
+    repository.listActionable.pipe(
+      Effect.tap((rows) =>
+        Metric.update(
+          Metric.withAttributes(deliveryOutboxRowsDecoded, metricAttributes({ source })),
+          rows.length,
+        ),
+      ),
+    );
 
-      const preSendTurnIds = yield* provider.readThread(candidate.threadId).pipe(
-        Effect.map((snapshot) => snapshot.turns.map((turn) => turn.id)),
-        Effect.catchCause(() => Effect.succeed([] as TurnId[])),
-      );
-      const claimed = yield* repository.claim(deliveryId, preSendTurnIds);
-      if (!claimed) return;
+  const settleClaimedDelivery = (deliveryId: CommandId, claimed: ProviderTurnDelivery) =>
+    Effect.gen(function* () {
       if (
         claimed.event.type !== "thread.turn-start-requested" &&
         claimed.event.type !== "thread.turn-steer-requested"
@@ -245,6 +253,26 @@ const make = Effect.gen(function* () {
         ambiguous: !notSent,
         ...(usageLimit ? { usageLimit } : {}),
       });
+    });
+
+  const processDelivery = (deliveryId: CommandId) =>
+    Effect.gen(function* () {
+      const actionable = yield* listActionable("claim");
+      const candidate = actionable.find((entry) => entry.deliveryId === deliveryId);
+      if (!candidate) return;
+
+      const preSendTurnIds = yield* provider.readThread(candidate.threadId).pipe(
+        Effect.map((snapshot) => snapshot.turns.map((turn) => turn.id)),
+        Effect.catchCause(() => Effect.succeed([] as TurnId[])),
+      );
+      const claimed = yield* repository.claim(deliveryId, preSendTurnIds);
+      if (!claimed) return;
+      // Acquire/release so an interrupt cannot land between increment and settle.
+      yield* Effect.acquireUseRelease(
+        Metric.modify(deliveryAttemptsActive, 1),
+        () => settleClaimedDelivery(deliveryId, claimed),
+        () => Metric.modify(deliveryAttemptsActive, -1),
+      );
     }).pipe(
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
@@ -310,7 +338,7 @@ const make = Effect.gen(function* () {
     );
   });
 
-  const enqueueActionable = repository.listActionable.pipe(
+  const enqueueActionable = listActionable("sweep").pipe(
     Effect.flatMap((deliveries) =>
       Effect.forEach(deliveries, (delivery) => enqueue(delivery), {
         discard: true,

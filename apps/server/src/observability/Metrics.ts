@@ -135,6 +135,46 @@ export const previewRecordingFramesDroppedTotal = Metric.counter(
   },
 );
 
+export const eventLoopDelay = Metric.timer("t3_event_loop_delay", {
+  // One sample per 250 ms sleep, so a short stall between samples can be missed. Its
+  // percentiles are not comparable with the perf harness's monitorEventLoopDelay p99.
+  description: "Lateness of a 250 ms sleep, sampling event-loop blocking.",
+});
+
+export const sqlExecutionDuration = Metric.timer("t3_sql_execution_duration", {
+  description: "Synchronous SQLite statement execution time on the application connection.",
+});
+
+export const sqlConnectionWaitDuration = Metric.timer("t3_sql_connection_wait_duration", {
+  description: "Time spent waiting for the application SQLite connection or a transaction.",
+});
+
+export const deliveryOutboxRowsDecoded = Metric.histogram("t3_delivery_outbox_rows_decoded", {
+  description: "Provider delivery outbox rows read and decoded by one actionable scan.",
+  boundaries: Metric.exponentialBoundaries({ start: 1, factor: 2, count: 14 }),
+});
+
+export const deliveryAttemptsActive = Metric.gauge("t3_delivery_attempts_active", {
+  description: "Claimed provider delivery attempts whose outcome is still being settled.",
+});
+
+export const deliveryAmbiguousTotal = Metric.counter("t3_delivery_ambiguous_total", {
+  description: "Provider deliveries recorded as ambiguous (sent with unknown outcome).",
+});
+
+const EVENT_LOOP_DELAY_SAMPLE_INTERVAL_MS = 250;
+
+/**
+ * Records how late a fixed sleep wakes up. Runs until interrupted; fork it in the
+ * scope that owns metric collection.
+ */
+export const sampleEventLoopDelay = Effect.gen(function* () {
+  const startedAt = performance.now();
+  yield* Effect.sleep(Duration.millis(EVENT_LOOP_DELAY_SAMPLE_INTERVAL_MS));
+  const lateness = performance.now() - startedAt - EVENT_LOOP_DELAY_SAMPLE_INTERVAL_MS;
+  yield* Metric.update(eventLoopDelay, Duration.millis(Math.max(0, lateness)));
+}).pipe(Effect.forever, Effect.withTracerEnabled(false));
+
 export const metricAttributes = (attributes: Readonly<Record<string, unknown>>): MetricAttributes =>
   compactMetricAttributes(attributes);
 

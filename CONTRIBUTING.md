@@ -64,6 +64,20 @@ We may close it. We may ignore it. We may ask you to shrink it. We may reimpleme
 
 If you are fine with that, proceed.
 
+## Running the full test suite
+
+Install the locked dependency tree before testing; a stale `node_modules` can hold an
+older Claude SDK than the one pinned, and the SDK contract probes fail fast when it does:
+
+```sh
+bun install --frozen-lockfile
+env -i PATH="$PATH" HOME="$HOME" bun run test:full
+```
+
+`env -i` matters when you run tests from inside an F5 session: profile variables such as
+`F5_PROFILE_ISOLATED` and `CLAUDE_*` leak into direct vitest runs and change server
+behavior under test. `test:full` includes the extended Git matrix.
+
 ## Harness version bumps
 
 Pin runtime versions; do not certify floating latest. Before merging a Claude SDK or

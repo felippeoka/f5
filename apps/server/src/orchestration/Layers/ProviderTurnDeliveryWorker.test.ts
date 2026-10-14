@@ -9,8 +9,13 @@ import {
   type OrchestrationUsageLimit,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Option, Stream } from "effect";
+import { Effect, Fiber, Layer, Metric, Option, Stream } from "effect";
 
+import {
+  deliveryAmbiguousTotal,
+  deliveryAttemptsActive,
+  deliveryOutboxRowsDecoded,
+} from "../../observability/Metrics.ts";
 import { PersistenceSqlError } from "../../persistence/Errors.ts";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -92,7 +97,41 @@ function resetDelivery() {
   abandonApplies = true;
   pendingTurnStartMessageId = null;
   pendingTurnStartDeletes = 0;
+  activeAttemptsDuringDelivery = null;
 }
+
+let activeAttemptsDuringDelivery: number | null = null;
+
+const deliverTurnStartOutcome = (): Effect.Effect<
+  { readonly turnId: TurnId },
+  | ProviderAdapterRequestError
+  | ProviderTurnDeliveryError
+  | Error
+  | { readonly cause: { readonly cause: { readonly code: number; readonly message: string } } }
+> =>
+  usageRejection && usageRequestMethod
+    ? Effect.fail(
+        new ProviderAdapterRequestError({
+          provider: "codex",
+          method: usageRequestMethod,
+          detail: "Usage limit reached",
+          usageLimit: usageRejection,
+        }),
+      )
+    : usageRejection
+      ? Effect.fail(
+          new ProviderTurnDeliveryError({
+            certainty: "not_sent",
+            retryable: true,
+            detail: "Usage limit reached",
+            usageLimit: usageRejection,
+          }),
+        )
+      : methodNotFound
+        ? Effect.fail({ cause: { cause: { code: -32601, message: "Method not found" } } })
+        : acceptSend
+          ? Effect.succeed({ turnId: TurnId.makeUnsafe("existing-turn") })
+          : Effect.fail(new Error("session not found after request write"));
 
 const reconcile = (target: ThreadId) =>
   Effect.gen(function* () {
@@ -181,29 +220,14 @@ const testLayer = ProviderTurnDeliveryWorkerLive.pipe(
   Layer.provideMerge(
     Layer.succeed(ProviderCommandReactor, {
       deliverTurnStart: () =>
-        usageRejection && usageRequestMethod
-          ? Effect.fail(
-              new ProviderAdapterRequestError({
-                provider: "codex",
-                method: usageRequestMethod,
-                detail: "Usage limit reached",
-                usageLimit: usageRejection,
-              }),
-            )
-          : usageRejection
-            ? Effect.fail(
-                new ProviderTurnDeliveryError({
-                  certainty: "not_sent",
-                  retryable: true,
-                  detail: "Usage limit reached",
-                  usageLimit: usageRejection,
-                }),
-              )
-            : methodNotFound
-              ? Effect.fail({ cause: { cause: { code: -32601, message: "Method not found" } } })
-              : acceptSend
-                ? Effect.succeed({ turnId: TurnId.makeUnsafe("existing-turn") })
-                : Effect.fail(new Error("session not found after request write")),
+        Metric.value(deliveryAttemptsActive).pipe(
+          Effect.tap((gauge) =>
+            Effect.sync(() => {
+              activeAttemptsDuringDelivery = gauge.value;
+            }),
+          ),
+          Effect.andThen(Effect.suspend(deliverTurnStartOutcome)),
+        ),
       recordTurnStartFailure: () =>
         Effect.sync(() => {
           failureProjectionCount += 1;
@@ -281,6 +305,12 @@ it.effect(
       resetDelivery();
       const worker = yield* ProviderTurnDeliveryWorker;
 
+      const ambiguousBefore = (yield* Metric.value(deliveryAmbiguousTotal)).count;
+      const claimScans = Metric.withAttributes(deliveryOutboxRowsDecoded, { source: "claim" });
+      const sweepScans = Metric.withAttributes(deliveryOutboxRowsDecoded, { source: "sweep" });
+      const claimBefore = yield* Metric.value(claimScans);
+      const sweepBefore = yield* Metric.value(sweepScans);
+
       // First run has no outcome subscriber, modeling a crash after the
       // terminal SQLite update but before the queue observes the PubSub frame.
       yield* worker.start;
@@ -289,6 +319,18 @@ it.effect(
       assert.equal(state.certainty, "unknown");
       assert.equal(requeueCount, 0);
       assert.equal(outcomeProjected, false);
+      assert.equal((yield* Metric.value(deliveryAmbiguousTotal)).count - ambiguousBefore, 1);
+      // The attempt is counted while the provider send is in flight, then released.
+      assert.equal(activeAttemptsDuringDelivery, 1);
+      assert.equal((yield* Metric.value(deliveryAttemptsActive)).value, 0);
+      // The startup sweep and the claim each decode the one pending delivery. The
+      // forked safety sweep may also run, but finds nothing pending by then.
+      const claimAfter = yield* Metric.value(claimScans);
+      const sweepAfter = yield* Metric.value(sweepScans);
+      assert.equal(claimAfter.count - claimBefore.count, 1);
+      assert.equal(claimAfter.sum - claimBefore.sum, 1);
+      assert.isAtLeast(sweepAfter.count - sweepBefore.count, 1);
+      assert.equal(sweepAfter.sum - sweepBefore.sum, 1);
 
       const replayFiber = yield* Effect.forkScoped(Stream.runHead(worker.outcomes));
       yield* Effect.yieldNow;

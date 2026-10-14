@@ -2,7 +2,7 @@ import { Effect, FileSystem, Layer, Path, Tracer } from "effect";
 
 import { ServerConfig } from "../../config.ts";
 import { makeLocalFileTracer } from "../LocalFileTracer.ts";
-import { makeMetricSnapshotWriter } from "../Metrics.ts";
+import { makeMetricSnapshotWriter, sampleEventLoopDelay } from "../Metrics.ts";
 
 const TRACE_MAX_BYTES = 10 * 1024 * 1024;
 const TRACE_MAX_FILES = 10;
@@ -47,6 +47,7 @@ export const ObservabilityLive = Layer.unwrap(
         yield* Effect.forkScoped(
           Effect.sleep(METRIC_FLUSH_INTERVAL).pipe(Effect.andThen(writer.flush), Effect.forever),
         );
+        yield* Effect.forkScoped(sampleEventLoopDelay);
       }),
     );
 
