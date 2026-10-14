@@ -59,6 +59,7 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegat
     counter.frame = NSRect(x: 30, y: 40, width: 400, height: 28)
     content.addSubview(counter)
     instruction.frame = NSRect(x: 30, y: 4, width: 310, height: 28)
+    instruction.setAccessibilityLabel("Rehearsal instruction")
     content.addSubview(instruction)
     finishButton = NSButton(title: "Finish check", target: self, action: #selector(acknowledge))
     finishButton.frame = NSRect(x: 350, y: 4, width: 120, height: 28)
@@ -74,12 +75,14 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegat
           "WINDOWLESS_COUNTDOWN_1": "Starting in 1. Keep input idle.",
           "WINDOWLESS_RUNNING": "RED — running. Keep input idle.",
           "WINDOWLESS_FINISHED": "Finished. Click Finish check.",
+          "PROFILE_HOLD": "RED — Isolation waiting. Keep idle.",
+          "PROFILE_RELEASE": "Isolation released — keep input idle.",
         ]
         guard let message = instructions[line] else { continue }
         DispatchQueue.main.async {
           guard let self else { return }
           self.instruction.stringValue = message
-          self.instruction.textColor = line == "WINDOWLESS_RUNNING" ? .systemRed : .labelColor
+          self.instruction.textColor = (line == "WINDOWLESS_RUNNING" || line == "PROFILE_HOLD") ? .systemRed : .labelColor
           self.finishButton.isEnabled = line == "WINDOWLESS_FINISHED"
         }
       }

@@ -76,6 +76,29 @@ afterEach(async () => {
 });
 
 describe("certification inventory and coverage", () => {
+  it("uses real Codex profile phases only in development and retains unavailable platform/integration gates", () => {
+    for (const key of ["profile-isolation", "profile-readiness"]) {
+      const s = scenario(key);
+      const target = { repo: "/repo", platform: "darwin" as const };
+      const launch = { codex: { home: "/private/home", binary: "/cli/codex" } };
+      const commands = commandsFor(s, target, "/private/output", launch, "darwin");
+      expect(Array.isArray(commands)).toBe(true);
+      if (Array.isArray(commands))
+        expect(commands[0]?.args).toContain(
+          key === "profile-readiness" ? "--profile-isolation-readonly" : "--profile-isolation",
+        );
+      expect(
+        commandsFor(s, { ...target, app: "/private/Installed.app" }, "/output", launch, "darwin"),
+      ).toBe("installed-observation-driver-required");
+      expect(commandsFor(s, { ...target, platform: "win32" }, "/output", launch, "win32")).toBe(
+        "windows-interactive-driver-required",
+      );
+      expect(commandsFor(s, target, "/output", {}, "darwin")).toBe(
+        "provider-launch-not-configured",
+      );
+    }
+  });
+
   it("runs a selected new phase without redoing prior phases or hiding missing coverage", () => {
     expect(
       pending(manifest, [], "workflows", undefined, "real-apps.codex").map((s) => s.key),

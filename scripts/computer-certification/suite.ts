@@ -108,7 +108,7 @@ export async function runSuite(options: {
         evidenceKind:
           scenario.group === "automated"
             ? "automated"
-            : scenario.provider
+            : scenario.provider || ["profile-isolation", "profile-readiness"].includes(scenario.id)
               ? "provider-desktop"
               : "native-helper",
         startedAt: start,
@@ -135,8 +135,9 @@ export async function runSuite(options: {
         else if (!observed.checks["helper-permissions"])
           blocker = "helper-prerequisites-unavailable";
         else if (
-          scenario.selectedProvider &&
-          !observed.checks[scenario.selectedProvider + "-ready"]
+          (scenario.selectedProvider ||
+            ["profile-isolation", "profile-readiness"].includes(scenario.id)) &&
+          !observed.checks[(scenario.selectedProvider ?? "codex") + "-ready"]
         )
           blocker = "provider-authentication-unavailable";
         else if (manifest.identity.dirty) blocker = "dirty-build-identity";

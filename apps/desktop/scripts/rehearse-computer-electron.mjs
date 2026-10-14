@@ -27,6 +27,11 @@ import { RehearsalExternalClient } from "../src/computer/rehearsalExternalClient
 import { windowlessChecks } from "../../../scripts/computer-certification/windowlessEvidence.ts";
 import { runGrantMemory } from "../../../scripts/computer-certification/grantMemory.ts";
 import { runSessionActions } from "../../../scripts/computer-certification/sessionActions.ts";
+import { runProfileIsolation } from "./rehearse-computer-profile-isolation.mjs";
+import {
+  profileIsolationChecks,
+  profileReadinessChecks,
+} from "../../../scripts/computer-certification/profileIsolationEvidence.ts";
 import { rehearsalMcpBackendBootstrap } from "../src/computer/rehearsalMcpTransport.ts";
 import {
   readChromiumFixture,
@@ -74,6 +79,8 @@ const chromiumFixture = args.includes("--chromium-fixture");
 const windowless = args.includes("--windows-closed");
 const grantMemory = args.includes("--grant-memory");
 const sessionActions = args.includes("--session-actions");
+const profileIsolationReadOnly = args.includes("--profile-isolation-readonly");
+const profileIsolation = args.includes("--profile-isolation") || profileIsolationReadOnly;
 const observeMcpTransport = provider === "codex" && (sessionActions || approvalDiagnostic);
 const runtimeMode = sessionActions || approvalDiagnostic ? "approval-required" : "full-access";
 const includesRealApps = realApps || clusterWorkflows;
@@ -84,6 +91,7 @@ if (
   !output ||
   !sourceHome ||
   !binary ||
+  (profileIsolation && provider !== "codex") ||
   (diagnoseChord && !stopOnly) ||
   (approvalDiagnostic && args.includes("--status-only")) ||
   (chromiumFixture &&
@@ -94,7 +102,7 @@ if (
       clusterWorkflows ||
       controlsOnly ||
       actionsOnly)) ||
-  ((windowless || grantMemory || sessionActions) && chromiumFixture) ||
+  ((windowless || grantMemory || sessionActions || profileIsolation) && chromiumFixture) ||
   [
     statusOnly,
     controlsOnly,
@@ -106,6 +114,7 @@ if (
     windowless,
     grantMemory,
     sessionActions,
+    profileIsolation,
   ].filter(Boolean).length > 1
 ) {
   process.stderr.write(
@@ -187,6 +196,10 @@ let providerActivityCounts;
 let grantMemoryObservation;
 const grantMemoryConsentReceipts = [];
 let sessionActionsObservation;
+let profileIsolationObservation;
+let installRenderer;
+const additionalFixtures = [];
+const additionalClients = [];
 let sessionActionsFailures;
 let approvalModeVerifiedTurns = 0;
 let approvalComposerInitiallySupervised;
@@ -456,6 +469,18 @@ try {
         ["grantMemorySource", join(repo, "scripts/computer-certification/grantMemory.ts")],
         ["sessionActionsSource", join(repo, "scripts/computer-certification/sessionActions.ts")],
         [
+          "profileIsolationSource",
+          join(desktopDir, "scripts/rehearse-computer-profile-isolation.mjs"),
+        ],
+        [
+          "profileIsolationObserverSource",
+          join(desktopDir, "src/computer/rehearsalProfileIsolation.ts"),
+        ],
+        [
+          "profileIsolationEvidenceSource",
+          join(repo, "scripts/computer-certification/profileIsolationEvidence.ts"),
+        ],
+        [
           "windowlessEvidenceSource",
           join(repo, "scripts/computer-certification/windowlessEvidence.ts"),
         ],
@@ -564,7 +589,7 @@ try {
     }),
     { mode: 0o600 },
   );
-  if (!statusOnly && !realApps)
+  if (!statusOnly && !realApps && !profileIsolationReadOnly)
     fixture = chromiumFixture
       ? await createRehearsalChromiumFixture({
           root,
@@ -628,6 +653,19 @@ try {
     { timeout: 30000 },
   );
   const compiledStopObserver = join(root, "stop-observer.cjs");
+  const compiledIsolationObserver = join(root, "isolation-observer.cjs");
+  if (profileIsolation)
+    await exec(
+      "bun",
+      [
+        "build",
+        join(desktopDir, "src/computer/rehearsalProfileIsolation.ts"),
+        "--target=node",
+        "--format=cjs",
+        `--outfile=${compiledIsolationObserver}`,
+      ],
+      { timeout: 30000 },
+    );
   await exec(
     "bun",
     [
@@ -692,6 +730,13 @@ const setPath=app.setPath.bind(app);
 app.setPath=(key,value)=>setPath(key,key==='userData'?${JSON.stringify(join(root, "electron"))}:value);
 const {ElectronRehearsalObservation}=require(${JSON.stringify(compiledObserver)});
 const evidence=globalThis.__computerRehearsalNative=new ElectronRehearsalObservation();
+${
+  profileIsolation
+    ? `const {RehearsalProfileIsolation}=require(${JSON.stringify(compiledIsolationObserver)});
+globalThis.__computerRehearsalIsolation=new RehearsalProfileIsolation();
+globalThis.__computerRehearsalIsolationBackendPids={};`
+    : ""
+}
 globalThis.__computerRehearsalChildPids=new Set();
 const {RehearsalStopObservation}=require(${JSON.stringify(compiledStopObserver)});
 const stopEvidence=globalThis.__computerRehearsalStop=new RehearsalStopObservation();
@@ -733,8 +778,15 @@ const child=spawn.apply(this,args);
 if(child.pid){globalThis.__computerRehearsalChildPids.add(child.pid);
 child.once('exit',()=>globalThis.__computerRehearsalChildPids.delete(child.pid));}
 if(args[2]?.env?.F5_DESKTOP_COMPUTER_HOST==='ipc'){
-child.on('message',m=>observe(m));
+let isolatedProfile;
+child.on('message',m=>{${
+      profileIsolation
+        ? `if(m.type==='hello'){isolatedProfile=m.profileId;globalThis.__computerRehearsalIsolationBackendPids[isolatedProfile]=child.pid;}
+if(isolatedProfile)globalThis.__computerRehearsalIsolation.receive(isolatedProfile,m,'backend');`
+        : ""
+    }observe(m);});
 const send=child.send.bind(child);child.send=function(m,...args){observe(m);
+${profileIsolation ? `if(isolatedProfile)globalThis.__computerRehearsalIsolation.receive(isolatedProfile,m,'main');` : ""}
 return send(m,...args);};}
 if(args[0]===${JSON.stringify(join(desktopDir, `dist-native/mac-${process.arch}/f5-computer-helper`))}){
 let buffer='';child.stdout.on('data',chunk=>{buffer+=chunk;let end;while((end=buffer.indexOf('\\n'))>=0){
@@ -781,132 +833,137 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
   }, 10000);
   checks.realElectronPermissionsAvailable = true;
   stage = "renderer-transport";
-  await page.evaluate(
-    async ([protocol, expectedAppIds, rehearsalThreadId]) => {
-      const state = (window.__computerRehearsal = {
-        paused: false,
-        consent: undefined,
-        trustedConsent: false,
-        trustedConsentVisible: false,
-        trustedPause: false,
-        trustedResume: false,
-        activitySeen: false,
-        thumbnailSeen: false,
-        toolOutcomeErrors: [],
-        toolFailures: [],
-        toolFailuresOverflow: false,
-        submittedRuntimeModes: [],
-        leaseSeen: false,
-        consentSettled: false,
-        consentAllowed: false,
-        fixtureGranted: false,
-      });
-      const originalSend = WebSocket.prototype.send;
-      WebSocket.prototype.send = function (data) {
-        // Observe the composer's actual command, not just the configured thread.
-        // Do not alter messages or retain message text, IDs or tool parameters.
-        if (typeof data === "string") {
-          try {
-            const command = JSON.parse(data)?.body?.command;
-            if (
-              command?.type === "thread.turn.start" &&
-              command.threadId === rehearsalThreadId &&
-              state.submittedRuntimeModes.length < 16
-            )
-              state.submittedRuntimeModes.push(
-                ["approval-required", "full-access", "auto", "auto-accept-edits"].includes(
-                  command.runtimeMode,
-                )
-                  ? command.runtimeMode
-                  : "unknown",
-              );
-          } catch {
-            /* Non-JSON messages are simply forwarded. */
-          }
-        }
-        return originalSend.call(this, data);
-      };
-      const url = new URL(window.desktopBridge.getWsUrl());
-      url.searchParams.set("protocol", String(protocol));
-      const socket = new WebSocket(url);
-      const pending = new Map();
-      state.rpc = (method, body = {}) =>
-        new Promise((resolve, reject) => {
-          const id = crypto.randomUUID();
-          const timer = setTimeout(() => {
-            pending.delete(id);
-            reject(new Error("RPC timed out"));
-          }, 15000);
-          pending.set(id, { resolve, reject, timer });
-          socket.send(JSON.stringify({ id, body: { _tag: method, ...body } }));
+  installRenderer = (targetPage, expectedApps, targetThread) =>
+    targetPage.evaluate(
+      async ([protocol, expectedAppIds, rehearsalThreadId]) => {
+        const state = (window.__computerRehearsal = {
+          paused: false,
+          consent: undefined,
+          trustedConsent: false,
+          trustedConsentVisible: false,
+          trustedPause: false,
+          trustedResume: false,
+          activitySeen: false,
+          thumbnailSeen: false,
+          toolOutcomeErrors: [],
+          toolFailures: [],
+          toolFailuresOverflow: false,
+          submittedRuntimeModes: [],
+          leaseSeen: false,
+          consentSettled: false,
+          consentAllowed: false,
+          fixtureGranted: false,
         });
-      socket.onmessage = (event) => {
-        const message = JSON.parse(event.data);
-        if (message.id) {
-          const item = pending.get(message.id);
-          if (item) {
-            clearTimeout(item.timer);
-            pending.delete(message.id);
-            if (message.error) item.reject(new Error("RPC rejected"));
-            else item.resolve(message.result);
+        const originalSend = WebSocket.prototype.send;
+        WebSocket.prototype.send = function (data) {
+          // Observe the composer's actual command, not just the configured thread.
+          // Do not alter messages or retain message text, IDs or tool parameters.
+          if (typeof data === "string") {
+            try {
+              const command = JSON.parse(data)?.body?.command;
+              if (
+                command?.type === "thread.turn.start" &&
+                command.threadId === rehearsalThreadId &&
+                state.submittedRuntimeModes.length < 16
+              )
+                state.submittedRuntimeModes.push(
+                  ["approval-required", "full-access", "auto", "auto-accept-edits"].includes(
+                    command.runtimeMode,
+                  )
+                    ? command.runtimeMode
+                    : "unknown",
+                );
+            } catch {
+              /* Non-JSON messages are simply forwarded. */
+            }
           }
-          return;
-        }
-        if (message.channel === "computer.access.requested") state.consent = message.data;
-        if (
-          message.channel === "computer.access.settled" &&
-          message.data.requestId === state.consent?.requestId
-        ) {
-          state.consentSettled = true;
-          state.consentAllowed = message.data.allowed === true;
-        }
-        if (
-          message.channel === "computer.access.grantsChanged" &&
-          message.data.threadId === rehearsalThreadId
-        )
-          state.fixtureGranted = expectedAppIds.every((appId) =>
-            message.data.grants.some((grant) => grant.appId === appId),
-          );
-        if (message.channel === "preview.automation.pauseChanged")
-          state.paused = message.data.paused;
-        if (message.channel === "agent.computerUseChanged" && message.data.threadId)
-          state.leaseSeen = true;
-        if (message.channel === "computer.activity") {
-          state.activitySeen = true;
-          if (typeof message.data.outcome === "string" && state.toolOutcomeErrors.length < 128)
-            state.toolOutcomeErrors.push(message.data.outcome.slice(0, 64));
-          if (message.data.status === "failed") {
-            if (state.toolFailures.length >= 128) state.toolFailuresOverflow = true;
-            else state.toolFailures.push({ op: message.data.op, outcome: message.data.outcome });
+          return originalSend.call(this, data);
+        };
+        const url = new URL(window.desktopBridge.getWsUrl());
+        url.searchParams.set("protocol", String(protocol));
+        const socket = new WebSocket(url);
+        const pending = new Map();
+        state.rpc = (method, body = {}) =>
+          new Promise((resolve, reject) => {
+            const id = crypto.randomUUID();
+            const timer = setTimeout(() => {
+              pending.delete(id);
+              reject(new Error("RPC timed out"));
+            }, 15000);
+            pending.set(id, { resolve, reject, timer });
+            socket.send(JSON.stringify({ id, body: { _tag: method, ...body } }));
+          });
+        socket.onmessage = (event) => {
+          const message = JSON.parse(event.data);
+          if (message.id) {
+            const item = pending.get(message.id);
+            if (item) {
+              clearTimeout(item.timer);
+              pending.delete(message.id);
+              if (message.error) item.reject(new Error("RPC rejected"));
+              else item.resolve(message.result);
+            }
+            return;
           }
-          state.thumbnailSeen ||=
-            typeof message.data.thumbnailDataUrl === "string" &&
-            message.data.thumbnailDataUrl.startsWith("data:image/jpeg;base64,") &&
-            message.data.thumbnailDataUrl.length <= 40960;
-        }
-      };
-      document.addEventListener(
-        "click",
-        (event) => {
-          if (!event.isTrusted || !(event.target instanceof Element)) return;
-          const button = event.target.closest("button");
-          const name = button?.textContent?.trim();
-          if (name === "Review access" && button?.closest('[data-testid="computer-access-card"]')) {
-            state.trustedConsent = true;
-            state.trustedConsentVisible = button.checkVisibility();
+          if (message.channel === "computer.access.requested") state.consent = message.data;
+          if (
+            message.channel === "computer.access.settled" &&
+            message.data.requestId === state.consent?.requestId
+          ) {
+            state.consentSettled = true;
+            state.consentAllowed = message.data.allowed === true;
           }
-          if (name === "Pause") state.trustedPause = true;
-          if (name === "Resume") state.trustedResume = true;
-        },
-        true,
-      );
-      await new Promise((resolve, reject) => {
-        socket.onopen = resolve;
-        socket.onerror = () => reject(new Error("Connection failed"));
-      });
-    },
-    [F5_PROTOCOL_VERSION, consentApps, threadId],
-  );
+          if (
+            message.channel === "computer.access.grantsChanged" &&
+            message.data.threadId === rehearsalThreadId
+          )
+            state.fixtureGranted = expectedAppIds.every((appId) =>
+              message.data.grants.some((grant) => grant.appId === appId),
+            );
+          if (message.channel === "preview.automation.pauseChanged")
+            state.paused = message.data.paused;
+          if (message.channel === "agent.computerUseChanged" && message.data.threadId)
+            state.leaseSeen = true;
+          if (message.channel === "computer.activity") {
+            state.activitySeen = true;
+            if (typeof message.data.outcome === "string" && state.toolOutcomeErrors.length < 128)
+              state.toolOutcomeErrors.push(message.data.outcome.slice(0, 64));
+            if (message.data.status === "failed") {
+              if (state.toolFailures.length >= 128) state.toolFailuresOverflow = true;
+              else state.toolFailures.push({ op: message.data.op, outcome: message.data.outcome });
+            }
+            state.thumbnailSeen ||=
+              typeof message.data.thumbnailDataUrl === "string" &&
+              message.data.thumbnailDataUrl.startsWith("data:image/jpeg;base64,") &&
+              message.data.thumbnailDataUrl.length <= 40960;
+          }
+        };
+        document.addEventListener(
+          "click",
+          (event) => {
+            if (!event.isTrusted || !(event.target instanceof Element)) return;
+            const button = event.target.closest("button");
+            const name = button?.textContent?.trim();
+            if (
+              name === "Review access" &&
+              button?.closest('[data-testid="computer-access-card"]')
+            ) {
+              state.trustedConsent = true;
+              state.trustedConsentVisible = button.checkVisibility();
+            }
+            if (name === "Pause") state.trustedPause = true;
+            if (name === "Resume") state.trustedResume = true;
+          },
+          true,
+        );
+        await new Promise((resolve, reject) => {
+          socket.onopen = resolve;
+          socket.onerror = () => reject(new Error("Connection failed"));
+        });
+      },
+      [F5_PROTOCOL_VERSION, expectedApps, targetThread],
+    );
+  await installRenderer(page, consentApps, threadId);
   await dispatch({
     type: "project.create",
     projectId,
@@ -946,7 +1003,55 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       5000,
     );
   }
-  if (sessionActions) {
+  if (profileIsolation) {
+    profileIsolationObservation = await runProfileIsolation({
+      application,
+      page,
+      fixture,
+      root,
+      state,
+      home,
+      sourceHome: resolve(sourceHome),
+      threadId,
+      appId,
+      projectId,
+      modelSelection,
+      installRenderer,
+      rpc,
+      waitFor,
+      delay,
+      stage: (value) => {
+        stage = value;
+      },
+      instructions: async (text, target = page) => {
+        if (target === page) await instructions(text);
+        else
+          await target.evaluate((value) => {
+            let panel = document.getElementById("f5-isolation-instructions");
+            if (!panel) {
+              panel = document.createElement("div");
+              panel.id = "f5-isolation-instructions";
+              panel.style.cssText =
+                "position:fixed;bottom:12px;right:12px;max-width:340px;padding:12px;background:#172554;color:white;z-index:1000;pointer-events:none";
+              document.body.append(panel);
+            }
+            panel.textContent = value;
+          }, text);
+      },
+      readinessOnly: profileIsolationReadOnly,
+      ownFixture: (value) => {
+        additionalFixtures.push(value);
+        return value;
+      },
+      ownClient: (value) => {
+        additionalClients.push(value);
+        return value;
+      },
+      helper: join(desktopDir, `dist-native/mac-${process.arch}/f5-computer-helper`),
+      fixtureBinDirectory,
+    });
+    stage = "finished";
+  } else if (sessionActions) {
     sessionActionsObservation = await runSessionActions({
       appId,
       projectId,
@@ -1896,7 +2001,9 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
       expectedSyntheticTextReceived: fixture.typed(),
       ...(windowless || sessionActions ? { humanFinishAcknowledged: fixture.acknowledged() } : {}),
     };
-  const fixtureClosed = await closeRehearsalChild(fixture?.child);
+  let fixtureClosed = await closeRehearsalChild(fixture?.child);
+  for (const owned of additionalFixtures)
+    fixtureClosed = (await closeRehearsalChild(owned.child)) && fixtureClosed;
   if (documentRoot) {
     const state = documentOpened
       ? await verifyRealApp("--document-state", documentPath).catch(() => undefined)
@@ -1966,6 +2073,15 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     );
   if (grantMemory) checks.grantMemoryCleanup = cleanup.confirmed;
   if (sessionActions) checks.sessionActionsCleanup = cleanup.confirmed;
+  if (profileIsolation)
+    Object.assign(
+      checks,
+      (profileIsolationReadOnly ? profileReadinessChecks : profileIsolationChecks)({
+        profileIsolationObservation,
+        cleanup,
+      }),
+    );
+  for (const client of additionalClients) client.close();
   externalClient?.close();
   const passed =
     !failureStage && !interrupted && cleanup.confirmed && Object.values(checks).every(Boolean);
@@ -1977,25 +2093,29 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         reportVersion: 1,
         admissionId: process.env.F5_COMPUTER_CERTIFICATION_ADMISSION,
         recordedAt: new Date().toISOString(),
-        scope: sessionActions
-          ? `unsigned-real-electron-${provider}-session-actions`
-          : grantMemory
-            ? `unsigned-real-electron-${provider}-grant-memory`
-            : windowless
-              ? `unsigned-real-electron-${provider}-all-app-windows-closed`
-              : clusterWorkflows
-                ? "unsigned-real-electron-clustered-workflows"
-                : realApps
-                  ? `unsigned-real-electron-${provider}-textedit-and-calculator`
-                  : stopOnly
-                    ? `unsigned-real-electron-${provider}-${stopMain ? "main" : "renderer"}-frozen-physical-stop`
-                    : statusOnly
-                      ? `unsigned-real-electron-${provider}-${approvalDiagnostic ? "approval-mode-" : ""}read-only-discovery-diagnostic`
-                      : controlsOnly
-                        ? `unsigned-real-electron-${provider}-human-consent-and-controls`
-                        : actionsOnly
-                          ? `unsigned-real-electron-${provider}-human-consent-and-actions`
-                          : `unsigned-real-electron-${provider}-human-consent-synthetic-app`,
+        scope: profileIsolationReadOnly
+          ? "unsigned-real-electron-codex-profile-readiness"
+          : profileIsolation
+            ? "unsigned-real-electron-codex-profile-isolation"
+            : sessionActions
+              ? `unsigned-real-electron-${provider}-session-actions`
+              : grantMemory
+                ? `unsigned-real-electron-${provider}-grant-memory`
+                : windowless
+                  ? `unsigned-real-electron-${provider}-all-app-windows-closed`
+                  : clusterWorkflows
+                    ? "unsigned-real-electron-clustered-workflows"
+                    : realApps
+                      ? `unsigned-real-electron-${provider}-textedit-and-calculator`
+                      : stopOnly
+                        ? `unsigned-real-electron-${provider}-${stopMain ? "main" : "renderer"}-frozen-physical-stop`
+                        : statusOnly
+                          ? `unsigned-real-electron-${provider}-${approvalDiagnostic ? "approval-mode-" : ""}read-only-discovery-diagnostic`
+                          : controlsOnly
+                            ? `unsigned-real-electron-${provider}-human-consent-and-controls`
+                            : actionsOnly
+                              ? `unsigned-real-electron-${provider}-human-consent-and-actions`
+                              : `unsigned-real-electron-${provider}-human-consent-synthetic-app`,
         platform: process.platform,
         arch: process.arch,
         osVersion: release(),
@@ -2025,6 +2145,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         ...(grantMemory
           ? { grantMemoryObservation, grantMemoryConsentReceipts, providerTailObserved }
           : {}),
+        ...(profileIsolation ? { profileIsolationObservation } : {}),
         ...(windowless
           ? {
               externalSubmissions,

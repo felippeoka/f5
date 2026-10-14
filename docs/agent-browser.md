@@ -710,6 +710,37 @@ unchanged exact probe-count assertions. This usage fix also applies when compute
 is disabled and provides no computer-control certification evidence. WebSocket test
 connection failures now retain their original cause for complete diagnostics.
 
+The unsigned macOS profile-isolation driver now prepares two disposable F5 profiles,
+two separate Codex homes/backends and two distinct synthetic app identities. Its
+read-only `profile-readiness` phase performs native metadata turns through both real
+provider sessions without grants, permits, capture or input, then stops both sessions.
+That phase must pass before scheduling genuine consent. It provides readiness proof,
+not contention or privacy release certification.
+
+The `profile-isolation` phase uses ordinary authenticated queue submissions and genuine
+app consent in each registered renderer. Both profiles take turns holding the machine
+lease while the other makes exactly one activation request expected to return `Busy`.
+The holder only activates its fixture and inspects its fixed waiting/released status;
+no typing, pointer injection or semantic press is requested. Stopping the non-holder
+must leave the active holder's lease intact. A separately spawned, suspended helper
+must report `other-instance`. Each IPC channel and authenticated client stream is
+observed independently. Acceptance requires positive owner activity/thumbnail receipts
+as well as absence of foreign activity, images, grants, thread identifiers and private
+titles; foreign lease banners must stay anonymous. Failed or bounded-out observations,
+uncertain submissions and unconfirmed cleanup cannot pass. Submission is never retried.
+
+The driver compares credential files in memory before/after and verifies distinct
+profile homes and private orchestration snapshots; hashes or credential bytes are not
+retained. These checks do not audit every provider filesystem read or prove that an
+agent with filesystem access cannot read another directory. The non-holder stop check
+proves that lifecycle boundary; deterministic lease tests retain the separate stale
+holder-release rejection cases. Instrumentation only observes existing IPC/messages.
+It neither answers consent nor manufactures leases, results or helper permits. Driver,
+observer, fixtures and receipt validator are source-hashed. Initial live coverage uses
+Codex in both profiles; it does not qualify Claude profile-launch isolation, Windows,
+signed installed candidates or persistence/capture privacy beyond the measured streams.
+No passing real profile-isolation run is recorded yet; no public gate changed.
+
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;
 watching a child's absent stdout pipe produced no diagnostic evidence. The new

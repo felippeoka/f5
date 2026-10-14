@@ -127,6 +127,9 @@ export async function identify(target: Target): Promise<Identity> {
   files["electron-runner"] = await hashFile(
     join(target.repo, "apps/desktop/scripts/rehearse-computer-electron.mjs"),
   );
+  files["profile-isolation-runner"] = await hashFile(
+    join(target.repo, "apps/desktop/scripts/rehearse-computer-profile-isolation.mjs"),
+  );
   // These development observer modules are loaded directly, outside the app bundles.
   for (const name of [
     "rehearsalExternalClient",
@@ -134,6 +137,7 @@ export async function identify(target: Target): Promise<Identity> {
     "rehearsalMcpTransport",
     "rehearsalFixture",
     "rehearsalResponses",
+    "rehearsalProfileIsolation",
   ])
     files[name] = await hashFile(join(target.repo, "apps/desktop/src/computer", name + ".ts"));
   files["native-fixtures"] = await hashTree(
