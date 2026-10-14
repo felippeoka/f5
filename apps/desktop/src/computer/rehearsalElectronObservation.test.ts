@@ -173,6 +173,22 @@ it("distinguishes recorded provider approval decisions without keeping arbitrary
 });
 
 it("keeps harness failure diagnostics content-free", () => {
+  for (const [message, code] of [
+    [
+      "electronApplication.evaluate: Cannot serialize result: object reference chain is too long.",
+      "electron-serialization",
+    ],
+    ["electronApplication.evaluate: Execution context was destroyed", "electron-context-lost"],
+    [
+      "electronApplication.evaluate: Target page, context or browser has been closed",
+      "electron-target-closed",
+    ],
+    ["electronApplication.evaluate: PRIVATE_SENTINEL", "electron-evaluation"],
+  ]) {
+    const result = rehearsalHarnessFailureCode(new Error(`${message} PRIVATE_CONTENT`));
+    expect(result).toBe(code);
+    expect(result).not.toContain("PRIVATE");
+  }
   expect(rehearsalHarnessFailureCode(new Error("External rehearsal transport Unavailable"))).toBe(
     "external-transport-unavailable",
   );

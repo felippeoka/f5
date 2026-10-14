@@ -3,7 +3,19 @@ import {
   RehearsalProfileIsolation,
   profileProviderProgress,
   profileOwnerLeaseReady,
+  profileSnapshotEnvelope,
 } from "./rehearsalProfileIsolation";
+
+it("separates observer faults from transport failure without retaining exception contents", () => {
+  const snapshot = { traceComplete: true };
+  expect(profileSnapshotEnvelope(() => snapshot)).toEqual({ failed: false, value: snapshot });
+  expect(profileSnapshotEnvelope(() => undefined)).toEqual({ failed: false, value: undefined });
+  const failed = profileSnapshotEnvelope(() => {
+    throw new Error("PRIVATE_SENTINEL");
+  });
+  expect(failed).toEqual({ failed: true });
+  expect(JSON.stringify(failed)).not.toContain("PRIVATE");
+});
 
 it("rechecks the live lease when a terminal projection crosses acquisition", async () => {
   let held = false;

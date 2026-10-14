@@ -203,7 +203,12 @@ export async function runProfileIsolation(o) {
   const snapshot = async () => {
     await pushWork;
     if (pushFailed) throw new Error("Isolation push receipt incomplete.");
-    return application.evaluate(() => globalThis.__computerRehearsalIsolation.snapshot());
+    const result = await application.evaluate(() =>
+      globalThis.__computerRehearsalIsolationSnapshot(),
+    );
+    if (!result || result.failed !== false)
+      throw new Error("Isolation observer snapshot callback failed.");
+    return result.value;
   };
   const current = async (i) =>
     (await clients[i].rpc(ORCHESTRATION_WS_METHODS.getSnapshot)).threads.find(

@@ -862,6 +862,18 @@ cleared grants, stopped sessions and confirmed cleanup. Mapped error locations a
 retained on failure. This diagnostic has no release-coverage requirements: it cannot
 qualify contention, image isolation, stop latency or a tested mutation veto.
 
+The [first inspection diagnostic](computer-certification/2026-10-14-macos-profile-inspection-diagnostic-failed.json)
+on clean `7e7d44f8e7` reproduced the failure after eighteen successful inspections
+in one profile; both genuine fixture consents settled. The source-mapped failure
+originates at the Electron observation-snapshot evaluation boundary. No lease,
+capture or input was observed, and cleanup was confirmed. Failure cleanup subsequently
+interrupted pending observation work; that interruption is not the original fault.
+Standalone Electron replay of the sanitized snapshot and larger synthetic snapshots
+succeeded, so serialization or a provider fault has not been established. New
+diagnostics distinguish a thrown observer callback from fixed evaluator transport
+categories without keeping raw exception text. This attempt remains failed and
+grants no release credit; another full control run is pending diagnosis.
+
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;
 watching a child's absent stdout pipe produced no diagnostic evidence. The new

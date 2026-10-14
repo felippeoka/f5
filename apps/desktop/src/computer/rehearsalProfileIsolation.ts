@@ -10,6 +10,15 @@ type Identity = { profileId: string; threadId: string; appId: string; privateTit
 const record = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v);
 
+/** Distinguish observer faults from evaluator transport failures without error I/O. */
+export function profileSnapshotEnvelope<T>(read: () => T) {
+  try {
+    return { value: read(), failed: false as const };
+  } catch {
+    return { failed: true as const };
+  }
+}
+
 /** The host lease and provider projection are separate asynchronous reads.
  * A terminal projection must not trigger cleanup of a newly acquired lease. */
 export async function profileOwnerLeaseReady(

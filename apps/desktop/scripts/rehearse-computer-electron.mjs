@@ -742,8 +742,9 @@ const {ElectronRehearsalObservation}=require(${JSON.stringify(compiledObserver)}
 const evidence=globalThis.__computerRehearsalNative=new ElectronRehearsalObservation(${profileIsolation ? "2048" : ""});
 ${
   profileIsolation
-    ? `const {RehearsalProfileIsolation}=require(${JSON.stringify(compiledIsolationObserver)});
+    ? `const {RehearsalProfileIsolation,profileSnapshotEnvelope}=require(${JSON.stringify(compiledIsolationObserver)});
 globalThis.__computerRehearsalIsolation=new RehearsalProfileIsolation();
+globalThis.__computerRehearsalIsolationSnapshot=()=>profileSnapshotEnvelope(()=>globalThis.__computerRehearsalIsolation.snapshot());
 globalThis.__computerRehearsalIsolationBackendPids={};`
     : ""
 }

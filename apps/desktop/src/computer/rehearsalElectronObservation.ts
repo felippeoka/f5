@@ -314,6 +314,20 @@ export function rehearsalSessionErrorCode(error: unknown): string {
 export function rehearsalHarnessFailureCode(error: unknown): string {
   if (!(error instanceof Error)) return "unknown";
   const message = error.message.slice(0, 8192);
+  if (message === "Isolation observer snapshot callback failed.") return "observer-snapshot";
+  // Playwright can fail before the observer callback runs. Retain only fixed
+  // transport categories; its message may otherwise include evaluated content.
+  if (
+    /Cannot serialize result: object reference chain is too long|Object couldn't be returned by value/.test(
+      message,
+    )
+  )
+    return "electron-serialization";
+  if (/Execution context was destroyed|Cannot find context with specified id/.test(message))
+    return "electron-context-lost";
+  if (/Target page, context or browser has been closed|Session closed|Target closed/.test(message))
+    return "electron-target-closed";
+  if (/^electronApplication\.evaluate(?:Handle)?:/.test(message)) return "electron-evaluation";
   if (message === "External rehearsal transport Unavailable")
     return "external-transport-unavailable";
   if (message === "External rehearsal transport Interrupted")
