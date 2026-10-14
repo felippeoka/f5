@@ -140,6 +140,9 @@ export async function identify(target: Target): Promise<Identity> {
     "rehearsalProfileIsolation",
   ])
     files[name] = await hashFile(join(target.repo, "apps/desktop/src/computer", name + ".ts"));
+  files["profile-limits"] = await hashFile(
+    join(target.repo, "packages/shared/src/computerRehearsalProfiles.ts"),
+  );
   files["native-fixtures"] = await hashTree(
     join(
       target.repo,

@@ -14,6 +14,7 @@ import {
   TurnSubmissionResult,
 } from "@t3tools/contracts";
 import { Schema } from "effect";
+import { PROFILE_OBSERVATION_REQUEST_LIMIT } from "@t3tools/shared/computerRehearsalProfiles";
 import {
   REAL_APP_REHEARSAL_IDS,
   REAL_APP_REHEARSAL_TEXT,
@@ -224,7 +225,7 @@ let buildHashes;
 let repositoryCommit;
 let workingTreeDirty;
 let nativeObservation;
-const profileObservationLimit = profileIsolation ? 2048 : 128;
+const profileObservationLimit = profileIsolation ? 2 * PROFILE_OBSERVATION_REQUEST_LIMIT : 128;
 const stdoutObservation = new ElectronRehearsalObservation(profileObservationLimit);
 const stderrObservation = new ElectronRehearsalObservation(profileObservationLimit);
 let threadObservation;
@@ -486,6 +487,7 @@ try {
           "profileIsolationObserverSource",
           join(desktopDir, "src/computer/rehearsalProfileIsolation.ts"),
         ],
+        ["profileLimitsSource", join(repo, "packages/shared/src/computerRehearsalProfiles.ts")],
         [
           "profileIsolationEvidenceSource",
           join(repo, "scripts/computer-certification/profileIsolationEvidence.ts"),
@@ -739,7 +741,7 @@ const {app,BrowserWindow}=require('electron');
 const setPath=app.setPath.bind(app);
 app.setPath=(key,value)=>setPath(key,key==='userData'?${JSON.stringify(join(root, "electron"))}:value);
 const {ElectronRehearsalObservation}=require(${JSON.stringify(compiledObserver)});
-const evidence=globalThis.__computerRehearsalNative=new ElectronRehearsalObservation(${profileIsolation ? "2048" : ""});
+const evidence=globalThis.__computerRehearsalNative=new ElectronRehearsalObservation(${profileIsolation ? profileObservationLimit : ""});
 ${
   profileIsolation
     ? `const {RehearsalProfileIsolation,profileSnapshotEnvelope}=require(${JSON.stringify(compiledIsolationObserver)});

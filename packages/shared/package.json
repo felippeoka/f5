@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./computerRehearsalProfiles": {
+      "types": "./src/computerRehearsalProfiles.ts",
+      "import": "./src/computerRehearsalProfiles.ts"
+    },
     "./computerRehearsalClaude": {
       "types": "./src/computerRehearsalClaude.ts",
       "import": "./src/computerRehearsalClaude.ts"

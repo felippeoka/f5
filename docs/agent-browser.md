@@ -898,6 +898,19 @@ new observation-transfer path but does not prove the precise earlier context-los
 cause. Real lease contention and positive capture/privacy evidence remain pending;
 the diagnostic carries no release credit and opens no gate.
 
+The [subsequent full isolation attempt](computer-certification/2026-10-14-macos-profile-isolation-validator-limit-failed.json)
+on clean `33add63096` reached real contention in both directions, positive owner
+thumbnails on both IPC and client streams, anonymous banners and no observed
+foreign data. It failed at final receipt validation: one profile's complete
+trace exceeded the stale 128-operation validator limit, despite the observer
+admitting 1,024 operations for the bounded 200-poll owner and contender loops.
+The final local receipt was not saved before rejection, so remaining invariants
+cannot be reconstructed completely; the attempt stays failed with no release
+credit. Cleanup was confirmed. Observer and validator budgets now share one
+hashed constant; overflow and unexpected operations still fail, including move
+and scroll. The driver saves its final receipt before validating it. Regression
+coverage includes long valid traces, the exact cap, overflow and extra actions.
+
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;
 watching a child's absent stdout pipe produced no diagnostic evidence. The new

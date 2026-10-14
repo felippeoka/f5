@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { PROFILE_OBSERVATION_REQUEST_LIMIT } from "@t3tools/shared/computerRehearsalProfiles";
 import {
   profileIsolationChecks,
   profileReadinessChecks,
@@ -95,6 +96,39 @@ it("does not accept sequential activations as real contention", () => {
   contender.busyWhileForeignHeld = false;
   contender.native.operations[0] = { op: "leaseAcquire", outcome: "ok" };
   expect(profileIsolationChecks(raw)["lease-contention"]).toBe(false);
+});
+it("uses the observer's bounded profile budget without accepting extra mutations or overflow", () => {
+  const raw = passing();
+  const native = raw.profileIsolationObservation.channels.profiles[1]!.native;
+  const inspection = { op: "inspect", outcome: "ok" };
+  native.operations.push(...Array.from({ length: 165 }, () => ({ ...inspection })));
+  expect(profileIsolationChecks(raw)["native-actions"]).toBe(true);
+  for (const op of [
+    "type",
+    "key",
+    "click",
+    "drag",
+    "move",
+    "scroll",
+    "elementAction",
+    "openApp",
+    "unknown",
+  ]) {
+    native.operations.push({ op, outcome: "ok" });
+    expect(profileIsolationChecks(raw)["native-actions"]).toBe(false);
+    native.operations.pop();
+  }
+  native.operations.push(
+    ...Array.from({ length: PROFILE_OBSERVATION_REQUEST_LIMIT - native.operations.length }, () => ({
+      ...inspection,
+    })),
+  );
+  expect(profileIsolationChecks(raw)["native-actions"]).toBe(true);
+  native.operations.push({ ...inspection });
+  expect(profileIsolationChecks(raw)["native-actions"]).toBe(false);
+  native.operations.pop();
+  native.traceComplete = false;
+  expect(profileIsolationChecks(raw)["native-actions"]).toBe(false);
 });
 it("keeps granted plan-mode inspection diagnostics separate from actual control evidence", () => {
   const raw: any = passing();

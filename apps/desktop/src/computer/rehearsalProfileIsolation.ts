@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { DesktopComputerHostMessage } from "@t3tools/contracts";
+import { PROFILE_OBSERVATION_REQUEST_LIMIT } from "@t3tools/shared/computerRehearsalProfiles";
 import {
   ElectronRehearsalObservation,
   rehearsalProviderActivityCounts,
@@ -72,8 +73,8 @@ export function profileProviderProgress(thread: unknown, activities: unknown) {
 export class RehearsalProfileIsolation {
   private identities: readonly Identity[] = [];
   private readonly native = [
-    new ElectronRehearsalObservation(1024),
-    new ElectronRehearsalObservation(1024),
+    new ElectronRehearsalObservation(PROFILE_OBSERVATION_REQUEST_LIMIT),
+    new ElectronRehearsalObservation(PROFILE_OBSERVATION_REQUEST_LIMIT),
   ];
   private readonly stats = [this.empty(), this.empty()];
   private messages = 0;

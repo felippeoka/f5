@@ -10,6 +10,7 @@ import {
 import { Schema } from "effect";
 import { profileStateDir } from "@t3tools/shared/profilePaths";
 import { createRehearsalFixture } from "../src/computer/rehearsalFixture.ts";
+import { PROFILE_INSPECTION_POLL_LIMIT } from "@t3tools/shared/computerRehearsalProfiles";
 import { RehearsalExternalClient } from "../src/computer/rehearsalExternalClient.ts";
 import {
   suspendedProbe,
@@ -556,7 +557,7 @@ export async function runProfileIsolation(o) {
     const inspectionBaseline = (await snapshot()).profiles[contender].native.inspectionResponses;
     const previousContender = await submit(
       contender,
-      `Use only F5 computer tools for exact granted app ${apps[contender]}. Inspect only this app sequentially, one call at a time, at most 200 times, while its Rehearsal instruction says Isolation waiting. When this fixture says Isolation released, call computer_activate_app exactly once for this app with screenshot:false. Another profile should then hold the lease: expect Busy and finish READY immediately. If the inspection limit is reached, finish without activating. No fallback, retry, other tools, shell/files/network or apps. Stop on any error or interruption.`,
+      `Use only F5 computer tools for exact granted app ${apps[contender]}. Inspect only this app sequentially, one call at a time, at most ${PROFILE_INSPECTION_POLL_LIMIT} times, while its Rehearsal instruction says Isolation waiting. When this fixture says Isolation released, call computer_activate_app exactly once for this app with screenshot:false. Another profile should then hold the lease: expect Busy and finish READY immediately. If the inspection limit is reached, finish without activating. No fallback, retry, other tools, shell/files/network or apps. Stop on any error or interruption.`,
       "contender",
     );
     await waitFor(
@@ -566,7 +567,7 @@ export async function runProfileIsolation(o) {
     );
     const previousOwner = await submit(
       owner,
-      `Use only F5 computer tools for exact granted app ${apps[owner]}. Activate it exactly once with screenshot:true. Then inspect only this app sequentially, one call at a time, at most 200 times, while the Rehearsal instruction says Isolation waiting. When it says Isolation released, finish READY immediately. If the inspection limit is reached, finish without further action. Do not press, type, move, click or touch any other app. Do not request new access or use shell/files/network. Stop on any error/interruption/ambiguity, never retry.`,
+      `Use only F5 computer tools for exact granted app ${apps[owner]}. Activate it exactly once with screenshot:true. Then inspect only this app sequentially, one call at a time, at most ${PROFILE_INSPECTION_POLL_LIMIT} times, while the Rehearsal instruction says Isolation waiting. When it says Isolation released, finish READY immediately. If the inspection limit is reached, finish without further action. Do not press, type, move, click or touch any other app. Do not request new access or use shell/files/network. Stop on any error/interruption/ambiguity, never retry.`,
       "owner",
     );
     // Provider planning/queue admission is not a native execution latency check.
@@ -650,6 +651,7 @@ export async function runProfileIsolation(o) {
     fixturesUntouched: fixtures.every((f) => f.presses() === 0 && !f.typed()),
     bothChatSurfacesReady: true,
   };
+  o.record(receipt);
   const checks = profileIsolationChecks({
     profileIsolationObservation: receipt,
     cleanup: { confirmed: true },

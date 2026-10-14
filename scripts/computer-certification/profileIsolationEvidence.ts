@@ -1,4 +1,5 @@
 import { record } from "./model";
+import { PROFILE_OBSERVATION_REQUEST_LIMIT } from "@t3tools/shared/computerRehearsalProfiles";
 
 /** Diagnostic only: plan-mode observation is not contention or veto evidence. */
 export function profileInspectionDiagnosticChecks(raw: unknown): Record<string, boolean> {
@@ -196,10 +197,11 @@ export function profileIsolationChecks(raw: unknown): Record<string, boolean> {
           native(p).traceComplete === true &&
           native(p).pendingResponses === 0 &&
           ops(p).length > 0 &&
-          ops(p).length <= 128 &&
+          ops(p).length <= PROFILE_OBSERVATION_REQUEST_LIMIT &&
           ops(p).every(
             (op) =>
               record(op) &&
+              ["resolveApps", "inspect", "leaseAcquire", "activateApp"].includes(String(op.op)) &&
               (op.outcome === "ok" || (op.op === "leaseAcquire" && op.outcome === "Busy")),
           ) &&
           ops(p).filter((op) => record(op) && op.op === "activateApp").length === 1 &&
@@ -209,11 +211,6 @@ export function profileIsolationChecks(raw: unknown): Record<string, boolean> {
               op.op === "activateApp" &&
               op.actionCompleted === true &&
               op.actionCaptureSucceeded === true,
-          ) &&
-          !ops(p).some(
-            (op) =>
-              record(op) &&
-              ["type", "key", "click", "drag", "elementAction", "openApp"].includes(String(op.op)),
           ) &&
           noForeign(p),
       ),
