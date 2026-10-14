@@ -218,7 +218,8 @@ export async function runProfileIsolation(o) {
       }),
     ),
   }));
-  const submit = async (i, text) => {
+  const submissions = [];
+  const submit = async (i, text, phase = "metadata") => {
     const previous = (await current(i))?.latestTurn?.turnId;
     const submissionId = randomUUID();
     const result = await clients[i].rpc(WS_METHODS.nextTurnQueueSubmit, {
@@ -241,6 +242,7 @@ export async function runProfileIsolation(o) {
       !["started", "queued"].includes(result.disposition)
     )
       throw new Error("Isolation queue admission incomplete.");
+    submissions.push({ profileOrdinal: i + 1, phase, disposition: result.disposition });
     return previous;
   };
   const completed = async (i, previous) =>
@@ -298,6 +300,7 @@ export async function runProfileIsolation(o) {
   const consents = [];
   o.record({
     consents,
+    submissions,
     bothChatSurfacesReady: true,
     distinctRendererProfiles: primaryId !== other.id,
     isolatedProviderHomes: home !== secondaryHome,
@@ -313,6 +316,7 @@ export async function runProfileIsolation(o) {
     const previous = await submit(
       i,
       `Consent-only isolation test. Call computer_status with {}, then computer_request_access exactly once with these arguments: ${JSON.stringify({ apps: [apps[i]], reason: "Synthetic two-profile isolation test" })}. The apps field is an array of one exact app ID and reason is required. The user will review genuine consent. Do not activate, inspect, capture, type or use any other tool. No shell/files/network. Stop on failure, never retry. Finish READY.`,
+      "consent",
     );
     await waitFor(
       async () => pages[i].evaluate(() => window.__computerRehearsal.consentSettled),
@@ -352,6 +356,15 @@ export async function runProfileIsolation(o) {
   const device = await suspendedProbe(helper);
   if (device.available || device.reason !== "other-instance")
     throw new Error("Isolation device lock receipt incomplete.");
+  o.record({
+    consents,
+    submissions,
+    bothChatSurfacesReady: true,
+    distinctRendererProfiles: primaryId !== other.id,
+    distinctBackendProcesses: true,
+    isolatedProviderHomes: home !== secondaryHome,
+    secondHelperReason: device.reason,
+  });
   await instructions(
     "Both grants ready. Keep input idle during countdown and RED. Finish check will stay available after both sessions stop.",
   );
@@ -370,11 +383,25 @@ export async function runProfileIsolation(o) {
     const previousOwner = await submit(
       owner,
       `Use only F5 computer tools for exact granted app ${apps[owner]}. Activate it exactly once with screenshot:true. Then inspect only this app repeatedly, at most 40 times, while the Rehearsal instruction says Isolation waiting. When it says Isolation released, finish READY immediately. Do not press, type, move, click or touch any other app. Do not request new access or use shell/files/network. Stop on any error/interruption/ambiguity, never retry.`,
+      "owner",
     );
-    await waitFor(async () => (await snapshot()).profiles[owner].held, 30000);
+    // Provider planning/queue admission is not a native execution latency check.
+    // Use the same bounded turn budget as completion; still require a live lease.
+    await waitFor(async () => {
+      if ((await snapshot()).profiles[owner].held) return true;
+      const turn = (await current(owner))?.latestTurn;
+      if (
+        turn &&
+        turn.turnId !== previousOwner &&
+        ["completed", "error", "interrupted"].includes(turn.state)
+      )
+        throw new Error("Isolation owner turn ended without a lease.");
+      return false;
+    }, 150000);
     const previousContender = await submit(
       contender,
       `Use only computer_activate_app exactly once for already granted app ${apps[contender]} with screenshot:false. Another profile is holding the machine lease. Expect Busy; finish READY after the result. No fallback, retry, other tool, shell/files/network or apps.`,
+      "contender",
     );
     await completed(contender, previousContender);
     const contention = await snapshot();
@@ -424,6 +451,7 @@ export async function runProfileIsolation(o) {
   const receipt = {
     channels: await snapshot(),
     consents,
+    submissions,
     beforeNonHolderStop,
     afterNonHolderStop,
     nonHolderSessionStopped,

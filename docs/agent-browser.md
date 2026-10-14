@@ -771,6 +771,18 @@ required `reason`. Validation remains strict, consent remains genuine and failed
 invocations are never retried automatically. Full isolation validation remains
 pending; neither this failure nor metadata-only success qualifies release.
 
+The [next consent/contention attempt](computer-certification/2026-10-14-macos-profile-isolation-owner-wait-timeout.json)
+on clean `b5d9d6d8cd` received both genuine app consents without remembering.
+It timed out waiting for the first owner's lease before any activation, capture
+or input. The provider turn remained running, without a recorded tool call or
+approval request; cleanup was confirmed. This does not establish the reason for
+the provider delay. Owner admission now uses the existing 150-second provider-turn
+budget instead of 30 seconds, and fails early if the turn ends without a lease.
+This wait measures provider progress, not native stop latency. Fixed queue
+dispositions and completed backend/device prerequisites are retained on failure;
+contention and privacy assertions remain unchanged. The failed attempt remains
+failed and release gates remain closed.
+
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;
 watching a child's absent stdout pipe produced no diagnostic evidence. The new
