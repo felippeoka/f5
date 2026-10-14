@@ -171,13 +171,15 @@ export function makeClaudeComputerMcpServer(input: {
 }): ClaudePreviewServer {
   const serverName = chooseServerName("f5_computer", input.existingServerNames);
   const sessionGeneration = `claude:${randomUUID()}`;
+  const releaseProvenance = automationEventSanitizer.retain(input.threadId);
   input.broker.bindSession(input.threadId, sessionGeneration, "claude");
   automationEventSanitizer.register(input.threadId, {
     serverName,
     verified: true,
     kind: "f5-computer",
   });
-  const geometry = new ComputerToolGeometry();
+  let geometry = new ComputerToolGeometry();
+  let connectionId = randomUUID();
   const unsubscribe = input.broker.subscribe((event) => {
     if (event.channel === "computer.access.grantsChanged" && event.data.threadId === input.threadId)
       geometry.clear();
@@ -196,44 +198,58 @@ export function makeClaudeComputerMcpServer(input: {
       unsubscribe();
       geometry.clear();
       input.broker.releaseSession(input.threadId, sessionGeneration);
+      releaseProvenance();
     },
     endTurn: (turnId) => input.broker.endTurn(input.threadId, turnId, sessionGeneration),
-    config: createSdkMcpServer({
-      name: serverName,
-      version: "2",
-      timeout: COMPUTER_TOOL_TIMEOUT_MS,
-      tools: COMPUTER_TOOL_DEFINITIONS.map((definition) =>
-        tool(
-          definition.name,
-          definition.description,
-          definition.shape,
-          async (args, extra) => {
-            const result = await callComputerTool(
-              {
-                broker: input.broker,
-                threadId: input.threadId,
-                sessionGeneration,
-                geometry,
-                ...(extra !== null &&
-                typeof extra === "object" &&
-                "requestId" in extra &&
-                (typeof extra.requestId === "string" || typeof extra.requestId === "number")
-                  ? { invocationId: JSON.stringify(extra.requestId) }
+    config: (() => {
+      const config = createSdkMcpServer({
+        name: serverName,
+        version: "2",
+        timeout: COMPUTER_TOOL_TIMEOUT_MS,
+        tools: COMPUTER_TOOL_DEFINITIONS.map((definition) =>
+          tool(
+            definition.name,
+            definition.description,
+            definition.shape,
+            async (args, extra) => {
+              const result = await callComputerTool(
+                {
+                  broker: input.broker,
+                  threadId: input.threadId,
+                  sessionGeneration,
+                  geometry,
+                  ...(extra !== null &&
+                  typeof extra === "object" &&
+                  "requestId" in extra &&
+                  (typeof extra.requestId === "string" || typeof extra.requestId === "number")
+                    ? { invocationId: `${connectionId}:${JSON.stringify(extra.requestId)}` }
+                    : {}),
+                },
+                definition.name,
+                args,
+              );
+              return {
+                content: result.content.map((block) => ({ ...block })),
+                ...(result.structuredContent
+                  ? { structuredContent: result.structuredContent }
                   : {}),
-              },
-              definition.name,
-              args,
-            );
-            return {
-              content: result.content.map((block) => ({ ...block })),
-              ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}),
-              ...(result.isError ? { isError: true } : {}),
-            };
-          },
-          { annotations: definition.annotations, alwaysLoad: definition.alwaysLoad },
+                ...(result.isError ? { isError: true } : {}),
+              };
+            },
+            { annotations: definition.annotations, alwaysLoad: definition.alwaysLoad },
+          ),
         ),
-      ),
-    }),
+      });
+      if (config.instance?.server) {
+        const initialized = config.instance.server.oninitialized;
+        config.instance.server.oninitialized = () => {
+          initialized?.();
+          geometry = new ComputerToolGeometry();
+          connectionId = randomUUID();
+        };
+      }
+      return config;
+    })(),
   };
 }
 export function classifyF5ComputerTool(

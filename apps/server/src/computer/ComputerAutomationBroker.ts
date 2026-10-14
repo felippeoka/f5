@@ -94,7 +94,8 @@ export class ComputerAutomationBrokerRuntime {
     string,
     { threadId: string; generation: string; settle: (allowed: boolean) => void }
   >();
-  private otherProfile = false;
+  private nativeOtherProfile = false;
+  private chromeOtherProfile = false;
   private readonly offHost: () => void;
   private readonly offPause: () => void;
   constructor(
@@ -120,6 +121,7 @@ export class ComputerAutomationBrokerRuntime {
     });
     this.access = new ComputerAccessService({
       platform: options.platform,
+      forgotten: (projectId, appId) => this.host.send({ type: "grantForget", projectId, appId }),
       backendIncarnation: host.backendIncarnation,
       storage: options.storage,
       request: (request) => {
@@ -163,11 +165,11 @@ export class ComputerAutomationBrokerRuntime {
         return;
       if (message.type === "leaseChanged") {
         this.mainHolder = message.holder;
-        this.otherProfile = message.otherProfile ?? false;
+        this.nativeOtherProfile = message.otherProfile ?? false;
       }
       if (message.type === "chromeLeaseChanged") {
         this.chromeHolder = message.holder;
-        this.otherProfile = message.otherProfile ?? false;
+        this.chromeOtherProfile = message.otherProfile ?? false;
       }
       if (
         message.type === "status" &&
@@ -176,7 +178,8 @@ export class ComputerAutomationBrokerRuntime {
       ) {
         this.mainHolder = null;
         this.chromeHolder = null;
-        this.otherProfile = false;
+        this.nativeOtherProfile = false;
+        this.chromeOtherProfile = false;
         for (const [threadId, binding] of this.bindings)
           this.releaseSession(threadId, binding.generation);
         this.publish({ channel: "computer.host", data: { type: "leaseChanged", holder: null } });
@@ -228,7 +231,7 @@ export class ComputerAutomationBrokerRuntime {
     return {
       holder: this.mainHolder,
       chromeHolder: this.chromeHolder,
-      otherProfile: this.otherProfile,
+      otherProfile: this.nativeOtherProfile || this.chromeOtherProfile,
       pausedThreads: this.pause.list(),
       pending: this.access
         .pendingRequests()
@@ -293,6 +296,7 @@ export class ComputerAutomationBrokerRuntime {
   ): ComputerAuthorization {
     return {
       profileId: this.host.profileId,
+      projectId: ctx.projectId,
       threadId: ctx.threadId,
       sessionGeneration: ctx.sessionGeneration,
       turnId: ctx.turnId,
@@ -311,6 +315,7 @@ export class ComputerAutomationBrokerRuntime {
       type: "grantsChanged",
       authorization: {
         profileId: this.host.profileId,
+        ...(this.access.projectId(threadId) ? { projectId: this.access.projectId(threadId)! } : {}),
         threadId,
         sessionGeneration: generation,
         turnId,
@@ -344,6 +349,8 @@ export class ComputerAutomationBrokerRuntime {
     if (!binding || binding.generation !== generation)
       throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
     if (ctx.turnId !== "observation") binding.turnId = ctx.turnId;
+    if (this.pause.has(threadId) && !["status", "listApps", "resolveApps"].includes(input.op))
+      throw new ComputerControlError({ _tag: "Interrupted", cause: "paused" });
     if (mutation) {
       if (ctx.turnId === "observation" || this.endedTurns.has(`${generation}\0${ctx.turnId}`))
         throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
@@ -375,6 +382,8 @@ export class ComputerAutomationBrokerRuntime {
       const live = await this.context(threadId, generation);
       if (!live.policy.computerUse)
         throw new ComputerControlError({ _tag: "Unavailable", reason: "disabled" });
+      if (this.pause.has(threadId) && !["status", "listApps", "resolveApps"].includes(input.op))
+        throw new ComputerControlError({ _tag: "Interrupted", cause: "paused" });
       if (
         mutation &&
         (this.pause.has(threadId) ||
@@ -404,10 +413,11 @@ export class ComputerAutomationBrokerRuntime {
         throw new ComputerControlError({ _tag: "NotGranted", needed: "type" });
       let executionGeneration = binding.holder?.executionGeneration ?? 1;
       if (mutation) {
+        const acquisitionId = randomUUID();
         const holder = (await this.host.correlated(
           {
             type: "leaseAcquire",
-            requestId: randomUUID(),
+            requestId: acquisitionId,
             holder: {
               ...this.authorization(live, executionGeneration),
               backend: "native",
@@ -417,6 +427,7 @@ export class ComputerAutomationBrokerRuntime {
           2000,
           false,
         )) as ComputerLeaseHolder;
+        this.host.send({ type: "leaseAccepted", requestId: acquisitionId });
         // Cancellation during acquire must release the exact returned holder.
         if (
           this.bindings.get(threadId) !== binding ||
@@ -585,6 +596,7 @@ export class ComputerAutomationBrokerRuntime {
       type: "grantsChanged",
       authorization: {
         profileId: this.host.profileId,
+        ...(this.access.projectId(threadId) ? { projectId: this.access.projectId(threadId)! } : {}),
         threadId,
         sessionGeneration: generation,
         turnId: binding.turnId ?? "observation",
@@ -677,17 +689,43 @@ export const ComputerAutomationBrokerLive = Layer.effect(
     const file = path.join(config.stateDir, "computer-access.json");
     const host = DesktopComputerHost.fromEnvironment(config.profile?.id ?? "default");
     const pause = yield* Effect.serviceOption(AgentControlPauseService);
+    const storage = computerAccessStorage({
+      exists: () => run(fs.exists(file)),
+      read: () => run(fs.readFileString(file)),
+      quarantine: (suffix) =>
+        run(fs.rename(file, path.join(config.stateDir, `computer-access.${suffix}`))),
+      warn: (message) => console.warn(message),
+      write: (contents) => run(writeFileStringAtomically({ filePath: file, contents })),
+    });
     const broker = new ComputerAutomationBrokerRuntime(host, {
       ...(Option.isSome(pause) ? { pause: pause.value } : {}),
       platform: process.platform === "win32" ? "win32" : "darwin",
-      storage: computerAccessStorage({
-        exists: () => run(fs.exists(file)),
-        read: () => run(fs.readFileString(file)),
-        quarantine: (suffix) =>
-          run(fs.rename(file, path.join(config.stateDir, `computer-access.${suffix}`))),
-        warn: (message) => console.warn(message),
-        write: (contents) => run(writeFileStringAtomically({ filePath: file, contents })),
-      }),
+      storage: {
+        save: storage.save,
+        load: async () => {
+          const stored = await storage.load();
+          const verified = [];
+          for (const projectId of new Set(stored.map((grant) => grant.projectId))) {
+            try {
+              const result = await host.correlated(
+                {
+                  type: "grantsValidate",
+                  requestId: randomUUID(),
+                  projectId,
+                  grants: stored.filter((grant) => grant.projectId === projectId),
+                },
+                2000,
+                false,
+              );
+              const grants = Schema.decodeUnknownSync(Schema.Array(ComputerGrant))(result);
+              verified.push(...grants.map((grant) => ({ ...grant, projectId })));
+            } catch {
+              /* Missing host/receipts means fresh consent, never a file grant. */
+            }
+          }
+          return verified;
+        },
+      },
       resolve: async (threadId, sessionGeneration, provider) => {
         const rows = await run(
           sql<{

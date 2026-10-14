@@ -1203,9 +1203,10 @@ describe("WebSocket Server", () => {
     ["reset", true, false],
     ["alreadyRedeemed", true, false],
     ["reset", true, true],
+    ["reset", true, true, true],
   ] as const)(
     "refreshes after reset-credit outcome %s (recent refresh: %s; elapsed retry hint: %s) with the real account throttle",
-    async (outcome, recentRefresh, elapsedRetryHint) => {
+    async (outcome, recentRefresh, elapsedRetryHint, persistentRefusal = false) => {
       const instanceId = ProviderInstanceId.makeUnsafe("claudeAgent-credit-test");
       let refreshCalls = 0;
       let probeCalls = 0;
@@ -1269,6 +1270,12 @@ describe("WebSocket Server", () => {
               ...capability,
               refreshAccount: (permits) => {
                 refreshCalls++;
+                if (persistentRefusal)
+                  return Effect.succeed({
+                    snapshot: null,
+                    fresh: false,
+                    nextAllowedAt: new Date(0).toISOString(),
+                  });
                 const refresh = capability.refreshAccount!(permits);
                 // Reproduce crossing the deadline between capability refusal and
                 // the route inspecting its hint. Keep the real five-second gate.
@@ -1308,7 +1315,12 @@ describe("WebSocket Server", () => {
       expect(response.result).toEqual({ outcome });
       expect(refreshCalls).toBe(1);
       expect(probeCalls).toBe(1);
-      if (recentRefresh) {
+      if (persistentRefusal) {
+        await vi.waitFor(() => expect(refreshCalls).toBe(4));
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        expect(refreshCalls).toBe(4);
+        expect(probeCalls).toBe(1);
+      } else if (recentRefresh) {
         // The response arrives while the real capability is throttled. The
         // scoped retry must perform a second probe after its five-second gate.
         await vi.waitFor(() => expect(probeCalls).toBe(2), { timeout: 7000 });

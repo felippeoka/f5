@@ -92,7 +92,8 @@ export class ComputerController {
     this.offEvent = helper.onEvent((message) => {
       if (message.type === "physicalInput" || message.type === "killSwitch") {
         if (message.type === "physicalInput") this.physicalInputAt = this.now();
-        this.stop(message.type === "killSwitch" ? "kill-switch" : "user-input");
+        if (message.type === "killSwitch" || lease.current())
+          this.stop(message.type === "killSwitch" ? "kill-switch" : "user-input");
       } else if (message.type === "hello") {
         // A replacement helper starts suspended and has no remembered authorization.
         for (const authorization of this.grants.values())
@@ -326,10 +327,13 @@ export class ComputerController {
     const status = this.helper.status();
     if (!status.available)
       throw new ComputerControlError({ _tag: "Unavailable", reason: status.reason });
+    if (
+      this.paused.has(this.key(request.authorization)) &&
+      !["status", "listApps", "resolveApps"].includes(request.op)
+    )
+      throw new ComputerControlError({ _tag: "Interrupted", cause: "paused" });
     if (isComputerMutation(request.op)) {
       const holder = this.lease.current();
-      if (this.paused.has(this.key(request.authorization)))
-        throw new ComputerControlError({ _tag: "Interrupted", cause: "paused" });
       if (
         !holder ||
         !sameComputerHolder(holder, {

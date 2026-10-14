@@ -1,3 +1,4 @@
+import { ComputerGrantAuthority } from "./ComputerGrantAuthority";
 import type { ChildProcess } from "node:child_process";
 import { Schema } from "effect";
 import {
@@ -17,6 +18,7 @@ interface Backend {
   incarnation: string;
   ready: boolean;
   pendingAccess: Map<string, ComputerAccessRequested>;
+  acquisitions: Map<string, ComputerLeaseHolder>;
 }
 /** Inherited private process IPC is the only registration, execute and consent transport. */
 export class ComputerHostChannel {
@@ -33,15 +35,25 @@ export class ComputerHostChannel {
       certified: (provider: "claude" | "codex") => boolean;
       changed?: (holder: ChromeLeaseHolder | null) => void;
     },
+    private readonly grants = new ComputerGrantAuthority(
+      process.platform === "win32" ? "win32" : "darwin",
+    ),
   ) {}
   register(profileId: string, incarnation: string, child: ChildProcess): void {
     // Replacing an incarnation also revokes the old process's device authority.
     if (this.backends.has(profileId)) {
       this.backends.delete(profileId);
       this.controller.disconnect(profileId);
+      this.grants.disconnect(profileId);
       this.chrome.releaseProfile(profileId);
     }
-    const backend: Backend = { child, incarnation, ready: false, pendingAccess: new Map() };
+    const backend: Backend = {
+      child,
+      incarnation,
+      ready: false,
+      pendingAccess: new Map(),
+      acquisitions: new Map(),
+    };
     this.backends.set(profileId, backend);
     child.on("message", (raw: unknown) => {
       if (this.backends.get(profileId) !== backend) return;
@@ -106,7 +118,10 @@ export class ComputerHostChannel {
             const status = this.status();
             if (!status.available)
               throw new ComputerControlError({ _tag: "Unavailable", reason: status.reason });
+            if (backend.acquisitions.size >= 32)
+              throw new ComputerControlError({ _tag: "Busy", holder: "same-profile" });
             const result = this.controller.acquire(message.holder);
+            backend.acquisitions.set(message.requestId, result);
             this.send(profileId, { type: "response", requestId: message.requestId, result });
           } catch (error) {
             fail(message.requestId, error);
@@ -153,14 +168,31 @@ export class ComputerHostChannel {
         case "leaseRelease":
           if (message.holder.profileId === profileId) this.controller.lease.release(message.holder);
           break;
+        case "leaseAccepted":
+          backend.acquisitions.delete(message.requestId);
+          break;
+        case "grantForget":
+          this.grants.forget(profileId, message.projectId, message.appId);
+          break;
+        case "grantsValidate":
+          this.send(profileId, {
+            type: "response",
+            requestId: message.requestId,
+            result: this.grants.remembered(profileId, message.projectId, message.grants),
+          });
+          break;
         case "grantsChanged":
           if (message.authorization.profileId === profileId)
-            this.controller.updateGrants(message.authorization);
+            this.controller.updateGrants(this.grants.validate(message.authorization));
           break;
-        case "cancel":
+        case "cancel": {
+          const acquired = backend.acquisitions.get(message.requestId);
+          backend.acquisitions.delete(message.requestId);
+          if (acquired) this.controller.lease.release(acquired);
           backend.pendingAccess.delete(message.requestId);
           this.controller.cancel(message.requestId, profileId);
           break;
+        }
         case "pauseChanged":
           // Backend clients can narrow access. Only trusted local renderer IPC can resume.
           if (message.paused) {
@@ -182,6 +214,7 @@ export class ComputerHostChannel {
       if (this.backends.get(profileId) !== backend) return;
       this.backends.delete(profileId);
       this.controller.disconnect(profileId);
+      this.grants.disconnect(profileId);
       this.chrome.releaseProfile(profileId);
     };
     child.once("disconnect", disconnected);
@@ -227,13 +260,18 @@ export class ComputerHostChannel {
   }
   answerAccess(profileId: string, answer: ComputerAccessAnswer): void {
     const backend = this.backends.get(profileId);
+    const request = backend?.pendingAccess.get(answer.requestId);
     if (
       !backend?.ready ||
+      !request ||
       answer.backendIncarnation !== backend.incarnation ||
       !backend.pendingAccess.delete(answer.requestId)
     )
       throw new Error("This request expired or belongs to another backend.");
-    this.send(profileId, { type: "accessAnswer", answer });
+    this.send(profileId, {
+      type: "accessAnswer",
+      answer: request.kind === "apps" ? this.grants.issue(profileId, request, answer) : answer,
+    });
   }
   incarnation(profileId: string): string | undefined {
     return this.backends.get(profileId)?.incarnation;

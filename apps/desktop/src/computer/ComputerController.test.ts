@@ -450,3 +450,17 @@ it("rejects an expired deadline and old execution generation before input", asyn
     h.controller.close();
   }
 });
+
+it("blocks capture and inspection while paused, including when there is no lease", async () => {
+  const h = make();
+  try {
+    h.controller.setPaused("p", "t", true);
+    for (const op of ["screenshot", "zoom", "inspect"])
+      await expect(
+        h.controller.invoke(envelope(`paused-${op}`, auth, { op, appId: "com.apple.TextEdit" })),
+      ).rejects.toMatchObject({ error: { _tag: "Interrupted", cause: "paused" } });
+    expect(h.request).not.toHaveBeenCalled();
+  } finally {
+    h.controller.close();
+  }
+});

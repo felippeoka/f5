@@ -15,18 +15,19 @@ async function harness(
   const requests: ComputerAccessRequested[] = [];
   const save = vi.fn(async () => {});
   const changed = vi.fn();
+  const settled = vi.fn();
   const service = new ComputerAccessService({
     platform,
     backendIncarnation: "backend",
     storage: { load: async () => remembered, save },
     request: (request) => requests.push(request),
-    settled: vi.fn(),
+    settled,
     changed,
     timeoutMs: 50,
   });
   await service.initialize();
   service.bind("t", "p", "s");
-  return { service, requests, save, changed };
+  return { service, requests, save, changed, settled };
 }
 describe("server-owned computer grants", () => {
   it("explicitly upgrades click-only access to typing without re-prompting ordinary duplicate requests", async () => {
@@ -306,4 +307,51 @@ describe("server-owned computer grants", () => {
     expect(changed).toHaveBeenCalled();
     service.close();
   });
+});
+
+it("settles a failed remember write immediately without widening access", async () => {
+  const h = await harness();
+  h.save.mockRejectedValueOnce(new Error("disk failed"));
+  const pending = h.service.requestAccess("t", "turn", [app], "Edit");
+  await expect(
+    h.service.answerFromHost({
+      requestId: h.requests[0]!.requestId,
+      backendIncarnation: "backend",
+      decisions: [{ appId: app.appId, allow: true, allowTyping: false, remember: true }],
+    }),
+  ).rejects.toThrow("could not be saved");
+  await expect(pending).resolves.toBeNull();
+  expect(h.service.pendingRequests()).toEqual([]);
+  expect(h.service.grants("t")).toEqual([]);
+  expect(h.settled).toHaveBeenLastCalledWith(h.requests[0]!.requestId, "t", false);
+  h.service.close();
+});
+it("denying typing keeps clicks, and app denial is not reported as session approval", async () => {
+  const h = await harness([
+    { projectId: "p", appId: app.appId, tier: "click", allowTyping: false },
+  ]);
+  const session = h.service.requestAccess("t", "turn", [], "Actions", "session-actions");
+  await h.service.answerFromHost({
+    requestId: h.requests[0]!.requestId,
+    backendIncarnation: "backend",
+    decisions: [],
+    allowSessionActions: true,
+  });
+  await session;
+  const typing = h.service.requestAccess("t", "turn", [app], "Type", "apps", true);
+  await h.service.answerFromHost({
+    requestId: h.requests[1]!.requestId,
+    backendIncarnation: "backend",
+    decisions: [{ appId: app.appId, allow: false, allowTyping: false, remember: false }],
+  });
+  await typing;
+  expect(() => h.service.require("t", app.appId, "click")).not.toThrow();
+  expect(() => h.service.require("t", app.appId, "type")).toThrow();
+  expect(h.settled).toHaveBeenLastCalledWith(h.requests[1]!.requestId, "t", false);
+  h.service.clearSession("t");
+  h.service.bind("t", "p", "replacement");
+  const retry = h.service.requestAccess("t", "turn", [app], "Type", "apps", true);
+  expect(h.requests).toHaveLength(3);
+  h.service.close();
+  await retry;
 });

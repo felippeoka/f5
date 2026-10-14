@@ -3,6 +3,8 @@ import { release } from "node:os";
 
 /** Only signed, installed certification runs may open these gates. */
 export const COMPUTER_CONTROL_CERTIFIED = { darwin: false, win32: false } as const;
+/** Explicit opt-in preview availability is separate from signed-build certification. */
+export const COMPUTER_CONTROL_PREVIEW = { darwin: true, win32: false } as const;
 export const CHROME_CONTROL_CERTIFIED = {
   claude: { darwin: false, win32: false },
   codex: { darwin: false, win32: false },
@@ -30,7 +32,11 @@ export function computerCertificationStatus(
       reason: "os-too-old",
       detail: "Computer control requires macOS 14+ or Windows 10 2004+.",
     };
-  if (!COMPUTER_CONTROL_CERTIFIED[platform] && (packaged || devOverride !== "1"))
+  if (
+    !COMPUTER_CONTROL_CERTIFIED[platform] &&
+    !COMPUTER_CONTROL_PREVIEW[platform] &&
+    (packaged || devOverride !== "1")
+  )
     return {
       available: false,
       reason: "not-certified",

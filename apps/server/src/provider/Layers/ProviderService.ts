@@ -1970,10 +1970,6 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               .stopSession(routed.threadId)
               .pipe(Effect.ensuring(releaseControls));
           else yield* releaseControls;
-          // Unpin any hidden agent-controlled preview this session was using.
-          if (Option.isSome(previewAutomationBroker)) {
-            yield* previewAutomationBroker.value.releaseThread(input.threadId);
-          }
           yield* directory.upsert({
             threadId: input.threadId,
             provider: routed.adapter.provider,

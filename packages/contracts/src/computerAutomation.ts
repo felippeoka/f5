@@ -62,6 +62,7 @@ export type ComputerAutomationBackendStatus = typeof ComputerAutomationBackendSt
 export const ComputerAppTier = Schema.Literals(["blocked", "view", "click", "full"]);
 export type ComputerAppTier = typeof ComputerAppTier.Type;
 export const ComputerGrant = Schema.Struct({
+  receipt: Schema.optionalKey(Id),
   appId: Id,
   tier: ComputerAppTier,
   allowTyping: Schema.Boolean,
@@ -80,6 +81,7 @@ export const ComputerApp = Schema.Struct({
 });
 export type ComputerApp = typeof ComputerApp.Type;
 export const ComputerAuthorization = Schema.Struct({
+  projectId: Schema.optionalKey(Id),
   profileId: Id,
   threadId: Id,
   sessionGeneration: Id,
@@ -281,6 +283,8 @@ export const ComputerAutomationError = Schema.Union([
 ]);
 export type ComputerAutomationError = typeof ComputerAutomationError.Type;
 export const ComputerAccessRequested = Schema.Struct({
+  projectId: Schema.optionalKey(Id),
+  sessionGeneration: Schema.optionalKey(Id),
   requestId: Id,
   threadId: Id,
   reason: Schema.String.check(Schema.isMaxLength(500)),
@@ -311,6 +315,7 @@ export const ComputerAccessAnswer = Schema.Struct({
   decisions: Schema.Array(
     Schema.Struct({
       appId: Id,
+      receipt: Schema.optionalKey(Id),
       allow: Schema.Boolean,
       allowTyping: Schema.Boolean,
       remember: Schema.Boolean,
@@ -397,7 +402,14 @@ export const DesktopComputerHostMessage = Schema.Union([
     result: Schema.optional(Schema.Unknown),
     error: Schema.optional(ComputerAutomationError),
   }),
-  Schema.Struct({ type: Schema.Literal("cancel"), requestId: Id }),
+  Schema.Struct({ type: Schema.Literals(["cancel", "leaseAccepted"]), requestId: Id }),
+  Schema.Struct({ type: Schema.Literal("grantForget"), projectId: Id, appId: Id }),
+  Schema.Struct({
+    type: Schema.Literal("grantsValidate"),
+    requestId: Id,
+    projectId: Id,
+    grants: Schema.Array(ComputerGrant),
+  }),
   Schema.Struct({
     type: Schema.Literals(["leaseAcquire", "leaseRelease"]),
     requestId: Id,

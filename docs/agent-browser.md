@@ -6,6 +6,41 @@ per project in **Project settings → Conversation**. Every flag below is ANDed 
 `enableAgentBrowserAccess`. A checked-in `f5.json` can never set `previewExternalHosts`,
 `enableClaudeInChrome`, or `enableAgentComputerUse` (`USER_ONLY_PROJECT_SETTING_KEYS`).
 
+## macOS opt-in preview
+
+macOS 14+ native computer control is available in development and packaged builds as
+an **uncertified, opt-in preview**. In Settings → Browser and capture, enable Agent
+browser access and Computer use (preview), grant Screen Recording and Accessibility
+in System Settings, then start a new Claude or Codex turn and approve each app in
+F5's native dialog. Defaults remain off. Your input pauses control; ⌃⌘Esc stops it.
+Pause blocks screenshots, zoom and inspection as well as input. Status/app metadata
+remain available to explain the pause.
+
+This availability change does **not** certify the existing or new binaries. All
+`COMPUTER_CONTROL_CERTIFIED` constants remain false. Signed installed-build/TCC,
+full protection/display coverage and Windows interactive evidence remain pending.
+Windows, provider built-in computer control and Chrome integrations stay unavailable.
+Prior machine receipts remain evidence for their recorded binaries only.
+
+Project grants contain opaque receipts issued and checked by Electron main. Editing
+`computer-access.json` cannot mint an approval. In this preview, receipts live only
+in main memory: remembered approvals survive backend restarts while F5 is running,
+but restarting F5 requires genuine consent again. A session revoke also prevents
+replaying its old receipt. Native dialogs identify the bundle ID/executable and
+quote the agent's unverified reason after F5's own instructions.
+
+Every macOS desktop backend and its descendants run under a kernel sandbox that
+blocks Apple Events, WindowServer/capture/accessibility service connections,
+LaunchServices GUI launch, launchd job creation and privileged task ports. It applies
+even when computer use is off, because another profile or SnapShot may already have
+obtained F5's permissions. Filesystem/network coding tools retain their existing
+access; shell GUI automation must use F5's consent-mediated computer catalog.
+There is no unsandboxed fallback if the sandbox launcher fails.
+
+Every included window is audited for secure fields, including background apps and
+second windows. Missing, partial or timed-out accessibility scans hide the entire
+window. Consequently apps with unreadable accessibility trees can appear gray.
+
 ## Rule: tools installed, execution gated
 
 Preview tools are installed in every interactive desktop session. Each call resolves the
@@ -80,7 +115,7 @@ Sign-in popups stay with the user; the agent sees `popupOpen` in status and snap
 Computer control is opt-in and currently **awaiting certification** on both macOS and
 Windows. Linux reports `unsupported-platform`. The native implementation targets macOS
 14+ and Windows 10 2004+. Setting `F5_COMPUTER_CONTROL_DEV=1` enables local engineering
-validation only in unpackaged builds; it cannot enable a packaged release.
+validation only in unpackaged builds; it cannot enable a certified release. The macOS preview now has a separate explicit availability flag.
 
 For local use from this checkout, build with `bun run build:desktop`, quit any
 existing F5 instance, then launch with
@@ -89,7 +124,7 @@ in Settings → Integrations, grant the missing OS permissions, and start a new
 provider session. The root desktop launch also passes this development flag
 through Turbo. A running app must be restarted to receive the flag; setting it
 in a different shell cannot change the existing process. This remains an
-uncertified development path, and the flag is ignored by packaged builds.
+uncertified development path, and the flag is ignored by packaged builds. macOS preview availability is explicitly enabled by `COMPUTER_CONTROL_PREVIEW`, independently of certification.
 
 Electron main is the device authority. Every profile backend inherits a private Node IPC
 channel with an incarnation UUID and a versioned hello. There is no network computer host
@@ -178,17 +213,19 @@ not prompted again within the same turn. Full-tier native approval explicitly sa
 **Allow control and typing**. Unknown apps retain the plan's full-tier ceiling; identity
 classification is not a sandbox and consent is required for every app.
 
-Grants last for the provider session, across turns. “Always allow in this project” writes
-server-owned `computer-access.json` under `ServerConfig.stateDir`, through serialized
-atomic writes. Invalid or incompatible files are quarantined with their original bytes
+Grants last for the provider session, across turns. “Remember for this project while F5
+is running” writes main-issued receipts to server-owned `computer-access.json` under
+`ServerConfig.stateDir`, through serialized atomic writes. Invalid or incompatible files are quarantined with their original bytes
 preserved and startup continues without remembered grants. If quarantine fails, remembering
 is disabled until storage is repaired. Session deny overrides a remembered grant. Revoke narrows live access;
-Forget removes a remembered grant from project settings. Restart retains remembered
-grants and drops session grants. Settings patches and model tool calls cannot add grants.
-An agent with unrestricted filesystem write access can still edit these files; the
-no-widening guarantee applies to the tool and consent paths.
+Forget removes a remembered grant from project settings. A backend restart retains
+remembered grants only while desktop main remains open; restarting F5 expires them.
+Settings patches and model tool calls cannot add grants. Filesystem edits cannot
+mint a main-owned approval receipt, widen its rights or reuse a receipt after it has
+been revoked in that session. Unrestricted filesystem access still permits modifying
+other user files; these grants are not a general filesystem sandbox.
 These controls govern F5's computer tools, not every command an unrestricted shell
-can run. A separate AppleScript/`osascript` or native Accessibility program is subject
+can run. For desktop macOS profiles, separate AppleScript/`osascript`, capture and native Accessibility programs are blocked by the backend sandbox rather than inheriting F5 permissions. For separately launched headless servers, such programs are subject
 to macOS permissions and its own execution policy; the F5 computer lease and pause
 cannot supervise an independent process that bypasses this tool interface.
 

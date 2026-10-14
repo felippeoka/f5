@@ -3072,19 +3072,20 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             )
             .map((thread) => [thread.id, usageLimitKey(thread.session)]),
         );
-        const refreshResumes = (): Effect.Effect<void> =>
+        const refreshResumes = (attempt = 0): Effect.Effect<void> =>
           Effect.gen(function* () {
             const refreshed = yield* usageService.refreshAccount(body.providerInstanceId);
             if (!refreshed.fresh || !refreshed.snapshot) {
               const retryAt = Date.parse(refreshed.nextAllowedAt ?? "");
               if (
                 (result.outcome === "reset" || result.outcome === "alreadyRedeemed") &&
-                Number.isFinite(retryAt)
+                Number.isFinite(retryAt) &&
+                attempt < 3
               )
                 // The hint can elapse between the capability's refusal and this
                 // check. Retry through its real throttle instead of dropping it.
                 yield* Effect.sleep(Math.max(50, retryAt - Date.now())).pipe(
-                  Effect.andThen(Effect.suspend(refreshResumes)),
+                  Effect.andThen(Effect.suspend(() => refreshResumes(attempt + 1))),
                   Effect.forkIn(subscriptionsScope),
                 );
               return;

@@ -294,3 +294,69 @@ describe("computer persistence sanitization", () => {
     });
   });
 });
+
+it("preserves projected assistant text while redacting nested tool blocks", () => {
+  const sanitizer = new AutomationEventSanitizer();
+  sanitizer.register("mixed", provenance);
+  const raw = {
+    type: "assistant",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "text", text: "I'll take a screenshot." },
+        {
+          type: "tool_use",
+          id: "computer-tool",
+          name: "mcp__f5_computer__computer_type",
+          input: { text: "SECRET_SENTINEL" },
+        },
+      ],
+    },
+  };
+  const safe = sanitizer.sanitize("mixed", {
+    type: "content.delta",
+    itemId: "assistant-text",
+    payload: { streamKind: "assistant_text", delta: "I'll take a screenshot." },
+    raw,
+  }) as any;
+  expect(safe.payload.delta).toBe("I'll take a screenshot.");
+  expect(JSON.stringify(sanitizer.sanitize("mixed", raw))).toContain("I'll take a screenshot.");
+  expect(JSON.stringify(safe)).not.toContain("SECRET_SENTINEL");
+  expect(sanitizer.isComputerItem("mixed", "assistant-text")).toBe(false);
+  const completed = sanitizer.sanitize("mixed", {
+    type: "item.completed",
+    itemId: "assistant-text",
+    payload: {
+      itemType: "assistant_message",
+      detail: "I'll take a screenshot.",
+      title: "Assistant message",
+    },
+    raw,
+  }) as any;
+  expect(completed.payload.detail).toBe("I'll take a screenshot.");
+  expect(JSON.stringify(completed)).not.toContain("SECRET_SENTINEL");
+});
+it("retains old tool identities until the adapter has stopped its event stream", () => {
+  const sanitizer = new AutomationEventSanitizer();
+  const release = sanitizer.retain("restart");
+  sanitizer.register("restart", provenance);
+  sanitizer.sanitize("restart", {
+    type: "tool_use",
+    id: "old-call",
+    name: "mcp__f5_computer__computer_inspect",
+    input: {},
+  });
+  sanitizer.clear("restart");
+  sanitizer.register("restart", provenance);
+  expect(
+    JSON.stringify(
+      sanitizer.sanitize("restart", {
+        type: "tool_result",
+        tool_use_id: "old-call",
+        content: [{ type: "text", text: "SECRET_SENTINEL" }],
+      }),
+    ),
+  ).not.toContain("SECRET_SENTINEL");
+  release();
+  expect(sanitizer.isComputerItem("restart", "old-call")).toBe(false);
+});

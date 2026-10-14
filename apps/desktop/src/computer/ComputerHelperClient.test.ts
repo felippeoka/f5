@@ -132,6 +132,8 @@ describe("computer helper supervision", () => {
       expect(h.client.status()).toMatchObject({ available: false, reason: "helper-crashed" });
       vi.mocked(spawn).mockReturnValue(child());
       h.client.retry();
+      current.emit("exit", null, "SIGKILL");
+      await vi.advanceTimersByTimeAsync(0);
       expect(spawn).toHaveBeenCalledTimes(4);
     } finally {
       clearInterval(heartbeat);
@@ -185,14 +187,16 @@ describe("computer helper supervision", () => {
     });
     expect(event.mock.calls.filter(([message]) => message.type === "status")).toHaveLength(1);
   });
-  it("ignores buffered messages from a retired helper", () => {
+  it("ignores buffered messages from a retired helper", async () => {
     const h = make();
     ready(h);
     const replacement = child();
     vi.mocked(spawn).mockReturnValue(replacement);
     h.client.retry();
     h.emit({ type: "status", status: { available: true } });
+    h.process.emit("exit", null, "SIGKILL");
     expect(h.client.status()).toMatchObject({ available: false, reason: "helper-missing" });
+    await vi.advanceTimersByTimeAsync(0);
     replacement.stdout.emit("data", JSON.stringify({ type: "hello", protocolVersion: 1 }) + "\n");
     replacement.stdout.emit(
       "data",
@@ -207,6 +211,7 @@ describe("computer helper supervision", () => {
     const replacement = child();
     vi.mocked(spawn).mockReturnValue(replacement);
     h.client.retry();
+    h.process.emit("exit", null, "SIGKILL");
     await suspended;
     await vi.advanceTimersByTimeAsync(300);
     expect(replacement.kill).not.toHaveBeenCalled();
@@ -269,4 +274,25 @@ describe("computer helper supervision", () => {
     expect(spawn).toHaveBeenCalledTimes(2);
     expect(h.client.status().available).toBe(false);
   });
+});
+
+it("rejects malformed helper errors without losing the in-flight mutation", async () => {
+  const h = make();
+  ready(h);
+  const pending = h.client.request(request("malformed"), extra);
+  const rejected = expect(pending).rejects.toMatchObject({ error: { _tag: "OutcomeUnknown" } });
+  h.emit({ type: "response", requestId: "malformed", error: { _tag: "UnknownError" } });
+  await rejected;
+  expect(h.process.kill).toHaveBeenCalledWith("SIGKILL");
+});
+it("retry waits for the old worker exit before reacquiring its device lock", async () => {
+  const h = make();
+  ready(h);
+  vi.mocked(spawn).mockReturnValue(child());
+  h.client.retry();
+  await vi.advanceTimersByTimeAsync(100);
+  expect(spawn).toHaveBeenCalledTimes(1);
+  h.process.emit("exit", null, "SIGKILL");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(spawn).toHaveBeenCalledTimes(2);
 });

@@ -6727,6 +6727,13 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           enabled: startBrowserPolicy.computerUse,
           nativeStatus: computerStatus ?? { available: false, reason: "no-host" },
         });
+        const existingContext = sessions.get(threadId);
+        if (
+          existingContext &&
+          computerDecision.selection?.kind === "native" &&
+          !input.workflowExecutionProfile
+        )
+          yield* stopSessionInternal(existingContext, { emitExitEvent: false });
         const computerServer =
           serverConfig.mode === "desktop" &&
           !input.workflowExecutionProfile &&
@@ -6972,10 +6979,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           };
         }
 
-        const existingContext = sessions.get(threadId);
-        if (existingContext) {
+        if (existingContext && !existingContext.stopped)
           yield* stopSessionInternal(existingContext, { emitExitEvent: false });
-        }
 
         if (
           existingResumeSessionId &&

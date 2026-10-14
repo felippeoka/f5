@@ -109,6 +109,23 @@ export class AutomationEventSanitizer {
   private readonly items = new Map<string, AutomationToolProvenance>();
   private readonly blocks = new Map<string, AutomationToolProvenance>();
   private readonly overflow = new Set<string>();
+  private readonly retainers = new Map<string, number>();
+  private readonly pendingClear = new Set<string>();
+  /** An adapter owns provenance until its event producer/consumer has stopped. */
+  retain(threadId: string): () => void {
+    this.retainers.set(threadId, (this.retainers.get(threadId) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const count = (this.retainers.get(threadId) ?? 1) - 1;
+      if (count) this.retainers.set(threadId, count);
+      else {
+        this.retainers.delete(threadId);
+        if (this.pendingClear.delete(threadId)) this.clear(threadId);
+      }
+    };
+  }
   constructor(private readonly itemLimit = 65_536) {}
   private remember(
     threadId: string,
@@ -131,6 +148,10 @@ export class AutomationEventSanitizer {
     ]);
   }
   clear(threadId: string): void {
+    if (this.retainers.has(threadId)) {
+      this.pendingClear.add(threadId);
+      return;
+    }
     this.servers.delete(threadId);
     this.overflow.delete(threadId);
     for (const map of [this.items, this.blocks])
@@ -233,7 +254,17 @@ export class AutomationEventSanitizer {
             ? record.name
             : "";
       const itemId = record.tool_use_id ?? record.itemId ?? record.id;
-      const provenance = lookup(record) ?? inherited;
+      const payload = record.payload as Record<string, unknown> | undefined;
+      const assistantEnvelope =
+        (record.type === "content.delta" &&
+          (payload?.streamKind === "assistant_text" || payload?.kind === "text")) ||
+        payload?.itemType === "assistant_message" ||
+        record.type === "assistant" ||
+        record.role === "assistant" ||
+        record.type === "user" ||
+        record.type === "text" ||
+        record.type === "text_delta";
+      const provenance = assistantEnvelope ? undefined : (lookup(record) ?? inherited);
       // Codex reports the server and tool separately inside data.item. Rebuild
       // the identity only for the server registered by this session's adapter.
       if (
@@ -245,7 +276,8 @@ export class AutomationEventSanitizer {
         record.tool.length <= 200
       )
         name = `mcp__${provenance.serverName}__${record.tool}`;
-      if (provenance && typeof itemId === "string") this.remember(threadId, itemId, provenance);
+      if (provenance && typeof itemId === "string" && !assistantEnvelope)
+        this.remember(threadId, itemId, provenance);
       if (record.type === "content_block_start" && typeof record.index === "number") {
         const block = record.content_block as Record<string, unknown> | undefined;
         const blockName = typeof block?.name === "string" ? block.name : "";

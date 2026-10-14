@@ -44,6 +44,8 @@ describe("computer installation fingerprint", () => {
       "monitor-unhealthy",
       "helper-crashed",
       "helper-missing",
+      "no-host",
+      "not-certified",
     ] as const) {
       const recovered = await Effect.runPromise(
         resolveComputerBackendSelection({

@@ -1,3 +1,4 @@
+import { isolatedBackendCommand } from "./backendComputerIsolation";
 import { profilePreviewPartition } from "./profileRuntime";
 import { CaptureShortcut } from "./snapShot/CaptureShortcut";
 import { captureBoundedPage } from "./preview/capture";
@@ -2861,7 +2862,8 @@ function startBackend(runtime: BackendRuntime = defaultBackend): void {
 
   const backendIncarnation = Crypto.randomUUID();
   const captureBackendLogs = app.isPackaged && backendLogSink !== null;
-  const child = ChildProcess.spawn(process.execPath, [backendEntry], {
+  const isolated = isolatedBackendCommand(process.platform, process.execPath, backendEntry);
+  const child = ChildProcess.spawn(isolated.executable, isolated.args, {
     cwd: resolveBackendCwd(),
     // In Electron main, process.execPath points to the Electron binary.
     // Run the child in Node mode so this backend process does not become a GUI app instance.

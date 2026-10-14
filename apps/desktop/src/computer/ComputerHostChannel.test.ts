@@ -237,3 +237,36 @@ describe("private computer host channel", () => {
     expect(h.controller.disconnect).toHaveBeenCalledTimes(2);
   });
 });
+
+it("releases an unacknowledged acquisition when the backend times out, using the exact holder", () => {
+  const h = setup();
+  h.hello();
+  const holder = {
+    profileId: "profile",
+    threadId: "t",
+    sessionGeneration: "s",
+    turnId: "turn",
+    executionGeneration: 7,
+    grantVersion: 1,
+    grants: [],
+    backend: "native" as const,
+    threadTitle: "Thread",
+  };
+  const acquire = vi.fn(() => holder);
+  const release = vi.fn();
+  Object.assign(h.controller, { acquire, cancel: vi.fn() });
+  Object.assign(h.controller.lease, { release });
+  h.process.emit("message", {
+    type: "leaseAcquire",
+    requestId: "late",
+    holder: { ...holder, executionGeneration: 1 },
+  });
+  h.process.emit("message", { type: "cancel", requestId: "late" });
+  expect(release).toHaveBeenCalledExactlyOnceWith(holder);
+  h.process.emit("message", { type: "cancel", requestId: "late" });
+  expect(release).toHaveBeenCalledOnce();
+  h.process.emit("message", { type: "leaseAcquire", requestId: "accepted", holder });
+  h.process.emit("message", { type: "leaseAccepted", requestId: "accepted" });
+  h.process.emit("message", { type: "cancel", requestId: "accepted" });
+  expect(release).toHaveBeenCalledOnce();
+});

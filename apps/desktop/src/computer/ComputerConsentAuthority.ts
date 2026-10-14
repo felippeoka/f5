@@ -2,6 +2,11 @@ import type { ComputerAccessAnswer, ComputerAccessRequested } from "@t3tools/con
 import { appTier, restrictComputerTier, type ComputerPlatform } from "@t3tools/shared/computerApps";
 import type { MessageBoxOptions, MessageBoxReturnValue } from "electron";
 
+const quoteUntrusted = (value: string) =>
+  JSON.stringify(
+    value.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, " ").slice(0, 500),
+  );
+
 /** Renderer gestures only open a prompt. Only main's native dialog can widen access. */
 export class ComputerConsentAuthority {
   private readonly pending = new Set<string>();
@@ -30,10 +35,13 @@ export class ComputerConsentAuthority {
         const choice = await this.options.show(profileId, {
           type: "warning",
           title: "F5 computer access",
-          message: request.reason,
+          message:
+            request.kind === "chrome-setup"
+              ? "Allow browser integration setup?"
+              : "Allow session computer actions?",
           detail: setup
             ? `Current browser targets:\n${setup.previousTargets.join("\n")}\nNew target:\n${setup.targetPath}\nThis integration can act on sites you are signed in to.`
-            : "Allow this agent session to control apps you separately approve?",
+            : `Allow this agent session to control apps you separately approve?\nAgent’s unverified reason: ${quoteUntrusted(request.reason)}`,
           buttons: ["Deny", "Allow"],
           defaultId: 0,
           cancelId: 0,
@@ -56,8 +64,8 @@ export class ComputerConsentAuthority {
           const choice = await this.options.show(profileId, {
             type: "warning",
             title: "F5 computer access",
-            message: `Allow access to ${app.name}?`,
-            detail: `${request.reason}\n${tier === "view" ? "Viewing only." : tier === "click" ? "Typing here can run commands. Choose typing separately." : "Control includes typing in this app."}${app.warning === "browser" ? "\nThis app can act on sites you are signed in to." : ""}`,
+            message: `Allow access to ${quoteUntrusted(app.name)}?`,
+            detail: `${tier === "view" ? "Viewing only." : tier === "click" ? "Typing here can run commands. Choose typing separately." : "Control includes typing in this app."}${app.warning === "browser" ? "\nThis app can act on sites you are signed in to." : ""}\nApp identity: ${quoteUntrusted(app.appId)}\nAgent’s unverified reason: ${quoteUntrusted(request.reason)}`,
             buttons:
               tier === "click"
                 ? ["Deny", "Allow clicks", "Allow clicks and typing"]
@@ -65,7 +73,7 @@ export class ComputerConsentAuthority {
             defaultId: 0,
             cancelId: 0,
             noLink: true,
-            checkboxLabel: "Always allow in this project",
+            checkboxLabel: "Remember for this project while F5 is running",
             checkboxChecked: false,
           });
           decisions.push({

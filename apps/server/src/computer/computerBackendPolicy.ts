@@ -76,8 +76,13 @@ export function resolveComputerBackendSelection(input: {
       fingerprint: JSON.stringify({
         enabled: input.enabled,
         preference,
-        kind: selection?.kind,
-        toolsInstalled: selection?.kind === "native",
+        // Health/handshake changes are reflected live, not by replacing a provider session.
+        // An explicit built-in selection change still schedules next-turn fallback.
+        builtin:
+          selection?.kind === "claude-builtin" || selection?.kind === "codex-builtin"
+            ? selection.kind
+            : null,
+        platform: process.platform,
       }),
     };
   });

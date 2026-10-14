@@ -15,8 +15,8 @@ export function ComputerSettings() {
   return (
     <>
       <SettingsRow
-        title="Computer use"
-        description="Let Claude and Codex see and control apps you approve. Press ⌃⌘Esc (Ctrl+Alt+Shift+F12 on Windows) to stop."
+        title="Computer use (preview)"
+        description="Opt-in macOS preview: let Claude and Codex see and control apps you approve. Signed-build safety certification is pending. Press ⌃⌘Esc to stop; your input pauses control. Project approvals expire when F5 closes. Windows remains unavailable."
         control={
           <Switch
             aria-label="Let agents control this computer"
@@ -34,7 +34,7 @@ export function ComputerSettings() {
             : !status
               ? "Checking…"
               : status.available
-                ? "F5 computer control ready"
+                ? "F5 computer control preview ready"
                 : `${status.reason}${status.detail ? `: ${status.detail}` : ""}`
         }
         control={

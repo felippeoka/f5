@@ -50,6 +50,7 @@ export class ComputerAccessService {
       settled: (requestId: string, threadId: string, allowed: boolean) => void;
       changed: (threadId: string) => void;
       timeoutMs?: number;
+      forgotten?: (projectId: string, appId: string) => void;
     },
   ) {}
   async initialize(): Promise<void> {
@@ -75,6 +76,9 @@ export class ComputerAccessService {
       actionsApproved: false,
     });
   }
+  projectId(threadId: string): string | undefined {
+    return this.bindings.get(threadId)?.projectId;
+  }
   version(threadId: string): number {
     return this.bindings.get(threadId)?.version ?? 0;
   }
@@ -92,7 +96,12 @@ export class ComputerAccessService {
         .filter((grant) => grant.projectId === binding.projectId)
         .map((grant) => [
           grant.appId,
-          { appId: grant.appId, tier: grant.tier, allowTyping: grant.allowTyping },
+          {
+            appId: grant.appId,
+            tier: grant.tier,
+            allowTyping: grant.allowTyping,
+            ...(grant.receipt ? { receipt: grant.receipt } : {}),
+          },
         ]),
     );
     for (const [appId, grant] of binding.overrides) {
@@ -152,6 +161,8 @@ export class ComputerAccessService {
     if (existing) throw new ComputerControlError({ _tag: "Busy", holder: "same-profile" });
     const request: ComputerAccessRequested = {
       requestId: randomUUID(),
+      projectId: binding.projectId,
+      sessionGeneration: binding.generation,
       threadId,
       reason: reason.slice(0, 500),
       kind,
@@ -193,6 +204,7 @@ export class ComputerAccessService {
         const decision = answer.decisions.find((entry) => entry.appId === app.appId);
         return {
           appId: app.appId,
+          ...(decision?.receipt ? { receipt: decision.receipt } : {}),
           allow: app.tier !== "blocked" && decision?.allow === true,
           allowTyping: app.tier === "click" && decision?.allowTyping === true,
           remember: decision?.remember === true,
@@ -211,18 +223,31 @@ export class ComputerAccessService {
             appId: app.appId,
             tier: app.tier,
             allowTyping: decision.allowTyping,
+            ...(decision.receipt ? { receipt: decision.receipt } : {}),
           });
         }
       const rememberChanged = decisions.some((decision) => decision.allow && decision.remember);
-      if (rememberChanged) await this.options.storage.save(next);
+      if (rememberChanged) {
+        try {
+          await this.options.storage.save(next);
+        } catch {
+          this.deny(answer.requestId);
+          throw new Error(
+            "Computer access was denied because the remembered grant could not be saved.",
+          );
+        }
+      }
       // A turn can end while storage is being written. Never revive its session grants.
       if (
         this.pending.get(answer.requestId) !== pending ||
         this.bindings.get(pending.request.threadId) !== binding ||
         binding.version !== approvalVersion
       ) {
-        if (rememberChanged) await this.options.storage.save(this.remembered);
-        this.deny(answer.requestId);
+        try {
+          if (rememberChanged) await this.options.storage.save(this.remembered);
+        } finally {
+          this.deny(answer.requestId);
+        }
         return;
       }
       this.remembered = next;
@@ -238,10 +263,17 @@ export class ComputerAccessService {
             `${pending.request.threadId}\0${pending.turnId}\0${decision.appId}\0typing`,
           );
         const app = pending.request.apps.find((entry) => entry.appId === decision.appId)!;
+        // Declining a typing upgrade never revokes an existing viewing/click grant.
+        if (pending.request.typingRequested && !decision.allow) continue;
         binding.overrides.set(
           app.appId,
           decision.allow
-            ? { appId: app.appId, tier: app.tier, allowTyping: decision.allowTyping }
+            ? {
+                appId: app.appId,
+                tier: app.tier,
+                allowTyping: decision.allowTyping,
+                ...(decision.receipt ? { receipt: decision.receipt } : {}),
+              }
             : null,
         );
         if (!decision.allow)
@@ -262,7 +294,9 @@ export class ComputerAccessService {
       this.options.settled(
         answer.requestId,
         pending.request.threadId,
-        decisions.some((decision) => decision.allow) || binding.actionsApproved,
+        pending.request.kind === "session-actions"
+          ? binding.actionsApproved
+          : decisions.some((decision) => decision.allow),
       );
     };
     const result = this.writes.then(task);
@@ -275,7 +309,9 @@ export class ComputerAccessService {
     this.pending.delete(requestId);
     clearTimeout(pending.timer);
     for (const app of pending.request.apps)
-      this.deniedThisTurn.add(`${pending.request.threadId}\0${pending.turnId}\0${app.appId}`);
+      this.deniedThisTurn.add(
+        `${pending.request.threadId}\0${pending.turnId}\0${app.appId}${pending.request.typingRequested ? "\0typing" : ""}`,
+      );
     if (pending.request.kind === "session-actions")
       this.deniedThisTurn.add(`${pending.request.threadId}\0${pending.turnId}\0session-actions`);
     pending.resolve(null);
@@ -314,13 +350,14 @@ export class ComputerAccessService {
       const next = this.remembered.filter(
         (grant) => grant.projectId !== projectId || grant.appId !== appId,
       );
-      await this.options.storage.save(next);
+      this.options.forgotten?.(projectId, appId);
       this.remembered = next;
       for (const [threadId, binding] of this.bindings)
         if (binding.projectId === projectId) {
           ++binding.version;
           this.options.changed(threadId);
         }
+      await this.options.storage.save(next);
     });
     this.writes = result.catch(() => undefined);
     return result;
@@ -336,9 +373,12 @@ export class ComputerAccessService {
     for (const [id, pending] of this.pending)
       if (pending.request.threadId === threadId) this.deny(id);
     this.bindings.delete(threadId);
+    for (const key of this.deniedThisTurn)
+      if (key.startsWith(`${threadId}\0`)) this.deniedThisTurn.delete(key);
   }
   close(): void {
     for (const requestId of this.pending.keys()) this.deny(requestId);
     this.bindings.clear();
+    this.deniedThisTurn.clear();
   }
 }

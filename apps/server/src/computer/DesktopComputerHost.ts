@@ -34,7 +34,7 @@ export class DesktopComputerHost {
     this.connected = true;
     this.state = {
       available: false,
-      reason: "helper-missing",
+      reason: "no-host",
       detail: "Waiting for desktop host.",
     };
     ipc.on("message", this.receive);

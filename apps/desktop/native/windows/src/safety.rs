@@ -218,7 +218,8 @@ pub fn parse_chord(raw: &str) -> Result<Vec<u16>, &'static str> {
         };
         codes.push(code)
     }
-    if codes.contains(&0x5b) && (codes.contains(&(b'L' as u16)) || codes.contains(&(b'R' as u16)))
+    if codes.contains(&0x5b)
+        || codes.contains(&0x11) && codes.contains(&0x1b)
         || codes.contains(&0x11) && codes.contains(&0x12) && codes.contains(&0x2e)
         || codes.contains(&0x11)
             && codes.contains(&0x12)
@@ -252,7 +253,17 @@ mod keyboard_tests {
     use super::*;
     #[test]
     fn protected_and_kill_chords_cannot_be_injected() {
-        for chord in ["Ctrl+Alt+Delete", "win+l", "Meta+R", "Ctrl+Alt+Shift+F12"] {
+        for chord in [
+            "Ctrl+Alt+Delete",
+            "win+l",
+            "Meta+R",
+            "Ctrl+Alt+Shift+F12",
+            "Meta",
+            "Meta+I",
+            "Meta+E",
+            "Meta+X",
+            "Ctrl+Esc",
+        ] {
             assert_eq!(parse_chord(chord), Err("system-ui"));
         }
         assert_eq!(parse_chord("CTRL+a"), Ok(vec![0x11, 0x41]));
@@ -285,11 +296,16 @@ mod keyboard_tests {
     }
     #[test]
     fn focused_owner_or_password_change_stops_before_the_next_event() {
-        for changed in [(Some(21), Some(false)), (Some(20), Some(true)), (Some(20), None)] {
+        for changed in [
+            (Some(21), Some(false)),
+            (Some(20), Some(true)),
+            (Some(20), None),
+        ] {
             let states = [(Some(20), Some(false)), changed];
-            let delivered = states.iter().take_while(|(pid, password)| {
-                focused_element_block(20, *pid, *password).is_none()
-            }).count();
+            let delivered = states
+                .iter()
+                .take_while(|(pid, password)| focused_element_block(20, *pid, *password).is_none())
+                .count();
             assert_eq!(delivered, 1);
         }
     }
@@ -299,6 +315,56 @@ mod keyboard_tests {
             assert!(!hooks_healthy(probe, probe - 1, probe));
             assert!(!hooks_healthy(probe - 1, probe, probe));
             assert!(hooks_healthy(probe, probe, probe));
+        }
+    }
+}
+
+/// Validation precedes every Unicode character, even within one 32-character chunk.
+pub fn deliver_characters<E>(
+    characters: impl IntoIterator<Item = char>,
+    mut validate: impl FnMut() -> Result<(), E>,
+    mut emit: impl FnMut(char) -> Result<(), E>,
+) -> Result<(), E> {
+    for character in characters {
+        validate()?;
+        emit(character)?;
+    }
+    Ok(())
+}
+#[cfg(test)]
+mod character_delivery_tests {
+    use super::*;
+    use std::cell::Cell;
+    #[test]
+    fn changed_focus_in_the_same_window_stops_after_one_character() {
+        let focus = Cell::new(1);
+        let mut delivered = String::new();
+        let result = deliver_characters(
+            "first chunk".chars(),
+            || {
+                if focus.get() == 1 {
+                    Ok(())
+                } else {
+                    Err("focus-unknown")
+                }
+            },
+            |character| {
+                delivered.push(character);
+                focus.set(2);
+                Ok(())
+            },
+        );
+        assert_eq!(result, Err("focus-unknown"));
+        assert_eq!(delivered, "f");
+    }
+    #[test]
+    fn rejected_shell_chords_emit_no_input() {
+        for chord in ["Meta", "Meta+I", "Meta+E", "Meta+X", "Ctrl+Esc"] {
+            let mut events = 0;
+            if let Ok(codes) = parse_chord(chord) {
+                events += codes.len();
+            }
+            assert_eq!(events, 0);
         }
     }
 }

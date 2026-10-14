@@ -185,12 +185,13 @@ export class ComputerHelperClient implements ComputerHelper {
     } else if (message.type === "response" && typeof message.requestId === "string") {
       const pending = this.pending.get(message.requestId);
       if (!pending) return;
+      // Decode before removing the entry so protocol failure rejects it via fail().
+      const error = message.error
+        ? new ComputerControlError(Schema.decodeUnknownSync(ErrorSchema)(message.error))
+        : undefined;
       this.pending.delete(message.requestId);
       clearTimeout(pending.timer);
-      if (message.error)
-        pending.reject(
-          new ComputerControlError(Schema.decodeUnknownSync(ErrorSchema)(message.error)),
-        );
+      if (error) pending.reject(error);
       else pending.resolve(message.result);
     }
     for (const listener of this.listeners) listener(message);
@@ -302,8 +303,30 @@ export class ComputerHelperClient implements ComputerHelper {
     this.child = null;
     this.ready = false;
     this.fail({ available: false, reason: "helper-missing" });
+    const exited = this.childExited;
     child?.kill("SIGKILL");
-    this.start();
+    if (!child) this.start();
+    else void this.restartAfterExit(exited);
+  }
+  private async restartAfterExit(exited: Promise<void>): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const confirmed = await Promise.race([
+        exited.then(() => true),
+        new Promise<boolean>((done) => {
+          timer = setTimeout(() => done(false), 2000);
+        }),
+      ]);
+      if (confirmed) this.start();
+      else
+        this.fail({
+          available: false,
+          reason: "helper-crashed",
+          detail: "Previous helper has not exited. Retry after it exits.",
+        });
+    } finally {
+      clearTimeout(timer);
+    }
   }
   onEvent(callback: (message: Record<string, unknown>) => void): () => void {
     this.listeners.add(callback);

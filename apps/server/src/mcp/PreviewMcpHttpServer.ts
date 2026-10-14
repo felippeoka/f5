@@ -1,3 +1,4 @@
+import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
 import {
   ComputerAutomationBroker,
   type ComputerAutomationBrokerRuntime,
@@ -477,6 +478,8 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
         input.existingServerNames,
       );
       const generation = `codex:${randomUUID()}`;
+      const releaseProvenance =
+        catalog === "computer" ? automationEventSanitizer.retain(input.threadId) : undefined;
       if (catalog === "computer") computer!.bindSession(input.threadId, generation, "codex");
       const geometry = new ComputerToolGeometry();
       const offComputer =
@@ -511,6 +514,7 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
         disposed = true;
         offComputer?.();
         if (catalog === "computer") computer?.releaseSession(input.threadId, generation);
+        releaseProvenance?.();
         const storedToken = tokenByEnvVar.get(envVarName);
         tokenByEnvVar.delete(envVarName);
         if (storedToken) {

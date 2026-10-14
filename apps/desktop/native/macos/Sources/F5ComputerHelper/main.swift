@@ -239,7 +239,11 @@ func installMonitor() {
         suspend("killSwitch")
         return Unmanaged.passUnretained(event)
       }
-      if !permit.isSuspended {
+      do {
+        func physicalInput() {
+          if permit.isSuspended { emit(["type": "physicalInput", "idle": true]) }
+          else { suspend("physicalInput") }
+        }
         if type == .mouseMoved {
           let now = ProcessInfo.processInfo.systemUptime
           if now - physicalWindowStarted > 0.25 {
@@ -249,10 +253,10 @@ func installMonitor() {
           if let previous = lastPhysicalPoint,
             hypot(event.location.x - previous.x, event.location.y - previous.y) > 8
           {
-            suspend("physicalInput")
+            physicalInput()
           }
         } else {
-          suspend("physicalInput")
+          physicalInput()
         }
       }
       return Unmanaged.passUnretained(event)
@@ -734,51 +738,82 @@ func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws ->
         x: floor(x), y: Double(captureHeight) - ceil(y + h), width: ceil(w) + 2, height: ceil(h) + 2
       ))
   }
-  if let front = NSWorkspace.shared.frontmostApplication,
-    apps.contains(where: { $0.processID == front.processIdentifier })
-  {
-    let root = applicationElement(front.processIdentifier)
-    if let window = axElement(attribute(root, kAXFocusedWindowAttribute)) {
-      var visited = 0
-      let deadline = ProcessInfo.processInfo.systemUptime + 1
-      func mask(_ element: AXUIElement, depth: Int) {
-        if depth > 30 || visited >= 4000 || ProcessInfo.processInfo.systemUptime >= deadline {
-          maskIncomplete = true
-          return
-        }
-        visited += 1
-        guard let role = attribute(element, kAXRoleAttribute) as? String else {
-          maskIncomplete = true
-          return
-        }
-        if role == "AXSecureTextField"
-          || (attribute(element, kAXSubroleAttribute) as? String) == "AXSecureTextField"
-        {
-          if let rect = axRect(element) { fillMask(rect) } else { maskIncomplete = true }
-        }
-        var children: CFTypeRef?
-        let status = AXUIElementCopyAttributeValue(
-          element, kAXChildrenAttribute as CFString, &children)
-        if status != .success && status != .attributeUnsupported && status != .noValue {
-          maskIncomplete = true
-        }
-        for child in children as? [AXUIElement] ?? [] {
-          mask(child, depth: depth + 1)
-          if maskIncomplete { break }
-        }
-      }
-      mask(window, depth: 0)
-      if maskIncomplete, let rect = axRect(window) { fillMask(rect) }
-    } else {
-      maskIncomplete = true
-    }
-    if maskIncomplete {
-      for record in windows()
-      where integer(record, kCGWindowOwnerPID as String) == Int(front.processIdentifier) {
-        if let rect = windowRect(record) { fillMask(rect) }
-      }
-    }
+  let capturedWindows = content.windows.filter { window in
+    captureApps.contains { $0.processID == window.owningApplication?.processID }
+      && computerCaptureWindowIntersectsDisplay(window: window.frame, display: target.bounds)
   }
+  let maskDeadline = ProcessInfo.processInfo.systemUptime + 1
+  var appWindows: [pid_t: [AXUIElement]] = [:]
+  let masks = computerSecureCaptureMasks(windows: capturedWindows.map(\.frame)) { index in
+    let captured = capturedWindows[index]
+    guard ProcessInfo.processInfo.systemUptime < maskDeadline,
+      let pid = captured.owningApplication?.processID else { return nil }
+    if appWindows[pid] == nil {
+      let root = applicationElement(pid)
+      appWindows[pid] = attribute(root, kAXWindowsAttribute) as? [AXUIElement] ?? []
+    }
+    // Resolve this exact captured window. Ambiguous or missing AX ownership is hidden.
+    let matches = (appWindows[pid] ?? []).filter { element in
+      guard let rect = axRect(element) else { return false }
+      return abs(rect.minX - captured.frame.minX) < 1
+        && abs(rect.minY - captured.frame.minY) < 1
+        && abs(rect.width - captured.frame.width) < 1
+        && abs(rect.height - captured.frame.height) < 1
+    }
+    guard matches.count == 1 else { return nil }
+    var secureRects: [CGRect] = []
+    var complete = true
+    var visited = 0
+    func mask(_ element: AXUIElement, depth: Int) {
+      if depth > 30 || visited >= 4000 || ProcessInfo.processInfo.systemUptime >= maskDeadline {
+        complete = false
+        return
+      }
+      visited += 1
+      guard let role = attribute(element, kAXRoleAttribute) as? String else {
+        complete = false
+        return
+      }
+      if role == "AXSecureTextField"
+        || (attribute(element, kAXSubroleAttribute) as? String) == "AXSecureTextField" {
+        if let rect = axRect(element) { secureRects.append(rect) } else { complete = false }
+      }
+      var children: CFTypeRef?
+      let status = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+      if status != .success && status != .attributeUnsupported && status != .noValue {
+        complete = false
+      }
+      for child in children as? [AXUIElement] ?? [] {
+        mask(child, depth: depth + 1)
+        if !complete { break }
+      }
+    }
+    mask(matches[0], depth: 0)
+    return complete ? secureRects : nil
+  }
+  maskIncomplete = masks.incomplete
+  for rect in masks.rects { fillMask(rect) }
+  // Capture and AX traversal are separate OS calls. If a granted window moved,
+  // appeared or disappeared, old mask coordinates cannot establish safe pixels.
+  let after: SCShareableContent
+  do {
+    after = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+  } catch {
+    throw Failure("Unavailable", "reason", "missing-permissions",
+      captureFailure: computerCaptureFailureDiagnostic(stage: .shareableContent, error: error))
+  }
+  let afterWindows = after.windows.filter { window in
+    captureApps.contains { $0.processID == window.owningApplication?.processID }
+      && computerCaptureWindowIntersectsDisplay(window: window.frame, display: target.bounds)
+  }
+  if capturedWindows.count != afterWindows.count || capturedWindows.contains(where: { before in
+    !afterWindows.contains { $0.windowID == before.windowID && $0.frame == before.frame
+      && $0.owningApplication?.processID == before.owningApplication?.processID }
+  }) {
+    maskIncomplete = true
+    fillMask(target.bounds)
+  }
+  try checkGrants(request)
   guard var encoded = canvas.makeImage() else {
     throw Failure("Execution", "message", "Unable to encode capture.")
   }

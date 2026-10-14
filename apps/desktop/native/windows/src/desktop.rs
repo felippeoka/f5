@@ -611,6 +611,8 @@ unsafe extern "system" fn key_hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
                 interrupt_from_hook(true)
             } else if state.armed.load(Ordering::SeqCst) {
                 interrupt_from_hook(false)
+            } else {
+                state.pending_input.fetch_max(1, Ordering::SeqCst);
             }
         }
     }
@@ -625,9 +627,13 @@ unsafe extern "system" fn mouse_hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT
                 .mouse_probe
                 .store(state.started.elapsed().as_millis() as u64, Ordering::SeqCst);
             return LRESULT(1);
-        } else if input.dwExtraInfo != MARK && state.armed.load(Ordering::SeqCst) {
+        } else if input.dwExtraInfo != MARK {
             if w.0 as u32 != WM_MOUSEMOVE {
-                interrupt_from_hook(false)
+                if state.armed.load(Ordering::SeqCst) {
+                    interrupt_from_hook(false)
+                } else {
+                    state.pending_input.fetch_max(1, Ordering::SeqCst);
+                }
             } else {
                 thread_local! {static LAST:std::cell::RefCell<(Instant,POINT)>=std::cell::RefCell::new((Instant::now(),POINT{x:0,y:0}));}
                 LAST.with(|last| {
@@ -635,7 +641,11 @@ unsafe extern "system" fn mouse_hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT
                     if last.0.elapsed() > Duration::from_millis(250) {
                         *last = (Instant::now(), input.pt);
                     } else if (input.pt.x - last.1.x).pow(2) + (input.pt.y - last.1.y).pow(2) > 64 {
-                        interrupt_from_hook(false)
+                        if state.armed.load(Ordering::SeqCst) {
+                            interrupt_from_hook(false)
+                        } else {
+                            state.pending_input.fetch_max(1, Ordering::SeqCst);
+                        }
                     }
                 })
             }
@@ -1090,7 +1100,7 @@ unsafe fn capture(request: &Value, host: &Value) -> Result<Value, Value> {
         };
         let old = SelectObject(dc, HGDIOBJ(bitmap.0));
         let success = PrintWindow(hwnd, dc, PRINT_WINDOW_FLAGS(2)).as_bool();
-        if success && !bits.is_null() {
+        if success && !bits.is_null() && authorize(hwnd, request, host, "view").is_ok() {
             let pixels =
                 std::slice::from_raw_parts(bits as *const u8, width as usize * height as usize * 4);
             let bounds = |rect: RECT| crate::composition::CaptureRect {
@@ -1109,45 +1119,52 @@ unsafe fn capture(request: &Value, host: &Value) -> Result<Value, Value> {
                 hidden = true;
             }
         }
+        {
+            let mut current_bounds = RECT::default();
+            let mut incomplete = GetWindowRect(hwnd, &mut current_bounds).is_err()
+                || current_bounds.left != capture_rect.left
+                || current_bounds.top != capture_rect.top
+                || current_bounds.right != capture_rect.right
+                || current_bounds.bottom != capture_rect.bottom;
+            let tree = automation().and_then(|uia| {
+                uia.ElementFromHandle(hwnd)
+                    .map_err(|_| blocked("focus-unknown"))
+            });
+            if let Ok(root) = tree {
+                let (elements, complete) = walk_checked(&root, 4000);
+                incomplete |= !complete;
+                if root.CurrentProcessId().ok().map(|id| id as u32) != Some(pid(hwnd)) {
+                    incomplete = true;
+                }
+                for element in elements {
+                    match element.CurrentIsPassword() {
+                        Ok(password) if password.as_bool() => {
+                            if let Ok(rect) = element.CurrentBoundingRectangle() {
+                                if rect.right <= rect.left || rect.bottom <= rect.top {
+                                    incomplete = true;
+                                } else {
+                                    mask_rect(&mut canvas, rect, &target.bounds);
+                                }
+                            } else {
+                                incomplete = true;
+                            }
+                        }
+                        Err(_) => incomplete = true,
+                        _ => {}
+                    }
+                }
+            } else {
+                incomplete = true;
+            }
+            if incomplete {
+                hidden = true;
+                // The captured buffer is positioned at the original frame, even if the live window moved.
+                mask_rect(&mut canvas, capture_rect, &target.bounds);
+            }
+        }
         SelectObject(dc, old);
         let _ = DeleteObject(HGDIOBJ(bitmap.0));
         let _ = DeleteDC(dc);
-    }
-    let front = GetForegroundWindow();
-    if authorize(front, request, host, "view").is_ok() {
-        let mut incomplete;
-        let tree = automation().and_then(|uia| {
-            uia.ElementFromHandle(front)
-                .map_err(|_| blocked("focus-unknown"))
-        });
-        if let Ok(root) = tree {
-            let (elements, complete) = walk_checked(&root, 4000);
-            incomplete = !complete;
-            for element in elements {
-                match element.CurrentIsPassword() {
-                    Ok(password) if password.as_bool() => {
-                        if let Ok(rect) = element.CurrentBoundingRectangle() {
-                            mask_rect(&mut canvas, rect, &target.bounds);
-                        } else {
-                            incomplete = true;
-                        }
-                    }
-                    Err(_) => incomplete = true,
-                    _ => {}
-                }
-            }
-        } else {
-            incomplete = true;
-        }
-        if incomplete {
-            hidden = true;
-            let mut bounds = RECT::default();
-            if GetWindowRect(front, &mut bounds).is_ok() {
-                mask_rect(&mut canvas, bounds, &target.bounds);
-            } else {
-                canvas = RgbaImage::from_pixel(w, h, Rgba([115, 115, 115, 255]));
-            }
-        }
     }
     check_grants(request)?;
     if select_display(request)?.generation != target.generation {
@@ -1596,51 +1613,60 @@ unsafe fn execute(message: &Value) -> Result<Value, Value> {
                 }
                 for chunk in chars.chunks(32) {
                     validate()?;
-                    for character in chunk {
-                        let mut units = [0u16; 2];
-                        for unit in character.encode_utf16(&mut units) {
-                            for flags in [KEYEVENTF_UNICODE, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP] {
-                                check(request)?;
-                                let _gate = STATE.get().unwrap().input_gate.lock().unwrap();
-                                if !flags.contains(KEYEVENTF_KEYUP) {
-                                    STATE
-                                        .get()
-                                        .unwrap()
-                                        .held_unicode
-                                        .lock()
-                                        .unwrap()
-                                        .insert(*unit);
-                                }
-                                check(request)?;
-                                // Cheap per-event ownership guard; expensive UIA focus/security checks
-                                // remain at Unicode-safe chunk boundaries.
-                                if GetForegroundWindow() != initial_hwnd {
-                                    return Err(blocked("focus-unknown"));
-                                }
-                                send(INPUT {
-                                    r#type: INPUT_KEYBOARD,
-                                    Anonymous: INPUT_0 {
-                                        ki: KEYBDINPUT {
-                                            wVk: VIRTUAL_KEY(0),
-                                            wScan: *unit,
-                                            dwFlags: flags,
-                                            time: 0,
-                                            dwExtraInfo: MARK,
+                    crate::safety::deliver_characters(
+                        chunk.iter().copied(),
+                        || validate(),
+                        |character| {
+                            let mut units = [0u16; 2];
+                            for unit in character.encode_utf16(&mut units) {
+                                for flags in
+                                    [KEYEVENTF_UNICODE, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP]
+                                {
+                                    check(request)?;
+                                    let _gate = STATE.get().unwrap().input_gate.lock().unwrap();
+                                    if !flags.contains(KEYEVENTF_KEYUP) {
+                                        STATE
+                                            .get()
+                                            .unwrap()
+                                            .held_unicode
+                                            .lock()
+                                            .unwrap()
+                                            .insert(*unit);
+                                    }
+                                    check(request)?;
+                                    // Secure-field/focus checks also precede every UTF-16 down event.
+                                    if !flags.contains(KEYEVENTF_KEYUP) {
+                                        validate()?;
+                                    }
+                                    if GetForegroundWindow() != initial_hwnd {
+                                        return Err(blocked("focus-unknown"));
+                                    }
+                                    send(INPUT {
+                                        r#type: INPUT_KEYBOARD,
+                                        Anonymous: INPUT_0 {
+                                            ki: KEYBDINPUT {
+                                                wVk: VIRTUAL_KEY(0),
+                                                wScan: *unit,
+                                                dwFlags: flags,
+                                                time: 0,
+                                                dwExtraInfo: MARK,
+                                            },
                                         },
-                                    },
-                                })?;
-                                if flags.contains(KEYEVENTF_KEYUP) {
-                                    STATE
-                                        .get()
-                                        .unwrap()
-                                        .held_unicode
-                                        .lock()
-                                        .unwrap()
-                                        .remove(unit);
+                                    })?;
+                                    if flags.contains(KEYEVENTF_KEYUP) {
+                                        STATE
+                                            .get()
+                                            .unwrap()
+                                            .held_unicode
+                                            .lock()
+                                            .unwrap()
+                                            .remove(unit);
+                                    }
                                 }
                             }
-                        }
-                    }
+                            Ok(())
+                        },
+                    )?;
                     std::thread::sleep(Duration::from_millis(10));
                 }
             } else {

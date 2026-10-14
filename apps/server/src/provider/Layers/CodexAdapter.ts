@@ -2472,6 +2472,9 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
             : undefined;
         // Registered before launch so `session/configured` can report the installed server.
         if (previewMcpSession) previewMcpSessions.set(input.threadId, previewMcpSession);
+        // Retire the old event producer before disposing its computer provenance.
+        if (computerMcpSessions.has(input.threadId) && manager.hasSession(input.threadId))
+          manager.stopSession(input.threadId);
         computerMcpSessions.get(input.threadId)?.dispose();
         computerMcpSessions.delete(input.threadId);
         computerDecisions.delete(input.threadId);
@@ -2877,6 +2880,7 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
 
     const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const prepareRuntimeEvent = yield* makeAutomationRuntimeEventPreparer;
+
     const turnStartedAtByThread = new Map<ThreadId, string>();
     const limitsByThread = new Map<
       ThreadId,
@@ -2897,8 +2901,11 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           });
 
         const services = yield* Effect.services<never>();
-        const listener = (event: ProviderEvent) =>
-          Effect.gen(function* () {
+        const listener = (event: ProviderEvent) => {
+          // Retain synchronously at admission: asynchronous logging/image storage
+          // can still be running when a replacement retires this provider process.
+          const releaseProvenance = automationEventSanitizer.retain(event.threadId);
+          return Effect.gen(function* () {
             if (isSyntheticOneOffThreadId(event.threadId)) {
               return;
             }
@@ -2952,7 +2959,8 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
               return;
             }
             yield* Queue.offerAll(runtimeEventQueue, safeRuntimeEvents);
-          }).pipe(Effect.runPromiseWith(services));
+          }).pipe(Effect.ensuring(Effect.sync(releaseProvenance)), Effect.runPromiseWith(services));
+        };
         manager.on("event", listener);
         return listener;
       }),

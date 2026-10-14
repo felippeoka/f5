@@ -417,3 +417,17 @@ describe("computer broker safety boundaries", () => {
     }
   });
 });
+
+it("refuses screenshots, zoom and inspection while paused", async () => {
+  const h = await harness();
+  try {
+    h.broker.setPaused("t", true);
+    for (const op of ["screenshot", "zoom", "inspect"] as const)
+      await expect(h.broker.invoke("t", "s", { op })).rejects.toMatchObject({
+        error: { _tag: "Interrupted", cause: "paused" },
+      });
+    expect(h.ipc.messages.filter((message) => message.type === "request")).toEqual([]);
+  } finally {
+    h.broker.close();
+  }
+});

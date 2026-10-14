@@ -13,8 +13,8 @@ export function RememberedComputerApps({ projectId }: { projectId: ProjectId }) 
   }, [projectId]);
   return (
     <SettingsCard
-      title="Always-allowed computer apps"
-      description="Add apps through a computer access request. Forget removes the remembered grant for future sessions."
+      title="Remembered computer apps"
+      description="Approvals are remembered only while F5 is running. Restarting F5 requires fresh consent. Forget removes the grant for future sessions."
     >
       {grants.length ? (
         grants.map((grant) => (
