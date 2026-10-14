@@ -1206,7 +1206,7 @@ describe("WebSocket Server", () => {
     ["reset", true, true, true],
   ] as const)(
     "refreshes after reset-credit outcome %s (recent refresh: %s; elapsed retry hint: %s) with the real account throttle",
-    async (outcome, recentRefresh, elapsedRetryHint, persistentRefusal = false) => {
+    async (outcome, recentRefresh, elapsedRetryHint, persistentRefusal: boolean = false) => {
       const instanceId = ProviderInstanceId.makeUnsafe("claudeAgent-credit-test");
       let refreshCalls = 0;
       let probeCalls = 0;
