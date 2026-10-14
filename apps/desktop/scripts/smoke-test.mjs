@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -55,7 +55,7 @@ try {
       output = (output + chunk.toString()).slice(-65_536);
     });
   }
-  const page = await application.firstWindow({ timeout: 60_000 });
+  let page = await application.firstWindow({ timeout: 60_000 });
   const errors = [];
   page.on("requestfailed", (request) =>
     console.error(
@@ -297,6 +297,74 @@ try {
   ) {
     throw new Error("Composer draft was not restored after reload");
   }
+  // Stop keeps the window and its immutable preload URL, just like an exited backend.
+  const stopDefaultBackend = () =>
+    application.evaluate(({ Menu }) => {
+      const profile = Menu.getApplicationMenu()
+        .items.flatMap((item) => item.submenu?.items ?? [])
+        .find((item) => item.label === "Default");
+      const stop = profile?.submenu?.items.find((item) => item.label === "Stop");
+      if (!stop) throw new Error("Missing default profile Stop action");
+      stop.click();
+    });
+  const waitForBackend = (expected) =>
+    page.waitForFunction(
+      async ({ origin, expected }) => {
+        try {
+          return (await fetch(`${origin}/api/bootstrap`)).ok === expected;
+        } catch {
+          return !expected;
+        }
+      },
+      { origin: backendOrigin, expected },
+      { timeout: 60_000 },
+    );
+  const retainedWsUrl = await page.evaluate(() => window.desktopBridge.getWsUrl());
+  const retainedRendererUrl = page.url();
+  const recoveryCount = () =>
+    readFileSync(join(state, "logs", "desktop-main.log"), "utf8").split(
+      "profile open ready profile=",
+    ).length - 1;
+  const waitForRecovery = async (previousCount) => {
+    const deadline = Date.now() + 60_000;
+    while (recoveryCount() <= previousCount) {
+      if (Date.now() > deadline) throw new Error("Profile recovery did not finish");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await waitForBackend(true);
+  };
+  await stopDefaultBackend();
+  await waitForBackend(false);
+  const beforeSecondInstance = recoveryCount();
+  await application.evaluate(({ app }) => app.emit("second-instance", {}, [], ""));
+  await waitForRecovery(beforeSecondInstance);
+  if ((await page.evaluate(() => window.desktopBridge.getWsUrl())) !== retainedWsUrl)
+    throw new Error("Reopening changed the retained window's connection");
+  if (
+    (await page.locator('[contenteditable="true"]').innerText()) !== "**a****b**\n# Title **bold**"
+  )
+    throw new Error("Backend recovery changed the retained composer draft");
+  if (process.platform === "darwin") {
+    await stopDefaultBackend();
+    await waitForBackend(false);
+    await application.evaluate(({ BrowserWindow }) => {
+      for (const window of BrowserWindow.getAllWindows()) window.close();
+    });
+    const beforeActivate = recoveryCount();
+    const reopened = application.waitForEvent("window");
+    await application.evaluate(({ app }) => app.emit("activate"));
+    page = await reopened;
+    page.on("pageerror", (error) => errors.push(error.message));
+    await waitForRecovery(beforeActivate);
+    await page.goto(retainedRendererUrl);
+    await page.locator('[contenteditable="true"]').waitFor({ timeout: 60_000 });
+    await waitForBackend(true);
+    if (
+      (await page.locator('[contenteditable="true"]').innerText()) !==
+      "**a****b**\n# Title **bold**"
+    )
+      throw new Error("Dock recovery did not restore the saved composer draft");
+  }
   await page.screenshot({ path: join(directory, "workspace.png") });
   if (errors.length) throw new Error(errors.join("\n"));
   await page.evaluate(() => window.desktopBridge.setAttentionBadge(3));
@@ -318,6 +386,8 @@ try {
   await application.evaluate(({ app }) => app.quit());
   await page.waitForTimeout(300);
   if (electronProcess.exitCode !== null) throw new Error("Draft veto did not cancel quit");
+  await application.evaluate(({ app }) => app.emit("activate"));
+  await waitForBackend(true);
   if (
     !(await application.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows().some((window) => window.isVisible()),

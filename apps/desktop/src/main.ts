@@ -41,6 +41,9 @@ import {
   profileWindowArguments,
   singleProfileOpen,
   ensureProfileConnection,
+  ensureProfileBackend,
+  isProfileBackendRunning,
+  waitForProfileBackend,
   MAX_ACTIVE_PROFILE_BACKENDS,
 } from "./profileRuntime";
 import { profilesRootDir } from "@t3tools/shared/profilePaths";
@@ -103,6 +106,7 @@ import {
   authorizeDesktopBackendRequestHeaders,
   DESKTOP_BACKEND_REQUEST_FILTER,
   getDesktopBackendWebSocketUrl,
+  getDesktopBackendHttpOrigin,
 } from "./backendRequestAuth";
 import { showDesktopConfirmDialog } from "./confirmDialog";
 import { syncShellEnvironment } from "./syncShellEnvironment";
@@ -1972,7 +1976,7 @@ function writeDesktopStreamChunk(
 }
 
 function installStdIoCapture(): void {
-  if (!app.isPackaged || desktopLogSink === null || restoreStdIoCapture !== null) {
+  if (desktopLogSink === null || restoreStdIoCapture !== null) {
     return;
   }
 
@@ -2010,8 +2014,7 @@ function installStdIoCapture(): void {
   };
 }
 
-function initializePackagedLogging(): void {
-  if (!app.isPackaged) return;
+function initializeDesktopLogging(): void {
   try {
     desktopLogSink = new RotatingFileSink({
       filePath: Path.join(LOG_DIR, "desktop-main.log"),
@@ -2027,22 +2030,30 @@ function initializePackagedLogging(): void {
     writeDesktopLogHeader(`runtime log capture enabled logDir=${LOG_DIR}`);
   } catch (error) {
     // Logging setup should never block app startup.
-    console.error("[desktop] failed to initialize packaged logging", error);
+    console.error("[desktop] failed to initialize desktop logging", error);
   }
 }
 
 function captureBackendOutput(child: ChildProcess.ChildProcess, profileSlug: string): void {
-  if (!app.isPackaged || backendLogSink === null) return;
-  const writeChunk = (chunk: unknown): void => {
-    if (!backendLogSink) return;
+  if (backendLogSink === null) return;
+  const writeChunk = (stream: "stdout" | "stderr") => (chunk: unknown) => {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), "utf8");
-    backendLogSink.write(Buffer.concat([Buffer.from(`[${profileSlug}] `), buffer]));
+    backendLogSink?.write(Buffer.concat([Buffer.from(`[${profileSlug}] `), buffer]));
+    if (!app.isPackaged) process[stream].write(buffer);
   };
-  child.stdout?.on("data", writeChunk);
-  child.stderr?.on("data", writeChunk);
+  child.stdout?.on("data", writeChunk("stdout"));
+  child.stderr?.on("data", writeChunk("stderr"));
 }
 
-initializePackagedLogging();
+initializeDesktopLogging();
+process.on("uncaughtExceptionMonitor", (error) => {
+  writeDesktopLogHeader(`uncaught exception: ${error.stack ?? error.message}`);
+});
+app.on("child-process-gone", (_event, details) => {
+  writeDesktopLogHeader(
+    `child process gone type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`,
+  );
+});
 
 function getDestructiveMenuIcon(): Electron.NativeImage | undefined {
   if (process.platform !== "darwin") return undefined;
@@ -2861,7 +2872,7 @@ function startBackend(runtime: BackendRuntime = defaultBackend): void {
   }
 
   const backendIncarnation = Crypto.randomUUID();
-  const captureBackendLogs = app.isPackaged && backendLogSink !== null;
+  const captureBackendLogs = backendLogSink !== null;
   const isolated = isolatedBackendCommand(process.platform, process.execPath, backendEntry);
   const child = ChildProcess.spawn(isolated.executable, isolated.args, {
     cwd: resolveBackendCwd(),
@@ -2900,13 +2911,14 @@ function startBackend(runtime: BackendRuntime = defaultBackend): void {
   });
 
   child.on("exit", (code, signal) => {
+    const current = runtime.backendProcess === child;
     if (runtime.backendProcess === child) {
       runtime.backendProcess = null;
     }
     closeBackendSession(
       `pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`,
     );
-    if (isQuitting || runtime.stopped) return;
+    if (!current || isQuitting || runtime.stopped) return;
     if (code === 78) {
       runtime.stopped = true;
       let message = "Profile startup failed. Check its registry, lock, and configured port.";
@@ -3010,12 +3022,70 @@ async function stopBackendAndWaitForExit(
   if (runtime.backendProcess === backendChild) runtime.backendProcess = null;
 }
 
+let bootstrapReady: Promise<void> = Promise.resolve();
+let lastOpenedProfileId = defaultBackend.profile.id;
+
+async function ensureBackendRunning(runtime: BackendRuntime): Promise<void> {
+  await ensureProfileBackend(runtime, {
+    stop: () => stopBackendAndWaitForExit(5000, runtime),
+    prepare: async () => {
+      if (isQuitting) throw new Error("F5 is shutting down.");
+      const otherBackends = [...backends.values()].filter(
+        (entry) => entry !== runtime && (!entry.stopped || isProfileBackendRunning(entry)),
+      );
+      if (otherBackends.length >= MAX_ACTIVE_PROFILE_BACKENDS)
+        throw new Error("Six profiles are already running. Stop one before opening another.");
+      await ensureProfileConnection(
+        runtime,
+        () =>
+          Effect.runPromise(
+            Effect.service(NetService).pipe(
+              Effect.flatMap((net) => net.reserveLoopbackPort()),
+              Effect.provide(NetService.layer),
+            ),
+          ),
+        () => Crypto.randomBytes(24).toString("hex"),
+        getDesktopBackendWebSocketUrl,
+      );
+      await shellEnvironmentReady;
+      if (isQuitting) throw new Error("F5 is shutting down.");
+      configureBackendRequestAuthentication(runtime);
+    },
+    start: () => {
+      writeDesktopLogHeader(`starting profile backend profile=${runtime.profile.id}`);
+      startBackend(runtime);
+    },
+    ready: () =>
+      waitForProfileBackend(
+        () => !isQuitting && !runtime.stopped && isProfileBackendRunning(runtime),
+        async () => {
+          try {
+            const response = await fetch(
+              `${getDesktopBackendHttpOrigin(runtime.backendPort)}/api/bootstrap`,
+              {
+                headers: { Authorization: `Bearer ${runtime.backendAuthToken}` },
+                signal: AbortSignal.timeout(1000),
+                redirect: "error",
+              },
+            );
+            await response.body?.cancel();
+            return response.ok;
+          } catch {
+            return false;
+          }
+        },
+      ),
+  });
+}
+
 const openProfile = singleProfileOpen(async (id) => {
   try {
+    await bootstrapReady;
+    if (isQuitting) return false;
     return await openProfileOnce(id);
   } catch (cause) {
     const runtime = backends.get(id);
-    if (runtime && !runtime.backendProcess) runtime.stopped = true;
+    if (runtime && !runtime.backendProcess && !runtime.restartTimer) runtime.stopped = true;
     throw cause;
   }
 });
@@ -3027,43 +3097,31 @@ async function openProfileOnce(profileId: string): Promise<boolean> {
   const existingWindow = BrowserWindow.getAllWindows().find(
     (window) => profileByWebContentsId.get(window.webContents.id) === profileId,
   );
-  if (existingWindow && backends.has(profileId) && !backends.get(profileId)!.stopped) {
-    existingWindow.show();
-    existingWindow.focus();
-    return true;
-  }
-  let runtime = backends.get(profileId);
-  if (runtime?.stopped && runtime.backendProcess) await stopBackendAndWaitForExit(5000, runtime);
-  if (!runtime || runtime.stopped) {
-    if (
-      [...backends.values()].filter((entry) => !entry.stopped || entry.backendProcess !== null)
-        .length >= MAX_ACTIVE_PROFILE_BACKENDS
-    )
-      throw new Error("Six profiles are already running. Stop one before opening another.");
-    runtime = runtime ?? makeBackendRuntime(profile);
-    runtime.stopped = false;
-    runtime.restartAttempt = 0;
-    backends.set(profileId, runtime);
-    await ensureProfileConnection(
-      runtime,
-      () =>
-        Effect.runPromise(
-          Effect.service(NetService).pipe(
-            Effect.flatMap((net) => net.reserveLoopbackPort()),
-            Effect.provide(NetService.layer),
-          ),
-        ),
-      () => Crypto.randomBytes(24).toString("hex"),
-      getDesktopBackendWebSocketUrl,
-    );
-    configureBackendRequestAuthentication(runtime);
-    startBackend(runtime);
-  }
-  if (existingWindow) {
+  const runtime = backends.get(profileId) ?? makeBackendRuntime(profile);
+  backends.set(profileId, runtime);
+  await ensureBackendRunning(runtime);
+  if (isQuitting) return false;
+  if (existingWindow && !existingWindow.isDestroyed()) {
+    if (existingWindow.isMinimized()) existingWindow.restore();
     existingWindow.show();
     existingWindow.focus();
   } else createWindow(null, runtime);
+  lastOpenedProfileId = profile.id;
+  writeDesktopLogHeader(`profile open ready profile=${profile.id}`);
   return true;
+}
+
+function reopenApplication(): void {
+  if (!app.isReady() || isQuitting) return;
+  const window = BrowserWindow.getFocusedWindow();
+  const profileId =
+    (window && profileByWebContentsId.get(window.webContents.id)) ?? lastOpenedProfileId;
+  void openProfile(profileId).catch((error) => {
+    writeDesktopLogHeader(
+      `profile reopen failed profile=${profileId}: ${formatErrorMessage(error)}`,
+    );
+    if (!isQuitting) dialog.showErrorBox("Cannot reopen F5", formatErrorMessage(error));
+  });
 }
 
 function registerIpcHandlers(): void {
@@ -3613,6 +3671,9 @@ function createWindow(
 
   appRendererWebContentsIds.add(window.webContents.id);
   profileByWebContentsId.set(window.webContents.id, runtime.profile.id);
+  window.on("focus", () => {
+    lastOpenedProfileId = runtime.profile.id;
+  });
   window.webContents.once("destroyed", () =>
     appRendererWebContentsIds.delete(rendererWebContentsId),
   );
@@ -3738,18 +3799,7 @@ function createWindow(
 app.setPath("userData", resolveUserDataPath());
 
 if (!app.requestSingleInstanceLock()) app.exit(0);
-app.on("second-instance", () => {
-  const window = BrowserWindow.getAllWindows()[0];
-  if (window) {
-    if (window.isMinimized()) window.restore();
-    window.show();
-    window.focus();
-  } else if (app.isReady()) {
-    void openProfile(defaultBackend.profile.id).catch((error) =>
-      dialog.showErrorBox("Cannot open Default", String(error)),
-    );
-  }
-});
+app.on("second-instance", reopenApplication);
 configureAppIdentity();
 
 async function bootstrap(): Promise<void> {
@@ -3797,8 +3847,8 @@ async function bootstrap(): Promise<void> {
   await shellEnvironmentReady;
   writeDesktopLogHeader("bootstrap shell environment ready");
   if (!isQuitting) {
-    startBackend();
-    writeDesktopLogHeader("bootstrap backend start requested");
+    await ensureBackendRunning(defaultBackend);
+    writeDesktopLogHeader("bootstrap backend ready");
   }
 }
 
@@ -3807,6 +3857,7 @@ installDesktopAttention((id) => profileByWebContentsId.get(id));
 let shutdownPending = false;
 let shutdownComplete = false;
 function cancelQuit(): void {
+  writeDesktopLogHeader("quit cancelled by renderer");
   shutdownPending = false;
   shutdownComplete = false;
   isQuitting = false;
@@ -3842,6 +3893,7 @@ app.on("web-contents-created", (_event, contents) => {
   });
 });
 app.on("before-quit", () => {
+  writeDesktopLogHeader("before-quit received");
   isQuitting = true;
 });
 app.on("will-quit", (event) => {
@@ -3866,15 +3918,12 @@ app
     configureApplicationMenu();
     registerDesktopProtocol();
     configureAutoUpdater();
-    void bootstrap().catch((error) => {
+    bootstrapReady = bootstrap();
+    void bootstrapReady.catch((error) => {
       handleFatalStartupError("bootstrap", error);
     });
 
-    app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
-        mainWindow = createWindow();
-      }
-    });
+    app.on("activate", reopenApplication);
   })
   .catch((error) => {
     handleFatalStartupError("whenReady", error);
