@@ -11,9 +11,14 @@ const record = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v);
 
 /** Distinguish observer faults from evaluator transport failures without error I/O. */
-export function profileSnapshotEnvelope<T>(read: () => T) {
+export function profileSnapshotEnvelope(read: () => unknown) {
   try {
-    return { value: read(), failed: false as const };
+    // The observer already discards raw I/O. Send its complete snapshot as one
+    // bounded string instead of passing the growing tree through CDP's serializer.
+    const value = JSON.stringify(read());
+    if (typeof value !== "string" || Buffer.byteLength(value, "utf8") > 512 * 1024)
+      return { failed: true as const };
+    return { value, failed: false as const };
   } catch {
     return { failed: true as const };
   }

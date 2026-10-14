@@ -8,13 +8,41 @@ import {
 
 it("separates observer faults from transport failure without retaining exception contents", () => {
   const snapshot = { traceComplete: true };
-  expect(profileSnapshotEnvelope(() => snapshot)).toEqual({ failed: false, value: snapshot });
-  expect(profileSnapshotEnvelope(() => undefined)).toEqual({ failed: false, value: undefined });
+  expect(profileSnapshotEnvelope(() => snapshot)).toEqual({
+    failed: false,
+    value: JSON.stringify(snapshot),
+  });
+  expect(profileSnapshotEnvelope(() => undefined)).toEqual({ failed: true });
   const failed = profileSnapshotEnvelope(() => {
     throw new Error("PRIVATE_SENTINEL");
   });
   expect(failed).toEqual({ failed: true });
   expect(JSON.stringify(failed)).not.toContain("PRIVATE");
+});
+
+it("preserves full-budget observation fields and fails closed on oversized or circular snapshots", () => {
+  const snapshot = {
+    traceComplete: false,
+    profiles: [0, 1].map(() => ({
+      foreignImages: true,
+      native: {
+        operations: Array.from({ length: 1024 }, () => ({
+          op: "inspect",
+          outcome: "ok",
+          accessible: true,
+          nodes: 20,
+        })),
+      },
+    })),
+  };
+  const envelope = profileSnapshotEnvelope(() => snapshot);
+  expect(envelope.failed).toBe(false);
+  if (!envelope.failed) expect(JSON.parse(envelope.value)).toEqual(snapshot);
+  expect(profileSnapshotEnvelope(() => "x".repeat(512 * 1024))).toEqual({ failed: true });
+  expect(profileSnapshotEnvelope(() => "Ω".repeat(256 * 1024))).toEqual({ failed: true });
+  const cyclic: { self?: unknown } = {};
+  cyclic.self = cyclic;
+  expect(profileSnapshotEnvelope(() => cyclic)).toEqual({ failed: true });
 });
 
 it("rechecks the live lease when a terminal projection crosses acquisition", async () => {

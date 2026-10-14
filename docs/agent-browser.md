@@ -874,6 +874,18 @@ diagnostics distinguish a thrown observer callback from fixed evaluator transpor
 categories without keeping raw exception text. This attempt remains failed and
 grants no release credit; another full control run is pending diagnosis.
 
+The [boundary-instrumented attempt](computer-certification/2026-10-14-macos-profile-inspection-context-loss.json)
+on clean `de494e90d4` reported `electron-context-lost` after four successful
+inspections in one profile. Both consents settled; no lease, capture or input was
+observed, and cleanup succeeded. No observer-callback failure was recorded.
+Playwright rewrites some underlying protocol failures into context-loss errors,
+so this category does not establish a navigation or provider failure. The
+diagnostic now transfers the complete sanitized observer snapshot as JSON,
+bounded to 512 KiB, avoiding nested CDP object serialization. Oversized, cyclic
+or missing results fail closed, and all receipt checks remain intact. Its
+unit round trip includes full-budget traces and negative isolation flags;
+that fake transport check does not qualify the real profile gate.
+
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;
 watching a child's absent stdout pipe produced no diagnostic evidence. The new

@@ -206,9 +206,9 @@ export async function runProfileIsolation(o) {
     const result = await application.evaluate(() =>
       globalThis.__computerRehearsalIsolationSnapshot(),
     );
-    if (!result || result.failed !== false)
+    if (!result || result.failed !== false || typeof result.value !== "string")
       throw new Error("Isolation observer snapshot callback failed.");
-    return result.value;
+    return JSON.parse(result.value);
   };
   const current = async (i) =>
     (await clients[i].rpc(ORCHESTRATION_WS_METHODS.getSnapshot)).threads.find(
