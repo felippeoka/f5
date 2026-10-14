@@ -260,13 +260,42 @@ export async function runProfileIsolation(o) {
       return turn.state === "completed";
     }, 150000);
   if (o.readinessOnly) {
-    for (const i of [0, 1]) {
-      const previous = await submit(
-        i,
-        "Read-only profile readiness. Call computer_status and computer_list_apps exactly once each. No access request, activation, inspection, screenshot, input, shell, files or network. Stop on failure and never retry. Finish READY.",
-      );
-      await completed(i, previous);
-    }
+    stage("profile-readiness-concurrent-polling");
+    const previousTurns = await Promise.all(
+      [0, 1].map((i) =>
+        submit(
+          i,
+          "Read-only profile readiness. Call computer_status and computer_list_apps exactly once each. No access request, activation, inspection, screenshot, input, shell, files or network. Stop on failure and never retry. Finish READY.",
+        ),
+      ),
+    );
+    await Promise.all(
+      [0, 1].map((i) =>
+        waitFor(async () => {
+          try {
+            if (
+              await profileOwnerLeaseReady(
+                async () => (await snapshot()).profiles[i].held,
+                async () => (await current(i))?.latestTurn,
+                previousTurns[i],
+              )
+            )
+              throw new Error("Isolation read-only owner polling receipt incomplete.");
+          } catch (error) {
+            if (
+              !(error instanceof Error) ||
+              error.message !== "Isolation owner turn ended without a lease."
+            )
+              throw error;
+          }
+          const turn = (await current(i))?.latestTurn;
+          if (!turn || turn.turnId === previousTurns[i]) return false;
+          if (["error", "interrupted"].includes(turn.state))
+            throw new Error("Provider turn did not complete.");
+          return turn.state === "completed";
+        }, 150000),
+      ),
+    );
     // Exercise the exact bundled Node polling path without acquiring a lease.
     // Both completed metadata turns must be refused as owners with no lease.
     for (const i of [0, 1]) {

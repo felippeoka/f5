@@ -838,6 +838,11 @@ absolute paths. Read-only readiness also exercises the exact bundled owner-polli
 path against completed metadata turns, requiring no-lease refusal in both profiles.
 It cannot acquire a lease or supply execution results. These diagnostics neither
 qualify the older failed attempt nor change public gates.
+The completed-turn check passed on clean `cdd577b1db` with no consent, lease or
+input and confirmed cleanup. Read-only readiness now also submits the two profiles'
+metadata turns concurrently and exercises the same polling while they run. Exact
+one-per-profile app-list receipts remain required. This is an input-free diagnostic,
+not a retry of any mutation or passing contention evidence.
 
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;
