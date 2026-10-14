@@ -9,6 +9,7 @@ const required = {
     "replay.cancel-after-1000-with-writer",
     "git.status-large-nested-submodules",
     "upload.decode-persist-release-8MiB",
+    "orchestration.assistant-stream",
   ],
   interactive: [
     "transport.slow-disconnecting-client",
@@ -54,6 +55,15 @@ export function validateCoverage(reports: readonly PerformanceReport[]): string[
             "replay.pageSerializedBytes": 1048576,
             "upload.decodedBuffersBytes": 83886080,
             "sqlite.concurrentWriterFailures": 0,
+            "stream.deltaLatencyP50Ms": 250,
+            "stream.deltaLatencyP95Ms": 500,
+            "stream.eventRowsWritten": 4000,
+            "stream.domainEvents": 4000,
+            "stream.sqlStatements": 200000,
+            "stream.projectionSqlStatements": 100000,
+            "stream.eventLoopDelayP99Ms": 100,
+            "readModel.heapBytes": 134217728,
+            "readModel.rssBytes": 268435456,
           }
         : {
             "transport.logicalBufferedBytes": 8388608,

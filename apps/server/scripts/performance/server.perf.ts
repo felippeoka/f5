@@ -29,6 +29,7 @@ import { OrchestrationEventStoreLive } from "../../src/persistence/Layers/Orches
 import { makeSqlitePersistenceLive } from "../../src/persistence/Layers/Sqlite.ts";
 import { TerminalManagerRuntime } from "../../src/terminal/Layers/Manager.ts";
 import type { PtyProcess, PtyExitEvent } from "../../src/terminal/Services/PTY.ts";
+import { measureAssistantStream, measureReadModelMemory } from "./assistantStream.ts";
 import {
   fixture,
   repositoryFile,
@@ -396,6 +397,11 @@ it("records server component performance with deterministic workloads", async ()
     await gitRuntime.dispose();
     rmSync(directory, { recursive: true, force: true });
   }
+  // Runs after the replay spy above is restored; it installs its own statement counters.
+  const stream = await measureAssistantStream(method);
+  report.measurements["orchestration.assistant-stream"] = stream.samples;
+  report.observations.push(...stream.observations, ...(await measureReadModelMemory()));
   mkdirSync(path.dirname(output), { recursive: true });
   writeFileSync(output, JSON.stringify(report, null, 2) + "\n", { flag: "wx" });
-}, 600_000);
+  // The streaming scenario alone takes roughly 40 s per repetition before P1.
+}, 3_600_000);

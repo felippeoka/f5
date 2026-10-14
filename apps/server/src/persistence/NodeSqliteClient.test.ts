@@ -1,7 +1,8 @@
 import { assert, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Metric } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { sqlConnectionWaitDuration, sqlExecutionDuration } from "../observability/Metrics.ts";
 import * as SqliteClient from "./NodeSqliteClient.ts";
 
 const layer = it.layer(SqliteClient.layerMemory());
@@ -41,6 +42,23 @@ layer("NodeSqliteClient", (it) => {
       yield* sql`CREATE TABLE raw_write_fixture(id INTEGER PRIMARY KEY, value TEXT)`;
       const metadata = yield* sql`INSERT INTO raw_write_fixture(value) VALUES (${"synthetic"})`.raw;
       assert.deepEqual(metadata, { changes: 1, lastInsertRowid: 1 });
+    }),
+  );
+  it.effect("records statement execution and connection wait durations", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const count = (metric: typeof sqlExecutionDuration) =>
+        Metric.value(metric).pipe(Effect.map((state) => state.count));
+      const executedBefore = yield* count(sqlExecutionDuration);
+      const waitedBefore = yield* count(sqlConnectionWaitDuration);
+
+      yield* sql`SELECT 1`;
+      yield* sql`SELECT 1`.values;
+      yield* sql.withTransaction(sql`SELECT 1`);
+
+      // Plain, positional and in-transaction statements are each timed once.
+      assert.equal((yield* count(sqlExecutionDuration)) - executedBefore, 5);
+      assert.isAtLeast((yield* count(sqlConnectionWaitDuration)) - waitedBefore, 3);
     }),
   );
   for (const values of [false, true]) {

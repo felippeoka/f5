@@ -9,8 +9,13 @@ import {
   type OrchestrationUsageLimit,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Option, Stream } from "effect";
+import { Effect, Fiber, Layer, Metric, Option, Stream } from "effect";
 
+import {
+  deliveryAmbiguousTotal,
+  deliveryAttemptsActive,
+  deliveryOutboxRowsDecoded,
+} from "../../observability/Metrics.ts";
 import { PersistenceSqlError } from "../../persistence/Errors.ts";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -281,6 +286,10 @@ it.effect(
       resetDelivery();
       const worker = yield* ProviderTurnDeliveryWorker;
 
+      const ambiguousBefore = (yield* Metric.value(deliveryAmbiguousTotal)).count;
+      const claimScans = Metric.withAttributes(deliveryOutboxRowsDecoded, { source: "claim" });
+      const decodedScansBefore = (yield* Metric.value(claimScans)).count;
+
       // First run has no outcome subscriber, modeling a crash after the
       // terminal SQLite update but before the queue observes the PubSub frame.
       yield* worker.start;
@@ -289,6 +298,9 @@ it.effect(
       assert.equal(state.certainty, "unknown");
       assert.equal(requeueCount, 0);
       assert.equal(outcomeProjected, false);
+      assert.equal((yield* Metric.value(deliveryAmbiguousTotal)).count - ambiguousBefore, 1);
+      assert.equal((yield* Metric.value(deliveryAttemptsActive)).value, 0);
+      assert.isAbove((yield* Metric.value(claimScans)).count, decodedScansBefore);
 
       const replayFiber = yield* Effect.forkScoped(Stream.runHead(worker.outcomes));
       yield* Effect.yieldNow;

@@ -3,12 +3,14 @@ import os from "node:os";
 import path from "node:path";
 
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Metric } from "effect";
+import { Effect, Fiber, Metric } from "effect";
 
 import {
+  eventLoopDelay,
   increment,
   makeMetricSnapshotWriter,
   previewRecordingFramesDroppedTotal,
+  sampleEventLoopDelay,
   serializeMetricSnapshot,
   withMetrics,
 } from "./Metrics.ts";
@@ -160,6 +162,25 @@ describe("metric snapshot writer", () => {
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }
+    }),
+  );
+});
+
+describe("event loop delay sampler", () => {
+  it.live("records how long a blocked event loop delays the sampling timer", () =>
+    Effect.gen(function* () {
+      const before = yield* Metric.value(eventLoopDelay);
+      const sampler = yield* Effect.forkChild(sampleEventLoopDelay);
+      yield* Effect.sleep("20 millis");
+      // Block synchronously so the sampler's timer fires late.
+      const blockedUntil = performance.now() + 400;
+      while (performance.now() < blockedUntil) {}
+      yield* Effect.sleep("300 millis");
+      yield* Fiber.interrupt(sampler);
+
+      const after = yield* Metric.value(eventLoopDelay);
+      assert.isAbove(after.count, before.count);
+      assert.isAtLeast(after.max, 100);
     }),
   );
 });

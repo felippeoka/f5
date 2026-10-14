@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import { identity } from "effect/Function";
 import * as Layer from "effect/Layer";
+import * as Metric from "effect/Metric";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as ServiceMap from "effect/ServiceMap";
@@ -23,7 +24,14 @@ import type { Connection } from "effect/unstable/sql/SqlConnection";
 import { SqlError } from "effect/unstable/sql/SqlError";
 import * as Statement from "effect/unstable/sql/Statement";
 
+import { sqlConnectionWaitDuration, sqlExecutionDuration } from "../observability/Metrics.ts";
+
 const ATTR_DB_SYSTEM_NAME = "db.system.name";
+
+const recordDuration = (
+  metric: Metric.Metric<Duration.Duration, unknown>,
+  startedAt: number,
+): Effect.Effect<void> => Metric.update(metric, Duration.millis(performance.now() - startedAt));
 
 export const TypeId: TypeId = "~local/sqlite-node/SqliteClient";
 
@@ -122,19 +130,22 @@ const makeWithDatabase = (
       ) =>
         Effect.withFiber<ReadonlyArray<any>, SqlError>((fiber) => {
           statement.setReadBigInts(Boolean(ServiceMap.get(fiber.services, Client.SafeIntegers)));
+          const startedAt = performance.now();
+          const executed = (result: ReadonlyArray<any>) =>
+            Effect.as(recordDuration(sqlExecutionDuration, startedAt), result);
           try {
             if (hasRows(statement)) {
-              return Effect.succeed(statement.all(...(params as any)));
+              return executed(statement.all(...(params as any)));
             }
             if (raw) {
               const result = statement.run(...(params as any));
-              return Effect.succeed(result as unknown as ReadonlyArray<any>);
+              return executed(result as unknown as ReadonlyArray<any>);
             }
             // Some zero-column pragmas yield intermediate SQLITE_ROW steps.
             // run() stops at the first one (incremental_vacuum frees one page),
             // whereas all() drains to SQLITE_DONE. Keep the public no-row result.
             statement.all(...(params as any));
-            return Effect.succeed([]);
+            return executed([]);
           } catch (cause) {
             return Effect.fail(new SqlError({ cause, message: "Failed to execute statement" }));
           }
@@ -147,19 +158,22 @@ const makeWithDatabase = (
         Effect.acquireUseRelease(
           Cache.get(prepareCache, sql),
           (statement) =>
-            Effect.try({
-              try: () => {
-                if (hasRows(statement)) {
-                  statement.setReturnArrays(true);
-                  // Safe to cast to array after we've setReturnArrays(true)
-                  return statement.all(...(params as any)) as unknown as ReadonlyArray<
-                    ReadonlyArray<unknown>
-                  >;
-                }
-                statement.all(...(params as any));
-                return [];
-              },
-              catch: (cause) => new SqlError({ cause, message: "Failed to execute statement" }),
+            Effect.suspend(() => {
+              const startedAt = performance.now();
+              return Effect.try({
+                try: () => {
+                  if (hasRows(statement)) {
+                    statement.setReturnArrays(true);
+                    // Safe to cast to array after we've setReturnArrays(true)
+                    return statement.all(...(params as any)) as unknown as ReadonlyArray<
+                      ReadonlyArray<unknown>
+                    >;
+                  }
+                  statement.all(...(params as any));
+                  return [];
+                },
+                catch: (cause) => new SqlError({ cause, message: "Failed to execute statement" }),
+              }).pipe(Effect.tap(() => recordDuration(sqlExecutionDuration, startedAt)));
             }),
           (statement) =>
             Effect.sync(() => {
@@ -192,13 +206,21 @@ const makeWithDatabase = (
     const semaphore = yield* Semaphore.make(1);
     const connection = yield* makeConnection;
 
-    const acquirer = semaphore.withPermits(1)(Effect.succeed(connection));
+    const acquirer = Effect.suspend(() => {
+      const startedAt = performance.now();
+      return semaphore
+        .withPermits(1)(Effect.succeed(connection))
+        .pipe(Effect.tap(() => recordDuration(sqlConnectionWaitDuration, startedAt)));
+    });
     const transactionAcquirer = Effect.uninterruptibleMask((restore) => {
       const fiber = Fiber.getCurrent()!;
       const scope = ServiceMap.getUnsafe(fiber.services, Scope.Scope);
+      const startedAt = performance.now();
       return Effect.as(
         Effect.tap(restore(semaphore.take(1)), () =>
-          Scope.addFinalizer(scope, semaphore.release(1)),
+          Scope.addFinalizer(scope, semaphore.release(1)).pipe(
+            Effect.andThen(recordDuration(sqlConnectionWaitDuration, startedAt)),
+          ),
         ),
         connection,
       );
