@@ -25,6 +25,7 @@ import { isIgnorableCodexProcessStderrMessage } from "@t3tools/shared/codexStder
 import { ELICITATION_SUBMITTED_ACTIVITY_KIND } from "@t3tools/shared/pendingUserInputs";
 import {
   normalizeCodexCollaborationTool,
+  REASONING_STATUS_ACTIVITY_KIND,
   readToolActivityPayload,
 } from "@t3tools/shared/orchestrationActivityPayload";
 
@@ -40,6 +41,7 @@ import {
   classifyCompactCommand,
   deriveNarratedActivityDisplayHints,
   isGenericCommandTitle,
+  resolveCommandExecutionSummaryText,
 } from "@t3tools/shared/commandSummary";
 import { compareCommandExecutions } from "./lib/commandExecutions";
 import { formatUsageLimitActivityLabel, readUsageLimitActivityDisplay } from "./lib/usageLimits";
@@ -1143,6 +1145,130 @@ function correlateSubagentActivities(entries: ReadonlyArray<WorkLogEntry>): Work
   return correlated.filter((_entry, index) => !dropped.has(index));
 }
 
+export type LiveWorkActivity =
+  | { kind: "thinking"; detail: string | null }
+  | { kind: "tool"; providerItemId: string | null; title: string }
+  | null;
+
+/**
+ * The turn whose live activity the Working label may show: only a running
+ * session whose active turn is the latest turn. Sending or connecting before
+ * a turn exists, terminal/error sessions, and a stale `activeTurnId` get none.
+ */
+export function deriveLiveWorkTurnId(
+  session: Pick<ThreadSession, "status" | "activeTurnId"> | null | undefined,
+  latestTurnId: TurnId | null | undefined,
+): TurnId | undefined {
+  return session?.status === "running" && latestTurnId && session.activeTurnId === latestTurnId
+    ? latestTurnId
+    : undefined;
+}
+
+/** A running command reads as its command, not the provider's "Ran command". */
+function liveToolTitle(
+  activity: OrchestrationThreadActivity,
+  payload: ReturnType<typeof readToolActivityPayload>,
+): string {
+  if (payload?.itemType === "command_execution" && payload.command) {
+    return resolveCommandExecutionSummaryText({
+      command: payload.command,
+      detail: payload.detail ?? null,
+      title: payload.title ?? null,
+    });
+  }
+  return payload?.title ?? activity.summary.replace(/ started$/, "");
+}
+
+function isTerminalItemStatus(status: RuntimeItemStatus | undefined): boolean {
+  return status === "completed" || status === "failed" || status === "declined";
+}
+
+/**
+ * What the latest turn is doing right now: the most recently started item
+ * that has not finished. A completion only closes its own item, so a
+ * background tool finishing does not hide a newer tool or active reasoning.
+ * A terminal status is final for its item: activities without a session
+ * sequence can sort a start after its completion when timestamps tie.
+ */
+export function deriveLiveWorkActivity(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  latestTurnId: TurnId | undefined,
+): LiveWorkActivity {
+  if (!latestTurnId) return null;
+  const ordered = activities
+    .filter((activity) => activity.turnId === latestTurnId)
+    .toSorted(compareActivitiesByOrder);
+  const items = new Map<
+    string,
+    {
+      startIndex: number;
+      status: RuntimeItemStatus | undefined;
+      activity: Exclude<LiveWorkActivity, null>;
+    }
+  >();
+  ordered.forEach((activity, index) => {
+    if (activity.kind === REASONING_STATUS_ACTIVITY_KIND) {
+      const payload =
+        activity.payload && typeof activity.payload === "object"
+          ? (activity.payload as Record<string, unknown>)
+          : null;
+      const detail = asTrimmedString(payload?.detail) ?? null;
+      items.set(activity.id, {
+        startIndex: index,
+        status: payload?.state === "active" ? "inProgress" : "completed",
+        activity: { kind: "thinking", detail },
+      });
+      return;
+    }
+    if (
+      activity.kind !== "tool.started" &&
+      activity.kind !== "tool.updated" &&
+      activity.kind !== "tool.completed"
+    ) {
+      return;
+    }
+    const payload = readToolActivityPayload(activity.payload);
+    const status =
+      activity.kind === "tool.started"
+        ? "inProgress"
+        : inferWorkLogStatus(activity, payload?.status);
+    if (!payload?.providerItemId) {
+      // Without an item id a completion cannot name its start; it closes
+      // every id-less tool started before it.
+      if (activity.kind === "tool.started") {
+        items.set(activity.id, {
+          startIndex: index,
+          status,
+          activity: { kind: "tool", providerItemId: null, title: liveToolTitle(activity, payload) },
+        });
+      } else if (isTerminalItemStatus(status)) {
+        for (const [key, item] of items) {
+          if (item.activity.kind === "tool" && item.activity.providerItemId === null) {
+            items.set(key, { ...item, status });
+          }
+        }
+      }
+      return;
+    }
+    const existing = items.get(payload.providerItemId);
+    items.set(payload.providerItemId, {
+      startIndex: existing ? Math.min(existing.startIndex, index) : index,
+      status: isTerminalItemStatus(existing?.status) ? existing?.status : status,
+      activity: {
+        kind: "tool",
+        providerItemId: payload.providerItemId,
+        title: liveToolTitle(activity, payload),
+      },
+    });
+  });
+  let live: { startIndex: number; activity: Exclude<LiveWorkActivity, null> } | null = null;
+  for (const item of items.values()) {
+    if (item.status !== "inProgress") continue;
+    if (!live || item.startIndex > live.startIndex) live = item;
+  }
+  return live?.activity ?? null;
+}
+
 export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
@@ -1228,6 +1354,7 @@ export function deriveWorkLogEntries(
         Boolean(readToolActivityPayload(activity.payload)?.codexCollaborationTool),
     )
     .filter((activity) => activity.kind !== "runtime.configured")
+    .filter((activity) => activity.kind !== REASONING_STATUS_ACTIVITY_KIND)
     .filter((activity) => activity.kind !== "account.updated")
     .filter((activity) => activity.kind !== "account.rate-limits.updated")
     .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")

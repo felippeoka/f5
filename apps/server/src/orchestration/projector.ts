@@ -1,6 +1,7 @@
 import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
 import type { ProviderKind } from "@t3tools/contracts";
 import { projectPendingUserInputs } from "@t3tools/shared/pendingUserInputs";
+import { REASONING_STATUS_ACTIVITY_KIND } from "@t3tools/shared/orchestrationActivityPayload";
 import {
   CodeReviewWorkflow,
   InvestigationWorkflow,
@@ -1549,14 +1550,18 @@ export function projectEvent(
           ]
             .toSorted(compareThreadActivities)
             .slice(-MAX_THREAD_ACTIVITIES);
+          // The live reasoning status is upserted often; it must not reorder
+          // threads or mark them unread.
+          const touchesRecency = payload.activity.kind !== REASONING_STATUS_ACTIVITY_KIND;
 
           return {
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
               activities,
               pendingUserInputs: projectPendingUserInputs(thread.pendingUserInputs ?? [], event),
-              lastInteractionAt: event.occurredAt,
-              updatedAt: event.occurredAt,
+              ...(touchesRecency
+                ? { lastInteractionAt: event.occurredAt, updatedAt: event.occurredAt }
+                : {}),
             }),
           };
         }),

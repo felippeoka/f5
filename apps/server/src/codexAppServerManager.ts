@@ -187,6 +187,11 @@ interface CodexSessionContext {
   nativeGoalBudget?: number;
   nativeGoalPauseInFlight?: boolean;
   requestedRuntime?: Record<string, unknown>;
+  /**
+   * Whether F5 put the fast tier on this provider thread. A turn clears the
+   * tier only then, so a tier from the user's `config.toml` is left alone.
+   */
+  fastTierApplied?: boolean;
   childThreadIds?: Set<string>;
   forkNotifications?: JsonRpcNotification[] | undefined;
   forkNotificationOverflow?: boolean;
@@ -264,7 +269,7 @@ export interface CodexAppServerSendTurnInput {
     { type: "image"; url: string } | { type: "localImage"; path: string }
   >;
   readonly model?: string;
-  readonly serviceTier?: string | null;
+  readonly serviceTier?: "fast" | null;
   readonly effort?: string;
   readonly interactionMode?: ProviderInteractionMode;
 }
@@ -725,7 +730,7 @@ export function normalizeCodexModelSlug(
  */
 function resolveReportedCodexEffort(
   model: string,
-  effort: string,
+  effort: string | undefined,
   reported: ModelCapabilities,
 ): string | undefined {
   const capabilities = resolveModelCapabilities("codex", model, reported);
@@ -791,7 +796,7 @@ export function buildCodexTurnStartParams(
       mode: "default" | "plan";
       settings: {
         model: string;
-        reasoning_effort: string;
+        reasoning_effort: string | null;
         developer_instructions: string;
       };
     };
@@ -822,12 +827,12 @@ export function buildCodexTurnStartParams(
         ? null
         : input.serviceTier;
   }
-  const resolvedEffort =
-    input.effort === undefined
-      ? undefined
-      : reportedCapabilities
-        ? resolveReportedCodexEffort(effortModel, input.effort, reportedCapabilities)
-        : resolveCodexReasoningEffortForModel(effortModel, input.effort);
+  // An absent effort means the model default (the composer strips it when it
+  // equals the default), so the resolvers always run instead of letting the
+  // collaboration mode fall back to a fixed effort.
+  const resolvedEffort = reportedCapabilities
+    ? resolveReportedCodexEffort(effortModel, input.effort, reportedCapabilities)
+    : resolveCodexReasoningEffortForModel(effortModel, input.effort);
   if (resolvedEffort) {
     turnStartParams.effort = resolvedEffort;
   }
@@ -890,7 +895,7 @@ function buildCodexCollaborationMode(input: {
   mode: "default" | "plan";
   settings: {
     model: string;
-    reasoning_effort: string;
+    reasoning_effort: string | null;
     developer_instructions: string;
   };
 } {
@@ -934,7 +939,9 @@ function buildCodexCollaborationMode(input: {
     mode: effectiveMode,
     settings: {
       model,
-      reasoning_effort: input.effort ?? "medium",
+      // Null when the model takes no effort; a fixed fallback here would
+      // override the resolved model default.
+      reasoning_effort: input.effort ?? null,
       developer_instructions: buildCodexAssistantInstructions(instructionInput),
     },
   };
@@ -1351,6 +1358,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           : [],
       );
       context.requestedRuntime = { model: input.model, serviceTier: input.serviceTier };
+      context.fastTierApplied = input.serviceTier === "fast";
       this.emitSessionConfigured(context, {
         ...(normalizedModel ? { model: normalizedModel } : {}),
         ...(modelContextWindowTokens !== undefined ? { modelContextWindowTokens } : {}),
@@ -1402,7 +1410,12 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
     const providerThreadId = readResumeCursorThreadId(context.session.resumeCursor);
     if (!providerThreadId) throw new Error("Session is missing provider resume thread id.");
-    const turnStartParams = buildCodexTurnStartParams(input, {
+    // `null` only undoes a fast tier F5 applied; otherwise the thread keeps
+    // whatever tier the user's config chose.
+    const { serviceTier: _requestedTier, ...inputWithoutTier } = input;
+    const turnInput =
+      input.serviceTier === null && !context.fastTierApplied ? inputWithoutTier : input;
+    const turnStartParams = buildCodexTurnStartParams(turnInput, {
       providerThreadId,
       model: context.session.model,
       account: context.account,
@@ -1455,6 +1468,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       effort: input.effort,
       serviceTier: input.serviceTier,
     };
+    if (turnStartParams.serviceTier !== undefined) {
+      context.fastTierApplied = turnStartParams.serviceTier === "fast";
+    }
     if (nextConfiguredModel !== undefined) {
       const modelContextWindowTokens = lookupModelContextWindowTokens({
         provider: "codex",
@@ -1471,7 +1487,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         ...configuredBase,
         model: nextConfiguredModel,
         ...(turnStartParams.effort ? { effort: turnStartParams.effort } : {}),
-        ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
+        ...(turnStartParams.serviceTier ? { serviceTier: turnStartParams.serviceTier } : {}),
         ...(modelContextWindowTokens !== undefined ? { modelContextWindowTokens } : {}),
       });
     }
@@ -1628,7 +1644,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       await this.sendTurn({
         threadId,
         input: input.prompt,
-        ...(input.effort !== undefined ? { effort: input.effort } : {}),
+        // Background prompts keep a cheap effort unless the caller picks one.
+        effort: input.effort ?? "medium",
         ...(input.serviceTier !== undefined ? { serviceTier: input.serviceTier } : {}),
       });
       await completion;

@@ -21,7 +21,9 @@ import { describeMcpElicitation } from "../../codex/mcpElicitation.ts";
 import {
   type CanonicalItemType,
   type CanonicalRequestType,
+  type ModelSelection,
   type ProviderEvent,
+  type ProviderModelOptions,
   type ProviderStartOptions,
   type ProviderRuntimeEvent,
   type ProviderUserInputAnswers,
@@ -32,6 +34,7 @@ import {
   RuntimeTaskId,
   SubagentActivityKind,
   ProviderApprovalDecision,
+  ProviderInstanceId,
   ProviderItemId,
   ThreadId,
   TurnId,
@@ -92,6 +95,37 @@ function codexServiceTierOptions(fastMode: boolean | undefined): { readonly serv
   return fastMode ? { serviceTier: "fast" } : {};
 }
 
+/**
+ * A selection bound to this instance is authoritative: an option it omits is
+ * off/default, never a stale `modelOptions` value (same precedence as Claude).
+ * Selections for another instance fall back to `modelOptions.codex`.
+ */
+export function resolveCodexSelectionOptions(input: {
+  readonly modelOptions?: ProviderModelOptions | undefined;
+  readonly modelSelection?: ModelSelection | undefined;
+  readonly boundInstanceId: ProviderInstanceId;
+}): { readonly reasoningEffort?: string; readonly fastMode?: boolean } {
+  if (input.modelSelection && input.modelSelection.instanceId === input.boundInstanceId) {
+    const reasoningEffort = getModelSelectionStringOptionValue(
+      input.modelSelection,
+      "reasoningEffort",
+    );
+    const fastMode = getProviderOptionBooleanSelectionValue(
+      input.modelSelection.options,
+      "fastMode",
+    );
+    return {
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+      ...(fastMode !== undefined ? { fastMode } : {}),
+    };
+  }
+  const codex = input.modelOptions?.codex;
+  return {
+    ...(codex?.reasoningEffort !== undefined ? { reasoningEffort: codex.reasoningEffort } : {}),
+    ...(codex?.fastMode !== undefined ? { fastMode: codex.fastMode } : {}),
+  };
+}
+
 export interface CodexAdapterLiveOptions {
   readonly manager?: CodexAppServerManager;
   readonly makeManager?: (services?: ServiceMap.ServiceMap<never>) => CodexAppServerManager;
@@ -104,6 +138,8 @@ export interface CodexAdapterLiveOptions {
   readonly previewMcpHttpServer?: PreviewMcpHttpServerShape;
   readonly defaultProviderOptions?: ProviderStartOptions;
   readonly processEnvironment?: NodeJS.ProcessEnv;
+  /** The provider instance this adapter serves; defaults to `codex`. */
+  readonly instanceId?: ProviderInstanceId;
 }
 
 function mergeCodexProviderOptions(
@@ -2336,6 +2372,7 @@ function mapToRuntimeEvents(
 export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
   Effect.gen(function* () {
     const serverConfig = yield* Effect.service(ServerConfig);
+    const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make(PROVIDER);
     const nativeEventLogger =
       options?.nativeEventLogger ??
       (options?.nativeEventLogPath !== undefined
@@ -2463,7 +2500,13 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
             : {}),
           runtimeMode: input.runtimeMode,
           ...(input.model !== undefined ? { model: input.model } : {}),
-          ...codexServiceTierOptions(input.modelOptions?.codex?.fastMode),
+          ...codexServiceTierOptions(
+            resolveCodexSelectionOptions({
+              modelOptions: input.modelOptions,
+              modelSelection: input.modelSelection,
+              boundInstanceId,
+            }).fastMode,
+          ),
           ...(providerMcpServers
             ? { mcpServers: translateMcpForCodex(providerMcpServers) ?? {} }
             : {}),
@@ -2532,6 +2575,17 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           input.resolvedAttachments ?? [],
         );
 
+        const selectionOptions = resolveCodexSelectionOptions({
+          modelOptions: input.modelOptions,
+          modelSelection: input.modelSelection,
+          boundInstanceId,
+        });
+        // Only a turn that states Codex options can turn fast mode off; turns
+        // without any (some internal callers) keep the thread's tier.
+        const statesCodexOptions =
+          input.modelSelection?.instanceId === boundInstanceId ||
+          input.modelOptions?.codex !== undefined;
+
         return yield* Effect.tryPromise({
           try: () => {
             const managerInput = {
@@ -2539,10 +2593,16 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
               ...(input.expectedTurnId ? { expectedTurnId: input.expectedTurnId } : {}),
               ...(providerInput !== undefined ? { input: providerInput } : {}),
               ...(input.model !== undefined ? { model: input.model } : {}),
-              ...(input.modelOptions?.codex?.reasoningEffort !== undefined
-                ? { effort: input.modelOptions.codex.reasoningEffort }
+              ...(selectionOptions.reasoningEffort !== undefined
+                ? { effort: selectionOptions.reasoningEffort }
                 : {}),
-              ...codexServiceTierOptions(input.modelOptions?.codex?.fastMode),
+              // The composer omits fast mode when it is off, so an absent value
+              // must clear a tier an earlier turn set on this thread.
+              ...(selectionOptions.fastMode === true
+                ? { serviceTier: "fast" as const }
+                : statesCodexOptions
+                  ? { serviceTier: null }
+                  : {}),
               ...(input.interactionMode !== undefined
                 ? { interactionMode: input.interactionMode }
                 : {}),
@@ -2626,19 +2686,17 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
             prompt: input.prompt,
             ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
             ...(input.modelSelection
-              ? {
-                  model: input.modelSelection.model,
-                  effort: getModelSelectionStringOptionValue(
-                    input.modelSelection,
-                    "reasoningEffort",
-                  ),
-                  ...codexServiceTierOptions(
-                    getProviderOptionBooleanSelectionValue(
-                      input.modelSelection.options,
-                      "fastMode",
-                    ),
-                  ),
-                }
+              ? (() => {
+                  const selectionOptions = resolveCodexSelectionOptions({
+                    modelSelection: input.modelSelection,
+                    boundInstanceId: input.modelSelection.instanceId,
+                  });
+                  return {
+                    model: input.modelSelection.model,
+                    effort: selectionOptions.reasoningEffort,
+                    ...codexServiceTierOptions(selectionOptions.fastMode),
+                  };
+                })()
               : input.model !== undefined
                 ? { model: input.model }
                 : {}),

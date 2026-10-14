@@ -812,6 +812,31 @@ describe("applyDomainEvent", () => {
     ]);
   });
 
+  it("keeps thread recency when the live reasoning status is upserted", () => {
+    const initialState = makeState({
+      threads: [makeThread({ lastInteractionAt: "2026-04-01T09:00:00.000Z" })],
+    });
+    const next = applyDomainEvent(
+      initialState,
+      makeEvent("thread.activity-appended", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        activity: {
+          id: EventId.makeUnsafe("reasoning-status:thread-1:turn-1"),
+          tone: "info",
+          kind: "reasoning.status",
+          summary: "Thinking",
+          payload: { state: "active" },
+          turnId: TurnId.makeUnsafe("turn-1"),
+          createdAt: "2026-04-01T09:05:00.000Z",
+        },
+      }),
+    );
+    expect(next.threads[0]?.activities.map((activity) => activity.kind)).toEqual([
+      "reasoning.status",
+    ]);
+    expect(next.threads[0]?.lastInteractionAt).toBe("2026-04-01T09:00:00.000Z");
+  });
+
   it("replaces thread tasks from the event payload", () => {
     const next = applyDomainEvent(
       makeState({

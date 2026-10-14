@@ -17,15 +17,17 @@ import { afterAll, it, vi } from "@effect/vitest";
 
 import { Effect, Fiber, Layer, Option, Stream } from "effect";
 import { holdsAutomaticResume, isBlockingUserInput } from "@t3tools/shared/pendingUserInputs";
+import { getDefaultReasoningEffort, normalizeCodexModelOptions } from "@t3tools/shared/model";
 
 import {
   CodexAppServerManager,
   CodexJsonRpcError,
+  buildCodexTurnStartParams,
   type CodexAppServerStartSessionInput,
   type CodexAppServerSendTurnInput,
 } from "../../codexAppServerManager.ts";
 import { ServerConfig } from "../../config.ts";
-import { CodexAdapter } from "../Services/CodexAdapter.ts";
+import { CodexAdapter, type CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import { readRuntimeConfiguredPayload } from "@t3tools/shared/orchestrationActivityPayload";
 import {
@@ -327,6 +329,28 @@ validationLayer("CodexAdapterLive validation", (it) => {
     }),
   );
 
+  it.effect("takes the thread-start fast mode from a bound selection", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      for (const fastMode of [true, false]) {
+        validationManager.startSessionImpl.mockClear();
+        yield* adapter.startSession({
+          provider: "codex",
+          threadId: asThreadId(`thread-fast-${fastMode}`),
+          modelOptions: { codex: { fastMode: !fastMode } },
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5.3-codex",
+            options: [{ id: "fastMode", value: fastMode }],
+          },
+          runtimeMode: "full-access",
+        });
+        const request = validationManager.startSessionImpl.mock.calls[0]?.[0];
+        assert.equal(request?.serviceTier, fastMode ? "fast" : undefined);
+      }
+    }),
+  );
+
   it.effect("maps one-off prompts to the manager", () =>
     Effect.gen(function* () {
       validationManager.runOneOffPromptImpl.mockClear();
@@ -544,6 +568,127 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         effort: "high",
         serviceTier: "fast",
       });
+    }),
+  );
+
+  const sendSelectionTurn = (
+    input: Partial<Parameters<CodexAdapterShape["sendTurn"]>[0]>,
+  ): Effect.Effect<CodexAppServerSendTurnInput | undefined, never, CodexAdapter> =>
+    Effect.gen(function* () {
+      sessionErrorManager.sendTurnImpl.mockClear();
+      const adapter = yield* CodexAdapter;
+      yield* Effect.ignore(
+        adapter.sendTurn({
+          threadId: asThreadId("sess-missing"),
+          input: "hello",
+          model: "gpt-5.3-codex",
+          attachments: [],
+          ...input,
+        }),
+      );
+      return sessionErrorManager.sendTurnImpl.mock.calls[0]?.[0];
+    });
+
+  it.effect("reads effort and fast mode from a selection bound to this instance", () =>
+    Effect.gen(function* () {
+      const request = yield* sendSelectionTurn({
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.3-codex",
+          options: [
+            { id: "reasoningEffort", value: "xhigh" },
+            { id: "fastMode", value: true },
+          ],
+        },
+      });
+      assert.equal(request?.effort, "xhigh");
+      assert.equal(request?.serviceTier, "fast");
+    }),
+  );
+
+  it.effect("prefers a bound selection over conflicting modelOptions", () =>
+    Effect.gen(function* () {
+      const request = yield* sendSelectionTurn({
+        modelOptions: { codex: { reasoningEffort: "low", fastMode: true } },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.3-codex",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        },
+      });
+      assert.equal(request?.effort, "high");
+      assert.equal(request?.serviceTier, null);
+    }),
+  );
+
+  it.effect("falls back to modelOptions for a selection from another instance", () =>
+    Effect.gen(function* () {
+      const request = yield* sendSelectionTurn({
+        modelOptions: { codex: { reasoningEffort: "low", fastMode: true } },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex-work"),
+          model: "gpt-5.3-codex",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        },
+      });
+      assert.equal(request?.effort, "low");
+      assert.equal(request?.serviceTier, "fast");
+    }),
+  );
+
+  it.effect("turns fast mode off when a later composer turn omits it", () =>
+    Effect.gen(function* () {
+      const instanceId = ProviderInstanceId.make("codex");
+      const fast = yield* sendSelectionTurn({
+        modelSelection: {
+          instanceId,
+          model: "gpt-5.3-codex",
+          options: [{ id: "fastMode", value: true }],
+        },
+      });
+      assert.equal(fast?.serviceTier, "fast");
+      // The composer strips `fastMode: false` before sending.
+      const off = yield* sendSelectionTurn({
+        modelSelection: { instanceId, model: "gpt-5.3-codex" },
+      });
+      assert.equal(off?.serviceTier, null);
+      assert.equal(Object.hasOwn(off!, "effort"), false);
+    }),
+  );
+
+  it.effect("keeps the thread tier for a turn that states no Codex options", () =>
+    Effect.gen(function* () {
+      const request = yield* sendSelectionTurn({});
+      assert.equal(Object.hasOwn(request!, "serviceTier"), false);
+      const otherInstance = yield* sendSelectionTurn({
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex-work"),
+          model: "gpt-5.3-codex",
+        },
+      });
+      assert.equal(Object.hasOwn(otherInstance!, "serviceTier"), false);
+    }),
+  );
+
+  it.effect("resolves the composer's stripped default effort to the same default", () =>
+    Effect.gen(function* () {
+      const model = "gpt-5.3-codex";
+      const normalized = normalizeCodexModelOptions(model, {
+        reasoningEffort: getDefaultReasoningEffort("codex", model),
+      });
+      assert.equal(normalized?.reasoningEffort, undefined);
+      const request = yield* sendSelectionTurn(
+        normalized ? { modelOptions: { codex: normalized } } : {},
+      );
+      const params = buildCodexTurnStartParams(request!, {
+        providerThreadId: "thread",
+        account: { type: "unknown", planType: null, sparkEnabled: false },
+      });
+      assert.equal(params.effort, getDefaultReasoningEffort("codex", model));
+      assert.equal(
+        params.collaborationMode?.settings.reasoning_effort,
+        getDefaultReasoningEffort("codex", model),
+      );
     }),
   );
 

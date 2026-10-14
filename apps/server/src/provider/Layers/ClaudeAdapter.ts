@@ -252,6 +252,13 @@ interface ClaudeTurnState {
   readonly assistantTextBlockOrder: Array<AssistantTextBlockState>;
   readonly capturedProposedPlanKeys: Set<string>;
   nextSyntheticAssistantBlockIndex: number;
+  /**
+   * Thinking blocks seen this turn. Ids come from this counter because block
+   * indexes restart with every assistant message.
+   */
+  thinkingBlockCount: number;
+  /** Open thinking blocks by stream block index, closed on stop or turn end. */
+  readonly openThinkingBlocks: Map<number, string>;
   authenticationFailureMessage?: string;
   rejectedUsageLimits?: Map<string, ReturnType<typeof claudeLimitState>>;
   announcedUsageLimits?: Set<string>;
@@ -1308,6 +1315,21 @@ function resolveClaudeLaunchThinking(
   });
 }
 
+/**
+ * Claude 5 omits thinking text unless summaries are requested, and the SDK
+ * only overrides the install default when the setting is explicit. A typed
+ * `display` decides; then the user's own Claude setting (left to apply as is);
+ * otherwise summaries are on. Disabled thinking needs no setting.
+ */
+export function claudeShowThinkingSummaries(
+  thinking: ClaudeThinkingResolution["thinking"],
+  userSetting?: boolean,
+): boolean | undefined {
+  if (thinking?.type === "disabled") return undefined;
+  if (thinking?.display) return thinking.display === "summarized";
+  return userSetting === undefined ? true : undefined;
+}
+
 function claudeThinkingConfiguredFields(resolution: ClaudeThinkingResolution) {
   return {
     ...(resolution.thinking ? { thinking: resolution.thinking } : {}),
@@ -2235,6 +2257,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         readonly options: ClaudeQueryOptions;
       }) => query(input));
     const transcriptRetention = (environment: NodeJS.ProcessEnv, cwd?: string) =>
+      instanceSettings(environment, cwd).pipe(Effect.map((settings) => settings.cleanupPeriodDays));
+    const instanceSettings = (environment: NodeJS.ProcessEnv, cwd?: string) =>
       Effect.tryPromise({
         try: async () => {
           const file = NodePath.join(resolveClaudeConfigDir(environment, cwd), "settings.json");
@@ -2250,7 +2274,12 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               );
             } else if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
           }
-          return resolveClaudeCleanupPeriodDays(instanceSettings, environment);
+          const showThinkingSummaries = (instanceSettings as { showThinkingSummaries?: unknown })
+            ?.showThinkingSummaries;
+          return {
+            cleanupPeriodDays: resolveClaudeCleanupPeriodDays(instanceSettings, environment),
+            ...(typeof showThinkingSummaries === "boolean" ? { showThinkingSummaries } : {}),
+          };
         },
         catch: (cause) =>
           new ProviderAdapterValidationError({
@@ -3398,6 +3427,42 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         });
       });
 
+    const completeThinkingBlock = (
+      context: ClaudeSessionContext,
+      turnState: ClaudeTurnState,
+      index: number,
+      raw: { readonly method: string; readonly payload: unknown },
+    ): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const itemId = turnState.openThinkingBlocks.get(index);
+        if (itemId === undefined) return;
+        turnState.openThinkingBlocks.delete(index);
+        const stamp = yield* makeEventStamp(context.session.threadId);
+        yield* offerRuntimeEvent({
+          type: "item.completed",
+          eventId: stamp.eventId,
+          provider: PROVIDER,
+          createdAt: stamp.createdAt,
+          threadId: context.session.threadId,
+          turnId: asCanonicalTurnId(turnState.turnId),
+          itemId: asRuntimeItemId(itemId),
+          payload: { itemType: "reasoning", status: "completed" },
+          providerRefs: nativeProviderRefs(context),
+          raw: { source: "claude.sdk.message", method: raw.method, payload: raw.payload },
+        });
+      });
+
+    const completeOpenThinkingBlocks = (
+      context: ClaudeSessionContext,
+      turnState: ClaudeTurnState,
+      raw: { readonly method: string; readonly payload: unknown },
+    ): Effect.Effect<void> =>
+      Effect.forEach(
+        [...turnState.openThinkingBlocks.keys()],
+        (index) => completeThinkingBlock(context, turnState, index, raw),
+        { discard: true },
+      ).pipe(Effect.andThen(Effect.sync(() => turnState.openThinkingBlocks.clear())));
+
     const completeTurn = (
       context: ClaudeSessionContext,
       status: ProviderRuntimeTurnStatus,
@@ -3481,6 +3546,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         }
         // Clear any remaining stale entries (e.g. from interrupted content blocks)
         context.inFlightTools.clear();
+        yield* completeOpenThinkingBlocks(context, turnState, {
+          method: "claude/result",
+          payload: result ?? { status },
+        });
 
         for (const block of turnState.assistantTextBlockOrder) {
           yield* completeAssistantTextBlock(context, block, {
@@ -3640,6 +3709,13 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             if (assistantBlockEntry?.block && event.delta.type === "text_delta") {
               assistantBlockEntry.block.emittedTextDelta = true;
             }
+            // Thinking deltas carry their block's item id so separate blocks
+            // become separate reasoning sections.
+            const deltaItemId =
+              assistantBlockEntry?.block.itemId ??
+              (event.delta.type === "thinking_delta"
+                ? context.turnState.openThinkingBlocks.get(event.index)
+                : undefined);
             const stamp = yield* makeEventStamp(context.session.threadId);
             yield* offerRuntimeEvent({
               type: "content.delta",
@@ -3648,9 +3724,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               createdAt: stamp.createdAt,
               threadId: context.session.threadId,
               turnId: context.turnState.turnId,
-              ...(assistantBlockEntry?.block
-                ? { itemId: asRuntimeItemId(assistantBlockEntry.block.itemId) }
-                : {}),
+              ...(deltaItemId !== undefined ? { itemId: asRuntimeItemId(deltaItemId) } : {}),
               payload: {
                 streamKind,
                 delta: deltaText,
@@ -3743,9 +3817,44 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
 
         if (event.type === "content_block_start") {
           const { index, content_block: block } = event;
+          // A thinking block still open at a reused index lost its stop; close
+          // it so the new block's stop is not consumed by the stale one.
+          if (context.turnState?.openThinkingBlocks.has(index)) {
+            yield* completeThinkingBlock(context, context.turnState, index, {
+              method: "claude/stream_event/content_block_start",
+              payload: message,
+            });
+          }
           if (block.type === "text") {
             yield* ensureAssistantTextBlock(context, index, {
               fallbackText: extractContentBlockText(block),
+            });
+            return;
+          }
+          if (block.type === "thinking" || block.type === "redacted_thinking") {
+            // Lifecycle only, so long or omitted thinking still shows progress.
+            // Redacted contents and signatures never become readable text.
+            const turnState = context.turnState;
+            if (!turnState) return;
+            turnState.thinkingBlockCount += 1;
+            const itemId = `${turnState.turnId}:thinking:${turnState.thinkingBlockCount}`;
+            turnState.openThinkingBlocks.set(index, itemId);
+            const stamp = yield* makeEventStamp(context.session.threadId);
+            yield* offerRuntimeEvent({
+              type: "item.started",
+              eventId: stamp.eventId,
+              provider: PROVIDER,
+              createdAt: stamp.createdAt,
+              threadId: context.session.threadId,
+              turnId: asCanonicalTurnId(turnState.turnId),
+              itemId: asRuntimeItemId(itemId),
+              payload: { itemType: "reasoning", status: "inProgress" },
+              providerRefs: nativeProviderRefs(context),
+              raw: {
+                source: "claude.sdk.message",
+                method: "claude/stream_event/content_block_start",
+                payload: message,
+              },
             });
             return;
           }
@@ -3817,6 +3926,13 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
 
         if (event.type === "content_block_stop") {
           const { index } = event;
+          if (context.turnState?.openThinkingBlocks.has(index)) {
+            yield* completeThinkingBlock(context, context.turnState, index, {
+              method: "claude/stream_event/content_block_stop",
+              payload: message,
+            });
+            return;
+          }
           const assistantBlock = context.turnState?.assistantTextBlocks.get(index);
           if (assistantBlock) {
             assistantBlock.streamClosed = true;
@@ -4152,6 +4268,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             assistantTextBlockOrder: [],
             capturedProposedPlanKeys: new Set(),
             nextSyntheticAssistantBlockIndex: -1,
+            thinkingBlockCount: 0,
+            openThinkingBlocks: new Map(),
             interruptRequested: false,
           };
           context.session = {
@@ -4357,6 +4475,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           if (!completed) {
             // Close this segment's messages, retaining the logical turn and
             // background tools. Block indexes are reused by the next segment.
+            yield* completeOpenThinkingBlocks(context, context.turnState, {
+              method: "claude/result",
+              payload: message,
+            });
             for (const block of context.turnState.assistantTextBlockOrder) {
               yield* completeAssistantTextBlock(context, block, {
                 force: true,
@@ -6646,8 +6768,13 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               issue: toMessage(cause, "Invalid Claude thinking configuration."),
             }),
         });
+        const launchInstanceSettings = yield* instanceSettings(queryEnvironment, input.cwd);
+        const showThinkingSummaries = claudeShowThinkingSummaries(
+          thinkingResolution.thinking,
+          launchInstanceSettings.showThinkingSummaries,
+        );
         const settings = {
-          cleanupPeriodDays: yield* transcriptRetention(queryEnvironment, input.cwd),
+          cleanupPeriodDays: launchInstanceSettings.cleanupPeriodDays,
           ...(providerOptions?.autoCompactWindow
             ? { autoCompactWindow: providerOptions.autoCompactWindow }
             : {}),
@@ -6655,6 +6782,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             fastMode,
             ...(typeof thinking === "boolean" ? { thinking } : {}),
           }),
+          ...(showThinkingSummaries !== undefined ? { showThinkingSummaries } : {}),
         };
         const configuredBase = {
           ...(selectedModel ? { model: selectedModel } : {}),
@@ -7280,6 +7408,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           assistantTextBlockOrder: [],
           capturedProposedPlanKeys: new Set(),
           nextSyntheticAssistantBlockIndex: -1,
+          thinkingBlockCount: 0,
+          openThinkingBlocks: new Map(),
           interruptRequested: false,
         };
 

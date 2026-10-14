@@ -16,6 +16,7 @@ import {
 import {
   buildCodexInitializeParams,
   buildCodexThreadOpenRequestParams,
+  buildCodexTurnStartParams,
   CODEX_ELICITATION_OPENED_METHOD,
   CODEX_ELICITATION_SETTLED_METHOD,
   CODEX_ONE_OFF_WORKER_IDLE_MS,
@@ -986,6 +987,7 @@ describe("sendTurn", () => {
     const expected = {
       model: "gpt-6.1-sol",
       cwd: "/tmp/project",
+      effort: "high",
       ...(limit !== undefined ? { modelContextWindowTokens: limit } : {}),
     };
     expect(context.configuredBase).toEqual(expected);
@@ -1101,15 +1103,17 @@ describe("sendTurn", () => {
         },
       ],
       model: "gpt-5.3-codex",
+      effort: "high",
       collaborationMode: {
         mode: "default",
         settings: {
           model: "gpt-5.3-codex",
-          reasoning_effort: "medium",
+          reasoning_effort: "high",
           developer_instructions: buildCodexAssistantInstructions({
             interactionMode: "default",
             currentDate: today,
             model: "gpt-5.3-codex",
+            effort: "high",
           }),
         },
       },
@@ -1136,15 +1140,17 @@ describe("sendTurn", () => {
         },
       ],
       model: DEFAULT_MODEL_BY_PROVIDER.codex,
+      effort: "high",
       collaborationMode: {
         mode: "default",
         settings: {
           model: DEFAULT_MODEL_BY_PROVIDER.codex,
-          reasoning_effort: "medium",
+          reasoning_effort: "high",
           developer_instructions: buildCodexAssistantInstructions({
             interactionMode: "default",
             currentDate: today,
             model: DEFAULT_MODEL_BY_PROVIDER.codex,
+            effort: "high",
           }),
         },
       },
@@ -1209,6 +1215,111 @@ describe("sendTurn", () => {
     );
   });
 
+  describe("effort and service tier resolution", () => {
+    const account = { type: "unknown" as const, planType: null, sparkEnabled: false };
+    const reportedEfforts = (defaultEffort: string) =>
+      new Map([
+        [
+          "gpt-5.3-codex",
+          {
+            source: "reported" as const,
+            optionDescriptors: [
+              {
+                id: "reasoningEffort",
+                label: "Reasoning",
+                type: "select" as const,
+                options: ["low", "medium", "high"].map((id) => ({
+                  id,
+                  label: id,
+                  ...(id === defaultEffort ? { isDefault: true } : {}),
+                })),
+              },
+            ],
+          },
+        ],
+      ]);
+    const build = (
+      input: Partial<Parameters<typeof buildCodexTurnStartParams>[0]>,
+      state: Partial<Parameters<typeof buildCodexTurnStartParams>[1]> = {},
+    ) =>
+      buildCodexTurnStartParams(
+        { threadId: asThreadId("thread_1"), input: "Go", model: "gpt-5.3-codex", ...input },
+        { providerThreadId: "thread_1", account, ...state },
+      );
+
+    it("sends the model default when no effort is given", () => {
+      const params = build({});
+      expect(params.effort).toBe("high");
+      expect(params.collaborationMode?.settings.reasoning_effort).toBe("high");
+    });
+
+    it("uses the reported default effort", () => {
+      const params = build({}, { reportedModelCapabilities: reportedEfforts("medium") });
+      expect(params.effort).toBe("medium");
+      expect(params.collaborationMode?.settings.reasoning_effort).toBe("medium");
+    });
+
+    it("omits effort and sends a null reasoning effort when the model takes none", () => {
+      const params = build(
+        { effort: "high" },
+        {
+          reportedModelCapabilities: new Map([
+            ["gpt-5.3-codex", { source: "reported" as const, supportsEffort: false }],
+          ]),
+        },
+      );
+      expect(params).not.toHaveProperty("effort");
+      expect(params.collaborationMode?.settings.reasoning_effort).toBeNull();
+    });
+
+    it("keeps an explicit supported effort", () => {
+      const params = build({ effort: "low" });
+      expect(params.effort).toBe("low");
+      expect(params.collaborationMode?.settings.reasoning_effort).toBe("low");
+    });
+
+    it("downgrades an unsupported effort", () => {
+      const params = build(
+        { effort: "xhigh" },
+        { reportedModelCapabilities: reportedEfforts("medium") },
+      );
+      expect(params.effort).toBe("high");
+      expect(params.collaborationMode?.settings.reasoning_effort).toBe("high");
+    });
+
+    it("clears the tier only after F5 applied fast to the thread", async () => {
+      const { manager, context, sendRequest } = createSendTurnHarness();
+      const tierSent = () => {
+        const params = sendRequest.mock.calls.at(-1)?.[2] as Record<string, unknown>;
+        return Object.hasOwn(params, "serviceTier") ? params.serviceTier : "omitted";
+      };
+      // Fast never enabled: a tier from the user's config.toml is left alone.
+      await manager.sendTurn({ threadId: asThreadId("thread_1"), input: "Go", serviceTier: null });
+      expect(tierSent()).toBe("omitted");
+
+      await manager.sendTurn({
+        threadId: asThreadId("thread_1"),
+        input: "Go",
+        serviceTier: "fast",
+      });
+      expect(tierSent()).toBe("fast");
+      await manager.sendTurn({ threadId: asThreadId("thread_1"), input: "Go", serviceTier: null });
+      expect(tierSent()).toBeNull();
+      await manager.sendTurn({ threadId: asThreadId("thread_1"), input: "Go", serviceTier: null });
+      expect(tierSent()).toBe("omitted");
+
+      // A thread started with fast is cleared by the first fast-off turn.
+      (context as { fastTierApplied?: boolean }).fastTierApplied = true;
+      await manager.sendTurn({ threadId: asThreadId("thread_1"), input: "Go", serviceTier: null });
+      expect(tierSent()).toBeNull();
+    });
+
+    it("never asks for a reasoning summary", () => {
+      expect(build({ effort: "low", serviceTier: "fast" })).not.toHaveProperty("summary");
+      expect(build({})).not.toHaveProperty("summary");
+    });
+  });
+
   it("passes Codex plan mode as a collaboration preset on turn/start", async () => {
     const { manager, context, sendRequest } = createSendTurnHarness();
     const today = currentDate();
@@ -1229,15 +1340,17 @@ describe("sendTurn", () => {
         },
       ],
       model: "gpt-5.3-codex",
+      effort: "high",
       collaborationMode: {
         mode: "plan",
         settings: {
           model: "gpt-5.3-codex",
-          reasoning_effort: "medium",
+          reasoning_effort: "high",
           developer_instructions: buildCodexAssistantInstructions({
             interactionMode: "plan",
             currentDate: today,
             model: "gpt-5.3-codex",
+            effort: "high",
           }),
         },
       },
@@ -1264,15 +1377,17 @@ describe("sendTurn", () => {
         },
       ],
       model: "gpt-5.3-codex",
+      effort: "high",
       collaborationMode: {
         mode: "default",
         settings: {
           model: "gpt-5.3-codex",
-          reasoning_effort: "medium",
+          reasoning_effort: "high",
           developer_instructions: buildCodexAssistantInstructions({
             interactionMode: "default",
             currentDate: today,
             model: "gpt-5.3-codex",
+            effort: "high",
           }),
         },
       },
@@ -1300,15 +1415,17 @@ describe("sendTurn", () => {
         },
       ],
       model: "gpt-5.2-codex",
+      effort: "high",
       collaborationMode: {
         mode: "plan",
         settings: {
           model: "gpt-5.2-codex",
-          reasoning_effort: "medium",
+          reasoning_effort: "high",
           developer_instructions: buildCodexAssistantInstructions({
             interactionMode: "plan",
             currentDate: today,
             model: "gpt-5.2-codex",
+            effort: "high",
           }),
         },
       },
@@ -2013,6 +2130,11 @@ describe("runOneOffPrompt", () => {
       }),
     );
     expect(stopSession).toHaveBeenCalledWith(expect.stringMatching(/^one-off:/));
+
+    await manager.runOneOffPrompt({ prompt: "No effort", timeoutMs: 1_000 });
+    expect(manager.sendTurn).toHaveBeenLastCalledWith(
+      expect.objectContaining({ input: "No effort", effort: "medium" }),
+    );
   });
 
   it("fails when the synthetic turn completes without assistant text", async () => {

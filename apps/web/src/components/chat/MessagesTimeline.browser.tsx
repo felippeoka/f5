@@ -20,7 +20,7 @@ import type {} from "@vitest/browser-playwright"; // Types cdp() as a Playwright
 import { cdp, page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
-import type { deriveTimelineEntries } from "../../session-logic";
+import type { deriveTimelineEntries, LiveWorkActivity } from "../../session-logic";
 import { parsePersistedAppSettings } from "../../appSettings";
 import type { TurnDiffSummary } from "../../types";
 import { readTimelineScrollAnchor } from "./timelineScrollAnchors";
@@ -211,6 +211,7 @@ interface HarnessProps {
   initialHeight?: number;
   initialIsWorking?: boolean;
   initialActiveTurnStartedAt?: string | null;
+  initialLiveActivity?: LiveWorkActivity;
   initialExpandedCommandExecutions?: Record<string, boolean>;
   queryClient?: QueryClient;
   turnDiffSummaryByTurnId?: Map<TurnId, TurnDiffSummary>;
@@ -254,6 +255,7 @@ interface TimelineHarnessApi {
     isWorking?: boolean;
     activeTurnStartedAt?: string | null;
     nowIso?: string;
+    liveActivity?: LiveWorkActivity;
   }) => void;
 }
 
@@ -273,6 +275,9 @@ function TimelineHarness(
       : props.initialActiveTurnStartedAt,
   );
   const [nowIso, setNowIso] = useState(props.initialNowIso ?? "2026-03-04T12:05:00.000Z");
+  const [liveActivity, setLiveActivity] = useState<LiveWorkActivity>(
+    props.initialLiveActivity ?? null,
+  );
   const [dockHeight, setDockHeight] = useState(0);
   const [threadId, setThreadId] = useState<ThreadId | undefined>(props.threadId);
   const [headerContent, setHeaderContent] = useState<React.ReactNode>(props.headerContent ?? null);
@@ -304,6 +309,7 @@ function TimelineHarness(
         if (nextState.entries !== undefined) setEntries(nextState.entries);
         if (nextState.isWorking !== undefined) setIsWorking(nextState.isWorking);
         if (nextState.nowIso !== undefined) setNowIso(nextState.nowIso);
+        if (nextState.liveActivity !== undefined) setLiveActivity(nextState.liveActivity);
         if (Object.hasOwn(nextState, "activeTurnStartedAt")) {
           setActiveTurnStartedAt(nextState.activeTurnStartedAt ?? null);
         }
@@ -326,6 +332,7 @@ function TimelineHarness(
           hasMessages={entries.length > 0}
           isWorking={isWorking}
           activeTurnStartedAt={activeTurnStartedAt}
+          liveActivity={liveActivity}
           listRef={listRef}
           onIsAtEndChange={props.onIsAtEndChangeSpy}
           timelineEntries={entries}
@@ -2698,6 +2705,7 @@ describe("MessagesTimeline working ribbon", () => {
       initialNowIso?: string;
       initialActiveTurnStartedAt?: string | null;
       initialHeight?: number;
+      initialLiveActivity?: LiveWorkActivity;
       threadId?: ThreadId;
       strict?: boolean;
     } = {},
@@ -2716,6 +2724,9 @@ describe("MessagesTimeline working ribbon", () => {
           ? { initialActiveTurnStartedAt: options.initialActiveTurnStartedAt }
           : {})}
         {...(options.threadId ? { threadId: options.threadId } : {})}
+        {...(options.initialLiveActivity !== undefined
+          ? { initialLiveActivity: options.initialLiveActivity }
+          : {})}
         onIsAtEndChangeSpy={() => {}}
         onWorkingRibbonFocusLost={focusLost}
         setApi={(next) => {
@@ -2777,6 +2788,7 @@ describe("MessagesTimeline working ribbon", () => {
           makeReadWorkEntry("ribbon-footprint-read", "src/a.ts", 1),
         ],
         initialActiveTurnStartedAt: startedAt,
+        initialLiveActivity: { kind: "tool", providerItemId: null, title: "Read src/a.ts" },
       });
       const { host } = mounted;
       const measure = () => {

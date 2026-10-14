@@ -19,6 +19,7 @@ import { providerQueryKeys } from "../../lib/providerReactQuery";
 import {
   deriveTimelineEntries,
   deriveWorkLogEntries,
+  type LiveWorkActivity,
   type TimelineEntry,
 } from "../../session-logic";
 
@@ -229,6 +230,116 @@ function preloadThreadFileChange(input: {
 }
 
 describe("MessagesTimeline", () => {
+  it("labels the working row with the live activity, not the last finished tool", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const createdAt = "2026-03-17T19:12:28.000Z";
+    const timelineEntries: TimelineEntry[] = [
+      {
+        id: "finished-tool-entry",
+        kind: "work",
+        createdAt,
+        entry: {
+          id: "finished-tool-work",
+          createdAt,
+          label: "Finished lookup",
+          tone: "tool",
+          itemType: "dynamic_tool_call",
+        },
+      },
+      {
+        id: "running-tool-entry",
+        kind: "work",
+        createdAt,
+        entry: {
+          id: "running-tool-work",
+          createdAt,
+          label: "Running lookup",
+          tone: "tool",
+          itemType: "dynamic_tool_call",
+          providerItemId: ProviderItemId.makeUnsafe("item-running"),
+          status: "inProgress",
+        },
+      },
+      {
+        id: "running-command-entry",
+        kind: "command",
+        createdAt,
+        commandExecution: {
+          id: "running-command",
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          turnId: TurnId.makeUnsafe("turn-1"),
+          providerItemId: ProviderItemId.makeUnsafe("cmd-running"),
+          command: "/bin/zsh -lc 'bun run test'",
+          title: "Ran command",
+          status: "running",
+          detail: null,
+          exitCode: null,
+          startedAt: createdAt,
+          completedAt: null,
+          updatedAt: createdAt,
+          startedSequence: 1,
+          lastUpdatedSequence: 1,
+        },
+      } as unknown as TimelineEntry,
+    ];
+    const queryClient = new QueryClient();
+    const render = (liveActivity: LiveWorkActivity) =>
+      renderToStaticMarkup(
+        <QueryClientProvider client={queryClient}>
+          <MessagesTimeline
+            hasMessages
+            isWorking
+            activeTurnStartedAt={createdAt}
+            liveActivity={liveActivity}
+            listRef={{ current: null }}
+            onIsAtEndChange={() => {}}
+            timelineEntries={timelineEntries}
+            completionDividerBeforeEntryId={null}
+            completionSummary={null}
+            turnDiffSummaryByAssistantMessageId={new Map()}
+            turnDiffSummaryByTurnId={new Map()}
+            nowIso="2026-03-17T19:12:40.000Z"
+            expandedWorkGroups={{}}
+            onToggleWorkGroup={() => {}}
+            onOpenTurnDiff={() => {}}
+            revertTurnCountByUserMessageId={new Map()}
+            onRevertUserMessage={() => {}}
+            isRevertingCheckpoint={false}
+            onImageExpand={() => {}}
+            markdownCwd={undefined}
+            resolvedTheme="light"
+            timestampFormat="locale"
+            workspaceRoot={undefined}
+            expandedCommandExecutions={{}}
+            onToggleCommandExecution={() => {}}
+            allDirectoriesExpanded
+            onToggleAllDirectories={() => {}}
+          />
+        </QueryClientProvider>,
+      );
+    const workingActivity = (markup: string) =>
+      /· ([^<]*)<\/span>/.exec(markup.replaceAll("<!-- -->", ""))?.[1] ?? null;
+
+    expect(workingActivity(render({ kind: "thinking", detail: null }))).toBe("Thinking");
+    expect(workingActivity(render({ kind: "thinking", detail: "Inspecting adapter" }))).toBe(
+      "Thinking: Inspecting adapter",
+    );
+    expect(
+      workingActivity(
+        render({ kind: "tool", providerItemId: "item-running", title: "fallback title" }),
+      ),
+    ).toBe("Running lookup");
+    expect(
+      workingActivity(
+        render({ kind: "tool", providerItemId: "cmd-running", title: "Ran command" }),
+      ),
+    ).toBe("bun run test");
+    expect(
+      workingActivity(render({ kind: "tool", providerItemId: "item-missing", title: "Grep" })),
+    ).toBe("Grep");
+    expect(workingActivity(render(null))).toBeNull();
+  });
+
   it("keeps file-change rows visible when routine work exceeds the page size", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const createdAt = "2026-03-17T19:12:28.000Z";
