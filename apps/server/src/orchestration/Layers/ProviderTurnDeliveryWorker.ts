@@ -267,9 +267,11 @@ const make = Effect.gen(function* () {
       );
       const claimed = yield* repository.claim(deliveryId, preSendTurnIds);
       if (!claimed) return;
-      yield* Metric.modify(deliveryAttemptsActive, 1);
-      yield* settleClaimedDelivery(deliveryId, claimed).pipe(
-        Effect.ensuring(Metric.modify(deliveryAttemptsActive, -1)),
+      // Acquire/release so an interrupt cannot land between increment and settle.
+      yield* Effect.acquireUseRelease(
+        Metric.modify(deliveryAttemptsActive, 1),
+        () => settleClaimedDelivery(deliveryId, claimed),
+        () => Metric.modify(deliveryAttemptsActive, -1),
       );
     }).pipe(
       Effect.catchCause((cause) =>

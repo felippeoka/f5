@@ -10,6 +10,7 @@ import * as Cache from "effect/Cache";
 import * as Config from "effect/Config";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import { identity } from "effect/Function";
 import * as Layer from "effect/Layer";
@@ -32,6 +33,9 @@ const recordDuration = (
   metric: Metric.Metric<Duration.Duration, unknown>,
   startedAt: number,
 ): Effect.Effect<void> => Metric.update(metric, Duration.millis(performance.now() - startedAt));
+
+const recordExecution = (startedAt: number, outcome: "success" | "failure") =>
+  recordDuration(Metric.withAttributes(sqlExecutionDuration, { outcome }), startedAt);
 
 export const TypeId: TypeId = "~local/sqlite-node/SqliteClient";
 
@@ -132,7 +136,7 @@ const makeWithDatabase = (
           statement.setReadBigInts(Boolean(ServiceMap.get(fiber.services, Client.SafeIntegers)));
           const startedAt = performance.now();
           const executed = (result: ReadonlyArray<any>) =>
-            Effect.as(recordDuration(sqlExecutionDuration, startedAt), result);
+            Effect.as(recordExecution(startedAt, "success"), result);
           try {
             if (hasRows(statement)) {
               return executed(statement.all(...(params as any)));
@@ -147,7 +151,11 @@ const makeWithDatabase = (
             statement.all(...(params as any));
             return executed([]);
           } catch (cause) {
-            return Effect.fail(new SqlError({ cause, message: "Failed to execute statement" }));
+            // Failures are timed too: a busy-timeout stall ends in SQLITE_BUSY.
+            return Effect.andThen(
+              recordExecution(startedAt, "failure"),
+              Effect.fail(new SqlError({ cause, message: "Failed to execute statement" })),
+            );
           }
         });
 
@@ -173,7 +181,11 @@ const makeWithDatabase = (
                   return [];
                 },
                 catch: (cause) => new SqlError({ cause, message: "Failed to execute statement" }),
-              }).pipe(Effect.tap(() => recordDuration(sqlExecutionDuration, startedAt)));
+              }).pipe(
+                Effect.onExit((exit) =>
+                  recordExecution(startedAt, Exit.isSuccess(exit) ? "success" : "failure"),
+                ),
+              );
             }),
           (statement) =>
             Effect.sync(() => {

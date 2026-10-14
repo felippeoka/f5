@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { Effect, Metric } from "effect";
+import { Effect, Exit, Metric } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { sqlConnectionWaitDuration, sqlExecutionDuration } from "../observability/Metrics.ts";
@@ -49,16 +49,32 @@ layer("NodeSqliteClient", (it) => {
       const sql = yield* SqlClient.SqlClient;
       const count = (metric: typeof sqlExecutionDuration) =>
         Metric.value(metric).pipe(Effect.map((state) => state.count));
-      const executedBefore = yield* count(sqlExecutionDuration);
+      const succeeded = Metric.withAttributes(sqlExecutionDuration, { outcome: "success" });
+      const executedBefore = yield* count(succeeded);
       const waitedBefore = yield* count(sqlConnectionWaitDuration);
 
       yield* sql`SELECT 1`;
       yield* sql`SELECT 1`.values;
       yield* sql.withTransaction(sql`SELECT 1`);
 
-      // Plain, positional and in-transaction statements are each timed once.
-      assert.equal((yield* count(sqlExecutionDuration)) - executedBefore, 5);
+      // Three SELECTs plus the transaction's BEGIN and COMMIT, each timed once.
+      assert.equal((yield* count(succeeded)) - executedBefore, 5);
       assert.isAtLeast((yield* count(sqlConnectionWaitDuration)) - waitedBefore, 3);
+    }),
+  );
+  it.effect("records failed statements on the row and positional paths", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const failed = Metric.withAttributes(sqlExecutionDuration, { outcome: "failure" });
+      const failedBefore = (yield* Metric.value(failed)).count;
+      yield* sql`CREATE TABLE failing_fixture(id INTEGER PRIMARY KEY)`;
+      yield* sql`INSERT INTO failing_fixture(id) VALUES (1)`;
+
+      const duplicate = sql`INSERT INTO failing_fixture(id) VALUES (1)`;
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(duplicate)));
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(duplicate.values)));
+
+      assert.equal((yield* Metric.value(failed)).count - failedBefore, 2);
     }),
   );
   for (const values of [false, true]) {

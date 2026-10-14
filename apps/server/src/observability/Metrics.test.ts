@@ -178,9 +178,10 @@ describe("event loop delay sampler", () => {
       yield* Effect.sleep("300 millis");
       yield* Fiber.interrupt(sampler);
 
+      // The timer is process-global, so compare against this test's starting state.
       const after = yield* Metric.value(eventLoopDelay);
       assert.isAbove(after.count, before.count);
-      assert.isAtLeast(after.max, 100);
+      assert.isAtLeast(after.sum - before.sum, 100);
     }),
   );
 });

@@ -136,7 +136,9 @@ export const previewRecordingFramesDroppedTotal = Metric.counter(
 );
 
 export const eventLoopDelay = Metric.timer("t3_event_loop_delay", {
-  description: "Lateness of a fixed-interval timer, sampling event-loop blocking.",
+  // One sample per 250 ms sleep, so a short stall between samples can be missed. Its
+  // percentiles are not comparable with the perf harness's monitorEventLoopDelay p99.
+  description: "Lateness of a 250 ms sleep, sampling event-loop blocking.",
 });
 
 export const sqlExecutionDuration = Metric.timer("t3_sql_execution_duration", {

@@ -4,9 +4,11 @@
  * against a disposable on-disk SQLite database.
  */
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { Effect, Exit, Layer, ManagedRuntime, PubSub, Scope, Stream } from "effect";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -30,7 +32,6 @@ import { ThreadBackgroundWorkLive } from "../../src/orchestration/Layers/ThreadB
 import { ThreadCommandExecutionQueryLive } from "../../src/orchestration/Layers/ThreadCommandExecutionQuery.ts";
 import { ThreadFileChangeQueryLive } from "../../src/orchestration/Layers/ThreadFileChangeQuery.ts";
 import { OrchestrationEngineService } from "../../src/orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../../src/orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProviderRuntimeIngestionService } from "../../src/orchestration/Services/ProviderRuntimeIngestion.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../src/persistence/Layers/OrchestrationCommandReceipts.ts";
 import { OrchestrationEventStoreLive } from "../../src/persistence/Layers/OrchestrationEventStore.ts";
@@ -58,8 +59,12 @@ import {
   type Observation,
   type Samples,
 } from "../../../../scripts/lib/performance/report.ts";
+import { SERVER_COMPONENT_BOUNDS } from "../../../../scripts/lib/performance/coverage.ts";
 
 const workload = fixture.assistantStream;
+// Per-delta latency is ~100 ms today; a missing commit is a harness or ingestion bug.
+const DELTA_COMMIT_TIMEOUT_MS = 30_000;
+const READ_MODEL_MEMORY_RUNS = 3;
 const epochMs = Date.parse(fixture.epoch);
 const at = (offsetMs: number) => new Date(epochMs + offsetMs).toISOString();
 const projectId = ProjectId.makeUnsafe("perf-stream-project");
@@ -331,9 +336,22 @@ export async function measureAssistantStream(
             }
           }
           const eventId = id(`delta-${index}`);
-          const committed = new Promise<void>((resolve) =>
-            waiters.set(`provider:${eventId}:assistant-delta`, resolve),
-          );
+          const commandId = `provider:${eventId}:assistant-delta`;
+          // Fail fast and say where, instead of hanging until the test timeout.
+          const committed = new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(() => {
+              waiters.delete(commandId);
+              reject(
+                new Error(
+                  `Stream ${stream} delta ${index} (repetition ${rep}) was not committed within ${DELTA_COMMIT_TIMEOUT_MS} ms; expected a domain event with commandId ${commandId}`,
+                ),
+              );
+            }, DELTA_COMMIT_TIMEOUT_MS);
+            waiters.set(commandId, () => {
+              clearTimeout(timer);
+              resolve();
+            });
+          });
           const startedAt = performance.now();
           provider.emit({
             ...base,
@@ -375,6 +393,8 @@ export async function measureAssistantStream(
         async () => {
           counts.statements = counts.projectionStatements = counts.eventRows = 0;
           counts.domainEvents = 0;
+          // Like the other stream observations, the delay histogram covers measured runs only.
+          if (repetition === method.warmups) loopDelay.reset();
         },
       );
       loopDelay.disable();
@@ -399,23 +419,18 @@ export async function measureAssistantStream(
       const measuredCounts = perRepetition.slice(-method.repetitions);
       const most = (key: keyof typeof counts) =>
         Math.max(...measuredCounts.map((entry) => entry[key]));
-      const deltas = workload.threads * workload.deltasPerStream;
+      const bounded = (name: keyof typeof SERVER_COMPONENT_BOUNDS, actual: number) =>
+        maximumObservation(name, actual, SERVER_COMPONENT_BOUNDS[name]);
       return {
         samples,
         observations: [
-          // Ceilings sit well above the pre-P1 baseline; the 20% gate uses perf:compare.
-          maximumObservation("stream.deltaLatencyP50Ms", percentile(measured, 0.5), 250),
-          maximumObservation("stream.deltaLatencyP95Ms", percentile(measured, 0.95), 500),
-          maximumObservation("stream.eventRowsWritten", most("eventRows"), deltas * 2),
-          maximumObservation("stream.domainEvents", most("domainEvents"), deltas * 2),
-          maximumObservation("stream.sqlStatements", most("statements"), deltas * 100),
-          maximumObservation(
-            "stream.projectionSqlStatements",
-            most("projectionStatements"),
-            deltas * 50,
-          ),
-          // The SQLite helper-process gate trips at 100 ms p99.
-          maximumObservation("stream.eventLoopDelayP99Ms", loopDelay.percentile(99) / 1e6, 100),
+          bounded("stream.deltaLatencyP50Ms", percentile(measured, 0.5)),
+          bounded("stream.deltaLatencyP95Ms", percentile(measured, 0.95)),
+          bounded("stream.eventRowsWritten", most("eventRows")),
+          bounded("stream.domainEvents", most("domainEvents")),
+          bounded("stream.sqlStatements", most("statements")),
+          bounded("stream.projectionSqlStatements", most("projectionStatements")),
+          bounded("stream.eventLoopDelayP99Ms", loopDelay.percentile(99) / 1e6),
         ],
       };
     } finally {
@@ -430,46 +445,100 @@ export async function measureAssistantStream(
   }
 }
 
-/** Retained heap and RSS of the startup read model for a large profile. */
-export async function measureReadModelMemory(): Promise<Observation[]> {
-  const directory = mkdtempSync(path.join(tmpdir(), "f5-performance-read-model-"));
+const readModelThreadId = (index: number) => ThreadId.makeUnsafe(`perf-read-model-${index}`);
+const readModelDatabase = (directory: string) => path.join(directory, "read-model.sqlite");
+
+export interface EngineHydrationMemory {
+  readonly heapBytes: number;
+  readonly rssBytes: number;
+}
+
+/**
+ * Memory retained by engine startup (projection bootstrap, snapshot hydration and
+ * catch-up replay), sampled before the engine layer exists. Runs in a fresh process
+ * via readModelMemory.perf.ts so seeding never warms this allocator.
+ */
+export async function measureEngineHydration(directory: string): Promise<EngineHydrationMemory> {
   const gc = (globalThis as { gc?: () => void }).gc;
   if (!gc) throw new Error("Read-model memory measurement requires --expose-gc");
+  gc();
+  const before = process.memoryUsage();
+  const runtime = ManagedRuntime.make(
+    makeLayer(directory, readModelDatabase(directory), makeProviderService().service),
+  );
   try {
-    const database = path.join(directory, "read-model.sqlite");
+    const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    gc();
+    const after = process.memoryUsage();
+    const model = await runtime.runPromise(engine.getReadModel());
+    const hydrated = model.threads.filter((thread) => thread.id.startsWith("perf-read-model-"));
+    expect(hydrated).toHaveLength(workload.readModelThreads);
+    expect(hydrated.every((t) => t.messages.length === workload.readModelMessages)).toBe(true);
+    return {
+      heapBytes: Math.max(0, after.heapUsed - before.heapUsed),
+      rssBytes: Math.max(0, after.rss - before.rss),
+    };
+  } finally {
+    await runtime.dispose();
+  }
+}
+
+/** Seeds once here, then takes the median of several fresh-process hydrations. */
+export async function measureReadModelMemory(): Promise<Observation[]> {
+  const directory = mkdtempSync(path.join(tmpdir(), "f5-performance-read-model-"));
+  try {
     const threadIds = Array.from({ length: workload.readModelThreads }, (_, i) =>
-      ThreadId.makeUnsafe(`perf-read-model-${i}`),
+      readModelThreadId(i),
     );
-    await seed(directory, database, threadIds, workload.readModelMessages);
-    const runtime = ManagedRuntime.make(
-      makeLayer(directory, database, makeProviderService().service),
+    await seed(directory, readModelDatabase(directory), threadIds, workload.readModelMessages);
+    const serverRoot = fileURLToPath(new URL("../..", import.meta.url));
+    // A nested vitest must not inherit this worker's pool identity.
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => !key.startsWith("VITEST")),
     );
-    try {
-      const query = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
-      gc();
-      const before = process.memoryUsage();
-      const model = await runtime.runPromise(query.getBootstrapSnapshot());
-      gc();
-      const after = process.memoryUsage();
-      expect(model.threads).toHaveLength(workload.readModelThreads);
-      expect(model.threads.every((t) => t.messages.length === workload.readModelMessages)).toBe(
-        true,
+    const heap: number[] = [];
+    const rss: number[] = [];
+    for (let run = 0; run < READ_MODEL_MEMORY_RUNS; run++) {
+      const output = path.join(directory, `hydration-${run}.json`);
+      const child = spawnSync(
+        process.execPath,
+        [
+          path.join(serverRoot, "node_modules/vitest/vitest.mjs"),
+          "run",
+          "--config",
+          "vitest.performance.config.ts",
+        ],
+        {
+          cwd: serverRoot,
+          encoding: "utf8",
+          env: {
+            ...env,
+            F5_PERF_READ_MODEL: "1",
+            F5_PERF_READ_MODEL_DIR: directory,
+            F5_PERF_READ_MODEL_OUTPUT: output,
+          },
+        },
       );
-      return [
-        maximumObservation(
-          "readModel.heapBytes",
-          Math.max(0, after.heapUsed - before.heapUsed),
-          128 * 1024 * 1024,
-        ),
-        maximumObservation(
-          "readModel.rssBytes",
-          Math.max(0, after.rss - before.rss),
-          256 * 1024 * 1024,
-        ),
-      ];
-    } finally {
-      await runtime.dispose();
+      if (child.status !== 0)
+        throw new Error(
+          `Read-model hydration process failed (${child.status ?? child.signal}): ${child.stderr.slice(-4096) || child.stdout.slice(-4096)}`,
+        );
+      const result = JSON.parse(readFileSync(output, "utf8")) as EngineHydrationMemory;
+      heap.push(result.heapBytes);
+      rss.push(result.rssBytes);
     }
+    return [
+      maximumObservation(
+        "readModel.heapBytes",
+        percentile(heap, 0.5),
+        SERVER_COMPONENT_BOUNDS["readModel.heapBytes"],
+      ),
+      maximumObservation(
+        "readModel.rssBytes",
+        percentile(rss, 0.5),
+        SERVER_COMPONENT_BOUNDS["readModel.rssBytes"],
+      ),
+    ];
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
