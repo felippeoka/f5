@@ -16,7 +16,10 @@ import {
   codexAuthenticationReady,
 } from "../../../scripts/computer-certification/preflight.ts";
 import { profileIsolationChecks } from "../../../scripts/computer-certification/profileIsolationEvidence.ts";
-import { profileProviderProgress } from "../src/computer/rehearsalProfileIsolation.ts";
+import {
+  profileProviderProgress,
+  profileOwnerLeaseReady,
+} from "../src/computer/rehearsalProfileIsolation.ts";
 
 const fingerprint = async (path) =>
   createHash("sha256")
@@ -403,17 +406,15 @@ export async function runProfileIsolation(o) {
     );
     // Provider planning/queue admission is not a native execution latency check.
     // Use the same bounded turn budget as completion; still require a live lease.
-    await waitFor(async () => {
-      if ((await snapshot()).profiles[owner].held) return true;
-      const turn = (await current(owner))?.latestTurn;
-      if (
-        turn &&
-        turn.turnId !== previousOwner &&
-        ["completed", "error", "interrupted"].includes(turn.state)
-      )
-        throw new Error("Isolation owner turn ended without a lease.");
-      return false;
-    }, 150000);
+    await waitFor(
+      () =>
+        profileOwnerLeaseReady(
+          async () => (await snapshot()).profiles[owner].held,
+          async () => (await current(owner))?.latestTurn,
+          previousOwner,
+        ),
+      150000,
+    );
     const previousContender = await submit(
       contender,
       `Use only computer_activate_app exactly once for already granted app ${apps[contender]} with screenshot:false. Another profile is holding the machine lease. Expect Busy; finish READY after the result. No fallback, retry, other tool, shell/files/network or apps.`,

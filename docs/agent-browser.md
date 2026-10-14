@@ -798,6 +798,17 @@ Neither change alters authorization, consent, helper input or stop behavior, and
 neither is evidence about this older attempt. No automatic retry or public gate
 change follows from these diagnostics.
 
+The operator subsequently confirmed staying idle through RED. An automated
+regression demonstrated a separate runner race: the host lease and provider turn
+projection are independent asynchronous reads. A lease acquired between those
+reads could be cleaned up based on a terminal projection and the stale no-lease
+observation. The runner now rechecks the live lease before that failure. The
+regression fails with the old predicate and passes with the recheck; terminal
+turns without a live lease still fail, and old terminal turns remain ignored.
+This establishes a runner defect, not the cause of the older `unknown` failure.
+Its result and release status remain unchanged. Production pause/authorization
+paths and the subsequent contention/privacy assertions are unchanged.
+
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;
 watching a child's absent stdout pipe produced no diagnostic evidence. The new

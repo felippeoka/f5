@@ -1,5 +1,56 @@
 import { expect, it } from "vitest";
-import { RehearsalProfileIsolation, profileProviderProgress } from "./rehearsalProfileIsolation";
+import {
+  RehearsalProfileIsolation,
+  profileProviderProgress,
+  profileOwnerLeaseReady,
+} from "./rehearsalProfileIsolation";
+
+it("rechecks the live lease when a terminal projection crosses acquisition", async () => {
+  let held = false;
+  let reads = 0;
+  const ready = await profileOwnerLeaseReady(
+    async () => {
+      reads++;
+      return held;
+    },
+    async () => {
+      held = true;
+      return { turnId: "new", state: "completed" };
+    },
+    "old",
+  );
+  expect(ready).toBe(true);
+  expect(reads).toBe(2);
+});
+
+it.each(["completed", "error", "interrupted"])(
+  "still refuses a %s owner turn with no live lease",
+  async (state) => {
+    await expect(
+      profileOwnerLeaseReady(
+        async () => false,
+        async () => ({ turnId: "new", state }),
+        "old",
+      ),
+    ).rejects.toThrow("Isolation owner turn ended without a lease.");
+  },
+);
+
+it("waits for the new turn and never treats an old completed turn as failure", async () => {
+  for (const turn of [
+    undefined,
+    { turnId: "old", state: "completed" },
+    { turnId: "new", state: "running" },
+  ])
+    expect(
+      await profileOwnerLeaseReady(
+        async () => false,
+        async () => turn,
+        "old",
+      ),
+    ).toBe(false);
+});
+
 const identities = [0, 1].map((i) => ({
   profileId: String(i + 1).repeat(32),
   threadId: `PRIVATE_THREAD_${i}`,

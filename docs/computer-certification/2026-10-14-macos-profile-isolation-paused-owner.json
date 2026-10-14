@@ -631,6 +631,8 @@
     "One owner lease and anonymous foreign banner observed; activation returned Interrupted(paused), with no successful capture or input",
     "Harness failure code unknown; failure cleanup pauses locally before collecting diagnostics, so the response alone cannot establish the original pause cause",
     "No recorded foreign activity, image, grant or private identity; absent positive image receipts prevent privacy acceptance",
-    "Cleanup confirmed; failed attempt preserved and no automatic retry or gate change"
-  ]
+    "Cleanup confirmed; failed attempt preserved and no automatic retry or gate change",
+    "Operator subsequently confirmed no mouse or keyboard use during RED; this does not retroactively identify the unknown harness failure or exclude other OS signals"
+  ],
+  "operatorReportedIdleDuringRed": true
 }

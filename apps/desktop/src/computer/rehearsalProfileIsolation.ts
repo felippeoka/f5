@@ -10,6 +10,26 @@ type Identity = { profileId: string; threadId: string; appId: string; privateTit
 const record = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v);
 
+/** The host lease and provider projection are separate asynchronous reads.
+ * A terminal projection must not trigger cleanup of a newly acquired lease. */
+export async function profileOwnerLeaseReady(
+  readHeld: () => Promise<boolean>,
+  readTurn: () => Promise<{ turnId: string; state: string } | null | undefined>,
+  previousTurnId: string | undefined,
+): Promise<boolean> {
+  if (await readHeld()) return true;
+  const turn = await readTurn();
+  if (
+    turn &&
+    turn.turnId !== previousTurnId &&
+    ["completed", "error", "interrupted"].includes(turn.state)
+  ) {
+    if (await readHeld()) return true;
+    throw new Error("Isolation owner turn ended without a lease.");
+  }
+  return false;
+}
+
 /** Provider/UI failures can happen before any host call. Fixed states and
  * canonical decision counts distinguish those cases without keeping content. */
 export function profileProviderProgress(thread: unknown, activities: unknown) {
