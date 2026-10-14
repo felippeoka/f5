@@ -32,6 +32,9 @@ export class ComputerOverlay implements ComputerOverlaySurface {
     for (const display of screen.getAllDisplays()) {
       const window = new BrowserWindow({
         ...display.bounds,
+        // A non-activating macOS panel can float above fullscreen apps without
+        // changing the entire application's activation policy (and Dock icon).
+        ...(process.platform === "darwin" ? { type: "panel" } : {}),
         transparent: true,
         frame: false,
         focusable: false,
@@ -49,7 +52,10 @@ export class ComputerOverlay implements ComputerOverlaySurface {
       window.setIgnoreMouseEvents(true);
       window.setContentProtection(true);
       if (process.platform === "darwin")
-        window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+        window.setVisibleOnAllWorkspaces(true, {
+          visibleOnFullScreen: true,
+          skipTransformProcessType: true,
+        });
       window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
       window.webContents.on("will-navigate", (event) => event.preventDefault());
       void window
