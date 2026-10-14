@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
 import { ProfileId } from "@t3tools/contracts";
+import { ChildProcess } from "node:child_process";
 import {
   profilePartition,
   profilePreviewPartition,
   profileWindowArguments,
   singleProfileOpen,
   ensureProfileConnection,
+  ensureProfileBackend,
+  isProfileBackendRunning,
+  waitForProfileBackend,
 } from "./profileRuntime";
 import { buildDesktopBackendEnv } from "./backendEnv";
 
@@ -32,6 +36,147 @@ describe("profile window isolation", () => {
         },
       ).F5_PROFILE,
     ).toBe("work");
+  });
+});
+
+describe("profile backend recovery", () => {
+  const child = () =>
+    Object.assign(new ChildProcess(), {
+      pid: 123,
+      exitCode: null,
+      signalCode: null,
+      killed: false,
+    });
+  const runtime = () => ({
+    backendProcess: null as ChildProcess | null,
+    stopped: false,
+    restartAttempt: 6,
+    restartTimer: null as ReturnType<typeof setTimeout> | null,
+  });
+
+  it("recovers a missing backend even when the profile is still marked running", async () => {
+    const state = runtime();
+    const calls: string[] = [];
+    await ensureProfileBackend(state, {
+      stop: async () => {
+        calls.push("stop");
+      },
+      prepare: async () => {
+        calls.push("prepare");
+      },
+      start: () => {
+        calls.push("start");
+        state.backendProcess = child();
+      },
+      ready: async () => {
+        expect(isProfileBackendRunning(state)).toBe(true);
+        calls.push("ready");
+      },
+    });
+    expect(calls).toEqual(["prepare", "start", "ready"]);
+    expect(state.stopped).toBe(false);
+    expect(state.restartAttempt).toBe(0);
+  });
+
+  it.each(["stopped", "exited", "signalled", "killed"] as const)(
+    "waits for a %s backend to exit before starting its replacement",
+    async (failure) => {
+      const state = { ...runtime(), backendProcess: child() as ChildProcess | null };
+      const old = state.backendProcess!;
+      if (failure === "stopped") state.stopped = true;
+      if (failure === "exited") Object.assign(old, { exitCode: 1 });
+      if (failure === "signalled") Object.assign(old, { signalCode: "SIGTERM" });
+      if (failure === "killed") Object.assign(old, { killed: true });
+      const calls: string[] = [];
+      await ensureProfileBackend(state, {
+        stop: async () => {
+          await Promise.resolve();
+          calls.push("stop");
+          state.backendProcess = null;
+        },
+        prepare: async () => {
+          calls.push("prepare");
+        },
+        start: () => {
+          expect(state.backendProcess).toBeNull();
+          calls.push("start");
+          state.backendProcess = child();
+        },
+        ready: async () => {
+          calls.push("ready");
+        },
+      });
+      expect(calls).toEqual(["stop", "prepare", "start", "ready"]);
+    },
+  );
+
+  it("checks readiness without restarting a live backend", async () => {
+    const state = { ...runtime(), backendProcess: child() };
+    const operations = { stop: vi.fn(), prepare: vi.fn(), start: vi.fn(), ready: vi.fn() };
+    await ensureProfileBackend(state, operations);
+    expect(operations.ready).toHaveBeenCalledOnce();
+    expect(operations.stop).not.toHaveBeenCalled();
+    expect(operations.prepare).not.toHaveBeenCalled();
+    expect(operations.start).not.toHaveBeenCalled();
+  });
+
+  it("cancels a scheduled restart and leaves the profile stopped if preparation fails", async () => {
+    vi.useFakeTimers();
+    try {
+      const restart = vi.fn();
+      const state = runtime();
+      state.restartTimer = setTimeout(() => {
+        restart();
+      }, 100);
+      const start = vi.fn();
+      await expect(
+        ensureProfileBackend(state, {
+          stop: vi.fn(),
+          prepare: async () => {
+            throw new Error("shutting down");
+          },
+          start,
+          ready: vi.fn(),
+        }),
+      ).rejects.toThrow("shutting down");
+      await vi.runAllTimersAsync();
+      expect(restart).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
+      expect(state.stopped).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits for startup and stops waiting if the backend exits", async () => {
+    vi.useFakeTimers();
+    try {
+      const ready = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+      const waiting = waitForProfileBackend(() => true, ready);
+      await vi.advanceTimersByTimeAsync(100);
+      await waiting;
+      expect(ready).toHaveBeenCalledTimes(2);
+      await expect(waitForProfileBackend(() => false, ready)).rejects.toThrow("Backend stopped");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds readiness waiting for a backend that never listens", async () => {
+    vi.useFakeTimers();
+    try {
+      const waiting = expect(
+        waitForProfileBackend(
+          () => true,
+          async () => false,
+          200,
+        ),
+      ).rejects.toThrow("startup timed out");
+      await vi.advanceTimersByTimeAsync(200);
+      await waiting;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
