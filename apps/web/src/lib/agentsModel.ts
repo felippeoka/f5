@@ -6,7 +6,10 @@ import type {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { readToolActivityPayload } from "@t3tools/shared/orchestrationActivityPayload";
+import {
+  readToolActivityPayload,
+  REASONING_STATUS_ACTIVITY_KIND,
+} from "@t3tools/shared/orchestrationActivityPayload";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -127,6 +130,7 @@ function isTimelineFocusableActivity(activity: OrchestrationThreadActivity): boo
     activity.kind !== "task.started" &&
     activity.kind !== "task.completed" &&
     activity.kind !== "runtime.configured" &&
+    activity.kind !== REASONING_STATUS_ACTIVITY_KIND &&
     activity.kind !== "account.updated" &&
     activity.kind !== "account.rate-limits.updated"
   );

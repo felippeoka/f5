@@ -24,7 +24,12 @@ import {
 import type { InlineExactFileChangeDiffProps } from "./InlineExactFileChangeDiff";
 import type { InlineFileChangeDiffProps } from "./InlineFileChangeDiff";
 import { LegendList, type LegendListRef, type OnViewableItemsChanged } from "@legendapp/list/react";
-import { deriveTimelineEntries, formatDuration, formatElapsed } from "../../session-logic";
+import {
+  deriveTimelineEntries,
+  formatDuration,
+  formatElapsed,
+  type LiveWorkActivity,
+} from "../../session-logic";
 import { attachmentPreviewUrlForId } from "../../orchestrationState";
 import { type TurnDiffSummary } from "../../types";
 import { changedLineCount, summarizeTurnDiffStats } from "../../lib/turnDiffTree";
@@ -74,6 +79,7 @@ import {
   deriveTimelineTurnRailItems,
   findLastUserMessageRowIndex,
   findNearestMinimapMarkerIndex,
+  formatWorkingLabel,
   isFileChangeWorkEntry,
   isFileReadWorkEntry,
   isSearchWorkEntry,
@@ -90,6 +96,9 @@ import {
   TIMELINE_TURN_RAIL_MIN_ITEMS,
 } from "./MessagesTimeline.logic";
 import { TimelineTurnRail } from "./TimelineTurnRail";
+import { WorkingRibbon, type WorkingRibbonReleaseReason } from "./WorkingRibbon";
+import type { RibbonPoint } from "./WorkingRibbon.logic";
+import { useReducedMotion } from "../../hooks/useReducedMotion";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { SkillInlineChip } from "./SkillInlineChip";
 import {
@@ -116,7 +125,11 @@ import { ReasoningSection } from "./ReasoningSection";
 import { COMPOSER_INLINE_CHIP_CLASS_NAME } from "../composerInlineChip";
 import { DiffSurfaceBoundary } from "../DiffSurfaceBoundary";
 import { VscodeEntryIcon } from "./VscodeEntryIcon";
-import { classifyCompactCommand, isGenericCommandTitle } from "@t3tools/shared/commandSummary";
+import {
+  classifyCompactCommand,
+  isGenericCommandTitle,
+  resolveCommandExecutionSummaryText,
+} from "@t3tools/shared/commandSummary";
 import { WORK_LOG_PAGE_SIZE } from "./workLogConstants";
 import {
   CHANGED_FILES_COMPACT_PREVIEW_COUNT,
@@ -213,6 +226,8 @@ interface MessagesTimelineProps {
   hasMessages: boolean;
   isWorking: boolean;
   activeTurnStartedAt: string | null;
+  /** What the running turn is doing now; null shows a plain "Working". */
+  liveActivity?: LiveWorkActivity | undefined;
   listRef: React.RefObject<LegendListRef | null>;
   entryRowIndexMapRef?: MutableRefObject<ReadonlyMap<string, number> | null>;
   onIsAtEndChange: (isAtEnd: boolean) => void;
@@ -300,6 +315,11 @@ interface MessagesTimelineProps {
    */
   listHeaderContent?: ReactNode;
   chatDiffContext?: ChatDiffContext;
+  /**
+   * The steerable working ribbon went away while it had focus and the
+   * working label it would return focus to is gone too (the turn ended).
+   */
+  onWorkingRibbonFocusLost?: (() => void) | undefined;
 }
 
 export interface PendingRevertDisplay {
@@ -351,6 +371,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hasMessages,
   isWorking,
   activeTurnStartedAt,
+  liveActivity = null,
   listRef,
   entryRowIndexMapRef,
   onIsAtEndChange,
@@ -393,8 +414,33 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onToggleAllDirectories,
   listHeaderContent,
   chatDiffContext = EMPTY_CHAT_DIFF_CONTEXT,
+  onWorkingRibbonFocusLost,
 }: MessagesTimelineProps) {
   const { settings } = useAppSettings();
+  // The working label can be picked up and steered (see WorkingRibbon).
+  const reducedMotion = useReducedMotion();
+  const [ribbonOrigin, setRibbonOrigin] = useState<RibbonPoint | null>(null);
+  const grabButtonRef = useRef<HTMLButtonElement | null>(null);
+  if (ribbonOrigin && (!isWorking || reducedMotion)) setRibbonOrigin(null);
+  const restoreRibbonFocus = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      // Focus that already moved on (a control the user picked, or a ribbon
+      // remounted by Strict Mode) is left alone.
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active !== document.body) return;
+      const button = grabButtonRef.current;
+      if (button?.isConnected) button.focus({ preventScroll: true });
+      else onWorkingRibbonFocusLost?.();
+    });
+  }, [onWorkingRibbonFocusLost]);
+  const handleRibbonRelease = useCallback(
+    (reason: WorkingRibbonReleaseReason) => {
+      setRibbonOrigin(null);
+      // On blur focus has already gone somewhere the user chose.
+      if (reason !== "blur") restoreRibbonFocus();
+    },
+    [restoreRibbonFocus],
+  );
   const ownedEntryRowIndexMapRef = useRef<ReadonlyMap<string, number> | null>(null);
   const resolvedEntryRowIndexMapRef = entryRowIndexMapRef ?? ownedEntryRowIndexMapRef;
   const [restoredAnchor] = useState(() =>
@@ -523,7 +569,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         kind: "working",
         id: "working-indicator-row",
         createdAt: activeTurnStartedAt,
-        activity: latestWorkActivityHeading(nextRows),
+        activity: workingActivityLabel(nextRows, liveActivity),
       });
     }
 
@@ -534,6 +580,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     completionSummary,
     isWorking,
     activeTurnStartedAt,
+    liveActivity,
     settings.expandMcpToolCalls,
   ]);
 
@@ -926,8 +973,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       turnDiffSummaryByTurnId,
       changedFilesPresentationOverrides,
       newestTurnDiffId,
+      ribbonOrigin !== null,
+      reducedMotion,
     ],
     [
+      ribbonOrigin !== null,
+      reducedMotion,
       canRestoreFiles,
       nativeSessionCapabilities,
       effectiveRevertDisabledReason,
@@ -1573,11 +1624,40 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               <span className="size-1 rounded-full bg-faint-foreground motion-safe:animate-status-pulse motion-safe:[animation-delay:200ms]" />
               <span className="size-1 rounded-full bg-faint-foreground motion-safe:animate-status-pulse motion-safe:[animation-delay:400ms]" />
             </span>
-            <span className="shrink-0 tabular-nums">
-              {row.createdAt
-                ? `Working · ${formatWorkingTimer(row.createdAt, nowIso) ?? "0s"}`
-                : "Working…"}
-            </span>
+            {reducedMotion ? (
+              <span className="shrink-0 tabular-nums">
+                {formatWorkingLabel(row.createdAt, nowIso)}
+              </span>
+            ) : (
+              // Picks the label up as a steerable ribbon; looks like plain text at rest.
+              <button
+                ref={grabButtonRef}
+                type="button"
+                data-working-ribbon-grab=""
+                // Static: a focused control whose name ticked every second
+                // would be re-announced by screen readers on each tick.
+                aria-label="Working. Press to steer the text"
+                className={cn(
+                  "m-0 shrink-0 cursor-grab appearance-none rounded-sm border-0 bg-transparent p-0 font-[inherit] leading-[inherit] tracking-[inherit] text-inherit tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  ribbonOrigin && "invisible",
+                )}
+                onKeyDown={(event) => {
+                  // Focus returns here while the key that grabbed the ribbon
+                  // may still be held (it dropped for lack of room); its
+                  // autorepeat must not pick the ribbon straight back up.
+                  // Chromium already ignores repeats here; other engines may not.
+                  if (event.repeat && (event.key === "Enter" || event.key === " ")) {
+                    event.preventDefault();
+                  }
+                }}
+                onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setRibbonOrigin({ x: rect.right, y: rect.top + rect.height / 2 });
+                }}
+              >
+                {formatWorkingLabel(row.createdAt, nowIso)}
+              </button>
+            )}
             {row.activity ? (
               <span className="min-w-0 truncate text-muted-foreground">· {row.activity}</span>
             ) : null}
@@ -1701,6 +1781,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           <ComposerDockSpacer className="h-[calc(var(--composer-dock-height,0px)+0.75rem)] sm:h-[calc(var(--composer-dock-height,0px)+1rem)]" />
         }
       />
+      {/* Outside the virtualized list so scrolling and cell recycling never unmount it. */}
+      {ribbonOrigin && isWorking ? (
+        <WorkingRibbon
+          text={formatWorkingLabel(activeTurnStartedAt, nowIso)}
+          origin={ribbonOrigin}
+          onRelease={handleRibbonRelease}
+          onOrphanedFocus={restoreRibbonFocus}
+        />
+      ) : null}
       {minimapRowIndices.length > 1 ? (
         <TimelineMinimap
           rows={rows}
@@ -1967,15 +2056,33 @@ type TimelineRow =
     }
   | { kind: "working"; id: string; createdAt: string | null; activity: string | null };
 
-/** Heading of the newest tool entry in the current turn, for the working row. */
-function latestWorkActivityHeading(rows: ReadonlyArray<TimelineRow>): string | null {
-  const lastRow = rows.at(-1);
-  if (lastRow?.kind !== "work") return null;
-  for (let index = lastRow.groupedEntries.length - 1; index >= 0; index -= 1) {
-    const entry = lastRow.groupedEntries[index];
-    if (entry && entry.tone === "tool") return toolWorkEntryHeading(entry);
+/** Label for the working row: what the running turn is doing right now. */
+function workingActivityLabel(
+  rows: ReadonlyArray<TimelineRow>,
+  liveActivity: LiveWorkActivity,
+): string | null {
+  if (!liveActivity) return null;
+  if (liveActivity.kind === "thinking") {
+    return liveActivity.detail ? `Thinking: ${liveActivity.detail}` : "Thinking";
   }
-  return null;
+  if (liveActivity.providerItemId) {
+    for (let rowIndex = rows.length - 1; rowIndex >= 0; rowIndex -= 1) {
+      const row = rows[rowIndex];
+      if (
+        row?.kind === "command" &&
+        row.commandExecution.providerItemId === liveActivity.providerItemId
+      ) {
+        return resolveCommandExecutionSummaryText(row.commandExecution);
+      }
+      if (row?.kind !== "work") continue;
+      const entry = row.groupedEntries.findLast(
+        (candidate) =>
+          candidate.tone === "tool" && candidate.providerItemId === liveActivity.providerItemId,
+      );
+      if (entry) return toolWorkEntryHeading(entry);
+    }
+  }
+  return liveActivity.title || null;
 }
 
 interface WorkGroupRenderState {
@@ -2015,29 +2122,6 @@ function resolveWorkGroupRenderState(
     showHeader: hasOverflow || !onlyToolEntries,
     visibleEntries,
   };
-}
-
-function formatWorkingTimer(startIso: string, endIso: string): string | null {
-  const startedAtMs = Date.parse(startIso);
-  const endedAtMs = Date.parse(endIso);
-  if (!Number.isFinite(startedAtMs) || !Number.isFinite(endedAtMs)) {
-    return null;
-  }
-
-  const elapsedSeconds = Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000));
-  if (elapsedSeconds < 60) {
-    return `${elapsedSeconds}s`;
-  }
-
-  const hours = Math.floor(elapsedSeconds / 3600);
-  const minutes = Math.floor((elapsedSeconds % 3600) / 60);
-  const seconds = elapsedSeconds % 60;
-
-  if (hours > 0) {
-    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-  }
-
-  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
 function formatMessageMeta(

@@ -52,6 +52,7 @@ import {
 import {
   compactThreadActivityPayload,
   readToolActivityPayload,
+  REASONING_STATUS_ACTIVITY_KIND,
 } from "@t3tools/shared/orchestrationActivityPayload";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -129,6 +130,68 @@ function sameSessionCapabilities(
 }
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
+
+interface ReasoningStatusEntry {
+  readonly providerItemId: string | null;
+  readonly state: "active" | "idle";
+  readonly detail: string | null;
+  readonly sequence: number | undefined;
+  readonly createdAt: string;
+  /** Summary text scanned for a heading, per summary part; `null` once done. */
+  readonly headingParts: Readonly<Record<string, string | null>>;
+}
+
+interface ReasoningSection {
+  readonly key: string;
+  /** The streamed message that last received this turn's reasoning, if any. */
+  readonly messageId: MessageId | null;
+}
+
+/**
+ * The decider rejected the command outright (for example, a delta for a
+ * message it already closed). Retrying cannot succeed, so taken text is not
+ * restored: it would otherwise land on the next message.
+ */
+function isPermanentDispatchRejection(cause: Cause.Cause<unknown>): boolean {
+  const error = Cause.squash(cause) as { readonly _tag?: unknown } | null;
+  return (
+    error?._tag === "OrchestrationCommandInvariantError" ||
+    error?._tag === "OrchestrationCommandPreviouslyRejectedError"
+  );
+}
+
+function reasoningStatusActivityId(threadId: ThreadId, turnId: TurnId): EventId {
+  return EventId.make(`reasoning-status:${threadId}:${turnId}`);
+}
+
+/** Rebuilds the cached status from the persisted record, e.g. after a restart. */
+function restoreReasoningStatusEntry(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  threadId: ThreadId,
+  turnId: TurnId,
+): ReasoningStatusEntry | null {
+  const id = reasoningStatusActivityId(threadId, turnId);
+  const activity = activities.find((entry) => entry.id === id);
+  const payload =
+    activity?.payload && typeof activity.payload === "object"
+      ? (activity.payload as Record<string, unknown>)
+      : null;
+  if (!activity || !payload) return null;
+  return {
+    providerItemId: typeof payload.providerItemId === "string" ? payload.providerItemId : null,
+    state: payload.state === "active" ? "active" : "idle",
+    detail: typeof payload.detail === "string" ? payload.detail : null,
+    sequence: activity.sequence,
+    createdAt: activity.createdAt,
+    // Headings were already scanned before the restart; do not rescan.
+    headingParts: {},
+  };
+}
+
+function eventSessionSequence(event: ProviderRuntimeEvent): number | undefined {
+  return (event as ProviderRuntimeEvent & { sessionSequence?: number }).sessionSequence;
+}
+
 const DEFAULT_ASSISTANT_DELIVERY_MODE: AssistantDeliveryMode = "buffered";
 const TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY = 10_000;
 const TURN_MESSAGE_IDS_BY_TURN_TTL = Duration.minutes(120);
@@ -140,6 +203,14 @@ const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000;
 const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const LAST_THINKING_TOKENS_BY_THREAD_CACHE_CAPACITY = 10_000;
 const LAST_THINKING_TOKENS_BY_THREAD_TTL = Duration.minutes(120);
+const REASONING_STATUS_BY_TURN_KEY_CACHE_CAPACITY = 10_000;
+const REASONING_STATUS_BY_TURN_KEY_TTL = Duration.minutes(120);
+const REASONING_SECTION_BY_TURN_KEY_CACHE_CAPACITY = 10_000;
+const REASONING_SECTION_BY_TURN_KEY_TTL = Duration.minutes(120);
+// A summary part that has not produced a `**Heading**` within this many
+// characters never will; stop scanning it.
+const REASONING_HEADING_SCAN_CHARS = 400;
+const REASONING_HEADING_REGEX = /^\s*\*\*([^*\n]{1,200}?)\*\*/;
 // Live `thinking_tokens` frames arrive at high frequency. Coalesce them so the
 // event store only sees a bounded number of `thread.session.set` dispatches per
 // turn: dispatch only when the running estimate grows by at least this many
@@ -2510,6 +2581,23 @@ const make = Effect.gen(function* () {
     lookup: () => Effect.succeed(0),
   });
 
+  // One upserted `reasoning.status` record per turn. The stored sequence and
+  // createdAt keep every upsert at the position of the reasoning item that
+  // started it; only a new reasoning item moves it.
+  const reasoningStatusByTurnKey = yield* Cache.make<string, ReasoningStatusEntry | null>({
+    capacity: REASONING_STATUS_BY_TURN_KEY_CACHE_CAPACITY,
+    timeToLive: REASONING_STATUS_BY_TURN_KEY_TTL,
+    lookup: () => Effect.succeed(null),
+  });
+
+  // The last reasoning section appended per turn, so a new item or summary
+  // part starts on its own paragraph instead of running into the previous one.
+  const reasoningSectionByTurnKey = yield* Cache.make<string, ReasoningSection | null>({
+    capacity: REASONING_SECTION_BY_TURN_KEY_CACHE_CAPACITY,
+    timeToLive: REASONING_SECTION_BY_TURN_KEY_TTL,
+    lookup: () => Effect.succeed(null),
+  });
+
   const resolveWorkspaceCwdForThread = Effect.fnUntraced(function* (threadId: ThreadId) {
     const readModel = yield* orchestrationEngine.getReadModel();
     const thread = readModel.threads.find((entry) => entry.id === threadId);
@@ -2647,7 +2735,183 @@ const make = Effect.gen(function* () {
     );
 
   const clearBufferedReasoningText = (turnKey: string) =>
-    Cache.invalidate(bufferedReasoningTextByTurnKey, turnKey);
+    Cache.invalidate(bufferedReasoningTextByTurnKey, turnKey).pipe(
+      Effect.andThen(Cache.invalidate(reasoningSectionByTurnKey, turnKey)),
+    );
+
+  const dispatchReasoningStatus = (input: {
+    readonly event: ProviderRuntimeEvent;
+    readonly threadId: ThreadId;
+    readonly turnId: TurnId;
+    readonly entry: ReasoningStatusEntry;
+  }) =>
+    Effect.gen(function* () {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.activity.append",
+        commandId: providerCommandId(input.event, "reasoning-status"),
+        threadId: input.threadId,
+        activity: {
+          id: reasoningStatusActivityId(input.threadId, input.turnId),
+          createdAt: input.entry.createdAt,
+          tone: "info",
+          kind: REASONING_STATUS_ACTIVITY_KIND,
+          summary: "Thinking",
+          payload: {
+            state: input.entry.state,
+            ...(input.entry.detail ? { detail: input.entry.detail } : {}),
+            ...(input.entry.providerItemId ? { providerItemId: input.entry.providerItemId } : {}),
+          },
+          turnId: input.turnId,
+          ...(input.entry.sequence !== undefined ? { sequence: input.entry.sequence } : {}),
+        },
+        createdAt: input.event.createdAt,
+      });
+      yield* Cache.set(
+        reasoningStatusByTurnKey,
+        providerTurnKey(input.threadId, input.turnId),
+        input.entry,
+      );
+    });
+
+  /**
+   * Drives the per-turn reasoning status from item lifecycle events, so long
+   * reasoning shows progress even when the provider sends no summary text.
+   * Writes stay bounded per reasoning item: one start, at most one heading per
+   * summary part, and one idle transition.
+   */
+  const applyReasoningStatus = (
+    event: ProviderRuntimeEvent,
+    thread: {
+      readonly id: ThreadId;
+      readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
+    },
+  ) =>
+    Effect.gen(function* () {
+      const threadId = thread.id;
+      const turnId = toTurnId(event.turnId);
+      if (!turnId) return;
+      const turnKey = providerTurnKey(threadId, turnId);
+      const itemId = event.itemId ? String(event.itemId) : null;
+      // After a server restart the cache is empty; the persisted record still
+      // says whether this turn is reasoning.
+      const current =
+        Option.getOrNull(yield* Cache.getOption(reasoningStatusByTurnKey, turnKey)) ??
+        restoreReasoningStatusEntry(thread.activities, threadId, turnId);
+
+      if (event.type === "item.started" && event.payload.itemType === "reasoning") {
+        // A replayed start for the item already tracked changes nothing.
+        if (current && itemId !== null && current.providerItemId === itemId) return;
+        const sequence = eventSessionSequence(event);
+        yield* dispatchReasoningStatus({
+          event,
+          threadId,
+          turnId,
+          entry: {
+            providerItemId: itemId,
+            state: "active",
+            detail: null,
+            sequence,
+            createdAt: event.createdAt,
+            headingParts: {},
+          },
+        });
+        return;
+      }
+
+      if (!current || current.state !== "active") return;
+
+      const endsReasoning =
+        (event.type === "item.completed" &&
+          event.payload.itemType === "reasoning" &&
+          itemId === current.providerItemId) ||
+        (event.type === "item.started" && isToolLifecycleItemType(event.payload.itemType)) ||
+        (event.type === "content.delta" &&
+          event.payload.streamKind === "assistant_text" &&
+          event.payload.delta.length > 0) ||
+        // An interrupt or crash can skip the reasoning item's completion.
+        event.type === "turn.completed" ||
+        event.type === "turn.aborted";
+      if (endsReasoning) {
+        yield* dispatchReasoningStatus({
+          event,
+          threadId,
+          turnId,
+          entry: { ...current, state: "idle" },
+        });
+        return;
+      }
+
+      if (
+        event.type !== "content.delta" ||
+        event.payload.streamKind !== "reasoning_summary_text" ||
+        itemId === null ||
+        itemId !== current.providerItemId
+      ) {
+        return;
+      }
+      const partKey = String(event.payload.summaryIndex ?? 0);
+      const scanned = current.headingParts[partKey];
+      if (scanned === null) return;
+      const text = `${scanned ?? ""}${event.payload.delta}`;
+      const heading = REASONING_HEADING_REGEX.exec(text)?.[1]?.trim();
+      if (heading && heading === current.detail) {
+        yield* Cache.set(reasoningStatusByTurnKey, turnKey, {
+          ...current,
+          headingParts: { ...current.headingParts, [partKey]: null },
+        });
+        return;
+      }
+      if (heading) {
+        yield* dispatchReasoningStatus({
+          event,
+          threadId,
+          turnId,
+          entry: {
+            ...current,
+            detail: heading,
+            headingParts: { ...current.headingParts, [partKey]: null },
+          },
+        });
+        return;
+      }
+      // No heading yet: keep scanning this part until the cap, then give up
+      // without writing anything.
+      yield* Cache.set(reasoningStatusByTurnKey, turnKey, {
+        ...current,
+        headingParts: {
+          ...current.headingParts,
+          [partKey]: text.length >= REASONING_HEADING_SCAN_CHARS ? null : text,
+        },
+      });
+    });
+
+  // A failed dispatch puts taken text back in front of anything buffered since,
+  // so a later finalize delivers it exactly once.
+  const restoreBufferedAssistantText = (messageId: MessageId, text: string) =>
+    text.length === 0
+      ? Effect.void
+      : Cache.getOption(bufferedAssistantTextByMessageId, messageId).pipe(
+          Effect.flatMap((existing) =>
+            Cache.set(
+              bufferedAssistantTextByMessageId,
+              messageId,
+              `${text}${Option.getOrElse(existing, () => "")}`,
+            ),
+          ),
+        );
+
+  const restoreBufferedReasoningText = (turnKey: string, text: string) =>
+    text.length === 0
+      ? Effect.void
+      : Cache.getOption(bufferedReasoningTextByTurnKey, turnKey).pipe(
+          Effect.flatMap((existing) =>
+            Cache.set(
+              bufferedReasoningTextByTurnKey,
+              turnKey,
+              `${text}${Option.getOrElse(existing, () => "")}`,
+            ),
+          ),
+        );
 
   const appendBufferedProposedPlan = (planId: string, delta: string, createdAt: string) =>
     Cache.getOption(bufferedProposedPlanById, planId).pipe(
@@ -2692,10 +2956,9 @@ const make = Effect.gen(function* () {
     fallbackText?: string;
   }) =>
     Effect.gen(function* () {
+      const turnKey = input.turnId ? providerTurnKey(input.threadId, input.turnId) : undefined;
       const bufferedText = yield* takeBufferedAssistantText(input.messageId);
-      const bufferedReasoningText = input.turnId
-        ? yield* takeBufferedReasoningText(providerTurnKey(input.threadId, input.turnId))
-        : "";
+      const bufferedReasoningText = turnKey ? yield* takeBufferedReasoningText(turnKey) : "";
       const text =
         bufferedText.length > 0
           ? bufferedText
@@ -2703,38 +2966,51 @@ const make = Effect.gen(function* () {
             ? input.fallbackText!
             : "";
 
-      if (text.length > 0) {
-        yield* orchestrationEngine.dispatch({
-          type: "thread.message.assistant.delta",
-          commandId: providerCommandId(
-            input.event,
-            `${input.finalDeltaCommandTag}:${input.messageId}`,
-          ),
-          threadId: input.threadId,
-          messageId: input.messageId,
-          delta: text,
-          ...(bufferedReasoningText.length > 0 ? { reasoningDelta: bufferedReasoningText } : {}),
-          ...(input.turnId ? { turnId: input.turnId } : {}),
-          createdAt: input.createdAt,
-        });
-      }
+      yield* Effect.gen(function* () {
+        if (text.length > 0) {
+          yield* orchestrationEngine.dispatch({
+            type: "thread.message.assistant.delta",
+            commandId: providerCommandId(
+              input.event,
+              `${input.finalDeltaCommandTag}:${input.messageId}`,
+            ),
+            threadId: input.threadId,
+            messageId: input.messageId,
+            delta: text,
+            ...(bufferedReasoningText.length > 0 ? { reasoningDelta: bufferedReasoningText } : {}),
+            ...(input.turnId ? { turnId: input.turnId } : {}),
+            createdAt: input.createdAt,
+          });
+        }
 
-      if (text.length === 0 && bufferedReasoningText.length > 0) {
-        yield* orchestrationEngine.dispatch({
-          // Empty delta is safe here; completion immediately follows and closes the message.
-          type: "thread.message.assistant.delta",
-          commandId: providerCommandId(
-            input.event,
-            `${input.finalDeltaCommandTag}-reasoning-only:${input.messageId}`,
-          ),
-          threadId: input.threadId,
-          messageId: input.messageId,
-          delta: "",
-          reasoningDelta: bufferedReasoningText,
-          ...(input.turnId ? { turnId: input.turnId } : {}),
-          createdAt: input.createdAt,
-        });
-      }
+        if (text.length === 0 && bufferedReasoningText.length > 0) {
+          yield* orchestrationEngine.dispatch({
+            // Empty delta is safe here; completion immediately follows and closes the message.
+            type: "thread.message.assistant.delta",
+            commandId: providerCommandId(
+              input.event,
+              `${input.finalDeltaCommandTag}-reasoning-only:${input.messageId}`,
+            ),
+            threadId: input.threadId,
+            messageId: input.messageId,
+            delta: "",
+            reasoningDelta: bufferedReasoningText,
+            ...(input.turnId ? { turnId: input.turnId } : {}),
+            createdAt: input.createdAt,
+          });
+        }
+      }).pipe(
+        Effect.onError((cause) =>
+          isPermanentDispatchRejection(cause)
+            ? Effect.void
+            : Effect.andThen(
+                restoreBufferedAssistantText(input.messageId, bufferedText),
+                turnKey
+                  ? restoreBufferedReasoningText(turnKey, bufferedReasoningText)
+                  : Effect.void,
+              ),
+        ),
+      );
 
       yield* orchestrationEngine.dispatch({
         type: "thread.message.assistant.complete",
@@ -4391,6 +4667,17 @@ const make = Effect.gen(function* () {
         });
       }
 
+      // Progress only: a failed status write must not drop the event's content.
+      yield* applyReasoningStatus(event, thread).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("provider runtime ingestion failed to update reasoning status", {
+            eventId: event.eventId,
+            threadId: thread.id,
+            cause: Cause.pretty(cause),
+          }),
+        ),
+      );
+
       const assistantDelta =
         event.type === "content.delta" && event.payload.streamKind === "assistant_text"
           ? event.payload.delta
@@ -4463,22 +4750,61 @@ const make = Effect.gen(function* () {
         const turnId = toTurnId(event.turnId);
         if (turnId) {
           const turnKey = providerTurnKey(thread.id, turnId);
-          const spillChunk = yield* appendBufferedReasoningText(turnKey, reasoningDelta);
           const assistantDeliveryMode = yield* Cache.get(assistantDeliveryModes, thread.id);
+          const assistantMessageId =
+            assistantDeliveryMode === "streaming"
+              ? yield* getLatestAssistantMessageIdForTurn(thread.id, turnId)
+              : undefined;
+          // A new item or summary part starts a new paragraph, but only when it
+          // lands after earlier reasoning in the same buffer or streamed message.
+          const sectionKey =
+            event.type === "content.delta"
+              ? `${event.itemId ?? ""}\u0000${event.payload.streamKind}\u0000${event.payload.summaryIndex ?? ""}`
+              : "";
+          const previousSection = Option.getOrNull(
+            yield* Cache.getOption(reasoningSectionByTurnKey, turnKey),
+          );
+          const hasBufferedReasoning = Option.match(
+            yield* Cache.getOption(bufferedReasoningTextByTurnKey, turnKey),
+            { onNone: () => false, onSome: (text) => text.length > 0 },
+          );
+          const separator =
+            previousSection &&
+            previousSection.key !== sectionKey &&
+            (hasBufferedReasoning ||
+              (assistantMessageId !== undefined &&
+                previousSection.messageId === assistantMessageId))
+              ? "\n\n"
+              : "";
+          const spillChunk = yield* appendBufferedReasoningText(
+            turnKey,
+            `${separator}${reasoningDelta}`,
+          );
+          yield* Cache.set(reasoningSectionByTurnKey, turnKey, {
+            key: sectionKey,
+            messageId: assistantMessageId ?? null,
+          });
           if (assistantDeliveryMode === "streaming") {
-            const assistantMessageId = yield* getLatestAssistantMessageIdForTurn(thread.id, turnId);
             if (assistantMessageId && spillChunk.length > 0) {
-              yield* orchestrationEngine.dispatch({
-                // Empty assistant deltas are safe because assistant completion always follows.
-                type: "thread.message.assistant.delta",
-                commandId: providerCommandId(event, "assistant-reasoning-buffer-spill"),
-                threadId: thread.id,
-                messageId: assistantMessageId,
-                delta: "",
-                reasoningDelta: spillChunk,
-                turnId,
-                createdAt: now,
-              });
+              yield* orchestrationEngine
+                .dispatch({
+                  // Empty assistant deltas are safe because assistant completion always follows.
+                  type: "thread.message.assistant.delta",
+                  commandId: providerCommandId(event, "assistant-reasoning-buffer-spill"),
+                  threadId: thread.id,
+                  messageId: assistantMessageId,
+                  delta: "",
+                  reasoningDelta: spillChunk,
+                  turnId,
+                  createdAt: now,
+                })
+                .pipe(
+                  Effect.onError((cause) =>
+                    isPermanentDispatchRejection(cause)
+                      ? Effect.void
+                      : restoreBufferedReasoningText(turnKey, spillChunk),
+                  ),
+                );
             } else if (spillChunk.length > 0) {
               const cappedReasoningText = capBufferedReasoningText(spillChunk);
               if (cappedReasoningText.length < spillChunk.length) {
@@ -4494,17 +4820,25 @@ const make = Effect.gen(function* () {
 
             if (assistantMessageId && spillChunk.length === 0) {
               const reasoningText = yield* takeBufferedReasoningText(turnKey);
-              yield* orchestrationEngine.dispatch({
-                // Empty assistant deltas are safe because assistant completion always follows.
-                type: "thread.message.assistant.delta",
-                commandId: providerCommandId(event, "assistant-reasoning-delta"),
-                threadId: thread.id,
-                messageId: assistantMessageId,
-                delta: "",
-                reasoningDelta: reasoningText,
-                turnId,
-                createdAt: now,
-              });
+              yield* orchestrationEngine
+                .dispatch({
+                  // Empty assistant deltas are safe because assistant completion always follows.
+                  type: "thread.message.assistant.delta",
+                  commandId: providerCommandId(event, "assistant-reasoning-delta"),
+                  threadId: thread.id,
+                  messageId: assistantMessageId,
+                  delta: "",
+                  reasoningDelta: reasoningText,
+                  turnId,
+                  createdAt: now,
+                })
+                .pipe(
+                  Effect.onError((cause) =>
+                    isPermanentDispatchRejection(cause)
+                      ? Effect.void
+                      : restoreBufferedReasoningText(turnKey, reasoningText),
+                  ),
+                );
             }
           } else if (spillChunk.length > 0) {
             const cappedReasoningText = capBufferedReasoningText(spillChunk);

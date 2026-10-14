@@ -61,6 +61,7 @@ import { useCommandPaletteStore } from "../commandPaletteStore";
 import { useRecoveryStateStore } from "../recoveryStateStore";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
+import { useThreadSelectionStore } from "../threadSelectionStore";
 import { getRouter } from "../router";
 import { useStore } from "../store";
 import { createTestServerProvider } from "../testServerProvider";
@@ -5223,6 +5224,69 @@ describe("ChatView timeline (full app)", () => {
         expect(getDispatchCommandRequests("thread.turn.interrupt")).toHaveLength(1);
       });
     } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps bare shortcuts away from a steered working ribbon", async () => {
+    const plainKeybinding = (
+      command: ServerConfig["keybindings"][number]["command"],
+      key: string,
+    ): ServerConfig["keybindings"][number] => ({
+      ...createModKeybinding(command, key),
+      shortcut: { ...createModKeybinding(command, key).shortcut, modKey: false },
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-working-ribbon" as MessageId,
+        targetText: "working ribbon target",
+        sessionStatus: "running",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            plainKeybinding("thread.stop", "escape"),
+            plainKeybinding("diff.toggle", "arrowright"),
+          ],
+        };
+      },
+    });
+
+    try {
+      const grabButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>("[data-working-ribbon-grab]"),
+        "Unable to find the working label.",
+      );
+      const stage = () => document.querySelector<HTMLElement>('[data-slot="working-ribbon"]');
+      const locationBefore = mounted.router.state.location.href;
+
+      await userEvent.click(grabButton);
+      await vi.waitFor(() => {
+        expect(document.activeElement).toBe(stage());
+      });
+      // Selected after the click: a mousedown outside the sidebar clears it.
+      useThreadSelectionStore.getState().toggleThread(THREAD_ID);
+      await userEvent.keyboard("{ArrowRight>3/}");
+      await userEvent.keyboard("{Escape}");
+      await vi.waitFor(() => {
+        expect(stage()).toBeNull();
+        expect(document.activeElement).toBe(grabButton);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(getDispatchCommandRequests("thread.turn.interrupt")).toHaveLength(0);
+      expect(mounted.router.state.location.href).toBe(locationBefore);
+      expect(useThreadSelectionStore.getState().hasSelection()).toBe(true);
+
+      // Without the ribbon the same bare Escape stops the turn.
+      grabButton.blur();
+      await userEvent.keyboard("{Escape}");
+      await vi.waitFor(() => {
+        expect(getDispatchCommandRequests("thread.turn.interrupt")).toHaveLength(1);
+      });
+    } finally {
+      useThreadSelectionStore.getState().clearSelection();
       await mounted.cleanup();
     }
   });

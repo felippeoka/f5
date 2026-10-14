@@ -6,6 +6,7 @@ import {
   deriveCodexCollaborationResponseRows,
   findLastUserMessageRowIndex,
   findNearestMinimapMarkerIndex,
+  formatWorkingLabel,
   summarizeWorkGroup,
   type WorkEntryClassificationSource,
   normalizeCompactToolLabel,
@@ -22,6 +23,19 @@ import {
 } from "./MessagesTimeline.logic";
 import { appendAttachedFilesToPrompt } from "../../lib/attachedFiles";
 import { appendTerminalContextsToPrompt } from "../../lib/terminalContext";
+
+describe("formatWorkingLabel", () => {
+  const startedAt = "2026-03-04T12:00:00.000Z";
+
+  it("shows an ellipsis before the turn has a start time", () => {
+    expect(formatWorkingLabel(null, startedAt)).toBe("Working…");
+  });
+
+  it("shows the elapsed time", () => {
+    expect(formatWorkingLabel(startedAt, startedAt)).toBe("Working · 0s");
+    expect(formatWorkingLabel(startedAt, "2026-03-04T12:01:12.000Z")).toBe("Working · 1m 12s");
+  });
+});
 
 describe("computeMessageDurationStart", () => {
   it("returns message createdAt when there is no preceding user message", () => {

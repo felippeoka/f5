@@ -850,6 +850,7 @@ describe("WebSocket Server", () => {
         SqlError.SqlError | MigrationError | PlatformError.PlatformError
       >;
       mode?: ServerConfigShape["mode"];
+      port?: number;
       cwd?: string;
       autoBootstrapProjectFromCwd?: boolean;
       logWebSocketEvents?: boolean;
@@ -899,8 +900,10 @@ describe("WebSocket Server", () => {
     );
     const serverConfigLayer = Layer.succeed(ServerConfig, {
       mode: options.mode ?? "web",
-      port: 0,
-      host: undefined,
+      port: options.port ?? 0,
+      // Match the client's address family. On macOS an IPv6 wildcard listener
+      // can share a port with an unrelated IPv4 listener, which receives our client.
+      host: "127.0.0.1",
       cwd: options.cwd ?? "/test/project",
       baseDir: path.dirname(stateDir),
       stateDir,
@@ -1114,11 +1117,32 @@ describe("WebSocket Server", () => {
     vi.restoreAllMocks();
   });
 
+  it("cannot silently bind another address family over an occupied IPv4 port", async () => {
+    const foreign = Http.createServer((_request, response) => {
+      response.writeHead(403);
+      response.end();
+    });
+    await new Promise<void>((resolve) => foreign.listen({ host: "127.0.0.1", port: 0 }, resolve));
+    try {
+      const address = foreign.address();
+      if (!address || typeof address === "string") throw new Error("Fixture listener missing");
+      await expect(createTestServer({ port: address.port })).rejects.toMatchObject({
+        _tag: "ServerLifecycleError",
+        operation: "httpServerListen",
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        foreign.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
   it("sends welcome message on connect", async () => {
     server = await createTestServer({ cwd: "/test/project" });
     const addr = server.address();
     const port = typeof addr === "object" && addr !== null ? addr.port : 0;
     expect(port).toBeGreaterThan(0);
+    expect(typeof addr === "object" && addr?.family).toBe("IPv4");
 
     const [ws, welcome] = await connectAndAwaitWelcome(port);
     connections.push(ws);

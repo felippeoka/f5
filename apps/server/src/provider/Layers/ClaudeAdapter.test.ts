@@ -40,6 +40,7 @@ import {
 } from "../sharedAssistantContract.ts";
 import {
   buildClaudeQueryEnv,
+  claudeShowThinkingSummaries,
   isClaudeMissingConversationError,
   makeClaudeAdapterLive,
   probeClaudeSessionAvailability,
@@ -2698,7 +2699,11 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(session.model, "claude-opus-5");
       assert.equal(createInput?.options.model, "claude-opus-5");
       assert.equal(createInput?.options.effort, "high");
-      assert.deepEqual(createInput?.options.settings, { cleanupPeriodDays: 3650, fastMode: true });
+      assert.deepEqual(createInput?.options.settings, {
+        cleanupPeriodDays: 3650,
+        fastMode: true,
+        showThinkingSummaries: true,
+      });
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -3829,7 +3834,10 @@ describe("ClaudeAdapterLive", () => {
       });
 
       const createInput = harness.getLastCreateQueryInput();
-      assert.deepEqual(createInput?.options.settings, { cleanupPeriodDays: 3650 });
+      assert.deepEqual(createInput?.options.settings, {
+        cleanupPeriodDays: 3650,
+        showThinkingSummaries: true,
+      });
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -3856,6 +3864,7 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(createInput?.options.settings, {
         cleanupPeriodDays: 3650,
         fastMode: true,
+        showThinkingSummaries: true,
       });
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
@@ -3880,7 +3889,10 @@ describe("ClaudeAdapterLive", () => {
       });
 
       const createInput = harness.getLastCreateQueryInput();
-      assert.deepEqual(createInput?.options.settings, { cleanupPeriodDays: 3650 });
+      assert.deepEqual(createInput?.options.settings, {
+        cleanupPeriodDays: 3650,
+        showThinkingSummaries: true,
+      });
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -3904,7 +3916,10 @@ describe("ClaudeAdapterLive", () => {
       });
 
       const createInput = harness.getLastCreateQueryInput();
-      assert.deepEqual(createInput?.options.settings, { cleanupPeriodDays: 3650 });
+      assert.deepEqual(createInput?.options.settings, {
+        cleanupPeriodDays: 3650,
+        showThinkingSummaries: true,
+      });
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -3928,7 +3943,10 @@ describe("ClaudeAdapterLive", () => {
       });
 
       const createInput = harness.getLastCreateQueryInput();
-      assert.deepEqual(createInput?.options.settings, { cleanupPeriodDays: 3650 });
+      assert.deepEqual(createInput?.options.settings, {
+        cleanupPeriodDays: 3650,
+        showThinkingSummaries: true,
+      });
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -4544,6 +4562,253 @@ describe("ClaudeAdapterLive", () => {
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("emits reasoning lifecycle events for Claude thinking blocks", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "turn.completed"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "think",
+        attachments: [],
+      });
+      const emit = (message: Record<string, unknown>) =>
+        harness.query.emit({
+          uuid: crypto.randomUUID(),
+          session_id: "sdk-session-thinking",
+          ...message,
+        } as unknown as SDKMessage);
+      const stream = (event: Record<string, unknown>) =>
+        emit({ type: "stream_event", parent_tool_use_id: null, event });
+
+      // Session signals make the first result a segment boundary, not the end.
+      emit({ type: "system", subtype: "session_state_changed", state: "running" });
+      stream({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "thinking", thinking: "", signature: "" },
+      });
+      stream({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: "Plan" },
+      });
+      stream({ type: "content_block_stop", index: 0 });
+      stream({
+        type: "content_block_start",
+        index: 1,
+        content_block: { type: "redacted_thinking", data: "redacted-secret-blob" },
+      });
+      stream({ type: "content_block_stop", index: 1 });
+      // A new message reuses index 0 and is still open at the segment boundary.
+      stream({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "thinking", thinking: "", signature: "" },
+      });
+      emit({ type: "result", subtype: "success", is_error: false, errors: [] });
+      // Still open when the turn completes.
+      stream({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "thinking", thinking: "", signature: "" },
+      });
+      emit({ type: "system", subtype: "session_state_changed", state: "idle" });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      const id = (count: number) => `${turn.turnId}:thinking:${count}`;
+      assert.deepEqual(
+        events.flatMap((event) =>
+          (event.type === "item.started" || event.type === "item.completed") &&
+          event.payload.itemType === "reasoning"
+            ? [`${event.type} ${event.itemId}`]
+            : [],
+        ),
+        [
+          `item.started ${id(1)}`,
+          `item.completed ${id(1)}`,
+          `item.started ${id(2)}`,
+          `item.completed ${id(2)}`,
+          `item.started ${id(3)}`,
+          `item.completed ${id(3)}`,
+          `item.started ${id(4)}`,
+          `item.completed ${id(4)}`,
+        ],
+      );
+      const thinkingDelta = events.find(
+        (event) => event.type === "content.delta" && event.payload.streamKind === "reasoning_text",
+      );
+      assert.equal(thinkingDelta?.itemId, id(1));
+      // Redacted thinking never becomes readable payload text.
+      assert.equal(
+        events.some((event) =>
+          JSON.stringify(event.payload ?? {}).includes("redacted-secret-blob"),
+        ),
+        false,
+      );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("closes a stale thinking block and ignores thinking after an interrupt", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const lifecycle = (events: Iterable<ProviderRuntimeEvent>) =>
+        Array.from(events).flatMap((event) =>
+          event.type === "item.started" || event.type === "item.completed"
+            ? [`${event.type} ${event.payload.itemType}`]
+            : [],
+        );
+      const firstPhase = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil(
+          (event) =>
+            event.type === "item.completed" && event.payload.itemType === "assistant_message",
+        ),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "think",
+        attachments: [],
+      });
+      const stream = (event: Record<string, unknown>) =>
+        harness.query.emit({
+          uuid: crypto.randomUUID(),
+          session_id: "sdk-session-thinking-stale",
+          type: "stream_event",
+          parent_tool_use_id: null,
+          event,
+        } as unknown as SDKMessage);
+
+      // The thinking block's stop never arrives before a text block reuses index 0.
+      stream({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "thinking", thinking: "", signature: "" },
+      });
+      stream({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
+      stream({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "Answer" },
+      });
+      stream({ type: "content_block_stop", index: 0 });
+      // The text block's own stop still completes the text block.
+      assert.deepEqual(lifecycle(yield* Fiber.join(firstPhase)), [
+        "item.started reasoning",
+        "item.completed reasoning",
+        "item.completed assistant_message",
+      ]);
+
+      // After an interrupt request, new thinking blocks are not announced.
+      const secondPhase = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "turn.completed"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* adapter.interruptTurn(session.threadId, turn.turnId);
+      stream({
+        type: "content_block_start",
+        index: 1,
+        content_block: { type: "thinking", thinking: "", signature: "" },
+      });
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "sdk-session-thinking-stale",
+        uuid: "result-thinking-stale",
+      } as unknown as SDKMessage);
+      assert.deepEqual(lifecycle(yield* Fiber.join(secondPhase)), []);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("requests thinking summaries unless a typed display omits them", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const summaries = () =>
+        (
+          harness.getLastCreateQueryInput()?.options.settings as
+            | { showThinkingSummaries?: boolean }
+            | undefined
+        )?.showThinkingSummaries;
+
+      // No requested model: the install default still gets overridden.
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+      assert.equal(summaries(), true);
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "switch",
+        model: "claude-opus-4-6",
+        attachments: [],
+      });
+      assert.deepEqual(harness.query.setModelCalls, ["claude-opus-4-6"]);
+      assert.equal(
+        harness.query.applyFlagSettingsCalls.some((settings) =>
+          Object.hasOwn(settings, "showThinkingSummaries"),
+        ),
+        false,
+      );
+      assert.equal(summaries(), true);
+      yield* adapter.stopSession(session.threadId);
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        model: "claude-opus-5",
+        providerOptions: { claudeAgent: { thinking: { type: "adaptive", display: "omitted" } } },
+        runtimeMode: "full-access",
+      });
+      assert.equal(summaries(), false);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it("derives showThinkingSummaries from the typed thinking display", () => {
+    assert.equal(claudeShowThinkingSummaries(undefined), true);
+    assert.equal(claudeShowThinkingSummaries({ type: "adaptive" }), true);
+    assert.equal(claudeShowThinkingSummaries({ type: "disabled" }), undefined);
+    assert.equal(claudeShowThinkingSummaries({ type: "adaptive", display: "summarized" }), true);
+    assert.equal(claudeShowThinkingSummaries({ type: "enabled", display: "omitted" }), false);
+    // The user's own Claude setting applies untouched...
+    assert.equal(claudeShowThinkingSummaries(undefined, false), undefined);
+    assert.equal(claudeShowThinkingSummaries({ type: "adaptive" }, true), undefined);
+    // ...but a typed display in F5 still wins.
+    assert.equal(
+      claudeShowThinkingSummaries({ type: "adaptive", display: "summarized" }, false),
+      true,
     );
   });
 

@@ -265,6 +265,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
           : {}),
         defaultProviderOptions,
         processEnvironment,
+        instanceId,
       });
       const consumeResetCredit = (idempotencyKey: string) =>
         Effect.gen(function* () {

@@ -21,6 +21,13 @@ import {
 
 type UnknownRecord = Record<string, unknown>;
 
+/**
+ * One upserted record per turn saying whether the provider is reasoning.
+ * It drives the live Working label only: it never appears in the work log
+ * and never changes thread recency.
+ */
+export const REASONING_STATUS_ACTIVITY_KIND = "reasoning.status";
+
 const MAX_CHANGED_FILE_PREVIEW = 12;
 const MAX_COMPACT_TEXT_CHARS = 4_000;
 const MAX_SUBAGENT_RECEIVERS = 16;

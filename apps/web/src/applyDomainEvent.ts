@@ -1,5 +1,6 @@
 import { revertTaskToolState } from "@t3tools/shared/claudeTaskToolProjection";
 import { projectPendingUserInputs } from "@t3tools/shared/pendingUserInputs";
+import { REASONING_STATUS_ACTIVITY_KIND } from "@t3tools/shared/orchestrationActivityPayload";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   type OrchestrationEvent,
@@ -1536,14 +1537,19 @@ export function applyDomainEvent(state: AppState, event: OrchestrationEvent): Ap
     case "thread.activity-appended": {
       const threads = updateThread(state.threads, event.payload.threadId, (thread) => {
         const activities = upsertActivity(thread.activities, event.payload.activity);
-        if (activities === thread.activities && thread.lastInteractionAt === event.occurredAt) {
+        // The live reasoning status must not reorder threads or mark them unread.
+        const lastInteractionAt =
+          event.payload.activity.kind === REASONING_STATUS_ACTIVITY_KIND
+            ? thread.lastInteractionAt
+            : event.occurredAt;
+        if (activities === thread.activities && thread.lastInteractionAt === lastInteractionAt) {
           return thread;
         }
         return {
           ...thread,
           ...(activities !== thread.activities ? { activities } : {}),
           pendingUserInputs: projectPendingUserInputs(thread.pendingUserInputs ?? [], event),
-          lastInteractionAt: event.occurredAt,
+          lastInteractionAt,
         };
       });
       return threads === state.threads ? state : { ...state, threads };
