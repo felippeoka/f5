@@ -1,5 +1,9 @@
 import { expect, it } from "vitest";
-import { profileIsolationChecks, profileReadinessChecks } from "./profileIsolationEvidence";
+import {
+  profileIsolationChecks,
+  profileReadinessChecks,
+  profileInspectionDiagnosticChecks,
+} from "./profileIsolationEvidence";
 const passing = () => {
   const profiles = [0, 1].map(() => ({
     held: false,
@@ -91,6 +95,43 @@ it("does not accept sequential activations as real contention", () => {
   contender.busyWhileForeignHeld = false;
   contender.native.operations[0] = { op: "leaseAcquire", outcome: "ok" };
   expect(profileIsolationChecks(raw)["lease-contention"]).toBe(false);
+});
+it("keeps granted plan-mode inspection diagnostics separate from actual control evidence", () => {
+  const raw: any = passing();
+  const receipt = raw.profileIsolationObservation;
+  receipt.inspectionDiagnostic = true;
+  receipt.planModeVerified = true;
+  for (const p of receipt.channels.profiles) {
+    Object.assign(p, {
+      ownActivities: 0,
+      ownWsActivities: 0,
+      ownImages: 0,
+      ownWsImages: 0,
+      busy: 0,
+    });
+    Object.assign(p.native, {
+      inspectionResponses: 20,
+      leaseObserved: false,
+      captureResponses: 0,
+      operations: Array.from({ length: 20 }, () => ({
+        op: "inspect",
+        outcome: "ok",
+        accessible: true,
+        nodes: 15,
+      })),
+    });
+  }
+  expect(Object.values(profileInspectionDiagnosticChecks(raw)).every(Boolean)).toBe(true);
+  expect(Object.values(profileIsolationChecks(raw)).every(Boolean)).toBe(false);
+  receipt.planModeVerified = false;
+  expect(profileInspectionDiagnosticChecks(raw)["plan-observations"]).toBe(false);
+  receipt.planModeVerified = true;
+  const p = receipt.channels.profiles[0];
+  p.native.operations.push({ op: "activateApp", outcome: "ok" });
+  expect(profileInspectionDiagnosticChecks(raw)["no-native-input"]).toBe(false);
+  p.native.operations.pop();
+  p.native.leaseObserved = true;
+  expect(profileInspectionDiagnosticChecks(raw)["no-native-input"]).toBe(false);
 });
 it("rejects lost traces, changed credentials, unconfirmed cleanup and non-holder stop losing the holder", () => {
   const raw = passing();

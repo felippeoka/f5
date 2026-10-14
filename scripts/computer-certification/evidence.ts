@@ -1,10 +1,14 @@
 import { record, digest } from "./model";
 import type { Manifest, ScenarioResult } from "./model";
-import type { ScenarioInstance } from "./catalog";
+import { PROFILE_SCENARIO_IDS, type ScenarioInstance } from "./catalog";
 import { windowlessChecks } from "./windowlessEvidence";
 import { grantMemoryReceiptsComplete } from "./grantMemory";
 import { sessionActionsReceiptsComplete } from "./sessionActions";
-import { profileIsolationChecks, profileReadinessChecks } from "./profileIsolationEvidence";
+import {
+  profileIsolationChecks,
+  profileReadinessChecks,
+  profileInspectionDiagnosticChecks,
+} from "./profileIsolationEvidence";
 
 const safeKey = /^[a-zA-Z0-9][a-zA-Z0-9.-]{0,100}$/;
 const STOP_CHECKS = [
@@ -120,17 +124,23 @@ export function summarizeEvidence(
       manifest.identity.target === "development" &&
       raw.scope === `unsigned-real-electron-${scenario.selectedProvider}-session-actions`;
   }
-  if (["profile-isolation", "profile-readiness"].includes(scenario.id)) {
+  if (PROFILE_SCENARIO_IDS.includes(scenario.id)) {
     const receipts = (
-      scenario.id === "profile-readiness" ? profileReadinessChecks : profileIsolationChecks
+      scenario.id === "profile-inspection-diagnostic"
+        ? profileInspectionDiagnosticChecks
+        : scenario.id === "profile-readiness"
+          ? profileReadinessChecks
+          : profileIsolationChecks
     )(raw);
     for (const [key, value] of Object.entries(receipts)) checks["receipt." + key] = value;
     passed &&=
       Object.values(receipts).every(Boolean) &&
       raw.scope ===
-        (scenario.id === "profile-readiness"
-          ? "unsigned-real-electron-codex-profile-readiness"
-          : "unsigned-real-electron-codex-profile-isolation") &&
+        (scenario.id === "profile-inspection-diagnostic"
+          ? "unsigned-real-electron-codex-profile-inspection-diagnostic"
+          : scenario.id === "profile-readiness"
+            ? "unsigned-real-electron-codex-profile-readiness"
+            : "unsigned-real-electron-codex-profile-isolation") &&
       raw.provider === "codex" &&
       manifest.providers.includes("codex") &&
       manifest.identity.target === "development";
@@ -194,7 +204,7 @@ export function summarizeEvidence(
     measurements,
     cleanup,
     evidenceKind:
-      scenario.provider || ["profile-isolation", "profile-readiness"].includes(scenario.id)
+      scenario.provider || PROFILE_SCENARIO_IDS.includes(scenario.id)
         ? ("provider-desktop" as const)
         : ("native-helper" as const),
     evidenceSha256: digest(raw),

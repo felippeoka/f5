@@ -1,5 +1,78 @@
 import { record } from "./model";
 
+/** Diagnostic only: plan-mode observation is not contention or veto evidence. */
+export function profileInspectionDiagnosticChecks(raw: unknown): Record<string, boolean> {
+  const data = record(raw) ? raw : {};
+  const receipt = record(data.profileIsolationObservation) ? data.profileIsolationObservation : {};
+  const channels = record(receipt.channels) ? receipt.channels : {};
+  const profiles = Array.isArray(channels.profiles) ? channels.profiles : [];
+  const base = profileIsolationChecks(raw);
+  const both = (check: (p: Record<string, unknown>, n: Record<string, unknown>) => boolean) =>
+    channels.configured === true &&
+    channels.traceComplete === true &&
+    profiles.length === 2 &&
+    profiles.every(
+      (p) =>
+        record(p) &&
+        record(p.native) &&
+        p.native.traceComplete === true &&
+        p.native.pendingResponses === 0 &&
+        check(p, p.native),
+    );
+  return {
+    "two-real-profiles":
+      base["two-real-profiles"] === true && receipt.profileSnapshotsPrivate === true,
+    "genuine-consents": base["genuine-consents"] === true,
+    "plan-observations":
+      receipt.inspectionDiagnostic === true &&
+      receipt.planModeVerified === true &&
+      both(
+        (_p, n) =>
+          n.inspectionResponses === 20 &&
+          Array.isArray(n.operations) &&
+          n.operations.filter(
+            (op) =>
+              record(op) &&
+              op.op === "inspect" &&
+              op.outcome === "ok" &&
+              op.accessible === true &&
+              typeof op.nodes === "number" &&
+              op.nodes > 0,
+          ).length === 20,
+      ),
+    "no-native-input": both(
+      (p, n) =>
+        p.held === false &&
+        n.leaseObserved === false &&
+        n.captureResponses === 0 &&
+        p.ownActivities === 0 &&
+        p.ownWsActivities === 0 &&
+        p.ownImages === 0 &&
+        p.ownWsImages === 0 &&
+        [
+          "foreignActivity",
+          "foreignImages",
+          "foreignGrants",
+          "foreignIdentity",
+          "invalidBanner",
+        ].every((k) => p[k] === false) &&
+        Array.isArray(n.operations) &&
+        n.operations.every(
+          (op) =>
+            record(op) &&
+            typeof op.op === "string" &&
+            ["resolveApps", "inspect"].includes(op.op) &&
+            op.outcome === "ok",
+        ),
+    ),
+    "credential-files-unchanged":
+      receipt.sourceCredentialsUnchanged === true && receipt.isolatedCredentialsUnchanged === true,
+    "sessions-stopped":
+      receipt.bothSessionsStopped === true && both((_p, n) => n.lastGrantCount === 0),
+    cleanup: record(data.cleanup) && data.cleanup.confirmed === true,
+  };
+}
+
 export function profileReadinessChecks(raw: unknown): Record<string, boolean> {
   const data = record(raw) ? raw : {};
   const receipt = record(data.profileIsolationObservation) ? data.profileIsolationObservation : {};

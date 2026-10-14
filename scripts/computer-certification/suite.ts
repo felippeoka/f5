@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
-import { GROUPS, type Group } from "./catalog";
+import { GROUPS, PROFILE_SCENARIO_IDS, type Group } from "./catalog";
 import {
   coverage,
   decodeResult,
@@ -108,7 +108,7 @@ export async function runSuite(options: {
         evidenceKind:
           scenario.group === "automated"
             ? "automated"
-            : scenario.provider || ["profile-isolation", "profile-readiness"].includes(scenario.id)
+            : scenario.provider || PROFILE_SCENARIO_IDS.includes(scenario.id)
               ? "provider-desktop"
               : "native-helper",
         startedAt: start,
@@ -135,8 +135,7 @@ export async function runSuite(options: {
         else if (!observed.checks["helper-permissions"])
           blocker = "helper-prerequisites-unavailable";
         else if (
-          (scenario.selectedProvider ||
-            ["profile-isolation", "profile-readiness"].includes(scenario.id)) &&
+          (scenario.selectedProvider || PROFILE_SCENARIO_IDS.includes(scenario.id)) &&
           !observed.checks[(scenario.selectedProvider ?? "codex") + "-ready"]
         )
           blocker = "provider-authentication-unavailable";

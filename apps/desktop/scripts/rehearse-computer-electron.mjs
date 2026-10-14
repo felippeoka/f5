@@ -31,6 +31,7 @@ import { runProfileIsolation } from "./rehearse-computer-profile-isolation.mjs";
 import {
   profileIsolationChecks,
   profileReadinessChecks,
+  profileInspectionDiagnosticChecks,
 } from "../../../scripts/computer-certification/profileIsolationEvidence.ts";
 import { rehearsalMcpBackendBootstrap } from "../src/computer/rehearsalMcpTransport.ts";
 import {
@@ -81,7 +82,9 @@ const windowless = args.includes("--windows-closed");
 const grantMemory = args.includes("--grant-memory");
 const sessionActions = args.includes("--session-actions");
 const profileIsolationReadOnly = args.includes("--profile-isolation-readonly");
-const profileIsolation = args.includes("--profile-isolation") || profileIsolationReadOnly;
+const profileInspectionDiagnostic = args.includes("--profile-inspection-diagnostic");
+const profileIsolation =
+  args.includes("--profile-isolation") || profileIsolationReadOnly || profileInspectionDiagnostic;
 const observeMcpTransport =
   provider === "codex" && (sessionActions || approvalDiagnostic || profileIsolation);
 const runtimeMode = sessionActions || approvalDiagnostic ? "approval-required" : "full-access";
@@ -986,7 +989,8 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
     model: modelSelection.model,
     modelSelection,
     runtimeMode,
-    interactionMode: statusOnly && !approvalDiagnostic ? "plan" : "default",
+    interactionMode:
+      (statusOnly && !approvalDiagnostic) || profileInspectionDiagnostic ? "plan" : "default",
     branch: null,
     worktreePath: null,
   });
@@ -1046,6 +1050,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
           }, text);
       },
       readinessOnly: profileIsolationReadOnly,
+      inspectionDiagnostic: profileInspectionDiagnostic,
       record: (value) => {
         profileIsolationObservation = value;
       },
@@ -2103,7 +2108,11 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
   if (profileIsolation)
     Object.assign(
       checks,
-      (profileIsolationReadOnly ? profileReadinessChecks : profileIsolationChecks)({
+      (profileInspectionDiagnostic
+        ? profileInspectionDiagnosticChecks
+        : profileIsolationReadOnly
+          ? profileReadinessChecks
+          : profileIsolationChecks)({
         profileIsolationObservation,
         cleanup,
       }),
@@ -2120,29 +2129,31 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         reportVersion: 1,
         admissionId: process.env.F5_COMPUTER_CERTIFICATION_ADMISSION,
         recordedAt: new Date().toISOString(),
-        scope: profileIsolationReadOnly
-          ? "unsigned-real-electron-codex-profile-readiness"
-          : profileIsolation
-            ? "unsigned-real-electron-codex-profile-isolation"
-            : sessionActions
-              ? `unsigned-real-electron-${provider}-session-actions`
-              : grantMemory
-                ? `unsigned-real-electron-${provider}-grant-memory`
-                : windowless
-                  ? `unsigned-real-electron-${provider}-all-app-windows-closed`
-                  : clusterWorkflows
-                    ? "unsigned-real-electron-clustered-workflows"
-                    : realApps
-                      ? `unsigned-real-electron-${provider}-textedit-and-calculator`
-                      : stopOnly
-                        ? `unsigned-real-electron-${provider}-${stopMain ? "main" : "renderer"}-frozen-physical-stop`
-                        : statusOnly
-                          ? `unsigned-real-electron-${provider}-${approvalDiagnostic ? "approval-mode-" : ""}read-only-discovery-diagnostic`
-                          : controlsOnly
-                            ? `unsigned-real-electron-${provider}-human-consent-and-controls`
-                            : actionsOnly
-                              ? `unsigned-real-electron-${provider}-human-consent-and-actions`
-                              : `unsigned-real-electron-${provider}-human-consent-synthetic-app`,
+        scope: profileInspectionDiagnostic
+          ? "unsigned-real-electron-codex-profile-inspection-diagnostic"
+          : profileIsolationReadOnly
+            ? "unsigned-real-electron-codex-profile-readiness"
+            : profileIsolation
+              ? "unsigned-real-electron-codex-profile-isolation"
+              : sessionActions
+                ? `unsigned-real-electron-${provider}-session-actions`
+                : grantMemory
+                  ? `unsigned-real-electron-${provider}-grant-memory`
+                  : windowless
+                    ? `unsigned-real-electron-${provider}-all-app-windows-closed`
+                    : clusterWorkflows
+                      ? "unsigned-real-electron-clustered-workflows"
+                      : realApps
+                        ? `unsigned-real-electron-${provider}-textedit-and-calculator`
+                        : stopOnly
+                          ? `unsigned-real-electron-${provider}-${stopMain ? "main" : "renderer"}-frozen-physical-stop`
+                          : statusOnly
+                            ? `unsigned-real-electron-${provider}-${approvalDiagnostic ? "approval-mode-" : ""}read-only-discovery-diagnostic`
+                            : controlsOnly
+                              ? `unsigned-real-electron-${provider}-human-consent-and-controls`
+                              : actionsOnly
+                                ? `unsigned-real-electron-${provider}-human-consent-and-actions`
+                                : `unsigned-real-electron-${provider}-human-consent-synthetic-app`,
         platform: process.platform,
         arch: process.arch,
         osVersion: release(),

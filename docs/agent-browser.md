@@ -850,6 +850,18 @@ and confirmed cleanup. It did not reproduce the fixture-inspection failure; that
 live gate remains pending diagnosis. No further RED retry is scheduled from this
 metadata result.
 
+`profile-inspection-diagnostic` is a separate, operator-coordinated unsigned
+macOS/Codex phase. It requires genuine consent for each synthetic fixture, then
+concurrently inspects them twenty times in plan mode while exercising the same
+owner-polling path. It requests no activation, capture or input, and the broker's
+plan-mode mutation veto stays active. The operator may use their computer and
+should leave the fixtures unchanged; no RED or physical timing cue is needed.
+Acceptance requires positive correlated inspections in both profiles, verified
+plan mode, no lease/input/activity/images, private snapshots, unchanged credentials,
+cleared grants, stopped sessions and confirmed cleanup. Mapped error locations are
+retained on failure. This diagnostic has no release-coverage requirements: it cannot
+qualify contention, image isolation, stop latency or a tested mutation veto.
+
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;
 watching a child's absent stdout pipe produced no diagnostic evidence. The new

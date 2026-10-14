@@ -77,7 +77,7 @@ afterEach(async () => {
 
 describe("certification inventory and coverage", () => {
   it("uses real Codex profile phases only in development and retains unavailable platform/integration gates", () => {
-    for (const key of ["profile-isolation", "profile-readiness"]) {
+    for (const key of ["profile-isolation", "profile-readiness", "profile-inspection-diagnostic"]) {
       const s = scenario(key);
       const target = { repo: "/repo", platform: "darwin" as const };
       const launch = { codex: { home: "/private/home", binary: "/cli/codex" } };
@@ -85,7 +85,11 @@ describe("certification inventory and coverage", () => {
       expect(Array.isArray(commands)).toBe(true);
       if (Array.isArray(commands))
         expect(commands[0]?.args).toContain(
-          key === "profile-readiness" ? "--profile-isolation-readonly" : "--profile-isolation",
+          key === "profile-inspection-diagnostic"
+            ? "--profile-inspection-diagnostic"
+            : key === "profile-readiness"
+              ? "--profile-isolation-readonly"
+              : "--profile-isolation",
         );
       expect(
         commandsFor(s, { ...target, app: "/private/Installed.app" }, "/output", launch, "darwin"),

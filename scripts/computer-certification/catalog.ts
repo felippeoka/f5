@@ -3,6 +3,11 @@ export type Provider = "claude" | "codex";
 export type Group = "automated" | "workflows" | "protection" | "recovery" | "builtin" | "chrome";
 export type EvidenceKind = "automated" | "native-helper" | "provider-desktop" | "installed";
 export type ResultState = "passed" | "failed" | "blocked" | "not-run";
+export const PROFILE_SCENARIO_IDS: readonly string[] = [
+  "profile-isolation",
+  "profile-readiness",
+  "profile-inspection-diagnostic",
+];
 
 export interface Scenario {
   readonly id: string;
@@ -256,6 +261,24 @@ export const SCENARIOS: readonly Scenario[] = [
     expectedChecks: [
       "two-real-profiles",
       "no-grant-lease-or-input",
+      "credential-files-unchanged",
+      "sessions-stopped",
+      "cleanup",
+    ],
+  },
+  {
+    id: "profile-inspection-diagnostic",
+    group: "workflows",
+    title: "Concurrent granted-fixture inspection in plan mode without input",
+    provider: false,
+    operator: true,
+    runner: "electron-profile-inspection-diagnostic",
+    requirements: [],
+    expectedChecks: [
+      "two-real-profiles",
+      "genuine-consents",
+      "plan-observations",
+      "no-native-input",
       "credential-files-unchanged",
       "sessions-stopped",
       "cleanup",

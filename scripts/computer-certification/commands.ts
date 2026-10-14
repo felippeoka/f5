@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { ScenarioInstance } from "./catalog";
+import { PROFILE_SCENARIO_IDS, type ScenarioInstance } from "./catalog";
 import type { Target } from "./identity";
 import { helperPath } from "./identity";
 
@@ -125,9 +125,7 @@ export function commandsFor(
   if (target.app) return "installed-observation-driver-required";
   if (target.platform === "win32") return "windows-interactive-driver-required";
   if (s.runner.startsWith("electron") || s.runner === "windows-closed") {
-    const provider = ["profile-isolation", "profile-readiness"].includes(s.id)
-      ? "codex"
-      : s.selectedProvider!;
+    const provider = PROFILE_SCENARIO_IDS.includes(s.id) ? "codex" : s.selectedProvider!;
     const launch = launches[provider];
     if (!launch) return "provider-launch-not-configured";
     const flags: Record<string, string[]> = {
@@ -139,6 +137,7 @@ export function commandsFor(
       "electron-session-actions": ["--session-actions"],
       "electron-profile-isolation": ["--profile-isolation"],
       "electron-profile-isolation-readonly": ["--profile-isolation-readonly"],
+      "electron-profile-inspection-diagnostic": ["--profile-inspection-diagnostic"],
       "windows-closed": ["--windows-closed"],
       "electron-main-stop": ["--stop-main", "--diagnose-chord"],
       "electron-renderer-stop": ["--stop-renderer", "--diagnose-chord"],

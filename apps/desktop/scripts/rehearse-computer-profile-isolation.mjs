@@ -15,7 +15,10 @@ import {
   suspendedProbe,
   codexAuthenticationReady,
 } from "../../../scripts/computer-certification/preflight.ts";
-import { profileIsolationChecks } from "../../../scripts/computer-certification/profileIsolationEvidence.ts";
+import {
+  profileIsolationChecks,
+  profileInspectionDiagnosticChecks,
+} from "../../../scripts/computer-certification/profileIsolationEvidence.ts";
 import {
   profileProviderProgress,
   profileOwnerLeaseReady,
@@ -52,6 +55,7 @@ export async function runProfileIsolation(o) {
     helper,
     fixtureBinDirectory,
   } = o;
+  const interactionMode = o.inspectionDiagnostic ? "plan" : "default";
   stage("profile-isolation-prerequisites");
   const sourceHash = await fingerprint(join(sourceHome, "auth.json"));
   const primaryHash = await fingerprint(join(home, "auth.json"));
@@ -137,7 +141,7 @@ export async function runProfileIsolation(o) {
     model: modelSelection.model,
     modelSelection,
     runtimeMode: "full-access",
-    interactionMode: "default",
+    interactionMode,
     branch: null,
     worktreePath: null,
   });
@@ -239,7 +243,7 @@ export async function runProfileIsolation(o) {
         message: { messageId: randomUUID(), role: "user", text, attachments: [] },
         modelSelection,
         runtimeMode: "full-access",
-        interactionMode: "default",
+        interactionMode,
       },
     });
     if (
@@ -412,6 +416,97 @@ export async function runProfileIsolation(o) {
   const device = await suspendedProbe(helper);
   if (device.available || device.reason !== "other-instance")
     throw new Error("Isolation device lock receipt incomplete.");
+  if (o.inspectionDiagnostic) {
+    stage("profile-inspection-diagnostic");
+    await instructions(
+      "Observation-only check: no RED or computer input. You can use your computer; leave the two synthetic fixtures unchanged.",
+    );
+    const previous = await Promise.all(
+      [0, 1].map((i) =>
+        submit(
+          i,
+          `Plan-mode observation-only diagnostic. Call computer_inspect sequentially exactly 20 times with ${JSON.stringify({ app: apps[i], maxNodes: 30 })}. No activation, screenshot, zoom, input, shell, files, network or other tools. Stop on any error or interruption; never retry. Finish READY.`,
+          "inspection-diagnostic",
+        ),
+      ),
+    );
+    await Promise.all(
+      [0, 1].map((i) =>
+        waitFor(async () => {
+          try {
+            if (
+              await profileOwnerLeaseReady(
+                async () => (await snapshot()).profiles[i].held,
+                async () => (await current(i))?.latestTurn,
+                previous[i],
+              )
+            )
+              throw new Error("Isolation read-only owner polling receipt incomplete.");
+          } catch (error) {
+            if (
+              !(error instanceof Error) ||
+              error.message !== "Isolation owner turn ended without a lease."
+            )
+              throw error;
+          }
+          const turn = (await current(i))?.latestTurn;
+          if (!turn || turn.turnId === previous[i]) return false;
+          if (["error", "interrupted"].includes(turn.state))
+            throw new Error("Provider turn did not complete.");
+          return turn.state === "completed";
+        }, 150000),
+      ),
+    );
+    const planModeVerified = (await Promise.all([current(0), current(1)])).every(
+      (t) => t?.interactionMode === "plan",
+    );
+    for (const i of [0, 1]) {
+      await dispatch((m, b) => clients[i].rpc(m, b), {
+        type: "thread.session.stop",
+        threadId: ids[i],
+      });
+      await waitFor(async () => (await current(i))?.session?.status === "stopped", 15000);
+      await waitFor(async () => {
+        const grants = await clients[i].rpc(WS_METHODS.computerAccessList, { threadId: ids[i] });
+        return Array.isArray(grants) && grants.length === 0;
+      }, 5000);
+    }
+    const snapshots = await Promise.all(
+      clients.map((c) => c.rpc(ORCHESTRATION_WS_METHODS.getSnapshot)),
+    );
+    const receipt = {
+      inspectionDiagnostic: true,
+      planModeVerified,
+      consents,
+      submissions,
+      channels: await snapshot(),
+      bothChatSurfacesReady: true,
+      distinctRendererProfiles: primaryId !== other.id,
+      distinctBackendProcesses: true,
+      isolatedProviderHomes: home !== secondaryHome,
+      sourceCredentialsUnchanged: (await fingerprint(join(sourceHome, "auth.json"))) === sourceHash,
+      isolatedCredentialsUnchanged:
+        (await fingerprint(join(home, "auth.json"))) === primaryHash &&
+        (await fingerprint(join(secondaryHome, "auth.json"))) === secondaryHash,
+      profileSnapshotsPrivate: snapshots.every(
+        (s, i) =>
+          s.threads.some((t) => t.id === ids[i]) && !s.threads.some((t) => t.id === ids[1 - i]),
+      ),
+      bothSessionsStopped: true,
+    };
+    o.record(receipt);
+    const checks = profileInspectionDiagnosticChecks({
+      profileIsolationObservation: receipt,
+      cleanup: { confirmed: true },
+    });
+    delete checks.cleanup;
+    if (!Object.values(checks).every(Boolean))
+      throw new Error("Isolation inspection diagnostic receipt incomplete.");
+    await instructions(
+      "Finished: observation-only diagnostic complete, both sessions stopped. No computer input ran.",
+    );
+    return receipt;
+  }
   o.record({
     consents,
     submissions,
