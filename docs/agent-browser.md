@@ -843,6 +843,12 @@ input and confirmed cleanup. Read-only readiness now also submits the two profil
 metadata turns concurrently and exercises the same polling while they run. Exact
 one-per-profile app-list receipts remain required. This is an input-free diagnostic,
 not a retry of any mutation or passing contention evidence.
+The [concurrent metadata diagnostic](computer-certification/2026-10-14-macos-profile-concurrent-metadata-passed.json)
+passed all eleven admitted checks on clean `6b8b42a786`, with both polling paths
+exercised, zero consent/lease/capture/input, unchanged credentials, stopped sessions
+and confirmed cleanup. It did not reproduce the fixture-inspection failure; that
+live gate remains pending diagnosis. No further RED retry is scheduled from this
+metadata result.
 
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;
