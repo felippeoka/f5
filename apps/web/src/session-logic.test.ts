@@ -13,6 +13,8 @@ import {
   createLocalDispatchSnapshot,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  deriveLiveWorkActivity,
+  deriveLiveWorkTurnId,
   PROVIDER_OPTIONS,
   derivePendingApprovals,
   derivePendingUserInputs,
@@ -49,6 +51,184 @@ function makeActivity(overrides: {
     ...(overrides.sequence !== undefined ? { sequence: overrides.sequence } : {}),
   };
 }
+
+describe("deriveLiveWorkActivity", () => {
+  const turnId = TurnId.makeUnsafe("turn-live");
+  const tool = (kind: string, itemId: string, sequence: number, title = itemId) =>
+    makeActivity({
+      id: `${kind}-${itemId}-${sequence}`,
+      kind,
+      summary: kind === "tool.started" ? `${title} started` : title,
+      payload: { itemType: "dynamic_tool_call", providerItemId: itemId, title },
+      turnId: "turn-live",
+      sequence,
+    });
+  const reasoning = (state: "active" | "idle", sequence: number, detail?: string) =>
+    makeActivity({
+      id: "reasoning-status:thread-1:turn-live",
+      kind: "reasoning.status",
+      summary: "Thinking",
+      tone: "info",
+      payload: { state, ...(detail ? { detail } : {}) },
+      turnId: "turn-live",
+      sequence,
+    });
+
+  it("shows thinking while the reasoning status is active", () => {
+    expect(deriveLiveWorkActivity([reasoning("active", 1)], turnId)).toEqual({
+      kind: "thinking",
+      detail: null,
+    });
+    expect(deriveLiveWorkActivity([reasoning("active", 1, "Inspecting")], turnId)).toEqual({
+      kind: "thinking",
+      detail: "Inspecting",
+    });
+    expect(deriveLiveWorkActivity([reasoning("idle", 1)], turnId)).toBeNull();
+  });
+
+  it("keeps the newer tool when an older one completes", () => {
+    expect(
+      deriveLiveWorkActivity(
+        [
+          tool("tool.started", "A", 1),
+          tool("tool.started", "B", 2),
+          tool("tool.completed", "A", 3),
+        ],
+        turnId,
+      ),
+    ).toEqual({ kind: "tool", providerItemId: "B", title: "B" });
+  });
+
+  it("keeps thinking when a background tool completes during reasoning", () => {
+    expect(
+      deriveLiveWorkActivity(
+        [tool("tool.started", "A", 1), reasoning("active", 2), tool("tool.completed", "A", 3)],
+        turnId,
+      ),
+    ).toEqual({ kind: "thinking", detail: null });
+  });
+
+  it("shows a tool that has only started", () => {
+    expect(
+      deriveLiveWorkActivity(
+        [
+          makeActivity({
+            id: "started-only",
+            kind: "tool.started",
+            summary: "Ran command started",
+            payload: { itemType: "command_execution", providerItemId: "cmd" },
+            turnId: "turn-live",
+            sequence: 1,
+          }),
+        ],
+        turnId,
+      ),
+    ).toEqual({ kind: "tool", providerItemId: "cmd", title: "Ran command" });
+  });
+
+  it("labels a running command with its command text", () => {
+    expect(
+      deriveLiveWorkActivity(
+        [
+          makeActivity({
+            id: "command-started",
+            kind: "tool.started",
+            summary: "Ran command started",
+            payload: {
+              itemType: "command_execution",
+              providerItemId: "cmd",
+              title: "Ran command",
+              command: "bun run test",
+            },
+            turnId: "turn-live",
+            sequence: 1,
+          }),
+        ],
+        turnId,
+      ),
+    ).toEqual({ kind: "tool", providerItemId: "cmd", title: "bun run test" });
+  });
+
+  it("keeps a completed tool closed when its start sorts after the completion", () => {
+    // No session sequence and equal timestamps: ids decide the order.
+    const createdAt = "2026-02-23T00:00:05.000Z";
+    const payload = { itemType: "command_execution", providerItemId: "cmd", title: "Ran command" };
+    expect(
+      deriveLiveWorkActivity(
+        [
+          makeActivity({
+            id: "b-started",
+            kind: "tool.started",
+            payload,
+            createdAt,
+            turnId: "turn-live",
+          }),
+          makeActivity({
+            id: "a-completed",
+            kind: "tool.completed",
+            payload: { ...payload, status: "completed" },
+            createdAt,
+            turnId: "turn-live",
+          }),
+        ],
+        turnId,
+      ),
+    ).toBeNull();
+  });
+
+  it("closes tools without an item id when an id-less completion follows", () => {
+    const idless = (id: string, kind: string, sequence: number) =>
+      makeActivity({
+        id,
+        kind,
+        summary: "Tool call",
+        payload: { itemType: "dynamic_tool_call", title: "Lookup" },
+        turnId: "turn-live",
+        sequence,
+      });
+    expect(deriveLiveWorkActivity([idless("s", "tool.started", 1)], turnId)).toEqual({
+      kind: "tool",
+      providerItemId: null,
+      title: "Lookup",
+    });
+    expect(
+      deriveLiveWorkActivity(
+        [idless("s", "tool.started", 1), idless("c", "tool.completed", 2)],
+        turnId,
+      ),
+    ).toBeNull();
+  });
+
+  it("ignores activities from other turns", () => {
+    expect(
+      deriveLiveWorkActivity(
+        [makeActivity({ kind: "tool.started", turnId: "turn-old", sequence: 1 })],
+        turnId,
+      ),
+    ).toBeNull();
+    expect(deriveLiveWorkActivity([tool("tool.started", "A", 1)], undefined)).toBeNull();
+  });
+
+  it("only exposes a live turn for a running session on the latest turn", () => {
+    expect(deriveLiveWorkTurnId({ status: "running", activeTurnId: turnId }, turnId)).toBe(turnId);
+    for (const status of ["ready", "error", "closed", "connecting"] as const) {
+      expect(deriveLiveWorkTurnId({ status, activeTurnId: turnId }, turnId)).toBeUndefined();
+    }
+    // Sending before the new turn exists: the session still points at the old turn.
+    expect(
+      deriveLiveWorkTurnId(
+        { status: "running", activeTurnId: TurnId.makeUnsafe("turn-old") },
+        turnId,
+      ),
+    ).toBeUndefined();
+    expect(deriveLiveWorkTurnId({ status: "running" }, turnId)).toBeUndefined();
+    expect(deriveLiveWorkTurnId(null, turnId)).toBeUndefined();
+  });
+
+  it("keeps the reasoning status out of the work log", () => {
+    expect(deriveWorkLogEntries([reasoning("active", 1)], turnId)).toEqual([]);
+  });
+});
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {

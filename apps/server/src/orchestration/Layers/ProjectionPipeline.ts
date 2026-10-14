@@ -74,6 +74,7 @@ import {
 import { truncateMiddleByBytes } from "../outputTruncation.ts";
 import { canRepairErroredTurnFromSuccessfulSettlement } from "../turnStateTransitions.ts";
 import { revertTaskToolState } from "@t3tools/shared/claudeTaskToolProjection";
+import { REASONING_STATUS_ACTIVITY_KIND } from "@t3tools/shared/orchestrationActivityPayload";
 
 export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: "projection.projects",
@@ -1049,6 +1050,13 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             threadId: event.payload.threadId,
           });
           if (Option.isNone(existingRow)) {
+            return;
+          }
+          // The live reasoning status must not reorder threads or mark them unread.
+          if (
+            event.type === "thread.activity-appended" &&
+            event.payload.activity.kind === REASONING_STATUS_ACTIVITY_KIND
+          ) {
             return;
           }
           yield* projectionThreadRepository.upsert({

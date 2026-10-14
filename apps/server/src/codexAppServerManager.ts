@@ -264,7 +264,7 @@ export interface CodexAppServerSendTurnInput {
     { type: "image"; url: string } | { type: "localImage"; path: string }
   >;
   readonly model?: string;
-  readonly serviceTier?: string | null;
+  readonly serviceTier?: "fast" | null;
   readonly effort?: string;
   readonly interactionMode?: ProviderInteractionMode;
 }
@@ -725,7 +725,7 @@ export function normalizeCodexModelSlug(
  */
 function resolveReportedCodexEffort(
   model: string,
-  effort: string,
+  effort: string | undefined,
   reported: ModelCapabilities,
 ): string | undefined {
   const capabilities = resolveModelCapabilities("codex", model, reported);
@@ -791,7 +791,7 @@ export function buildCodexTurnStartParams(
       mode: "default" | "plan";
       settings: {
         model: string;
-        reasoning_effort: string;
+        reasoning_effort: string | null;
         developer_instructions: string;
       };
     };
@@ -822,12 +822,12 @@ export function buildCodexTurnStartParams(
         ? null
         : input.serviceTier;
   }
-  const resolvedEffort =
-    input.effort === undefined
-      ? undefined
-      : reportedCapabilities
-        ? resolveReportedCodexEffort(effortModel, input.effort, reportedCapabilities)
-        : resolveCodexReasoningEffortForModel(effortModel, input.effort);
+  // An absent effort means the model default (the composer strips it when it
+  // equals the default), so the resolvers always run instead of letting the
+  // collaboration mode fall back to a fixed effort.
+  const resolvedEffort = reportedCapabilities
+    ? resolveReportedCodexEffort(effortModel, input.effort, reportedCapabilities)
+    : resolveCodexReasoningEffortForModel(effortModel, input.effort);
   if (resolvedEffort) {
     turnStartParams.effort = resolvedEffort;
   }
@@ -890,7 +890,7 @@ function buildCodexCollaborationMode(input: {
   mode: "default" | "plan";
   settings: {
     model: string;
-    reasoning_effort: string;
+    reasoning_effort: string | null;
     developer_instructions: string;
   };
 } {
@@ -934,7 +934,9 @@ function buildCodexCollaborationMode(input: {
     mode: effectiveMode,
     settings: {
       model,
-      reasoning_effort: input.effort ?? "medium",
+      // Null when the model takes no effort; a fixed fallback here would
+      // override the resolved model default.
+      reasoning_effort: input.effort ?? null,
       developer_instructions: buildCodexAssistantInstructions(instructionInput),
     },
   };
@@ -1471,7 +1473,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         ...configuredBase,
         model: nextConfiguredModel,
         ...(turnStartParams.effort ? { effort: turnStartParams.effort } : {}),
-        ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
+        ...(turnStartParams.serviceTier ? { serviceTier: turnStartParams.serviceTier } : {}),
         ...(modelContextWindowTokens !== undefined ? { modelContextWindowTokens } : {}),
       });
     }
@@ -1628,7 +1630,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       await this.sendTurn({
         threadId,
         input: input.prompt,
-        ...(input.effort !== undefined ? { effort: input.effort } : {}),
+        // Background prompts keep a cheap effort unless the caller picks one.
+        effort: input.effort ?? "medium",
         ...(input.serviceTier !== undefined ? { serviceTier: input.serviceTier } : {}),
       });
       await completion;

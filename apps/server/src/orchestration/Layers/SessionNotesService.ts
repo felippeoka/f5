@@ -194,6 +194,7 @@ function summarizeRecentActivities(
       (activity) =>
         activity.kind !== "runtime.configured" &&
         !activity.kind.startsWith("tool.") &&
+        !activity.kind.startsWith("reasoning.") &&
         activity.kind !== "thread.compaction.completed",
     )
     .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))

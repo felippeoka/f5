@@ -137,6 +137,9 @@ import {
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  deriveLiveWorkActivity,
+  deriveLiveWorkTurnId,
+  type LiveWorkActivity,
   createLocalDispatchSnapshot,
   findLatestProposedPlan,
   deriveWorkLogEntries,
@@ -2005,6 +2008,31 @@ export default function ChatView({
       setIsModelPickerOpen(false);
     }
   }, [isPendingTurnDispatchBlocked]);
+  const liveTurnId = deriveLiveWorkTurnId(activeThread?.session, activeLatestTurn?.turnId);
+  // Unfiltered activities, so transcript and work-log filters cannot hide it.
+  const derivedLiveActivity = useMemo(
+    () => deriveLiveWorkActivity(threadActivities, liveTurnId),
+    [threadActivities, liveTurnId],
+  );
+  const liveActivityKind = derivedLiveActivity?.kind ?? null;
+  const liveActivityDetail =
+    derivedLiveActivity?.kind === "thinking" ? derivedLiveActivity.detail : null;
+  const liveActivityProviderItemId =
+    derivedLiveActivity?.kind === "tool" ? derivedLiveActivity.providerItemId : null;
+  const liveActivityTitle = derivedLiveActivity?.kind === "tool" ? derivedLiveActivity.title : null;
+  const liveActivity = useMemo<LiveWorkActivity>(
+    () =>
+      liveActivityKind === "thinking"
+        ? { kind: "thinking", detail: liveActivityDetail }
+        : liveActivityKind === "tool"
+          ? {
+              kind: "tool",
+              providerItemId: liveActivityProviderItemId,
+              title: liveActivityTitle ?? "",
+            }
+          : null,
+    [liveActivityKind, liveActivityDetail, liveActivityProviderItemId, liveActivityTitle],
+  );
   const activeWorkStartedAt = useMemo(
     () =>
       deriveActiveWorkStartedAt(
@@ -7169,6 +7197,7 @@ export default function ChatView({
                   hasMessages={timelineEntries.length > 0}
                   isWorking={isWorking}
                   activeTurnStartedAt={activeWorkStartedAt}
+                  liveActivity={liveActivity}
                   listRef={legendListRef}
                   entryRowIndexMapRef={timelineEntryRowIndexMapRef}
                   onIsAtEndChange={onIsAtEndChange}

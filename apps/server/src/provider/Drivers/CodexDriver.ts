@@ -260,6 +260,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         previewMcpHttpServer,
         defaultProviderOptions,
         processEnvironment,
+        instanceId,
       });
       const consumeResetCredit = (idempotencyKey: string) =>
         Effect.gen(function* () {

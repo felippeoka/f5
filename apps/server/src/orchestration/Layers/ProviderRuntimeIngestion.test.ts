@@ -16,10 +16,12 @@ import os from "node:os";
 import path from "node:path";
 
 import type {
+  OrchestrationCommand,
   OrchestrationReadModel,
   ProviderRuntimeEvent,
   ProviderSession,
 } from "@t3tools/contracts";
+import { OrchestrationCommandInvariantError } from "../Errors.ts";
 import {
   ApprovalRequestId,
   CommandId,
@@ -30,6 +32,7 @@ import {
   ProjectId,
   ProviderItemId,
   ProviderInstanceId,
+  RuntimeItemId,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -267,6 +270,8 @@ describe("ProviderRuntimeIngestion", () => {
     readonly settings?: Partial<import("@t3tools/contracts").ServerSettings>;
     /** Isolated state dir for tests that write attachments. */
     readonly stateDir?: string;
+    /** Makes the ingestion's dispatch of a matching command fail once. */
+    readonly failDispatchOnce?: (command: OrchestrationCommand) => boolean;
   }) {
     const workspaceRoot = makeTempDir("t3-provider-project-");
     fs.mkdirSync(path.join(workspaceRoot, ".git"));
@@ -284,7 +289,33 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provide(OrchestrationCommandReceiptRepositoryLive),
       Layer.provide(SqlitePersistenceMemory),
     );
+    const failDispatchOnce = options?.failDispatchOnce;
+    let dispatchFailureUsed = false;
+    const faultyEngineLayer = failDispatchOnce
+      ? Layer.effect(
+          OrchestrationEngineService,
+          Effect.map(
+            Effect.service(OrchestrationEngineService),
+            (engine): OrchestrationEngineShape => ({
+              ...engine,
+              dispatch: (command) => {
+                if (!dispatchFailureUsed && failDispatchOnce(command)) {
+                  dispatchFailureUsed = true;
+                  return Effect.fail(
+                    new OrchestrationCommandInvariantError({
+                      commandType: command.type,
+                      detail: "injected dispatch failure",
+                    }),
+                  );
+                }
+                return engine.dispatch(command);
+              },
+            }),
+          ),
+        )
+      : Layer.empty;
     const layer = ProviderRuntimeIngestionLive.pipe(
+      Layer.provide(faultyEngineLayer),
       Layer.provide(ServerSettingsService.layerTest(options?.settings)),
       Layer.provide(
         options?.refreshAccount
@@ -8007,6 +8038,328 @@ describe("ProviderRuntimeIngestion", () => {
       (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:assistant-streaming",
     );
     expect(message?.text).toBe("x");
-    expect(message?.reasoningText).toBe("ab");
+    // Two reasoning items are separate sections.
+    expect(message?.reasoningText).toBe("a\n\nb");
+  });
+
+  describe("reasoning status", () => {
+    const STATUS_ID = "reasoning-status:thread-1:turn-think";
+    let eventCounter = 0;
+    const base = (turnId = "turn-think") => ({
+      eventId: asEventId(`evt-think-${++eventCounter}`),
+      provider: "codex" as const,
+      createdAt: new Date(Date.UTC(2026, 9, 14, 12, 0, eventCounter)).toISOString(),
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId(turnId),
+    });
+    const reasoningStarted = (itemId: string): ProviderRuntimeEvent => ({
+      ...base(),
+      type: "item.started",
+      itemId: RuntimeItemId.makeUnsafe(itemId),
+      payload: { itemType: "reasoning" },
+    });
+    const reasoningCompleted = (itemId: string): ProviderRuntimeEvent => ({
+      ...base(),
+      type: "item.completed",
+      itemId: RuntimeItemId.makeUnsafe(itemId),
+      payload: { itemType: "reasoning", status: "completed" },
+    });
+    const summaryDelta = (
+      itemId: string,
+      delta: string,
+      summaryIndex = 0,
+    ): ProviderRuntimeEvent => ({
+      ...base(),
+      type: "content.delta",
+      itemId: RuntimeItemId.makeUnsafe(itemId),
+      payload: { streamKind: "reasoning_summary_text", delta, summaryIndex },
+    });
+    const assistantDelta = (itemId: string, delta: string): ProviderRuntimeEvent => ({
+      ...base(),
+      type: "content.delta",
+      itemId: RuntimeItemId.makeUnsafe(itemId),
+      payload: { streamKind: "assistant_text", delta },
+    });
+    const assistantCompleted = (itemId: string): ProviderRuntimeEvent => ({
+      ...base(),
+      type: "item.completed",
+      itemId: RuntimeItemId.makeUnsafe(itemId),
+      payload: { itemType: "assistant_message", status: "completed" },
+    });
+
+    async function startThinkingTurn(options?: Parameters<typeof createHarness>[0]) {
+      const harness = await createHarness(options);
+      harness.emit({ ...base(), type: "turn.started" });
+      await waitForThread(
+        harness.engine,
+        (thread) => thread.session?.activeTurnId === "turn-think",
+      );
+      await harness.drain();
+      return harness;
+    }
+
+    async function statusUpserts(harness: Awaited<ReturnType<typeof createHarness>>) {
+      await harness.drain();
+      const events = await Effect.runPromise(
+        Stream.runCollect(harness.engine.readEvents(0)).pipe(
+          Effect.map((chunk) => Array.from(chunk)),
+        ),
+      );
+      return events.flatMap((event) =>
+        event.type === "thread.activity-appended" && event.payload.activity.id === STATUS_ID
+          ? [event.payload.activity]
+          : [],
+      );
+    }
+
+    async function statusActivity(harness: Awaited<ReturnType<typeof createHarness>>) {
+      await harness.drain();
+      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      return readModel.threads[0]?.activities.find((activity) => activity.id === STATUS_ID);
+    }
+
+    it("creates an active status for an empty reasoning item", async () => {
+      const harness = await startThinkingTurn();
+      const started = reasoningStarted("r1");
+      harness.emit(started);
+      const status = await statusActivity(harness);
+      expect(status).toMatchObject({
+        id: STATUS_ID,
+        kind: "reasoning.status",
+        tone: "info",
+        summary: "Thinking",
+        turnId: "turn-think",
+        createdAt: started.createdAt,
+        payload: { state: "active" },
+      });
+    });
+
+    it("upserts one heading from split summary deltas at the original position", async () => {
+      const harness = await startThinkingTurn();
+      const started = reasoningStarted("r1");
+      harness.emit(started);
+      harness.emit(summaryDelta("r1", "**Inspect"));
+      harness.emit(summaryDelta("r1", "ing adapter**\n\nx"));
+      harness.emit(summaryDelta("r1", " more text"));
+      const upserts = await statusUpserts(harness);
+      expect(upserts.map((activity) => activity.payload)).toEqual([
+        { state: "active" },
+        { state: "active", detail: "Inspecting adapter" },
+      ]);
+      expect(upserts.every((activity) => activity.createdAt === started.createdAt)).toBe(true);
+      expect(upserts.every((activity) => activity.sequence === upserts[0]!.sequence)).toBe(true);
+    });
+
+    it("writes nothing for a summary part without a heading", async () => {
+      const harness = await startThinkingTurn();
+      harness.emit(reasoningStarted("r1"));
+      harness.emit(summaryDelta("r1", "plain text ".repeat(30)));
+      harness.emit(summaryDelta("r1", "**Too late**"));
+      expect(await statusUpserts(harness)).toHaveLength(1);
+    });
+
+    it("goes idle on completion, the first assistant text, or a tool start", async () => {
+      const completion = await startThinkingTurn();
+      completion.emit(reasoningStarted("r1"));
+      completion.emit(reasoningCompleted("r1"));
+      expect((await statusActivity(completion))?.payload).toEqual({ state: "idle" });
+
+      const assistant = await startThinkingTurn();
+      assistant.emit(reasoningStarted("r1"));
+      assistant.emit(assistantDelta("a1", "Answer"));
+      expect((await statusActivity(assistant))?.payload).toEqual({ state: "idle" });
+
+      const tool = await startThinkingTurn();
+      tool.emit(reasoningStarted("r1"));
+      tool.emit({
+        ...base(),
+        type: "item.started",
+        itemId: asItemId("cmd-1"),
+        payload: { itemType: "command_execution", title: "Ran command" },
+      });
+      expect((await statusActivity(tool))?.payload).toEqual({ state: "idle" });
+    });
+
+    it("does not dispatch duplicate lifecycle states", async () => {
+      const harness = await startThinkingTurn();
+      harness.emit(reasoningStarted("r1"));
+      harness.emit(reasoningStarted("r1"));
+      harness.emit(reasoningCompleted("r1"));
+      harness.emit(reasoningCompleted("r1"));
+      harness.emit(assistantDelta("a1", "Answer"));
+      expect((await statusUpserts(harness)).map((activity) => activity.payload)).toEqual([
+        { state: "active" },
+        { state: "idle" },
+      ]);
+    });
+
+    it("ignores a late heading from an earlier reasoning item", async () => {
+      const harness = await startThinkingTurn();
+      harness.emit(reasoningStarted("r1"));
+      const second = reasoningStarted("r2");
+      harness.emit(second);
+      harness.emit(summaryDelta("r1", "**Stale heading**"));
+      const status = await statusActivity(harness);
+      expect(status?.payload).toEqual({ state: "active" });
+      expect(status?.createdAt).toBe(second.createdAt);
+    });
+
+    it("leaves thread recency unchanged", async () => {
+      const harness = await startThinkingTurn();
+      const before = (await Effect.runPromise(harness.engine.getReadModel())).threads[0]!;
+      const sqlBefore = await Effect.runPromise(
+        harness.sql<{ readonly lastInteractionAt: string; readonly updatedAt: string }>`
+          SELECT last_interaction_at AS "lastInteractionAt", updated_at AS "updatedAt"
+          FROM projection_threads WHERE thread_id = 'thread-1'
+        `,
+      );
+      harness.emit(reasoningStarted("r1"));
+      harness.emit(summaryDelta("r1", "**Heading**"));
+      harness.emit(reasoningCompleted("r1"));
+      expect(await statusUpserts(harness)).toHaveLength(3);
+      const after = (await Effect.runPromise(harness.engine.getReadModel())).threads[0]!;
+      expect(after.updatedAt).toBe(before.updatedAt);
+      expect(after.lastInteractionAt).toBe(before.lastInteractionAt);
+      const sqlAfter = await Effect.runPromise(
+        harness.sql<{ readonly lastInteractionAt: string; readonly updatedAt: string }>`
+          SELECT last_interaction_at AS "lastInteractionAt", updated_at AS "updatedAt"
+          FROM projection_threads WHERE thread_id = 'thread-1'
+        `,
+      );
+      expect(sqlAfter).toEqual(sqlBefore);
+    });
+
+    it("keeps an active status past 100 earlier activities and in the persisted projection", async () => {
+      const harness = await startThinkingTurn();
+      for (let index = 0; index < 105; index += 1) {
+        harness.emit({
+          ...base(),
+          type: "item.completed",
+          itemId: asItemId(`tool-${index}`),
+          payload: { itemType: "dynamic_tool_call", status: "completed", title: `Tool ${index}` },
+        });
+      }
+      harness.emit(reasoningStarted("r1"));
+      expect((await statusActivity(harness))?.payload).toEqual({ state: "active" });
+      const rows = await Effect.runPromise(
+        harness.sql<{ readonly payload: string }>`
+          SELECT payload_json AS payload FROM projection_thread_activities
+          WHERE activity_id = ${STATUS_ID}
+        `,
+      );
+      expect(rows.map((row) => JSON.parse(row.payload))).toEqual([{ state: "active" }]);
+    });
+
+    it("separates summary parts with a blank line", async () => {
+      const harness = await startThinkingTurn();
+      harness.emit(reasoningStarted("r1"));
+      harness.emit(summaryDelta("r1", "**One**", 0));
+      harness.emit(summaryDelta("r1", " first", 0));
+      harness.emit(summaryDelta("r1", "**Two**", 1));
+      harness.emit(assistantDelta("a1", "Answer"));
+      harness.emit(assistantCompleted("a1"));
+      const thread = await waitForThread(harness.engine, (entry) =>
+        entry.messages.some((message) => message.id === "assistant:a1" && !message.streaming),
+      );
+      expect(thread.messages.find((message) => message.id === "assistant:a1")?.reasoningText).toBe(
+        "**One** first\n\n**Two**",
+      );
+    });
+
+    it("keeps buffered reasoning when finalizing fails and delivers it once on retry", async () => {
+      const harness = await startThinkingTurn({
+        failDispatchOnce: (command) =>
+          command.type === "thread.message.assistant.delta" &&
+          String(command.commandId).includes("assistant-delta-finalize:"),
+      });
+      harness.emit({
+        ...base(),
+        type: "content.delta",
+        itemId: asItemId("r1"),
+        payload: { streamKind: "reasoning_text", delta: "thinking..." },
+      });
+      harness.emit(assistantDelta("a1", "answer"));
+      harness.emit(assistantCompleted("a1"));
+      await harness.drain();
+      harness.emit({ ...base(), type: "turn.completed", payload: { state: "completed" } });
+      const thread = await waitForThread(harness.engine, (entry) =>
+        entry.messages.some((message) => message.id === "assistant:a1" && !message.streaming),
+      );
+      const message = thread.messages.find((entry) => entry.id === "assistant:a1");
+      expect(message?.text).toBe("answer");
+      expect(message?.reasoningText).toBe("thinking...");
+    });
+
+    it("restores streamed reasoning when its dispatch fails", async () => {
+      const harness = await createHarness({
+        failDispatchOnce: (command) =>
+          command.type === "thread.message.assistant.delta" &&
+          String(command.commandId).endsWith(":assistant-reasoning-delta"),
+      });
+      const now = new Date().toISOString();
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe("cmd-turn-start-reasoning-restore"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          message: {
+            messageId: asMessageId("message-reasoning-restore"),
+            role: "user",
+            text: "stream reasoning please",
+            attachments: [],
+          },
+          assistantDeliveryMode: "streaming",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        }),
+      );
+      await harness.drain();
+      harness.emit({ ...base(), type: "turn.started" });
+      await waitForThread(
+        harness.engine,
+        (thread) => thread.session?.activeTurnId === "turn-think",
+      );
+      harness.emit(assistantDelta("a1", "x"));
+      const reasoning = (delta: string): ProviderRuntimeEvent => ({
+        ...base(),
+        type: "content.delta",
+        itemId: RuntimeItemId.makeUnsafe("r1"),
+        payload: { streamKind: "reasoning_text", delta },
+      });
+      // The first take fails and is put back; the next take carries both.
+      harness.emit(reasoning("first "));
+      harness.emit(reasoning("second"));
+      harness.emit(assistantCompleted("a1"));
+      const thread = await waitForThread(harness.engine, (entry) =>
+        entry.messages.some((message) => message.id === "assistant:a1" && !message.streaming),
+      );
+      expect(thread.messages.find((message) => message.id === "assistant:a1")?.reasoningText).toBe(
+        "first second",
+      );
+    });
+
+    it("carries reasoning that follows a completed message onto the next message", async () => {
+      const harness = await startThinkingTurn();
+      harness.emit(assistantDelta("a1", "first"));
+      harness.emit(assistantCompleted("a1"));
+      harness.emit({
+        ...base(),
+        type: "content.delta",
+        itemId: asItemId("r2"),
+        payload: { streamKind: "reasoning_text", delta: "between" },
+      });
+      harness.emit(assistantDelta("a2", "second"));
+      harness.emit(assistantCompleted("a2"));
+      const thread = await waitForThread(harness.engine, (entry) =>
+        entry.messages.some((message) => message.id === "assistant:a2" && !message.streaming),
+      );
+      expect(
+        thread.messages.find((message) => message.id === "assistant:a1")?.reasoningText ?? "",
+      ).toBe("");
+      expect(thread.messages.find((message) => message.id === "assistant:a2")?.reasoningText).toBe(
+        "between",
+      );
+    });
   });
 });

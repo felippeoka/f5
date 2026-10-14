@@ -7,7 +7,10 @@ import {
   type ThreadCompactionDirection,
 } from "@t3tools/contracts";
 import { inferProviderForModel } from "@t3tools/shared/model";
-import { readToolActivityPayload } from "@t3tools/shared/orchestrationActivityPayload";
+import {
+  readToolActivityPayload,
+  REASONING_STATUS_ACTIVITY_KIND,
+} from "@t3tools/shared/orchestrationActivityPayload";
 
 import {
   estimateModelContextWindowTokens,
@@ -429,8 +432,9 @@ export function buildThreadCompactionTranscript(input: {
   const relatedActivities = input.thread.activities
     .filter(
       (activity) =>
-        (activity.turnId !== null && compactedTurnIds.has(activity.turnId)) ||
-        (activity.turnId === null && inCompactedWindow(activity.createdAt)),
+        activity.kind !== REASONING_STATUS_ACTIVITY_KIND &&
+        ((activity.turnId !== null && compactedTurnIds.has(activity.turnId)) ||
+          (activity.turnId === null && inCompactedWindow(activity.createdAt))),
     )
     .toSorted(
       (left, right) =>

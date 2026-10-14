@@ -24,7 +24,12 @@ import {
 import type { InlineExactFileChangeDiffProps } from "./InlineExactFileChangeDiff";
 import type { InlineFileChangeDiffProps } from "./InlineFileChangeDiff";
 import { LegendList, type LegendListRef, type OnViewableItemsChanged } from "@legendapp/list/react";
-import { deriveTimelineEntries, formatDuration, formatElapsed } from "../../session-logic";
+import {
+  deriveTimelineEntries,
+  formatDuration,
+  formatElapsed,
+  type LiveWorkActivity,
+} from "../../session-logic";
 import { attachmentPreviewUrlForId } from "../../orchestrationState";
 import { type TurnDiffSummary } from "../../types";
 import { changedLineCount, summarizeTurnDiffStats } from "../../lib/turnDiffTree";
@@ -120,7 +125,11 @@ import { ReasoningSection } from "./ReasoningSection";
 import { COMPOSER_INLINE_CHIP_CLASS_NAME } from "../composerInlineChip";
 import { DiffSurfaceBoundary } from "../DiffSurfaceBoundary";
 import { VscodeEntryIcon } from "./VscodeEntryIcon";
-import { classifyCompactCommand, isGenericCommandTitle } from "@t3tools/shared/commandSummary";
+import {
+  classifyCompactCommand,
+  isGenericCommandTitle,
+  resolveCommandExecutionSummaryText,
+} from "@t3tools/shared/commandSummary";
 import { WORK_LOG_PAGE_SIZE } from "./workLogConstants";
 import {
   CHANGED_FILES_COMPACT_PREVIEW_COUNT,
@@ -217,6 +226,8 @@ interface MessagesTimelineProps {
   hasMessages: boolean;
   isWorking: boolean;
   activeTurnStartedAt: string | null;
+  /** What the running turn is doing now; null shows a plain "Working". */
+  liveActivity?: LiveWorkActivity | undefined;
   listRef: React.RefObject<LegendListRef | null>;
   entryRowIndexMapRef?: MutableRefObject<ReadonlyMap<string, number> | null>;
   onIsAtEndChange: (isAtEnd: boolean) => void;
@@ -360,6 +371,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hasMessages,
   isWorking,
   activeTurnStartedAt,
+  liveActivity = null,
   listRef,
   entryRowIndexMapRef,
   onIsAtEndChange,
@@ -557,7 +569,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         kind: "working",
         id: "working-indicator-row",
         createdAt: activeTurnStartedAt,
-        activity: latestWorkActivityHeading(nextRows),
+        activity: workingActivityLabel(nextRows, liveActivity),
       });
     }
 
@@ -568,6 +580,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     completionSummary,
     isWorking,
     activeTurnStartedAt,
+    liveActivity,
     settings.expandMcpToolCalls,
   ]);
 
@@ -2043,15 +2056,33 @@ type TimelineRow =
     }
   | { kind: "working"; id: string; createdAt: string | null; activity: string | null };
 
-/** Heading of the newest tool entry in the current turn, for the working row. */
-function latestWorkActivityHeading(rows: ReadonlyArray<TimelineRow>): string | null {
-  const lastRow = rows.at(-1);
-  if (lastRow?.kind !== "work") return null;
-  for (let index = lastRow.groupedEntries.length - 1; index >= 0; index -= 1) {
-    const entry = lastRow.groupedEntries[index];
-    if (entry && entry.tone === "tool") return toolWorkEntryHeading(entry);
+/** Label for the working row: what the running turn is doing right now. */
+function workingActivityLabel(
+  rows: ReadonlyArray<TimelineRow>,
+  liveActivity: LiveWorkActivity,
+): string | null {
+  if (!liveActivity) return null;
+  if (liveActivity.kind === "thinking") {
+    return liveActivity.detail ? `Thinking: ${liveActivity.detail}` : "Thinking";
   }
-  return null;
+  if (liveActivity.providerItemId) {
+    for (let rowIndex = rows.length - 1; rowIndex >= 0; rowIndex -= 1) {
+      const row = rows[rowIndex];
+      if (
+        row?.kind === "command" &&
+        row.commandExecution.providerItemId === liveActivity.providerItemId
+      ) {
+        return resolveCommandExecutionSummaryText(row.commandExecution);
+      }
+      if (row?.kind !== "work") continue;
+      const entry = row.groupedEntries.findLast(
+        (candidate) =>
+          candidate.tone === "tool" && candidate.providerItemId === liveActivity.providerItemId,
+      );
+      if (entry) return toolWorkEntryHeading(entry);
+    }
+  }
+  return liveActivity.title || null;
 }
 
 interface WorkGroupRenderState {
