@@ -14,6 +14,10 @@ export class RehearsalStopObservation {
   private readonly samples: StopInputSample[] = [];
   readonly calibrations: number[] = [];
   heartbeatSequence = 0;
+  private physicalSignals = 0;
+  private chordSignals = 0;
+  private permitExpirations = 0;
+  private unhealthyHeartbeats = 0;
   constructor() {
     this.evidence.samples = this.samples;
   }
@@ -21,10 +25,18 @@ export class RehearsalStopObservation {
     if (!raw || typeof raw !== "object") return;
     const value = raw as Record<string, unknown>;
     if (value.type === "heartbeat") this.heartbeatSequence++;
+    if (value.type === "heartbeat" && value.monitorHealthy === false) this.unhealthyHeartbeats++;
+    if (value.type === "permitExpired" && this.finite(value.executionGeneration))
+      this.permitExpirations++;
     if (!this.finite(value.recognizedAtMs)) return;
-    if (value.type === "physicalInput")
+    if (value.type === "physicalInput") {
+      this.physicalSignals++;
       this.evidence.physicalRecognizedAtMs ??= value.recognizedAtMs;
-    if (value.type === "killSwitch") this.evidence.chordRecognizedAtMs ??= value.recognizedAtMs;
+    }
+    if (value.type === "killSwitch") {
+      this.chordSignals++;
+      this.evidence.chordRecognizedAtMs ??= value.recognizedAtMs;
+    }
   }
   fixture(raw: unknown): void {
     if (!raw || typeof raw !== "object") {
@@ -66,6 +78,16 @@ export class RehearsalStopObservation {
       heartbeatSequence: this.heartbeatSequence,
       physicalRecognizedAtMs: this.evidence.physicalRecognizedAtMs,
       chordRecognizedAtMs: this.evidence.chordRecognizedAtMs,
+    };
+  }
+  /** Counts only: compare a post-consent baseline with failure diagnostics.
+   * Does not retain input content or change stop timing evidence. */
+  diagnostics() {
+    return {
+      physicalSignals: this.physicalSignals,
+      chordSignals: this.chordSignals,
+      permitExpirations: this.permitExpirations,
+      unhealthyHeartbeats: this.unhealthyHeartbeats,
     };
   }
 }

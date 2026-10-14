@@ -1,6 +1,32 @@
 import { expect, it } from "vitest";
 import { RehearsalStopObservation } from "./rehearsalStopObservation";
 
+it("separates post-consent stop signals without retaining native payloads", () => {
+  const trace = new RehearsalStopObservation();
+  trace.helper({ type: "physicalInput", recognizedAtMs: 1 });
+  const baseline = trace.diagnostics();
+  trace.helper({ type: "physicalInput", recognizedAtMs: 2, text: "PRIVATE_SENTINEL" });
+  trace.helper({ type: "killSwitch", recognizedAtMs: 3, keyCode: 53 });
+  trace.helper({ type: "permitExpired", executionGeneration: 4, private: "PRIVATE_SENTINEL" });
+  trace.helper({ type: "heartbeat", monitorHealthy: false });
+  trace.helper({ type: "heartbeat", monitorHealthy: true });
+  trace.helper({ type: "permitExpired", executionGeneration: NaN });
+  trace.helper({ type: "killSwitch", recognizedAtMs: -1 });
+  expect(baseline).toEqual({
+    physicalSignals: 1,
+    chordSignals: 0,
+    permitExpirations: 0,
+    unhealthyHeartbeats: 0,
+  });
+  expect(trace.diagnostics()).toEqual({
+    physicalSignals: 2,
+    chordSignals: 1,
+    permitExpirations: 1,
+    unhealthyHeartbeats: 1,
+  });
+  expect(JSON.stringify(trace.diagnostics())).not.toMatch(/PRIVATE_SENTINEL|keyCode/);
+});
+
 it("retains only finite recognition timestamps and a heartbeat count", () => {
   const trace = new RehearsalStopObservation();
   trace.helper({ type: "heartbeat", private: "PRIVATE_SENTINEL" });

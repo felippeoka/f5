@@ -319,6 +319,7 @@ export function rehearsalHarnessFailureCode(error: unknown): string {
   if (message === "Unexpected certification consent answer.") return "unexpected-consent-answer";
   if (message === "Physical input interrupted the active turn.") return "physical-input";
   if (message === "Provider turn did not complete.") return "provider-turn-incomplete";
+  if (message === "Isolation owner turn ended without a lease.") return "owner-ended-without-lease";
   if (/receipt incomplete\.$/.test(message)) return "incomplete-receipt";
   return "unknown";
 }

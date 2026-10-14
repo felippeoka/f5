@@ -783,6 +783,21 @@ dispositions and completed backend/device prerequisites are retained on failure;
 contention and privacy assertions remain unchanged. The failed attempt remains
 failed and release gates remain closed.
 
+The [following attempt](computer-certification/2026-10-14-macos-profile-isolation-paused-owner.json)
+on clean `d199e2611e` received both genuine consents and verified the second-helper
+device lock. It observed one owner lease and an anonymous foreign-profile banner,
+then an `Interrupted(paused)` activation result without successful capture or input.
+The harness failure code was `unknown`; failure cleanup pauses locally before
+collecting diagnostics, so this result alone does not identify the original pause
+cause. Cleanup was confirmed. Missing positive owner image/action receipts prevent
+acceptance despite no observed foreign data. The attempt remains failed.
+Observation-only diagnostics now retain helper physical-input, kill-chord,
+permit-expiration and unhealthy-heartbeat counts against a post-consent/countdown
+baseline. The owner-ended-without-lease harness error has its own fixed code.
+Neither change alters authorization, consent, helper input or stop behavior, and
+neither is evidence about this older attempt. No automatic retry or public gate
+change follows from these diagnostics.
+
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;
 watching a child's absent stdout pipe produced no diagnostic evidence. The new

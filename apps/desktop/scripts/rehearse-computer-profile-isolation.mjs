@@ -204,6 +204,9 @@ export async function runProfileIsolation(o) {
     );
   o.registerDiagnostics(async () => ({
     channels: await snapshot(),
+    helperMonitorAtFailure: await application.evaluate(() =>
+      globalThis.__computerRehearsalStop.diagnostics(),
+    ),
     providerProgress: await Promise.all(
       clients.map(async (client, i) => {
         const tail = await client
@@ -373,6 +376,19 @@ export async function runProfileIsolation(o) {
     for (const f of fixtures) f.child.stdin.write(`WINDOWLESS_COUNTDOWN_${seconds}\n`);
     await delay(1000);
   }
+  const helperMonitorBaseline = await application.evaluate(() =>
+    globalThis.__computerRehearsalStop.diagnostics(),
+  );
+  o.record({
+    consents,
+    submissions,
+    bothChatSurfacesReady: true,
+    distinctRendererProfiles: primaryId !== other.id,
+    distinctBackendProcesses: true,
+    isolatedProviderHomes: home !== secondaryHome,
+    secondHelperReason: device.reason,
+    helperMonitorBaseline,
+  });
   let beforeNonHolderStop,
     afterNonHolderStop,
     nonHolderSessionStopped = false;
@@ -452,6 +468,7 @@ export async function runProfileIsolation(o) {
     channels: await snapshot(),
     consents,
     submissions,
+    helperMonitorBaseline,
     beforeNonHolderStop,
     afterNonHolderStop,
     nonHolderSessionStopped,

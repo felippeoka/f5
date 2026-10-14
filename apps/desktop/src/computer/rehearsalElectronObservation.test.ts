@@ -140,6 +140,12 @@ it("keeps harness failure diagnostics content-free", () => {
   expect(rehearsalHarnessFailureCode(new Error("Provider turn did not complete."))).toBe(
     "provider-turn-incomplete",
   );
+  expect(
+    rehearsalHarnessFailureCode(new Error("Isolation owner turn ended without a lease.")),
+  ).toBe("owner-ended-without-lease");
+  expect(
+    rehearsalHarnessFailureCode(new Error("Isolation owner turn ended without a lease. PRIVATE")),
+  ).toBe("unknown");
   expect(rehearsalHarnessFailureCode(new Error("Session actions receipt incomplete."))).toBe(
     "incomplete-receipt",
   );
