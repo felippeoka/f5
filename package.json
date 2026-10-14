@@ -40,6 +40,7 @@
     "lint": "node node_modules/oxlint/bin/oxlint --report-unused-disable-directives",
     "test": "node node_modules/turbo/bin/turbo run test --concurrency=2",
     "test:full": "bun run test && bun run test:server:git:extended",
+    "computer:certify": "bun scripts/computer-certification.ts",
     "test:server:unit": "bun run --cwd apps/server test:unit",
     "test:server:git": "bun run --cwd apps/server test:git",
     "test:server:git:smoke": "bun run --cwd apps/server test:git:smoke",

@@ -61,7 +61,9 @@ function pair(count = 501) {
       }),
   };
 }
-describe("schema-5 migration", () => {
+// Windows recovery cases launch PowerShell for process creation identities and
+// may run it multiple times; the default five seconds is too short on CI.
+describe("schema-5 migration", { timeout: process.platform === "win32" ? 30_000 : 5_000 }, () => {
   it("reconstructs and preserves all 2,332 real records including 10 category members", () => {
     const current = parseLedger(
       readFileSync(path.join(ROOT, "scripts/upstream-ports.json"), "utf8"),

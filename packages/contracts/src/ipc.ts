@@ -1,4 +1,15 @@
 import type {
+  ComputerAccessPush,
+  ComputerAccessSettled,
+  ComputerGrantsChanged,
+  AgentComputerUseChanged,
+} from "./ws";
+import type {
+  ComputerGrant,
+  ComputerActivity,
+  ChromeNativeHostTransactionSummary,
+} from "./computerAutomation";
+import type {
   NativeOperationInput,
   NativeOperationResolutionInput,
   NativeOperationInspectInput,
@@ -617,6 +628,29 @@ export interface DesktopPreviewBridge {
 }
 
 export interface NativeApi {
+  chrome?: {
+    listTransactions: (
+      provider: "claude" | "codex",
+    ) => Promise<ReadonlyArray<ChromeNativeHostTransactionSummary>>;
+    restoreNativeHost: (
+      provider: "claude" | "codex",
+      transactionId: string,
+    ) => Promise<{ restored: ReadonlyArray<string>; skipped: ReadonlyArray<string> }>;
+  };
+  computer?: {
+    access: {
+      revoke: (input: { threadId: ThreadId; appId: string }) => Promise<void>;
+      list: (input: { threadId: ThreadId }) => Promise<ReadonlyArray<ComputerGrant>>;
+      listRemembered: (input: { projectId: ProjectId }) => Promise<ReadonlyArray<ComputerGrant>>;
+      forgetRemembered: (input: { projectId: ProjectId; appId: string }) => Promise<void>;
+      onRequested: (listener: (event: typeof ComputerAccessPush.Type) => void) => () => void;
+      onSettled: (listener: (event: typeof ComputerAccessSettled.Type) => void) => () => void;
+      onGrantsChanged: (listener: (event: typeof ComputerGrantsChanged.Type) => void) => () => void;
+    };
+    onActivity: (listener: (event: ComputerActivity) => void) => () => void;
+    onLeaseChanged: (listener: (event: typeof AgentComputerUseChanged.Type) => void) => () => void;
+  };
+
   attachments: {
     getUploads: (input: AttachmentUploadsInput) => Promise<Array<AttachmentUpload | null>>;
     releaseUploads: (input: AttachmentUploadsInput) => Promise<{}>;

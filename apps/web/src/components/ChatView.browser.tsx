@@ -39,6 +39,7 @@ import type { ReactNode } from "react";
 import type {} from "@vitest/browser-playwright"; // Types cdp() as a Playwright CDPSession.
 import { cdp, page, userEvent } from "vitest/browser";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { timelineScrollAnchors } from "./chat/timelineScrollAnchors";
 import { render } from "vitest-browser-react";
 
 import { type ComposerImageAttachment, useComposerDraftStore } from "../composerDraftStore";
@@ -1562,7 +1563,8 @@ async function waitForComposerTransitions(form: HTMLElement): Promise<void> {
 /**
  * Holds the composer's transitions at a fraction of their duration, then waits
  * until that frame's observers (the dock's end pin) have run. Deterministic
- * regardless of how many frames a slow runner paints in 180ms.
+ * The transition must still exist: callers inspecting an early frame should
+ * hold the animation clock before triggering a change on a slow runner.
  */
 async function seekComposerTransitions(form: HTMLElement, fraction: number): Promise<void> {
   for (const transition of composerTransitions(form)) {
@@ -2069,6 +2071,10 @@ describe("ChatView timeline (full app)", () => {
       changedFilesExpandedByThreadId: {},
     });
     resetLiveThreadWarmSchedulerForTests();
+    // Each snapshot represents a fresh test thread, despite reusing its ID.
+    // The module-level anchor survives localStorage/Zustand resets and can put
+    // later fixtures at a previous test's historical position instead of the tail.
+    timelineScrollAnchors.set(THREAD_ID, { rowId: null, top: 0, scroll: 0, atEnd: true });
   });
 
   afterEach(() => {
@@ -2513,6 +2519,10 @@ describe("ChatView timeline (full app)", () => {
         await waitForComposerTransitions(form);
         expect(getComputedStyle(tray).visibility).toBe("hidden");
         expect(tray.getBoundingClientRect().height).toBe(0);
+        // Hold time before the click. Playwright and React can take longer than
+        // 180ms on CI; seeking after a transition finished otherwise does nothing.
+        await cdp().send("Animation.enable");
+        await cdp().send("Animation.setPlaybackRate", { playbackRate: 0 });
         await button.click();
         await vi.waitFor(() => expect(form.dataset.composerCollapsed).toBe("false"));
         // Early in expansion the chips are full size inside a short tray; they
@@ -2520,10 +2530,12 @@ describe("ChatView timeline (full app)", () => {
         await seekComposerTransitions(form, 0.05);
         expect(tray.getBoundingClientRect().height).toBeLessThan(tray.scrollHeight);
         expect(getComputedStyle(tray).overflow).toBe("clip");
+        await cdp().send("Animation.setPlaybackRate", { playbackRate: 1 });
         await waitForComposerTransitions(form);
         expect(getComputedStyle(tray).visibility).toBe("visible");
         expect(tray.getBoundingClientRect().height).toBeGreaterThan(0);
       } finally {
+        await cdp().send("Animation.setPlaybackRate", { playbackRate: 1 });
         await mounted.cleanup();
       }
     });
@@ -5545,15 +5557,11 @@ describe("ChatView timeline (full app)", () => {
       expect(scrollButton.textContent).toContain(useMetaForMod ? "⌘Enter" : "Ctrl+Enter");
 
       const composerEditor = await waitForComposerEditor();
-      composerEditor.focus();
-      composerEditor.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "Enter",
-          metaKey: useMetaForMod,
-          ctrlKey: !useMetaForMod,
-          bubbles: true,
-          cancelable: true,
-        }),
+      // Exercise a real browser key sequence after focus commits, rather than
+      // dispatching in the same stack as the jump-button render/passive effect.
+      await userEvent.click(composerEditor);
+      await userEvent.keyboard(
+        useMetaForMod ? "{Meta>}{Enter}{/Meta}" : "{Control>}{Enter}{/Control}",
       );
 
       await vi.waitFor(

@@ -1,3 +1,4 @@
+import { useAgentComputerActivityStore } from "./agentComputerActivityStore";
 import { NATIVE_OPERATION_WS_METHODS } from "@t3tools/contracts";
 import type { ProfileListResult, ProviderAccountEvent } from "@t3tools/contracts";
 import {
@@ -238,6 +239,8 @@ export function createWsNativeApi(): NativeApi {
     for (const listener of accountListeners) listener(message.data);
   });
   transport.subscribe(WS_CHANNELS.serverWelcome, (message) => {
+    // Welcome precedes the authoritative pending-consent/grant snapshot on every connection.
+    useAgentComputerActivityStore.getState().resetConnection();
     const payload = message.data;
     for (const listener of welcomeListeners) {
       try {
@@ -461,6 +464,45 @@ export function createWsNativeApi(): NativeApi {
       close: (input) => transport.request(WS_METHODS.terminalClose, input),
       onEvent: (callback) =>
         transport.subscribe(WS_CHANNELS.terminalEvent, (message) => callback(message.data)),
+    },
+    chrome: {
+      listTransactions: (provider) =>
+        transport.request(WS_METHODS.chromeNativeHostListTransactions, { provider }),
+      restoreNativeHost: (provider, transactionId) =>
+        transport.request(
+          provider === "claude"
+            ? WS_METHODS.claudeChromeRestoreNativeHost
+            : WS_METHODS.codexChromeRestoreNativeHost,
+          { transactionId },
+        ),
+    },
+    computer: {
+      access: {
+        revoke: (input) => transport.request(WS_METHODS.computerAccessRevoke, input),
+        list: (input) => transport.request(WS_METHODS.computerAccessList, input),
+        listRemembered: (input) =>
+          transport.request(WS_METHODS.computerAccessListRemembered, input),
+        forgetRemembered: (input) =>
+          transport.request(WS_METHODS.computerAccessForgetRemembered, input),
+        onRequested: (listener) =>
+          transport.subscribe(WS_CHANNELS.computerAccessRequested, (message) =>
+            listener(message.data),
+          ),
+        onSettled: (listener) =>
+          transport.subscribe(WS_CHANNELS.computerAccessSettled, (message) =>
+            listener(message.data),
+          ),
+        onGrantsChanged: (listener) =>
+          transport.subscribe(WS_CHANNELS.computerAccessGrantsChanged, (message) =>
+            listener(message.data),
+          ),
+      },
+      onActivity: (listener) =>
+        transport.subscribe(WS_CHANNELS.computerActivity, (message) => listener(message.data)),
+      onLeaseChanged: (listener) =>
+        transport.subscribe(WS_CHANNELS.agentComputerUseChanged, (message) =>
+          listener(message.data),
+        ),
     },
     preview: {
       open: (input) => transport.request(WS_METHODS.previewOpen, input),

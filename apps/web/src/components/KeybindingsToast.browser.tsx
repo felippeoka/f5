@@ -1,3 +1,4 @@
+import { resolveEmptyAppRpc } from "../test/emptyAppRpc";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { DEFAULT_SERVER_SETTINGS, type ProjectId as SettingsProjectId } from "@t3tools/contracts";
 import { serverBootstrapFixture } from "../test/serverBootstrap";
@@ -27,6 +28,7 @@ import { useComposerDraftStore } from "../composerDraftStore";
 import { getRouter } from "../router";
 import { useStore } from "../store";
 import { createTestServerProvider } from "../testServerProvider";
+import { toastManager } from "./ui/toast";
 
 vi.mock("./DiffWorkerPoolProvider", () => ({
   DiffWorkerPoolProvider: ({ children }: { children?: ReactNode }) => children ?? null,
@@ -148,6 +150,8 @@ function resolveWsRpc(body: {
   value?: string | boolean;
   key?: string;
 }): unknown {
+  const emptyReply = resolveEmptyAppRpc(body);
+  if (emptyReply !== undefined) return emptyReply;
   const tag = body._tag;
   if (tag === AGENTS_WS_METHODS.getSnapshot) {
     return { entries: [], generatedAt: NOW_ISO };
@@ -502,6 +506,9 @@ describe("Keybindings update toast", () => {
     try {
       sendServerConfigUpdatedPush([]);
       await waitForToast("Keybindings updated");
+      // This tests replay suppression, not auto-dismiss timers (which pause on
+      // blur/hover). Dismiss the live toast before checking the fresh mount.
+      toastManager.close();
       await waitForNoToast("Keybindings updated");
 
       // Remount the app — onServerConfigUpdated replays the cached value

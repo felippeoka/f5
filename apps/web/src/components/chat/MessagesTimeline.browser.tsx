@@ -1498,7 +1498,7 @@ describe("MessagesTimeline (LegendList)", () => {
       const popover = page.getByRole("dialog", { name: "Revert to before this message" });
       await vi.waitFor(() => {
         expect(popover.element().textContent).toContain("Removes this message.");
-        expect(popover.element().textContent).toContain("needs an isolated worktree");
+        expect(popover.element().textContent).toContain("needs an isolated workspace");
         expect(
           page.getByRole("button", { name: "Restore files" }).element().hasAttribute("disabled"),
         ).toBe(true);

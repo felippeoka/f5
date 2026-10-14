@@ -1,0 +1,272 @@
+import { EventEmitter } from "node:events";
+import type { ChildProcess } from "node:child_process";
+import { describe, expect, it, vi } from "vitest";
+import { ComputerHostChannel } from "./ComputerHostChannel";
+import type { ComputerController } from "./ComputerController";
+function setup(certified = false) {
+  const controller = {
+    disconnect: vi.fn(),
+    setPaused: vi.fn(),
+    lease: { current: () => null },
+    invoke: vi.fn(),
+  };
+  const channel = new ComputerHostChannel(
+    controller as unknown as ComputerController,
+    () => ({ available: true }),
+    vi.fn(),
+    { certified: () => certified },
+  );
+  const process = Object.assign(new EventEmitter(), {
+    connected: true,
+    send: vi.fn(),
+    disconnect: vi.fn(),
+  });
+  channel.register("profile", "incarnation", process as unknown as ChildProcess);
+  const hello = () =>
+    process.emit("message", {
+      type: "hello",
+      profileId: "profile",
+      backendIncarnation: "incarnation",
+      protocolVersion: 1,
+    });
+  return { channel, controller, process, hello };
+}
+describe("private computer host channel", () => {
+  it("keeps thumbnails private and sends other profiles only an anonymous lease", () => {
+    const h = setup();
+    h.hello();
+    const other = Object.assign(new EventEmitter(), {
+      connected: true,
+      send: vi.fn(),
+      disconnect: vi.fn(),
+    });
+    h.channel.register("other", "other-incarnation", other as unknown as ChildProcess);
+    other.emit("message", {
+      type: "hello",
+      profileId: "other",
+      backendIncarnation: "other-incarnation",
+      protocolVersion: 1,
+    });
+    h.process.send.mockClear();
+    other.send.mockClear();
+    const activity = {
+      threadId: "secret-thread",
+      backend: "native" as const,
+      op: "click" as const,
+      status: "completed" as const,
+      thumbnailDataUrl: "data:image/jpeg;base64,PRIVATE",
+    };
+    h.channel.send("profile", { type: "activity", activity });
+    expect(h.process.send).toHaveBeenCalledWith(
+      { type: "activity", activity },
+      expect.any(Function),
+    );
+    expect(other.send).not.toHaveBeenCalled();
+    const holder = {
+      profileId: "profile",
+      threadId: "secret-thread",
+      sessionGeneration: "session",
+      turnId: "turn",
+      executionGeneration: 1,
+      threadTitle: "Private title",
+      grantVersion: 1,
+      grants: [],
+      backend: "native" as const,
+    };
+    h.channel.publishLease(holder);
+    expect(h.process.send).toHaveBeenLastCalledWith(
+      { type: "leaseChanged", holder, otherProfile: false },
+      expect.any(Function),
+    );
+    expect(other.send).toHaveBeenLastCalledWith(
+      { type: "leaseChanged", holder: null, otherProfile: true },
+      expect.any(Function),
+    );
+    expect(JSON.stringify(other.send.mock.calls)).not.toContain("secret-thread");
+    expect(JSON.stringify(other.send.mock.calls)).not.toContain("PRIVATE");
+  });
+  it("requires certification and preserves main's pause veto independently of the server", async () => {
+    const holder = {
+      profileId: "profile",
+      threadId: "thread",
+      sessionGeneration: "s",
+      provider: "claude",
+    };
+    const closed = setup();
+    closed.hello();
+    closed.process.emit("message", { type: "chromeLeaseAcquire", requestId: "closed", holder });
+    await vi.waitFor(() =>
+      expect(closed.process.send).toHaveBeenCalledWith(
+        {
+          type: "response",
+          requestId: "closed",
+          error: { _tag: "Unavailable", reason: "not-certified" },
+        },
+        expect.any(Function),
+      ),
+    );
+    expect(closed.channel.chrome.current()).toBeNull();
+    const h = setup(true);
+    h.hello();
+    h.process.emit("message", { type: "chromeLeaseAcquire", requestId: "acquire", holder });
+    await vi.waitFor(() => expect(h.channel.chrome.current()).toEqual(holder));
+    h.channel.pauseChrome("profile", "thread", true);
+    h.process.emit("message", { type: "chromeLeaseValidate", requestId: "validate", holder });
+    await vi.waitFor(() =>
+      expect(h.process.send).toHaveBeenCalledWith(
+        {
+          type: "response",
+          requestId: "validate",
+          error: { _tag: "Interrupted", cause: "paused" },
+        },
+        expect.any(Function),
+      ),
+    );
+    h.process.emit("disconnect");
+    expect(h.channel.chrome.current()).toBeNull();
+  });
+  it("does not accept backend resume requests for native or Chrome control", async () => {
+    const h = setup(true);
+    h.hello();
+    h.process.emit("message", { type: "pauseChanged", threadId: "thread", paused: true });
+    h.controller.setPaused.mockClear();
+    h.process.emit("message", { type: "resumeRequested", threadId: "thread" });
+    h.process.emit("message", { type: "pauseChanged", threadId: "thread", paused: false });
+    expect(h.controller.setPaused).not.toHaveBeenCalled();
+    const holder = {
+      profileId: "profile",
+      threadId: "chrome-thread",
+      sessionGeneration: "s",
+      provider: "claude" as const,
+    };
+    h.channel.chrome.acquire(holder, null);
+    h.channel.pauseChrome("profile", "chrome-thread", true);
+    h.process.emit("message", { type: "resumeRequested", threadId: "chrome-thread" });
+    h.process.emit("message", { type: "pauseChanged", threadId: "chrome-thread", paused: false });
+    expect(() => h.channel.chrome.validate(holder)).toThrow();
+    expect(h.controller.setPaused).not.toHaveBeenCalled();
+  });
+  it("redacts Chrome session ownership for another profile", () => {
+    const h = setup(true);
+    h.hello();
+    const other = Object.assign(new EventEmitter(), {
+      connected: true,
+      send: vi.fn(),
+      disconnect: vi.fn(),
+    });
+    h.channel.register("other", "other-incarnation", other as unknown as ChildProcess);
+    other.emit("message", {
+      type: "hello",
+      profileId: "other",
+      backendIncarnation: "other-incarnation",
+      protocolVersion: 1,
+    });
+    other.send.mockClear();
+    h.channel.chrome.acquire(
+      {
+        profileId: "profile",
+        threadId: "private-thread",
+        sessionGeneration: "private-generation",
+        provider: "claude",
+      },
+      null,
+    );
+    expect(other.send).toHaveBeenLastCalledWith(
+      { type: "chromeLeaseChanged", holder: null, otherProfile: true },
+      expect.any(Function),
+    );
+    expect(JSON.stringify(other.send.mock.calls)).not.toContain("private");
+  });
+  it("rejects mismatched hello before allowing registration", () => {
+    const h = setup();
+    h.process.emit("message", {
+      type: "hello",
+      profileId: "other",
+      backendIncarnation: "incarnation",
+      protocolVersion: 1,
+    });
+    expect(h.process.disconnect).toHaveBeenCalled();
+    expect(h.process.send).not.toHaveBeenCalled();
+  });
+  it("rejects consent from another profile or incarnation and accepts each answer only once", () => {
+    const h = setup();
+    h.hello();
+    h.process.emit("message", {
+      type: "accessRequested",
+      request: {
+        requestId: "request",
+        threadId: "thread",
+        reason: "Edit Notes",
+        kind: "apps",
+        apps: [{ appId: "notes", name: "Notes", tier: "full" }],
+      },
+    });
+    const answer = { requestId: "request", backendIncarnation: "incarnation", decisions: [] };
+    expect(h.channel.accessRequest("profile", answer).apps).toEqual([
+      { appId: "notes", name: "Notes", tier: "full" },
+    ]);
+    expect(() => h.channel.accessRequest("other", answer)).toThrow();
+    expect(() =>
+      h.channel.accessRequest("profile", { ...answer, backendIncarnation: "old" }),
+    ).toThrow();
+    expect(() => h.channel.answerAccess("other", answer)).toThrow();
+    expect(() =>
+      h.channel.answerAccess("profile", { ...answer, backendIncarnation: "old" }),
+    ).toThrow();
+    h.channel.answerAccess("profile", answer);
+    expect(() => h.channel.accessRequest("profile", answer)).toThrow();
+    expect(() => h.channel.answerAccess("profile", answer)).toThrow();
+    expect(h.process.send).toHaveBeenCalledWith(
+      { type: "accessAnswer", answer },
+      expect.any(Function),
+    );
+  });
+  it("revokes device authority on disconnect and on backend replacement", () => {
+    const h = setup();
+    h.hello();
+    const replacement = Object.assign(new EventEmitter(), {
+      connected: true,
+      send: vi.fn(),
+      disconnect: vi.fn(),
+    });
+    h.channel.register("profile", "new", replacement as unknown as ChildProcess);
+    expect(h.controller.disconnect).toHaveBeenCalledTimes(1);
+    h.process.emit("disconnect");
+    expect(h.controller.disconnect).toHaveBeenCalledTimes(1);
+    replacement.emit("disconnect");
+    expect(h.controller.disconnect).toHaveBeenCalledTimes(2);
+  });
+});
+
+it("releases an unacknowledged acquisition when the backend times out, using the exact holder", () => {
+  const h = setup();
+  h.hello();
+  const holder = {
+    profileId: "profile",
+    threadId: "t",
+    sessionGeneration: "s",
+    turnId: "turn",
+    executionGeneration: 7,
+    grantVersion: 1,
+    grants: [],
+    backend: "native" as const,
+    threadTitle: "Thread",
+  };
+  const acquire = vi.fn(() => holder);
+  const release = vi.fn();
+  Object.assign(h.controller, { acquire, cancel: vi.fn() });
+  Object.assign(h.controller.lease, { release });
+  h.process.emit("message", {
+    type: "leaseAcquire",
+    requestId: "late",
+    holder: { ...holder, executionGeneration: 1 },
+  });
+  h.process.emit("message", { type: "cancel", requestId: "late" });
+  expect(release).toHaveBeenCalledExactlyOnceWith(holder);
+  h.process.emit("message", { type: "cancel", requestId: "late" });
+  expect(release).toHaveBeenCalledOnce();
+  h.process.emit("message", { type: "leaseAcquire", requestId: "accepted", holder });
+  h.process.emit("message", { type: "leaseAccepted", requestId: "accepted" });
+  h.process.emit("message", { type: "cancel", requestId: "accepted" });
+  expect(release).toHaveBeenCalledOnce();
+});

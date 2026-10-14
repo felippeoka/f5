@@ -76,8 +76,36 @@ try {
   await page
     .getByRole("button", { name: "Add your first project", exact: true })
     .waitFor({ timeout: 60_000 });
+  // The renderer can become ready before Electron shows its native surface.
+  // Capturing that hidden surface under Xvfb can fail with a zero-width bitmap.
+  await page.waitForFunction(
+    () => document.visibilityState === "visible" && innerWidth > 0 && innerHeight > 0,
+    undefined,
+    { timeout: 60_000 },
+  );
   await page.screenshot({ path: join(directory, "welcome.png") });
   await page.evaluate(async () => {
+    const computer = window.desktopBridge.computerAutomation;
+    if (
+      !computer ||
+      typeof computer.status !== "function" ||
+      "execute" in computer ||
+      "request" in computer
+    )
+      throw new Error("Computer bridge must expose controls without an execution path");
+    const computerStatus = await computer.status();
+    if (
+      !computerStatus.available &&
+      ![
+        "not-certified",
+        "helper-missing",
+        "missing-permissions",
+        "monitor-unhealthy",
+        "unsupported-platform",
+        "other-instance",
+      ].includes(computerStatus.reason)
+    )
+      throw new Error(`Unexpected computer backend status: ${computerStatus.reason}`);
     const bridge = window.desktopBridge.preview;
     const original = await bridge.getPreviewConfig();
     const persistent = await bridge.profiles.create("Smoke work", true);
@@ -220,9 +248,16 @@ try {
           "dom-ready",
           () => {
             clearTimeout(timer);
-            // Guests attach blank; load the backend explicitly to check its authorization.
+            // Guests attach blank. A backend navigation can be vetoed before
+            // networking, so test request authentication with a fetch instead.
+            // The session's onCompleted receipt must still report exactly 401;
+            // a cancellation, timeout or authenticated response never passes.
             const url = guest.getURL();
-            void guest.loadURL(target).catch(() => undefined);
+            void guest
+              .executeJavaScript(
+                `fetch(${JSON.stringify(target)}, { mode: "no-cors" }).catch(() => undefined)`,
+              )
+              .catch(() => undefined);
             resolve(url);
           },
           { once: true },

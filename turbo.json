@@ -31,6 +31,7 @@
     "T3CODE_DESKTOP_WS_URL"
   ],
   "globalPassThroughEnv": [
+    "F5_COMPUTER_CONTROL_DEV",
     "PATH",
     "Path",
     "PATHEXT",
@@ -54,7 +55,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", "dist-electron/**"]
+      "outputs": ["dist/**", "dist-electron/**", "dist-native/**"]
     },
     "dev": {
       "dependsOn": ["@t3tools/contracts#build"],

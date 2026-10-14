@@ -13,6 +13,10 @@ const api = vi.hoisted(() => ({
   cancel: vi.fn(),
   status: vi.fn(),
 }));
+const nativeApi = vi.hoisted(() => ({ chrome: { listTransactions: async () => [] } }));
+vi.mock("../../nativeApi", () => ({
+  readNativeApi: () => nativeApi,
+}));
 vi.mock("../../hooks/useSettings", () => ({
   useSettings: () => ({
     linkOpenTarget: "system",
@@ -51,7 +55,7 @@ beforeEach(() => {
   window.desktopBridge = { preview: { profiles: api, browserImport: api } } as never;
 });
 it("selects profiles for new tabs and exposes incognito without changing existing tabs", async () => {
-  render(<BrowserSettings />);
+  await render(<BrowserSettings />);
   await expect.element(page.getByText("Private")).toBeVisible();
   await expect.element(page.getByText("Incognito", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Use for new tabs" }).nth(1).click();
@@ -59,7 +63,7 @@ it("selects profiles for new tabs and exposes incognito without changing existin
   expect(api.create).not.toHaveBeenCalled();
 });
 it("shows staged import progress and permits cancellation without touching the target profiles", async () => {
-  render(<BrowserSettings />);
+  await render(<BrowserSettings />);
   await page.getByRole("combobox", { name: "Import source" }).click();
   await page.getByRole("option", { name: "Synthetic Firefox" }).click();
   await page.getByRole("combobox", { name: "Source profile" }).click();

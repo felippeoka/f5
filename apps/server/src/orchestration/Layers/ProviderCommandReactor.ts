@@ -89,6 +89,10 @@ import {
   readPersistedUnconvergedMcpConfigVersion,
 } from "../../provider/runtimePayload.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { ComputerAutomationBroker } from "../../computer/ComputerAutomationBroker";
+import { resolveAgentBrowserPolicy } from "../../mcp/browserAccess";
+import { resolveProviderComputerBackendSelection } from "../../computer/computerBackendPolicy";
+import { chromeSessionFingerprint } from "../../provider/chromeSessionRuntimeFactory";
 import {
   formatThreadTitleRegenerationContext,
   resolveBestEffortGeneratedTitleResult,
@@ -394,6 +398,8 @@ const make = Effect.gen(function* () {
   const git = yield* GitCore;
   const textGeneration = yield* TextGeneration;
   const serverSettings = yield* ServerSettingsService;
+  const computerBroker = yield* Effect.serviceOption(ComputerAutomationBroker);
+  const computerSelections = new Map<string, string>();
   const threadProviderOptions = new Map<string, ProviderStartOptions>();
   const settingsForThread = (thread: { projectId: ProjectId; worktreePath: string | null }) =>
     Effect.gen(function* () {
@@ -906,6 +912,27 @@ const make = Effect.gen(function* () {
         });
 
       const activeSession = yield* resolveActiveSession(threadId);
+      const computerPolicy = yield* resolveAgentBrowserPolicy(threadId);
+      const supportsComputer = preferredProvider === "claudeAgent" || preferredProvider === "codex";
+      const computerSelection = (yield* resolveProviderComputerBackendSelection(preferredProvider, {
+        enabled: computerPolicy.computerUse,
+        nativeStatus: Option.isSome(computerBroker)
+          ? computerBroker.value.host.status()
+          : { available: false, reason: "no-host" },
+      }))?.fingerprint;
+      const previousComputerSelection =
+        activeSession?.computerConfigurationFingerprint ?? computerSelections.get(threadId);
+      const shouldRestartForComputerUseChange =
+        supportsComputer &&
+        previousComputerSelection !== undefined &&
+        previousComputerSelection !== computerSelection;
+      if (computerSelection !== undefined) computerSelections.set(threadId, computerSelection);
+      else computerSelections.delete(threadId);
+      const shouldRestartForChromeLaunchChange =
+        activeSession?.provider === "claudeAgent" &&
+        activeSession.chromeConfigurationFingerprint !== undefined &&
+        activeSession.chromeConfigurationFingerprint !==
+          chromeSessionFingerprint(threadId, computerPolicy.claudeInChrome);
       const existingSessionThreadId =
         thread.session && thread.session.status !== "stopped" && activeSession ? thread.id : null;
       if (existingSessionThreadId) {
@@ -1000,6 +1027,8 @@ const make = Effect.gen(function* () {
           !shouldRestartForModelOptionsChange &&
           !shouldRestartForProviderOptionsChange &&
           !shouldRestartForProjectMcpChange &&
+          !shouldRestartForComputerUseChange &&
+          !shouldRestartForChromeLaunchChange &&
           !shouldRestartForCwdChange &&
           !shouldRestartForWorkflowExecutionProfileChange
         ) {
@@ -1032,6 +1061,8 @@ const make = Effect.gen(function* () {
           ...(shouldRestartForModelOptionsChange ? ["model-options-changed"] : []),
           ...(shouldRestartForProviderOptionsChange ? ["provider-options-changed"] : []),
           ...(shouldRestartForProjectMcpChange ? ["project-mcp-changed"] : []),
+          ...(shouldRestartForComputerUseChange ? ["computer-use-changed"] : []),
+          ...(shouldRestartForChromeLaunchChange ? ["chrome-launch-changed"] : []),
           ...(shouldRestartForCwdChange ? ["cwd-changed"] : []),
           ...(shouldRestartForWorkflowExecutionProfileChange
             ? ["workflow-execution-profile-changed"]
@@ -1059,6 +1090,7 @@ const make = Effect.gen(function* () {
           shouldRestartForModelOptionsChange,
           shouldRestartForProviderOptionsChange,
           shouldRestartForProjectMcpChange,
+          shouldRestartForComputerUseChange,
           shouldRestartForCwdChange,
           shouldRestartForWorkflowExecutionProfileChange,
           activeWorkflowExecutionProfile: activeWorkflowExecutionProfile ?? null,

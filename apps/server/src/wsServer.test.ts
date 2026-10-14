@@ -7,6 +7,13 @@ import {
 import { SERVER_BOOTSTRAP } from "./wsServer/protocol";
 import * as Http from "node:http";
 import { createHash } from "node:crypto";
+import { EventEmitter } from "node:events";
+import {
+  ComputerAutomationBroker,
+  ComputerAutomationBrokerRuntime,
+  ComputerAutomationBrokerLive,
+} from "./computer/ComputerAutomationBroker";
+import { DesktopComputerHost } from "./computer/DesktopComputerHost";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -621,7 +628,7 @@ function connectWsOnce(
       if (vi.isMockFunction(console.log))
         console.log("test websocket closed", code, String(reason));
     });
-    ws.once("error", () => reject(new Error("WebSocket connection failed")));
+    ws.once("error", (cause) => reject(new Error("WebSocket connection failed", { cause })));
   });
 }
 
@@ -843,6 +850,7 @@ describe("WebSocket Server", () => {
         SqlError.SqlError | MigrationError | PlatformError.PlatformError
       >;
       mode?: ServerConfigShape["mode"];
+      port?: number;
       cwd?: string;
       autoBootstrapProjectFromCwd?: boolean;
       logWebSocketEvents?: boolean;
@@ -861,6 +869,7 @@ describe("WebSocket Server", () => {
       terminalManager?: TerminalManagerShape;
       observabilityEnabled?: boolean;
       createServerFactory?: typeof createServer;
+      computerAccess?: boolean;
     } = {},
   ): Promise<Http.Server> {
     if (serverScope) {
@@ -891,8 +900,10 @@ describe("WebSocket Server", () => {
     );
     const serverConfigLayer = Layer.succeed(ServerConfig, {
       mode: options.mode ?? "web",
-      port: 0,
-      host: undefined,
+      port: options.port ?? 0,
+      // Match the client's address family. On macOS an IPv6 wildcard listener
+      // can share a port with an unrelated IPv4 listener, which receives our client.
+      host: "127.0.0.1",
       cwd: options.cwd ?? "/test/project",
       baseDir: path.dirname(stateDir),
       stateDir,
@@ -917,6 +928,9 @@ describe("WebSocket Server", () => {
     } satisfies ServerConfigShape);
     const infrastructureLayer = providerLayer.pipe(Layer.provideMerge(persistenceLayer));
     const runtimeOverrides = Layer.mergeAll(
+      options.computerAccess
+        ? ComputerAutomationBrokerLive.pipe(Layer.provide(persistenceLayer))
+        : Layer.empty,
       options.gitManager ? Layer.succeed(GitManager, options.gitManager) : Layer.empty,
       options.gitCore
         ? Layer.succeed(GitCore, options.gitCore as unknown as GitCoreShape)
@@ -968,6 +982,126 @@ describe("WebSocket Server", () => {
     await Effect.runPromise(Scope.close(scope, Exit.void));
   }
 
+  it.each(['[{"appId":"private-sentinel"', '[{"tier":"future","appId":"x","projectId":"p"}]'])(
+    "starts the real headless backend with invalid remembered grants: %s",
+    async (contents) => {
+      const stateDir = makeTempDir("f5-corrupt-grants-");
+      fs.writeFileSync(path.join(stateDir, "computer-access.json"), contents);
+      server = await createTestServer({ stateDir, computerAccess: true });
+      const address = server.address();
+      const [ws] = await connectAndAwaitWelcome(
+        typeof address === "object" && address ? address.port : 0,
+      );
+      connections.push(ws);
+      expect(fs.existsSync(path.join(stateDir, "computer-access.json"))).toBe(false);
+      const saved = fs
+        .readdirSync(stateDir)
+        .find((name) => name.startsWith("computer-access.corrupt-"));
+      expect(saved).toBeDefined();
+      expect(fs.readFileSync(path.join(stateDir, saved!), "utf8")).toBe(contents);
+    },
+  );
+
+  it.each([false, true])(
+    "preview resume remains typed and only requires main approval for computer pause=%s",
+    async (computerPaused) => {
+      const ipc = Object.assign(new EventEmitter(), {
+        connected: true,
+        send: (_message: unknown, callback: (error: Error | null) => void) => {
+          callback(null);
+          return true;
+        },
+      });
+      const host = new DesktopComputerHost("profile", "backend", ipc, true);
+      const broker = new ComputerAutomationBrokerRuntime(host, {
+        platform: "darwin",
+        storage: { load: async () => [], save: async () => {} },
+        resolve: async () => {
+          throw new Error("Computer tools must not execute in this test.");
+        },
+      });
+      const threadId = ThreadId.makeUnsafe("preview-with-computer-tools");
+      broker.bindSession(threadId, "session", "claude");
+      ipc.emit("message", {
+        type: "status",
+        status: { available: false, reason: "helper-missing" },
+      });
+      if (computerPaused) ipc.emit("message", { type: "pauseChanged", threadId, paused: true });
+      try {
+        server = await createTestServer({
+          createServerFactory: () =>
+            createServer().pipe(Effect.provideService(ComputerAutomationBroker, broker)),
+        });
+        const address = server.address();
+        const [ws] = await connectAndAwaitWelcome(
+          typeof address === "object" && address ? address.port : 0,
+        );
+        connections.push(ws);
+        const response = await sendRequest(ws, WS_METHODS.previewAutomationSetPaused, {
+          threadId,
+          paused: false,
+        });
+        if (computerPaused) {
+          expect(response.error?.message).toContain("computer running F5");
+          expect(broker.pause.has(threadId)).toBe(true);
+        } else expect(response.error).toBeUndefined();
+      } finally {
+        broker.close();
+      }
+    },
+  );
+
+  it("delivers native action activity and ephemeral thumbnails from private IPC to clients", async () => {
+    const ipc = Object.assign(new EventEmitter(), {
+      connected: true,
+      send: (_message: unknown, callback: (error: Error | null) => void) => {
+        callback(null);
+        return true;
+      },
+    });
+    const host = new DesktopComputerHost("profile", "backend", ipc, true);
+    const broker = new ComputerAutomationBrokerRuntime(host, {
+      platform: "darwin",
+      storage: { load: async () => [], save: async () => {} },
+      resolve: async () => {
+        throw new Error("No native action should execute in this transport test.");
+      },
+    });
+    try {
+      server = await createTestServer({
+        createServerFactory: () =>
+          createServer().pipe(Effect.provideService(ComputerAutomationBroker, broker)),
+      });
+      const address = server.address();
+      const [ws] = await connectAndAwaitWelcome(
+        typeof address === "object" && address ? address.port : 0,
+      );
+      connections.push(ws);
+      const activity = {
+        threadId: "fixture-thread",
+        backend: "native",
+        op: "activateApp",
+        status: "completed",
+        thumbnailDataUrl: "data:image/jpeg;base64,SYNTHETIC",
+      };
+      ipc.emit("message", { type: "activity", activity });
+      const push = await waitForPush(ws, WS_CHANNELS.computerActivity);
+      expect(push.data).toEqual(activity);
+      const failed = {
+        threadId: "fixture-thread",
+        backend: "native",
+        op: "elementAction",
+        status: "failed",
+        outcome: "app-resolution-failed",
+      };
+      ipc.emit("message", { type: "activity", activity: failed });
+      const failurePush = await waitForPush(ws, WS_CHANNELS.computerActivity);
+      expect(failurePush.data).toEqual(failed);
+    } finally {
+      broker.close();
+    }
+  });
+
   afterEach(async () => {
     for (const ws of connections) {
       ws.close();
@@ -983,11 +1117,32 @@ describe("WebSocket Server", () => {
     vi.restoreAllMocks();
   });
 
+  it("cannot silently bind another address family over an occupied IPv4 port", async () => {
+    const foreign = Http.createServer((_request, response) => {
+      response.writeHead(403);
+      response.end();
+    });
+    await new Promise<void>((resolve) => foreign.listen({ host: "127.0.0.1", port: 0 }, resolve));
+    try {
+      const address = foreign.address();
+      if (!address || typeof address === "string") throw new Error("Fixture listener missing");
+      await expect(createTestServer({ port: address.port })).rejects.toMatchObject({
+        _tag: "ServerLifecycleError",
+        operation: "httpServerListen",
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        foreign.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
   it("sends welcome message on connect", async () => {
     server = await createTestServer({ cwd: "/test/project" });
     const addr = server.address();
     const port = typeof addr === "object" && addr !== null ? addr.port : 0;
     expect(port).toBeGreaterThan(0);
+    expect(typeof addr === "object" && addr?.family).toBe("IPv4");
 
     const [ws, welcome] = await connectAndAwaitWelcome(port);
     connections.push(ws);
@@ -1065,15 +1220,17 @@ describe("WebSocket Server", () => {
   });
 
   it.each([
-    ["reset", false],
-    ["alreadyRedeemed", false],
-    ["nothingToReset", false],
-    ["noCredit", false],
-    ["reset", true],
-    ["alreadyRedeemed", true],
+    ["reset", false, false],
+    ["alreadyRedeemed", false, false],
+    ["nothingToReset", false, false],
+    ["noCredit", false, false],
+    ["reset", true, false],
+    ["alreadyRedeemed", true, false],
+    ["reset", true, true],
+    ["reset", true, true, true],
   ] as const)(
-    "refreshes after reset-credit outcome %s (recent refresh: %s) with the real account throttle",
-    async (outcome, recentRefresh) => {
+    "refreshes after reset-credit outcome %s (recent refresh: %s; elapsed retry hint: %s) with the real account throttle",
+    async (outcome, recentRefresh, elapsedRetryHint, persistentRefusal: boolean = false) => {
       const instanceId = ProviderInstanceId.makeUnsafe("claudeAgent-credit-test");
       let refreshCalls = 0;
       let probeCalls = 0;
@@ -1137,7 +1294,23 @@ describe("WebSocket Server", () => {
               ...capability,
               refreshAccount: (permits) => {
                 refreshCalls++;
-                return capability.refreshAccount!(permits);
+                if (persistentRefusal)
+                  return Effect.succeed({
+                    snapshot: null,
+                    fresh: false,
+                    nextAllowedAt: new Date(0).toISOString(),
+                  });
+                const refresh = capability.refreshAccount!(permits);
+                // Reproduce crossing the deadline between capability refusal and
+                // the route inspecting its hint. Keep the real five-second gate.
+                return elapsedRetryHint && refreshCalls === 1
+                  ? refresh.pipe(
+                      Effect.map((reply) => ({
+                        ...reply,
+                        nextAllowedAt: new Date(0).toISOString(),
+                      })),
+                    )
+                  : refresh;
               },
             },
           } as ProviderInstance;
@@ -1166,11 +1339,18 @@ describe("WebSocket Server", () => {
       expect(response.result).toEqual({ outcome });
       expect(refreshCalls).toBe(1);
       expect(probeCalls).toBe(1);
-      if (recentRefresh) {
+      if (persistentRefusal) {
+        await vi.waitFor(() => expect(refreshCalls).toBe(4));
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        expect(refreshCalls).toBe(4);
+        expect(probeCalls).toBe(1);
+      } else if (recentRefresh) {
         // The response arrives while the real capability is throttled. The
         // scoped retry must perform a second probe after its five-second gate.
         await vi.waitFor(() => expect(probeCalls).toBe(2), { timeout: 7000 });
-        expect(refreshCalls).toBe(2);
+        // A timer can wake just before the gate, causing another refused
+        // in-memory refresh attempt. The real probe count must still be exactly two.
+        expect(refreshCalls).toBeGreaterThanOrEqual(2);
       }
     },
     15000,
@@ -3840,7 +4020,7 @@ describe("WebSocket Server", () => {
         const sentTurns: Array<Parameters<ProviderServiceShape["sendTurn"]>[0]> = [];
         const ws = await startServer({ repo, sentTurns });
         await createProject(ws, repo, {
-          command: "echo SECRET=1 > .env && sleep 30",
+          command: `"${process.execPath}" -e "require('node:fs').writeFileSync('.env', 'SECRET=1\\n'); setTimeout(() => {}, 30000)"`,
           async: false,
         });
         await sendRequest(

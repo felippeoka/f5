@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./computerRehearsalProfiles": {
+      "types": "./src/computerRehearsalProfiles.ts",
+      "import": "./src/computerRehearsalProfiles.ts"
+    },
+    "./computerRehearsalClaude": {
+      "types": "./src/computerRehearsalClaude.ts",
+      "import": "./src/computerRehearsalClaude.ts"
+    },
     "./github": {
       "types": "./src/github.ts",
       "import": "./src/github.ts"
@@ -271,6 +279,22 @@
     "./claudeSdkManifest": {
       "types": "./src/claudeSdkManifest.ts",
       "import": "./src/claudeSdkManifest.ts"
+    },
+    "./computerApps": {
+      "types": "./src/computerApps.ts",
+      "import": "./src/computerApps.ts"
+    },
+    "./computerGeometry": {
+      "types": "./src/computerGeometry.ts",
+      "import": "./src/computerGeometry.ts"
+    },
+    "./automationActivitySanitizer": {
+      "types": "./src/automationActivitySanitizer.ts",
+      "import": "./src/automationActivitySanitizer.ts"
+    },
+    "./computerControl": {
+      "types": "./src/computerControl.ts",
+      "import": "./src/computerControl.ts"
     },
     "./nativeReviewTarget": {
       "types": "./src/nativeReviewTarget.ts",

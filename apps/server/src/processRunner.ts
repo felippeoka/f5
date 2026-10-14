@@ -2,7 +2,8 @@ import { type ChildProcess as ChildProcessHandle, spawn } from "node:child_proce
 import { killProcessTree } from "@t3tools/shared/processTree";
 import { ensureWindowsPathHydrated } from "@t3tools/shared/windowsPath";
 
-import { resolveInvocation } from "./spawn/resolveCommand.ts";
+import { resolveExecutable, resolveInvocation } from "./spawn/resolveCommand.ts";
+import { resolveProfileGithubLauncher } from "./git/GithubCliLauncher";
 
 export interface ProcessRunOptions {
   cwd?: string | undefined;
@@ -146,12 +147,22 @@ export async function runProcess(
   const outputMode = options.outputMode ?? "error";
   const environment = options.env;
   await ensureWindowsPathHydrated(environment);
-  const invocation = resolveInvocation(command, args, environment, { cwd: options.cwd });
+  const executable =
+    process.platform === "win32"
+      ? resolveExecutable(command, environment, { cwd: options.cwd })
+      : null;
+  const profileLauncher = executable ? resolveProfileGithubLauncher(executable, environment) : null;
+  const invocation = profileLauncher
+    ? { file: profileLauncher.runtime, args: [profileLauncher.script, ...args] }
+    : resolveInvocation(command, args, environment, { cwd: options.cwd });
+  const spawnEnvironment = profileLauncher
+    ? { ...environment, ELECTRON_RUN_AS_NODE: "1" }
+    : environment;
 
   return new Promise<ProcessRunResult>((resolve, reject) => {
     const child = spawn(invocation.file, [...invocation.args], {
       cwd: options.cwd,
-      env: environment,
+      env: spawnEnvironment,
       stdio: "pipe",
       detached: process.platform !== "win32",
     });

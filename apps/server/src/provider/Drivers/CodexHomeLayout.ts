@@ -354,7 +354,10 @@ const readLinkState = Effect.fn("CodexHomeLayout.readLinkState")(function* (
               stats._tag === "Some" &&
               stats.value[0].type === "File" &&
               stats.value[1].type === "File" &&
-              stats.value[0].ino !== undefined &&
+              // Some Windows filesystems/adapters report an unavailable inode as
+              // zero. Matching unknown identities cannot prove a hard link.
+              hasKnownFileIdentity(stats.value[0].ino) &&
+              hasKnownFileIdentity(stats.value[1].ino) &&
               stats.value[0].ino === stats.value[1].ino &&
               stats.value[0].dev === stats.value[1].dev
             ) {
@@ -368,6 +371,12 @@ const readLinkState = Effect.fn("CodexHomeLayout.readLinkState")(function* (
     ),
   );
 });
+
+export function hasKnownFileIdentity(ino: unknown): boolean {
+  return typeof ino === "bigint"
+    ? ino > 0n
+    : typeof ino === "number" && Number.isSafeInteger(ino) && ino > 0;
+}
 
 const removePrivateSymlink = Effect.fn("CodexHomeLayout.removePrivateSymlink")(function* (input: {
   readonly fileSystem: FileSystem.FileSystem;

@@ -1,3 +1,8 @@
+import {
+  ComputerAutomationBroker,
+  ComputerAutomationBrokerLive,
+} from "./computer/ComputerAutomationBroker";
+import { AgentControlPauseLive } from "./mcp/agentControlPause";
 import { WorktreeSetupLive } from "./project/Layers/WorktreeSetup.ts";
 import { DefaultBranchAutoPullLive } from "./git/DefaultBranchAutoPull.ts";
 import { StorageCleanupWorkerLive } from "./storage/StorageCleanupWorker.ts";
@@ -145,6 +150,7 @@ export function makeServerProviderLayer(): Layer.Layer<
   | McpRuntimeService
   | ProjectMcpConfigService
   | PreviewAutomationBroker
+  | ComputerAutomationBroker
   | PreviewMcpHttpServer
   | ProviderRegistry
   | ProviderUpdateAdvisor
@@ -188,14 +194,21 @@ export function makeServerProviderLayer(): Layer.Layer<
     const serverSettingsLayer = ServerSettingsLive;
     const previewAutomationBrokerLayer = PreviewAutomationBrokerLive.pipe(
       Layer.provide(serverSettingsLayer),
+      Layer.provide(AgentControlPauseLive),
+    );
+    const computerAutomationBrokerLayer = ComputerAutomationBrokerLive.pipe(
+      Layer.provide(serverSettingsLayer),
+      Layer.provide(AgentControlPauseLive),
     );
     const previewMcpHttpServerLayer = PreviewMcpHttpServerLive.pipe(
+      Layer.provide(computerAutomationBrokerLayer),
       Layer.provide(previewAutomationBrokerLayer),
     );
     const providerInstanceRegistryLayer = ProviderInstanceRegistryHydrationLive.pipe(
       Layer.provide(serverSettingsLayer),
       Layer.provide(providerEventLoggersLayer),
       Layer.provide(OpenCodeRuntimeLive),
+      Layer.provide(computerAutomationBrokerLayer),
       Layer.provide(previewMcpHttpServerLayer),
       Layer.provide(previewAutomationBrokerLayer),
     );
@@ -230,6 +243,7 @@ export function makeServerProviderLayer(): Layer.Layer<
       Layer.provide(serverSettingsLayer),
       Layer.provide(providerSessionDirectoryLayer),
       Layer.provide(projectMcpConfigServiceLayer),
+      Layer.provide(computerAutomationBrokerLayer),
       Layer.provide(previewAutomationBrokerLayer),
     );
     const harnessValidationLayer = HarnessValidationLive.pipe(
@@ -271,6 +285,7 @@ export function makeServerProviderLayer(): Layer.Layer<
       mcpRuntimeServiceLayer,
       projectMcpConfigServiceLayer,
       previewAutomationBrokerLayer,
+      computerAutomationBrokerLayer,
       previewMcpHttpServerLayer,
     );
   }).pipe(Effect.provide(ProviderTerminalEventRepositoryLive), Layer.unwrap);

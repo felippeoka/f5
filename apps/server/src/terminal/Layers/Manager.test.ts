@@ -246,7 +246,8 @@ describe("TerminalManager", () => {
     const manager = new TerminalManagerRuntime({
       logsDir,
       ptyAdapter,
-      ...(options.processTableReader ? { processTableReader: options.processTableReader } : {}),
+      // Fake PTY PIDs must not query or match real processes on the test host.
+      processTableReader: options.processTableReader ?? (async () => new Set()),
       historyLineLimit,
       shellResolver: options.shellResolver ?? (() => "/bin/bash"),
       ...(options.subprocessPollIntervalMs
@@ -651,10 +652,14 @@ describe("TerminalManager", () => {
       await waitFor(() => blocked);
       for (let i = 0; i < 50; i++) ptyAdapter.processes[0]!.emitData(`${i}\n`);
       await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls.filter(([target]) => target === historyLogPath(logsDir))).toHaveLength(
+        1,
+      );
       release.resolve();
       await manager.close({ threadId: "thread-1" });
-      expect(spy).toHaveBeenCalledTimes(2);
+      expect(spy.mock.calls.filter(([target]) => target === historyLogPath(logsDir))).toHaveLength(
+        2,
+      );
       expect(fs.readFileSync(historyLogPath(logsDir), "utf8")).toBe(
         "first\n" + Array.from({ length: 50 }, (_, i) => `${i}\n`).join(""),
       );
@@ -761,7 +766,9 @@ describe("TerminalManager", () => {
     await manager.close({ threadId: "thread-1" });
     await waitFor(() => process.killSignals.includes("SIGKILL"));
 
-    expect(process.killSignals[0]).toBe("SIGTERM");
+    expect(process.killSignals[0]).toBe(
+      globalThis.process.platform === "win32" ? "SIGKILL" : "SIGTERM",
+    );
     expect(process.killSignals).toContain("SIGKILL");
 
     manager.dispose();

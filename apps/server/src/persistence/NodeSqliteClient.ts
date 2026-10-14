@@ -126,8 +126,15 @@ const makeWithDatabase = (
             if (hasRows(statement)) {
               return Effect.succeed(statement.all(...(params as any)));
             }
-            const result = statement.run(...(params as any));
-            return Effect.succeed(raw ? (result as unknown as ReadonlyArray<any>) : []);
+            if (raw) {
+              const result = statement.run(...(params as any));
+              return Effect.succeed(result as unknown as ReadonlyArray<any>);
+            }
+            // Some zero-column pragmas yield intermediate SQLITE_ROW steps.
+            // run() stops at the first one (incremental_vacuum frees one page),
+            // whereas all() drains to SQLITE_DONE. Keep the public no-row result.
+            statement.all(...(params as any));
+            return Effect.succeed([]);
           } catch (cause) {
             return Effect.fail(new SqlError({ cause, message: "Failed to execute statement" }));
           }
@@ -149,7 +156,7 @@ const makeWithDatabase = (
                     ReadonlyArray<unknown>
                   >;
                 }
-                statement.run(...(params as any));
+                statement.all(...(params as any));
                 return [];
               },
               catch: (cause) => new SqlError({ cause, message: "Failed to execute statement" }),

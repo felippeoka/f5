@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { atomicJson, exclusiveJson, exists, readJson } from "./files";
+import { runWindowsPowerShell } from "../windowsPowerShell";
 import { readInstalled, preflightRuntime } from "./installation";
 import {
   managedChild,
@@ -34,15 +35,9 @@ async function processBirth(pid: number): Promise<string> {
   }
   const result =
     process.platform === "win32"
-      ? await exec(
-          "powershell.exe",
-          [
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            `(Get-Process -Id ${pid}).StartTime.ToUniversalTime().Ticks`,
-          ],
-          { timeout: 5000, maxBuffer: 4096 },
+      ? await runWindowsPowerShell(
+          `[Console]::Write([System.Diagnostics.Process]::GetProcessById(${pid}).StartTime.ToUniversalTime().Ticks)`,
+          { timeoutMs: 10_000, maxBuffer: 4096 },
         )
       : await exec("/bin/ps", ["-p", String(pid), "-o", "lstart="], {
           timeout: 5000,

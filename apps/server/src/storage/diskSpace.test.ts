@@ -146,8 +146,8 @@ describe("resolveWatchedPaths", () => {
       expect.arrayContaining([
         { path: "/state", role: "userdata" },
         { path: "/state/worktrees", role: "userdata" },
-        { path: "/homes/claude/.claude", role: "claudeHome" },
-        { path: "/homes/codex", role: "codexHome" },
+        { path: path.resolve("/homes/claude/.claude"), role: "claudeHome" },
+        { path: path.resolve("/homes/codex"), role: "codexHome" },
       ]),
     );
   });

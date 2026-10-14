@@ -28,6 +28,9 @@ import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnap
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
 import { Server, type ServerShape } from "./wsServer";
 
+// These tests apply real Windows ACLs, including cold PowerShell startup.
+if (process.platform === "win32") vi.setConfig({ testTimeout: 60_000 });
+
 const start = vi.fn(() => undefined);
 const stop = vi.fn(() => undefined);
 let resolvedConfig: ServerConfigShape | null = null;

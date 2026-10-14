@@ -2875,10 +2875,12 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
   private attachProcessListeners(context: CodexSessionContext): void {
     context.output.on("line", (line) => {
+      if (!this.isLiveContext(context)) return;
       this.handleStdoutLine(context, line);
     });
 
     context.child.stderr.on("data", (chunk: Buffer) => {
+      if (!this.isLiveContext(context)) return;
       const raw = chunk.toString();
       const lines = raw.split(/\r?\n/g);
       for (const rawLine of lines) {
@@ -2893,6 +2895,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
     context.child.on("error", (error) => {
       context.writer.close(error);
+      if (!this.isLiveContext(context)) return;
       const message = error.message || "codex app-server process errored.";
       this.updateSession(context, {
         status: "error",
@@ -2905,7 +2908,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       context.writer.close(
         new Error(`codex app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"}).`),
       );
-      if (context.stopping) {
+      if (!this.isLiveContext(context)) {
         return;
       }
       this.abortElicitations(context);

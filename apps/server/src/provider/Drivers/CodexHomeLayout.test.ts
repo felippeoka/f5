@@ -8,6 +8,7 @@ import {
   CodexShadowHomeError,
   materializeCodexShadowHome,
   normalizeWindowsLinkPath,
+  hasKnownFileIdentity,
   resolveCodexHomeLayout,
 } from "./CodexHomeLayout.ts";
 
@@ -35,6 +36,23 @@ const writeTextFile = Effect.fn("CodexHomeLayout.test.writeTextFile")(function* 
 });
 
 it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
+  it("never treats unknown Windows inode identities as proof of a hard link", () => {
+    for (const ino of [
+      undefined,
+      null,
+      0,
+      0n,
+      -1,
+      NaN,
+      Infinity,
+      Number.MAX_SAFE_INTEGER + 1,
+      "123",
+    ]) {
+      expect(hasKnownFileIdentity(ino)).toBe(false);
+    }
+    expect(hasKnownFileIdentity(42)).toBe(true);
+    expect(hasKnownFileIdentity(42n)).toBe(true);
+  });
   it("normalizes Windows junction targets for stable drift checks", () => {
     expect(normalizeWindowsLinkPath("\\\\?\\C:\\Users\\Test\\Codex\\")).toBe(
       "c:\\users\\test\\codex",

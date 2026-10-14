@@ -25,6 +25,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { Cause, Effect, Fiber, Layer, Random, Schema, Stream } from "effect";
 import * as TestClock from "effect/testing/TestClock";
 
+import * as computerBackendPolicy from "../../computer/computerBackendPolicy";
+import * as claudeAgentBrowser from "./claudeAgentBrowser";
 import { beginClaudeTranscriptMaintenance } from "../claudeTranscript.ts";
 import { CLAUDE_AUTO_UNAVAILABLE_WARNING } from "../claudeAutoMode.ts";
 import { attachmentRelativePath } from "../../attachmentStore.ts";
@@ -49,6 +51,10 @@ import {
 } from "./ClaudeAdapter.ts";
 import { FakeClaudeCodeProcess, respondToInitializeRequest } from "./ClaudeSdk.testUtils.ts";
 import type { AgentBrowserPolicy } from "../../mcp/browserAccess.ts";
+import { ComputerAutomationBrokerRuntime } from "../../computer/ComputerAutomationBroker";
+import { DesktopComputerHost } from "../../computer/DesktopComputerHost";
+import { ChromeSessionRuntime } from "../chromeSessionRuntime";
+import { parseNativeHostManifest, type ChromeNativeHostTransaction } from "../chromeNativeHost";
 import { makePreviewAutomationBroker } from "../../mcp/PreviewAutomationBroker.ts";
 
 type ClaudeQueryOptionsForTest = Omit<ClaudeQueryOptions, "effort"> & {
@@ -257,6 +263,7 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
 }
 
 function makeHarness(config?: {
+  readonly createQueryError?: Error;
   readonly oneOffProviderOptions?: ClaudeAdapterLiveOptions["oneOffProviderOptions"];
   readonly processEnvironment?: NodeJS.ProcessEnv;
   readonly nativeEventLogPath?: string;
@@ -268,6 +275,8 @@ function makeHarness(config?: {
   readonly resumeConfirmationTimeoutMs?: number;
   /** Runs the adapter in desktop mode with F5's preview broker. */
   readonly previewAutomationBroker?: ClaudeAdapterLiveOptions["previewAutomationBroker"];
+  readonly computerAutomationBroker?: ClaudeAdapterLiveOptions["computerAutomationBroker"];
+  readonly chromeRuntime?: ClaudeAdapterLiveOptions["chromeRuntime"];
   readonly reportedModelCapabilities?: ClaudeAdapterLiveOptions["reportedModelCapabilities"];
 }) {
   const query = new FakeClaudeQuery();
@@ -284,6 +293,10 @@ function makeHarness(config?: {
     | undefined;
 
   const adapterOptions: ClaudeAdapterLiveOptions = {
+    ...(config?.computerAutomationBroker
+      ? { computerAutomationBroker: config.computerAutomationBroker }
+      : {}),
+    ...(config?.chromeRuntime ? { chromeRuntime: config.chromeRuntime } : {}),
     ...(config?.oneOffProviderOptions
       ? { oneOffProviderOptions: config.oneOffProviderOptions }
       : {}),
@@ -291,6 +304,7 @@ function makeHarness(config?: {
     createQuery: (input) => {
       createInput = input;
       createInputs.push(input);
+      if (config?.createQueryError) throw config.createQueryError;
       const nextQuery = queries[createInputs.length - 1] ?? new FakeClaudeQuery();
       if (!queries.includes(nextQuery)) queries.push(nextQuery);
       return nextQuery;
@@ -605,7 +619,10 @@ describe("ClaudeAdapter agent browser", () => {
     source: "sdk",
   };
 
-  function makeBrowserHarness(initial?: Partial<AgentBrowserPolicy>) {
+  function makeBrowserHarness(
+    initial?: Partial<AgentBrowserPolicy>,
+    overrides?: Parameters<typeof makeHarness>[0],
+  ) {
     const policy: { current: AgentBrowserPolicy } = {
       current: {
         previewAutomation: true,
@@ -618,7 +635,7 @@ describe("ClaudeAdapter agent browser", () => {
     const broker = makePreviewAutomationBroker({
       resolvePolicy: () => Effect.sync(() => policy.current),
     });
-    const harness = makeHarness({ previewAutomationBroker: broker });
+    const harness = makeHarness({ ...overrides, previewAutomationBroker: broker });
     return { harness, policy, broker };
   }
 
@@ -639,6 +656,148 @@ describe("ClaudeAdapter agent browser", () => {
     tool_use_id: `hook-${toolName}`,
     ...(mcpServer ? { mcp_server: mcpServer } : {}),
   });
+
+  it.effect("disposes the computer server and binding if SDK query construction fails", () => {
+    const host = new DesktopComputerHost("profile", "incarnation", undefined, false);
+    const computer = new ComputerAutomationBrokerRuntime(host, {
+      platform: "darwin",
+      storage: { load: async () => [], save: async () => {} },
+      resolve: async () => {
+        throw new Error("not used");
+      },
+    });
+    const selection = vi
+      .spyOn(computerBackendPolicy, "resolveComputerBackendSelection")
+      .mockReturnValue(
+        Effect.succeed({
+          status: { available: true },
+          selection: { kind: "native" },
+          fingerprint: "test-native",
+        }),
+      );
+    const factory = vi.spyOn(claudeAgentBrowser, "makeClaudeComputerMcpServer");
+    const unsubscribe = vi.fn();
+    const subscription = vi.spyOn(computer, "subscribe").mockReturnValue(unsubscribe);
+    const { harness } = makeBrowserHarness(
+      { computerUse: true },
+      { computerAutomationBroker: computer, createQueryError: new Error("SDK constructor failed") },
+    );
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const exit = yield* adapter
+        .startSession({ threadId: THREAD_ID, provider: "claudeAgent", runtimeMode: "full-access" })
+        .pipe(Effect.exit);
+      assert.equal(exit._tag, "Failure");
+      assert.equal(factory.mock.calls.length, 1);
+      assert.equal(computer.generation(THREAD_ID), undefined);
+    }).pipe(
+      Effect.provide(harness.layer),
+      Effect.ensuring(
+        Effect.sync(() => {
+          selection.mockRestore();
+          factory.mockRestore();
+          computer.close();
+        }),
+      ),
+    );
+  });
+  it.effect(
+    "redacts queued tool events and interrupted completion before disposing computer provenance",
+    () => {
+      const host = new DesktopComputerHost("profile", "incarnation", undefined, false);
+      const computer = new ComputerAutomationBrokerRuntime(host, {
+        platform: "darwin",
+        storage: { load: async () => [], save: async () => {} },
+        resolve: async () => {
+          throw new Error("not used");
+        },
+      });
+      const selection = vi
+        .spyOn(computerBackendPolicy, "resolveComputerBackendSelection")
+        .mockReturnValue(
+          Effect.succeed({
+            status: { available: true },
+            selection: { kind: "native" },
+            fingerprint: "test-native",
+          }),
+        );
+      const logs: unknown[] = [];
+      const { harness } = makeBrowserHarness(
+        { computerUse: true },
+        {
+          computerAutomationBroker: computer,
+          nativeEventLogger: {
+            filePath: "/tmp/not-written",
+            write: (event) =>
+              Effect.sync(() => {
+                logs.push(event);
+              }),
+            close: () => Effect.void,
+          },
+        },
+      );
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeAgent",
+          runtimeMode: "full-access",
+        });
+        yield* adapter.sendTurn({ threadId: THREAD_ID, input: "Edit notes" });
+        harness.query.emit({
+          type: "stream_event",
+          session_id: BACKGROUND_SESSION_ID,
+          uuid: "computer-start",
+          parent_tool_use_id: null,
+          event: {
+            type: "content_block_start",
+            index: 0,
+            content_block: {
+              type: "tool_use",
+              id: "sensitive-call",
+              name: "mcp__f5_computer__computer_type",
+              input: { text: "REDACTION_SENTINEL" },
+            },
+          },
+        } as unknown as SDKMessage);
+        harness.query.emit({
+          type: "assistant",
+          session_id: BACKGROUND_SESSION_ID,
+          uuid: "computer-typed-text",
+          parent_tool_use_id: null,
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "sensitive-call",
+                name: "mcp__f5_computer__computer_type",
+                input: { text: "REDACTION_SENTINEL" },
+              },
+            ],
+          },
+        } as unknown as SDKMessage);
+        yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 10)));
+        yield* adapter.stopSession(THREAD_ID);
+        const events = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "session.exited"),
+          Stream.runCollect,
+        );
+        assert.ok(events.some((event) => event.type === "item.completed"));
+        assert.equal(JSON.stringify(events).includes("REDACTION_SENTINEL"), false);
+        assert.equal(JSON.stringify(logs).includes("REDACTION_SENTINEL"), false);
+        assert.equal(computer.generation(THREAD_ID), undefined);
+      }).pipe(
+        Effect.provide(harness.layer),
+        Effect.ensuring(
+          Effect.sync(() => {
+            selection.mockRestore();
+            computer.close();
+          }),
+        ),
+      );
+    },
+  );
 
   it.effect("installs an in-process preview server without any F5 credential", () => {
     const { harness } = makeBrowserHarness();
@@ -896,6 +1055,113 @@ describe("ClaudeAdapter agent browser", () => {
       Effect.provide(harness.layer),
     );
   });
+
+  it.effect(
+    "routes a certified Chrome launch through its lease, status verifier and live veto",
+    () => {
+      let registrations = [parseNativeHostManifest("chrome", "user", null)];
+      const saved = new Map<string, ChromeNativeHostTransaction>();
+      const release = vi.fn();
+      const acquire = vi.fn(async () => {});
+      const host = new DesktopComputerHost("profile", "incarnation", undefined, false);
+      const computerBroker = new ComputerAutomationBrokerRuntime(host, {
+        platform: "darwin",
+        storage: { load: async () => [], save: async () => {} },
+        resolve: async () => {
+          throw new Error("not used in Chrome-only fixture");
+        },
+      });
+      const runtime = new ChromeSessionRuntime({
+        profileId: "profile",
+        descriptor: {
+          provider: "claude",
+          certified: true,
+          browsers: ["chrome"],
+          hostNames: ["test-host"],
+          expectedTarget: () => "/test/host",
+          verifyServer: (status) => (status as McpServerStatus)?.source === "dynamic",
+        },
+        acquire,
+        release,
+        consent: async () => true,
+        paused: () => computerBroker.pause.has(THREAD_ID),
+        storage: {
+          inspect: async () => registrations,
+          saveTransaction: async (entry) => {
+            saved.set(entry.id, entry);
+          },
+          listTransactions: async () => [...saved.values()],
+          loadTransaction: async (_, id) => saved.get(id),
+          restoreRegistration: async () => {},
+        },
+      });
+      const { harness, policy } = makeBrowserHarness(
+        { claudeInChrome: true },
+        { computerAutomationBroker: computerBroker, chromeRuntime: runtime },
+      );
+      harness.query.mcpServerStatusValue = [
+        { name: "claude-in-chrome", status: "connected", source: "dynamic" },
+      ];
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const events: ProviderRuntimeEvent[] = [];
+        yield* Stream.runForEach(adapter.streamEvents, (event) =>
+          Effect.sync(() => events.push(event)),
+        ).pipe(Effect.forkChild);
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeAgent",
+          runtimeMode: "full-access",
+        });
+        assert.deepEqual(harness.getLastCreateQueryInput()!.options.extraArgs, { chrome: null });
+        assert.equal(acquire.mock.calls.length, 1);
+        registrations = [
+          parseNativeHostManifest(
+            "chrome",
+            "user",
+            JSON.stringify({
+              name: "test-host",
+              type: "stdio",
+              path: "/test/host",
+              allowed_origins: [],
+            }),
+          ),
+        ];
+        yield* Effect.promise(() =>
+          vi.waitFor(() =>
+            assert.ok(
+              events.some(
+                (event) =>
+                  event.type === "session.configured" &&
+                  JSON.stringify(event.payload.config.agentBrowser).includes(
+                    '"chrome":{"state":"connected"',
+                  ),
+              ),
+            ),
+          ),
+        );
+        const hook = harness.getLastCreateQueryInput()!.options.hooks!.PreToolUse!.at(-1)!
+          .hooks[0]!;
+        const call = () =>
+          hook(preToolUse("mcp__claude-in-chrome__navigate"), undefined, {
+            signal: new AbortController().signal,
+          });
+        assert.notEqual(hookDecision(yield* Effect.promise(call)), "deny");
+        computerBroker.pause.set(THREAD_ID, true);
+        assert.equal(hookDecision(yield* Effect.promise(call)), "deny");
+        computerBroker.pause.set(THREAD_ID, false);
+        policy.current = { ...policy.current, claudeInChrome: false };
+        assert.equal(hookDecision(yield* Effect.promise(call)), "deny");
+        yield* adapter.stopSession(THREAD_ID);
+        assert.equal(release.mock.calls.length, 1);
+        assert.equal(computerBroker.generation(THREAD_ID), undefined);
+      }).pipe(
+        Effect.ensuring(Effect.sync(() => computerBroker.close())),
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
 
   it.effect("keeps uncertified Claude in Chrome off at launch and denies its tools", () => {
     const { harness } = makeBrowserHarness({ claudeInChrome: true });
@@ -8619,7 +8885,7 @@ describe("ClaudeAdapterLive", () => {
         path.join(childCwd, ".claude-profile"),
       );
       assert.equal(
-        resolveClaudeConfigDir({ HOME: "relative-home" }, childCwd),
+        resolveClaudeConfigDir({ HOME: "relative-home", USERPROFILE: "relative-home" }, childCwd),
         path.join(childCwd, "relative-home", ".claude"),
       );
       assert.equal(
@@ -8652,7 +8918,10 @@ describe("ClaudeAdapterLive", () => {
 
         assert.equal(probeCalls.length, 1);
         assert.equal(probeCalls[0]?.sessionId, probeSessionId);
-        assert.equal(probeCalls[0]?.claudeConfigDir, "/profiles/abc/provider-homes/claude/.claude");
+        assert.equal(
+          probeCalls[0]?.claudeConfigDir,
+          path.resolve("/profiles/abc/provider-homes/claude/.claude"),
+        );
       }).pipe(
         Effect.provideService(Random.Random, makeDeterministicRandomService()),
         Effect.provide(harness.layer),

@@ -1,3 +1,5 @@
+import { useComputerStatus, computerSettingsCanEnable } from "../../hooks/useComputerStatus";
+import { RememberedComputerApps } from "./RememberedComputerApps";
 import { serverConfigQueryOptions } from "../../lib/serverReactQuery";
 import { WorktreeCleanupRulesEditor } from "./WorktreeCleanupRulesEditor";
 import {
@@ -98,6 +100,7 @@ export function SettingsScopePicker({
 }
 
 export function ProjectSettingsScope({ projectId }: { projectId: ProjectId }) {
+  const { status: computerStatus } = useComputerStatus();
   const client = useQueryClient();
   const query = useQuery(projectSettingsQueryOptions(projectId));
   const [error, setError] = useState<string>();
@@ -330,11 +333,14 @@ export function ProjectSettingsScope({ projectId }: { projectId: ProjectId }) {
           <ProjectSettingRow
             title="Computer use"
             source={badge("enableAgentComputerUse")}
-            description={UNCERTIFIED_CAPABILITY_DESCRIPTION}
+            description="Let agents see and control the apps you approve for this project."
             control={
               <Switch
                 aria-label="Computer use"
-                disabled={saving || !settings.enableAgentComputerUse}
+                disabled={
+                  saving ||
+                  (!settings.enableAgentComputerUse && !computerSettingsCanEnable(computerStatus))
+                }
                 checked={settings.enableAgentComputerUse}
                 onCheckedChange={(checked) => set("enableAgentComputerUse", checked)}
               />
@@ -544,6 +550,7 @@ export function ProjectSettingsScope({ projectId }: { projectId: ProjectId }) {
           ))}
         </SettingsCard>
       </fieldset>
+      <RememberedComputerApps projectId={projectId} />
     </div>
   );
 }

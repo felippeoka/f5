@@ -1,3 +1,5 @@
+import { ComputerSettings } from "./ComputerSettings";
+import { ChromeSetupSettings } from "./ChromeSetupSettings";
 import { useEffect, useState } from "react";
 import type {
   DesktopBrowserProfile,
@@ -153,18 +155,8 @@ export function BrowserSettings() {
             />
           }
         />
-        <SettingsRow
-          title="Computer use"
-          description="Let agents control this computer. Not available in F5 yet."
-          control={
-            <Switch
-              aria-label="Let agents control this computer"
-              checked={settings.enableAgentComputerUse ?? false}
-              disabled={!settings.enableAgentComputerUse}
-              onCheckedChange={(checked) => updateSettings({ enableAgentComputerUse: checked })}
-            />
-          }
-        />
+        <ComputerSettings />
+        <ChromeSetupSettings />
       </SettingsCard>
 
       {preview?.profiles ? (

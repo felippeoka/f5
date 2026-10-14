@@ -1,3 +1,14 @@
+import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
+import { makeAutomationRuntimeEventPreparer } from "../prepareAutomationRuntimeEvent";
+import type { ComputerAutomationBrokerRuntime } from "../../computer/ComputerAutomationBroker";
+import { resolveComputerBackendSelection } from "../../computer/computerBackendPolicy";
+import type { ChromeSessionRuntime } from "../chromeSessionRuntime";
+import {
+  makeChromeSessionRuntime,
+  registerChromeSession,
+  releaseChromeSession,
+  chromeSessionFingerprint,
+} from "../chromeSessionRuntimeFactory";
 import { readClaudeNativeResumeMetadata } from "../claudeResumeState.ts";
 import { normalizeProviderRuntimeInfo } from "@t3tools/shared/runtimeInfo";
 import { recoverClaudeTranscriptCursor } from "../../maintenance/ClaudeTranscriptRepair.ts";
@@ -54,6 +65,7 @@ import * as NodeFsSync from "node:fs";
 import * as NodeFs from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as EffectNodePath from "@effect/platform-node/NodePath";
 import * as NodeReadline from "node:readline";
 
 import {
@@ -196,11 +208,11 @@ import type { PreviewAutomationBrokerShape } from "../../mcp/PreviewAutomationBr
 import { type AgentBrowserPolicy, DISABLED_AGENT_BROWSER_POLICY } from "../../mcp/browserAccess.ts";
 import {
   agentBrowserConfigPayload,
-  CLAUDE_IN_CHROME_CERTIFIED,
   CLAUDE_IN_CHROME_SERVER_NAME,
   CLAUDE_IN_CHROME_UNAVAILABLE_DETAIL,
   type ClaudeAgentBrowserState,
   classifyF5PreviewTool,
+  classifyF5ComputerTool,
   writesPreviewArtifact,
   COMPUTER_USE_UNAVAILABLE_DETAIL,
   forceClaudeChromeFlag,
@@ -208,8 +220,12 @@ import {
   isClaudeInChromeTool,
   isVerifiedSdkServer,
   makeClaudePreviewMcpServer,
+  makeClaudeComputerMcpServer,
 } from "./claudeAgentBrowser.ts";
-import { resolveClaudeSdkExecutableOptions } from "../claudeSdkExecutable.ts";
+import {
+  resolveClaudeSdkExecutableOptions,
+  resolveBundledClaudeExecutable,
+} from "../claudeSdkExecutable.ts";
 import { makeMonotonicIsoClock } from "../monotonicEventClock.ts";
 import {
   isUuid,
@@ -352,6 +368,8 @@ interface ClaudeRuntimeWarningOptions {
 }
 
 interface ClaudeSessionContext {
+  chromeRuntime?: ChromeSessionRuntime | undefined;
+  chromeGeneration?: string | undefined;
   replyOwned?: boolean | undefined;
   hostContractVersion?: string | undefined;
   hostContractMigrationMessageUuid?: string | undefined;
@@ -437,6 +455,7 @@ interface ClaudeSessionContext {
   compactionRecommendationEmitted: boolean;
   resumeCompactionDialogShown: boolean;
   resumeAttemptSessionId: string | undefined;
+  resumeRejected?: boolean;
   resumeConfirmed: boolean;
   /**
    * Settles once the CLI confirms the resumed conversation, or the session
@@ -452,6 +471,8 @@ interface ClaudeSessionContext {
   retiring: boolean;
   /** Agent browser/computer capabilities installed for this session generation. */
   agentBrowser: ClaudeAgentBrowserState | undefined;
+  computerDispose?: () => void;
+  computerEndTurn?: (turnId: string) => void;
 }
 
 // Streaming-input results carry a running total. Resumes may restore transcript
@@ -539,6 +560,8 @@ export interface ClaudeAdapterLiveOptions {
    * supplies live agent browser policy. Absent outside desktop mode.
    */
   readonly previewAutomationBroker?: PreviewAutomationBrokerShape;
+  readonly computerAutomationBroker?: ComputerAutomationBrokerRuntime;
+  readonly chromeRuntime?: ChromeSessionRuntime;
   /** Executable-reported model capabilities for this instance (SDK initialization). */
   readonly reportedModelCapabilities?: ClaudeReportedModelCapabilitiesLookup;
 }
@@ -2229,12 +2252,31 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       toolName: string,
     ): Effect.Effect<string | undefined> =>
       Effect.gen(function* () {
+        const computerClass = classifyF5ComputerTool(
+          toolName,
+          sessions.get(threadId)?.agentBrowser,
+          undefined,
+        );
+        if (computerClass) {
+          const policy = yield* resolveSessionBrowserPolicy(threadId);
+          if (!policy.computerUse)
+            return "Computer use is turned off for this project in F5 settings.";
+        }
         if (isClaudeInChromeTool(toolName)) {
           const policy = yield* resolveSessionBrowserPolicy(threadId);
           if (!policy.claudeInChrome) {
             return "Claude in Chrome is turned off for this project in F5 settings.";
           }
-          return CLAUDE_IN_CHROME_CERTIFIED ? undefined : CLAUDE_IN_CHROME_UNAVAILABLE_DETAIL;
+          const context = sessions.get(threadId);
+          if (
+            !context?.chromeRuntime ||
+            !context.chromeGeneration ||
+            context.agentBrowser?.chrome?.verified !== true
+          )
+            return CLAUDE_IN_CHROME_UNAVAILABLE_DETAIL;
+          return yield* Effect.promise(() =>
+            context.chromeRuntime!.beforeTool(threadId, context.chromeGeneration!, true),
+          );
         }
         if (isClaudeComputerUseTool(toolName)) {
           const policy = yield* resolveSessionBrowserPolicy(threadId);
@@ -2302,6 +2344,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
     }
     const threadLocksRef = yield* SynchronizedRef.make(new Map<string, ThreadLockEntry>());
     const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const prepareRuntimeEvent = yield* makeAutomationRuntimeEventPreparer;
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
     const nextEventId = Effect.map(Random.nextUUIDv4, (id) => EventId.makeUnsafe(id));
@@ -2356,7 +2399,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       );
 
     const offerRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-      Queue.offer(runtimeEventQueue, event).pipe(Effect.asVoid);
+      prepareRuntimeEvent(event).pipe(
+        Effect.flatMap((safe) => Queue.offer(runtimeEventQueue, safe)),
+        Effect.asVoid,
+      );
 
     const emitSessionConfigured = (
       context: ClaudeSessionContext,
@@ -2456,6 +2502,14 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           if (!isCurrent()) return;
           if (statuses) {
             const before = JSON.stringify(agentBrowserConfigPayload(state));
+            if (state.computer && state.computer.verified === undefined) {
+              state.computer.verified = isVerifiedSdkServer(statuses, state.computer.serverName);
+              automationEventSanitizer.register(context.session.threadId, {
+                serverName: state.computer.serverName,
+                verified: true,
+                kind: "f5-computer",
+              });
+            }
             if (!previewChecked && state.preview) {
               previewChecked = true;
               state.preview.verified = isVerifiedSdkServer(statuses, state.preview.serverName);
@@ -2473,9 +2527,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               state.chrome.state !== "unavailable"
             ) {
               const chrome = statuses.find((entry) => entry.name === CLAUDE_IN_CHROME_SERVER_NAME);
+              const verified = context.chromeRuntime?.verifyServer(chrome) === true;
               state.chrome =
-                chrome?.status === "connected"
-                  ? { state: "connected" }
+                chrome?.status === "connected" && verified
+                  ? { state: "connected", verified }
                   : chrome?.status === "pending"
                     ? { state: "pending" }
                     : chrome
@@ -2483,15 +2538,42 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                           state: "failed",
                           detail:
                             chrome.error ??
-                            (chrome.status === "needs-auth"
-                              ? "Claude in Chrome needs you to sign in to claude.ai."
-                              : `Claude in Chrome is ${chrome.status}.`),
+                            (chrome.status === "connected" && !verified
+                              ? "F5 could not verify the Chrome server's provenance."
+                              : chrome.status === "needs-auth"
+                                ? "Claude in Chrome needs you to sign in to claude.ai."
+                                : `Claude in Chrome is ${chrome.status}.`),
                         }
                       : {
                           state: "failed",
                           detail:
                             "Claude in Chrome did not start. Install the Claude in Chrome extension and sign in with a claude.ai account.",
                         };
+              if (
+                chrome?.status === "connected" &&
+                context.chromeRuntime &&
+                context.chromeGeneration
+              )
+                yield* Effect.tryPromise(() =>
+                  context.chromeRuntime!.connected(
+                    context.session.threadId,
+                    context.chromeGeneration!,
+                  ),
+                ).pipe(
+                  Effect.catch(() =>
+                    Effect.sync(() => {
+                      state.chrome = {
+                        state: "failed",
+                        detail: "Chrome native-host verification failed.",
+                      };
+                    }),
+                  ),
+                );
+              if (state.chrome.state === "failed" && context.chromeGeneration)
+                context.chromeRuntime?.markUnhealthy(
+                  context.session.threadId,
+                  context.chromeGeneration,
+                );
             }
             if (JSON.stringify(agentBrowserConfigPayload(state)) !== before) {
               yield* emitSessionConfigured(context, context.configuredBase);
@@ -2575,7 +2657,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                 : {}),
               ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
               ...(itemId ? { itemId: ProviderItemId.makeUnsafe(itemId) } : {}),
-              payload: message,
+              payload: automationEventSanitizer.sanitize(context.session.threadId, message),
             },
           },
           context.session.threadId,
@@ -2673,9 +2755,11 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       context: ClaudeSessionContext,
       settlement: ClaudeResumeSettlement,
     ): Effect.Effect<void> =>
-      context.resumeSettlement
-        ? Deferred.succeed(context.resumeSettlement, settlement).pipe(Effect.asVoid)
-        : Effect.void;
+      Effect.gen(function* () {
+        if (settlement.outcome === "failed" && settlement.resumeRejected)
+          context.resumeRejected = true;
+        if (context.resumeSettlement) yield* Deferred.succeed(context.resumeSettlement, settlement);
+      });
 
     const invalidateClaudeResumeState = (
       context: ClaudeSessionContext,
@@ -3478,6 +3562,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         }
 
         const lastSegmentResult = context.lifecycle.latestResult;
+        context.computerEndTurn?.(turnState.turnId);
         const usage = context.lifecycle.usage ?? result?.usage;
         // Error placeholders can zero accounting fields. Retain the last
         // cumulative snapshot from this logical turn, never sum snapshots.
@@ -4391,6 +4476,13 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           if (turnStatusFromResult(message) === "failed") {
             recordClaudeResult(context.lifecycle, message);
             const originalError = resultUserFacingError(message);
+            // A resume may fail before the CLI acknowledges the queued first turn.
+            // Preserve the rejection before generic session cleanup settles the wait.
+            if (context.resumeAttemptSessionId && !context.resumeConfirmed)
+              yield* settleResume(context, {
+                outcome: "failed",
+                resumeRejected: isProviderResumeFailureText(originalError),
+              });
             const rejected = [...(context.rejectedUsageLimits?.values() ?? [])].filter(
               (limit) => limit.resettable,
             );
@@ -5533,6 +5625,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           yield* emitElicitationReceipt(context, requestId, receipt);
       });
 
+    const computerBrokerForCleanup = options?.computerAutomationBroker;
     const stopSessionInternal = (
       context: ClaudeSessionContext,
       options?: {
@@ -5544,6 +5637,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         if (context.stopped) return;
 
         context.stopped = true;
+        // Stop input immediately; retain provenance until final tool events are queued safely.
+        if (context.turnState) context.computerEndTurn?.(context.turnState.turnId);
         for (const stop of context.nativeTaskStops.values()) {
           if (stop.settlement)
             yield* Deferred.fail(
@@ -5650,7 +5745,14 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         if (sessions.get(context.session.threadId) === context) {
           sessions.delete(context.session.threadId);
         }
-      });
+        if (context.chromeGeneration) {
+          releaseChromeSession(context.session.threadId, context.chromeGeneration);
+          computerBrokerForCleanup?.releaseSession(
+            context.session.threadId,
+            context.chromeGeneration,
+          );
+        }
+      }).pipe(Effect.ensuring(Effect.sync(() => context.computerDispose?.())));
 
     const requireSession = (
       threadId: ThreadId,
@@ -5872,8 +5974,9 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         ),
       );
 
-    const startSessionUnlocked: ClaudeAdapterShape["startSession"] = (input) =>
-      Effect.gen(function* () {
+    const startSessionUnlocked: ClaudeAdapterShape["startSession"] = (input) => {
+      let disposeComputer: (() => void) | undefined;
+      return Effect.gen(function* () {
         if (input.provider !== undefined && input.provider !== PROVIDER) {
           return yield* new ProviderAdapterValidationError({
             provider: PROVIDER,
@@ -6335,6 +6438,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               // F5's own preview tools, identified by exact server name and
               // `sdk` provenance. Observing never prompts; mutating follows the
               // runtime mode with one session-wide grant for the whole family.
+              if (classifyF5ComputerTool(toolName, context.agentBrowser, callbackOptions.mcpServer))
+                return { behavior: "allow", updatedInput: toolInput } satisfies PermissionResult;
               const previewToolClass = classifyF5PreviewTool(
                 toolName,
                 context.agentBrowser,
@@ -6658,6 +6763,14 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               }
 
               if (decision === "accept" || decision === "acceptForSession") {
+                // Consent can stay open while the user pauses or changes policy.
+                // Revalidate the main-owned Chrome lease after the approval wait.
+                if (isClaudeInChromeTool(toolName)) {
+                  if (context.stopped || sessions.get(threadId) !== context)
+                    return { behavior: "deny", message: "Chrome session ended." };
+                  const denial = yield* evaluateAgentBrowserToolPolicy(threadId, toolName);
+                  if (denial) return { behavior: "deny", message: denial };
+                }
                 if (
                   decision === "acceptForSession" &&
                   previewToolClass === "mutate" &&
@@ -6729,9 +6842,39 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             })
           : undefined;
         const startBrowserPolicy = yield* resolveSessionBrowserPolicy(threadId);
+        const computerBroker = options?.computerAutomationBroker;
+        const computerStatus = computerBroker?.host.status();
+        const computerDecision = yield* resolveComputerBackendSelection({
+          provider: "claude",
+          enabled: startBrowserPolicy.computerUse,
+          nativeStatus: computerStatus ?? { available: false, reason: "no-host" },
+        });
+        const existingContext = sessions.get(threadId);
+        if (
+          existingContext &&
+          computerDecision.selection?.kind === "native" &&
+          !input.workflowExecutionProfile
+        )
+          yield* stopSessionInternal(existingContext, { emitExitEvent: false });
+        const computerServer =
+          serverConfig.mode === "desktop" &&
+          !input.workflowExecutionProfile &&
+          startBrowserPolicy.computerUse &&
+          computerDecision.selection?.kind === "native" &&
+          computerBroker
+            ? makeClaudeComputerMcpServer({
+                broker: computerBroker,
+                threadId,
+                existingServerNames: new Set([
+                  ...Object.keys(translatedMcpServers ?? {}),
+                  ...(previewServer ? [previewServer.serverName] : []),
+                ]),
+              })
+            : undefined;
+        disposeComputer = computerServer?.dispose;
         // Computer use and Claude in Chrome stay uncertified (see claudeAgentBrowser.ts):
         // enabling them reports "unavailable" and their tools are denied.
-        const chromeAllowed = startBrowserPolicy.claudeInChrome && CLAUDE_IN_CHROME_CERTIFIED;
+        let chromeAllowed = false;
         const agentBrowserState: ClaudeAgentBrowserState | undefined = agentBrowserBroker
           ? {
               ...(previewServer
@@ -6742,6 +6885,9 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                     },
                   }
                 : {}),
+              ...(computerServer
+                ? { computer: { serverName: computerServer.serverName, installed: true } }
+                : {}),
               chrome: !startBrowserPolicy.claudeInChrome
                 ? { state: "off" }
                 : chromeAllowed
@@ -6749,7 +6895,21 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                   : { state: "unavailable", detail: CLAUDE_IN_CHROME_UNAVAILABLE_DETAIL },
               computerUse: !startBrowserPolicy.computerUse
                 ? { state: "off" }
-                : { state: "unavailable", detail: COMPUTER_USE_UNAVAILABLE_DETAIL },
+                : computerServer && computerDecision.status.available
+                  ? {
+                      state: "connected",
+                      backend: "native",
+                      detail: computerDecision.selection?.fallbackFrom
+                        ? `Using F5 computer control; built-in unavailable: ${computerDecision.selection.fallbackFrom.reason}.`
+                        : "Using F5 computer control.",
+                    }
+                  : {
+                      state: "unavailable",
+                      detail:
+                        computerStatus && !computerStatus.available
+                          ? (computerStatus.detail ?? computerStatus.reason)
+                          : COMPUTER_USE_UNAVAILABLE_DETAIL,
+                    },
               mutatingPreviewGranted: false,
             }
           : undefined;
@@ -6939,17 +7099,16 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           systemPrompt,
           planModeInstructions,
         } satisfies ClaudeQueryOptions;
-        if (translatedMcpServers || previewServer) {
+        if (translatedMcpServers || previewServer || computerServer) {
           queryOptions.mcpServers = {
             ...(translatedMcpServers as NonNullable<ClaudeQueryOptions["mcpServers"]> | undefined),
             ...(previewServer ? { [previewServer.serverName]: previewServer.config } : {}),
+            ...(computerServer ? { [computerServer.serverName]: computerServer.config } : {}),
           };
         }
 
-        const existingContext = sessions.get(threadId);
-        if (existingContext) {
+        if (existingContext && !existingContext.stopped)
           yield* stopSessionInternal(existingContext, { emitExitEvent: false });
-        }
 
         if (
           existingResumeSessionId &&
@@ -6961,19 +7120,79 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             detail: "Claude transcript repair is in progress. Try again when it finishes.",
           });
         }
+        let chromeRuntime: ChromeSessionRuntime | undefined;
+        let chromeGeneration: string | undefined;
+        if (serverConfig.mode === "desktop" && !input.workflowExecutionProfile && computerBroker) {
+          chromeRuntime =
+            options?.chromeRuntime ??
+            (yield* makeChromeSessionRuntime({
+              stateDir: serverConfig.stateDir,
+              providerHome: resolveClaudeConfigDir(queryEnvironment, input.cwd),
+              executablePath: sdkExecutableOptions.pathToClaudeCodeExecutable,
+              resolveDefaultExecutable: resolveBundledClaudeExecutable,
+              broker: computerBroker,
+              provider: "claude",
+            }).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provide(EffectNodePath.layer),
+            ));
+          if (chromeRuntime && startBrowserPolicy.claudeInChrome) {
+            chromeGeneration = computerServer ? computerBroker.generation(threadId)! : randomUUID();
+            if (!computerServer) computerBroker.bindSession(threadId, chromeGeneration, "claude");
+            registerChromeSession(threadId, chromeGeneration, chromeRuntime);
+            const decision = yield* Effect.tryPromise(() =>
+              chromeRuntime!.prepare(
+                {
+                  threadId,
+                  generation: chromeGeneration!,
+                  providerHome: resolveClaudeConfigDir(queryEnvironment, input.cwd),
+                },
+                true,
+              ),
+            ).pipe(
+              Effect.catch(() =>
+                Effect.succeed({
+                  kind: "unknown" as const,
+                  detail: "Chrome setup failed verification.",
+                }),
+              ),
+            );
+            chromeAllowed =
+              decision.kind === "launch" &&
+              (yield* resolveSessionBrowserPolicy(threadId)).claudeInChrome;
+            if (!chromeAllowed) releaseChromeSession(threadId, chromeGeneration);
+            if (agentBrowserState)
+              agentBrowserState.chrome = chromeAllowed
+                ? { state: "pending" }
+                : {
+                    state: "unavailable",
+                    detail:
+                      "detail" in decision
+                        ? decision.detail
+                        : "Chrome setup was denied or is unavailable.",
+                  };
+            queryOptions.extraArgs = forceClaudeChromeFlag(queryOptions.extraArgs, chromeAllowed);
+          }
+        }
+
         const queryRuntime = yield* Effect.try({
           try: () =>
             createQuery({
               prompt,
               options: queryOptions,
             }),
-          catch: (cause) =>
-            new ProviderAdapterProcessError({
+          catch: (cause) => {
+            if (chromeGeneration) {
+              releaseChromeSession(threadId, chromeGeneration);
+              computerBroker?.releaseSession(threadId, chromeGeneration);
+            }
+            return new ProviderAdapterProcessError({
               provider: PROVIDER,
               threadId,
               detail: toMessage(cause, "Failed to start Claude runtime session."),
               cause,
-            }),
+            });
+          },
         });
 
         // Reuse the last observed total across restarts without requiring get_usage.
@@ -6981,6 +7200,15 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         const lastTotalCostUsd = existingResumeSessionId ? resumeState?.lastTotalCostUsd : 0;
 
         const session: ProviderSession = {
+          chromeConfigurationFingerprint: chromeSessionFingerprint(
+            threadId,
+            startBrowserPolicy.claudeInChrome,
+          ),
+          computerConfigurationFingerprint: computerDecision.fingerprint,
+          ...(computerDecision.selection
+            ? { computerBackendSelection: computerDecision.selection }
+            : {}),
+          computerToolsInstalled: computerServer !== undefined,
           threadId,
           provider: PROVIDER,
           status: "ready",
@@ -7026,6 +7254,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         };
 
         const context: ClaudeSessionContext = {
+          ...(chromeRuntime ? { chromeRuntime } : {}),
+          ...(chromeGeneration ? { chromeGeneration } : {}),
+          ...(computerServer?.dispose ? { computerDispose: computerServer.dispose } : {}),
+          ...(computerServer?.endTurn ? { computerEndTurn: computerServer.endTurn } : {}),
           startInput: input,
           nativeCompactionEnabled: providerOptions?.nativeCompaction !== false,
           ...(existingResumeSessionId && nativeResumeMetadata.providerTitle
@@ -7220,7 +7452,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         return {
           ...session,
         };
-      });
+      }).pipe(Effect.onError(() => Effect.sync(() => disposeComputer?.())));
+    };
 
     const startSession: ClaudeAdapterShape["startSession"] = (input) =>
       withThreadLock(input.threadId, startSessionUnlocked(input));
@@ -7245,7 +7478,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                   detail: "Claude session stopped while preparing the turn.",
                   // Every ensureLive check runs before the prompt is queued.
                   deliveryCertainty: "not_sent",
-                  deliveryRetryable: true,
+                  deliveryRetryable: !context.resumeRejected,
                 }),
               )
             : Effect.void,

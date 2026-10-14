@@ -1,3 +1,5 @@
+import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
+import { ComputerAutomationBroker } from "../../computer/ComputerAutomationBroker";
 import { parseCodexTryAgainAt } from "../../provider/codexErrors.ts";
 import { UsageService } from "../../usage/Services/UsageService.ts";
 import { resolveAccountUsageLimit } from "../../provider/usageLimitMessages.ts";
@@ -2298,6 +2300,7 @@ const make = Effect.gen(function* () {
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const providerTerminalEventRepository = yield* ProviderTerminalEventRepository;
   const threadBackgroundWork = yield* ThreadBackgroundWork;
+  const computerAutomationBroker = yield* Effect.serviceOption(ComputerAutomationBroker);
   const imageStorage = {
     config: yield* Effect.serviceOption(ServerConfig),
     sql: yield* Effect.serviceOption(SqlClient.SqlClient),
@@ -2314,6 +2317,7 @@ const make = Effect.gen(function* () {
   const extractLifecycleImages = (
     threadId: ThreadId,
     event: ProviderRuntimeEvent,
+    interactionMode?: string,
   ): Effect.Effect<{ readonly event: ProviderRuntimeEvent; readonly images?: ToolImageRefs }> => {
     if (
       (event.type !== "item.started" &&
@@ -2321,18 +2325,38 @@ const make = Effect.gen(function* () {
         event.type !== "item.completed") ||
       event.payload.data === undefined
     ) {
-      return Effect.succeed({ event });
+      return Effect.succeed({
+        event: automationEventSanitizer.sanitize(threadId, event) as ProviderRuntimeEvent,
+      });
     }
     const extraction = extractToolResultImages(event.payload.data);
+    // Register provenance on the whole event before deciding whether its images persist.
+    automationEventSanitizer.sanitize(threadId, event);
+    const omitComputerImages =
+      interactionMode === "plan" &&
+      (automationEventSanitizer.isComputerItem(threadId, event.itemId ?? event.eventId) ||
+        event.payload.mcpImages !== undefined ||
+        event.payload.mcpImagesOmitted !== undefined);
+    const preparedRefs = event.payload.mcpImages ?? [];
+    const preparedOmitted =
+      (event.payload.mcpImagesOmitted ?? 0) + (omitComputerImages ? preparedRefs.length : 0);
+    const preparedImages: ToolImageRefs = {
+      ...(!omitComputerImages && preparedRefs.length ? { mcpImages: preparedRefs } : {}),
+      ...(preparedOmitted ? { mcpImagesOmitted: preparedOmitted } : {}),
+    };
     if (extraction.images.length === 0 && extraction.omitted === 0) {
-      return Effect.succeed({ event });
+      return Effect.succeed({
+        event: automationEventSanitizer.sanitize(threadId, event) as ProviderRuntimeEvent,
+        images: preparedImages,
+      });
     }
     return Effect.gen(function* () {
-      const refs: ToolResultImageRef[] = [];
-      let omitted = extraction.omitted;
+      const refs: ToolResultImageRef[] = [...(preparedImages.mcpImages ?? [])];
+      let omitted = extraction.omitted + (preparedImages.mcpImagesOmitted ?? 0);
       const { config, sql, fileSystem, path } = imageStorage;
       for (const image of extraction.images) {
         if (
+          omitComputerImages ||
           Option.isNone(config) ||
           Option.isNone(sql) ||
           Option.isNone(fileSystem) ||
@@ -2358,7 +2382,13 @@ const make = Effect.gen(function* () {
         else omitted += 1;
       }
       return {
-        event: { ...event, payload: { ...event.payload, data: extraction.scrubbed } },
+        event: automationEventSanitizer.sanitize(threadId, {
+          ...event,
+          payload: {
+            ...event.payload,
+            data: automationEventSanitizer.sanitize(threadId, extraction.scrubbed),
+          },
+        }) as ProviderRuntimeEvent,
         images: {
           ...(refs.length > 0 ? { mcpImages: refs } : {}),
           ...(omitted > 0 ? { mcpImagesOmitted: omitted } : {}),
@@ -4272,7 +4302,7 @@ const make = Effect.gen(function* () {
                 providerName: event.provider,
                 providerInstanceId:
                   event.providerInstanceId ?? thread.session?.providerInstanceId ?? null,
-                runtimeMode: thread.session?.runtimeMode ?? "full-access",
+                runtimeMode: thread.session?.runtimeMode ?? thread.runtimeMode,
                 ...(workflowExecutionProfile ? { workflowExecutionProfile } : {}),
                 activeTurnId: nextActiveTurnId,
                 lastError,
@@ -5107,7 +5137,7 @@ const make = Effect.gen(function* () {
               providerName: event.provider,
               providerInstanceId:
                 event.providerInstanceId ?? thread.session?.providerInstanceId ?? null,
-              runtimeMode: thread.session?.runtimeMode ?? "full-access",
+              runtimeMode: thread.session?.runtimeMode ?? thread.runtimeMode,
               activeTurnId: eventTurnId ?? null,
               lastError: runtimeErrorMessage,
               lastErrorId: event.eventId,
@@ -5368,7 +5398,11 @@ const make = Effect.gen(function* () {
         }
       }
 
-      const lifecycle = yield* extractLifecycleImages(thread.id, event);
+      if (Option.isSome(computerAutomationBroker)) {
+        if ((event.type === "turn.completed" || event.type === "turn.aborted") && event.turnId)
+          computerAutomationBroker.value.endTurn(thread.id, event.turnId);
+      }
+      const lifecycle = yield* extractLifecycleImages(thread.id, event, thread.interactionMode);
       const activities = runtimeEventToActivities(lifecycle.event, lifecycle.images);
       yield* Effect.forEach(activities, (activity) =>
         orchestrationEngine.dispatch({

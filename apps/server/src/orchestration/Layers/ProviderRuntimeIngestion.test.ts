@@ -7,6 +7,8 @@ import {
 } from "@t3tools/contracts";
 import { createHash } from "node:crypto";
 import { createAttachmentId } from "../../attachmentStore.ts";
+import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
+import { makeAutomationRuntimeEventPreparer } from "../../provider/prepareAutomationRuntimeEvent";
 import { GitCommandError } from "../../git/Errors.ts";
 import { cleanupStaleWorktrees } from "./WorktreeStartupCleanup.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
@@ -32,8 +34,8 @@ import {
   OrchestrationFileChangeId,
   ProjectId,
   ProviderItemId,
-  ProviderInstanceId,
   RuntimeItemId,
+  ProviderInstanceId,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -267,6 +269,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   async function createHarness(options?: {
     readonly startIngestion?: boolean;
+    readonly seedSession?: boolean;
     readonly refreshAccount?: UsageServiceShape["refreshAccount"];
     readonly settings?: Partial<import("@t3tools/contracts").ServerSettings>;
     /** Isolated state dir for tests that write attachments. */
@@ -399,23 +402,24 @@ describe("ProviderRuntimeIngestion", () => {
         createdAt,
       }),
     );
-    await Effect.runPromise(
-      engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.makeUnsafe("cmd-session-seed"),
-        threadId: ThreadId.makeUnsafe("thread-1"),
-        session: {
+    if (options?.seedSession !== false)
+      await Effect.runPromise(
+        engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.makeUnsafe("cmd-session-seed"),
           threadId: ThreadId.makeUnsafe("thread-1"),
-          status: "ready",
-          providerName: "codex",
-          runtimeMode: "approval-required",
-          activeTurnId: null,
-          updatedAt: createdAt,
-          lastError: null,
-        },
-        createdAt,
-      }),
-    );
+          session: {
+            threadId: ThreadId.makeUnsafe("thread-1"),
+            status: "ready",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: null,
+            updatedAt: createdAt,
+            lastError: null,
+          },
+          createdAt,
+        }),
+      );
     provider.setSession({
       provider: "codex",
       status: "ready",
@@ -462,6 +466,7 @@ describe("ProviderRuntimeIngestion", () => {
       drain,
       workspaceRoot,
       attachmentsDir: (await runtime.runPromise(Effect.service(ServerConfig))).attachmentsDir,
+      prepareRuntimeEvent: await runtime.runPromise(makeAutomationRuntimeEventPreparer),
     };
   }
 
@@ -1942,6 +1947,61 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.estimatedContextTokens).toBe(550);
   });
 
+  it.each(["session.started", "session.state.changed", "runtime.error"])(
+    "preserves the requested approval mode when %s arrives before session binding",
+    async (type) => {
+      const harness = await createHarness({ seedSession: false });
+      const initial = (await Effect.runPromise(harness.engine.getReadModel())).threads[0]!;
+      expect(initial.session).toBeNull();
+      expect(initial.runtimeMode).toBe("approval-required");
+      harness.emit({
+        type,
+        eventId: asEventId(`cold-${type}`),
+        provider: "codex",
+        threadId: initial.id,
+        createdAt: new Date().toISOString(),
+        payload:
+          type === "runtime.error" ? { message: "Synthetic startup failure" } : { state: "ready" },
+      });
+      const thread = await waitForThread(harness.engine, (entry) => entry.session !== null);
+      expect(thread.session?.runtimeMode).toBe("approval-required");
+    },
+  );
+
+  it("preserves requested approval mode for a terminal event without a bound session", async () => {
+    const harness = await createHarness({ seedSession: false });
+    const thread = (await Effect.runPromise(harness.engine.getReadModel())).threads[0]!;
+    const event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }> = {
+      type: "turn.completed",
+      eventId: asEventId("cold-completed"),
+      provider: "codex",
+      threadId: thread.id,
+      turnId: asTurnId("cold-turn"),
+      createdAt: new Date().toISOString(),
+      payload: { state: "completed" },
+    };
+    expect(makeTurnCompletedSessionSetCommand({ event, thread }).session.runtimeMode).toBe(
+      "approval-required",
+    );
+    expect(
+      makeTurnCompletedSessionSetCommand({
+        event,
+        thread: {
+          ...thread,
+          session: {
+            threadId: thread.id,
+            providerName: "codex",
+            status: "ready",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: event.createdAt,
+          },
+        },
+      }).session.runtimeMode,
+    ).toBe("full-access");
+  });
+
   it("applies provider session.state.changed transitions directly", async () => {
     const harness = await createHarness();
     const waitingAt = new Date().toISOString();
@@ -2413,6 +2473,82 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.text).toBe("hello world");
     expect(message?.streaming).toBe(false);
   });
+
+  it.each(["default", "plan"])(
+    "retains prepared computer attachments across disposal in %s mode",
+    async (mode) => {
+      const stateDir = path.join(makeTempDir("f5-prepared-computer-images-"), "userdata");
+      const harness = await createHarness({ stateDir });
+      const threadId = asThreadId("thread-1");
+      const png =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+      await Effect.runPromise(
+        harness.sql`UPDATE projection_threads SET interaction_mode = ${mode} WHERE thread_id = ${threadId}`,
+      );
+      automationEventSanitizer.register(threadId, {
+        serverName: "__f5_computer",
+        verified: true,
+        kind: "f5-computer",
+      });
+      try {
+        const queued = await Effect.runPromise(
+          harness.prepareRuntimeEvent({
+            type: "item.completed",
+            eventId: asEventId("prepared-computer-shot"),
+            provider: "codex",
+            createdAt: new Date().toISOString(),
+            threadId,
+            itemId: RuntimeItemId.makeUnsafe("prepared-computer-shot"),
+            payload: {
+              itemType: "mcp_tool_call",
+              status: "completed",
+              data: {
+                toolName: "mcp____f5_computer__computer_screenshot",
+                input: { text: "PRIVATE_CAPTURE_SENTINEL" },
+                result: { content: [{ type: "image", mimeType: "image/png", data: png }] },
+              },
+            },
+          }),
+        );
+        automationEventSanitizer.clear(threadId);
+        expect(JSON.stringify(queued)).not.toContain(png);
+        expect(JSON.stringify(queued)).not.toContain("PRIVATE_CAPTURE_SENTINEL");
+        harness.emit(queued);
+        const thread = await waitForThread(harness.engine, (entry) =>
+          entry.activities.some(
+            (activity: ProviderRuntimeTestActivity) => activity.id === "prepared-computer-shot",
+          ),
+        );
+        await harness.drain();
+        const activity = thread.activities.find(
+          (entry: ProviderRuntimeTestActivity) => entry.id === "prepared-computer-shot",
+        )!;
+        const payload = activity.payload as {
+          mcpImages?: Array<{ attachmentId: string }>;
+          mcpImagesOmitted?: number;
+        };
+        const rows = await Effect.runPromise(
+          harness.sql<{
+            attachmentId: string;
+            finalPath: string;
+            lifecycle: string;
+          }>`SELECT attachment_id AS "attachmentId", final_path AS "finalPath", lifecycle FROM attachments`,
+        );
+        if (mode === "plan") {
+          expect(rows).toHaveLength(0);
+          expect(payload.mcpImages).toBeUndefined();
+          expect(payload.mcpImagesOmitted).toBe(1);
+        } else {
+          expect(rows).toHaveLength(1);
+          expect(rows[0]?.lifecycle).toBe("ready");
+          expect(payload.mcpImages?.[0]?.attachmentId).toBe(rows[0]?.attachmentId);
+          expect(fs.readFileSync(rows[0]!.finalPath).toString("base64")).toBe(png);
+        }
+      } finally {
+        automationEventSanitizer.clear(threadId);
+      }
+    },
+  );
 
   it("stores tool-result screenshots before compaction for Claude and Codex shapes", async () => {
     const stateDir = path.join(makeTempDir("t3-provider-images-"), "userdata");
@@ -3830,6 +3966,75 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(message?.text).toBe("hello");
     expect(message?.streaming).toBe(false);
+  });
+
+  it("keeps computer approvals answerable through sanitized runtime ingestion", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const itemId = asItemId("computer-approval-call");
+    automationEventSanitizer.register(threadId, {
+      serverName: "__f5_computer",
+      verified: true,
+      kind: "f5-computer",
+    });
+    automationEventSanitizer.sanitize(threadId, {
+      itemId,
+      payload: { toolName: "mcp____f5_computer__computer_type" },
+    });
+    try {
+      harness.emit({
+        type: "request.opened",
+        eventId: asEventId("computer-approval-open"),
+        provider: "codex",
+        createdAt: new Date().toISOString(),
+        threadId,
+        itemId,
+        requestId: ApprovalRequestId.makeUnsafe("computer-approval"),
+        payload: {
+          requestType: "mcp_elicitation_approval",
+          detail: "PRIVATE_APPROVAL_SENTINEL",
+          approvalOptions: [
+            { decision: "accept", label: "PRIVATE_APPROVAL_SENTINEL" },
+            { decision: "decline", label: "PRIVATE_APPROVAL_SENTINEL" },
+          ],
+        },
+      });
+      const opened = await waitForThread(harness.engine, (thread) =>
+        thread.activities.some((activity) => activity.id === "computer-approval-open"),
+      );
+      const approval = opened.activities.find(
+        (activity) => activity.id === "computer-approval-open",
+      );
+      expect(approval?.payload).toMatchObject({
+        requestId: "computer-approval",
+        requestKind: "mcp-elicitation",
+        requestType: "mcp_elicitation_approval",
+        approvalOptions: [
+          { decision: "accept", label: "Approve once" },
+          { decision: "decline", label: "Decline" },
+        ],
+      });
+      expect(JSON.stringify(approval)).not.toContain("PRIVATE_APPROVAL_SENTINEL");
+      harness.emit({
+        type: "request.resolved",
+        eventId: asEventId("computer-approval-resolved"),
+        provider: "codex",
+        createdAt: new Date().toISOString(),
+        threadId,
+        itemId,
+        requestId: ApprovalRequestId.makeUnsafe("computer-approval"),
+        payload: { requestType: "mcp_elicitation_approval", decision: "accept" },
+      });
+      const resolved = await waitForThread(harness.engine, (thread) =>
+        thread.activities.some((activity) => activity.id === "computer-approval-resolved"),
+      );
+      expect(
+        resolved.activities.find((activity) => activity.id === "computer-approval-resolved")
+          ?.payload,
+      ).toMatchObject({ requestId: "computer-approval", requestKind: "mcp-elicitation" });
+    } finally {
+      automationEventSanitizer.clear(threadId);
+    }
   });
 
   it("maps canonical request events into approval activities with requestKind", async () => {
