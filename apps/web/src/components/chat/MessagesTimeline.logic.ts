@@ -484,6 +484,34 @@ export function resolveCodexCollaborationStatusLabel(
   }[status];
 }
 
+export function formatWorkingTimer(startIso: string, endIso: string): string | null {
+  const startedAtMs = Date.parse(startIso);
+  const endedAtMs = Date.parse(endIso);
+  if (!Number.isFinite(startedAtMs) || !Number.isFinite(endedAtMs)) {
+    return null;
+  }
+
+  const elapsedSeconds = Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000));
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds}s`;
+  }
+
+  const hours = Math.floor(elapsedSeconds / 3600);
+  const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+  const seconds = elapsedSeconds % 60;
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+/** The working row's label: `Working · 12s`, or `Working…` before the turn has a start. */
+export function formatWorkingLabel(createdAt: string | null, nowIso: string): string {
+  return createdAt ? `Working · ${formatWorkingTimer(createdAt, nowIso) ?? "0s"}` : "Working…";
+}
+
 export function deriveCodexCollaborationResponseRows(
   receiverThreadIds: ReadonlyArray<string>,
   states: ReadonlyArray<CompactSubagentState>,

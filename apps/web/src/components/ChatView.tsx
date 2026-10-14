@@ -7219,6 +7219,7 @@ export default function ChatView({
                   allDirectoriesExpanded={allDirectoriesExpanded}
                   onToggleAllDirectories={onToggleAllDirectories}
                   chatDiffContext={chatDiffContext}
+                  onWorkingRibbonFocusLost={scheduleComposerFocus}
                   listHeaderContent={
                     <>
                       {historyStatusContent}
