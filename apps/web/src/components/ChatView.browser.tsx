@@ -5557,15 +5557,11 @@ describe("ChatView timeline (full app)", () => {
       expect(scrollButton.textContent).toContain(useMetaForMod ? "⌘Enter" : "Ctrl+Enter");
 
       const composerEditor = await waitForComposerEditor();
-      composerEditor.focus();
-      composerEditor.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "Enter",
-          metaKey: useMetaForMod,
-          ctrlKey: !useMetaForMod,
-          bubbles: true,
-          cancelable: true,
-        }),
+      // Exercise a real browser key sequence after focus commits, rather than
+      // dispatching in the same stack as the jump-button render/passive effect.
+      await userEvent.click(composerEditor);
+      await userEvent.keyboard(
+        useMetaForMod ? "{Meta>}{Enter}{/Meta}" : "{Control>}{Enter}{/Control}",
       );
 
       await vi.waitFor(

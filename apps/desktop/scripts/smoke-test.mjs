@@ -248,9 +248,16 @@ try {
           "dom-ready",
           () => {
             clearTimeout(timer);
-            // Guests attach blank; load the backend explicitly to check its authorization.
+            // Guests attach blank. A backend navigation can be vetoed before
+            // networking, so test request authentication with a fetch instead.
+            // The session's onCompleted receipt must still report exactly 401;
+            // a cancellation, timeout or authenticated response never passes.
             const url = guest.getURL();
-            void guest.loadURL(target).catch(() => undefined);
+            void guest
+              .executeJavaScript(
+                `fetch(${JSON.stringify(target)}, { mode: "no-cors" }).catch(() => undefined)`,
+              )
+              .catch(() => undefined);
             resolve(url);
           },
           { once: true },
