@@ -137,6 +137,7 @@ import {
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  deriveLatestAssistantOutputAt,
   deriveLiveWorkActivity,
   deriveLiveWorkTurnId,
   type LiveWorkActivity,
@@ -2009,30 +2010,51 @@ export default function ChatView({
     }
   }, [isPendingTurnDispatchBlocked]);
   const liveTurnId = deriveLiveWorkTurnId(activeThread?.session, activeLatestTurn?.turnId);
+  // Includes blocking provider forms, which `blockingUserInputs` leaves out.
+  const isAwaitingUser =
+    activePendingApproval !== null || pendingUserInputs.some(isBlockingUserInput);
+  const latestAssistantOutputAt = useMemo(
+    () => deriveLatestAssistantOutputAt(activeThread?.messages ?? [], liveTurnId),
+    [activeThread?.messages, liveTurnId],
+  );
   // Unfiltered activities, so transcript and work-log filters cannot hide it.
   const derivedLiveActivity = useMemo(
-    () => deriveLiveWorkActivity(threadActivities, liveTurnId),
-    [threadActivities, liveTurnId],
+    () =>
+      deriveLiveWorkActivity(threadActivities, liveTurnId, {
+        awaitingUser: isAwaitingUser,
+        latestAssistantOutputAt,
+      }),
+    [threadActivities, liveTurnId, isAwaitingUser, latestAssistantOutputAt],
   );
   const liveActivityKind = derivedLiveActivity?.kind ?? null;
-  const liveActivityDetail =
-    derivedLiveActivity?.kind === "thinking" ? derivedLiveActivity.detail : null;
+  const liveActivityText =
+    derivedLiveActivity?.kind === "thinking"
+      ? derivedLiveActivity.detail
+      : derivedLiveActivity?.kind === "tool"
+        ? derivedLiveActivity.title
+        : derivedLiveActivity?.kind === "reconnecting"
+          ? derivedLiveActivity.attempt
+          : null;
   const liveActivityProviderItemId =
     derivedLiveActivity?.kind === "tool" ? derivedLiveActivity.providerItemId : null;
-  const liveActivityTitle = derivedLiveActivity?.kind === "tool" ? derivedLiveActivity.title : null;
-  const liveActivity = useMemo<LiveWorkActivity>(
-    () =>
-      liveActivityKind === "thinking"
-        ? { kind: "thinking", detail: liveActivityDetail }
-        : liveActivityKind === "tool"
-          ? {
-              kind: "tool",
-              providerItemId: liveActivityProviderItemId,
-              title: liveActivityTitle ?? "",
-            }
-          : null,
-    [liveActivityKind, liveActivityDetail, liveActivityProviderItemId, liveActivityTitle],
-  );
+  const liveActivity = useMemo<LiveWorkActivity>(() => {
+    switch (liveActivityKind) {
+      case "thinking":
+        return { kind: "thinking", detail: liveActivityText };
+      case "tool":
+        return {
+          kind: "tool",
+          providerItemId: liveActivityProviderItemId,
+          title: liveActivityText ?? "",
+        };
+      case "reconnecting":
+        return { kind: "reconnecting", attempt: liveActivityText };
+      case "idle":
+        return { kind: "idle" };
+      default:
+        return null;
+    }
+  }, [liveActivityKind, liveActivityText, liveActivityProviderItemId]);
   const activeWorkStartedAt = useMemo(
     () =>
       deriveActiveWorkStartedAt(

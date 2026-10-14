@@ -8106,7 +8106,14 @@ describe("ProviderRuntimeIngestion", () => {
       return harness;
     }
 
-    async function statusUpserts(harness: Awaited<ReturnType<typeof createHarness>>) {
+    // `updatedAt` tracks each write's event time; it has its own test, so the
+    // remaining assertions compare the stable fields.
+    function withoutUpdatedAt<T extends { readonly payload: unknown }>(activity: T): T {
+      const { updatedAt: _updatedAt, ...payload } = activity.payload as Record<string, unknown>;
+      return { ...activity, payload };
+    }
+
+    async function rawStatusUpserts(harness: Awaited<ReturnType<typeof createHarness>>) {
       await harness.drain();
       const events = await Effect.runPromise(
         Stream.runCollect(harness.engine.readEvents(0)).pipe(
@@ -8120,10 +8127,15 @@ describe("ProviderRuntimeIngestion", () => {
       );
     }
 
+    async function statusUpserts(harness: Awaited<ReturnType<typeof createHarness>>) {
+      return (await rawStatusUpserts(harness)).map(withoutUpdatedAt);
+    }
+
     async function statusActivity(harness: Awaited<ReturnType<typeof createHarness>>) {
       await harness.drain();
       const readModel = await Effect.runPromise(harness.engine.getReadModel());
-      return readModel.threads[0]?.activities.find((activity) => activity.id === STATUS_ID);
+      const activity = readModel.threads[0]?.activities.find((entry) => entry.id === STATUS_ID);
+      return activity ? withoutUpdatedAt(activity) : undefined;
     }
 
     it("creates an active status for an empty reasoning item", async () => {
@@ -8156,6 +8168,20 @@ describe("ProviderRuntimeIngestion", () => {
       ]);
       expect(upserts.every((activity) => activity.createdAt === started.createdAt)).toBe(true);
       expect(upserts.every((activity) => activity.sequence === upserts[0]!.sequence)).toBe(true);
+    });
+
+    it("stamps every write with its event time while keeping the original createdAt", async () => {
+      const harness = await startThinkingTurn();
+      const started = reasoningStarted("r1");
+      const completed = reasoningCompleted("r1");
+      harness.emit(started);
+      harness.emit(completed);
+      const upserts = await rawStatusUpserts(harness);
+      expect(upserts.map((activity) => activity.payload)).toEqual([
+        { state: "active", providerItemId: "r1", updatedAt: started.createdAt },
+        { state: "idle", providerItemId: "r1", updatedAt: completed.createdAt },
+      ]);
+      expect(upserts.every((activity) => activity.createdAt === started.createdAt)).toBe(true);
     });
 
     it("writes nothing for a summary part without a heading", async () => {
@@ -8256,7 +8282,8 @@ describe("ProviderRuntimeIngestion", () => {
           payload: { itemType: "dynamic_tool_call", status: "completed", title: `Tool ${index}` },
         });
       }
-      harness.emit(reasoningStarted("r1"));
+      const started = reasoningStarted("r1");
+      harness.emit(started);
       expect((await statusActivity(harness))?.payload).toEqual({
         state: "active",
         providerItemId: "r1",
@@ -8268,7 +8295,7 @@ describe("ProviderRuntimeIngestion", () => {
         `,
       );
       expect(rows.map((row) => JSON.parse(row.payload))).toEqual([
-        { state: "active", providerItemId: "r1" },
+        { state: "active", providerItemId: "r1", updatedAt: started.createdAt },
       ]);
     });
 
