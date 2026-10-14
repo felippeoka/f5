@@ -1318,12 +1318,16 @@ function resolveClaudeLaunchThinking(
 /**
  * Claude 5 omits thinking text unless summaries are requested, and the SDK
  * only overrides the install default when the setting is explicit. A typed
- * `display` decides; otherwise summaries are on.
+ * `display` decides; then the user's own Claude setting (left to apply as is);
+ * otherwise summaries are on. Disabled thinking needs no setting.
  */
-export function claudeShowThinkingSummaries(thinking: ClaudeThinkingResolution["thinking"]) {
-  return thinking && thinking.type !== "disabled" && thinking.display
-    ? thinking.display === "summarized"
-    : true;
+export function claudeShowThinkingSummaries(
+  thinking: ClaudeThinkingResolution["thinking"],
+  userSetting?: boolean,
+): boolean | undefined {
+  if (thinking?.type === "disabled") return undefined;
+  if (thinking?.display) return thinking.display === "summarized";
+  return userSetting === undefined ? true : undefined;
 }
 
 function claudeThinkingConfiguredFields(resolution: ClaudeThinkingResolution) {
@@ -2253,6 +2257,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         readonly options: ClaudeQueryOptions;
       }) => query(input));
     const transcriptRetention = (environment: NodeJS.ProcessEnv, cwd?: string) =>
+      instanceSettings(environment, cwd).pipe(Effect.map((settings) => settings.cleanupPeriodDays));
+    const instanceSettings = (environment: NodeJS.ProcessEnv, cwd?: string) =>
       Effect.tryPromise({
         try: async () => {
           const file = NodePath.join(resolveClaudeConfigDir(environment, cwd), "settings.json");
@@ -2268,7 +2274,12 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               );
             } else if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
           }
-          return resolveClaudeCleanupPeriodDays(instanceSettings, environment);
+          const showThinkingSummaries = (instanceSettings as { showThinkingSummaries?: unknown })
+            ?.showThinkingSummaries;
+          return {
+            cleanupPeriodDays: resolveClaudeCleanupPeriodDays(instanceSettings, environment),
+            ...(typeof showThinkingSummaries === "boolean" ? { showThinkingSummaries } : {}),
+          };
         },
         catch: (cause) =>
           new ProviderAdapterValidationError({
@@ -6757,8 +6768,13 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               issue: toMessage(cause, "Invalid Claude thinking configuration."),
             }),
         });
+        const launchInstanceSettings = yield* instanceSettings(queryEnvironment, input.cwd);
+        const showThinkingSummaries = claudeShowThinkingSummaries(
+          thinkingResolution.thinking,
+          launchInstanceSettings.showThinkingSummaries,
+        );
         const settings = {
-          cleanupPeriodDays: yield* transcriptRetention(queryEnvironment, input.cwd),
+          cleanupPeriodDays: launchInstanceSettings.cleanupPeriodDays,
           ...(providerOptions?.autoCompactWindow
             ? { autoCompactWindow: providerOptions.autoCompactWindow }
             : {}),
@@ -6766,7 +6782,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             fastMode,
             ...(typeof thinking === "boolean" ? { thinking } : {}),
           }),
-          showThinkingSummaries: claudeShowThinkingSummaries(thinkingResolution.thinking),
+          ...(showThinkingSummaries !== undefined ? { showThinkingSummaries } : {}),
         };
         const configuredBase = {
           ...(selectedModel ? { model: selectedModel } : {}),

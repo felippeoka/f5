@@ -3544,7 +3544,6 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(createInput?.options.settings, {
         cleanupPeriodDays: 3650,
         alwaysThinkingEnabled: false,
-        showThinkingSummaries: true,
       });
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
@@ -4534,9 +4533,17 @@ describe("ClaudeAdapterLive", () => {
   it("derives showThinkingSummaries from the typed thinking display", () => {
     assert.equal(claudeShowThinkingSummaries(undefined), true);
     assert.equal(claudeShowThinkingSummaries({ type: "adaptive" }), true);
-    assert.equal(claudeShowThinkingSummaries({ type: "disabled" }), true);
+    assert.equal(claudeShowThinkingSummaries({ type: "disabled" }), undefined);
     assert.equal(claudeShowThinkingSummaries({ type: "adaptive", display: "summarized" }), true);
     assert.equal(claudeShowThinkingSummaries({ type: "enabled", display: "omitted" }), false);
+    // The user's own Claude setting applies untouched...
+    assert.equal(claudeShowThinkingSummaries(undefined, false), undefined);
+    assert.equal(claudeShowThinkingSummaries({ type: "adaptive" }, true), undefined);
+    // ...but a typed display in F5 still wins.
+    assert.equal(
+      claudeShowThinkingSummaries({ type: "adaptive", display: "summarized" }, false),
+      true,
+    );
   });
 
   it.effect("classifies Claude Task tool invocations as collaboration agent work", () => {
@@ -9853,7 +9860,6 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(harness.getLastCreateQueryInput()?.options.settings, {
         cleanupPeriodDays: 3650,
         alwaysThinkingEnabled: false,
-        showThinkingSummaries: true,
       });
       assert.equal(
         initial.find((event) => event.type === "session.configured")?.payload.config

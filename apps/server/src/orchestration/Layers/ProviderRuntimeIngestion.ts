@@ -145,6 +145,47 @@ interface ReasoningSection {
   readonly messageId: MessageId | null;
 }
 
+/**
+ * The decider rejected the command outright (for example, a delta for a
+ * message it already closed). Retrying cannot succeed, so taken text is not
+ * restored: it would otherwise land on the next message.
+ */
+function isPermanentDispatchRejection(cause: Cause.Cause<unknown>): boolean {
+  const error = Cause.squash(cause) as { readonly _tag?: unknown } | null;
+  return (
+    error?._tag === "OrchestrationCommandInvariantError" ||
+    error?._tag === "OrchestrationCommandPreviouslyRejectedError"
+  );
+}
+
+function reasoningStatusActivityId(threadId: ThreadId, turnId: TurnId): EventId {
+  return EventId.make(`reasoning-status:${threadId}:${turnId}`);
+}
+
+/** Rebuilds the cached status from the persisted record, e.g. after a restart. */
+function restoreReasoningStatusEntry(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  threadId: ThreadId,
+  turnId: TurnId,
+): ReasoningStatusEntry | null {
+  const id = reasoningStatusActivityId(threadId, turnId);
+  const activity = activities.find((entry) => entry.id === id);
+  const payload =
+    activity?.payload && typeof activity.payload === "object"
+      ? (activity.payload as Record<string, unknown>)
+      : null;
+  if (!activity || !payload) return null;
+  return {
+    providerItemId: typeof payload.providerItemId === "string" ? payload.providerItemId : null,
+    state: payload.state === "active" ? "active" : "idle",
+    detail: typeof payload.detail === "string" ? payload.detail : null,
+    sequence: activity.sequence,
+    createdAt: activity.createdAt,
+    // Headings were already scanned before the restart; do not rescan.
+    headingParts: {},
+  };
+}
+
 function eventSessionSequence(event: ProviderRuntimeEvent): number | undefined {
   return (event as ProviderRuntimeEvent & { sessionSequence?: number }).sessionSequence;
 }
@@ -2680,7 +2721,7 @@ const make = Effect.gen(function* () {
         commandId: providerCommandId(input.event, "reasoning-status"),
         threadId: input.threadId,
         activity: {
-          id: EventId.make(`reasoning-status:${input.threadId}:${input.turnId}`),
+          id: reasoningStatusActivityId(input.threadId, input.turnId),
           createdAt: input.entry.createdAt,
           tone: "info",
           kind: REASONING_STATUS_ACTIVITY_KIND,
@@ -2688,6 +2729,7 @@ const make = Effect.gen(function* () {
           payload: {
             state: input.entry.state,
             ...(input.entry.detail ? { detail: input.entry.detail } : {}),
+            ...(input.entry.providerItemId ? { providerItemId: input.entry.providerItemId } : {}),
           },
           turnId: input.turnId,
           ...(input.entry.sequence !== undefined ? { sequence: input.entry.sequence } : {}),
@@ -2707,13 +2749,24 @@ const make = Effect.gen(function* () {
    * Writes stay bounded per reasoning item: one start, at most one heading per
    * summary part, and one idle transition.
    */
-  const applyReasoningStatus = (event: ProviderRuntimeEvent, threadId: ThreadId) =>
+  const applyReasoningStatus = (
+    event: ProviderRuntimeEvent,
+    thread: {
+      readonly id: ThreadId;
+      readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
+    },
+  ) =>
     Effect.gen(function* () {
+      const threadId = thread.id;
       const turnId = toTurnId(event.turnId);
       if (!turnId) return;
       const turnKey = providerTurnKey(threadId, turnId);
       const itemId = event.itemId ? String(event.itemId) : null;
-      const current = Option.getOrNull(yield* Cache.getOption(reasoningStatusByTurnKey, turnKey));
+      // After a server restart the cache is empty; the persisted record still
+      // says whether this turn is reasoning.
+      const current =
+        Option.getOrNull(yield* Cache.getOption(reasoningStatusByTurnKey, turnKey)) ??
+        restoreReasoningStatusEntry(thread.activities, threadId, turnId);
 
       if (event.type === "item.started" && event.payload.itemType === "reasoning") {
         // A replayed start for the item already tracked changes nothing.
@@ -2744,7 +2797,10 @@ const make = Effect.gen(function* () {
         (event.type === "item.started" && isToolLifecycleItemType(event.payload.itemType)) ||
         (event.type === "content.delta" &&
           event.payload.streamKind === "assistant_text" &&
-          event.payload.delta.length > 0);
+          event.payload.delta.length > 0) ||
+        // An interrupt or crash can skip the reasoning item's completion.
+        event.type === "turn.completed" ||
+        event.type === "turn.aborted";
       if (endsReasoning) {
         yield* dispatchReasoningStatus({
           event,
@@ -2914,11 +2970,15 @@ const make = Effect.gen(function* () {
           });
         }
       }).pipe(
-        Effect.onError(() =>
-          Effect.andThen(
-            restoreBufferedAssistantText(input.messageId, bufferedText),
-            turnKey ? restoreBufferedReasoningText(turnKey, bufferedReasoningText) : Effect.void,
-          ),
+        Effect.onError((cause) =>
+          isPermanentDispatchRejection(cause)
+            ? Effect.void
+            : Effect.andThen(
+                restoreBufferedAssistantText(input.messageId, bufferedText),
+                turnKey
+                  ? restoreBufferedReasoningText(turnKey, bufferedReasoningText)
+                  : Effect.void,
+              ),
         ),
       );
 
@@ -4578,7 +4638,7 @@ const make = Effect.gen(function* () {
       }
 
       // Progress only: a failed status write must not drop the event's content.
-      yield* applyReasoningStatus(event, thread.id).pipe(
+      yield* applyReasoningStatus(event, thread).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("provider runtime ingestion failed to update reasoning status", {
             eventId: event.eventId,
@@ -4708,7 +4768,13 @@ const make = Effect.gen(function* () {
                   turnId,
                   createdAt: now,
                 })
-                .pipe(Effect.onError(() => restoreBufferedReasoningText(turnKey, spillChunk)));
+                .pipe(
+                  Effect.onError((cause) =>
+                    isPermanentDispatchRejection(cause)
+                      ? Effect.void
+                      : restoreBufferedReasoningText(turnKey, spillChunk),
+                  ),
+                );
             } else if (spillChunk.length > 0) {
               const cappedReasoningText = capBufferedReasoningText(spillChunk);
               if (cappedReasoningText.length < spillChunk.length) {
@@ -4736,7 +4802,13 @@ const make = Effect.gen(function* () {
                   turnId,
                   createdAt: now,
                 })
-                .pipe(Effect.onError(() => restoreBufferedReasoningText(turnKey, reasoningText)));
+                .pipe(
+                  Effect.onError((cause) =>
+                    isPermanentDispatchRejection(cause)
+                      ? Effect.void
+                      : restoreBufferedReasoningText(turnKey, reasoningText),
+                  ),
+                );
             }
           } else if (spillChunk.length > 0) {
             const cappedReasoningText = capBufferedReasoningText(spillChunk);

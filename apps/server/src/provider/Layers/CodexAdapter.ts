@@ -2580,6 +2580,11 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           modelSelection: input.modelSelection,
           boundInstanceId,
         });
+        // Only a turn that states Codex options can turn fast mode off; turns
+        // without any (some internal callers) keep the thread's tier.
+        const statesCodexOptions =
+          input.modelSelection?.instanceId === boundInstanceId ||
+          input.modelOptions?.codex !== undefined;
 
         return yield* Effect.tryPromise({
           try: () => {
@@ -2593,7 +2598,11 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
                 : {}),
               // The composer omits fast mode when it is off, so an absent value
               // must clear a tier an earlier turn set on this thread.
-              serviceTier: selectionOptions.fastMode === true ? ("fast" as const) : null,
+              ...(selectionOptions.fastMode === true
+                ? { serviceTier: "fast" as const }
+                : statesCodexOptions
+                  ? { serviceTier: null }
+                  : {}),
               ...(input.interactionMode !== undefined
                 ? { interactionMode: input.interactionMode }
                 : {}),

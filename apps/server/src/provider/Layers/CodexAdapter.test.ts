@@ -656,6 +656,20 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
     }),
   );
 
+  it.effect("keeps the thread tier for a turn that states no Codex options", () =>
+    Effect.gen(function* () {
+      const request = yield* sendSelectionTurn({});
+      assert.equal(Object.hasOwn(request!, "serviceTier"), false);
+      const otherInstance = yield* sendSelectionTurn({
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex-work"),
+          model: "gpt-5.3-codex",
+        },
+      });
+      assert.equal(Object.hasOwn(otherInstance!, "serviceTier"), false);
+    }),
+  );
+
   it.effect("resolves the composer's stripped default effort to the same default", () =>
     Effect.gen(function* () {
       const model = "gpt-5.3-codex";

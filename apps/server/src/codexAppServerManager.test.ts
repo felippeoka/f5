@@ -1287,14 +1287,31 @@ describe("sendTurn", () => {
       expect(params.collaborationMode?.settings.reasoning_effort).toBe("high");
     });
 
-    it("sends a null service tier to clear a thread-level tier", async () => {
+    it("clears the tier only after F5 applied fast to the thread", async () => {
       const { manager, context, sendRequest } = createSendTurnHarness();
+      const tierSent = () => {
+        const params = sendRequest.mock.calls.at(-1)?.[2] as Record<string, unknown>;
+        return Object.hasOwn(params, "serviceTier") ? params.serviceTier : "omitted";
+      };
+      // Fast never enabled: a tier from the user's config.toml is left alone.
       await manager.sendTurn({ threadId: asThreadId("thread_1"), input: "Go", serviceTier: null });
-      expect(sendRequest).toHaveBeenCalledWith(
-        context,
-        "turn/start",
-        expect.objectContaining({ serviceTier: null }),
-      );
+      expect(tierSent()).toBe("omitted");
+
+      await manager.sendTurn({
+        threadId: asThreadId("thread_1"),
+        input: "Go",
+        serviceTier: "fast",
+      });
+      expect(tierSent()).toBe("fast");
+      await manager.sendTurn({ threadId: asThreadId("thread_1"), input: "Go", serviceTier: null });
+      expect(tierSent()).toBeNull();
+      await manager.sendTurn({ threadId: asThreadId("thread_1"), input: "Go", serviceTier: null });
+      expect(tierSent()).toBe("omitted");
+
+      // A thread started with fast is cleared by the first fast-off turn.
+      (context as { fastTierApplied?: boolean }).fastTierApplied = true;
+      await manager.sendTurn({ threadId: asThreadId("thread_1"), input: "Go", serviceTier: null });
+      expect(tierSent()).toBeNull();
     });
 
     it("never asks for a reasoning summary", () => {

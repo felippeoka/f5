@@ -187,6 +187,11 @@ interface CodexSessionContext {
   nativeGoalBudget?: number;
   nativeGoalPauseInFlight?: boolean;
   requestedRuntime?: Record<string, unknown>;
+  /**
+   * Whether F5 put the fast tier on this provider thread. A turn clears the
+   * tier only then, so a tier from the user's `config.toml` is left alone.
+   */
+  fastTierApplied?: boolean;
   childThreadIds?: Set<string>;
   forkNotifications?: JsonRpcNotification[] | undefined;
   forkNotificationOverflow?: boolean;
@@ -1353,6 +1358,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           : [],
       );
       context.requestedRuntime = { model: input.model, serviceTier: input.serviceTier };
+      context.fastTierApplied = input.serviceTier === "fast";
       this.emitSessionConfigured(context, {
         ...(normalizedModel ? { model: normalizedModel } : {}),
         ...(modelContextWindowTokens !== undefined ? { modelContextWindowTokens } : {}),
@@ -1404,7 +1410,12 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
     const providerThreadId = readResumeCursorThreadId(context.session.resumeCursor);
     if (!providerThreadId) throw new Error("Session is missing provider resume thread id.");
-    const turnStartParams = buildCodexTurnStartParams(input, {
+    // `null` only undoes a fast tier F5 applied; otherwise the thread keeps
+    // whatever tier the user's config chose.
+    const { serviceTier: _requestedTier, ...inputWithoutTier } = input;
+    const turnInput =
+      input.serviceTier === null && !context.fastTierApplied ? inputWithoutTier : input;
+    const turnStartParams = buildCodexTurnStartParams(turnInput, {
       providerThreadId,
       model: context.session.model,
       account: context.account,
@@ -1457,6 +1468,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       effort: input.effort,
       serviceTier: input.serviceTier,
     };
+    if (turnStartParams.serviceTier !== undefined) {
+      context.fastTierApplied = turnStartParams.serviceTier === "fast";
+    }
     if (nextConfiguredModel !== undefined) {
       const modelContextWindowTokens = lookupModelContextWindowTokens({
         provider: "codex",

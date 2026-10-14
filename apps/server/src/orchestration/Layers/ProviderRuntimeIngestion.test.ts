@@ -22,6 +22,7 @@ import type {
   ProviderSession,
 } from "@t3tools/contracts";
 import { OrchestrationCommandInvariantError } from "../Errors.ts";
+import { PersistenceSqlError } from "../../persistence/Errors.ts";
 import {
   ApprovalRequestId,
   CommandId,
@@ -272,6 +273,8 @@ describe("ProviderRuntimeIngestion", () => {
     readonly stateDir?: string;
     /** Makes the ingestion's dispatch of a matching command fail once. */
     readonly failDispatchOnce?: (command: OrchestrationCommand) => boolean;
+    /** A transient store failure (default) or a permanent decider rejection. */
+    readonly dispatchFailure?: "transient" | "rejected";
   }) {
     const workspaceRoot = makeTempDir("t3-provider-project-");
     fs.mkdirSync(path.join(workspaceRoot, ".git"));
@@ -302,10 +305,15 @@ describe("ProviderRuntimeIngestion", () => {
                 if (!dispatchFailureUsed && failDispatchOnce(command)) {
                   dispatchFailureUsed = true;
                   return Effect.fail(
-                    new OrchestrationCommandInvariantError({
-                      commandType: command.type,
-                      detail: "injected dispatch failure",
-                    }),
+                    options?.dispatchFailure === "rejected"
+                      ? new OrchestrationCommandInvariantError({
+                          commandType: command.type,
+                          detail: "injected dispatch rejection",
+                        })
+                      : new PersistenceSqlError({
+                          operation: "test",
+                          detail: "injected dispatch failure",
+                        }),
                   );
                 }
                 return engine.dispatch(command);
@@ -8130,7 +8138,7 @@ describe("ProviderRuntimeIngestion", () => {
         summary: "Thinking",
         turnId: "turn-think",
         createdAt: started.createdAt,
-        payload: { state: "active" },
+        payload: { state: "active", providerItemId: "r1" },
       });
     });
 
@@ -8143,8 +8151,8 @@ describe("ProviderRuntimeIngestion", () => {
       harness.emit(summaryDelta("r1", " more text"));
       const upserts = await statusUpserts(harness);
       expect(upserts.map((activity) => activity.payload)).toEqual([
-        { state: "active" },
-        { state: "active", detail: "Inspecting adapter" },
+        { state: "active", providerItemId: "r1" },
+        { state: "active", detail: "Inspecting adapter", providerItemId: "r1" },
       ]);
       expect(upserts.every((activity) => activity.createdAt === started.createdAt)).toBe(true);
       expect(upserts.every((activity) => activity.sequence === upserts[0]!.sequence)).toBe(true);
@@ -8162,12 +8170,18 @@ describe("ProviderRuntimeIngestion", () => {
       const completion = await startThinkingTurn();
       completion.emit(reasoningStarted("r1"));
       completion.emit(reasoningCompleted("r1"));
-      expect((await statusActivity(completion))?.payload).toEqual({ state: "idle" });
+      expect((await statusActivity(completion))?.payload).toEqual({
+        state: "idle",
+        providerItemId: "r1",
+      });
 
       const assistant = await startThinkingTurn();
       assistant.emit(reasoningStarted("r1"));
       assistant.emit(assistantDelta("a1", "Answer"));
-      expect((await statusActivity(assistant))?.payload).toEqual({ state: "idle" });
+      expect((await statusActivity(assistant))?.payload).toEqual({
+        state: "idle",
+        providerItemId: "r1",
+      });
 
       const tool = await startThinkingTurn();
       tool.emit(reasoningStarted("r1"));
@@ -8177,7 +8191,10 @@ describe("ProviderRuntimeIngestion", () => {
         itemId: asItemId("cmd-1"),
         payload: { itemType: "command_execution", title: "Ran command" },
       });
-      expect((await statusActivity(tool))?.payload).toEqual({ state: "idle" });
+      expect((await statusActivity(tool))?.payload).toEqual({
+        state: "idle",
+        providerItemId: "r1",
+      });
     });
 
     it("does not dispatch duplicate lifecycle states", async () => {
@@ -8188,8 +8205,8 @@ describe("ProviderRuntimeIngestion", () => {
       harness.emit(reasoningCompleted("r1"));
       harness.emit(assistantDelta("a1", "Answer"));
       expect((await statusUpserts(harness)).map((activity) => activity.payload)).toEqual([
-        { state: "active" },
-        { state: "idle" },
+        { state: "active", providerItemId: "r1" },
+        { state: "idle", providerItemId: "r1" },
       ]);
     });
 
@@ -8200,7 +8217,7 @@ describe("ProviderRuntimeIngestion", () => {
       harness.emit(second);
       harness.emit(summaryDelta("r1", "**Stale heading**"));
       const status = await statusActivity(harness);
-      expect(status?.payload).toEqual({ state: "active" });
+      expect(status?.payload).toEqual({ state: "active", providerItemId: "r2" });
       expect(status?.createdAt).toBe(second.createdAt);
     });
 
@@ -8240,14 +8257,19 @@ describe("ProviderRuntimeIngestion", () => {
         });
       }
       harness.emit(reasoningStarted("r1"));
-      expect((await statusActivity(harness))?.payload).toEqual({ state: "active" });
+      expect((await statusActivity(harness))?.payload).toEqual({
+        state: "active",
+        providerItemId: "r1",
+      });
       const rows = await Effect.runPromise(
         harness.sql<{ readonly payload: string }>`
           SELECT payload_json AS payload FROM projection_thread_activities
           WHERE activity_id = ${STATUS_ID}
         `,
       );
-      expect(rows.map((row) => JSON.parse(row.payload))).toEqual([{ state: "active" }]);
+      expect(rows.map((row) => JSON.parse(row.payload))).toEqual([
+        { state: "active", providerItemId: "r1" },
+      ]);
     });
 
     it("separates summary parts with a blank line", async () => {
@@ -8337,6 +8359,75 @@ describe("ProviderRuntimeIngestion", () => {
       expect(thread.messages.find((message) => message.id === "assistant:a1")?.reasoningText).toBe(
         "first second",
       );
+    });
+
+    it("goes idle when the turn ends without completing the reasoning item", async () => {
+      for (const ending of ["turn.completed", "turn.aborted"] as const) {
+        const harness = await startThinkingTurn();
+        harness.emit(reasoningStarted("r1"));
+        harness.emit(
+          ending === "turn.completed"
+            ? { ...base(), type: "turn.completed", payload: { state: "interrupted" } }
+            : { ...base(), type: "turn.aborted", payload: { reason: "interrupted" } },
+        );
+        expect((await statusActivity(harness))?.payload).toEqual({
+          state: "idle",
+          providerItemId: "r1",
+        });
+      }
+    });
+
+    it("recovers the persisted status after a restart emptied the cache", async () => {
+      const harness = await startThinkingTurn();
+      // As written by the previous server process.
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.makeUnsafe("cmd-previous-process-status"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          activity: {
+            id: EventId.makeUnsafe(STATUS_ID),
+            createdAt: new Date().toISOString(),
+            tone: "info",
+            kind: "reasoning.status",
+            summary: "Thinking",
+            payload: { state: "active", providerItemId: "r1" },
+            turnId: asTurnId("turn-think"),
+          },
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      harness.emit(reasoningCompleted("r1"));
+      expect((await statusActivity(harness))?.payload).toEqual({
+        state: "idle",
+        providerItemId: "r1",
+      });
+    });
+
+    it("does not move text from a rejected finalize onto the next message", async () => {
+      const harness = await startThinkingTurn({
+        dispatchFailure: "rejected",
+        failDispatchOnce: (command) =>
+          command.type === "thread.message.assistant.delta" &&
+          String(command.commandId).includes("assistant-delta-finalize:assistant:a1"),
+      });
+      harness.emit({
+        ...base(),
+        type: "content.delta",
+        itemId: RuntimeItemId.makeUnsafe("r1"),
+        payload: { streamKind: "reasoning_text", delta: "belongs to a1" },
+      });
+      harness.emit(assistantDelta("a1", "first"));
+      harness.emit(assistantCompleted("a1"));
+      await harness.drain();
+      harness.emit(assistantDelta("a2", "second"));
+      harness.emit(assistantCompleted("a2"));
+      const thread = await waitForThread(harness.engine, (entry) =>
+        entry.messages.some((message) => message.id === "assistant:a2" && !message.streaming),
+      );
+      const second = thread.messages.find((message) => message.id === "assistant:a2");
+      expect(second?.text).toBe("second");
+      expect(second?.reasoningText ?? "").toBe("");
     });
 
     it("carries reasoning that follows a completed message onto the next message", async () => {
