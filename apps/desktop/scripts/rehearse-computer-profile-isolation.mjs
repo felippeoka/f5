@@ -267,6 +267,26 @@ export async function runProfileIsolation(o) {
       );
       await completed(i, previous);
     }
+    // Exercise the exact bundled Node polling path without acquiring a lease.
+    // Both completed metadata turns must be refused as owners with no lease.
+    for (const i of [0, 1]) {
+      let refused = false;
+      try {
+        await profileOwnerLeaseReady(
+          async () => (await snapshot()).profiles[i].held,
+          async () => (await current(i))?.latestTurn,
+          undefined,
+        );
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === "Isolation owner turn ended without a lease."
+        )
+          refused = true;
+        else throw error;
+      }
+      if (!refused) throw new Error("Isolation read-only owner polling receipt incomplete.");
+    }
     const backendPids = await application.evaluate(() =>
       Object.values(globalThis.__computerRehearsalIsolationBackendPids),
     );
@@ -297,6 +317,7 @@ export async function runProfileIsolation(o) {
       profileSnapshotsPrivate,
       bothSessionsStopped: true,
       bothChatSurfacesReady: true,
+      ownerPollingReadOnlyChecked: true,
     };
   }
   const secondaryFixture = ownFixture(

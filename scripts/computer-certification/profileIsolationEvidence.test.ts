@@ -123,6 +123,7 @@ it("keeps read-only readiness distinct from actual isolation and refuses any nat
     cleanup: { confirmed: true },
     profileIsolationObservation: {
       readinessOnly: true,
+      ownerPollingReadOnlyChecked: true,
       bothChatSurfacesReady: true,
       distinctRendererProfiles: true,
       distinctBackendProcesses: true,

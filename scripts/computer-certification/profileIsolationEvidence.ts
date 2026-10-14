@@ -8,6 +8,7 @@ export function profileReadinessChecks(raw: unknown): Record<string, boolean> {
   return {
     "two-real-profiles":
       receipt.bothChatSurfacesReady === true &&
+      receipt.ownerPollingReadOnlyChecked === true &&
       receipt.readinessOnly === true &&
       receipt.distinctRendererProfiles === true &&
       receipt.distinctBackendProcesses === true &&

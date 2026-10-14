@@ -45,6 +45,7 @@ import {
   rehearsalProviderActivityCounts,
   rehearsalSessionErrorCode,
   rehearsalHarnessFailureCode,
+  rehearsalHarnessFailureLocation,
   ElectronRehearsalObservation,
 } from "../src/computer/rehearsalElectronObservation.ts";
 import {
@@ -138,11 +139,12 @@ if (process.versions.bun) {
         fileURLToPath(import.meta.url),
         "--target=node",
         "--format=esm",
+        "--sourcemap=inline",
         `--outfile=${entry}`,
       ],
       { timeout: 30000 },
     );
-    const child = spawn("node", [entry, ...args], {
+    const child = spawn("node", ["--enable-source-maps", entry, ...args], {
       env: { ...process.env, F5_REHEARSAL_DESKTOP_ROOT: desktopDir },
       stdio: "inherit",
     });
@@ -212,6 +214,7 @@ let interrupted = false;
 let stage = "preparation";
 let failureStage;
 let failureCode;
+let failureLocation;
 let permissionStatus;
 let helperSha256;
 let buildHashes;
@@ -1808,6 +1811,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
 } catch (cause) {
   failureStage = stage;
   failureCode = rehearsalHarnessFailureCode(cause);
+  failureLocation = rehearsalHarnessFailureLocation(cause);
   // Narrow local device authority before waiting on server diagnostics.
   if (profileIsolationPause) await Promise.race([profileIsolationPause(), delay(1000)]);
   if (profileIsolationDiagnostics) {
@@ -2182,7 +2186,7 @@ require(${JSON.stringify(join(desktopDir, "dist-electron/main.js"))});
         runtimeMode,
         state: passed ? "passed" : "failed",
         interrupted,
-        ...(failureStage ? { failureStage, failureCode } : {}),
+        ...(failureStage ? { failureStage, failureCode, failureLocation } : {}),
         permissionStatus,
         nativeObservation,
         threadObservation,

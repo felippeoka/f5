@@ -7,7 +7,37 @@ import {
   rehearsalProviderActivityCounts,
   rehearsalSessionErrorCode,
   rehearsalHarnessFailureCode,
+  rehearsalHarnessFailureLocation,
 } from "./rehearsalElectronObservation";
+
+it("retains allowlisted source coordinates without error contents or private paths", () => {
+  const error = new TypeError("PRIVATE_SENTINEL");
+  error.stack = [
+    "TypeError: PRIVATE_SENTINEL",
+    "    at privateFunction (file:///PRIVATE_HOME/rehearse-computer-profile-isolation.mjs:421:17)",
+    "    at privateFunction (file:///PRIVATE_HOME/rehearsalProfileIsolation.ts:24:5)",
+    "    at privateFunction (file:///PRIVATE_HOME/untrusted.ts:24:5)",
+    "    at privateFunction (file:///PRIVATE_HOME/rehearsalProfileIsolation.ts:999999:5)",
+  ].join("\n");
+  const result = rehearsalHarnessFailureLocation(error);
+  expect(result).toEqual({
+    kind: "TypeError",
+    frames: [
+      { source: "rehearse-computer-profile-isolation.mjs", line: 421, column: 17 },
+      { source: "rehearsalProfileIsolation.ts", line: 24, column: 5 },
+    ],
+  });
+  expect(JSON.stringify(result)).not.toMatch(/PRIVATE|privateFunction|untrusted/);
+  error.name = "PRIVATE_SENTINEL";
+  error.stack =
+    "    at privateFunction (file:///PRIVATE_HOME/rehearsalProfileIsolation.ts:1:1)\n".repeat(10);
+  expect(rehearsalHarnessFailureLocation(error).kind).toBe("unknown");
+  expect(rehearsalHarnessFailureLocation(error).frames).toHaveLength(4);
+  expect(rehearsalHarnessFailureLocation({ message: "PRIVATE" })).toEqual({
+    kind: "unknown",
+    frames: [],
+  });
+});
 
 it("keeps expanded profile polling observations bounded without retaining native payloads", () => {
   for (const limit of [128, 1024, 2048]) {

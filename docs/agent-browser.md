@@ -827,6 +827,18 @@ unchanged. Bounded observation capacities cover the larger phase (1024 admitted
 requests per profile, 2048 aggregate/transport receipts, 4096 IPC messages); any
 overflow still fails. Other rehearsal defaults remain 128 requests/receipts.
 
+The [synchronized attempt](computer-certification/2026-10-14-macos-profile-isolation-unclassified-polling-failure.json)
+on clean `813547c1ab` completed both consents, the lock check and 18 contender
+inspections, then failed with an unclassified runner error before any lease,
+activation or capture. Monitor counts stayed zero and cleanup was confirmed.
+Live retries are deferred until the failing path is identified. The unsigned Node
+runner now enables source maps and records only allowlisted rehearsal filenames
+and bounded source coordinates, never raw error messages, function arguments or
+absolute paths. Read-only readiness also exercises the exact bundled owner-polling
+path against completed metadata turns, requiring no-lease refusal in both profiles.
+It cannot acquire a lease or supply execution results. These diagnostics neither
+qualify the older failed attempt nor change public gates.
+
 Development backends inherit stdio. The diagnostic observes Electron's parent output
 pipes separately and drops everything except allowlisted lifecycle/restart labels;
 watching a child's absent stdout pipe produced no diagnostic evidence. The new

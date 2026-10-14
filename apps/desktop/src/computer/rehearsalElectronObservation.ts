@@ -331,6 +331,35 @@ export function rehearsalHarnessFailureCode(error: unknown): string {
   return "unknown";
 }
 
+/** Source locations only, never messages, function arguments or absolute paths. */
+export function rehearsalHarnessFailureLocation(error: unknown) {
+  const frames: Array<{ source: string; line: number; column: number }> = [];
+  if (!(error instanceof Error)) return { kind: "unknown", frames };
+  const kind = [
+    "Error",
+    "TypeError",
+    "ReferenceError",
+    "RangeError",
+    "TimeoutError",
+    "SyntaxError",
+  ].includes(error.name)
+    ? error.name
+    : "unknown";
+  for (const frame of (error.stack ?? "").slice(0, 16 * 1024).split("\n")) {
+    if (!/^\s+at\s/.test(frame)) continue;
+    const match = frame.match(
+      /\/(rehearse-computer-(?:electron|profile-isolation)\.mjs|rehearsal(?:ProfileIsolation|ExternalClient|ElectronObservation)\.ts):(\d{1,6}):(\d{1,6})\)?$/,
+    );
+    if (!match) continue;
+    const line = Number(match[2]);
+    const column = Number(match[3]);
+    if (line < 1 || line > 10000 || column < 1 || column > 10000) continue;
+    frames.push({ source: match[1]!, line, column });
+    if (frames.length === 4) break;
+  }
+  return { kind, frames };
+}
+
 /** Already-sanitized provider activities can contain pre-host tool failures. Keep
  * only known error tags, never their detail strings or arbitrary provider fields. */
 export function rehearsalProviderErrorCodes(activities: unknown): string[] {
