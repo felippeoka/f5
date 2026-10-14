@@ -1,11 +1,33 @@
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
 import { query, type Options, type SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { ThreadId } from "@t3tools/contracts";
+import { CLAUDE_SDK_BASELINE_VERSION } from "@t3tools/shared/claudeSdkManifest";
 import { makePreviewAutomationBroker } from "../../mcp/PreviewAutomationBroker.ts";
 import { forceClaudeChromeFlag, makeClaudePreviewMcpServer } from "./claudeAgentBrowser.ts";
 import { FakeClaudeCodeProcess, respondToInitializeRequest } from "./ClaudeSdk.testUtils.ts";
 
 async function* emptyPrompt(): AsyncGenerator<never> {}
+
+// The SDK does not export its package.json, so read it next to the resolved entry.
+function installedClaudeSdkVersion(): string {
+  const entry = createRequire(import.meta.url).resolve("@anthropic-ai/claude-agent-sdk");
+  const manifest = JSON.parse(
+    readFileSync(path.join(path.dirname(entry), "package.json"), "utf8"),
+  ) as { version: string };
+  return manifest.version;
+}
+
+beforeAll(() => {
+  const installed = installedClaudeSdkVersion();
+  if (installed !== CLAUDE_SDK_BASELINE_VERSION) {
+    throw new Error(
+      `Installed Claude SDK ${installed} does not match pinned ${CLAUDE_SDK_BASELINE_VERSION}; run bun install --frozen-lockfile`,
+    );
+  }
+});
 
 describe("Claude SDK host contract transport", () => {
   it.each([undefined, "550e8400-e29b-41d4-a716-446655440000"])(
