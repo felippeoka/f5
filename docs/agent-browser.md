@@ -509,8 +509,9 @@ admission. After the turn completes, ordinary session stop must clear grants and
 lease. This stop check does not measure interruption of in-flight input. Missing
 responses, extra mutations, lost transport, incomplete cleanup or absent human
 acknowledgement cannot pass. All direct-loaded observer dependencies are hashed for
-resume. The driver and its fake-transport/receipt tests are prepared; no real windowless
-provider run or signed installed windowless result is claimed yet. Select it with:
+resume. The driver and its fake-transport/receipt tests are prepared. The unsigned real
+provider runs below now pass; signed installed windowless proof remains pending.
+Select the phase with:
 
     bun run computer:certify run --output <prepared-suite> \
       --group workflows --scenario windows-closed.claude
@@ -528,6 +529,20 @@ external-client regressions failed before the correction and pass after it. Thes
 software results do not qualify the unfinished real windowless phase. Transport
 failure diagnostics now preserve only fixed unavailable/interrupted/outcome-unknown
 labels; the original failed receipt retains its original unknown label.
+
+The corrected windowless phase passed all 21 admitted checks through
+[Claude](computer-certification/2026-10-14-macos-windowless-claude-passed.json) and
+[Codex](computer-certification/2026-10-14-macos-windowless-codex-passed.json) on clean
+`a2aa17f3d1`, with the unchanged helper hash. Each run obtained genuine fixture consent,
+closed every app window of its suite-owned F5 instance, and submitted exactly one
+ordinary queued turn externally. No test-instance app window reopened or was present
+at any of the four mutation admissions. Each provider completed exactly one activation,
+semantic press, semantic focus and synthetic typing action; correlated capture and
+inspection responses and independent fixture button/text receipts passed. Session stop
+after completion cleared grants and released the lease; the operator acknowledged
+Finish and cleanup was confirmed. Unrelated F5 instances remained open. This proves
+unsigned windowless continuity, not signed installed attribution or an in-flight stop
+latency bound. The earlier rejected attempt remains failed; no public gate changed.
 
 Use a separately prepared provider phase for Codex. Prerequisites must pass before
 readiness or consent; another running development helper holding the device lock
