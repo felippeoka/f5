@@ -1,25 +1,27 @@
 import { useEffect, useState } from "react";
-import type { ComputerAccessPush } from "@t3tools/contracts";
+import type { ComputerAccessPush, ComputerAppTier } from "@t3tools/contracts";
+import { AppWindowIcon, GlobeIcon, KeyboardIcon } from "lucide-react";
 
 import { readNativeApi } from "../nativeApi";
 import { useAgentComputerActivityStore } from "../agentComputerActivityStore";
+import { COMPUTER_TIER_LABEL } from "./AgentComputerLiveCard.logic";
+import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Dialog, DialogPopup, DialogTitle, DialogDescription, DialogHeader } from "./ui/dialog";
 
-export function ComputerAccessCard({
-  request,
-  settled,
-  allowed,
-}: {
-  request: typeof ComputerAccessPush.Type;
-  settled?: boolean | undefined;
-  allowed?: boolean | undefined;
-}) {
+const TIER_BADGE: Record<ComputerAppTier, "warning" | "info" | "outline" | "error"> = {
+  full: "warning",
+  click: "info",
+  view: "outline",
+  blocked: "error",
+};
+
+export function ComputerAccessCard({ request }: { request: typeof ComputerAccessPush.Type }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const bridge = window.desktopBridge?.computerAutomation;
   const review = async (trusted: boolean) => {
-    if (!bridge || !trusted || settled || sending) return;
+    if (!bridge || !trusted || sending) return;
     setSending(true);
     setError("");
     try {
@@ -34,48 +36,89 @@ export function ComputerAccessCard({
     }
   };
   return (
-    <div className="space-y-3 p-4 text-sm" data-testid="computer-access-card">
-      <p>{request.reason}</p>
-      {request.chromeSetup ? (
-        <div className="space-y-2 break-all rounded-md border p-3">
-          <p>Current targets:</p>
-          {request.chromeSetup.previousTargets.map((target) => (
-            <p key={target}>{target}</p>
-          ))}
-          <p>
-            New target for {request.chromeSetup.provider}: {request.chromeSetup.targetPath}
-          </p>
-          <p>This integration can act on sites you are signed in to.</p>
+    <div className="space-y-3 px-6 pb-6 text-sm" data-testid="computer-access-card">
+      {request.reason ? (
+        <div className="space-y-1 rounded-md bg-muted/50 px-3 py-2">
+          <p className="font-medium text-muted-foreground text-xs">Agent's reason</p>
+          <p>{request.reason}</p>
         </div>
       ) : null}
-      {request.apps.map((app) => (
-        <div key={app.appId} className="space-y-2 rounded-md border p-3">
-          <p className="font-medium">
-            {app.name} · {app.tier}
-          </p>
-          {app.warning === "browser" ? (
-            <p>This app can act on sites you are signed in to.</p>
-          ) : null}
-          {app.tier === "click" ? (
-            <p>Typing here can run commands. Choose typing separately in the native dialog.</p>
-          ) : null}
-          {app.tier === "full" ? <p>Control includes typing in this app.</p> : null}
-        </div>
-      ))}
-      {settled ? (
-        <p role="status">{allowed ? "Access allowed" : "Access denied or expired"}</p>
-      ) : !bridge ? (
-        <p>Answer on the computer running F5.</p>
+      {request.chromeSetup ? (
+        <dl className="space-y-2 rounded-md border p-3">
+          <div>
+            <dt className="text-muted-foreground text-xs">Current targets</dt>
+            {request.chromeSetup.previousTargets.length > 0 ? (
+              request.chromeSetup.previousTargets.map((target) => (
+                <dd key={target} className="break-all font-mono text-xs">
+                  {target}
+                </dd>
+              ))
+            ) : (
+              <dd className="text-muted-foreground text-xs">None</dd>
+            )}
+          </div>
+          <div>
+            <dt className="text-muted-foreground text-xs">
+              New target for {request.chromeSetup.provider}
+            </dt>
+            <dd className="break-all font-mono text-xs">{request.chromeSetup.targetPath}</dd>
+          </div>
+          <SignedInWarning />
+        </dl>
+      ) : null}
+      {request.apps.length > 0 ? (
+        <ul className="divide-y rounded-md border">
+          {request.apps.map((app) => (
+            <li key={app.appId} className="space-y-1 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <AppWindowIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate font-medium">{app.name}</span>
+                <Badge variant={TIER_BADGE[app.tier]}>{COMPUTER_TIER_LABEL[app.tier]}</Badge>
+              </div>
+              {app.warning === "browser" ? <SignedInWarning /> : null}
+              {app.tier === "full" ? (
+                <p className="flex items-center gap-1.5 text-muted-foreground text-xs">
+                  <KeyboardIcon className="size-3.5 shrink-0" />
+                  Includes typing
+                </p>
+              ) : null}
+              {app.tier === "click" ? (
+                <p className="flex items-center gap-1.5 text-muted-foreground text-xs">
+                  <KeyboardIcon className="size-3.5 shrink-0" />
+                  Typing can run commands; choose it in the native dialog
+                </p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {!bridge ? (
+        <p className="text-muted-foreground">Answer on the computer running F5.</p>
       ) : (
-        <div className="space-y-2">
-          <p>Choose access and remembering in F5's native dialog.</p>
+        <div className="flex items-center justify-between gap-3 pt-1">
+          <p className="text-muted-foreground text-xs">
+            Choose access and remembering in F5's native dialog
+          </p>
           <Button disabled={sending} onClick={(event) => void review(event.isTrusted)}>
             Review access
           </Button>
         </div>
       )}
-      {error ? <p role="alert">{error}</p> : null}
+      {error ? (
+        <p role="alert" className="text-destructive-foreground">
+          {error}
+        </p>
+      ) : null}
     </div>
+  );
+}
+
+function SignedInWarning() {
+  return (
+    <p className="flex items-center gap-1.5 text-warning-foreground text-xs">
+      <GlobeIcon className="size-3.5 shrink-0" />
+      Can act on sites you're signed in to
+    </p>
   );
 }
 /** Mounted once per app window. Consent stays visible even when its thread is not selected. */
@@ -117,32 +160,5 @@ export function ComputerAccessInbox() {
         <ComputerAccessCard key={request.requestId} request={request} />
       </DialogPopup>
     </Dialog>
-  );
-}
-export function ComputerAccessTimeline({ threadId }: { threadId: string }) {
-  const requests = useAgentComputerActivityStore((state) => state.requests);
-  const history = Object.values(requests)
-    .filter((request) => request?.threadId === threadId)
-    .slice(-20);
-  if (!history.length) return null;
-  return (
-    <details className="shrink-0 rounded-lg border text-sm">
-      <summary className="cursor-pointer px-3 py-2">
-        Computer access · {history.length} recent requests
-      </summary>
-      <div className="max-h-48 overflow-y-auto">
-        {history.map((request) =>
-          request ? (
-            <div key={request.requestId} className="border-t">
-              <ComputerAccessCard
-                request={request}
-                settled={request.settled}
-                allowed={request.allowed}
-              />
-            </div>
-          ) : null,
-        )}
-      </div>
-    </details>
   );
 }
