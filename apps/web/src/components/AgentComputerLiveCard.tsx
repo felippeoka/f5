@@ -41,6 +41,7 @@ const KIND_LABEL: Record<AccessRequest["kind"], string> = {
   apps: "Apps",
   "session-actions": "Session actions",
   "chrome-setup": "Browser setup",
+  "foreground-takeover": "Foreground takeover",
 };
 
 export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
@@ -50,7 +51,11 @@ export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
   const appNames = useAgentComputerActivityStore((state) => state.appNames);
   const requests = useAgentComputerActivityStore((state) => state.requests);
   const paused = useAgentComputerActivityStore((state) => state.paused[threadId]);
-  const held = useAgentComputerActivityStore((state) => state.lease.threadId === threadId);
+  const held = useAgentComputerActivityStore(
+    (state) =>
+      state.leases.holders.some((holder) => holder.threadId === threadId) ||
+      state.leases.pendingTakeover?.threadId === threadId,
+  );
   const lastLeaseAt = useAgentComputerActivityStore((state) => state.lastLeaseAt[threadId]);
   const [now, setNow] = useState(Date.now());
   const [error, setError] = useState("");

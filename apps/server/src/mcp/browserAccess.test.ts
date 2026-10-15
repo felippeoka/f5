@@ -18,6 +18,7 @@ it.effect("ANDs every agent capability with the browser access master switch", (
       externalHosts: [],
       claudeInChrome: false,
       computerUse: false,
+      computerUseExecutionMode: "foreground",
     });
     yield* settings.updateSettings({
       previewExternalHosts: ["example.com"],
@@ -34,6 +35,7 @@ it.effect("ANDs every agent capability with the browser access master switch", (
       externalHosts: ["*.example.org"],
       claudeInChrome: true,
       computerUse: true,
+      computerUseExecutionMode: "foreground",
     });
     yield* settings.updateSettings({ enableAgentBrowserAccess: false });
     assert.deepEqual(yield* resolveAgentBrowserPolicy(one), {
@@ -41,6 +43,7 @@ it.effect("ANDs every agent capability with the browser access master switch", (
       externalHosts: [],
       claudeInChrome: false,
       computerUse: false,
+      computerUseExecutionMode: "foreground",
     });
   }).pipe(
     Effect.provide(Layer.mergeAll(SqliteClient.layerMemory(), ServerSettingsService.layerTest())),

@@ -25,11 +25,11 @@ let outputQueue = DispatchQueue(label: "f5.computer.output")
 let outputSlots = DispatchSemaphore(value: 32)
 func emit(_ message: [String: Any]) {
   guard let bytes = encodeComputerPacket(message) else {
-    permit.suspend()
+    permits.suspendAll()
     return
   }
   guard outputSlots.wait(timeout: .now()) == .success else {
-    permit.suspend()
+    permits.suspendAll()
     return
   }
   outputQueue.async {
@@ -136,16 +136,83 @@ func display(_ id: String) throws -> Display {
   }
   return match
 }
-let permit = ExecutionPermit()
+// Phase 0: background accessibility delivery is compiled in but not advertised until the
+// delivery spike passes. Rehearsal builds pass `-Xswiftc -DF5_BACKGROUND_AX`.
+#if F5_BACKGROUND_AX
+  let backgroundAXEnabled = true
+#else
+  let backgroundAXEnabled = false
+#endif
+let helperCapabilities: [String] = backgroundAXEnabled ? ["background-ax-v1"] : []
+/// Per-generation permits. Lock order: never hold `permits`' lock with any other lock.
+let permits = ExecutionPermits()
+/// Guards grants, scopes' target PIDs, the window cache, frontmost PID, input sequence, the
+/// in-flight table, per-app queues and the activation-prone set. Never held across AX,
+/// CGWindowList or emit calls.
 let stateLock = NSLock()
 var latestGrants: [String: [String: Any]] = [:]
 var pressedKeys = HeldComputerInputs<CGKeyCode>()
 var pressedButtons = HeldComputerInputs<Int>()
 let inputLock = NSRecursiveLock()
 let inputQueue = DispatchQueue(label: "f5.computer.input")
+/// Held-input release never runs synchronously inside the event tap callback.
+let releaseQueue = DispatchQueue(label: "f5.computer.release")
+/// Resolves actionable physical input against background targets, off the tap callback.
+let conflictQueue = DispatchQueue(label: "f5.computer.conflicts")
+let telemetryQueue = DispatchQueue(label: "f5.computer.telemetry")
 let observeQueue = OperationQueue()
 observeQueue.maxConcurrentOperationCount = 2
 var eventTap: CFMachPort?
+struct CachedWindow {
+  let pid: Int
+  let bounds: CGRect
+}
+struct ActionableInput {
+  let kind: ComputerInputKind
+  let location: CGPoint
+  let windowNumber: Int
+  let sequence: Int
+}
+struct TrackedAction {
+  let generation: Int
+  let appId: String
+  let targetPid: Int
+  let beforeFrontPid: Int?
+  let dispatchSequence: Int
+  var windowEnd: TimeInterval
+  let session: String
+}
+// All guarded by stateLock.
+var windowCache: [Int: CachedWindow] = [:]
+var windowCacheRefreshedAt: TimeInterval = 0
+var frontmostPid: Int?
+var frontmostBundleId: String?
+var lastInputUptime: TimeInterval = 0
+var inputSequence = 0
+var pendingInputs: [ActionableInput] = []
+var enqueuedInputSequence = 0
+var resolvedInputSequence = 0
+var inFlight: [String: Int] = [:]
+var inFlightByGeneration: [Int: Int] = [:]
+var appQueues: [String: DispatchQueue] = [:]
+var activationProne = Set<String>()
+var trackedActions: [String: TrackedAction] = [:]
+var cancelledRequests: [String] = []
+var lastIdleTelemetry: TimeInterval = 0
+func locked<T>(_ body: () throws -> T) rethrows -> T {
+  stateLock.lock()
+  defer { stateLock.unlock() }
+  return try body()
+}
+func appQueue(_ appId: String) -> DispatchQueue {
+  locked {
+    if let queue = appQueues[appId] { return queue }
+    let queue = DispatchQueue(label: "f5.computer.app.\(appQueues.count)")
+    appQueues[appId] = queue
+    return queue
+  }
+}
+func requestCancelled(_ id: String) -> Bool { locked { cancelledRequests.contains(id) } }
 private var monitorHealthyValue = false
 var monitorHealthy: Bool {
   get {
@@ -166,21 +233,32 @@ let catalogLock = NSLock()
 struct Snapshot {
   let id: String
   let pid: pid_t
+  let launchDate: Date?
+  let bundleURL: URL?
   let window: AXUIElement
+  let document: String?
   let elements: [String: AXUIElement]
+  let roles: [String: String]
+  /// Owner, session, grant version and delivery the snapshot was taken under.
+  let owner: String
+  let session: String
+  let grantVersion: Int
+  let delivery: String
 }
 var snapshots: [String: [Snapshot]] = [:]
 let snapshotLock = NSLock()
-func releaseHeldInput() {
+func releaseHeldInput(where matches: ((HeldComputerInputOwner) -> Bool)? = nil) {
   inputLock.lock()
   defer { inputLock.unlock() }
-  for key in pressedKeys.drain() {
+  let keys = matches.map { pressedKeys.drain(where: $0) } ?? pressedKeys.drain()
+  for key in keys {
     if let event = computerKeyboardEvent(keyCode: key, keyDown: false) {
       event.post(tap: .cghidEventTap)
     }
   }
   let location = CGEvent(source: nil)?.location ?? .zero
-  for button in pressedButtons.drain() {
+  let buttons = matches.map { pressedButtons.drain(where: $0) } ?? pressedButtons.drain()
+  for button in buttons {
     let b: CGMouseButton = button == 1 ? .right : button == 2 ? .center : .left
     let t: CGEventType = button == 1 ? .rightMouseUp : button == 2 ? .otherMouseUp : .leftMouseUp
     if let event = CGEvent(
@@ -192,13 +270,110 @@ func releaseHeldInput() {
     }
   }
 }
-func suspend(_ event: String? = nil) {
+func suspend(_ event: String? = nil, synchronous: Bool = false) {
   // Local recognition time, before waiting to release held input. Certification
   // fixtures compare this with AppKit event/delivery times, never text or key data.
   let recognizedAtMs = ProcessInfo.processInfo.systemUptime * 1000
-  permit.suspend()
-  releaseHeldInput()
-  if let event { emit(["type": event, "recognizedAtMs": recognizedAtMs]) }
+  permits.suspendAll()
+  if synchronous { releaseHeldInput() } else { releaseQueue.async { releaseHeldInput() } }
+  if let event {
+    telemetryQueue.async { emit(["type": event, "recognizedAtMs": recognizedAtMs]) }
+  }
+}
+/// Tap-callback state; only touched on the main run loop.
+var dragging = false
+/// Suspend every active generation and tell Electron which ones stopped.
+func suspendAllReporting() {
+  let active = permits.activeGenerations()
+  permits.suspendAll()
+  releaseQueue.async { releaseHeldInput() }
+  for (generation, scope) in active {
+    interrupt(
+      generation,
+      scope.isBackground
+        ? ["type": "targetInterrupted", "cause": "monitor"] : ["type": "physicalInput"])
+  }
+}
+/// Suspend one generation locally, then report it asynchronously.
+func interrupt(_ generation: Int, _ message: [String: Any]) {
+  permits.suspend(generation)
+  releaseQueue.async { releaseHeldInput(where: { $0.generation == generation }) }
+  var payload = message
+  payload["executionGeneration"] = generation
+  payload["recognizedAtMs"] = ProcessInfo.processInfo.systemUptime * 1000
+  telemetryQueue.async { emit(payload) }
+}
+/// Window → PID/bounds map for on-screen windows. Never called from the tap callback.
+func refreshWindowCache() {
+  var cache: [Int: CachedWindow] = [:]
+  for record in windows() {
+    guard let rect = windowRect(record) else { continue }
+    cache[integer(record, kCGWindowNumber as String)] = CachedWindow(
+      pid: integer(record, kCGWindowOwnerPID as String), bounds: rect)
+  }
+  let front = NSWorkspace.shared.frontmostApplication
+  locked {
+    windowCache = cache
+    windowCacheRefreshedAt = ProcessInfo.processInfo.systemUptime
+    frontmostPid = front.map { Int($0.processIdentifier) }
+    frontmostBundleId = front?.bundleIdentifier
+  }
+}
+func backgroundScopesActive() -> [Int: String] {
+  var result: [Int: String] = [:]
+  for (generation, scope) in permits.activeGenerations() {
+    if case .app(let appId) = scope { result[generation] = appId }
+  }
+  return result
+}
+func pids(for appId: String) -> Set<Int> {
+  Set(
+    NSRunningApplication.runningApplications(withBundleIdentifier: appId).map {
+      Int($0.processIdentifier)
+    })
+}
+/// Resolve queued physical input against every active background target.
+func resolveInputs() {
+  let (events, cache, fresh, front) = locked {
+    () -> ([ActionableInput], [Int: CachedWindow], Bool, Int?) in
+    let drained = pendingInputs
+    pendingInputs.removeAll()
+    return (
+      drained, windowCache,
+      ProcessInfo.processInfo.systemUptime - windowCacheRefreshedAt < 0.5, frontmostPid
+    )
+  }
+  guard !events.isEmpty else { return }
+  let targets = backgroundScopesActive()
+  var targetPids: [Int: Set<Int>] = [:]
+  for (generation, appId) in targets { targetPids[generation] = pids(for: appId) }
+  let primaryHeight = CGDisplayBounds(CGMainDisplayID()).height
+  for event in events {
+    var ownerAtPoint: Int?
+    if !targets.isEmpty {
+      let point = computerAppKitCoordinates(
+        x: event.location.x, y: event.location.y, primaryDisplayHeight: primaryHeight)
+      let hit: () -> Int = {
+        NSWindow.windowNumber(
+          at: NSPoint(x: point.x, y: point.y), belowWindowWithWindowNumber: 0)
+      }
+      let windowId = Thread.isMainThread ? hit() : DispatchQueue.main.sync(execute: hit)
+      ownerAtPoint = cache[windowId]?.pid
+    }
+    for (generation, appId) in targets {
+      let owned = targetPids[generation] ?? []
+      let bounds = cache.values.filter { owned.contains($0.pid) }.map(\.bounds)
+      if computerInputConflicts(
+        kind: event.kind, location: event.location,
+        eventWindowOwnerPid: event.windowNumber > 0 ? cache[event.windowNumber]?.pid : nil,
+        cachedOwnerAtPoint: ownerAtPoint, frontmostPid: front, targetPids: owned,
+        targetBounds: bounds, cacheFresh: fresh)
+      {
+        interrupt(generation, ["type": "targetInterrupted", "appId": appId])
+      }
+    }
+    locked { resolvedInputSequence = max(resolvedInputSequence, event.sequence) }
+  }
 }
 func permissions() -> [String: Any] {
   let screen = CGPreflightScreenCaptureAccess()
@@ -225,7 +400,11 @@ func installMonitor() {
     tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
     eventsOfInterest: mask,
     callback: { _, type, event, _ in
+      // Bounded work only: recognise the chord, stamp input, queue actionable events.
       if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        // Never auto-resume: everything stays suspended until Electron re-arms it.
+        suspendAllReporting()
+        monitorHealthy = false
         if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
         return Unmanaged.passUnretained(event)
       }
@@ -239,24 +418,73 @@ func installMonitor() {
         suspend("killSwitch")
         return Unmanaged.passUnretained(event)
       }
-      do {
-        func physicalInput() {
-          if permit.isSuspended { emit(["type": "physicalInput", "idle": true]) }
-          else { suspend("physicalInput") }
+      let now = ProcessInfo.processInfo.systemUptime
+      var significant = true
+      if type == .mouseMoved {
+        if now - physicalWindowStarted > 0.25 {
+          lastPhysicalPoint = event.location
+          physicalWindowStarted = now
         }
-        if type == .mouseMoved {
-          let now = ProcessInfo.processInfo.systemUptime
-          if now - physicalWindowStarted > 0.25 {
-            lastPhysicalPoint = event.location
-            physicalWindowStarted = now
-          }
-          if let previous = lastPhysicalPoint,
-            hypot(event.location.x - previous.x, event.location.y - previous.y) > 8
-          {
-            physicalInput()
-          }
-        } else {
-          physicalInput()
+        significant =
+          lastPhysicalPoint.map {
+            hypot(event.location.x - $0.x, event.location.y - $0.y) > 8
+          } ?? false
+      }
+      let kind: ComputerInputKind? =
+        switch type {
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown: .pointerDown
+        case .keyDown: .keyDown
+        case .scrollWheel:
+          // Phase boundaries only: a gesture or momentum begin, or a plain wheel tick.
+          event.getIntegerValueField(.scrollWheelEventScrollPhase) <= 1
+            && event.getIntegerValueField(.scrollWheelEventMomentumPhase) <= 1 ? .scroll : nil
+        case .leftMouseDragged, .rightMouseDragged: dragging ? nil : .dragStart
+        case .leftMouseUp, .rightMouseUp: dragging ? .drop : nil
+        default: nil
+        }
+      if type == .leftMouseDragged || type == .rightMouseDragged { dragging = true }
+      if type == .leftMouseUp || type == .rightMouseUp || type == .leftMouseDown { dragging = false }
+      var overflow = false
+      let queued: Bool = locked {
+        if significant {
+          lastInputUptime = now
+          inputSequence += 1
+        }
+        guard let kind else { return false }
+        if kind == .scroll, let last = pendingInputs.last, last.kind == .scroll,
+          hypot(last.location.x - event.location.x, last.location.y - event.location.y) < 20
+        {
+          return false
+        }
+        guard pendingInputs.count < 256 else {
+          overflow = true
+          return false
+        }
+        enqueuedInputSequence = inputSequence
+        pendingInputs.append(
+          ActionableInput(
+            kind: kind, location: event.location,
+            windowNumber: Int(event.getIntegerValueField(.mouseEventWindowUnderMousePointer)),
+            sequence: inputSequence))
+        return true
+      }
+      if overflow {
+        // Unresolvable input: background generations cannot prove the user is elsewhere.
+        for generation in permits.suspendBackground() {
+          interrupt(generation, ["type": "targetInterrupted", "cause": "input-overflow"])
+        }
+      }
+      if queued { conflictQueue.async { resolveInputs() } }
+      // Foreground and takeover generations share the pointer and keyboard: any input pauses.
+      if significant {
+        let foreground = permits.suspendForeground()
+        for generation in foreground {
+          interrupt(generation, ["type": "physicalInput"])
+        }
+        if foreground.isEmpty && now - lastIdleTelemetry >= 0.1 {
+          // Coalesced idle telemetry: never pauses background holders.
+          lastIdleTelemetry = now
+          telemetryQueue.async { emit(["type": "physicalInput", "idle": true]) }
         }
       }
       return Unmanaged.passUnretained(event)
@@ -273,10 +501,33 @@ func installMonitor() {
 func authorization(_ request: [String: Any]) -> [String: Any] {
   request["authorization"] as? [String: Any] ?? [:]
 }
+func delivery(_ request: [String: Any]) -> String {
+  string(request, "delivery") == "background" ? "background" : "foreground"
+}
+func isBackground(_ request: [String: Any]) -> Bool { delivery(request) == "background" }
 func checkPermit(_ request: [String: Any]) throws {
   let auth = authorization(request)
-  guard permit.authorized(integer(auth, "executionGeneration"), id: string(request, "requestId"))
+  let generation = integer(auth, "executionGeneration")
+  guard permits.authorized(generation, id: string(request, "requestId"))
   else { throw Failure("Interrupted", "cause", "permit-expired") }
+  // The generation's immutable scope decides what this request may do.
+  guard let scope = permits.scope(generation) else {
+    throw Failure("Interrupted", "cause", "permit-expired")
+  }
+  let op = string(request, "op")
+  let appId = request["appId"] as? String
+  if !computerScopeAllows(
+    scope: scope, delivery: delivery(request), op: op, appId: appId,
+    action: request["action"] as? String)
+  {
+    if case .takeover = scope, !isBackground(request) {
+      throw Failure("TargetBlocked", "kind", "other-app")
+    }
+    if isBackground(request), case .app(let scoped) = scope, appId != scoped {
+      throw Failure("ReplayRejected")
+    }
+    throw Failure("ForegroundRequired", "reason", "unsupported-in-background")
+  }
   guard Date().timeIntervalSince1970 * 1000 < number(request, "deadlineAtMs") else {
     throw Failure("Interrupted", "cause", "permit-expired")
   }
@@ -320,6 +571,14 @@ func grant(_ app: NSRunningApplication, request: [String: Any], host: [String: A
     allowsComputerGrant(
       tier: appTier, allowTyping: access["allowTyping"] as? Bool == true, needed: needed)
   else { throw Failure("NotGranted", "needed", needed) }
+  // A takeover is foreground limited to one app: every recipient must belong to it.
+  if needed != "view",
+    case .takeover(let scoped) = permits.scope(
+      integer(authorization(request), "executionGeneration")),
+    scoped != id
+  {
+    throw Failure("TargetBlocked", "kind", "other-app")
+  }
   return id
 }
 func windows() -> [[String: Any]] {
@@ -412,7 +671,7 @@ func postMouse(
   event.setIntegerValueField(.eventSourceUserData, value: 0xF5C0)
   try checkPermit(request)
   if [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(type) {
-    pressedButtons.insert(Int(button.rawValue))
+    pressedButtons.insert(Int(button.rawValue), owner: inputOwner(request))
   }
   event.post(tap: .cghidEventTap)
   if [.leftMouseUp, .rightMouseUp, .otherMouseUp].contains(type) {
@@ -505,10 +764,14 @@ func inspect(_ request: [String: Any], _ host: [String: Any]) throws -> [String:
   let limit = min(400, max(1, integer(request, "maxNodes")))
   var nodes: [[String: Any]] = []
   var elements: [String: AXUIElement] = [:]
+  var roles: [String: String] = [:]
+  let background = isBackground(request)
+  let session = string(authorization(request), "sessionGeneration")
+  let foregroundOnly = background && backgroundForegroundOnly(id, session: session)
   let inspectDeadline = ProcessInfo.processInfo.systemUptime + 8
   func visit(_ element: AXUIElement, depth: Int) throws {
     if depth > 30 || nodes.count >= limit { return }
-    if permit.wasCancelled(string(request, "requestId")) {
+    if requestCancelled(string(request, "requestId")) {
       throw Failure("Interrupted", "cause", "paused")
     }
     guard ProcessInfo.processInfo.systemUptime < inspectDeadline,
@@ -518,6 +781,7 @@ func inspect(_ request: [String: Any], _ host: [String: Any]) throws -> [String:
     let ref = UUID().uuidString
     elements[ref] = element
     let role = attribute(element, kAXRoleAttribute) as? String ?? "unknown"
+    roles[ref] = role
     let secure =
       role == "AXSecureTextField"
       || (attribute(element, kAXSubroleAttribute) as? String) == "AXSecureTextField"
@@ -549,7 +813,9 @@ func inspect(_ request: [String: Any], _ host: [String: Any]) throws -> [String:
           ?? (attribute(element, kAXDescriptionAttribute) as? String) ?? "").prefix(200)),
       "focused": attribute(element, kAXFocusedAttribute) as? Bool ?? false,
       "enabled": attribute(element, kAXEnabledAttribute) as? Bool ?? true,
-      "actions": secure ? [] : actions,
+      // In background, list only actions that execute without the foreground.
+      "actions": secure || foregroundOnly
+        ? [] : background ? actions.filter { ["press", "setValue"].contains($0) } : actions,
     ]
     if !secure, let value = attribute(element, kAXValueAttribute) as? String {
       node["value"] = String(value.prefix(200))
@@ -590,37 +856,99 @@ func inspect(_ request: [String: Any], _ host: [String: Any]) throws -> [String:
     }
   }
   try visit(window, depth: 0)
+  let auth = authorization(request)
+  let snapshot = Snapshot(
+    id: snapshotId, pid: app.processIdentifier, launchDate: app.launchDate,
+    bundleURL: app.bundleURL, window: window,
+    document: attribute(window, kAXDocumentAttribute) as? String, elements: elements,
+    roles: roles, owner: string(auth, "profileId") + "\0" + string(auth, "threadId"),
+    session: session, grantVersion: integer(auth, "grantVersion"), delivery: delivery(request))
   snapshotLock.lock()
   var appSnapshots = snapshots[id] ?? []
-  appSnapshots.append(
-    Snapshot(id: snapshotId, pid: app.processIdentifier, window: window, elements: elements))
+  appSnapshots.append(snapshot)
   snapshots[id] = Array(appSnapshots.suffix(4))
   snapshotLock.unlock()
-  let result: [String: Any] = [
+  var result: [String: Any] = [
     "snapshotId": snapshotId, "appId": id, "accessible": true, "nodes": nodes,
   ]
+  if foregroundOnly {
+    result["executionNote"] =
+      "This app needs the foreground; call computer_request_foreground before acting."
+  } else if background {
+    result["executionNote"] =
+      "Background mode: press and setValue run here; other actions need computer_request_foreground."
+  }
   if (try JSONSerialization.data(withJSONObject: result)).count > 256 * 1024 {
     throw Failure("ResultTooLarge")
   }
   return result
 }
-func elementAction(_ request: [String: Any], _ host: [String: Any]) throws {
+/// Background actions only: the target window must be one on-screen CG window (not minimized,
+/// not on another Space) or the action needs the foreground.
+func onScreenWindow(_ window: AXUIElement, pid: pid_t) throws -> CGRect {
+  guard let rect = axRect(window) else {
+    throw Failure("ForegroundRequired", "reason", "window-unavailable")
+  }
+  let matches = windows().filter { record in
+    integer(record, kCGWindowOwnerPID as String) == Int(pid)
+      && windowRect(record).map {
+        abs($0.minX - rect.minX) < 1 && abs($0.minY - rect.minY) < 1
+          && abs($0.width - rect.width) < 1 && abs($0.height - rect.height) < 1
+      } == true
+  }
+  guard matches.count == 1 else {
+    throw Failure("ForegroundRequired", "reason", "window-unavailable")
+  }
+  return rect
+}
+func isAncestor(_ window: AXUIElement, of element: AXUIElement) -> Bool {
+  var current: AXUIElement? = element
+  for _ in 0..<64 {
+    guard let node = current else { return false }
+    if CFEqual(node, window) { return true }
+    current = axElement(attribute(node, kAXParentAttribute))
+  }
+  return false
+}
+/// Returns read-back verification facts for background deliveries; never document text.
+@discardableResult
+func elementAction(_ request: [String: Any], _ host: [String: Any]) throws -> [String: Any]? {
   let id = string(request, "appId")
   let app = try appById(id)
   let action = string(request, "action")
+  let background = isBackground(request)
   try checkPermit(request)
   _ = try grant(app, request: request, host: host, needed: action == "setValue" ? "type" : "click")
+  if background { try backgroundPreflight(request, app: app) }
   snapshotLock.lock()
   let snapshot = snapshots[id]?.first(where: { $0.id == string(request, "snapshotId") })
   snapshotLock.unlock()
+  let auth = authorization(request)
   guard let snapshot, snapshot.pid == app.processIdentifier,
     let element = snapshot.elements[string(request, "elementRef")],
     let currentWindow = axElement(
       attribute(applicationElement(app.processIdentifier), kAXFocusedWindowAttribute)),
     CFEqual(currentWindow, snapshot.window)
   else { throw Failure("StaleElement") }
+  if background {
+    // Same process incarnation, same owner/session/grants/mode, same document.
+    guard snapshot.launchDate == app.launchDate, snapshot.bundleURL == app.bundleURL,
+      snapshot.owner == string(auth, "profileId") + "\0" + string(auth, "threadId"),
+      snapshot.session == string(auth, "sessionGeneration"),
+      snapshot.grantVersion == integer(auth, "grantVersion"), snapshot.delivery == "background",
+      (attribute(currentWindow, kAXDocumentAttribute) as? String) == snapshot.document,
+      isAncestor(snapshot.window, of: element)
+    else { throw Failure("StaleElement") }
+    _ = try onScreenWindow(currentWindow, pid: app.processIdentifier)
+  }
   guard let role = attribute(element, kAXRoleAttribute) as? String else {
     throw Failure("StaleElement")
+  }
+  if background {
+    let expected = snapshot.roles[string(request, "elementRef")]
+    guard expected == role, attribute(element, kAXEnabledAttribute) as? Bool ?? true else {
+      throw Failure("StaleElement")
+    }
   }
   if role == "AXSecureTextField"
     || (attribute(element, kAXSubroleAttribute) as? String) == "AXSecureTextField"
@@ -633,6 +961,9 @@ func elementAction(_ request: [String: Any], _ host: [String: Any]) throws {
     throw Failure("StaleElement")
   }
   try checkPermit(request)
+  // A slow app may take longer than the process-wide ceiling to act; only this element.
+  if background { _ = AXUIElementSetMessagingTimeout(element, 2) }
+  defer { if background { _ = AXUIElementSetMessagingTimeout(element, 0.25) } }
   let result: AXError
   if action == "setValue" || action == "focus" {
     var settable = DarwinBoolean(false)
@@ -642,22 +973,250 @@ func elementAction(_ request: [String: Any], _ host: [String: Any]) throws {
         && settable.boolValue
     else { throw Failure("UnsupportedAction") }
     try checkPermit(request)
+    let dispatch = background ? beginBackgroundAction(request, app: app) : nil
     result = AXUIElementSetAttributeValue(
       element, name as CFString,
       action == "focus" ? kCFBooleanTrue : string(request, "value") as CFString)
+    if let dispatch { try endBackgroundAction(dispatch, succeeded: result == .success) }
   } else {
     let actions = [
       "press": "AXPress", "increment": "AXIncrement", "decrement": "AXDecrement",
       "showMenu": "AXShowMenu", "scrollIntoView": "AXScrollToVisible",
     ]
     guard let native = actions[action] else { throw Failure("UnsupportedAction") }
+    if background {
+      var names: CFArray?
+      _ = AXUIElementCopyActionNames(element, &names)
+      guard (names as? [String] ?? []).contains(native) else { throw Failure("UnsupportedAction") }
+    }
+    let dispatch = background ? beginBackgroundAction(request, app: app) : nil
     result = AXUIElementPerformAction(element, native as CFString)
+    if let dispatch { try endBackgroundAction(dispatch, succeeded: result == .success) }
   }
   guard result == .success else {
+    // After an AX dispatch that did not confirm, the action may or may not have happened.
+    if background && result == .cannotComplete { throw Failure("OutcomeUnknown") }
     throw Failure(
       result == .actionUnsupported || result == .attributeUnsupported
         ? "UnsupportedAction" : "StaleElement")
   }
+  guard background else { return nil }
+  // Bounded read-back. A read-back failure after confirmed success stays success.
+  if action == "setValue" {
+    let value = attribute(element, kAXValueAttribute) as? String
+    guard let value else { return ["verified": false] }
+    return [
+      "verified": value == string(request, "value"),
+      "matchesRequestedValue": value == string(request, "value"),
+      "valueLength": value.count,
+    ]
+  }
+  // AXPress reports dispatch, not effect: without a read-back it is never "verified".
+  return ["verified": false]
+}
+/// The secure-input deadline expired before a background mutation could run.
+struct SecureInputWait: Error {}
+func backgroundForegroundOnly(_ appId: String, session: String) -> Bool {
+  computerBackgroundForegroundOnly(appId) || locked { activationProne.contains(session + "\0" + appId) }
+}
+/// Shared background checks: target not frontmost, app allowed in background, secure input
+/// released, and every physical input up to now resolved against this target.
+func backgroundPreflight(_ request: [String: Any], app: NSRunningApplication) throws {
+  let generation = integer(authorization(request), "executionGeneration")
+  let appId = app.bundleIdentifier ?? ""
+  if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier {
+    throw Failure("TargetBlocked", "kind", "user-active")
+  }
+  if backgroundForegroundOnly(appId, session: string(authorization(request), "sessionGeneration"))
+  {
+    throw Failure("ForegroundRequired", "reason", "unsupported-app")
+  }
+  if IsSecureEventInputEnabled() {
+    // Hold, never type into or beside a secure field. Return before the host's own deadline.
+    emit(["type": "executionState", "executionGeneration": generation, "state": "waiting-secure-input"])
+    let deadline = min(
+      number(request, "deadlineAtMs") / 1000 - 1, Date().timeIntervalSince1970 + 25)
+    while IsSecureEventInputEnabled() {
+      if Date().timeIntervalSince1970 >= deadline { throw SecureInputWait() }
+      Thread.sleep(forTimeInterval: 0.1)
+      try checkPermit(request)
+    }
+    emit(["type": "executionState", "executionGeneration": generation, "state": "active"])
+  }
+  let target = locked { enqueuedInputSequence }
+  let until = ProcessInfo.processInfo.systemUptime + 0.25
+  while locked({ resolvedInputSequence }) < target {
+    guard ProcessInfo.processInfo.systemUptime < until else {
+      interrupt(generation, ["type": "targetInterrupted", "appId": appId, "cause": "unresolved"])
+      throw Failure("Interrupted", "cause", "user-input")
+    }
+    Thread.sleep(forTimeInterval: 0.005)
+  }
+  try checkPermit(request)
+}
+/// Track a dispatched background action until 500 ms after it completes.
+func beginBackgroundAction(
+  _ request: [String: Any], app: NSRunningApplication, frontPid: Int?? = nil
+) -> String {
+  let id = string(request, "requestId")
+  let front =
+    frontPid ?? NSWorkspace.shared.frontmostApplication.map { Int($0.processIdentifier) }
+  let auth = authorization(request)
+  locked {
+    trackedActions[id] = TrackedAction(
+      generation: integer(auth, "executionGeneration"), appId: app.bundleIdentifier ?? "",
+      targetPid: Int(app.processIdentifier), beforeFrontPid: front,
+      dispatchSequence: inputSequence, windowEnd: .infinity,
+      session: string(auth, "sessionGeneration"))
+  }
+  return id
+}
+func endBackgroundAction(_ id: String, succeeded: Bool) throws {
+  let now = ProcessInfo.processInfo.systemUptime
+  guard
+    let tracked: TrackedAction = locked({
+      trackedActions[id]?.windowEnd = now + 0.5
+      return trackedActions[id]
+    })
+  else { return }
+  DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+    locked { _ = trackedActions.removeValue(forKey: id) }
+  }
+  let front = NSWorkspace.shared.frontmostApplication.map { Int($0.processIdentifier) }
+  if computerActivationIncident(
+    beforePid: tracked.beforeFrontPid, afterPid: front, targetPid: tracked.targetPid,
+    windowEndUptime: now + 0.5, now: now)
+  {
+    activationIncident(id)
+    // A confirmed success stays a success; the pause is reported separately.
+    if !succeeded { throw Failure("ForegroundRequired", "reason", "activation-side-effect") }
+  }
+}
+/// The target came to the front because of our action: pause, quarantine the app for this
+/// provider session, and restore the previous app only if the user has not touched anything.
+func activationIncident(_ id: String) {
+  guard let tracked: TrackedAction = locked({ trackedActions.removeValue(forKey: id) }) else {
+    return
+  }
+  permits.suspend(tracked.generation)
+  locked { _ = activationProne.insert(tracked.session + "\0" + tracked.appId) }
+  let untouched = { locked { inputSequence == tracked.dispatchSequence } }
+  DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+    var restored = false
+    if untouched(), let pid = tracked.beforeFrontPid,
+      let previous = NSRunningApplication(processIdentifier: pid_t(pid))
+    {
+      restored = previous.activate(options: [])
+    }
+    emit([
+      "type": "activationIncident", "executionGeneration": tracked.generation,
+      "restored": restored,
+    ])
+  }
+}
+/// Workspace activation: a tracked action's target activating is an incident; otherwise any
+/// background target becoming frontmost pauses that generation (the user is there).
+func applicationActivated(_ app: NSRunningApplication) {
+  let pid = Int(app.processIdentifier)
+  let now = ProcessInfo.processInfo.systemUptime
+  locked {
+    frontmostPid = pid
+    frontmostBundleId = app.bundleIdentifier
+  }
+  let incident = locked {
+    trackedActions.first { $0.value.targetPid == pid && now <= $0.value.windowEnd }?.key
+  }
+  if let incident {
+    activationIncident(incident)
+    return
+  }
+  guard let bundleId = app.bundleIdentifier else { return }
+  for (generation, appId) in backgroundScopesActive() where appId == bundleId {
+    interrupt(generation, ["type": "targetInterrupted", "appId": appId, "cause": "frontmost"])
+  }
+}
+/// Background typing: accessibility text insertion into the target's focused element only.
+/// AX errors returned before the target accepted the write; anything else is ambiguous.
+func computerAXWriteRejected(_ error: AXError) -> Bool {
+  [.attributeUnsupported, .illegalArgument, .notImplemented, .apiDisabled, .invalidUIElement]
+    .contains(error)
+}
+/// The OS action is done; an optional screenshot follows. Lets Electron keep a known success
+/// even if a stop or activation incident arrives during capture.
+func confirmAction(_ request: [String: Any]) {
+  let payload: [String: Any] = [
+    "type": "actionConfirmed", "requestId": string(request, "requestId"),
+    "executionGeneration": integer(authorization(request), "executionGeneration"),
+  ]
+  telemetryQueue.async { emit(payload) }
+}
+func backgroundType(_ request: [String: Any], _ host: [String: Any]) throws -> (
+  NSRunningApplication, CGRect, [String: Any]
+) {
+  let id = string(request, "appId")
+  let app = try appById(id)
+  try checkPermit(request)
+  _ = try grant(app, request: request, host: host, needed: "type")
+  try backgroundPreflight(request, app: app)
+  let root = applicationElement(app.processIdentifier)
+  guard let element = axElement(attribute(root, kAXFocusedUIElementAttribute)),
+    let window = axElement(attribute(root, kAXFocusedWindowAttribute))
+  else { throw Failure("TargetBlocked", "kind", "focus-unknown") }
+  let bounds = try onScreenWindow(window, pid: app.processIdentifier)
+  var pid: pid_t = 0
+  if let kind = computerFocusBlock(
+    frontPid: Int(app.processIdentifier),
+    focusedPid: AXUIElementGetPid(element, &pid) == .success ? Int(pid) : nil,
+    secureInput: IsSecureEventInputEnabled(), role: attribute(element, kAXRoleAttribute) as? String,
+    subrole: attribute(element, kAXSubroleAttribute) as? String)
+  {
+    throw Failure("TargetBlocked", "kind", kind)
+  }
+  var settable = DarwinBoolean(false)
+  guard
+    AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable)
+      == .success && settable.boolValue
+  else { throw Failure("ForegroundRequired", "reason", "typing-unsupported") }
+  let characters = Array(string(request, "text"))
+  guard characters.count <= 10_000 else { throw Failure("ResultTooLarge") }
+  let before = attribute(element, kAXValueAttribute) as? String
+  var readable = before != nil
+  var start = 0
+  while start < characters.count {
+    // Once any chunk was inserted, a stop is no longer a clean interruption: the text is
+    // partially typed and a retry would duplicate it.
+    do { try checkPermit(request) } catch { throw start == 0 ? error : Failure("OutcomeUnknown") }
+    guard let currentElement = axElement(attribute(root, kAXFocusedUIElementAttribute)),
+      let currentWindow = axElement(attribute(root, kAXFocusedWindowAttribute)),
+      CFEqual(currentElement, element), CFEqual(currentWindow, window),
+      !IsSecureEventInputEnabled()
+    else { throw start == 0 ? Failure("TargetBlocked", "kind", "focus-unknown") : Failure("OutcomeUnknown") }
+    let end = min(start + 32, characters.count)
+    let dispatch = beginBackgroundAction(request, app: app)
+    let result = AXUIElementSetAttributeValue(
+      element, kAXSelectedTextAttribute as CFString, String(characters[start..<end]) as CFString)
+    try endBackgroundAction(dispatch, succeeded: result == .success)
+    guard result == .success else {
+      // Only errors that establish the write never applied are safe to retry in the
+      // foreground; cannotComplete and generic failures may already have inserted text.
+      throw start == 0 && computerAXWriteRejected(result)
+        ? Failure("ForegroundRequired", "reason", "typing-unsupported")
+        : Failure("OutcomeUnknown")
+    }
+    if start == 0 {
+      // Some apps accept the attribute write and ignore it: nothing was typed.
+      let after = attribute(element, kAXValueAttribute) as? String
+      if let before, let after, after == before {
+        throw Failure("ForegroundRequired", "reason", "typing-unsupported")
+      }
+      readable = readable && after != nil
+    }
+    start = end
+  }
+  let final = attribute(element, kAXValueAttribute) as? String
+  var verification: [String: Any] = ["verified": readable && final != nil && final != before]
+  if let final { verification["valueLength"] = final.count }
+  return (app, bounds, verification)
 }
 func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws -> [String: Any] {
   try checkGrants(request)
@@ -665,7 +1224,35 @@ func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws ->
     throw Failure("Unavailable", "reason", "missing-permissions",
       captureFailure: computerCaptureFailureDiagnostic(stage: .permissionPreflight))
   }
-  let target = try display(string(request, "displayId"))
+  // App-scoped (background) capture: only the named app, including covered windows. Never
+  // activates, unminimizes or switches Spaces. The display follows the target's focused window.
+  let scopedAppId = (request["appId"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+  var scopedWindow: CGRect?
+  if let scopedAppId {
+    let app = try appById(scopedAppId)
+    _ = try grant(app, request: request, host: host, needed: "view")
+    let root = applicationElement(app.processIdentifier)
+    guard
+      let window = axElement(attribute(root, kAXFocusedWindowAttribute))
+        ?? (attribute(root, kAXWindowsAttribute) as? [AXUIElement])?.first,
+      let rect = axRect(window)
+    else { throw Failure("ForegroundRequired", "reason", "window-unavailable") }
+    scopedWindow = rect
+  }
+  let target: Display
+  if let scopedWindow, string(request, "displayId").isEmpty {
+    let center = CGPoint(x: scopedWindow.midX, y: scopedWindow.midY)
+    guard
+      let match = displays().first(where: { $0.bounds.contains(center) })
+        ?? displays().first(where: { $0.bounds.intersects(scopedWindow) })
+    else { throw Failure("ForegroundRequired", "reason", "window-unavailable") }
+    target = match
+  } else {
+    target = try display(string(request, "displayId"))
+    if let scopedWindow, !target.bounds.intersects(scopedWindow) {
+      throw Failure("GeometryChanged")
+    }
+  }
   let grants = authorization(request)["grants"] as? [[String: Any]] ?? []
   let f5Pids = host["f5Pids"] as? [Int] ?? []
   let content: SCShareableContent
@@ -678,6 +1265,7 @@ func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws ->
   let apps = content.applications.filter { app in
     !f5Pids.contains(Int(app.processID)) && tier(app.bundleIdentifier) != "blocked"
       && grants.contains(where: { string($0, "appId") == app.bundleIdentifier })
+      && (scopedAppId == nil || app.bundleIdentifier == scopedAppId)
   }
   guard let screen = content.displays.first(where: { $0.displayID == target.id }) else {
     throw Failure("GeometryChanged")
@@ -703,10 +1291,12 @@ func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws ->
     ) {
       let filter = SCContentFilter(display: screen, including: captureApps, exceptingWindows: [])
       if #available(macOS 14.2, *) {
+        // The menu bar belongs to the frontmost app, never to a background target.
         filter.includeMenuBar =
-          NSWorkspace.shared.frontmostApplication.map { front in
+          scopedAppId == nil
+          && (NSWorkspace.shared.frontmostApplication.map { front in
             captureApps.contains(where: { $0.processID == front.processIdentifier })
-          } ?? false
+          } ?? false)
       }
       return try await withComputerCaptureConfiguration(width: captureWidth, height: captureHeight) {
         configuration in
@@ -863,6 +1453,12 @@ func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws ->
     "modelSize": ["width": encoded.width, "height": encoded.height],
     "mimeType": zoom ? "image/png" : "image/jpeg", "data": data, "hiddenContent": hidden,
   ]
+  if scopedAppId != nil {
+    // App-scoped evidence: the captured display, and no cursor (the user's pointer is theirs).
+    if zoom { result["rect"] = request["rect"] }
+    result["captureScope"] = "app"
+    return result
+  }
   let allDisplays = displays()
   let pointer = CGEvent(source: nil)?.location
   guard
@@ -913,10 +1509,101 @@ func keyChord(_ raw: String) throws -> (CGKeyCode, CGEventFlags) {
   }
   return (code, flags)
 }
+/// The request/generation that owns any input this request presses.
+func inputOwner(_ request: [String: Any]) -> HeldComputerInputOwner {
+  HeldComputerInputOwner(
+    requestId: string(request, "requestId"),
+    generation: integer(authorization(request), "executionGeneration"))
+}
+func openInstalledApp(
+  _ request: [String: Any], _ host: [String: Any], activates: Bool
+) async throws -> NSRunningApplication {
+  let id = string(request, "appId")
+  _ = resolveApps([id])
+  let resolvedURL = catalogLock.withLock { installed[id] }
+  guard let url = resolvedURL else {
+    throw Failure("Execution", "message", "App was not resolved from installed applications.")
+  }
+  guard !url.standardizedFileURL.path.hasPrefix(string(host, "f5BundlePath")),
+    !NSRunningApplication.runningApplications(withBundleIdentifier: id).contains(where: {
+      (host["f5Pids"] as? [Int] ?? []).contains(Int($0.processIdentifier))
+    })
+  else { throw Failure("TargetBlocked", "kind", "f5") }
+  try checkPermit(request)
+  let configuration = NSWorkspace.OpenConfiguration()
+  configuration.activates = activates
+  let app = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+  // Background: the launched process must be the granted app, not whatever the URL resolved to.
+  guard activates || app.bundleIdentifier == id else {
+    throw Failure("Execution", "message", "Opened app identity did not match.")
+  }
+  _ = try grant(app, request: request, host: host, needed: "click")
+  return app
+}
+/// Background deliveries: accessibility only, no pointer movement, no focus change.
+func backgroundMutate(_ request: [String: Any], _ host: [String: Any]) async throws -> [String:
+  Any]
+{
+  let op = string(request, "op")
+  let appId = string(request, "appId")
+  var verification: [String: Any]?
+  do {
+    switch op {
+    case "elementAction": verification = try elementAction(request, host)
+    case "type": verification = try backgroundType(request, host).2
+    case "openApp":
+      let id = string(request, "appId")
+      if tier(id) == "blocked" { throw Failure("TargetBlocked", "kind", "protection-unknown") }
+      let before = NSWorkspace.shared.frontmostApplication.map { Int($0.processIdentifier) }
+      let app = try await openInstalledApp(request, host, activates: false)
+      // Launching without activation is a request, not a guarantee: catch activation.
+      let dispatch = beginBackgroundAction(request, app: app, frontPid: before)
+      try endBackgroundAction(dispatch, succeeded: true)
+    default: throw Failure("ForegroundRequired", "reason", "unsupported-in-background")
+    }
+  } catch is SecureInputWait {
+    return [
+      "frontmostApp": NSNull(), "cursor": NSNull(), "actionCompleted": false,
+      "waiting": "secure-input", "delivery": "background", "target": ["appId": appId],
+      "displayId": displays().first.map { String($0.id) } ?? "unknown",
+      "geometryGeneration": displays().first?.generation ?? "unknown",
+    ]
+  }
+  confirmAction(request)
+  refreshWindowCache()
+  var result: [String: Any] = [
+    "frontmostApp": NSNull(), "cursor": NSNull(), "actionCompleted": true,
+    "delivery": "background", "target": ["appId": appId],
+  ]
+  if let verification { result["verification"] = verification }
+  if let current = displays().first {
+    result["displayId"] = String(current.id)
+    result["geometryGeneration"] = current.generation
+  } else {
+    result["displayId"] = "unknown"
+    result["geometryGeneration"] = "unknown"
+  }
+  if request["screenshot"] as? Bool == true {
+    var capture = request
+    capture["op"] = "screenshot"
+    capture.removeValue(forKey: "displayId")
+    do {
+      let image = try await screenshot(capture, host)
+      result["screenshot"] = image
+      result["displayId"] = image["displayId"]
+      result["geometryGeneration"] = image["geometryGeneration"]
+    } catch let failure as Failure {
+      result["screenshotError"] = failure.payload["_tag"] ?? "Execution"
+    } catch { result["screenshotError"] = "Execution" }
+  }
+  return result
+}
 func mutate(_ request: [String: Any], _ host: [String: Any]) async throws -> [String: Any] {
   let op = string(request, "op")
   try checkPermit(request)
-  defer { releaseHeldInput() }
+  let owner = inputOwner(request)
+  defer { releaseHeldInput(where: { $0 == owner }) }
+  if isBackground(request) { return try await backgroundMutate(request, host) }
   if ["click", "move", "drag", "scroll"].contains(op) {
     let target = try display(string(request, "displayId"))
     guard target.generation == string(request, "geometryGeneration") else {
@@ -1003,7 +1690,7 @@ func mutate(_ request: [String: Any], _ host: [String: Any]) async throws -> [St
               throw Failure("UnsupportedAction")
             }
             try checkPermit(request)
-            if down { pressedKeys.insert(0) }
+            if down { pressedKeys.insert(0, owner: owner) }
             event.post(tap: .cghidEventTap)
             if !down { pressedKeys.remove(0) }
           }
@@ -1023,7 +1710,7 @@ func mutate(_ request: [String: Any], _ host: [String: Any]) async throws -> [St
               guard let event = computerKeyboardEvent(keyCode: code, keyDown: down, modifiers: flags)
               else { throw Failure("UnsupportedAction") }
               try checkPermit(request)
-              if down { pressedKeys.insert(code) }
+              if down { pressedKeys.insert(code, owner: owner) }
               event.post(tap: .cghidEventTap)
               if !down { pressedKeys.remove(code) }
             }
@@ -1049,24 +1736,12 @@ func mutate(_ request: [String: Any], _ host: [String: Any]) async throws -> [St
         throw Failure("Execution", "message", "App activation failed.")
       }
     } else {
-      _ = resolveApps([id])
-      let resolvedURL = catalogLock.withLock { installed[id] }
-      guard let url = resolvedURL else {
-        throw Failure("Execution", "message", "App was not resolved from installed applications.")
-      }
-      guard !url.standardizedFileURL.path.hasPrefix(string(host, "f5BundlePath")),
-        !NSRunningApplication.runningApplications(withBundleIdentifier: id).contains(where: {
-          (host["f5Pids"] as? [Int] ?? []).contains(Int($0.processIdentifier))
-        })
-      else { throw Failure("TargetBlocked", "kind", "f5") }
-      try checkPermit(request)
-      let app = try await NSWorkspace.shared.openApplication(
-        at: url, configuration: NSWorkspace.OpenConfiguration())
-      _ = try grant(app, request: request, host: host, needed: "click")
+      _ = try await openInstalledApp(request, host, activates: true)
     }
   } else {
     throw Failure("UnsupportedAction")
   }
+  confirmAction(request)
   try await Task.sleep(nanoseconds: 300_000_000)
   var result: [String: Any] = [
     "frontmostApp": NSWorkspace.shared.frontmostApplication.flatMap(appRecord) ?? NSNull(),
@@ -1109,9 +1784,29 @@ func execute(_ message: [String: Any]) {
   let host = message["hostAuthorization"] as? [String: Any] ?? [:]
   let id = string(request, "requestId")
   let op = string(request, "op")
+  let generation = integer(authorization(request), "executionGeneration")
+  let tracked = ![
+    "status", "listApps", "resolveApps", "inspect", "screenshot", "zoom",
+  ].contains(op)
+  // The in-flight table maps cancel/drain to the request's generation.
+  if tracked {
+    locked {
+      inFlight[id] = generation
+      inFlightByGeneration[generation, default: 0] += 1
+    }
+  }
   let completed = DispatchSemaphore(value: 0)
   Task {
-    defer { completed.signal() }
+    defer {
+      if tracked {
+        locked {
+          inFlight.removeValue(forKey: id)
+          let remaining = (inFlightByGeneration[generation] ?? 1) - 1
+          inFlightByGeneration[generation] = remaining > 0 ? remaining : nil
+        }
+      }
+      completed.signal()
+    }
     do {
       let result: Any
       switch op {
@@ -1135,8 +1830,12 @@ func execute(_ message: [String: Any]) {
   }
   completed.wait()
 }
+let hello: [String: Any] = [
+  "type": "hello", "protocolVersion": 1, "helperVersion": "2.1.0",
+  "capabilities": helperCapabilities,
+]
 guard let lockDirectory = computerDeviceLockDirectory() else {
-  emit(["type": "hello", "protocolVersion": 1, "helperVersion": "2.0.0"])
+  emit(hello)
   emit([
     "type": "status",
     "status": [
@@ -1149,31 +1848,66 @@ guard let lockDirectory = computerDeviceLockDirectory() else {
 try FileManager.default.createDirectory(atPath: lockDirectory, withIntermediateDirectories: true)
 let deviceLock = ComputerDeviceLock(path: lockDirectory + "/computer-control.lock")
 guard deviceLock != nil else {
-  emit(["type": "hello", "protocolVersion": 1, "helperVersion": "2.0.0"])
+  emit(hello)
   emit(["type": "status", "status": ["available": false, "reason": "other-instance"]])
   outputQueue.sync {}
   exit(0)
 }
-emit(["type": "hello", "protocolVersion": 1, "helperVersion": "2.0.0"])
+emit(hello)
 // AppKit's cross-process mouse hit test needs a WindowServer connection. Initialize
 // the application without a Dock icon, activation, or windows of its own.
 NSApplication.shared.setActivationPolicy(.prohibited)
 // Child AX objects otherwise retain the default timeout; set the process-wide ceiling.
 _ = AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 0.25)
 installMonitor()
+let workspaceCenter = NSWorkspace.shared.notificationCenter
+let workspaceObservers = [
+  workspaceCenter.addObserver(
+    forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+  ) { note in
+    if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+      applicationActivated(app)
+    }
+    if !backgroundScopesActive().isEmpty { conflictQueue.async { refreshWindowCache() } }
+  },
+  workspaceCenter.addObserver(
+    forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main
+  ) { _ in if !backgroundScopesActive().isEmpty { conflictQueue.async { refreshWindowCache() } } },
+  workspaceCenter.addObserver(
+    forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main
+  ) { _ in if !backgroundScopesActive().isEmpty { conflictQueue.async { refreshWindowCache() } } },
+]
 let heartbeat = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
 heartbeat.schedule(deadline: .now(), repeating: .milliseconds(250))
 heartbeat.setEventHandler {
   if eventTap == nil && AXIsProcessTrusted() { installMonitor() }
   let healthy = eventTap.map { CGEvent.tapIsEnabled(tap: $0) } ?? false
+  if !healthy && monitorHealthy { suspendAllReporting() }
   monitorHealthy = healthy
   if !healthy { suspend() }
-  if let generation = permit.takeExpiredGeneration() {
-    releaseHeldInput()
+  for generation in permits.takeExpiredGenerations() {
+    releaseQueue.async { releaseHeldInput(where: { $0.generation == generation }) }
     emit(["type": "permitExpired", "executionGeneration": generation])
   }
-  if permit.isSuspended { releaseHeldInput() }
-  emit(["type": "heartbeat", "monitorHealthy": healthy, "suspended": permit.isSuspended])
+  let active = permits.activeGenerations()
+  // Inputs held by a suspended or retired generation are released.
+  releaseQueue.async { releaseHeldInput(where: { active[$0.generation] == nil }) }
+  // The window cache stays fresh while any background target exists.
+  if active.values.contains(where: \.isBackground) { conflictQueue.async { refreshWindowCache() } }
+  let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+  let (inputAge, sequence) = locked {
+    (
+      lastInputUptime > 0 ? (ProcessInfo.processInfo.systemUptime - lastInputUptime) * 1000 : -1,
+      inputSequence
+    )
+  }
+  var beat: [String: Any] = [
+    "type": "heartbeat", "monitorHealthy": healthy, "suspended": active.isEmpty,
+    "inputSequence": sequence, "activeGenerations": Array(active.keys).sorted(),
+  ]
+  if inputAge >= 0 { beat["lastUserInputAgeMs"] = Int(inputAge) }
+  if let front { beat["frontmostAppId"] = front }
+  emit(beat)
   emitStatus(permissions())
 }
 heartbeat.resume()
@@ -1193,20 +1927,91 @@ DispatchQueue.global(qos: .userInteractive).async {
         suspend()
         exit(1)
       }
+      let generation = integer(message, "executionGeneration")
       switch string(message, "type") {
       case "permit":
-        permit.renew(
-          integer(message, "executionGeneration"),
-          duration: Double(integer(message, "expiresInMs")) / 1000)
-      case "resume": permit.resume(integer(message, "executionGeneration"))
-      case "suspend":
-        suspend()
+        let duration = Double(integer(message, "expiresInMs")) / 1000
+        // The first permit fixes the scope; renewals carry only the generation. A permit with
+        // no scope for an unknown generation is the legacy machine-wide foreground lease.
+        if message["scope"] != nil, let scope = ComputerExecutionScope(message["scope"]) {
+          permits.arm(generation, scope: scope, duration: duration)
+        } else if permits.scope(generation) != nil {
+          permits.renew(generation, duration: duration)
+        } else {
+          permits.arm(generation, scope: .foreground, duration: duration)
+        }
+      case "resume":
+        let scope = message["scope"] != nil ? ComputerExecutionScope(message["scope"]) : nil
+        if case .app = scope { refreshWindowCache() }
+        // A takeover arms against the input sequence Electron observed when the user was idle.
+        // Any physical input since then wins: the generation stays suspended and stops.
+        if let expected = message["inputSequence"] as? Int,
+          locked({ inputSequence }) != expected
+        {
+          interrupt(generation, ["type": "physicalInput", "cause": "readiness"])
+        } else {
+          permits.resume(generation, scope: scope)
+        }
+      case "readiness":
         if let id = message["requestId"] {
-          emit(["type": "response", "requestId": id, "result": [:]])
+          let (age, sequence) = locked {
+            (
+              lastInputUptime > 0
+                ? Int((ProcessInfo.processInfo.systemUptime - lastInputUptime) * 1000) : -1,
+              inputSequence
+            )
+          }
+          emit([
+            "type": "response", "requestId": id,
+            "result": ["inputSequence": sequence, "lastUserInputAgeMs": age],
+          ])
+        }
+      case "suspend":
+        if message["executionGeneration"] != nil {
+          permits.suspend(generation)
+          // Release this generation's input here rather than behind other release work, so
+          // one thread's 50 ms acknowledgment never waits on another thread.
+          releaseHeldInput(where: { $0.generation == generation })
+          if let id = message["requestId"] {
+            emit(["type": "response", "requestId": id, "result": [:]])
+          }
+        } else {
+          suspend()
+          if let id = message["requestId"] {
+            // Acknowledge only after local suspension and held-input release.
+            releaseQueue.async { emit(["type": "response", "requestId": id, "result": [:]]) }
+          }
+        }
+      case "retire":
+        permits.retire(generation)
+        releaseQueue.async { releaseHeldInput(where: { $0.generation == generation }) }
+      case "drain":
+        // Acknowledged once every earlier mutation on that generation has finished. A
+        // generation stuck inside another app reports `drained: false` instead of going silent,
+        // so Electron can wait on that one thread rather than kill the shared helper.
+        if let id = message["requestId"] {
+          DispatchQueue.global().async {
+            let deadline = ProcessInfo.processInfo.systemUptime + 5
+            while locked({ inFlightByGeneration[generation] ?? 0 }) > 0 {
+              if ProcessInfo.processInfo.systemUptime >= deadline {
+                emit(["type": "response", "requestId": id, "result": ["drained": false]])
+                return
+              }
+              Thread.sleep(forTimeInterval: 0.01)
+            }
+            emit(["type": "response", "requestId": id, "result": ["drained": true]])
+          }
         }
       case "cancel":
-        permit.cancel(string(message, "requestId"))
-        releaseHeldInput()
+        let id = string(message, "requestId")
+        let owner: Int? = locked {
+          cancelledRequests.append(id)
+          if cancelledRequests.count > 4096 { cancelledRequests.removeFirst() }
+          return inFlight[id]
+        }
+        if let owner { permits.cancel(owner, id: id) }
+        // Only that request's held inputs; other generations keep theirs.
+        releaseQueue.async { releaseHeldInput(where: { $0.requestId == id }) }
       case "grantsChanged":
         if let auth = message["authorization"] as? [String: Any] {
           stateLock.lock()
@@ -1215,9 +2020,18 @@ DispatchQueue.global(qos: .userInteractive).async {
         }
       case "permissions": emitStatus(permissions())
       case "request":
-        let op = string(message["request"] as? [String: Any] ?? [:], "op")
+        let request = message["request"] as? [String: Any] ?? [:]
+        let op = string(request, "op")
         if ["status", "listApps", "resolveApps", "inspect", "screenshot", "zoom"].contains(op) {
           observeQueue.addOperation { execute(message) }
+        } else if backgroundAXEnabled && isBackground(request) {
+          // Background mutations run per app; foreground input stays on one serial queue.
+          appQueue(string(request, "appId")).async { execute(message) }
+        } else if isBackground(request) {
+          emit([
+            "type": "response", "requestId": string(request, "requestId"),
+            "error": ["_tag": "ForegroundRequired", "reason": "unsupported-in-background"],
+          ])
         } else {
           inputQueue.async { execute(message) }
         }

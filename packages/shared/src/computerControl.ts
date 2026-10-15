@@ -24,7 +24,15 @@ export class ComputerControlError extends Error {
           ? "Observation backlog is full; wait before requesting another screenshot or inspection."
           : error._tag === "Execution"
             ? error.message
-            : error._tag,
+            : error._tag === "ForegroundRequired"
+              ? `ForegroundRequired (${error.reason}): call computer_request_foreground with a short reason.`
+              : error._tag === "TargetBlocked" && error.kind === "user-active"
+                ? "TargetBlocked user-active: the user is in that app; wait or ask."
+                : error._tag === "TargetBlocked" && error.kind === "foreground-busy"
+                  ? "TargetBlocked foreground-busy: another chat has the foreground; wait."
+                  : error._tag === "TargetBlocked" && error.kind === "other-app"
+                    ? "TargetBlocked other-app: the foreground was approved for a different app."
+                    : error._tag,
     );
   }
 }

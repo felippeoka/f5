@@ -2,21 +2,26 @@ import { ComputerGrantAuthority } from "./ComputerGrantAuthority";
 import type { ChildProcess } from "node:child_process";
 import { Schema } from "effect";
 import {
+  COMPUTER_BACKGROUND_CAPABILITY,
   DesktopComputerHostMessage,
   type ComputerAccessAnswer,
   type ComputerAutomationBackendStatus,
   type ComputerAccessRequested,
+  type ComputerBackgroundStatus,
   type ComputerLeaseHolder,
   type ChromeLeaseHolder,
 } from "@t3tools/contracts";
 import { computerError, ComputerControlError } from "@t3tools/shared/computerControl";
-import type { ComputerController } from "./ComputerController";
+import type { ComputerController, ComputerExecutionStateUpdate } from "./ComputerController";
 import { ChromeLeaseAuthority } from "./ChromeLeaseAuthority";
+import { ComputerExecutionAuthority } from "./ComputerExecutionAuthority";
+import { ComputerTakeoverCoordinator } from "./ComputerTakeoverCoordinator";
 
 interface Backend {
   child: ChildProcess;
   incarnation: string;
   ready: boolean;
+  capabilities: ReadonlySet<string>;
   pendingAccess: Map<string, ComputerAccessRequested>;
   acquisitions: Map<string, ComputerLeaseHolder>;
 }
@@ -27,6 +32,8 @@ export class ComputerHostChannel {
     for (const profileId of this.backends.keys()) this.sendChromeLease(profileId, holder);
     this.chromeOptions?.changed?.(holder);
   });
+  readonly execution: ComputerExecutionAuthority;
+  readonly takeovers: ComputerTakeoverCoordinator;
   constructor(
     private readonly controller: ComputerController,
     private readonly status: () => ComputerAutomationBackendStatus,
@@ -38,19 +45,63 @@ export class ComputerHostChannel {
     private readonly grants = new ComputerGrantAuthority(
       process.platform === "win32" ? "win32" : "darwin",
     ),
-  ) {}
+    private readonly options: {
+      /** Desktop + helper side of background availability; the backend adds its own. */
+      background?: () => ComputerBackgroundStatus;
+      execution?: ComputerExecutionAuthority;
+      /**
+       * Whether this build offers background delivery at all (the preview gate). When it is
+       * closed, Electron never answers with the capability, so foreground-only users keep the
+       * legacy single-holder protocol and none of the background paths run.
+       */
+      advertiseBackground?: boolean;
+    } = {},
+  ) {
+    this.execution = options.execution ?? new ComputerExecutionAuthority();
+    this.takeovers = new ComputerTakeoverCoordinator(controller, this.execution, {
+      state: (profileId, holder, state) =>
+        this.sendExecutionState(profileId, {
+          threadId: holder.threadId,
+          sessionGeneration: holder.sessionGeneration,
+          state,
+          delivery: "foreground",
+          ...(holder.scope.kind !== "foreground" ? { appId: holder.scope.appId } : {}),
+        }),
+    });
+  }
+  private capable(backend: Backend | undefined): boolean {
+    return backend?.capabilities.has(COMPUTER_BACKGROUND_CAPABILITY) ?? false;
+  }
+  /** Status as one backend sees it: only capable peers learn about background delivery. */
+  private statusFor(backend: Backend): ComputerAutomationBackendStatus {
+    const status = this.status();
+    if (!status.available || !this.capable(backend)) return status;
+    return {
+      ...status,
+      background: this.options.background?.() ?? {
+        available: false,
+        reason: "peer-capability",
+      },
+    };
+  }
+  private disconnectProfile(profileId: string): void {
+    this.takeovers.cancelThread(profileId);
+    this.controller.disconnect(profileId);
+    this.grants.disconnect(profileId);
+    this.execution.disconnect(profileId);
+    this.chrome.releaseProfile(profileId);
+  }
   register(profileId: string, incarnation: string, child: ChildProcess): void {
     // Replacing an incarnation also revokes the old process's device authority.
     if (this.backends.has(profileId)) {
       this.backends.delete(profileId);
-      this.controller.disconnect(profileId);
-      this.grants.disconnect(profileId);
-      this.chrome.releaseProfile(profileId);
+      this.disconnectProfile(profileId);
     }
     const backend: Backend = {
       child,
       incarnation,
       ready: false,
+      capabilities: new Set(),
       pendingAccess: new Map(),
       acquisitions: new Map(),
     };
@@ -75,8 +126,16 @@ export class ComputerHostChannel {
           return;
         }
         backend.ready = true;
-        this.send(profileId, { type: "status", status: this.status() });
-        this.sendLease(profileId, this.controller.lease.current());
+        backend.capabilities = new Set(
+          this.options.advertiseBackground === false ? [] : (message.capabilities ?? []),
+        );
+        if (this.capable(backend))
+          this.send(profileId, {
+            type: "hostCapabilities",
+            capabilities: [COMPUTER_BACKGROUND_CAPABILITY],
+          });
+        this.send(profileId, { type: "status", status: this.statusFor(backend) });
+        this.sendLeases(profileId);
         if (this.chrome.current()) this.sendChromeLease(profileId, this.chrome.current());
         return;
       }
@@ -85,6 +144,11 @@ export class ComputerHostChannel {
       switch (message.type) {
         case "request":
           if (message.request.authorization.profileId !== profileId) {
+            child.disconnect();
+            return;
+          }
+          // Background delivery is only accepted from peers that negotiated it.
+          if (message.request.delivery === "background" && !this.capable(backend)) {
             child.disconnect();
             return;
           }
@@ -109,17 +173,41 @@ export class ComputerHostChannel {
           );
           break;
         case "leaseAcquire":
-          if (message.holder.profileId !== profileId || message.holder.backend !== "native") {
+          if (
+            message.holder.profileId !== profileId ||
+            message.holder.backend !== "native" ||
+            // Takeovers need approval; background scopes need a negotiated peer.
+            message.holder.scope.kind === "takeover" ||
+            (message.holder.scope.kind === "app" && !this.capable(backend))
+          ) {
             child.disconnect();
             return;
           }
           try {
-            this.chrome.assertNativeAvailable(profileId);
+            this.chrome.assertNativeAvailable(profileId, message.holder.scope);
             const status = this.status();
             if (!status.available)
               throw new ComputerControlError({ _tag: "Unavailable", reason: status.reason });
             if (backend.acquisitions.size >= 32)
               throw new ComputerControlError({ _tag: "Busy", holder: "same-profile" });
+            if (
+              !this.execution.revisionAccepted(
+                profileId,
+                message.holder.threadId,
+                message.holder.policyRevision,
+              )
+            )
+              throw new ComputerControlError({ _tag: "Interrupted", cause: "access-changed" });
+            if (
+              message.holder.scope.kind === "app" &&
+              !this.execution.hasSessionApproval(
+                profileId,
+                incarnation,
+                message.holder.threadId,
+                message.holder.sessionGeneration,
+              )
+            )
+              throw new ComputerControlError({ _tag: "NotGranted", needed: "click" });
             const result = this.controller.acquire(message.holder);
             backend.acquisitions.set(message.requestId, result);
             this.send(profileId, { type: "response", requestId: message.requestId, result });
@@ -127,6 +215,54 @@ export class ComputerHostChannel {
             fail(message.requestId, error);
           }
           break;
+        case "foregroundTakeoverAcquire": {
+          if (
+            message.holder.profileId !== profileId ||
+            !this.capable(backend) ||
+            message.holder.scope.kind !== "takeover"
+          ) {
+            child.disconnect();
+            return;
+          }
+          const requestId = message.requestId;
+          try {
+            this.chrome.assertNativeAvailable(profileId);
+            this.takeovers.request(
+              profileId,
+              incarnation,
+              requestId,
+              message.approvalRequestId,
+              message.holder,
+              (outcome) => {
+                if (this.backends.get(profileId) !== backend) return;
+                if ("error" in outcome) fail(requestId, new ComputerControlError(outcome.error));
+                else {
+                  backend.acquisitions.set(requestId, outcome.holder);
+                  this.send(profileId, {
+                    type: "response",
+                    requestId,
+                    result: outcome.holder,
+                  });
+                }
+              },
+            );
+          } catch (error) {
+            fail(requestId, error);
+          }
+          break;
+        }
+        case "observationInvalidate": {
+          const requestId = message.requestId;
+          this.execution.advanceRevision(profileId, message.threadId, message.policyRevision);
+          this.takeovers.cancelThread(profileId, message.threadId);
+          void this.controller
+            .invalidateThread(profileId, message.threadId, message.policyRevision)
+            .then(
+              () => this.send(profileId, { type: "response", requestId, result: true }),
+              (error: unknown) => fail(requestId, error),
+            );
+          break;
+        }
         case "chromeLeaseAcquire":
           if (message.holder.profileId !== profileId) {
             child.disconnect();
@@ -138,7 +274,10 @@ export class ComputerHostChannel {
             const status = this.status();
             if (!status.available)
               throw new ComputerControlError({ _tag: "Unavailable", reason: status.reason });
-            this.chrome.acquire(message.holder, this.controller.lease.current());
+            // Released native holders may still be executing; Chrome waits for their drain.
+            if (this.controller.nativeWorkConflicts("chrome"))
+              throw new ComputerControlError({ _tag: "Busy", holder: "same-profile" });
+            this.chrome.acquire(message.holder, this.controller.lease.chromeConflict(profileId));
             this.send(profileId, { type: "response", requestId: message.requestId, result: true });
           } catch (error) {
             fail(message.requestId, error);
@@ -166,7 +305,14 @@ export class ComputerHostChannel {
           }
           break;
         case "leaseRelease":
-          if (message.holder.profileId === profileId) this.controller.lease.release(message.holder);
+          if (message.holder.profileId === profileId) {
+            this.controller.lease.release(message.holder);
+            if (message.holder.scope.kind === "takeover")
+              this.execution.revokeTakeovers(
+                (receipt) =>
+                  receipt.profileId === profileId && receipt.threadId === message.holder.threadId,
+              );
+          }
           break;
         case "leaseAccepted":
           backend.acquisitions.delete(message.requestId);
@@ -182,20 +328,29 @@ export class ComputerHostChannel {
           });
           break;
         case "grantsChanged":
-          if (message.authorization.profileId === profileId)
+          if (message.authorization.profileId === profileId) {
+            this.execution.sessionChanged(
+              profileId,
+              message.authorization.threadId,
+              message.authorization.sessionGeneration,
+            );
             this.controller.updateGrants(this.grants.validate(message.authorization));
+          }
           break;
         case "cancel": {
           const acquired = backend.acquisitions.get(message.requestId);
           backend.acquisitions.delete(message.requestId);
           if (acquired) this.controller.lease.release(acquired);
+          // Consent cleanup removes only the consent record, never a takeover coordinator.
           backend.pendingAccess.delete(message.requestId);
+          this.takeovers.cancel(profileId, message.requestId);
           this.controller.cancel(message.requestId, profileId);
           break;
         }
         case "pauseChanged":
           // Backend clients can narrow access. Only trusted local renderer IPC can resume.
           if (message.paused) {
+            this.takeovers.cancelThread(profileId, message.threadId);
             if (!this.pauseChrome(profileId, message.threadId, true))
               this.controller.setPaused(profileId, message.threadId, true);
           }
@@ -213,9 +368,7 @@ export class ComputerHostChannel {
     const disconnected = () => {
       if (this.backends.get(profileId) !== backend) return;
       this.backends.delete(profileId);
-      this.controller.disconnect(profileId);
-      this.grants.disconnect(profileId);
-      this.chrome.releaseProfile(profileId);
+      this.disconnectProfile(profileId);
     };
     child.once("disconnect", disconnected);
     child.once("exit", disconnected);
@@ -238,15 +391,51 @@ export class ComputerHostChannel {
     const backend = this.backends.get(profileId);
     if (backend?.ready && backend.child.connected) backend.child.send(message, () => undefined);
   }
-  private sendLease(profileId: string, holder: ComputerLeaseHolder | null): void {
-    this.send(profileId, {
-      type: "leaseChanged",
-      holder: holder?.profileId === profileId ? holder : null,
-      otherProfile: holder !== null && holder.profileId !== profileId,
-    });
+  /** Capable peers get every own holder; legacy peers keep the single-holder message. */
+  private sendLeases(profileId: string): void {
+    const backend = this.backends.get(profileId);
+    if (!backend) return;
+    const holders = this.controller.lease.holders();
+    const own = holders.filter((holder) => holder.profileId === profileId);
+    const otherProfile =
+      holders.some((holder) => holder.profileId !== profileId) ||
+      (this.controller.lease.pendingTakeover()?.holder.profileId ?? profileId) !== profileId;
+    if (this.capable(backend)) {
+      const pending = this.controller.lease.pendingTakeover();
+      this.send(profileId, {
+        type: "leasesChanged",
+        holders: own,
+        otherProfile,
+        ...(pending?.holder.profileId === profileId
+          ? { pendingTakeover: { threadId: pending.holder.threadId, appId: pending.appId } }
+          : {}),
+      });
+    } else
+      this.send(profileId, {
+        type: "leaseChanged",
+        holder: own[0] ?? null,
+        otherProfile: otherProfile && own.length === 0,
+      });
   }
-  publishLease(holder: ComputerLeaseHolder | null): void {
-    for (const profileId of this.backends.keys()) this.sendLease(profileId, holder);
+  publishLeases(): void {
+    for (const profileId of this.backends.keys()) this.sendLeases(profileId);
+  }
+  /** Per-backend status: capability-dependent fields never reach legacy peers. */
+  broadcastStatus(): void {
+    for (const [profileId, backend] of this.backends)
+      this.send(profileId, { type: "status", status: this.statusFor(backend) });
+  }
+  sendExecutionState(profileId: string, update: ComputerExecutionStateUpdate): void {
+    if (!this.capable(this.backends.get(profileId))) return;
+    this.send(profileId, {
+      type: "executionStateChanged",
+      threadId: update.threadId,
+      sessionGeneration: update.sessionGeneration,
+      state: update.state,
+      ...(update.appId ? { appId: update.appId } : {}),
+      ...(update.delivery ? { delivery: update.delivery } : {}),
+      ...(update.pauseCause ? { pauseCause: update.pauseCause } : {}),
+    });
   }
   broadcast(message: DesktopComputerHostMessage): void {
     for (const profileId of this.backends.keys()) this.send(profileId, message);
@@ -268,12 +457,36 @@ export class ComputerHostChannel {
       !backend.pendingAccess.delete(answer.requestId)
     )
       throw new Error("This request expired or belongs to another backend.");
-    this.send(profileId, {
-      type: "accessAnswer",
-      answer: request.kind === "apps" ? this.grants.issue(profileId, request, answer) : answer,
-    });
+    // Only this method mints session receipts; never forward one from the answer's source.
+    const { sessionReceipt: _untrusted, ...base } = answer;
+    answer = base;
+    let forwarded: ComputerAccessAnswer = answer;
+    if (request.kind === "apps") forwarded = this.grants.issue(profileId, request, answer);
+    else if (
+      request.kind === "session-actions" &&
+      request.background === true &&
+      answer.allowSessionActions === true &&
+      request.sessionGeneration &&
+      this.capable(backend)
+    )
+      forwarded = {
+        ...answer,
+        sessionReceipt: this.execution.approveSession({
+          profileId,
+          backendIncarnation: backend.incarnation,
+          threadId: request.threadId,
+          sessionGeneration: request.sessionGeneration,
+          policyRevision: this.execution.minimumRevision(profileId, request.threadId),
+        }),
+      };
+    else if (request.kind === "foreground-takeover")
+      this.takeovers.answered(profileId, request, answer.allowForegroundTakeover === true);
+    this.send(profileId, { type: "accessAnswer", answer: forwarded });
   }
   incarnation(profileId: string): string | undefined {
     return this.backends.get(profileId)?.incarnation;
+  }
+  close(): void {
+    this.takeovers.close();
   }
 }

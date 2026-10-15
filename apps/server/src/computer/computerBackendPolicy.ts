@@ -28,9 +28,14 @@ export function resolveComputerBackendSelection(input: {
 }) {
   return Effect.gen(function* () {
     const service = yield* Effect.serviceOption(ServerSettingsService);
+    // Background execution exists only in F5's helper: that mode forces the native backend.
     const preference = Option.isSome(service)
       ? yield* service.value.getSettings.pipe(
-          Effect.map((settings) => settings.computerUseBackend),
+          Effect.map((settings) =>
+            settings.computerUseExecutionMode === "background"
+              ? ("f5" as const)
+              : settings.computerUseBackend,
+          ),
           Effect.catch(() => Effect.succeed("f5" as const)),
         )
       : "auto";

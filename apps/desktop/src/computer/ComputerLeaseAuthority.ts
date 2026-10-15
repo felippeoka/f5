@@ -1,5 +1,14 @@
-import type { ComputerLeaseHolder } from "@t3tools/contracts";
+import type {
+  ComputerAuthorization,
+  ComputerLeaseHolder,
+  ComputerLeaseScope,
+} from "@t3tools/contracts";
 import { ComputerControlError } from "@t3tools/shared/computerControl";
+import {
+  COMPUTER_CHROME_APP_IDS,
+  computerScopesConflict,
+  sameComputerScope,
+} from "@t3tools/shared/computerExecution";
 
 export function sameComputerHolder(a: ComputerLeaseHolder, b: ComputerLeaseHolder): boolean {
   return (
@@ -8,73 +17,200 @@ export function sameComputerHolder(a: ComputerLeaseHolder, b: ComputerLeaseHolde
     a.sessionGeneration === b.sessionGeneration &&
     a.turnId === b.turnId &&
     a.executionGeneration === b.executionGeneration &&
-    a.backend === b.backend
+    a.backend === b.backend &&
+    a.policyRevision === b.policyRevision &&
+    sameComputerScope(a.scope, b.scope)
   );
 }
-/** Owned by Electron main, shared across every profile and provider. */
+const sameThread = (
+  a: Pick<ComputerAuthorization, "profileId" | "threadId">,
+  b: Pick<ComputerAuthorization, "profileId" | "threadId">,
+) => a.profileId === b.profileId && a.threadId === b.threadId;
+/** A takeover approved by the user but not yet armed: blocks other foreground work, no permit. */
+export interface ComputerTakeoverReservation {
+  readonly id: number;
+  readonly holder: ComputerLeaseHolder;
+  readonly appId: string;
+}
+interface Entry {
+  holder: ComputerLeaseHolder;
+  lastMutationAt: number;
+}
+/**
+ * Owned by Electron main, shared across every profile and provider. Holds at most one lease
+ * per profile+thread: the legacy machine-wide foreground scope, one background app scope per
+ * app, or one takeover (foreground limited to one app) at a time.
+ */
 export class ComputerLeaseAuthority {
-  private holder: ComputerLeaseHolder | null = null;
+  private entries: Entry[] = [];
   private generation = 0;
-  private lastMutationAt = 0;
-  private readonly listeners = new Set<(holder: ComputerLeaseHolder | null) => void>();
+  private reservationId = 0;
+  private pending: ComputerTakeoverReservation | null = null;
+  private readonly listeners = new Set<(holders: ReadonlyArray<ComputerLeaseHolder>) => void>();
   constructor(private readonly now: () => number = Date.now) {}
-  current(): ComputerLeaseHolder | null {
-    return this.holder;
+  holders(): ReadonlyArray<ComputerLeaseHolder> {
+    return this.entries.map((entry) => entry.holder);
+  }
+  pendingTakeover(): ComputerTakeoverReservation | null {
+    return this.pending;
+  }
+  /** The armed takeover, which blocks every other thread's background mutations. */
+  takeover(): ComputerLeaseHolder | undefined {
+    return this.entries.find((entry) => entry.holder.scope.kind === "takeover")?.holder;
+  }
+  /** Resolve the holder a request's authorization names, by exact generation. */
+  find(
+    auth: Pick<
+      ComputerAuthorization,
+      "profileId" | "threadId" | "sessionGeneration" | "turnId" | "executionGeneration"
+    >,
+    scope?: ComputerLeaseScope,
+  ): ComputerLeaseHolder | undefined {
+    return this.entries.find(
+      ({ holder }) =>
+        sameThread(holder, auth) &&
+        holder.sessionGeneration === auth.sessionGeneration &&
+        holder.turnId === auth.turnId &&
+        holder.executionGeneration === auth.executionGeneration &&
+        (!scope || sameComputerScope(holder.scope, scope)),
+    )?.holder;
   }
   acquire(input: ComputerLeaseHolder): ComputerLeaseHolder {
     this.sweep();
-    if (this.holder) {
-      const holder = this.holder;
-      if (
-        holder.profileId === input.profileId &&
-        holder.threadId === input.threadId &&
+    if (input.scope.kind === "takeover")
+      throw new ComputerControlError({
+        _tag: "Execution",
+        message: "A foreground takeover needs approval.",
+      });
+    const own = this.entries.find(({ holder }) => sameThread(holder, input));
+    if (own) {
+      const holder = own.holder;
+      const sameTurn =
         holder.sessionGeneration === input.sessionGeneration &&
         holder.turnId === input.turnId &&
-        holder.backend === input.backend
+        holder.backend === input.backend;
+      if (
+        sameTurn &&
+        holder.policyRevision === input.policyRevision &&
+        sameComputerScope(holder.scope, input.scope)
       )
         return holder;
-      throw new ComputerControlError({
-        _tag: "Busy",
-        holder: holder.profileId === input.profileId ? "same-profile" : "other-profile",
-        ...(holder.profileId === input.profileId ? { threadTitle: holder.threadTitle } : {}),
-      });
+      // A scope change keeps the thread's single lease: only within the same session/turn.
+      if (!sameTurn) throw this.busy(holder, input.profileId);
     }
+    for (const { holder } of this.entries)
+      if (!sameThread(holder, input) && computerScopesConflict(input.scope, holder.scope))
+        throw this.busy(holder, input.profileId);
+    if (this.pending && !sameThread(this.pending.holder, input)) {
+      if (input.scope.kind === "foreground" || input.scope.appId === this.pending.appId)
+        throw this.busy(this.pending.holder, input.profileId);
+    }
+    if (own) this.entries = this.entries.filter((entry) => entry !== own);
     const granted = { ...input, executionGeneration: ++this.generation };
-    this.holder = granted;
-    this.lastMutationAt = this.now();
+    this.entries.push({ holder: granted, lastMutationAt: this.now() });
     this.notify();
     return granted;
   }
+  /** Reserve the foreground for one app while the user decides and finishes input. */
+  reserveTakeover(input: ComputerLeaseHolder): ComputerTakeoverReservation {
+    this.sweep();
+    if (input.scope.kind !== "takeover")
+      throw new ComputerControlError({ _tag: "Execution", message: "Not a takeover scope." });
+    const appId = input.scope.appId;
+    if (this.pending) throw this.busy(this.pending.holder, input.profileId);
+    for (const { holder } of this.entries)
+      if (!sameThread(holder, input) && computerScopesConflict(input.scope, holder.scope))
+        throw this.busy(holder, input.profileId);
+    this.pending = { id: ++this.reservationId, holder: input, appId };
+    this.notify();
+    return this.pending;
+  }
+  cancelTakeover(reservation?: ComputerTakeoverReservation): void {
+    if (!this.pending || (reservation && this.pending.id !== reservation.id)) return;
+    this.pending = null;
+    this.notify();
+  }
+  /** Arm the reserved takeover. Replaces the thread's own background lease, if any. */
+  armTakeover(
+    reservation: ComputerTakeoverReservation,
+    approvalReceipt: string,
+  ): ComputerLeaseHolder {
+    if (this.pending?.id !== reservation.id)
+      throw new ComputerControlError({ _tag: "Interrupted", cause: "paused" });
+    const scope: ComputerLeaseScope = {
+      kind: "takeover",
+      appId: reservation.appId,
+      approvalReceipt,
+    };
+    for (const { holder } of this.entries)
+      if (!sameThread(holder, reservation.holder) && computerScopesConflict(scope, holder.scope))
+        throw this.busy(holder, reservation.holder.profileId);
+    this.pending = null;
+    this.entries = this.entries.filter(({ holder }) => !sameThread(holder, reservation.holder));
+    const granted = { ...reservation.holder, scope, executionGeneration: ++this.generation };
+    this.entries.push({ holder: granted, lastMutationAt: this.now() });
+    this.notify();
+    return granted;
+  }
+  /** The holder that blocks a Chrome lease for `profileId`, same-profile holders first. */
+  chromeConflict(profileId: string): ComputerLeaseHolder | null {
+    const conflicts = this.entries
+      .map(({ holder }) => holder)
+      .filter(
+        (holder) =>
+          holder.scope.kind !== "app" || COMPUTER_CHROME_APP_IDS.includes(holder.scope.appId),
+      );
+    return (
+      conflicts.find((holder) => holder.profileId === profileId) ??
+      conflicts[0] ??
+      this.pending?.holder ??
+      null
+    );
+  }
   touch(holder: ComputerLeaseHolder): void {
-    if (this.holder && sameComputerHolder(this.holder, holder)) this.lastMutationAt = this.now();
+    const entry = this.entries.find((candidate) => sameComputerHolder(candidate.holder, holder));
+    if (entry) entry.lastMutationAt = this.now();
   }
   release(holder: ComputerLeaseHolder): void {
-    if (this.holder && sameComputerHolder(this.holder, holder)) {
-      this.holder = null;
-      this.notify();
-    }
+    const before = this.entries.length;
+    this.entries = this.entries.filter((entry) => !sameComputerHolder(entry.holder, holder));
+    if (this.entries.length !== before) this.notify();
   }
   releaseProfile(profileId: string): void {
-    if (this.holder?.profileId === profileId) this.release(this.holder);
+    this.invalidate((holder) => holder.profileId === profileId);
+    if (this.pending?.holder.profileId === profileId) this.cancelTakeover();
   }
-  invalidate(): void {
+  invalidate(predicate: (holder: ComputerLeaseHolder) => boolean = () => true): void {
     ++this.generation;
-    if (this.holder) {
-      this.holder = null;
-      this.notify();
-    }
+    const before = this.entries.length;
+    this.entries = this.entries.filter((entry) => !predicate(entry.holder));
+    if (this.entries.length !== before) this.notify();
   }
   sweep(): void {
-    if (this.holder && this.now() - this.lastMutationAt >= 60_000) this.release(this.holder);
+    const now = this.now();
+    const before = this.entries.length;
+    this.entries = this.entries.filter((entry) => now - entry.lastMutationAt < 60_000);
+    if (this.entries.length !== before) this.notify();
   }
-  subscribe(listener: (holder: ComputerLeaseHolder | null) => void): () => void {
+  subscribe(listener: (holders: ReadonlyArray<ComputerLeaseHolder>) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
+  private busy(
+    holder: Pick<ComputerLeaseHolder, "profileId" | "threadTitle">,
+    profileId: string,
+  ): ComputerControlError {
+    return new ComputerControlError({
+      _tag: "Busy",
+      holder: holder.profileId === profileId ? "same-profile" : "other-profile",
+      ...(holder.profileId === profileId ? { threadTitle: holder.threadTitle } : {}),
+    });
+  }
   private notify(): void {
+    const holders = this.holders();
     for (const listener of this.listeners) {
       try {
-        listener(this.holder);
+        listener(holders);
       } catch {
         /* Authority must survive a failing observer. */
       }

@@ -9,6 +9,7 @@ import {
   COMPUTER_TOOL_TIMEOUT_MS,
   ComputerToolGeometry,
   computerToolInputJsonSchema,
+  subscribeComputerObservationInvalidation,
 } from "../computer/computerMcpTools";
 import { Option } from "effect";
 import http from "node:http";
@@ -483,20 +484,10 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
       if (catalog === "computer") computer!.bindSession(input.threadId, generation, "codex");
       const geometry = new ComputerToolGeometry();
       const offComputer =
-        catalog === "computer"
-          ? computer?.subscribe((event) => {
-              if (
-                event.channel === "computer.access.grantsChanged" &&
-                event.data.threadId === input.threadId
-              )
-                sessionsByToken.get(token)?.geometry.clear();
-              if (
-                event.channel === "computer.host" &&
-                event.data.type === "pauseChanged" &&
-                event.data.threadId === input.threadId
-              )
-                sessionsByToken.get(token)?.geometry.clear();
-            })
+        catalog === "computer" && computer
+          ? subscribeComputerObservationInvalidation(computer, input.threadId, () =>
+              sessionsByToken.get(token)?.geometry.clear(),
+            )
           : undefined;
       sessionsByToken.set(token, {
         threadId: input.threadId,

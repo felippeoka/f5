@@ -135,7 +135,7 @@ export function ComputerAccessInbox() {
         store.setGrants(event.threadId, event.grants),
       ),
       api?.computer?.onActivity(store.record),
-      api?.computer?.onLeaseChanged(store.setLease),
+      api?.computer?.onLeaseChanged(store.setLeases),
       api?.preview.automation.onPauseChanged((event) =>
         store.setPaused(event.threadId, event.paused),
       ),
@@ -149,12 +149,20 @@ export function ComputerAccessInbox() {
       <DialogPopup showCloseButton={false}>
         <DialogHeader>
           <DialogTitle>
-            {request.kind === "chrome-setup" ? "Browser integration setup" : "Computer access"}
+            {request.kind === "chrome-setup"
+              ? "Browser integration setup"
+              : request.kind === "foreground-takeover"
+                ? "Foreground control"
+                : "Computer access"}
           </DialogTitle>
           <DialogDescription>
             {request.kind === "chrome-setup"
               ? "Review the browser registration change before allowing it."
-              : "Choose which apps the agent can use for this session."}
+              : request.kind === "foreground-takeover"
+                ? `The agent asks to take over ${request.takeover?.appName ?? "an app"} with the mouse and keyboard. It starts once you stop using them.`
+                : request.kind === "session-actions" && request.background
+                  ? "The agent may keep acting in granted apps while you work elsewhere."
+                  : "Choose which apps the agent can use for this session."}
           </DialogDescription>
         </DialogHeader>
         <ComputerAccessCard key={request.requestId} request={request} />

@@ -28,6 +28,13 @@ public func computerAppTier(_ id: String) -> String {
   }
   return "full"
 }
+/// Apps the delivery spike found need the foreground; generated from the canonical policy.
+public func computerBackgroundForegroundOnly(_ id: String) -> Bool {
+  let background = tierTable["background"] as? [String: Any]
+  return (background?["foregroundOnly"] as? [String] ?? []).contains(where: {
+    patternMatches(id, $0)
+  })
+}
 public func computerAppIsBrowser(_ id: String) -> Bool {
   ((tierTable["browsers"] as! [String: [String]])["darwin"]!).contains(where: {
     patternMatches(id, $0)

@@ -31,6 +31,10 @@ class Ipc extends EventEmitter {
               }),
         }),
       );
+    if (message.type === "observationInvalidate")
+      queueMicrotask(() =>
+        this.emit("message", { type: "response", requestId: message.requestId, result: {} }),
+      );
     if (message.type === "request" && !this.holdRequests)
       queueMicrotask(() =>
         this.emit("message", {
@@ -311,7 +315,8 @@ describe("computer broker safety boundaries", () => {
       h.ipc.emit("message", { type: "leaseChanged", holder: null, otherProfile: true });
       h.broker.setPaused("t", true);
       expect(h.broker.snapshot()).toMatchObject({
-        holder: null,
+        holders: [],
+        computerUse: { holders: [], otherProfile: true },
         otherProfile: true,
         pausedThreads: ["t"],
       });
@@ -412,6 +417,326 @@ describe("computer broker safety boundaries", () => {
       await first;
       await expect(second).rejects.toMatchObject({ error: { _tag: "NotGranted" } });
       expect(h.ipc.messages.filter((m) => m.type === "request")).toHaveLength(1);
+    } finally {
+      h.broker.close();
+    }
+  });
+});
+
+describe("background delivery", () => {
+  async function backgroundHarness() {
+    const h = await harness();
+    h.set({
+      policy: {
+        previewAutomation: true,
+        externalHosts: [],
+        computerUse: true,
+        claudeInChrome: false,
+        computerUseExecutionMode: "background",
+      },
+    });
+    h.ipc.emit("message", { type: "hostCapabilities", capabilities: ["background-ax-v1"] });
+    h.ipc.emit("message", {
+      type: "status",
+      status: { available: true, background: { available: true } },
+    });
+    return h;
+  }
+  async function approveBackgroundSession(h: Awaited<ReturnType<typeof harness>>) {
+    await vi.waitFor(() =>
+      expect(h.ipc.messages.some((m) => m.type === "accessRequested")).toBe(true),
+    );
+    const request = h.ipc.messages.findLast((m) => m.type === "accessRequested");
+    if (request?.type !== "accessRequested") throw new Error("missing session request");
+    expect(request.request).toMatchObject({ kind: "session-actions", background: true });
+    h.ipc.emit("message", {
+      type: "accessAnswer",
+      answer: {
+        requestId: request.request.requestId,
+        backendIncarnation: "backend",
+        decisions: [],
+        allowSessionActions: true,
+        sessionReceipt: "receipt",
+      },
+    });
+  }
+  it("stays foreground until the policy prefers background and every peer negotiated it", async () => {
+    const h = await harness();
+    try {
+      h.ipc.emit("message", {
+        type: "status",
+        status: { available: true, background: { available: true } },
+      });
+      await expect(h.broker.classify("t", "s", "type", "com.apple.TextEdit", {})).resolves.toBe(
+        "foreground",
+      );
+      h.set({
+        policy: {
+          previewAutomation: true,
+          externalHosts: [],
+          computerUse: true,
+          claudeInChrome: false,
+          computerUseExecutionMode: "background",
+        },
+      });
+      // No hostCapabilities answer: the desktop is a legacy peer.
+      await expect(
+        h.broker.classify("t", "s", "type", "com.apple.TextEdit", {}),
+      ).rejects.toMatchObject({ error: { _tag: "Execution" } });
+      h.ipc.emit("message", { type: "hostCapabilities", capabilities: ["background-ax-v1"] });
+      await expect(h.broker.classify("t", "s", "type", "com.apple.TextEdit", {})).resolves.toBe(
+        "background",
+      );
+    } finally {
+      h.broker.close();
+    }
+  });
+  it("needs a native session approval, then acquires an app-scoped lease", async () => {
+    const h = await backgroundHarness();
+    try {
+      const typed = h.broker.invoke("t", "s", {
+        op: "type",
+        text: "x",
+        appId: "com.apple.TextEdit",
+      });
+      await approveBackgroundSession(h);
+      await typed;
+      const acquire = h.ipc.messages.find((m) => m.type === "leaseAcquire");
+      expect(acquire).toMatchObject({
+        holder: {
+          scope: { kind: "app", appId: "com.apple.TextEdit" },
+          policyRevision: expect.any(Number),
+        },
+      });
+      const request = h.ipc.messages.findLast((m) => m.type === "request");
+      expect(request).toMatchObject({
+        request: { op: "type", appId: "com.apple.TextEdit", delivery: "background" },
+      });
+      expect(request?.type === "request" && "executionMode" in request.request).toBe(false);
+    } finally {
+      h.broker.close();
+    }
+  });
+  it("requires an app and refuses coordinate input in background", async () => {
+    const h = await backgroundHarness();
+    try {
+      await expect(h.broker.invoke("t", "s", { op: "type", text: "x" })).rejects.toMatchObject({
+        error: { _tag: "Execution", message: "Specify app: the app to act in." },
+      });
+      await expect(
+        h.broker.invoke("t", "s", { op: "click", x: 1, y: 1, appId: "com.apple.TextEdit" }),
+      ).rejects.toMatchObject({
+        error: { _tag: "ForegroundRequired", reason: "unsupported-in-background" },
+      });
+      await expect(
+        h.broker.invoke("t", "s", {
+          op: "elementAction",
+          appId: "com.apple.TextEdit",
+          snapshotId: "snapshot",
+          elementRef: "element",
+          action: "press",
+          executionMode: "foreground",
+        }),
+      ).rejects.toMatchObject({ error: { _tag: "ForegroundRequired" } });
+      expect(h.ipc.messages.filter((m) => m.type === "leaseAcquire")).toEqual([]);
+    } finally {
+      h.broker.close();
+    }
+  });
+  it("drops a released holder's active state but keeps paused and recovery states", async () => {
+    const h = await backgroundHarness();
+    try {
+      const holder = {
+        profileId: "p",
+        threadId: "t",
+        sessionGeneration: "s",
+        turnId: "turn",
+        executionGeneration: 3,
+        grantVersion: 1,
+        grants: [],
+        backend: "native",
+        threadTitle: "Thread",
+        scope: { kind: "app", appId: "com.apple.TextEdit" },
+        policyRevision: 1,
+      };
+      h.ipc.emit("message", { type: "leasesChanged", holders: [holder], otherProfile: false });
+      h.ipc.emit("message", {
+        type: "executionStateChanged",
+        threadId: "t",
+        sessionGeneration: "s",
+        state: "active",
+        delivery: "background",
+        appId: "com.apple.TextEdit",
+      });
+      expect(h.broker.computerUse().holders).toMatchObject([{ threadId: "t", state: "active" }]);
+      h.ipc.emit("message", { type: "leasesChanged", holders: [], otherProfile: false });
+      expect(h.broker.computerUse().holders).toEqual([]);
+      h.ipc.emit("message", {
+        type: "executionStateChanged",
+        threadId: "t",
+        sessionGeneration: "s",
+        state: "recovery",
+        pauseCause: "outcome-unknown",
+      });
+      h.ipc.emit("message", { type: "leasesChanged", holders: [], otherProfile: false });
+      expect(h.broker.computerUse().holders).toMatchObject([
+        { threadId: "t", state: "recovery", pauseCause: "outcome-unknown" },
+      ]);
+      h.broker.releaseSession("t", "s");
+      expect(h.broker.computerUse().holders).toEqual([]);
+    } finally {
+      h.broker.close();
+    }
+  });
+  it("arms a natively approved takeover and refuses a declined one", async () => {
+    const h = await backgroundHarness();
+    h.ipc.appResults = [
+      {
+        appId: "com.apple.TextEdit",
+        name: "TextEdit",
+        tier: "full",
+        running: true,
+        frontmost: false,
+      },
+    ];
+    try {
+      const typed = h.broker.invoke("t", "s", {
+        op: "type",
+        text: "x",
+        appId: "com.apple.TextEdit",
+      });
+      await approveBackgroundSession(h);
+      await typed;
+      const answerTakeover = async (allow: boolean) => {
+        await vi.waitFor(() =>
+          expect(
+            h.ipc.messages.some(
+              (m) => m.type === "accessRequested" && m.request.kind === "foreground-takeover",
+            ),
+          ).toBe(true),
+        );
+        const request = h.ipc.messages.findLast(
+          (m) => m.type === "accessRequested" && m.request.kind === "foreground-takeover",
+        );
+        const acquire = h.ipc.messages.findLast((m) => m.type === "foregroundTakeoverAcquire");
+        if (request?.type !== "accessRequested" || acquire?.type !== "foregroundTakeoverAcquire")
+          throw new Error("missing takeover exchange");
+        expect(acquire.approvalRequestId).toBe(request.request.requestId);
+        expect(request.request.takeover).toMatchObject({
+          appId: "com.apple.TextEdit",
+          threadId: "t",
+          turnId: "turn",
+        });
+        h.ipc.messages.length = 0;
+        h.ipc.emit("message", {
+          type: "accessAnswer",
+          answer: {
+            requestId: request.request.requestId,
+            backendIncarnation: "backend",
+            decisions: [],
+            allowForegroundTakeover: allow,
+          },
+        });
+        if (allow)
+          h.ipc.emit("message", {
+            type: "response",
+            requestId: acquire.requestId,
+            result: { ...acquire.holder, executionGeneration: 9 },
+          });
+        return acquire.requestId;
+      };
+      const declined = h.broker.requestForeground("t", "s", "TextEdit", "Needs a drag");
+      const declinedId = await answerTakeover(false);
+      await expect(declined).rejects.toMatchObject({ error: { _tag: "NotGranted" } });
+      expect(h.ipc.messages).toContainEqual({ type: "cancel", requestId: declinedId });
+      const approved = h.broker.requestForeground("t", "s", "TextEdit", "Needs a drag");
+      await answerTakeover(true);
+      await expect(approved).resolves.toMatchObject({
+        foreground: true,
+        appId: "com.apple.TextEdit",
+      });
+      expect(h.broker.computerUse().holders).toEqual([]);
+    } finally {
+      h.broker.close();
+    }
+  });
+  it("continues the policy revision when a thread's session is replaced", async () => {
+    const h = await backgroundHarness();
+    try {
+      await h.broker.policyTransition(async () => undefined);
+      const invalidated = h.ipc.messages.findLast((m) => m.type === "observationInvalidate");
+      if (invalidated?.type !== "observationInvalidate") throw new Error("no invalidation");
+      // Provider restart: a new session generation for the same thread.
+      h.broker.bindSession("t", "s2", "claude");
+      h.ipc.messages.length = 0;
+      const typed = h.broker.invoke("t", "s2", {
+        op: "type",
+        text: "x",
+        appId: "com.apple.TextEdit",
+      });
+      await approveBackgroundSession(h);
+      await typed;
+      const acquire = h.ipc.messages.find((m) => m.type === "leaseAcquire");
+      if (acquire?.type !== "leaseAcquire") throw new Error("no acquire");
+      // Electron keeps its per-thread minimum; the new binding must not fall below it.
+      expect(acquire.holder.policyRevision).toBeGreaterThanOrEqual(invalidated.policyRevision);
+    } finally {
+      h.broker.close();
+    }
+  });
+  it("asks for the background session approval when a takeover comes first", async () => {
+    const h = await backgroundHarness();
+    h.ipc.appResults = [
+      {
+        appId: "com.apple.TextEdit",
+        name: "TextEdit",
+        tier: "full",
+        running: true,
+        frontmost: false,
+      },
+    ];
+    try {
+      const pending = h.broker.requestForeground("t", "s", "TextEdit", "Needs a drag");
+      await approveBackgroundSession(h);
+      await vi.waitFor(() =>
+        expect(h.ipc.messages.some((m) => m.type === "foregroundTakeoverAcquire")).toBe(true),
+      );
+      h.broker.close();
+      await pending.catch(() => undefined);
+    } finally {
+      h.broker.close();
+    }
+  });
+  it("closes admissions and bumps the revision during a policy transition", async () => {
+    const h = await backgroundHarness();
+    try {
+      const typed = h.broker.invoke("t", "s", {
+        op: "type",
+        text: "x",
+        appId: "com.apple.TextEdit",
+      });
+      await approveBackgroundSession(h);
+      await typed;
+      let applied = false;
+      const transition = h.broker.policyTransition(async () => {
+        applied = true;
+        h.set({
+          policy: {
+            previewAutomation: true,
+            externalHosts: [],
+            computerUse: true,
+            claudeInChrome: false,
+            computerUseExecutionMode: "foreground",
+          },
+        });
+      });
+      // Admitted only after the change applies; it then runs under the new mode.
+      const queued = h.broker.classify("t", "s", "type", "com.apple.TextEdit", {});
+      await transition;
+      expect(applied).toBe(true);
+      await expect(queued).resolves.toBe("foreground");
+      // The session approval for background was revoked with the policy change.
+      expect(h.broker.access.backgroundApproved("t")).toBe(false);
     } finally {
       h.broker.close();
     }

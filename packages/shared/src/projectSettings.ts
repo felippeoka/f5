@@ -78,6 +78,11 @@ export interface AgentBrowserPolicy {
   readonly externalHosts: ReadonlyArray<string>;
   readonly claudeInChrome: boolean;
   readonly computerUse: boolean;
+  /**
+   * Global preference; missing means foreground. Background still needs every peer's
+   * capability at invocation.
+   */
+  readonly computerUseExecutionMode?: "foreground" | "background";
 }
 
 export const DISABLED_AGENT_BROWSER_POLICY: AgentBrowserPolicy = {
@@ -85,6 +90,7 @@ export const DISABLED_AGENT_BROWSER_POLICY: AgentBrowserPolicy = {
   externalHosts: [],
   claudeInChrome: false,
   computerUse: false,
+  computerUseExecutionMode: "foreground",
 };
 
 /** User overrides for the project win over global settings; checked-in files never apply. */
@@ -105,6 +111,8 @@ export function agentBrowserPolicyFromSettings(
     ),
     claudeInChrome: overrides?.enableClaudeInChrome ?? settings.enableClaudeInChrome,
     computerUse: overrides?.enableAgentComputerUse ?? settings.enableAgentComputerUse,
+    // No project override: the execution mode is a machine-wide choice.
+    computerUseExecutionMode: settings.computerUseExecutionMode ?? "foreground",
   };
 }
 

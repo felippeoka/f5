@@ -1,4 +1,8 @@
-import { ComputerAutomationBroker } from "./computer/ComputerAutomationBroker";
+import {
+  agentComputerUsePush,
+  ComputerAutomationBroker,
+} from "./computer/ComputerAutomationBroker";
+import { computerPolicyChange } from "./computer/computerPolicyChange";
 import {
   restoreChromeSessionSetup,
   listChromeSessionSetups,
@@ -1080,7 +1084,16 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         computerUseLease.subscribe((holder) => {
           void Effect.runPromise(
             pushBus.publishAll(WS_CHANNELS.agentComputerUseChanged, {
-              threadId: holder === null ? null : ThreadId.makeUnsafe(holder),
+              holders:
+                holder === null
+                  ? []
+                  : [
+                      {
+                        threadId: ThreadId.makeUnsafe(holder),
+                        delivery: "foreground",
+                        state: "active",
+                      },
+                    ],
             }),
           );
         }),
@@ -1092,17 +1105,19 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     yield* Effect.acquireRelease(
       Effect.sync(() =>
         computer.subscribe((event) => {
+          // One merged publication for native, Chrome and execution-state changes, so a
+          // reconnecting client restores real pending, active and paused state.
+          if (event.channel === "computer.use.changed") {
+            computerUseLease.setFromHost(event.data.holders[0]?.threadId ?? null);
+            void Effect.runPromise(
+              pushBus.publishAll(
+                WS_CHANNELS.agentComputerUseChanged,
+                agentComputerUsePush(event.data),
+              ),
+            );
+          }
           if (event.channel === "computer.host") {
-            if (event.data.type === "chromeLeaseChanged") {
-              const holder = event.data.holder;
-              computerUseLease.setFromHost(holder?.threadId ?? null);
-              void Effect.runPromise(
-                pushBus.publishAll(WS_CHANNELS.agentComputerUseChanged, {
-                  threadId: holder ? ThreadId.makeUnsafe(holder.threadId) : null,
-                  otherProfile: event.data.otherProfile ?? false,
-                }),
-              );
-            } else if (event.data.type === "chromeInterrupted") {
+            if (event.data.type === "chromeInterrupted") {
               const interrupted = event.data;
               void Effect.runPromise(
                 Deferred.await(orchestrationRuntime).pipe(
@@ -1120,17 +1135,6 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
                   ),
                 ),
               ).catch(() => undefined);
-            } else if (event.data.type === "leaseChanged") {
-              const holder = event.data.holder;
-              const sameProfile = holder?.profileId === computer.host.profileId;
-              computerUseLease.setFromHost(holder && sameProfile ? holder.threadId : null);
-              void Effect.runPromise(
-                pushBus.publishAll(WS_CHANNELS.agentComputerUseChanged, {
-                  threadId: holder && sameProfile ? ThreadId.makeUnsafe(holder.threadId) : null,
-                  otherProfile: event.data.otherProfile ?? (!!holder && !sameProfile),
-                  ...(holder ? { backend: holder.backend } : {}),
-                }),
-              );
             } else if (event.data.type === "pauseChanged")
               void Effect.runPromise(
                 previewAutomationBroker.setPaused(
@@ -4950,7 +4954,27 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             }
           }
         }
-        return yield* serverSettings.updateSettings(body).pipe(
+        const update = serverSettings.updateSettings(body);
+        // Computer policy changes go through the broker's admission barrier before they persist:
+        // admissions close, revisions bump, host scopes drain, then the change applies. On a
+        // persistence failure the barrier reloads policies and reopens under a fresh revision.
+        // Only patches that change effective computer policy pass the barrier, and a project
+        // override change interrupts only that project's threads.
+        const change = Option.isSome(computerAutomationBroker)
+          ? computerPolicyChange(yield* serverSettings.getSettings, body)
+          : null;
+        const guarded =
+          change && Option.isSome(computerAutomationBroker)
+            ? Effect.promise(() =>
+                computerAutomationBroker.value.policyTransition(
+                  () => Effect.runPromise(Effect.exit(update)),
+                  change.global
+                    ? undefined
+                    : (projectId) => projectId !== undefined && change.projects.has(projectId),
+                ),
+              ).pipe(Effect.flatMap((exit) => exit))
+            : update;
+        return yield* guarded.pipe(
           Effect.map(redactServerSettingsForClient),
           Effect.mapError(
             (error) =>
@@ -6190,19 +6214,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
                     if (Option.isSome(computerAutomationBroker)) {
                       const computer = computerAutomationBroker.value;
                       const snapshot = computer.snapshot();
-                      const holder = snapshot.holder;
-                      const sameProfile = holder?.profileId === computer.host.profileId;
                       return Effect.all([
-                        pushBus.publishClient(ws, WS_CHANNELS.agentComputerUseChanged, {
-                          threadId:
-                            holder && sameProfile
-                              ? ThreadId.makeUnsafe(holder.threadId)
-                              : snapshot.chromeHolder
-                                ? ThreadId.makeUnsafe(snapshot.chromeHolder.threadId)
-                                : null,
-                          otherProfile: snapshot.otherProfile || (!!holder && !sameProfile),
-                          ...(holder ? { backend: holder.backend } : {}),
-                        }),
+                        pushBus.publishClient(
+                          ws,
+                          WS_CHANNELS.agentComputerUseChanged,
+                          agentComputerUsePush(snapshot.computerUse),
+                        ),
                         ...snapshot.pausedThreads.map((threadId) =>
                           pushBus.publishClient(ws, WS_CHANNELS.previewAutomationPauseChanged, {
                             threadId: ThreadId.makeUnsafe(threadId),
@@ -6225,7 +6242,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
                     return holder === null
                       ? Effect.void
                       : pushBus.publishClient(ws, WS_CHANNELS.agentComputerUseChanged, {
-                          threadId: ThreadId.makeUnsafe(holder),
+                          holders: [
+                            {
+                              threadId: ThreadId.makeUnsafe(holder),
+                              delivery: "foreground",
+                              state: "active",
+                            },
+                          ],
                         });
                   }),
                 ),

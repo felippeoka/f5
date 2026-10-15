@@ -46,10 +46,26 @@ export const ComputerDisplay = Schema.Struct({
   modelSize: Size,
 });
 export type ComputerDisplay = typeof ComputerDisplay.Type;
+/** Capability token: background accessibility delivery (helper, desktop and backend). */
+export const COMPUTER_BACKGROUND_CAPABILITY = "background-ax-v1";
+export const ComputerBackgroundUnavailableReason = Schema.Literals([
+  "unsupported-platform",
+  "peer-capability",
+  "preview-off",
+  "permissions",
+  "monitor-unhealthy",
+]);
+export type ComputerBackgroundUnavailableReason = typeof ComputerBackgroundUnavailableReason.Type;
+export const ComputerBackgroundStatus = Schema.Struct({
+  available: Schema.Boolean,
+  reason: Schema.optional(ComputerBackgroundUnavailableReason),
+});
+export type ComputerBackgroundStatus = typeof ComputerBackgroundStatus.Type;
 export const ComputerAutomationBackendStatus = Schema.Union([
   Schema.Struct({
     available: Schema.Literal(true),
     displays: Schema.optional(Schema.Array(ComputerDisplay)),
+    background: Schema.optional(ComputerBackgroundStatus),
   }),
   Schema.Struct({
     available: Schema.Literal(false),
@@ -101,6 +117,9 @@ export const ComputerElementAction = Schema.Literals([
   "scrollIntoView",
 ]);
 export type ComputerElementAction = typeof ComputerElementAction.Type;
+/** Background acts inside one app through accessibility; foreground posts system input. */
+export const ComputerDelivery = Schema.Literals(["background", "foreground"]);
+export type ComputerDelivery = typeof ComputerDelivery.Type;
 const Envelope = {
   requestId: Id,
   payloadHash: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
@@ -111,6 +130,8 @@ const Envelope = {
     threadTitle: Schema.String.check(Schema.isMaxLength(200)),
   }),
   screenshot: Schema.optional(Schema.Boolean),
+  /** Missing means foreground, the only delivery legacy peers understand. */
+  delivery: Schema.optional(ComputerDelivery),
 };
 const Coordinates = { displayId: Id, geometryGeneration: Id, x: NonNegative, y: NonNegative };
 export const ComputerAutomationRequest = Schema.Union([
@@ -121,8 +142,19 @@ export const ComputerAutomationRequest = Schema.Union([
     op: Schema.Literal("resolveApps"),
     queries: Schema.Array(Id).check(Schema.isMinLength(1), Schema.isMaxLength(10)),
   }),
-  Schema.Struct({ ...Envelope, op: Schema.Literal("screenshot"), displayId: Schema.optional(Id) }),
-  Schema.Struct({ ...Envelope, op: Schema.Literal("zoom"), displayId: Id, rect: Rect }),
+  Schema.Struct({
+    ...Envelope,
+    op: Schema.Literal("screenshot"),
+    displayId: Schema.optional(Id),
+    appId: Schema.optional(Id),
+  }),
+  Schema.Struct({
+    ...Envelope,
+    op: Schema.Literal("zoom"),
+    displayId: Id,
+    rect: Rect,
+    appId: Schema.optional(Id),
+  }),
   Schema.Struct({
     ...Envelope,
     op: Schema.Literal("inspect"),
@@ -157,6 +189,7 @@ export const ComputerAutomationRequest = Schema.Union([
     ...Envelope,
     op: Schema.Literal("type"),
     text: Schema.String.check(Schema.isMaxLength(10_000)),
+    appId: Schema.optional(Id),
   }),
   Schema.Struct({
     ...Envelope,
@@ -200,6 +233,18 @@ export const ComputerActionResult = Schema.Struct({
   screenshotError: Schema.optional(Schema.String.check(Schema.isMaxLength(100))),
   actionCompleted: Schema.optional(Schema.Boolean),
   thumbnail: Schema.optional(Schema.String.check(Schema.isMaxLength(40 * 1024))),
+  delivery: Schema.optional(ComputerDelivery),
+  target: Schema.optional(Schema.Struct({ appId: Id, windowBounds: Schema.optional(Rect) })),
+  /** Bounded read-back facts only; document text is never returned. */
+  verification: Schema.optional(
+    Schema.Struct({
+      verified: Schema.Boolean,
+      matchesRequestedValue: Schema.optional(Schema.Boolean),
+      valueLength: Schema.optional(NonNegative),
+    }),
+  ),
+  /** Set when a background mutation waited for a secure field and did not run. */
+  waiting: Schema.optional(Schema.Literal("secure-input")),
 });
 export type ComputerActionResult = typeof ComputerActionResult.Type;
 export const ComputerInspectResult = Schema.Struct({
@@ -221,6 +266,14 @@ export const ComputerInspectResult = Schema.Struct({
   ).check(Schema.isMaxLength(400)),
 });
 export type ComputerInspectResult = typeof ComputerInspectResult.Type;
+export const ComputerForegroundRequiredReason = Schema.Literals([
+  "unsupported-in-background",
+  "unsupported-app",
+  "window-unavailable",
+  "typing-unsupported",
+  "activation-side-effect",
+]);
+export type ComputerForegroundRequiredReason = typeof ComputerForegroundRequiredReason.Type;
 export const ComputerAutomationError = Schema.Union([
   Schema.Struct({
     _tag: Schema.Literal("Unavailable"),
@@ -252,6 +305,11 @@ export const ComputerAutomationError = Schema.Union([
     ]),
   }),
   Schema.Struct({
+    _tag: Schema.Literal("ForegroundRequired"),
+    reason: ComputerForegroundRequiredReason,
+    restored: Schema.optional(Schema.Boolean),
+  }),
+  Schema.Struct({
     _tag: Schema.Literal("NotGranted"),
     appName: Schema.optional(Schema.String),
     needed: Schema.Literals(["view", "click", "type"]),
@@ -266,6 +324,9 @@ export const ComputerAutomationError = Schema.Union([
       "elevated",
       "owner-unknown",
       "protection-unknown",
+      "user-active",
+      "other-app",
+      "foreground-busy",
     ]),
   }),
   Schema.Struct({ _tag: Schema.Literal("Execution"), message: Schema.String }),
@@ -288,8 +349,19 @@ export const ComputerAccessRequested = Schema.Struct({
   requestId: Id,
   threadId: Id,
   reason: Schema.String.check(Schema.isMaxLength(500)),
-  kind: Schema.Literals(["apps", "session-actions", "chrome-setup"]),
+  kind: Schema.Literals(["apps", "session-actions", "chrome-setup", "foreground-takeover"]),
   typingRequested: Schema.optionalKey(Schema.Boolean),
+  /** Session approval that also covers background control while the user works elsewhere. */
+  background: Schema.optionalKey(Schema.Boolean),
+  takeover: Schema.optionalKey(
+    Schema.Struct({
+      appId: Id,
+      appName: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
+      threadId: Id,
+      turnId: Id,
+      reason: Schema.String.check(Schema.isMaxLength(500)),
+    }),
+  ),
   chromeSetup: Schema.optionalKey(
     Schema.Struct({
       provider: Schema.Literals(["claude", "codex"]),
@@ -323,14 +395,48 @@ export const ComputerAccessAnswer = Schema.Struct({
   ).check(Schema.isMaxLength(10)),
   allowSessionActions: Schema.optional(Schema.Boolean),
   allowChromeSetup: Schema.optionalKey(Schema.Boolean),
+  allowForegroundTakeover: Schema.optionalKey(Schema.Boolean),
+  /** Minted by Electron main only; renderer and model input never supply it. */
+  sessionReceipt: Schema.optionalKey(Id),
 });
 export type ComputerAccessAnswer = typeof ComputerAccessAnswer.Type;
+export const ComputerLeaseScope = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("foreground") }),
+  Schema.Struct({ kind: Schema.Literal("app"), appId: Id }),
+  Schema.Struct({ kind: Schema.Literal("takeover"), appId: Id, approvalReceipt: Id }),
+]);
+export type ComputerLeaseScope = typeof ComputerLeaseScope.Type;
 export const ComputerLeaseHolder = Schema.Struct({
   ...ComputerAuthorization.fields,
   backend: ComputerBackendKind,
   threadTitle: Schema.String,
+  /** Legacy peers send no scope; they only ever held the machine-wide foreground lease. */
+  scope: ComputerLeaseScope.pipe(
+    Schema.withDecodingDefault((): ComputerLeaseScope => ({ kind: "foreground" })),
+  ),
+  policyRevision: NonNegative.pipe(Schema.withDecodingDefault(() => 0)),
 });
 export type ComputerLeaseHolder = typeof ComputerLeaseHolder.Type;
+export const ComputerExecutionState = Schema.Literals([
+  "pending-consent",
+  "waiting-idle",
+  "active",
+  "waiting-secure-input",
+  "paused",
+  "recovery",
+]);
+export type ComputerExecutionState = typeof ComputerExecutionState.Type;
+export const ComputerPauseCause = Schema.Literals([
+  "paused",
+  "kill-switch",
+  "user-input",
+  "permit-expired",
+  "target-active",
+  "activation",
+  "outcome-unknown",
+  "access-changed",
+]);
+export type ComputerPauseCause = typeof ComputerPauseCause.Type;
 export const ChromeLeaseHolder = Schema.Struct({
   profileId: Id,
   threadId: Id,
@@ -364,6 +470,8 @@ export const ComputerToolOutcomeCode = Schema.Literals([
   "app-resolution-failed",
   "fresh-screenshot-required",
   "display-required",
+  "ForegroundRequired",
+  "app-required",
 ]);
 export type ComputerToolOutcomeCode = typeof ComputerToolOutcomeCode.Type;
 export const ComputerActivity = Schema.Struct({
@@ -374,6 +482,7 @@ export const ComputerActivity = Schema.Struct({
   outcome: Schema.optional(ComputerToolOutcomeCode),
   appName: Schema.optional(Schema.String.check(Schema.isMaxLength(200))),
   thumbnailDataUrl: Schema.optional(Schema.String.check(Schema.isMaxLength(40 * 1024))),
+  delivery: Schema.optional(ComputerDelivery),
 });
 export type ComputerActivity = typeof ComputerActivity.Type;
 export const DesktopComputerHostMessage = Schema.Union([
@@ -393,6 +502,12 @@ export const DesktopComputerHostMessage = Schema.Union([
     profileId: Id,
     backendIncarnation: Id,
     protocolVersion: Schema.Literal(1),
+    capabilities: Schema.optionalKey(Schema.Array(Id).check(Schema.isMaxLength(32))),
+  }),
+  // Desktop registration: sent only to backends that advertised a capability.
+  Schema.Struct({
+    type: Schema.Literal("hostCapabilities"),
+    capabilities: Schema.Array(Id).check(Schema.isMaxLength(32)),
   }),
   Schema.Struct({ type: Schema.Literal("status"), status: ComputerAutomationBackendStatus }),
   Schema.Struct({ type: Schema.Literal("request"), request: ComputerAutomationRequest }),
@@ -419,6 +534,34 @@ export const DesktopComputerHostMessage = Schema.Union([
     type: Schema.Literal("leaseChanged"),
     holder: Schema.NullOr(ComputerLeaseHolder),
     otherProfile: Schema.optionalKey(Schema.Boolean),
+  }),
+  // Capable peers only: every same-profile holder, other profiles stay anonymous.
+  Schema.Struct({
+    type: Schema.Literal("leasesChanged"),
+    holders: Schema.Array(ComputerLeaseHolder).check(Schema.isMaxLength(64)),
+    otherProfile: Schema.Boolean,
+    pendingTakeover: Schema.optionalKey(Schema.Struct({ threadId: Id, appId: Id })),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("executionStateChanged"),
+    threadId: Id,
+    sessionGeneration: Id,
+    state: Schema.NullOr(ComputerExecutionState),
+    appId: Schema.optionalKey(Id),
+    delivery: Schema.optionalKey(ComputerDelivery),
+    pauseCause: Schema.optionalKey(ComputerPauseCause),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("foregroundTakeoverAcquire"),
+    requestId: Id,
+    approvalRequestId: Id,
+    holder: ComputerLeaseHolder,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("observationInvalidate"),
+    requestId: Id,
+    threadId: Id,
+    policyRevision: NonNegative,
   }),
   Schema.Struct({ type: Schema.Literal("pauseChanged"), threadId: Id, paused: Schema.Boolean }),
   Schema.Struct({ type: Schema.Literal("resumeRequested"), threadId: Id }),

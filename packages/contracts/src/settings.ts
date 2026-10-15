@@ -309,6 +309,9 @@ export const PreviewExternalHosts = Schema.Array(
 ).check(Schema.isMaxLength(200));
 export type PreviewExternalHosts = typeof PreviewExternalHosts.Type;
 
+export const ComputerUseExecutionMode = Schema.Literals(["foreground", "background"]);
+export type ComputerUseExecutionMode = typeof ComputerUseExecutionMode.Type;
+
 export const ProjectSettingsOverrides = Schema.Struct({
   autoResumeUsageLimitedThreads: Schema.optionalKey(Schema.Boolean),
   resumeActiveTurnsAfterRestart: Schema.optionalKey(Schema.Boolean),
@@ -382,6 +385,13 @@ export const ServerSettings = Schema.Struct({
   enableClaudeInChrome: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   computerUseBackend: Schema.Literals(["auto", "f5"]).pipe(
     Schema.withDecodingDefault(() => "auto" as const),
+  ),
+  /**
+   * Global only. "background" lets agents act inside granted apps while the user works
+   * elsewhere; it forces F5's native backend. Foreground keeps the idle-only behaviour.
+   */
+  computerUseExecutionMode: ComputerUseExecutionMode.pipe(
+    Schema.withDecodingDefault(() => "foreground" as const),
   ),
   /** Allow agents to control approved apps. Off by default. */
   enableAgentComputerUse: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
@@ -530,6 +540,7 @@ export const ServerSettingsPatch = Schema.Struct({
   enableClaudeInChrome: Schema.optionalKey(Schema.Boolean),
   enableAgentComputerUse: Schema.optionalKey(Schema.Boolean),
   computerUseBackend: Schema.optionalKey(Schema.Literals(["auto", "f5"])),
+  computerUseExecutionMode: Schema.optionalKey(ComputerUseExecutionMode),
   autoPullDefaultBranch: Schema.optionalKey(Schema.Boolean),
   observability: Schema.optionalKey(
     Schema.Struct({

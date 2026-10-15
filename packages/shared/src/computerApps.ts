@@ -114,6 +114,25 @@ export const COMPUTER_BROWSER_IDS = {
   ],
   win32: ["chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "arc.exe"],
 } as const;
+/**
+ * Background (accessibility-only) delivery policy, macOS only. `foregroundOnly` lists apps the
+ * delivery spike found activate or fail under AX actions; they always need a takeover.
+ * `certified` is the reference set the spike and rehearsals must pass on.
+ */
+export const COMPUTER_BACKGROUND_POLICY = {
+  foregroundOnly: [] as ReadonlyArray<string>,
+  certified: [
+    "dev.f5.rehearsal.target",
+    "com.apple.calculator",
+    "com.apple.TextEdit",
+    "com.apple.Notes",
+  ] as ReadonlyArray<string>,
+} as const;
+export function computerBackgroundForegroundOnly(appId: string): boolean {
+  return COMPUTER_BACKGROUND_POLICY.foregroundOnly.some((pattern) =>
+    matches(appId.toLowerCase(), pattern),
+  );
+}
 export interface RuntimeF5Identity {
   readonly appIds?: ReadonlyArray<string>;
   readonly f5Pids?: ReadonlyArray<number>;

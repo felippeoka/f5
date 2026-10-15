@@ -6,6 +6,7 @@ import {
   COMPUTER_TOOL_TIMEOUT_MS,
   ComputerToolGeometry,
   classifyComputerTool,
+  subscribeComputerObservationInvalidation,
 } from "../../computer/computerMcpTools";
 /**
  * Claude-side wiring for F5's agent browser: the in-process preview MCP server,
@@ -180,18 +181,9 @@ export function makeClaudeComputerMcpServer(input: {
   });
   let geometry = new ComputerToolGeometry();
   let connectionId = randomUUID();
-  const unsubscribe = input.broker.subscribe((event) => {
-    if (event.channel === "computer.access.grantsChanged" && event.data.threadId === input.threadId)
-      geometry.clear();
-    if (
-      event.channel === "computer.host" &&
-      (event.data.type === "pauseChanged" || event.data.type === "grantsChanged") &&
-      (event.data.type === "grantsChanged"
-        ? event.data.authorization.threadId
-        : event.data.threadId) === input.threadId
-    )
-      geometry.clear();
-  });
+  const unsubscribe = subscribeComputerObservationInvalidation(input.broker, input.threadId, () =>
+    geometry.clear(),
+  );
   return {
     serverName,
     dispose: () => {

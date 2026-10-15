@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Schema } from "effect";
 import {
+  COMPUTER_BACKGROUND_CAPABILITY,
   DesktopComputerHostMessage,
   type ComputerAutomationBackendStatus,
   type ComputerAutomationRequest,
@@ -24,6 +25,7 @@ export class DesktopComputerHost {
   private readonly pending = new Map<string, Pending>();
   private readonly listeners = new Set<(message: DesktopComputerHostMessage) => void>();
   private connected = false;
+  private hostCapabilities = new Set<string>();
   constructor(
     readonly profileId: string,
     readonly backendIncarnation: string,
@@ -39,10 +41,20 @@ export class DesktopComputerHost {
     };
     ipc.on("message", this.receive);
     ipc.on("disconnect", this.disconnect);
-    this.send({ type: "hello", profileId, backendIncarnation, protocolVersion: 1 });
+    this.send({
+      type: "hello",
+      profileId,
+      backendIncarnation,
+      protocolVersion: 1,
+      capabilities: [COMPUTER_BACKGROUND_CAPABILITY],
+    });
   }
   status(): ComputerAutomationBackendStatus {
     return this.state;
+  }
+  /** Background delivery needs the desktop to have answered with the same capability. */
+  backgroundCapable(): boolean {
+    return this.connected && this.hostCapabilities.has(COMPUTER_BACKGROUND_CAPABILITY);
   }
   hasHost(): boolean {
     return this.connected;
@@ -65,6 +77,7 @@ export class DesktopComputerHost {
       this.disconnect();
       return;
     }
+    if (message.type === "hostCapabilities") this.hostCapabilities = new Set(message.capabilities);
     if (message.type === "status") this.state = message.status;
     if (message.type === "response") {
       const pending = this.pending.get(message.requestId);
@@ -79,6 +92,7 @@ export class DesktopComputerHost {
   };
   private readonly disconnect = () => {
     this.connected = false;
+    this.hostCapabilities = new Set();
     this.state = { available: false, reason: "no-host" };
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
@@ -115,6 +129,15 @@ export class DesktopComputerHost {
       this.pending.set(message.requestId, { resolve, reject, timer, mutation });
       this.send(message);
     });
+  }
+  /** Cancel a correlated exchange locally and on the desktop; late replies are ignored. */
+  abandon(requestId: string, error: ComputerControlError): void {
+    const pending = this.pending.get(requestId);
+    if (!pending) return;
+    this.pending.delete(requestId);
+    clearTimeout(pending.timer);
+    this.send({ type: "cancel", requestId });
+    pending.reject(error);
   }
   request(request: ComputerAutomationRequest): Promise<unknown> {
     const requestId = request.requestId;

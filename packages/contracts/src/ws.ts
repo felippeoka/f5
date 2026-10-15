@@ -3,6 +3,9 @@ import {
   ComputerGrant,
   ComputerActivity,
   ComputerBackendKind,
+  ComputerDelivery,
+  ComputerExecutionState,
+  ComputerPauseCause,
 } from "./computerAutomation";
 import {
   NATIVE_OPERATION_WS_METHODS,
@@ -1015,11 +1018,32 @@ export const WsPushPreviewAutomationPauseChanged = makeWsPushSchema(
   WS_CHANNELS.previewAutomationPauseChanged,
   PreviewAutomationPauseChanged,
 );
-/** Which thread, if any, currently controls this computer's screen, mouse, and keyboard. */
-export const AgentComputerUseChanged = Schema.Struct({
-  threadId: Schema.NullOr(ThreadId),
-  otherProfile: Schema.optional(Schema.Boolean),
+export const AgentComputerUseHolder = Schema.Struct({
+  threadId: ThreadId,
+  /** Absent for browser-integration (Chrome) holders. */
   backend: Schema.optional(ComputerBackendKind),
+  delivery: ComputerDelivery,
+  appId: Schema.optional(Schema.String),
+  appName: Schema.optional(Schema.String),
+  state: ComputerExecutionState,
+  pauseCause: Schema.optional(ComputerPauseCause),
+});
+export type AgentComputerUseHolder = typeof AgentComputerUseHolder.Type;
+/**
+ * Which threads in this profile control apps on this computer. Foreground holders own the
+ * screen, mouse and keyboard; background holders act inside one app each.
+ */
+export const AgentComputerUseChanged = Schema.Struct({
+  holders: Schema.Array(AgentComputerUseHolder),
+  pendingTakeover: Schema.optional(
+    Schema.Struct({
+      threadId: ThreadId,
+      appId: Schema.String,
+      appName: Schema.optional(Schema.String),
+      state: ComputerExecutionState,
+    }),
+  ),
+  otherProfile: Schema.optional(Schema.Boolean),
 });
 export const WsPushAgentComputerUseChanged = makeWsPushSchema(
   WS_CHANNELS.agentComputerUseChanged,

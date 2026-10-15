@@ -721,9 +721,9 @@ export interface NativeApi {
       ) => () => void;
       onOwnerReleased: (callback: (event: PreviewAutomationOwnerReleased) => void) => () => void;
       onPauseChanged: (callback: (event: PreviewAutomationPauseChanged) => void) => () => void;
-      /** Which thread controls this computer (computer use); null when none. */
+      /** Which threads control apps on this computer (computer use); empty when none. */
       onComputerUseChanged: (
-        callback: (event: { readonly threadId: ThreadId | null }) => void,
+        callback: (event: typeof AgentComputerUseChanged.Type) => void,
       ) => () => void;
     };
     onEvent: (callback: (event: PreviewEvent) => void) => () => void;
