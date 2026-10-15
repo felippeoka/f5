@@ -21,9 +21,12 @@ import { AgentBridgeHostError, type AgentBridgeHostShape } from "./agentBridge/A
 import {
   agentBridgeStdioSetups,
   makeAgentBridgeService,
+  type AgentBridgeServiceError,
 } from "./agentBridge/AgentBridgeService.ts";
 import { makeAgentBridgeStore } from "./agentBridge/AgentBridgeStore.ts";
 import { makeBotTaskStore, type BotTaskError } from "./agentBridge/BotTaskStore.ts";
+import { makeOAuthStore } from "./agentBridge/OAuthStore.ts";
+import { makeEventStore } from "./agentBridge/events/EventStore.ts";
 import { version as serverPackageVersion } from "../package.json" with { type: "json" };
 import { usageResumeTargetAfterCredit } from "./usage/usageResumeAfterCredit.ts";
 import { usageLimitKey } from "./nextTurnQueue/usageLimitResume.ts";
@@ -604,7 +607,8 @@ function readFilePrefix(
   });
 }
 
-const toTaskRouteError = (error: BotTaskError) => new RouteRequestError({ message: error.message });
+const toTaskRouteError = (error: BotTaskError | AgentBridgeServiceError) =>
+  new RouteRequestError({ message: error.message });
 
 function stripRequestTag<T extends { _tag: string }>(body: T) {
   return Struct.omit(body, ["_tag"]);
@@ -3092,6 +3096,18 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         ),
       ),
     ),
+    readEventsAfter: (sequenceExclusive) =>
+      Stream.unwrap(
+        awaitOrchestrationRuntimeForOptionalBackground.pipe(
+          Effect.map((runtime) =>
+            Option.isSome(runtime)
+              ? runtime.value.orchestrationEngine
+                  .readEvents(sequenceExclusive)
+                  .pipe(Stream.mapError(toAgentBridgeHostError))
+              : Stream.empty,
+          ),
+        ),
+      ),
     listProviderInstances: providerAdvisoryProjection.getProviders,
     getSettings: serverSettings.getSettings.pipe(Effect.mapError(toAgentBridgeHostError)),
     getProjectGitBranch: (cwd) =>
@@ -3117,6 +3133,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     host: agentBridgeHost,
     store: makeAgentBridgeStore(sql),
     tasks: makeBotTaskStore(sql),
+    oauth: makeOAuthStore(sql),
+    events: makeEventStore(sql),
+    secrets: profileSecrets,
     settingsChanges: serverSettings.streamChanges,
     stateDir: serverConfig.stateDir,
     serverVersion: serverPackageVersion,
@@ -3402,6 +3421,24 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case AGENT_BRIDGE_WS_METHODS.cancelTask:
         return yield* agentBridge.tasks
           .controlTask("cancel", stripRequestTag(request.body))
+          .pipe(Effect.mapError(toTaskRouteError));
+      case AGENT_BRIDGE_WS_METHODS.openPairingWindow:
+        return yield* agentBridge.openPairingWindow.pipe(Effect.mapError(toTaskRouteError));
+      case AGENT_BRIDGE_WS_METHODS.decideAuthorization:
+        return yield* agentBridge
+          .decideAuthorization(stripRequestTag(request.body))
+          .pipe(Effect.mapError(toTaskRouteError));
+      case AGENT_BRIDGE_WS_METHODS.updateClientGrant:
+        return yield* agentBridge
+          .updateClientGrant(stripRequestTag(request.body))
+          .pipe(Effect.mapError(toTaskRouteError));
+      case AGENT_BRIDGE_WS_METHODS.retryNotification:
+        return yield* agentBridge
+          .retryNotification(request.body.clientId)
+          .pipe(Effect.mapError(toTaskRouteError));
+      case AGENT_BRIDGE_WS_METHODS.revokeClient:
+        return yield* agentBridge
+          .revokeClient(request.body.clientId)
           .pipe(Effect.mapError(toTaskRouteError));
 
       case AGENTS_WS_METHODS.getSnapshot: {
