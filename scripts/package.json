@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
+    "@muse-code/sdk": "1.4.8",
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
     "effect": "catalog:"

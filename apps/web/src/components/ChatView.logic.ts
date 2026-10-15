@@ -724,6 +724,7 @@ export function getProviderDispatchModelsByProvider(
     opencode: modelsFor("opencode"),
     grok: modelsFor("grok"),
     antigravity: modelsFor("antigravity"),
+    muse: modelsFor("muse"),
   };
 }
 

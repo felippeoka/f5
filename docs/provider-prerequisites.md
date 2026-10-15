@@ -33,6 +33,23 @@ F5 needs at least one authenticated coding-agent provider on the machine running
 Enable Antigravity in Settings, explicitly install its pinned runtime, then sign in with Google.
 See [Antigravity setup and isolation](providers/antigravity.md). It is disabled by default.
 
+## Muse Code
+
+This is Meta's Muse Code coding CLI, not the Muse personal agent (which has no public API yet;
+F5 does not imitate it).
+
+- Install the CLI yourself so `muse` is on your PATH. F5 never runs the installer:
+
+  ```bash
+  curl -fsSL https://dev.meta.ai/install.sh | bash
+  ```
+
+- Sign in once: run `muse` in a terminal, use `muse auth set`, or set `META_API_KEY` in the
+  provider instance's environment. A set `META_API_KEY` takes precedence over a stored browser
+  sign-in.
+- Muse Code is unavailable in isolated (non-default) profiles. See
+  [Muse Code](providers/muse.md).
+
 ## Windows executable overrides
 
 F5 launches provider arguments without a command shell so workspace paths and provider options are

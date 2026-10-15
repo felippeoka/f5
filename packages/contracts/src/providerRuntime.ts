@@ -35,6 +35,7 @@ const RuntimeEventRawSource = Schema.Literals([
   "acp.cursor.extension",
   "acp.grok.extension",
   "opencode.sdk.event",
+  "msp.jsonrpc",
 ]);
 export type RuntimeEventRawSource = typeof RuntimeEventRawSource.Type;
 

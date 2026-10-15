@@ -1,0 +1,597 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { assert, it } from "@effect/vitest";
+import {
+  ApprovalRequestId,
+  MuseSettings,
+  ProviderInstanceId,
+  type ProviderRuntimeEvent,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
+import { Effect, Fiber, Layer, Schema, ServiceMap, Stream } from "effect";
+
+import { ServerConfig } from "../../config.ts";
+import { openMspHost } from "../msp/MspSessionRuntime.ts";
+import { memoryNativeCommandIdStore } from "../msp/nativeCommandIds.ts";
+import { MockMspHost, mspError } from "../msp/testing/mockMspHost.ts";
+import type { MuseAdapterShape } from "../Services/MuseAdapter.ts";
+import { makeMuseAdapter, parseMuseResumeCursor } from "./MuseAdapter.ts";
+
+const INSTANCE = ProviderInstanceId.make("muse");
+
+interface Harness {
+  readonly adapter: MuseAdapterShape;
+  readonly hosts: MockMspHost[];
+  configure: (host: MockMspHost) => void;
+}
+
+class MuseHarness extends ServiceMap.Service<MuseHarness, Harness>()(
+  "t3/provider/Layers/MuseAdapter.test/MuseHarness",
+) {}
+
+const HarnessLayer = Layer.effect(
+  MuseHarness,
+  Effect.gen(function* () {
+    const hosts: MockMspHost[] = [];
+    const harness: { configure: (host: MockMspHost) => void } = { configure: () => undefined };
+    const adapter = yield* makeMuseAdapter(Schema.decodeSync(MuseSettings)({}), {
+      instanceId: INSTANCE,
+      nativeCommandIds: memoryNativeCommandIdStore(),
+      openHost: () =>
+        Effect.promise(async () => {
+          const mock = new MockMspHost();
+          harness.configure(mock);
+          hosts.push(mock);
+          const host = await openMspHost({ transport: mock.transport, clientVersion: "test" });
+          return { host, stderrTail: () => "" };
+        }),
+    });
+    return {
+      adapter,
+      hosts,
+      get configure() {
+        return harness.configure;
+      },
+      set configure(value) {
+        harness.configure = value;
+      },
+    } satisfies Harness;
+  }),
+).pipe(
+  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3code-muse-adapter-" })),
+  Layer.provideMerge(NodeServices.layer),
+);
+
+const tick = (ms = 20) => Effect.promise(() => new Promise((resolve) => setTimeout(resolve, ms)));
+
+const collect = (adapter: MuseAdapterShape) =>
+  Effect.gen(function* () {
+    const events: ProviderRuntimeEvent[] = [];
+    const fiber = yield* adapter.streamEvents.pipe(
+      Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+      Effect.forkChild,
+    );
+    yield* tick(5);
+    return { events, stop: Fiber.interrupt(fiber) };
+  });
+
+const start = (harness: Harness, threadId: ThreadId, runtimeMode = "auto-accept-edits" as const) =>
+  harness.adapter.startSession({
+    threadId,
+    provider: "muse",
+    cwd: process.cwd(),
+    runtimeMode,
+  });
+
+it.layer(HarnessLayer)("MuseAdapter", (it) => {
+  it.effect("starts with verified permissions and maps the turn lifecycle", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      harness.configure = () => undefined;
+      const { events, stop } = yield* collect(harness.adapter);
+      const threadId = ThreadId.make("thread-lifecycle");
+      const session = yield* start(harness, threadId);
+      const host = harness.hosts.at(-1)!;
+      assert.deepEqual(
+        host.requestsFor("session/start")[0]?.params.approvalMode,
+        "promptUnmatched",
+      );
+      assert.equal(
+        host.requestsFor("session/setReasoningEffort")[0]?.params.reasoningEffort,
+        "high",
+      );
+      assert.equal(parseMuseResumeCursor(session.resumeCursor)?.mspSessionId, "msp-session-1");
+
+      const turn = yield* harness.adapter.sendTurn({ threadId, input: "hello" });
+      assert.equal(turn.turnId, "turn-1");
+      host.notify("turn/started", { turnId: "turn-1", commandId: "x" });
+      host.notify("item/started", {
+        item: {
+          itemId: "a1",
+          kind: "agentMessage",
+          revision: 1,
+          status: "inProgress",
+          turnId: "turn-1",
+          text: "",
+        },
+      });
+      host.notify("item/delta", { itemId: "a1", delta: "Hel" });
+      host.notify("item/updated", {
+        item: {
+          itemId: "a1",
+          kind: "agentMessage",
+          revision: 2,
+          status: "inProgress",
+          turnId: "turn-1",
+          text: "Hel",
+        },
+      });
+      // A stale revision must not be re-projected.
+      host.notify("item/updated", {
+        item: {
+          itemId: "a1",
+          kind: "agentMessage",
+          revision: 1,
+          status: "inProgress",
+          turnId: "turn-1",
+          text: "",
+        },
+      });
+      host.notify("item/completed", {
+        item: {
+          itemId: "a1",
+          kind: "agentMessage",
+          revision: 3,
+          status: "completed",
+          turnId: "turn-1",
+          text: "Hello",
+        },
+      });
+      host.notify("session/todoListChanged", {
+        items: [{ text: "step", status: "inProgress" }],
+        revision: 1,
+        sourceTool: "todo",
+      });
+      host.notify("turn/completed", { turnId: "turn-1", terminal: "completed" });
+      yield* tick(50);
+
+      const types = events.map((event) => event.type);
+      assert.include(types, "turn.started");
+      assert.include(types, "turn.plan.updated");
+      assert.equal(types.filter((type) => type === "item.updated").length, 1, types.join(","));
+      const deltas = events.filter((event) => event.type === "content.delta");
+      assert.deepEqual(
+        deltas.map((event) => (event.type === "content.delta" ? event.payload.delta : "")),
+        ["Hel", "lo"],
+      );
+      const completed = events.find((event) => event.type === "item.completed");
+      assert.equal(completed?.type === "item.completed" ? completed.payload.detail : "", "Hello");
+      const turnCompleted = events.find((event) => event.type === "turn.completed");
+      assert.ok(turnCompleted?.resumeCursor);
+      yield* stop;
+      yield* harness.adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("rejects approval-required through the unsupported-mode path", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      const result = yield* harness.adapter
+        .startSession({
+          threadId: ThreadId.make("thread-supervised"),
+          provider: "muse",
+          cwd: process.cwd(),
+          runtimeMode: "approval-required",
+        })
+        .pipe(Effect.result);
+      assert.equal(result._tag, "Failure");
+    }),
+  );
+
+  it.effect("stops the session when the permission read-back mismatches", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      harness.configure = (host) => {
+        (host.options as { forcedApprovalMode?: string }).forcedApprovalMode = "allowAll";
+      };
+      const threadId = ThreadId.make("thread-mismatch");
+      const result = yield* start(harness, threadId).pipe(Effect.result);
+      harness.configure = () => undefined;
+      assert.equal(result._tag, "Failure");
+      assert.isFalse(yield* harness.adapter.hasSession(threadId));
+    }),
+  );
+
+  it.effect("stops when permissions diverge mid-session", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      const { events, stop } = yield* collect(harness.adapter);
+      const threadId = ThreadId.make("thread-diverge");
+      yield* start(harness, threadId);
+      const host = harness.hosts.at(-1)!;
+      host.notify("session/approvalModeChanged", {
+        mode: "allowAll",
+        clientName: "other",
+        commandId: "c",
+        source: "approvalReconfigure",
+      });
+      yield* tick(50);
+      assert.isFalse(yield* harness.adapter.hasSession(threadId));
+      assert.include(
+        events.map((event) => event.type),
+        "runtime.error",
+      );
+      yield* stop;
+    }),
+  );
+
+  it.effect("maps approval choices, supersedes stages, and handles competing resolution", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      const { events, stop } = yield* collect(harness.adapter);
+      const threadId = ThreadId.make("thread-approval");
+      yield* start(harness, threadId);
+      const host = harness.hosts.at(-1)!;
+      const approval = {
+        approvalId: "ap1",
+        currentRequirementId: { approvalId: "ap1", sourceIndex: 0 },
+        availableChoices: [
+          { choiceId: "once", decision: "approved", scope: "once", label: "Allow once" },
+          { choiceId: "no", decision: "denied", scope: "once", label: "Deny" },
+        ],
+        subject: { kind: "command", command: "make deploy" },
+        toolName: "shell",
+        turnId: "turn-1",
+        itemId: "i",
+        judgeEscalated: false,
+        protectedWrite: false,
+        rawArgs: "",
+        taskId: "t",
+        toolCallId: "tc",
+      };
+      host.notify("approval/requested", approval);
+      yield* tick();
+      host.notify("approval/updated", {
+        approvalId: "ap1",
+        availableChoices: approval.availableChoices,
+        change: { kind: "nextStage" },
+        currentRequirementId: { approvalId: "ap1", sourceIndex: 1 },
+        subject: { kind: "command", command: "make deploy --prod" },
+      });
+      yield* tick();
+      const opened = events.filter((event) => event.type === "request.opened");
+      assert.equal(opened.length, 2);
+      assert.equal(opened[1]?.requestId, "ap1#ap1:1");
+      const first = opened[0];
+      assert.deepEqual(first?.type === "request.opened" ? first.payload.approvalOptions : [], [
+        { decision: "accept", label: "Allow once" },
+        { decision: "decline", label: "Deny" },
+      ]);
+
+      yield* harness.adapter.respondToRequest(
+        threadId,
+        ApprovalRequestId.make("ap1#ap1:1"),
+        "accept",
+      );
+      const decide = host.requestsFor("approval/decide")[0]?.params;
+      assert.equal(decide?.choiceId, "once");
+      assert.deepEqual(decide?.requirementId, { approvalId: "ap1", sourceIndex: 1 });
+
+      host.notify("approval/requested", {
+        ...approval,
+        approvalId: "ap2",
+        currentRequirementId: { approvalId: "ap2", sourceIndex: 0 },
+      });
+      yield* tick();
+      host.notify("approval/resolved", {
+        approvalId: "ap2",
+        decision: "denied",
+        resolvedBy: "user",
+        itemId: "i",
+        policyResult: "deny",
+        stageEvidence: [],
+        turnId: "turn-1",
+      });
+      yield* tick();
+      const late = yield* harness.adapter
+        .respondToRequest(threadId, ApprovalRequestId.make("ap2#ap2:0"), "accept")
+        .pipe(Effect.result);
+      assert.equal(late._tag, "Failure");
+      assert.match(late._tag === "Failure" ? late.failure.message : "", /already resolved/);
+      yield* stop;
+      yield* harness.adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("re-syncs on a stale requirement without retrying", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      const threadId = ThreadId.make("thread-stale");
+      yield* start(harness, threadId);
+      const host = harness.hosts.at(-1)!;
+      host.notify("approval/requested", {
+        approvalId: "ap1",
+        currentRequirementId: { approvalId: "ap1", sourceIndex: 0 },
+        availableChoices: [{ choiceId: "ok", decision: "approved", scope: "once", label: "OK" }],
+        subject: { kind: "command" },
+        toolName: "shell",
+        turnId: "turn-1",
+      });
+      yield* tick();
+      host.handlers.set("approval/decide", () => {
+        throw mspError("approvalRequirementStale");
+      });
+      const result = yield* harness.adapter
+        .respondToRequest(threadId, ApprovalRequestId.make("ap1#ap1:0"), "accept")
+        .pipe(Effect.result);
+      assert.match(result._tag === "Failure" ? result.failure.message : "", /approval changed/);
+      assert.equal(host.requestsFor("approval/decide").length, 1);
+      assert.isAtLeast(host.requestsFor("approval/listPending").length, 2);
+      yield* harness.adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("denies an undecodable approval when it can, otherwise stops", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      const threadId = ThreadId.make("thread-undecodable");
+      yield* start(harness, threadId);
+      const host = harness.hosts.at(-1)!;
+      host.notify("approval/requested", {
+        approvalId: "ap1",
+        currentRequirementId: { approvalId: "ap1", sourceIndex: 0 },
+        availableChoices: [{ choiceId: "deny", decision: "denied" }],
+      });
+      yield* tick(40);
+      assert.equal(host.requestsFor("approval/decide")[0]?.params.choiceId, "deny");
+      assert.isTrue(yield* harness.adapter.hasSession(threadId));
+      host.notify("approval/requested", { approvalId: "ap2" });
+      yield* tick(40);
+      assert.isFalse(yield* harness.adapter.hasSession(threadId));
+    }),
+  );
+
+  it.effect("classifies a rejected turn as not sent and pins the native id on retries", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      const threadId = ThreadId.make("thread-delivery");
+      yield* start(harness, threadId);
+      const host = harness.hosts.at(-1)!;
+      host.handlers.set("turn/start", () => {
+        throw mspError("commandRejected", "rejected", -32030);
+      });
+      const deliveryId = "delivery-1" as never;
+      const first = yield* harness.adapter
+        .sendTurn({ threadId, input: "hi", deliveryId })
+        .pipe(Effect.result);
+      assert.equal(first._tag, "Failure");
+      const failure =
+        first._tag === "Failure"
+          ? (first.failure as { deliveryCertainty?: string; deliveryRetryable?: boolean })
+          : {};
+      assert.equal(failure.deliveryCertainty, "not_sent");
+      assert.equal(failure.deliveryRetryable, false);
+      host.handlers.delete("turn/start");
+      yield* harness.adapter.sendTurn({ threadId, input: "hi", deliveryId });
+      const commandIds = host.requestsFor("turn/start").map((request) => request.params.commandId);
+      assert.equal(commandIds.length, 2);
+      assert.equal(commandIds[0], commandIds[1]);
+      yield* harness.adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("stopSession waits for the cancelled turn to settle", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      const threadId = ThreadId.make("thread-cancel");
+      yield* start(harness, threadId);
+      const host = harness.hosts.at(-1)!;
+      yield* harness.adapter.sendTurn({ threadId, input: "work" });
+      host.notify("turn/started", { turnId: "turn-1", commandId: "c" });
+      yield* tick();
+      host.handlers.set("turn/cancel", (params) => {
+        setTimeout(
+          () => host.notify("turn/completed", { turnId: "turn-1", terminal: "cancelled" }),
+          30,
+        );
+        return { commandId: params.commandId, status: "accepted", turnId: "turn-1" };
+      });
+      const startedAt = Date.now();
+      yield* harness.adapter.stopSession(threadId);
+      assert.isAtLeast(Date.now() - startedAt, 25);
+      assert.equal(host.requestsFor("turn/cancel").length, 1);
+    }),
+  );
+
+  it.effect("starts fresh only on sessionNotFound and warns", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      harness.configure = (host) => {
+        host.handlers.set("session/resume", () => {
+          throw mspError("sessionNotFound");
+        });
+      };
+      const { events, stop } = yield* collect(harness.adapter);
+      const threadId = ThreadId.make("thread-resume");
+      yield* harness.adapter.startSession({
+        threadId,
+        provider: "muse",
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        resumeCursor: {
+          schemaVersion: 1,
+          mspSessionId: "old",
+          viewCursor: "c9",
+          durability: "durable",
+        },
+      });
+      harness.configure = () => undefined;
+      const host = harness.hosts.at(-1)!;
+      assert.equal(host.requestsFor("session/start").length, 1);
+      assert.ok(
+        events.some(
+          (event) =>
+            event.type === "runtime.warning" && /new Muse Code session/.test(event.payload.message),
+        ),
+      );
+      yield* stop;
+      yield* harness.adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("hydrates from session/read when the resume anchor was pruned", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      let resumes = 0;
+      harness.configure = (host) => {
+        host.handlers.set("session/resume", () => {
+          resumes += 1;
+          if (resumes === 1) throw mspError("boundaryPruned");
+          return {
+            session: { sessionId: host.sessionId, status: "idle", turnCount: 1 },
+            history: { items: null, mode: "none", snapshot: null },
+            pendingRequests: [],
+            viewCursor: host.nextCursor(),
+          };
+        });
+        host.handlers.set("session/read", () => ({
+          session: { sessionId: host.sessionId },
+          history: {
+            items: [
+              {
+                itemId: "old",
+                kind: "agentMessage",
+                revision: 2,
+                status: "completed",
+                turnId: "t0",
+                text: "Earlier",
+              },
+            ],
+            mode: "inline",
+            snapshot: null,
+          },
+          pendingRequests: [],
+          viewCursor: "cursor-read",
+        }));
+      };
+      const { events, stop } = yield* collect(harness.adapter);
+      const threadId = ThreadId.make("thread-pruned");
+      yield* harness.adapter.startSession({
+        threadId,
+        provider: "muse",
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        resumeCursor: {
+          schemaVersion: 1,
+          mspSessionId: "msp-session-1",
+          viewCursor: "gone",
+          durability: "durable",
+        },
+      });
+      harness.configure = () => undefined;
+      assert.ok(events.some((event) => event.type === "runtime.warning"));
+      const hydrated = events.find((event) => event.type === "item.completed");
+      assert.equal(hydrated?.itemId, "old");
+      assert.equal(harness.hosts.at(-1)!.requestsFor("session/start").length, 0);
+      yield* stop;
+      yield* harness.adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("reopens pending approvals after resume", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      harness.configure = (host) => {
+        host.handlers.set("approval/listPending", () => ({
+          approvals: [
+            {
+              approvalId: "ap9",
+              currentRequirementId: { approvalId: "ap9", sourceIndex: 0 },
+              availableChoices: [
+                { choiceId: "ok", decision: "approved", scope: "once", label: "OK" },
+              ],
+              subject: { kind: "command" },
+              toolName: "shell",
+              turnId: "t1",
+            },
+          ],
+          userInputs: [],
+        }));
+      };
+      const { events, stop } = yield* collect(harness.adapter);
+      const threadId = ThreadId.make("thread-reopen");
+      yield* harness.adapter.startSession({
+        threadId,
+        provider: "muse",
+        cwd: process.cwd(),
+        runtimeMode: "auto-accept-edits",
+        resumeCursor: {
+          schemaVersion: 1,
+          mspSessionId: "msp-session-1",
+          viewCursor: "c1",
+          durability: "durable",
+        },
+      });
+      harness.configure = () => undefined;
+      assert.ok(
+        events.some((event) => event.type === "request.opened" && event.requestId === "ap9#ap9:0"),
+      );
+      yield* stop;
+      yield* harness.adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("re-applies effort after resume and on change", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      const threadId = ThreadId.make("thread-effort");
+      yield* harness.adapter.startSession({
+        threadId,
+        provider: "muse",
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: {
+          instanceId: INSTANCE,
+          model: "muse-spark-1.3",
+          options: [{ id: "reasoningEffort", value: "low" }],
+        },
+        resumeCursor: {
+          schemaVersion: 1,
+          mspSessionId: "msp-session-1",
+          viewCursor: "c1",
+          durability: "durable",
+        },
+      });
+      const host = harness.hosts.at(-1)!;
+      yield* harness.adapter.sendTurn({
+        threadId,
+        input: "go",
+        modelSelection: {
+          instanceId: INSTANCE,
+          model: "muse-spark-1.3",
+          options: [{ id: "reasoningEffort", value: "medium" }],
+        },
+      });
+      assert.deepEqual(
+        host
+          .requestsFor("session/setReasoningEffort")
+          .map((request) => request.params.reasoningEffort),
+        ["low", "medium"],
+      );
+      yield* harness.adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("interrupts the active turn", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      const threadId = ThreadId.make("thread-interrupt");
+      yield* start(harness, threadId);
+      const host = harness.hosts.at(-1)!;
+      yield* harness.adapter.sendTurn({ threadId, input: "go" });
+      yield* harness.adapter.interruptTurn(threadId, TurnId.make("turn-1"));
+      assert.equal(host.requestsFor("turn/interrupt")[0]?.params.turnId, "turn-1");
+      yield* harness.adapter.stopSession(threadId);
+    }),
+  );
+});

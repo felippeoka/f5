@@ -103,9 +103,11 @@ export function UsagePriceEditor() {
             value={provider}
             onChange={(event) => setProvider(event.target.value as ProviderKind)}
           >
-            {["codex", "claudeAgent", "cursor", "grok", "opencode", "antigravity"].map((kind) => (
-              <option key={kind}>{kind}</option>
-            ))}
+            {["codex", "claudeAgent", "cursor", "grok", "opencode", "antigravity", "muse"].map(
+              (kind) => (
+                <option key={kind}>{kind}</option>
+              ),
+            )}
           </select>
         </label>
         <label className="text-xs">

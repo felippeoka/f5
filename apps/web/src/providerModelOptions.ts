@@ -5,6 +5,8 @@ import {
   type CodexReasoningEffort,
   type CursorModelOptions,
   type CursorReasoningOption,
+  type MuseModelOptions,
+  type MuseReasoningEffort,
   type OpenCodeModelOptions,
   type ProviderKind,
   type ProviderModelOptions,
@@ -35,6 +37,10 @@ function readCursorReasoning(value: unknown): CursorReasoningOption | undefined 
     : undefined;
 }
 
+function readMuseReasoningEffort(value: unknown): MuseReasoningEffort | undefined {
+  return value === "low" || value === "medium" || value === "high" ? value : undefined;
+}
+
 function readCodexReasoningEffort(value: unknown): CodexReasoningEffort | undefined {
   return typeof value === "string"
     ? (resolveReasoningEffortForProvider("codex", value) ?? undefined)
@@ -56,6 +62,7 @@ export function normalizeProviderModelOptions(
   const cursorCandidate = readRecordField(candidate, "cursor");
   const openCodeCandidate = readRecordField(candidate, "opencode");
   const grokCandidate = readRecordField(candidate, "grok");
+  const museCandidate = readRecordField(candidate, "muse");
 
   const codexReasoningEffort =
     readCodexReasoningEffort(codexCandidate?.reasoningEffort) ??
@@ -130,7 +137,12 @@ export function normalizeProviderModelOptions(
 
   const grok = grokCandidate ? {} : undefined;
 
-  if (!codex && !claude && !cursor && !opencode && !grok) {
+  const museReasoningEffort = readMuseReasoningEffort(museCandidate?.reasoningEffort);
+  const muse: MuseModelOptions | undefined = museReasoningEffort
+    ? { reasoningEffort: museReasoningEffort }
+    : undefined;
+
+  if (!codex && !claude && !cursor && !opencode && !grok && !muse) {
     return null;
   }
   return {
@@ -139,6 +151,7 @@ export function normalizeProviderModelOptions(
     ...(cursor ? { cursor } : {}),
     ...(opencode ? { opencode } : {}),
     ...(grok ? { grok } : {}),
+    ...(muse ? { muse } : {}),
   };
 }
 
@@ -191,6 +204,14 @@ export function providerSelectionsToModelOptions(
         opencode: {
           ...(stringValue("variant") ? { variant: stringValue("variant") } : {}),
           ...(stringValue("agent") ? { agent: stringValue("agent") } : {}),
+        },
+      });
+    case "muse":
+      return normalizeProviderModelOptions({
+        muse: {
+          ...(stringValue("reasoningEffort")
+            ? { reasoningEffort: stringValue("reasoningEffort") }
+            : {}),
         },
       });
     case "antigravity":
@@ -249,6 +270,11 @@ export function providerModelOptionsToSelections(
       const openCodeOptions = providerOptions as OpenCodeModelOptions;
       pushString("variant", openCodeOptions.variant);
       pushString("agent", openCodeOptions.agent);
+      break;
+    }
+    case "muse": {
+      const museOptions = providerOptions as MuseModelOptions;
+      pushString("reasoningEffort", museOptions.reasoningEffort);
       break;
     }
     case "antigravity":

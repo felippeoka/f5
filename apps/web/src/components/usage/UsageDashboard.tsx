@@ -265,6 +265,8 @@ function providerLabel(provider: UsageSummary["byProvider"][number]["provider"])
       return "Grok";
     case "antigravity":
       return "Antigravity";
+    case "muse":
+      return "Muse Code";
   }
 }
 
@@ -596,13 +598,13 @@ export function UsageDashboardView(props: {
           }
         >
           <option value="all">All providers</option>
-          {(["codex", "claudeAgent", "cursor", "opencode", "grok", "antigravity"] as const).map(
-            (provider) => (
-              <option key={provider} value={provider}>
-                {providerLabel(provider)}
-              </option>
-            ),
-          )}
+          {(
+            ["codex", "claudeAgent", "cursor", "opencode", "grok", "antigravity", "muse"] as const
+          ).map((provider) => (
+            <option key={provider} value={provider}>
+              {providerLabel(provider)}
+            </option>
+          ))}
         </select>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

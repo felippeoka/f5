@@ -1,5 +1,14 @@
 import { ProviderDriverKind } from "@t3tools/contracts";
-import { Gemini, ClaudeAI, CursorIcon, GrokIcon, type Icon, OpenAI, OpenCodeIcon } from "../Icons";
+import {
+  Gemini,
+  ClaudeAI,
+  CursorIcon,
+  GrokIcon,
+  type Icon,
+  MuseIcon,
+  OpenAI,
+  OpenCodeIcon,
+} from "../Icons";
 
 /**
  * A single editable field exposed on a provider instance. `key` must match
@@ -154,6 +163,21 @@ export const DRIVER_OPTIONS: readonly DriverOption[] = [
         label: "Binary path",
         placeholder: "grok",
         description: "Path to the Grok CLI binary.",
+      },
+    ],
+  },
+  {
+    value: ProviderDriverKind.make("muse"),
+    label: "Muse Code",
+    icon: MuseIcon,
+    badgeLabel: "Early Access",
+    fields: [
+      {
+        key: "binaryPath",
+        label: "Binary path",
+        placeholder: "muse",
+        description:
+          "Path to the Muse Code CLI. Set META_API_KEY in this instance's environment to use an API key.",
       },
     ],
   },

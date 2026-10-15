@@ -22,10 +22,13 @@ export const CLAUDE_CODE_EFFORT_OPTIONS = [
 export type ClaudeCodeEffort = (typeof CLAUDE_CODE_EFFORT_OPTIONS)[number];
 export const CURSOR_REASONING_OPTIONS = ["low", "medium", "high", "max", "xhigh"] as const;
 export type CursorReasoningOption = (typeof CURSOR_REASONING_OPTIONS)[number];
+export const MUSE_REASONING_EFFORT_OPTIONS = ["low", "medium", "high"] as const;
+export type MuseReasoningEffort = (typeof MUSE_REASONING_EFFORT_OPTIONS)[number];
 export type ProviderReasoningEffort =
   | CodexReasoningEffort
   | ClaudeCodeEffort
-  | CursorReasoningOption;
+  | CursorReasoningOption
+  | MuseReasoningEffort;
 
 export const CodexModelOptions = Schema.Struct({
   reasoningEffort: Schema.optional(Schema.Literals(CODEX_REASONING_EFFORT_OPTIONS)),
@@ -55,6 +58,11 @@ export const OpenCodeModelOptions = Schema.Struct({
 });
 export type OpenCodeModelOptions = typeof OpenCodeModelOptions.Type;
 
+export const MuseModelOptions = Schema.Struct({
+  reasoningEffort: Schema.optional(Schema.Literals(MUSE_REASONING_EFFORT_OPTIONS)),
+});
+export type MuseModelOptions = typeof MuseModelOptions.Type;
+
 export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
   claudeAgent: Schema.optional(ClaudeModelOptions),
@@ -62,6 +70,7 @@ export const ProviderModelOptions = Schema.Struct({
   opencode: Schema.optional(OpenCodeModelOptions),
   grok: Schema.optional(Schema.Struct({})),
   antigravity: Schema.optional(Schema.Struct({})),
+  muse: Schema.optional(MuseModelOptions),
 });
 export type ProviderModelOptions = typeof ProviderModelOptions.Type;
 
@@ -238,6 +247,7 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
   opencode: [{ slug: "openai/gpt-5", name: "OpenAI GPT-5" }],
   grok: [{ slug: "grok-build", name: "Grok Build" }],
   antigravity: [{ slug: "antigravity-default", name: "Antigravity Default" }],
+  muse: [{ slug: "muse-spark-1.3", name: "Muse Spark 1.3" }],
 } as const satisfies Record<ProviderKind, readonly ModelOption[]>;
 export type ModelOptionsByProvider = typeof MODEL_OPTIONS_BY_PROVIDER;
 export type ClaudeBuiltInModelSlug = ModelOptionsByProvider["claudeAgent"][number]["slug"];
@@ -252,6 +262,7 @@ export const DEFAULT_MODEL_BY_PROVIDER = {
   opencode: "openai/gpt-5",
   grok: "grok-build",
   antigravity: "antigravity-default",
+  muse: "muse-spark-1.3",
 } as const satisfies Record<ProviderKind, ModelSlug>;
 
 export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
@@ -267,6 +278,7 @@ export const DEFAULT_THREAD_TITLE_MODEL_BY_PROVIDER = {
   opencode: "openai/gpt-5",
   grok: "grok-build",
   antigravity: "antigravity-default",
+  muse: "muse-spark-1.3",
 } as const satisfies Record<ProviderKind, ModelSlug>;
 
 export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER = {
@@ -276,6 +288,7 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER = {
   opencode: "openai/gpt-5",
   grok: "grok-build",
   antigravity: "antigravity-default",
+  muse: "muse-spark-1.3",
 } as const satisfies Record<ProviderKind, ModelSlug>;
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER = {
@@ -344,6 +357,7 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER = {
   opencode: {},
   grok: {},
   antigravity: {},
+  muse: {},
 } as const satisfies Record<ProviderKind, Record<string, ModelSlug>>;
 
 export const PROVIDER_DISPLAY_NAMES = {
@@ -353,6 +367,7 @@ export const PROVIDER_DISPLAY_NAMES = {
   opencode: "OpenCode",
   grok: "Grok",
   antigravity: "Antigravity",
+  muse: "Muse Code",
 } as const satisfies Record<ProviderKind, string>;
 
 export const REASONING_EFFORT_OPTIONS_BY_PROVIDER = {
@@ -362,6 +377,7 @@ export const REASONING_EFFORT_OPTIONS_BY_PROVIDER = {
   opencode: [],
   grok: [],
   antigravity: [],
+  muse: MUSE_REASONING_EFFORT_OPTIONS,
 } as const satisfies Record<ProviderKind, readonly ProviderReasoningEffort[]>;
 
 export const DEFAULT_REASONING_EFFORT_BY_PROVIDER = {
@@ -371,4 +387,5 @@ export const DEFAULT_REASONING_EFFORT_BY_PROVIDER = {
   opencode: "high",
   grok: "high",
   antigravity: "high",
+  muse: "high",
 } as const satisfies Record<ProviderKind, ProviderReasoningEffort>;

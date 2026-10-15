@@ -166,6 +166,14 @@ export const GrokSettings = Schema.Struct({
 });
 export type GrokSettings = typeof GrokSettings.Type;
 
+/** Muse Code CLI. `META_API_KEY` travels through the instance environment. */
+export const MuseSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  binaryPath: makeBinaryPathSetting("muse"),
+  customModels: Schema.Array(CustomModelSetting).pipe(Schema.withDecodingDefault(() => [])),
+});
+export type MuseSettings = typeof MuseSettings.Type;
+
 export const AntigravitySettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   customModels: Schema.Array(CustomModelSetting).pipe(Schema.withDecodingDefault(() => [])),
@@ -392,6 +400,7 @@ export const ServerSettings = Schema.Struct({
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     grok: GrokSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     antigravity: AntigravitySettings.pipe(Schema.withDecodingDefault(() => ({}))),
+    muse: MuseSettings.pipe(Schema.withDecodingDefault(() => ({}))),
   }).pipe(Schema.withDecodingDefault(() => ({}))),
   // New driver-agnostic instance map. Keyed by `ProviderInstanceId`; values
   // are `ProviderInstanceConfig` envelopes. The driver-specific config blob
@@ -480,6 +489,12 @@ const GrokSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(CustomModelSetting)),
 });
 
+const MuseSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  binaryPath: Schema.optionalKey(Schema.String),
+  customModels: Schema.optionalKey(Schema.Array(CustomModelSetting)),
+});
+
 const PrHubSettingsPatch = Schema.Struct({
   pollIntervalSeconds: Schema.optionalKey(PrHubPollIntervalSeconds),
   excludeRepos: Schema.optionalKey(Schema.Array(Schema.String)),
@@ -530,6 +545,7 @@ export const ServerSettingsPatch = Schema.Struct({
       cursor: Schema.optionalKey(CursorSettingsPatch),
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),
       grok: Schema.optionalKey(GrokSettingsPatch),
+      muse: Schema.optionalKey(MuseSettingsPatch),
       antigravity: Schema.optionalKey(
         Schema.Struct({
           enabled: Schema.optionalKey(Schema.Boolean),

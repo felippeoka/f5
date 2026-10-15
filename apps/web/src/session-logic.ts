@@ -82,6 +82,7 @@ export const PROVIDER_OPTIONS: Array<{
   { value: "opencode", label: "OpenCode", available: true },
   { value: "grok", label: "Grok", available: true },
   { value: "antigravity", label: "Antigravity", available: true },
+  { value: "muse", label: "Muse Code", available: true },
 ];
 
 export interface WorkLogEntry {
