@@ -12,7 +12,11 @@ import { parsePersistedAppSettings } from "../../appSettings";
 import { useStore } from "../../store";
 import { TestRouterContext } from "../../test/routerContext";
 import { createTestServerProvider } from "../../testServerProvider";
-import { ProjectScopeProvider, ProjectThreadsOverrides } from "./ProjectSettingsScope";
+import {
+  ProjectScopeGate,
+  ProjectScopeProvider,
+  ProjectThreadsOverrides,
+} from "./ProjectSettingsScope";
 import { SettingsRouteContext } from "./SettingsRouteContext";
 import { useSettingsRouteState } from "./useSettingsRouteState";
 import { ProjectSettings } from "./categories/ProjectSettings";
@@ -176,7 +180,9 @@ function SettingsRouteStateHarness({ projectId }: { readonly projectId: ProjectI
     <SettingsRouteContext.Provider value={routeState}>
       <ProjectScopeProvider key={projectId} projectId={projectId}>
         <ProjectSettings />
-        <ProjectThreadsOverrides />
+        <ProjectScopeGate>
+          <ProjectThreadsOverrides />
+        </ProjectScopeGate>
       </ProjectScopeProvider>
     </SettingsRouteContext.Provider>
   );
@@ -238,6 +244,73 @@ describe("useSettingsRouteState", () => {
         expect(document.body.textContent).toContain(
           "Repository-defined scripts require explicit approval.",
         );
+      });
+    } finally {
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
+
+  it("keeps icon and memory usable when project settings fail to load", async () => {
+    createNativeApiMock();
+    vi.mocked(nativeApiRef.current!.server.getProjectSettings).mockRejectedValue(
+      new Error("offline"),
+    );
+    seedProjects();
+    seedAppSettings();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const screen = await render(
+      <QueryClientProvider client={queryClient}>
+        <TestRouterContext>
+          <SettingsRouteStateHarness projectId={PROJECT_ONE} />
+        </TestRouterContext>
+      </QueryClientProvider>,
+    );
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.body.textContent).toContain("Could not load project settings.");
+        expect(document.body.textContent).toContain("Build rule");
+        expect(document.querySelector('[aria-label="Project icon source"]')).not.toBeNull();
+      });
+    } finally {
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
+
+  it("inherits global Claude sub-agent defaults until the project overrides them", async () => {
+    const { screen, queryClient } = await renderHarness({
+      settings: { claudeSubagentDefaults: { subagentsEnabled: true } },
+    });
+    const subagentCard = () =>
+      Array.from(document.querySelectorAll<HTMLElement>("section, [data-slot]")).find((node) =>
+        node.textContent?.startsWith("Claude sub-agents"),
+      );
+    const toggle = () =>
+      document.querySelector<HTMLElement>('[aria-label="Enable Claude sub-agents"]');
+
+    try {
+      await vi.waitFor(() => {
+        expect(toggle()?.getAttribute("aria-checked")).toBe("true");
+        expect(subagentCard()?.textContent).toContain("From global");
+      });
+
+      toggle()!.click();
+      await vi.waitFor(() => {
+        expect(toggle()?.getAttribute("aria-checked")).toBe("false");
+        expect(subagentCard()?.textContent).toContain("Project override");
+        expect(
+          JSON.parse(localStorage.getItem(APP_SETTINGS_STORAGE_KEY)!).claudeProjectSettings[
+            PROJECT_ONE
+          ],
+        ).toMatchObject({ subagentsEnabled: false });
+      });
+
+      await page.getByRole("button", { name: "Reset all project overrides" }).click();
+      await vi.waitFor(() => {
+        expect(toggle()?.getAttribute("aria-checked")).toBe("true");
+        expect(subagentCard()?.textContent).toContain("From global");
       });
     } finally {
       queryClient.clear();

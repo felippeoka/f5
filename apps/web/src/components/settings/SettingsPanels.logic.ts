@@ -15,24 +15,36 @@ export interface LegacyProviderOverrides {
   readonly customModels?: ReadonlyArray<string>;
 }
 
+export type LegacyProviderOverrideField = keyof LegacyProviderOverrides;
+
 /**
  * Copy legacy overrides into an instance config. A field the instance already
  * sets keeps its value and is reported in `skipped`; custom models are merged.
+ * A value equal to the driver default (for example the `codex` binary that a
+ * blank path decodes to) counts as unset, so it does not block the move.
  */
 export function mergeLegacyProviderOverrides(
   instance: ProviderInstanceConfig,
   legacy: LegacyProviderOverrides,
-): { readonly instance: ProviderInstanceConfig; readonly skipped: ReadonlyArray<string> } {
+): {
+  readonly instance: ProviderInstanceConfig;
+  readonly skipped: ReadonlyArray<LegacyProviderOverrideField>;
+} {
   const config: Record<string, unknown> =
     instance.config !== null && typeof instance.config === "object"
       ? { ...(instance.config as Record<string, unknown>) }
       : {};
-  const skipped: string[] = [];
+  const driverDefaults = (DEFAULT_UNIFIED_SETTINGS.providers as Record<string, unknown>)[
+    instance.driver
+  ] as Record<string, unknown> | undefined;
+  const skipped: LegacyProviderOverrideField[] = [];
   for (const key of ["binaryPath", "homePath", "launchArgs"] as const) {
     const value = legacy[key]?.trim();
     if (!value) continue;
-    const existing = config[key];
-    if (typeof existing === "string" && existing.trim().length > 0 && existing.trim() !== value) {
+    const existing = typeof config[key] === "string" ? (config[key] as string).trim() : "";
+    const fallback =
+      typeof driverDefaults?.[key] === "string" ? (driverDefaults[key] as string).trim() : "";
+    if (existing.length > 0 && existing !== fallback && existing !== value) {
       skipped.push(key);
       continue;
     }

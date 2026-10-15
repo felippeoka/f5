@@ -364,11 +364,11 @@ function createNativeApiMock(options?: { serverConfig?: Partial<ServerConfig> })
 
 async function renderSettingsRoute(
   initialEntry = "/settings",
-  options?: { serverConfig?: Partial<ServerConfig> },
+  options?: { serverConfig?: Partial<ServerConfig>; appSettings?: Record<string, unknown> },
 ) {
   createNativeApiMock(options);
   seedProjects();
-  seedAppSettings();
+  seedAppSettings(options?.appSettings);
 
   const history = createMemoryHistory({
     initialEntries: [initialEntry],
@@ -587,6 +587,27 @@ describe("settings route", () => {
       });
     } finally {
       await screen.unmount();
+    }
+  });
+
+  it("scrolls the category nav on short desktop windows", async () => {
+    await page.viewport(1280, 480);
+    const { screen } = await renderSettingsRoute("/settings?category=general");
+
+    try {
+      const about = page.getByRole("button", { name: "About", exact: true });
+      await vi.waitFor(() => expect(about.element()).toBeTruthy());
+      const list = about.element().closest<HTMLElement>(".lg\\:overflow-y-auto");
+      expect(list).not.toBeNull();
+      expect(list!.scrollHeight).toBeGreaterThan(list!.clientHeight);
+
+      about.element().scrollIntoView({ block: "nearest" });
+      await about.click();
+      await vi.waitFor(() => expectCategoryVisible("about"));
+    } finally {
+      await screen.unmount();
+      // vitest's default browser viewport.
+      await page.viewport(414, 896);
     }
   });
 
@@ -843,7 +864,79 @@ describe("settings route", () => {
         expect(getCategoryPanelText("project")).toContain(
           "This project is unavailable or was deleted.",
         );
+        expect(
+          document.querySelector<HTMLElement>('[aria-label="Settings scope"]')?.textContent,
+        ).toContain("Unavailable project");
       });
+
+      // Override pages must not write overrides for a project that no longer exists.
+      await page.getByRole("button", { name: "Threads", exact: true }).click();
+      await vi.waitFor(() => {
+        expectCategoryVisible("threads");
+        expect(getCategoryPanelText("threads")).toContain("so its overrides can't be edited");
+        expect(
+          getCategoryPanel("threads").querySelector('[aria-label="Default permissions"]'),
+        ).toBeNull();
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("moves a legacy Codex binary into a never-edited default instance", async () => {
+    const { screen } = await renderSettingsRoute("/settings?category=providers", {
+      appSettings: { codexBinaryPath: "/opt/homebrew/bin/codex" },
+    });
+    const updateSettings = vi.mocked(nativeApiRef.current!.server.updateSettings);
+
+    try {
+      await vi.waitFor(() => {
+        expect(getCategoryPanelText("providers")).toContain("binary /opt/homebrew/bin/codex");
+      });
+      await page.getByRole("button", { name: "Move to default instance" }).click();
+
+      await vi.waitFor(() => {
+        expect(updateSettings).toHaveBeenCalledWith(
+          expect.objectContaining({
+            providerInstances: expect.objectContaining({
+              codex: expect.objectContaining({
+                config: expect.objectContaining({ binaryPath: "/opt/homebrew/bin/codex" }),
+              }),
+            }),
+          }),
+        );
+        expect(JSON.parse(localStorage.getItem(APP_SETTINGS_STORAGE_KEY)!).codexBinaryPath).toBe(
+          "",
+        );
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("keeps legacy overrides when moving them to the instance fails", async () => {
+    const { screen } = await renderSettingsRoute("/settings?category=providers", {
+      appSettings: { codexBinaryPath: "/opt/homebrew/bin/codex" },
+    });
+    const updateSettings = vi.mocked(nativeApiRef.current!.server.updateSettings);
+    updateSettings.mockRejectedValueOnce(new Error("socket closed"));
+
+    try {
+      await vi.waitFor(() => {
+        expect(getCategoryPanelText("providers")).toContain("binary /opt/homebrew/bin/codex");
+      });
+      await page.getByRole("button", { name: "Move to default instance" }).click();
+
+      await vi.waitFor(() => {
+        expect(updateSettings).toHaveBeenCalledTimes(1);
+        expect(
+          page.getByRole("button", { name: "Move to default instance" }).element(),
+        ).not.toBeDisabled();
+      });
+      expect(JSON.parse(localStorage.getItem(APP_SETTINGS_STORAGE_KEY)!).codexBinaryPath).toBe(
+        "/opt/homebrew/bin/codex",
+      );
+      expect(getCategoryPanelText("providers")).toContain("binary /opt/homebrew/bin/codex");
     } finally {
       await screen.unmount();
     }

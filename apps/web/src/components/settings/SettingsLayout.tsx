@@ -26,6 +26,7 @@ import { ToolsSettings } from "./categories/ToolsSettings";
 import {
   ProjectBrowserOverrides,
   ProjectGitOverrides,
+  ProjectScopeGate,
   ProjectScopeProvider,
   ProjectThreadsOverrides,
   ProjectToolsOverrides,
@@ -49,6 +50,8 @@ interface SettingsLayoutProps {
   /** Set when a project scope is selected; the layout then shows only project pages. */
   readonly projectId?: ProjectId | undefined;
   readonly projectName?: string | null | undefined;
+  /** The scoped project was deleted or never existed. */
+  readonly projectUnavailable?: boolean;
   readonly category: SettingsCategory;
   readonly onCategoryChange: (category: SettingsCategory) => void;
   readonly item?: string | undefined;
@@ -103,13 +106,29 @@ function ProjectCategoryContent({ category }: { readonly category: SettingsCateg
     case "project":
       return <ProjectSettings />;
     case "threads":
-      return <ProjectThreadsOverrides />;
+      return (
+        <ProjectScopeGate>
+          <ProjectThreadsOverrides />
+        </ProjectScopeGate>
+      );
     case "tools":
-      return <ProjectToolsOverrides />;
+      return (
+        <ProjectScopeGate>
+          <ProjectToolsOverrides />
+        </ProjectScopeGate>
+      );
     case "browser":
-      return <ProjectBrowserOverrides />;
+      return (
+        <ProjectScopeGate>
+          <ProjectBrowserOverrides />
+        </ProjectScopeGate>
+      );
     case "git":
-      return <ProjectGitOverrides />;
+      return (
+        <ProjectScopeGate>
+          <ProjectGitOverrides />
+        </ProjectScopeGate>
+      );
     default:
       return null;
   }
@@ -130,6 +149,7 @@ export function SettingsLayout({
   scopeHeader,
   projectId,
   projectName,
+  projectUnavailable = false,
   category,
   onCategoryChange,
   item,
@@ -277,19 +297,21 @@ export function SettingsLayout({
             <header className="space-y-1">
               <h1 className="text-xl font-semibold tracking-tight text-foreground">Settings</h1>
               <p className="text-ui text-muted-foreground">
-                {projectId
-                  ? `Overrides for ${projectName ?? "this project"}. Anything not overridden uses the global settings.`
-                  : "Settings for this profile."}
+                {!projectId
+                  ? "Settings for this profile."
+                  : projectUnavailable
+                    ? "This project is unavailable or was deleted. Switch to Global or another project."
+                    : `Overrides for ${projectName ?? "this project"}. Anything not overridden uses the global settings.`}
               </p>
             </header>
 
             <div className="flex flex-col gap-6 lg:min-h-0 lg:flex-1 lg:flex-row lg:gap-8">
               <nav
                 aria-label="Settings categories"
-                className="lg:sticky lg:top-0 lg:w-56 lg:shrink-0 lg:self-start"
+                className="lg:flex lg:min-h-0 lg:w-56 lg:shrink-0 lg:flex-col"
               >
-                <div>
-                  <div ref={searchContainerRef} className="relative mb-3">
+                <div className="contents">
+                  <div ref={searchContainerRef} className="relative mb-3 lg:shrink-0">
                     <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       ref={searchInputRef}
@@ -398,7 +420,8 @@ export function SettingsLayout({
                       </div>
                     ) : null}
                   </div>
-                  <div className="flex flex-col gap-3">
+                  {/* Scrolls on its own so short desktop windows can reach every page. */}
+                  <div className="flex flex-col gap-3 lg:min-h-0 lg:overflow-y-auto">
                     {categoryGroups.map((group) => (
                       <div
                         key={group.id}

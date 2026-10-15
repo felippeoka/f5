@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import { useSettingsRouteContext } from "../SettingsRouteContext";
 import { projectCheckedInConfigQueryOptions } from "../../../lib/projectConfigReactQuery";
 import { EMPTY_MEMORY_DRAFT, PROJECT_MEMORY_TYPES } from "../useSettingsRouteState";
-import { ProjectOverridesResetCard } from "../ProjectSettingsScope";
+import { ProjectOverridesResetCard, ProjectScopeGate } from "../ProjectSettingsScope";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../ui/select";
@@ -116,7 +116,9 @@ export function ProjectSettings() {
 
   return (
     <>
-      <ProjectOverridesResetCard />
+      <ProjectScopeGate>
+        <ProjectOverridesResetCard />
+      </ProjectScopeGate>
 
       <section className="rounded-xl border border-border bg-card p-5">
         <div className="mb-4">

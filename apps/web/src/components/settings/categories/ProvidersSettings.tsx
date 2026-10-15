@@ -28,8 +28,10 @@ import { SettingsCard, SettingsRow } from "../SettingsCard";
 import {
   buildProviderInstanceUpdatePatch,
   mergeLegacyProviderOverrides,
+  type LegacyProviderOverrideField,
   type LegacyProviderOverrides,
 } from "../SettingsPanels.logic";
+import { parseClaudeLaunchArgs } from "@t3tools/shared/cliArgs";
 
 const BUILT_IN_PROVIDER_DRIVERS = [
   ProviderDriverKind.make("codex"),
@@ -147,7 +149,7 @@ export function ProvidersSettings() {
     options?: {
       readonly textGenerationModelSelection?: ServerSettings["textGenerationModelSelection"];
     },
-  ) => {
+  ) =>
     updateUnifiedSettings(
       buildProviderInstanceUpdatePatch({
         settings: unifiedSettings,
@@ -158,7 +160,6 @@ export function ProvidersSettings() {
         textGenerationModelSelection: options?.textGenerationModelSelection,
       }),
     );
-  };
 
   const deleteProviderInstance = (id: ProviderInstanceId) => {
     updateUnifiedSettings({
@@ -416,12 +417,28 @@ export function ProvidersSettings() {
   );
 }
 
+type ClientSettingsPatch = Parameters<
+  ReturnType<typeof useSettingsRouteContext>["updateSettings"]
+>[0];
+
 interface LegacyProviderEntry {
   readonly driver: ProviderDriverKind;
   readonly label: string;
   readonly overrides: LegacyProviderOverrides;
-  /** Client settings that reset this provider's legacy overrides. */
-  readonly clearPatch: Parameters<ReturnType<typeof useSettingsRouteContext>["updateSettings"]>[0];
+  /** Client settings that reset each legacy override field for this provider. */
+  readonly clearPatches: Partial<Record<LegacyProviderOverrideField, ClientSettingsPatch>>;
+}
+
+function legacyClearPatch(
+  entry: LegacyProviderEntry,
+  keep: ReadonlyArray<LegacyProviderOverrideField> = [],
+): ClientSettingsPatch {
+  return Object.assign(
+    {},
+    ...Object.entries(entry.clearPatches)
+      .filter(([field]) => !keep.includes(field as LegacyProviderOverrideField))
+      .map(([, patch]) => patch),
+  );
 }
 
 function describeLegacyOverrides(overrides: LegacyProviderOverrides): string {
@@ -447,9 +464,10 @@ function LegacyProviderOverridesCard({
   onMove,
 }: {
   readonly rows: ReadonlyArray<ProviderInstanceRow>;
-  readonly onMove: (row: ProviderInstanceRow, next: ProviderInstanceConfig) => void;
+  readonly onMove: (row: ProviderInstanceRow, next: ProviderInstanceConfig) => Promise<void>;
 }) {
   const { settings, defaults, updateSettings } = useSettingsRouteContext();
+  const [movingDriver, setMovingDriver] = useState<ProviderDriverKind | null>(null);
   const entries: LegacyProviderEntry[] = [
     {
       driver: ProviderDriverKind.make("codex"),
@@ -459,10 +477,10 @@ function LegacyProviderOverridesCard({
         homePath: settings.codexHomePath,
         customModels: settings.customCodexModels,
       },
-      clearPatch: {
-        codexBinaryPath: defaults.codexBinaryPath,
-        codexHomePath: defaults.codexHomePath,
-        customCodexModels: defaults.customCodexModels,
+      clearPatches: {
+        binaryPath: { codexBinaryPath: defaults.codexBinaryPath },
+        homePath: { codexHomePath: defaults.codexHomePath },
+        customModels: { customCodexModels: defaults.customCodexModels },
       },
     },
     {
@@ -473,21 +491,62 @@ function LegacyProviderOverridesCard({
         launchArgs: settings.claudeLaunchArgs,
         customModels: settings.customClaudeModels,
       },
-      clearPatch: {
-        claudeBinaryPath: defaults.claudeBinaryPath,
-        claudeLaunchArgs: defaults.claudeLaunchArgs,
-        customClaudeModels: defaults.customClaudeModels,
+      clearPatches: {
+        binaryPath: { claudeBinaryPath: defaults.claudeBinaryPath },
+        launchArgs: { claudeLaunchArgs: defaults.claudeLaunchArgs },
+        customModels: { customClaudeModels: defaults.customClaudeModels },
       },
     },
     {
       driver: ProviderDriverKind.make("grok"),
       label: "Grok",
       overrides: { customModels: settings.customGrokModels },
-      clearPatch: { customGrokModels: defaults.customGrokModels },
+      clearPatches: { customModels: { customGrokModels: defaults.customGrokModels } },
     },
   ].filter((entry) => describeLegacyOverrides(entry.overrides).length > 0);
 
   if (entries.length === 0) return null;
+
+  const move = async (entry: LegacyProviderEntry, row: ProviderInstanceRow) => {
+    // Invalid launch args are ignored today; moving them would start passing them.
+    const invalidLaunchArgs =
+      entry.overrides.launchArgs !== undefined &&
+      !parseClaudeLaunchArgs(entry.overrides.launchArgs).ok;
+    const merged = mergeLegacyProviderOverrides(
+      row.instance,
+      invalidLaunchArgs ? { ...entry.overrides, launchArgs: "" } : entry.overrides,
+    );
+    const { instance } = merged;
+    const skipped: LegacyProviderOverrideField[] = [
+      ...merged.skipped,
+      ...(invalidLaunchArgs ? (["launchArgs"] as const) : []),
+    ];
+    setMovingDriver(entry.driver);
+    try {
+      await onMove(row, instance);
+    } catch (cause) {
+      // Nothing was written to the instance, so keep the legacy values in effect.
+      toastManager.add({
+        type: "error",
+        title: `Could not move ${entry.label} overrides`,
+        description: cause instanceof Error ? cause.message : String(cause),
+      });
+      return;
+    } finally {
+      setMovingDriver(null);
+    }
+    // Skipped fields stay as legacy overrides so their values are not lost.
+    updateSettings(legacyClearPatch(entry, skipped));
+    toastManager.add(
+      skipped.length > 0
+        ? {
+            type: "warning",
+            title: `${entry.label} overrides partly moved`,
+            description: `${skipped.join(", ")} stayed here as legacy overrides, because the instance already sets them or they are invalid.`,
+          }
+        : { type: "success", title: `${entry.label} overrides moved` },
+    );
+  };
 
   return (
     <SettingsCard
@@ -499,39 +558,42 @@ function LegacyProviderOverridesCard({
         const row = rows.find(
           (candidate) => candidate.isDefault && candidate.driver === entry.driver,
         );
+        const launchArgs = entry.overrides.launchArgs
+          ? parseClaudeLaunchArgs(entry.overrides.launchArgs)
+          : null;
+        const busy = movingDriver === entry.driver;
         return (
           <SettingsRow
             key={entry.driver}
             title={entry.label}
-            description={describeLegacyOverrides(entry.overrides)}
+            description={
+              <>
+                {describeLegacyOverrides(entry.overrides)}
+                {launchArgs && !launchArgs.ok ? (
+                  <span className="block text-destructive-foreground">
+                    Invalid arguments, so new sessions ignore them: {launchArgs.error}
+                  </span>
+                ) : null}
+              </>
+            }
             control={
               <div className="flex items-center gap-2">
                 <Button
                   size="xs"
                   variant="outline"
-                  disabled={!row}
+                  disabled={!row || movingDriver !== null}
                   onClick={() => {
-                    if (!row) return;
-                    const { instance, skipped } = mergeLegacyProviderOverrides(
-                      row.instance,
-                      entry.overrides,
-                    );
-                    onMove(row, instance);
-                    updateSettings(entry.clearPatch);
-                    toastManager.add(
-                      skipped.length > 0
-                        ? {
-                            type: "warning",
-                            title: `${entry.label} overrides moved`,
-                            description: `The instance already set ${skipped.join(", ")}, so those kept the instance value.`,
-                          }
-                        : { type: "success", title: `${entry.label} overrides moved` },
-                    );
+                    if (row) void move(entry, row);
                   }}
                 >
-                  Move to default instance
+                  {busy ? "Moving…" : "Move to default instance"}
                 </Button>
-                <Button size="xs" variant="ghost" onClick={() => updateSettings(entry.clearPatch)}>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => updateSettings(legacyClearPatch(entry))}
+                >
                   Clear
                 </Button>
               </div>

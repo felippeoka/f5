@@ -81,6 +81,24 @@ describe("mergeLegacyProviderOverrides", () => {
     });
   });
 
+  it("overwrites decoded driver defaults on a never-edited default instance", () => {
+    for (const driver of ["codex", "claudeAgent"] as const) {
+      const result = mergeLegacyProviderOverrides(
+        {
+          driver: ProviderDriverKind.make(driver),
+          enabled: true,
+          config: DEFAULT_SERVER_SETTINGS.providers[driver],
+        },
+        { binaryPath: "/opt/homebrew/bin/custom", launchArgs: "--chrome" },
+      );
+      expect(result.skipped, driver).toEqual([]);
+      expect(result.instance.config, driver).toMatchObject({
+        binaryPath: "/opt/homebrew/bin/custom",
+        launchArgs: "--chrome",
+      });
+    }
+  });
+
   it("keeps instance values that differ and merges custom models without duplicates", () => {
     const result = mergeLegacyProviderOverrides(
       {

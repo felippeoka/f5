@@ -44,6 +44,7 @@ function SettingsRouteView() {
         }
         projectId={search.project}
         projectName={routeState.selectedProject?.name}
+        projectUnavailable={routeState.selectedProjectUnavailable}
         category={search.category}
         item={search.item}
         onCategoryChange={(category) => {

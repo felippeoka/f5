@@ -75,7 +75,9 @@ export function SettingsScopePicker({
           className="flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-sm font-medium text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         >
           <span className="truncate">
-            {projects.find((p) => p.id === projectId)?.name ?? "Global settings"}
+            {projectId
+              ? (projects.find((p) => p.id === projectId)?.name ?? "Unavailable project")
+              : "Global settings"}
           </span>
           <ChevronsUpDownIcon aria-hidden="true" className="size-3.5 shrink-0 opacity-60" />
         </ComboboxTrigger>
@@ -117,12 +119,53 @@ interface ProjectScopeValue {
   readonly badge: (key: ProjectScopedServerSettingKey) => ReactNode;
 }
 
-const ProjectScopeContext = createContext<ProjectScopeValue | null>(null);
+interface ProjectScopeState {
+  /** Null until the project's resolved settings load. */
+  readonly value: ProjectScopeValue | null;
+  readonly pending: boolean;
+  readonly retry: () => void;
+}
+
+const ProjectScopeContext = createContext<ProjectScopeState | null>(null);
+
+function useProjectScopeState(): ProjectScopeState {
+  const state = useContext(ProjectScopeContext);
+  if (!state) throw new Error("useProjectScope must be used within ProjectScopeProvider.");
+  return state;
+}
 
 function useProjectScope(): ProjectScopeValue {
-  const value = useContext(ProjectScopeContext);
-  if (!value) throw new Error("useProjectScope must be used within ProjectScopeProvider.");
+  const { value } = useProjectScopeState();
+  if (!value) throw new Error("useProjectScope must be used within ProjectScopeGate.");
   return value;
+}
+
+/**
+ * Renders its children once the project's resolved settings load. Only the
+ * override controls need them, so project features that read other data (icon,
+ * memory) stay outside the gate and keep working when this query fails.
+ */
+export function ProjectScopeGate({ children }: { readonly children: ReactNode }) {
+  const { value, pending, retry } = useProjectScopeState();
+  // A stale link to a deleted project must not write overrides for it.
+  const { selectedProjectUnavailable } = useSettingsRouteContext();
+  if (selectedProjectUnavailable)
+    return (
+      <p className="text-ui text-muted-foreground" role="status">
+        This project is unavailable or was deleted, so its overrides can't be edited.
+      </p>
+    );
+  if (pending) return <p className="text-ui text-muted-foreground">Loading project settings…</p>;
+  if (!value)
+    return (
+      <div className="flex items-center gap-3 text-sm" role="alert">
+        Could not load project settings.
+        <Button size="xs" variant="outline" onClick={retry}>
+          Retry
+        </Button>
+      </div>
+    );
+  return <>{children}</>;
 }
 
 /**
@@ -140,18 +183,7 @@ export function ProjectScopeProvider({
   const query = useQuery(projectSettingsQueryOptions(projectId));
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
-  if (query.isPending)
-    return <p className="text-ui text-muted-foreground">Loading project settings…</p>;
-  if (!query.data)
-    return (
-      <div className="flex items-center gap-3 text-sm" role="alert">
-        Could not load project settings.
-        <Button size="xs" variant="outline" onClick={() => void query.refetch()}>
-          Retry
-        </Button>
-      </div>
-    );
-  const { settings, overrides, sources } = query.data;
+  const retry = () => void query.refetch();
   const save = async (patch: ProjectSettingsOverrides | null) => {
     setSaving(true);
     setError(undefined);
@@ -166,29 +198,35 @@ export function ProjectScopeProvider({
       setSaving(false);
     }
   };
-  const set = <K extends ProjectScopedServerSettingKey>(
-    key: K,
-    value: ProjectSettingsOverrides[K],
-  ) => void save({ ...overrides, [key]: value });
-  const badge = (key: ProjectScopedServerSettingKey) =>
-    sources[key] === "project" ? (
-      <OverrideBadge
-        disabled={saving}
-        onReset={() => {
-          const next = { ...overrides };
-          delete next[key];
-          void save(next);
-        }}
-      />
-    ) : (
-      <SourceBadge>
-        {sources[key] === "legacy-project" ? "From older project default" : `From ${sources[key]}`}
-      </SourceBadge>
-    );
+  let value: ProjectScopeValue | null = null;
+  if (query.data) {
+    const { settings, overrides, sources } = query.data;
+    const set = <K extends ProjectScopedServerSettingKey>(
+      key: K,
+      next: ProjectSettingsOverrides[K],
+    ) => void save({ ...overrides, [key]: next });
+    const badge = (key: ProjectScopedServerSettingKey) =>
+      sources[key] === "project" ? (
+        <OverrideBadge
+          disabled={saving}
+          onReset={() => {
+            const next = { ...overrides };
+            delete next[key];
+            void save(next);
+          }}
+        />
+      ) : (
+        <SourceBadge>
+          {sources[key] === "legacy-project"
+            ? "From older project default"
+            : `From ${sources[key]}`}
+        </SourceBadge>
+      );
+    value = { projectId, settings, overrides, sources, saving, save, set, badge };
+  }
+  // One tree for every query state, so the ungated Project page never remounts.
   return (
-    <ProjectScopeContext.Provider
-      value={{ projectId, settings, overrides, sources, saving, save, set, badge }}
-    >
+    <ProjectScopeContext.Provider value={{ value, pending: query.isPending, retry }}>
       {error && (
         <p role="alert" className="text-sm text-destructive-foreground">
           {error}
