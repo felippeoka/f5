@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import {
+  AGENT_BRIDGE_TURN_SUBMITTED_ACTIVITY_KIND,
   ApprovalRequestId,
   ProviderApprovalOption,
   ProviderApprovalPresentation,
@@ -695,6 +696,8 @@ const ALWAYS_VISIBLE_KINDS = new Set([
   "mcp.oauth.completed",
   "hook.started",
   "hook.completed",
+  // "Sent by … via F5 Agent Bridge" stays visible after later turns.
+  AGENT_BRIDGE_TURN_SUBMITTED_ACTIVITY_KIND,
 ]);
 
 function inferWorkLogStatus(

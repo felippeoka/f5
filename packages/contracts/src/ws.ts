@@ -268,6 +268,18 @@ import {
   AgentsSnapshot,
 } from "./backgroundWork";
 import {
+  AGENT_BRIDGE_WS_CHANNELS,
+  AGENT_BRIDGE_WS_METHODS,
+  AgentBridgeCreateTaskInput,
+  AgentBridgeGetStateInput,
+  AgentBridgeGetTaskActivitiesInput,
+  AgentBridgeGetTasksInput,
+  AgentBridgeReplyToTaskInput,
+  AgentBridgeStateChanged,
+  AgentBridgeTaskControlInput,
+  AgentBridgeTaskInput,
+} from "./agentBridge";
+import {
   USAGE_WS_METHODS,
   UsageConsumeResetCreditInput,
   UsageGetAccountsInput,
@@ -543,6 +555,15 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.providerAccountStatus, ProviderAccountStartInput),
   tagRequestBody(AGENTS_WS_METHODS.getSnapshot, AgentsGetSnapshotInput),
   tagRequestBody(AGENTS_WS_METHODS.dismiss, AgentsDismissInput),
+  tagRequestBody(AGENT_BRIDGE_WS_METHODS.getState, AgentBridgeGetStateInput),
+  tagRequestBody(AGENT_BRIDGE_WS_METHODS.getTasks, AgentBridgeGetTasksInput),
+  tagRequestBody(AGENT_BRIDGE_WS_METHODS.getTask, AgentBridgeTaskInput),
+  tagRequestBody(AGENT_BRIDGE_WS_METHODS.getTaskActivities, AgentBridgeGetTaskActivitiesInput),
+  tagRequestBody(AGENT_BRIDGE_WS_METHODS.createTask, AgentBridgeCreateTaskInput),
+  tagRequestBody(AGENT_BRIDGE_WS_METHODS.replyToTask, AgentBridgeReplyToTaskInput),
+  tagRequestBody(AGENT_BRIDGE_WS_METHODS.pauseTask, AgentBridgeTaskControlInput),
+  tagRequestBody(AGENT_BRIDGE_WS_METHODS.resumeTask, AgentBridgeTaskControlInput),
+  tagRequestBody(AGENT_BRIDGE_WS_METHODS.cancelTask, AgentBridgeTaskControlInput),
   tagRequestBody(USAGE_WS_METHODS.consumeResetCredit, UsageConsumeResetCreditInput),
   tagRequestBody(USAGE_WS_METHODS.getAccounts, UsageGetAccountsInput),
   tagRequestBody(USAGE_WS_METHODS.getSummary, UsageGetSummaryInput),
@@ -921,6 +942,7 @@ export interface WsPushPayloadByChannel {
   readonly [WS_CHANNELS.profilesUpdated]: typeof ProfileListResult.Type;
   readonly [WS_CHANNELS.providerAccountEvent]: typeof ProviderAccountEvent.Type;
   readonly [AGENTS_WS_CHANNELS.snapshotUpdated]: typeof AgentsSnapshot.Type;
+  readonly [AGENT_BRIDGE_WS_CHANNELS.stateChanged]: typeof AgentBridgeStateChanged.Type;
   readonly [WS_CHANNELS.serverWelcome]: WsWelcomePayload;
   readonly [WS_CHANNELS.serverConfigUpdated]: typeof ServerConfigUpdatedPayload.Type;
   readonly [WS_CHANNELS.providerAdvisoriesUpdated]: typeof ServerProviderAdvisoriesUpdatedPayload.Type;
@@ -976,6 +998,10 @@ export const WsPushServerWelcome = makeWsPushSchema(WS_CHANNELS.serverWelcome, W
 export const WsPushAgentsSnapshotUpdated = makeWsPushSchema(
   AGENTS_WS_CHANNELS.snapshotUpdated,
   AgentsSnapshot,
+);
+export const WsPushAgentBridgeStateChanged = makeWsPushSchema(
+  AGENT_BRIDGE_WS_CHANNELS.stateChanged,
+  AgentBridgeStateChanged,
 );
 export const WsPushServerConfigUpdated = makeWsPushSchema(
   WS_CHANNELS.serverConfigUpdated,
@@ -1097,6 +1123,7 @@ export const WsPushChannelSchema = Schema.Literals([
   WS_CHANNELS.profilesUpdated,
   WS_CHANNELS.providerAccountEvent,
   AGENTS_WS_CHANNELS.snapshotUpdated,
+  AGENT_BRIDGE_WS_CHANNELS.stateChanged,
   WS_CHANNELS.gitActionProgress,
   WS_CHANNELS.gitStatusInvalidated,
   WS_CHANNELS.serverWelcome,
@@ -1131,6 +1158,7 @@ export const WsPush = Schema.Union([
   WsPushProfilesUpdated,
   WsPushProviderAccountEvent,
   WsPushAgentsSnapshotUpdated,
+  WsPushAgentBridgeStateChanged,
   WsPushServerWelcome,
   WsPushServerConfigUpdated,
   WsPushProviderAdvisoriesUpdated,

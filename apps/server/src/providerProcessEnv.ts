@@ -54,6 +54,9 @@ export function buildProviderChildProcessEnv(
   return env;
 }
 
+/** Marks processes F5 launches for agents and terminals. */
+export const AGENT_PROCESS_ENV = "F5_AGENT_PROCESS";
+
 export const PROFILE_ISOLATED_CREDENTIAL_ENV_NAMES = [
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
@@ -114,6 +117,8 @@ export function buildAccountExecutionEnvironment(input: {
     input.stateDir,
   );
   if (input.purpose === "provider" || input.purpose === "terminal") {
+    // Recursion guard: the Agent Bridge STDIO shim serves no tools to F5's own agents.
+    environment[AGENT_PROCESS_ENV] = "1";
     const pathKey = Object.keys(environment).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
     environment[pathKey] =
       githubLauncherDir(input.stateDir) + Path.delimiter + (environment[pathKey] ?? "");

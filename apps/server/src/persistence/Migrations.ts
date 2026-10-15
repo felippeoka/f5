@@ -1,3 +1,5 @@
+import Migration0114 from "./Migrations/114_BotTasks.ts";
+import Migration0113 from "./Migrations/113_AgentBridge.ts";
 import Migration0112 from "./Migrations/112_ProviderNativeCommandIds.ts";
 import Migration0111 from "./Migrations/111_ThreadBackgroundWorkIdentity.ts";
 import Migration0110 from "./Migrations/110_NativeOperations.ts";
@@ -145,6 +147,8 @@ import Migration0102 from "./Migrations/102_ForgeAccounts.ts";
 import Migration0101 from "./Migrations/101_UsageResetCreditRequests.ts";
 
 export const MIGRATIONS = {
+  "114_BotTasks": Migration0114,
+  "113_AgentBridge": Migration0113,
   "112_ProviderNativeCommandIds": Migration0112,
   "111_ThreadBackgroundWorkIdentity": Migration0111,
   "110_NativeOperations": Migration0110,

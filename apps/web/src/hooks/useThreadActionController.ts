@@ -37,6 +37,7 @@ export type ThreadActionId =
   | "archive"
   | "unarchive"
   | "mark-unread"
+  | "assign-to-bot"
   | "copy-path"
   | "copy-thread-id"
   | "delete";
@@ -76,6 +77,7 @@ export function buildThreadActionMenuItems(input: {
       label: thread.archivedAt === null ? "Archive" : "Unarchive",
     },
     { id: "mark-unread", label: "Mark unread" },
+    { id: "assign-to-bot", label: "Assign task to bot…" },
     { id: "copy-path", label: "Copy path" },
     { id: "copy-thread-id", label: "Copy thread ID" },
     { id: "delete", label: "Delete", destructive: true },
@@ -267,6 +269,10 @@ export function useThreadActionController(input: {
         return;
       }
       if (actionId === "title-regeneration-pending") return;
+      if (actionId === "assign-to-bot") {
+        await navigate({ to: "/bots", search: { fromThread: threadId } });
+        return;
+      }
       if (actionId === "pin" || actionId === "unpin") {
         await toggleThreadPin({ threadId, threads, expectedRevision: pinRevision }).catch(
           (error) => {

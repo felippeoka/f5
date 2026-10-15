@@ -5,9 +5,12 @@ import {
   ProjectCloneJob,
   AGENTS_WS_CHANNELS,
   AGENTS_WS_METHODS,
+  AGENT_BRIDGE_WS_CHANNELS,
+  AGENT_BRIDGE_WS_METHODS,
   ELICITATION_WS_METHODS,
   USAGE_WS_METHODS,
   type AgentsSnapshot,
+  type AgentBridgeStateChanged,
   type GitActionProgressEvent,
   type GitStatusInvalidatedPayload,
   type McpStatusUpdatedPayload,
@@ -86,6 +89,7 @@ const worktreeSetupUpdatedListeners = new Set<(payload: WorktreeSetupUpdatedPayl
 const prHubChangedListeners = new Set<(payload: PrHubChanged) => void>();
 const prHubAdvisoriesUpdatedListeners = new Set<(payload: PrHubAdvisoriesChanged) => void>();
 const agentsSnapshotUpdatedListeners = new Set<(payload: AgentsSnapshot) => void>();
+const agentBridgeStateChangedListeners = new Set<(payload: AgentBridgeStateChanged) => void>();
 
 function decodeRetryWorkflowResult(result: unknown) {
   return result === undefined
@@ -243,6 +247,16 @@ export function createWsNativeApi(): NativeApi {
     useAgentComputerActivityStore.getState().resetConnection();
     const payload = message.data;
     for (const listener of welcomeListeners) {
+      try {
+        listener(payload);
+      } catch {
+        // Swallow listener errors
+      }
+    }
+  });
+  transport.subscribe(AGENT_BRIDGE_WS_CHANNELS.stateChanged, (message) => {
+    const payload = message.data;
+    for (const listener of agentBridgeStateChangedListeners) {
       try {
         listener(payload);
       } catch {
@@ -772,6 +786,24 @@ export function createWsNativeApi(): NativeApi {
     },
     globalSearch: {
       query: (input) => transport.request(WS_METHODS.globalSearchQuery, input),
+    },
+    agentBridge: {
+      getState: () => transport.request(AGENT_BRIDGE_WS_METHODS.getState, {}),
+      onStateChanged: (callback) => {
+        agentBridgeStateChangedListeners.add(callback);
+        return () => {
+          agentBridgeStateChangedListeners.delete(callback);
+        };
+      },
+      getTasks: (input) => transport.request(AGENT_BRIDGE_WS_METHODS.getTasks, input),
+      getTask: (taskId) => transport.request(AGENT_BRIDGE_WS_METHODS.getTask, { taskId }),
+      getTaskActivities: (input) =>
+        transport.request(AGENT_BRIDGE_WS_METHODS.getTaskActivities, input),
+      createTask: (input) => transport.request(AGENT_BRIDGE_WS_METHODS.createTask, input),
+      replyToTask: (input) => transport.request(AGENT_BRIDGE_WS_METHODS.replyToTask, input),
+      pauseTask: (input) => transport.request(AGENT_BRIDGE_WS_METHODS.pauseTask, input),
+      resumeTask: (input) => transport.request(AGENT_BRIDGE_WS_METHODS.resumeTask, input),
+      cancelTask: (input) => transport.request(AGENT_BRIDGE_WS_METHODS.cancelTask, input),
     },
     agents: {
       getSnapshot: (input) => transport.request(AGENTS_WS_METHODS.getSnapshot, input ?? {}),

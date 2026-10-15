@@ -13,6 +13,14 @@ import {
   claudeMaintenanceErrorMessage,
 } from "./maintenance/ClaudeTranscriptMaintenance.ts";
 import { stampSubmissionSource } from "./provider/submissionProvenance.ts";
+import { AgentBridgeHostError, type AgentBridgeHostShape } from "./agentBridge/AgentBridgeHost.ts";
+import {
+  agentBridgeStdioSetups,
+  makeAgentBridgeService,
+} from "./agentBridge/AgentBridgeService.ts";
+import { makeAgentBridgeStore } from "./agentBridge/AgentBridgeStore.ts";
+import { makeBotTaskStore, type BotTaskError } from "./agentBridge/BotTaskStore.ts";
+import { version as serverPackageVersion } from "../package.json" with { type: "json" };
 import { usageResumeTargetAfterCredit } from "./usage/usageResumeAfterCredit.ts";
 import { usageLimitKey } from "./nextTurnQueue/usageLimitResume.ts";
 import { awaitActivation, waitForActivation, reportActive } from "./distribution/activation";
@@ -21,7 +29,7 @@ import { PrHubExtensions } from "./prHub/PrHubExtensions.ts";
 import { createGitHubMediaProxy } from "./prHub/githubMediaProxy.ts";
 import { readAssetImageDimensions } from "./imageDimensions";
 import { makePreviewFileServer } from "./previewFileServer";
-import { MessageId } from "@t3tools/contracts";
+import { MessageId, type NextTurnQueueSubmitInput } from "@t3tools/contracts";
 import { makeAttachmentUploads, AttachmentUploadError } from "./attachmentUploads";
 import { GitCommandError } from "./git/Errors";
 import { readProjectSettings, isInsideProjectWorkspace } from "./project/projectSettings";
@@ -70,6 +78,8 @@ import Mime from "@effect/platform-node/Mime";
 import {
   AGENTS_WS_CHANNELS,
   AGENTS_WS_METHODS,
+  AGENT_BRIDGE_WS_CHANNELS,
+  AGENT_BRIDGE_WS_METHODS,
   USAGE_WS_METHODS,
   ELICITATION_WS_METHODS,
   CommandId,
@@ -309,6 +319,8 @@ export interface ServerShape {
  * Server - Service tag for HTTP/WebSocket lifecycle management.
  */
 export class Server extends ServiceMap.Service<Server, ServerShape>()("t3/wsServer/Server") {}
+
+type SubmissionSource = "human" | "automation";
 
 const DESKTOP_RENDERER_ORIGIN = "t3://app";
 const PRIVATE_CORS_METHODS = new Set(["GET", "POST"]);
@@ -586,6 +598,8 @@ function readFilePrefix(
     catch: (cause) => new RouteRequestError({ message: `Failed to read file: ${String(cause)}` }),
   });
 }
+
+const toTaskRouteError = (error: BotTaskError) => new RouteRequestError({ message: error.message });
 
 function stripRequestTag<T extends { _tag: string }>(body: T) {
   return Struct.omit(body, ["_tag"]);
@@ -1442,13 +1456,14 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     readonly submissionId: CommandId;
     readonly requestHash: string;
     readonly worktreeSetup: WorktreeSetupShape;
+    readonly submissionSource: SubmissionSource;
   }) =>
     Effect.gen(function* () {
       const prepared = yield* prepareTurnStartCommand({ command: input.command });
       yield* stampSubmissionSource(
         prepared.command.commandId,
         prepared.command.threadId,
-        "human",
+        input.submissionSource,
       ).pipe(Effect.provideService(SqlClient.SqlClient, sql));
       const result = yield* input.worktreeSetup
         .start({
@@ -1502,12 +1517,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     readonly command: Extract<ClientOrchestrationCommand, { type: "thread.turn.start" }>;
     readonly orchestrationEngine: OrchestrationEngineShape;
     readonly projectSetupScriptRunner: ProjectSetupScriptRunnerShape;
+    readonly submissionSource: SubmissionSource;
   }) {
     const prepared = yield* prepareTurnStartCommand({ command: input.command });
     yield* stampSubmissionSource(
       prepared.command.commandId,
       prepared.command.threadId,
-      "human",
+      input.submissionSource,
     ).pipe(Effect.provideService(SqlClient.SqlClient, sql));
     let rolledBack: BootstrapThreadDisposition | null = null;
     return yield* dispatchBootstrapTurnStart({
@@ -1550,6 +1566,8 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   const normalizeDispatchCommand = Effect.fnUntraced(function* (input: {
     readonly command: ClientOrchestrationCommand;
+    /** Provenance stamped on a turn start; the first stamp for a command wins. */
+    readonly submissionSource: SubmissionSource;
   }) {
     if (input.command.type === "project.create") {
       return {
@@ -1634,7 +1652,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     yield* stampSubmissionSource(
       prepared.command.commandId,
       prepared.command.threadId,
-      "human",
+      input.submissionSource,
     ).pipe(Effect.provideService(SqlClient.SqlClient, sql));
     return yield* persistPreparedTurnStartCommand(prepared);
   });
@@ -2775,6 +2793,237 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       };
     });
 
+  /**
+   * Admits a turn through the durable queue (or the bootstrap path for a
+   * first send). The WS route submits as `human`; the Agent Bridge submits as
+   * `automation`. Retries with the same submission id replay the stored result.
+   */
+  const submitTurnSubmission = (
+    body: NextTurnQueueSubmitInput,
+    options: { readonly submissionSource: SubmissionSource },
+  ) =>
+    Effect.gen(function* () {
+      const requestHash = canonicalRequestHash(body.command);
+      const existingSubmission = yield* nextTurnQueueStore
+        .getBySubmissionId(body.submissionId)
+        .pipe(Effect.mapError(mapNextTurnQueueRouteError));
+      const {
+        nextTurnQueueDispatcher,
+        orchestrationEngine,
+        projectSetupScriptRunner,
+        worktreeSetup,
+      } = yield* awaitOrchestrationRuntimeForRoute;
+      if (
+        body.command.bootstrap?.createThread !== undefined &&
+        body.command.bootstrap.prepareWorktree !== undefined &&
+        existingSubmission === null
+      ) {
+        // A new thread in a worktree: the thread and its queued first turn are
+        // created now, and the worktree is prepared in the background while
+        // the queue waits. The client gets `queued` right away.
+        const started = yield* singleFlightBootstrap(
+          body.submissionId,
+          requestHash,
+          startWorktreeSetupSubmission({
+            command: body.command,
+            submissionId: body.submissionId,
+            requestHash,
+            worktreeSetup,
+            submissionSource: options.submissionSource,
+          }),
+        );
+        if (started !== null) return started;
+        // No usable repository or base: fall through to the project checkout.
+      }
+      if (body.command.bootstrap !== undefined && existingSubmission === null) {
+        // A first send creates its thread here, so it cannot be admitted to
+        // the thread's queue first. The submission is recorded once the turn
+        // starts; a retry with the same id then replays the result above.
+        // A retry that arrives while the first attempt still runs joins it
+        // instead of racing it into a second thread.
+        const fallbackCommand =
+          body.command.bootstrap.prepareWorktree === undefined ||
+          body.command.bootstrap.createThread === undefined
+            ? body.command
+            : {
+                ...body.command,
+                bootstrap: {
+                  createThread: body.command.bootstrap.createThread,
+                },
+              };
+        return yield* singleFlightBootstrap(
+          body.submissionId,
+          requestHash,
+          Effect.gen(function* () {
+            const dispatched = yield* runBootstrapTurnStart({
+              command: fallbackCommand,
+              orchestrationEngine,
+              projectSetupScriptRunner,
+              submissionSource: options.submissionSource,
+            });
+            yield* nextTurnQueueStore
+              .recordStartedSubmission({
+                submissionId: body.submissionId,
+                threadId: body.command.threadId,
+                requestHash,
+                messageId: body.command.message.messageId,
+                sequence: dispatched.sequence,
+              })
+              .pipe(Effect.mapError(mapNextTurnQueueRouteError));
+            yield* releaseSentUploads(body.command.threadId, body.command.message.attachments);
+            yield* nextTurnQueueDispatcher.notify(body.command.threadId);
+            return {
+              disposition: "started" as const,
+              submissionId: body.submissionId,
+              sequence: dispatched.sequence,
+            };
+          }),
+        );
+      }
+      if (existingSubmission !== null) {
+        if (existingSubmission.requestHash !== requestHash) {
+          return yield* mapNextTurnQueueRouteError(
+            new NextTurnQueueIdempotencyConflictError({
+              message: "That send identifier was already used for different content.",
+            }),
+          );
+        }
+        if (existingSubmission.disposition === "started") {
+          return {
+            disposition: "started" as const,
+            submissionId: body.submissionId,
+            sequence: existingSubmission.resultSequence ?? 0,
+          };
+        }
+        if (
+          existingSubmission.disposition === "canceled" ||
+          existingSubmission.disposition === "cleared" ||
+          existingSubmission.disposition === "rejected"
+        ) {
+          return {
+            disposition: existingSubmission.disposition,
+            submissionId: body.submissionId,
+            reasonCode: existingSubmission.reasonCode ?? existingSubmission.disposition,
+          };
+        }
+        if (existingSubmission.itemId !== null) {
+          if (
+            existingSubmission.disposition === "pending" &&
+            (body.intent === "auto" || body.intent === "steer")
+          ) {
+            return yield* nextTurnQueueDispatcher
+              .submitAndSettle({
+                threadId: existingSubmission.threadId,
+                itemId: existingSubmission.itemId,
+                submissionId: body.submissionId,
+              })
+              .pipe(Effect.mapError(mapNextTurnQueueRouteError));
+          }
+          return {
+            disposition: "queued" as const,
+            submissionId: body.submissionId,
+            itemId: existingSubmission.itemId,
+            snapshot: yield* nextTurnQueueDispatcher
+              .getSnapshot(existingSubmission.threadId)
+              .pipe(Effect.mapError(mapNextTurnQueueRouteError)),
+          };
+        }
+      }
+      const command = yield* normalizeDispatchCommand({
+        command: body.command,
+        submissionSource: options.submissionSource,
+      });
+      if (command.type !== "thread.turn.start") {
+        return yield* new RouteRequestError({
+          message: "Only thread turn-start commands can be queued.",
+        });
+      }
+      const itemId = CommandId.makeUnsafe(crypto.randomUUID());
+      const steeringThread =
+        body.intent === "steer"
+          ? (yield* (yield* awaitOrchestrationRuntimeForRoute).orchestrationEngine.getReadModel()).threads.find(
+              (thread) => thread.id === command.threadId,
+            )
+          : undefined;
+      if (
+        body.intent === "steer" &&
+        (!steeringThread?.session?.activeTurnId ||
+          steeringThread.runtimeMode !== command.runtimeMode ||
+          steeringThread.interactionMode !== command.interactionMode)
+      ) {
+        yield* removePersistedTurnAttachments(command);
+        return yield* new RouteRequestError({
+          message:
+            "Steering requires an active turn with the same Build/Plan and permission modes.",
+        });
+      }
+      const queuedCommand = steeringThread?.session?.activeTurnId
+        ? { ...command, expectedTurnId: steeringThread.session.activeTurnId }
+        : command;
+      const inserted = yield* nextTurnQueueStore
+        .insertSubmission({
+          submissionId: body.submissionId,
+          requestHash,
+          itemId,
+          command: queuedCommand,
+          submissionSource: options.submissionSource,
+          supersedeUsageResume: body.intent !== "queue-tail",
+          atHead: body.intent === "queue-head" || body.intent === "steer",
+        })
+        .pipe(
+          Effect.tapError(() => removePersistedTurnAttachments(command)),
+          Effect.mapError(mapNextTurnQueueRouteError),
+        );
+      if (inserted.kind === "replay") {
+        // A concurrent request may have normalized a second, independently-id'd
+        // attachment set before the winning ledger transaction committed.
+        // The ledger result is authoritative; discard this request's ingress files.
+        yield* removePersistedTurnAttachments(command);
+        const replayItemId = inserted.submission.itemId ?? itemId;
+        if (body.intent === "auto" || body.intent === "steer") {
+          return yield* nextTurnQueueDispatcher
+            .submitAndSettle({
+              threadId: inserted.submission.threadId,
+              itemId: replayItemId,
+              submissionId: body.submissionId,
+            })
+            .pipe(Effect.mapError(mapNextTurnQueueRouteError));
+        }
+        return {
+          disposition: "queued" as const,
+          submissionId: body.submissionId,
+          itemId: replayItemId,
+          snapshot: yield* nextTurnQueueDispatcher
+            .getSnapshot(inserted.submission.threadId)
+            .pipe(Effect.mapError(mapNextTurnQueueRouteError)),
+        };
+      }
+      const result =
+        body.intent === "auto" || body.intent === "steer"
+          ? yield* nextTurnQueueDispatcher
+              .submitAndSettle({
+                threadId: command.threadId,
+                itemId,
+                submissionId: body.submissionId,
+              })
+              .pipe(Effect.mapError(mapNextTurnQueueRouteError))
+          : {
+              disposition: "queued" as const,
+              submissionId: body.submissionId,
+              itemId,
+              snapshot: yield* nextTurnQueueDispatcher
+                .getSnapshot(command.threadId)
+                .pipe(Effect.mapError(mapNextTurnQueueRouteError)),
+            };
+      yield* nextTurnQueueStore
+        .settleSubmission({ submissionId: body.submissionId, result })
+        .pipe(Effect.mapError(mapNextTurnQueueRouteError));
+      // The queue item now owns its attachment copies; retries replay by submissionId.
+      yield* releaseSentUploads(command.threadId, body.command.message.attachments);
+      yield* nextTurnQueueDispatcher.notify(command.threadId);
+      return result;
+    });
+
   const publishNextTurnQueueSnapshot = (threadId: ThreadId) =>
     getNextTurnQueueSnapshot(threadId).pipe(
       Effect.flatMap((snapshot) => pushBus.publishAll(WS_CHANNELS.nextTurnQueueUpdated, snapshot)),
@@ -2785,6 +3034,86 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         }),
       ),
     );
+
+  const toAgentBridgeHostError = (error: { readonly message: string; readonly code?: unknown }) =>
+    new AgentBridgeHostError({
+      message: error.message,
+      ...(typeof error.code === "string" ? { code: error.code } : {}),
+    });
+  const agentBridgeHost: AgentBridgeHostShape = {
+    readSnapshot: awaitOrchestrationRuntimeForRoute.pipe(
+      Effect.flatMap(({ orchestrationEngine }) => orchestrationEngine.getReadModel()),
+      Effect.mapError(toAgentBridgeHostError),
+    ),
+    getThreadDetails: (threadId) =>
+      projectionReadModelQuery
+        .getThreadDetails({ threadId })
+        .pipe(Effect.mapError(toAgentBridgeHostError)),
+    getThreadDiff: ({ threadId, fromTurnCount, toTurnCount }) =>
+      (fromTurnCount === undefined
+        ? checkpointDiffQuery.getFullThreadDiff({ threadId, toTurnCount })
+        : checkpointDiffQuery.getTurnDiff({ threadId, fromTurnCount, toTurnCount })
+      ).pipe(
+        Effect.map((result) => result.diff),
+        Effect.mapError(toAgentBridgeHostError),
+      ),
+    getQueueSnapshot: (threadId) =>
+      getNextTurnQueueSnapshot(threadId).pipe(Effect.mapError(toAgentBridgeHostError)),
+    getSubmission: (submissionId) =>
+      nextTurnQueueStore
+        .getBySubmissionId(submissionId)
+        .pipe(Effect.mapError(toAgentBridgeHostError)),
+    queueChanges: Stream.unwrap(
+      awaitOrchestrationRuntimeForOptionalBackground.pipe(
+        Effect.map((runtime) =>
+          Option.isSome(runtime) ? runtime.value.nextTurnQueueDispatcher.changes : Stream.empty,
+        ),
+      ),
+    ),
+    domainEvents: Stream.unwrap(
+      awaitOrchestrationRuntimeForOptionalBackground.pipe(
+        Effect.map((runtime) =>
+          Option.isSome(runtime)
+            ? runtime.value.orchestrationEngine.streamDomainEvents
+            : Stream.empty,
+        ),
+      ),
+    ),
+    listProviderInstances: providerAdvisoryProjection.getProviders,
+    getSettings: serverSettings.getSettings.pipe(Effect.mapError(toAgentBridgeHostError)),
+    getProjectGitBranch: (cwd) =>
+      git.status({ cwd }).pipe(
+        Effect.map((status) => status.branch),
+        Effect.orElseSucceed(() => null),
+      ),
+    submitTurnSubmission: (body, options) =>
+      submitTurnSubmission(body, options).pipe(
+        Effect.mapError(toAgentBridgeHostError),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+        Effect.provideService(SqlClient.SqlClient, sql),
+      ),
+    dispatch: (command) =>
+      awaitOrchestrationRuntimeForRoute.pipe(
+        Effect.flatMap(({ orchestrationEngine }) => orchestrationEngine.dispatch(command)),
+        Effect.asVoid,
+        Effect.mapError(toAgentBridgeHostError),
+      ),
+  };
+  const agentBridge = yield* makeAgentBridgeService({
+    host: agentBridgeHost,
+    store: makeAgentBridgeStore(sql),
+    tasks: makeBotTaskStore(sql),
+    settingsChanges: serverSettings.streamChanges,
+    stateDir: serverConfig.stateDir,
+    serverVersion: serverPackageVersion,
+    stdio: agentBridgeStdioSetups({
+      profileId: serverConfig.profile?.id,
+      isDefaultProfile: serverConfig.profile?.isDefault ?? true,
+      defaultStateDir: serverConfig.defaultStateDir,
+    }),
+    publish: (payload) => pushBus.publishAll(AGENT_BRIDGE_WS_CHANNELS.stateChanged, payload),
+  });
 
   const ownedPreviewUrls = new OwnedPreviewUrls();
   const unsubscribeTerminalEvents = yield* terminalManager.subscribe((event) => {
@@ -3026,6 +3355,41 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const id = request.body.instanceId;
         return yield* profileCall(() => accountService.status(id));
       }
+
+      case AGENT_BRIDGE_WS_METHODS.getState:
+        return yield* agentBridge.getState;
+      case AGENT_BRIDGE_WS_METHODS.getTasks:
+        return yield* agentBridge.tasks
+          .getTasks(stripRequestTag(request.body))
+          .pipe(Effect.mapError(toTaskRouteError));
+      case AGENT_BRIDGE_WS_METHODS.getTask:
+        return yield* agentBridge.tasks
+          .getTask(request.body.taskId)
+          .pipe(Effect.mapError(toTaskRouteError));
+      case AGENT_BRIDGE_WS_METHODS.getTaskActivities:
+        return yield* agentBridge.tasks
+          .getTaskActivities(stripRequestTag(request.body))
+          .pipe(Effect.mapError(toTaskRouteError));
+      case AGENT_BRIDGE_WS_METHODS.createTask:
+        return yield* agentBridge.tasks
+          .createTask(stripRequestTag(request.body))
+          .pipe(Effect.mapError(toTaskRouteError));
+      case AGENT_BRIDGE_WS_METHODS.replyToTask:
+        return yield* agentBridge.tasks
+          .replyToTask(stripRequestTag(request.body))
+          .pipe(Effect.mapError(toTaskRouteError));
+      case AGENT_BRIDGE_WS_METHODS.pauseTask:
+        return yield* agentBridge.tasks
+          .controlTask("pause", stripRequestTag(request.body))
+          .pipe(Effect.mapError(toTaskRouteError));
+      case AGENT_BRIDGE_WS_METHODS.resumeTask:
+        return yield* agentBridge.tasks
+          .controlTask("resume", stripRequestTag(request.body))
+          .pipe(Effect.mapError(toTaskRouteError));
+      case AGENT_BRIDGE_WS_METHODS.cancelTask:
+        return yield* agentBridge.tasks
+          .controlTask("cancel", stripRequestTag(request.body))
+          .pipe(Effect.mapError(toTaskRouteError));
 
       case AGENTS_WS_METHODS.getSnapshot: {
         const { threadBackgroundWork } = yield* awaitOrchestrationRuntimeForRoute;
@@ -3407,11 +3771,15 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             command,
             orchestrationEngine,
             projectSetupScriptRunner,
+            submissionSource: "human",
           });
           yield* releaseSentUploads(command.threadId, command.message.attachments);
           return dispatched;
         }
-        const normalizedCommand = yield* normalizeDispatchCommand({ command });
+        const normalizedCommand = yield* normalizeDispatchCommand({
+          command,
+          submissionSource: "human",
+        });
         if (normalizedCommand.type === "thread.turn.start") {
           yield* removePersistedTurnAttachments(normalizedCommand);
           return yield* new RouteRequestError({
@@ -5200,223 +5568,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case WS_METHODS.nextTurnQueueSummary:
         return yield* nextTurnQueueStore.summary.pipe(Effect.mapError(mapNextTurnQueueRouteError));
 
-      case WS_METHODS.nextTurnQueueSubmit: {
-        const body = stripRequestTag(request.body);
-        const requestHash = canonicalRequestHash(body.command);
-        const existingSubmission = yield* nextTurnQueueStore
-          .getBySubmissionId(body.submissionId)
-          .pipe(Effect.mapError(mapNextTurnQueueRouteError));
-        const {
-          nextTurnQueueDispatcher,
-          orchestrationEngine,
-          projectSetupScriptRunner,
-          worktreeSetup,
-        } = yield* awaitOrchestrationRuntimeForRoute;
-        if (
-          body.command.bootstrap?.createThread !== undefined &&
-          body.command.bootstrap.prepareWorktree !== undefined &&
-          existingSubmission === null
-        ) {
-          // A new thread in a worktree: the thread and its queued first turn are
-          // created now, and the worktree is prepared in the background while
-          // the queue waits. The client gets `queued` right away.
-          const started = yield* singleFlightBootstrap(
-            body.submissionId,
-            requestHash,
-            startWorktreeSetupSubmission({
-              command: body.command,
-              submissionId: body.submissionId,
-              requestHash,
-              worktreeSetup,
-            }),
-          );
-          if (started !== null) return started;
-          // No usable repository or base: fall through to the project checkout.
-        }
-        if (body.command.bootstrap !== undefined && existingSubmission === null) {
-          // A first send creates its thread here, so it cannot be admitted to
-          // the thread's queue first. The submission is recorded once the turn
-          // starts; a retry with the same id then replays the result above.
-          // A retry that arrives while the first attempt still runs joins it
-          // instead of racing it into a second thread.
-          const fallbackCommand =
-            body.command.bootstrap.prepareWorktree === undefined ||
-            body.command.bootstrap.createThread === undefined
-              ? body.command
-              : {
-                  ...body.command,
-                  bootstrap: {
-                    createThread: body.command.bootstrap.createThread,
-                  },
-                };
-          return yield* singleFlightBootstrap(
-            body.submissionId,
-            requestHash,
-            Effect.gen(function* () {
-              const dispatched = yield* runBootstrapTurnStart({
-                command: fallbackCommand,
-                orchestrationEngine,
-                projectSetupScriptRunner,
-              });
-              yield* nextTurnQueueStore
-                .recordStartedSubmission({
-                  submissionId: body.submissionId,
-                  threadId: body.command.threadId,
-                  requestHash,
-                  messageId: body.command.message.messageId,
-                  sequence: dispatched.sequence,
-                })
-                .pipe(Effect.mapError(mapNextTurnQueueRouteError));
-              yield* releaseSentUploads(body.command.threadId, body.command.message.attachments);
-              yield* nextTurnQueueDispatcher.notify(body.command.threadId);
-              return {
-                disposition: "started" as const,
-                submissionId: body.submissionId,
-                sequence: dispatched.sequence,
-              };
-            }),
-          );
-        }
-        if (existingSubmission !== null) {
-          if (existingSubmission.requestHash !== requestHash) {
-            return yield* mapNextTurnQueueRouteError(
-              new NextTurnQueueIdempotencyConflictError({
-                message: "That send identifier was already used for different content.",
-              }),
-            );
-          }
-          if (existingSubmission.disposition === "started") {
-            return {
-              disposition: "started" as const,
-              submissionId: body.submissionId,
-              sequence: existingSubmission.resultSequence ?? 0,
-            };
-          }
-          if (
-            existingSubmission.disposition === "canceled" ||
-            existingSubmission.disposition === "cleared" ||
-            existingSubmission.disposition === "rejected"
-          ) {
-            return {
-              disposition: existingSubmission.disposition,
-              submissionId: body.submissionId,
-              reasonCode: existingSubmission.reasonCode ?? existingSubmission.disposition,
-            };
-          }
-          if (existingSubmission.itemId !== null) {
-            if (
-              existingSubmission.disposition === "pending" &&
-              (body.intent === "auto" || body.intent === "steer")
-            ) {
-              return yield* nextTurnQueueDispatcher
-                .submitAndSettle({
-                  threadId: existingSubmission.threadId,
-                  itemId: existingSubmission.itemId,
-                  submissionId: body.submissionId,
-                })
-                .pipe(Effect.mapError(mapNextTurnQueueRouteError));
-            }
-            return {
-              disposition: "queued" as const,
-              submissionId: body.submissionId,
-              itemId: existingSubmission.itemId,
-              snapshot: yield* nextTurnQueueDispatcher
-                .getSnapshot(existingSubmission.threadId)
-                .pipe(Effect.mapError(mapNextTurnQueueRouteError)),
-            };
-          }
-        }
-        const command = yield* normalizeDispatchCommand({ command: body.command });
-        if (command.type !== "thread.turn.start") {
-          return yield* new RouteRequestError({
-            message: "Only thread turn-start commands can be queued.",
-          });
-        }
-        const itemId = CommandId.makeUnsafe(crypto.randomUUID());
-        const steeringThread =
-          body.intent === "steer"
-            ? (yield* (yield* awaitOrchestrationRuntimeForRoute).orchestrationEngine.getReadModel()).threads.find(
-                (thread) => thread.id === command.threadId,
-              )
-            : undefined;
-        if (
-          body.intent === "steer" &&
-          (!steeringThread?.session?.activeTurnId ||
-            steeringThread.runtimeMode !== command.runtimeMode ||
-            steeringThread.interactionMode !== command.interactionMode)
-        ) {
-          yield* removePersistedTurnAttachments(command);
-          return yield* new RouteRequestError({
-            message:
-              "Steering requires an active turn with the same Build/Plan and permission modes.",
-          });
-        }
-        const queuedCommand = steeringThread?.session?.activeTurnId
-          ? { ...command, expectedTurnId: steeringThread.session.activeTurnId }
-          : command;
-        const inserted = yield* nextTurnQueueStore
-          .insertSubmission({
-            submissionId: body.submissionId,
-            requestHash,
-            itemId,
-            command: queuedCommand,
-            submissionSource: "human",
-            supersedeUsageResume: body.intent !== "queue-tail",
-            atHead: body.intent === "queue-head" || body.intent === "steer",
-          })
-          .pipe(
-            Effect.tapError(() => removePersistedTurnAttachments(command)),
-            Effect.mapError(mapNextTurnQueueRouteError),
-          );
-        if (inserted.kind === "replay") {
-          // A concurrent request may have normalized a second, independently-id'd
-          // attachment set before the winning ledger transaction committed.
-          // The ledger result is authoritative; discard this request's ingress files.
-          yield* removePersistedTurnAttachments(command);
-          const replayItemId = inserted.submission.itemId ?? itemId;
-          if (body.intent === "auto" || body.intent === "steer") {
-            return yield* nextTurnQueueDispatcher
-              .submitAndSettle({
-                threadId: inserted.submission.threadId,
-                itemId: replayItemId,
-                submissionId: body.submissionId,
-              })
-              .pipe(Effect.mapError(mapNextTurnQueueRouteError));
-          }
-          return {
-            disposition: "queued" as const,
-            submissionId: body.submissionId,
-            itemId: replayItemId,
-            snapshot: yield* nextTurnQueueDispatcher
-              .getSnapshot(inserted.submission.threadId)
-              .pipe(Effect.mapError(mapNextTurnQueueRouteError)),
-          };
-        }
-        const result =
-          body.intent === "auto" || body.intent === "steer"
-            ? yield* nextTurnQueueDispatcher
-                .submitAndSettle({
-                  threadId: command.threadId,
-                  itemId,
-                  submissionId: body.submissionId,
-                })
-                .pipe(Effect.mapError(mapNextTurnQueueRouteError))
-            : {
-                disposition: "queued" as const,
-                submissionId: body.submissionId,
-                itemId,
-                snapshot: yield* nextTurnQueueDispatcher
-                  .getSnapshot(command.threadId)
-                  .pipe(Effect.mapError(mapNextTurnQueueRouteError)),
-              };
-        yield* nextTurnQueueStore
-          .settleSubmission({ submissionId: body.submissionId, result })
-          .pipe(Effect.mapError(mapNextTurnQueueRouteError));
-        // The queue item now owns its attachment copies; retries replay by submissionId.
-        yield* releaseSentUploads(command.threadId, body.command.message.attachments);
-        yield* nextTurnQueueDispatcher.notify(command.threadId);
-        return result;
-      }
+      case WS_METHODS.nextTurnQueueSubmit:
+        return yield* submitTurnSubmission(stripRequestTag(request.body), {
+          submissionSource: "human",
+        });
 
       case WS_METHODS.nextTurnQueueUpdate: {
         const body = stripRequestTag(request.body);

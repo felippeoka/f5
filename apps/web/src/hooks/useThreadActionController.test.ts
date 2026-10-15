@@ -21,6 +21,7 @@ describe("buildThreadActionMenuItems", () => {
       "snooze-next-week",
       "archive",
       "mark-unread",
+      "assign-to-bot",
       "copy-path",
       "copy-thread-id",
       "delete",

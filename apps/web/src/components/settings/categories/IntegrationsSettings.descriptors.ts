@@ -18,6 +18,15 @@ export const INTEGRATIONS_SETTINGS_DESCRIPTORS = [
     targetSelector: '[data-settings-search-target="integrations.github"]',
   },
   {
+    id: "integrations.agent-bridge",
+    category: "integrations",
+    label: "Agent Bridge",
+    description:
+      "Let external agents such as a ChatGPT Dot read shared projects and start supervised threads.",
+    keywords: ["mcp", "dots", "chatgpt", "agents", "bots", "stdio", "bridge"],
+    targetSelector: '[data-settings-search-target="integrations.agent-bridge"]',
+  },
+  {
     id: "integrations.keybindings",
     category: "integrations",
     label: "Keybindings",

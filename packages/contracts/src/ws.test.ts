@@ -4,6 +4,7 @@ import { Effect, Schema } from "effect";
 
 import { ORCHESTRATION_WS_CHANNELS, ORCHESTRATION_WS_METHODS } from "./orchestration";
 import { AGENTS_WS_CHANNELS, AGENTS_WS_METHODS } from "./backgroundWork";
+import { AGENT_BRIDGE_WS_CHANNELS } from "./agentBridge";
 import { PR_HUB_WS_CHANNELS, PR_HUB_WS_METHODS } from "./prHub";
 import { ServerValidateHarnessesResult } from "./server";
 import {
@@ -612,6 +613,7 @@ it("registers every declared push channel in both transport schemas", () => {
   const channels = Object.values({
     ...WS_CHANNELS,
     ...AGENTS_WS_CHANNELS,
+    ...AGENT_BRIDGE_WS_CHANNELS,
     ...ORCHESTRATION_WS_CHANNELS,
     ...PR_HUB_WS_CHANNELS,
   });

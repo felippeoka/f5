@@ -104,3 +104,47 @@ it("links repository references in rendered chat without changing code or existi
   expect(html).not.toContain("/issues/456");
   expect(html).not.toContain("/issues/789");
 });
+
+describe("ChatMarkdown external-bot policy", () => {
+  const render = async (text: string) => {
+    const { default: ChatMarkdown } = await import("./ChatMarkdown");
+    return renderToStaticMarkup(
+      <RepositoryLinks.Provider value={{ provider: "github", webUrl: "https://github.com/o/r" }}>
+        <ChatMarkdown text={text} cwd="/tmp/project" policy="external-bot" />
+      </RepositoryLinks.Provider>,
+    );
+  };
+
+  it("drops raw HTML", async () => {
+    const html = await render('Hi <script>alert(1)</script><img src="x" onerror="y"> **there**');
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("<img");
+    expect(html).toContain("<strong>there</strong>");
+  });
+
+  it("renders images as text", async () => {
+    const html = await render("![diagram](https://example.com/a.png)");
+    expect(html).not.toContain("<img");
+    expect(html).toContain("[diagram: https://example.com/a.png]");
+  });
+
+  it("keeps only HTTPS links, with noopener noreferrer", async () => {
+    const html = await render(
+      "[ok](https://example.com/x) [plain](http://example.com) [file](./app.ts) [abs](/etc/passwd) [js](javascript:alert(1))",
+    );
+    expect(html).toContain(
+      '<a href="https://example.com/x" target="_blank" rel="noopener noreferrer">ok</a>',
+    );
+    expect(html.match(/<a /g)).toHaveLength(1);
+    expect(html).not.toContain("chat-markdown-file-link");
+    expect(html).toContain("plain");
+    expect(html).toContain("file");
+  });
+
+  it("adds no PR previews or issue links", async () => {
+    const html = await render("See https://github.com/o/r/pull/12 and #34.");
+    expect(html).not.toContain("issues/34");
+    expect(html).toContain('href="https://github.com/o/r/pull/12"');
+    expect(html).not.toContain("pr-link-preview");
+  });
+});
