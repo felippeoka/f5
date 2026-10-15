@@ -110,7 +110,6 @@ describe("MessagesTimeline markdown streaming", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-04-23T18:00:10.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}

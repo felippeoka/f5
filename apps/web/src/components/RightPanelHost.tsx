@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { usePreviewPresentationStore } from "../previewPresentationStore";
 import type { RightPanelSurface, ThreadRightPanelState } from "../rightPanelStore";
 import { RightPanelTabs } from "./RightPanelTabs";
+import { SurfaceErrorBoundary } from "./ui/SurfaceErrorBoundary";
 
 export function RightPanelHost(props: {
   mode: "sidebar" | "sheet";
@@ -65,7 +66,12 @@ export function RightPanelHost(props: {
         <div className="relative flex min-h-0 flex-1 flex-col">
           {activeSurface ? (
             <div className="absolute inset-0 flex min-h-0 flex-col">
-              {props.renderSurface(activeSurface)}
+              <SurfaceErrorBoundary
+                name={`right-panel:${activeSurface.kind}`}
+                resetKeys={[props.threadId, activeSurface.id]}
+              >
+                {props.renderSurface(activeSurface)}
+              </SurfaceErrorBoundary>
             </div>
           ) : null}
           {inactivePreviewSurface ? (
@@ -74,7 +80,12 @@ export function RightPanelHost(props: {
               inert
               className="pointer-events-none invisible absolute inset-0 flex min-h-0 flex-col"
             >
-              {props.renderSurface(inactivePreviewSurface)}
+              <SurfaceErrorBoundary
+                name="right-panel:preview"
+                resetKeys={[props.threadId, inactivePreviewSurface.id]}
+              >
+                {props.renderSurface(inactivePreviewSurface)}
+              </SurfaceErrorBoundary>
             </div>
           ) : null}
         </div>

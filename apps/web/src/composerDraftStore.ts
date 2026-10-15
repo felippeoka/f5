@@ -48,7 +48,12 @@ import {
 import { recordModelSelection, useModelPreferencesStore } from "./modelPreferencesStore";
 import { Debouncer } from "@tanstack/react-pacer";
 import { create } from "zustand";
-import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
+import {
+  persist,
+  type PersistStorage,
+  type StateStorage,
+  type StorageValue,
+} from "zustand/middleware";
 import { randomUUID } from "./lib/utils";
 import {
   compressImageForComposer,
@@ -65,14 +70,35 @@ export type DraftThreadEnvMode = "local" | "worktree";
 
 const COMPOSER_PERSIST_DEBOUNCE_MS = 300;
 
-interface DebouncedStorage extends StateStorage {
+/**
+ * Debounced writes over a string storage. `setItem` keeps only a reference to
+ * the latest value per name; `serialize` runs when that name's debounce fires
+ * (or on `flush` / `pendingValue`), so rapid edits cost one serialization per
+ * window instead of one per keystroke.
+ */
+interface DeferredStorage<T> {
+  /** The stored string, without any pending write applied. */
+  getItem: (name: string) => string | null | Promise<string | null>;
+  setItem: (name: string, value: T) => void;
+  removeItem: (name: string) => void;
   cancelPending: () => void;
   flush: () => void;
-  pendingValue: () => string | null;
+  /** Serialized pending value for `name` (default: the last name written), if any. */
+  pendingValue: (name?: string) => string | null;
 }
 
-export function createDebouncedStorage(baseStorage: StateStorage): DebouncedStorage {
-  let pendingValue: string | null = null;
+interface PendingWrite<T> {
+  readonly debouncer: Debouncer<() => void>;
+  latest: { readonly value: T } | null;
+  serialized: { readonly value: T; readonly text: string } | null;
+}
+
+export function createDeferredStorage<T>(
+  baseStorage: StateStorage,
+  serialize: (value: T) => string,
+): DeferredStorage<T> {
+  const pendingByName = new Map<string, PendingWrite<T>>();
+  let lastName: string | null = null;
   const reportWriteFailure = (error: unknown) => {
     if (typeof window === "undefined") return;
     window.dispatchEvent(
@@ -81,41 +107,85 @@ export function createDebouncedStorage(baseStorage: StateStorage): DebouncedStor
       }),
     );
   };
-  const debouncedSetItem = new Debouncer(
-    (name: string, value: string) => {
-      pendingValue = null;
-      try {
-        const result = baseStorage.setItem(name, value);
-        if (result instanceof Promise) {
-          void result.catch(reportWriteFailure);
-        }
-      } catch (error) {
-        reportWriteFailure(error);
+  const serializePending = (pending: PendingWrite<T>): string | null => {
+    const latest = pending.latest;
+    if (!latest) return null;
+    if (pending.serialized?.value !== latest.value) {
+      pending.serialized = { value: latest.value, text: serialize(latest.value) };
+    }
+    return pending.serialized.text;
+  };
+  const write = (name: string) => {
+    const pending = pendingByName.get(name);
+    if (!pending?.latest) return;
+    try {
+      const text = serializePending(pending);
+      pending.latest = null;
+      pending.serialized = null;
+      if (text === null) return;
+      const result = baseStorage.setItem(name, text);
+      if (result instanceof Promise) {
+        void result.catch(reportWriteFailure);
       }
-    },
-    { wait: COMPOSER_PERSIST_DEBOUNCE_MS },
-  );
+    } catch (error) {
+      pending.latest = null;
+      pending.serialized = null;
+      reportWriteFailure(error);
+    }
+  };
+  const pendingFor = (name: string): PendingWrite<T> => {
+    let pending = pendingByName.get(name);
+    if (!pending) {
+      pending = {
+        debouncer: new Debouncer(() => write(name), { wait: COMPOSER_PERSIST_DEBOUNCE_MS }),
+        latest: null,
+        serialized: null,
+      };
+      pendingByName.set(name, pending);
+    }
+    return pending;
+  };
+  const cancel = (pending: PendingWrite<T>) => {
+    pending.debouncer.cancel();
+    pending.latest = null;
+    pending.serialized = null;
+  };
 
   return {
     getItem: (name) => baseStorage.getItem(name),
     setItem: (name, value) => {
-      pendingValue = value;
-      debouncedSetItem.maybeExecute(name, value);
+      lastName = name;
+      const pending = pendingFor(name);
+      pending.latest = { value };
+      pending.debouncer.maybeExecute();
     },
     removeItem: (name) => {
-      debouncedSetItem.cancel();
-      pendingValue = null;
+      const pending = pendingByName.get(name);
+      if (pending) cancel(pending);
       baseStorage.removeItem(name);
     },
     cancelPending: () => {
-      debouncedSetItem.cancel();
-      pendingValue = null;
+      for (const pending of pendingByName.values()) cancel(pending);
     },
     flush: () => {
-      debouncedSetItem.flush();
+      for (const pending of pendingByName.values()) pending.debouncer.flush();
     },
-    pendingValue: () => pendingValue,
+    pendingValue: (name) => {
+      const target = name ?? lastName;
+      const pending = target === null ? undefined : pendingByName.get(target);
+      if (!pending) return null;
+      try {
+        return serializePending(pending);
+      } catch {
+        return null;
+      }
+    },
   };
+}
+
+/** String-valued deferred storage (serialization is the identity). */
+export function createDebouncedStorage(baseStorage: StateStorage): DeferredStorage<string> {
+  return createDeferredStorage<string>(baseStorage, (value) => value);
 }
 
 function createMemoryStateStorage(): StateStorage {
@@ -152,9 +222,38 @@ function resolveComposerBaseStorage(): StateStorage {
     : fallbackComposerBaseStorage;
 }
 
-let composerDebouncedStorage: DebouncedStorage = createDebouncedStorage(
-  resolveComposerBaseStorage(),
-);
+/** What `partialize` hands to storage: live references, serialized only when written. */
+interface ComposerPersistSnapshot {
+  readonly draftsByThreadId: Readonly<Record<ThreadId, ComposerThreadDraftState>>;
+  readonly draftThreadsByThreadId: Readonly<Record<ThreadId, DraftThreadState>>;
+  readonly projectDraftThreadIdByProjectId: Readonly<Record<ProjectId, ThreadId>>;
+  readonly promptStashes: ReadonlyArray<PromptStashEntry>;
+}
+
+function createComposerDeferredStorage(
+  baseStorage: StateStorage,
+): DeferredStorage<StorageValue<ComposerPersistSnapshot>> {
+  return createDeferredStorage(baseStorage, (value) =>
+    JSON.stringify({ state: toPersistedComposerDraftState(value.state), version: value.version }),
+  );
+}
+
+let composerDebouncedStorage = createComposerDeferredStorage(resolveComposerBaseStorage());
+
+/**
+ * Reads parse the stored JSON, which holds the serialized draft shape rather
+ * than the reference snapshot; `merge` normalizes whatever it receives.
+ */
+const composerPersistStorage: PersistStorage<ComposerPersistSnapshot> = {
+  getItem: (name) => {
+    const parse = (raw: string | null) =>
+      raw === null ? null : (JSON.parse(raw) as StorageValue<ComposerPersistSnapshot>);
+    const raw = composerDebouncedStorage.getItem(name);
+    return raw instanceof Promise ? raw.then(parse) : parse(raw);
+  },
+  setItem: (name, value) => composerDebouncedStorage.setItem(name, value),
+  removeItem: (name) => composerDebouncedStorage.removeItem(name),
+};
 
 // Test-only seams: gated behind `import.meta.env.DEV` so Vite can tree-shake
 // the body in production bundles and any accidental runtime call from a
@@ -166,10 +265,7 @@ export function setComposerDraftBaseStorageForTesting(baseStorage: StateStorage)
     );
   }
   composerDebouncedStorage.cancelPending();
-  composerDebouncedStorage = createDebouncedStorage(baseStorage);
-  useComposerDraftStore.persist.setOptions({
-    storage: createJSONStorage(() => composerDebouncedStorage),
-  });
+  composerDebouncedStorage = createComposerDeferredStorage(baseStorage);
 }
 
 export function resetComposerDraftBaseStorageForTesting(): void {
@@ -179,10 +275,7 @@ export function resetComposerDraftBaseStorageForTesting(): void {
     );
   }
   composerDebouncedStorage.cancelPending();
-  composerDebouncedStorage = createDebouncedStorage(resolveComposerBaseStorage());
-  useComposerDraftStore.persist.setOptions({
-    storage: createJSONStorage(() => composerDebouncedStorage),
-  });
+  composerDebouncedStorage = createComposerDeferredStorage(resolveComposerBaseStorage());
 }
 
 // Flush pending composer draft writes before page unload to prevent data loss.
@@ -1474,6 +1567,43 @@ function toPersistedThreadDraft(
     persistedDraft.codexFastMode = true;
   }
   return persistedDraft;
+}
+
+function isEmptyThreadDraft(draft: ComposerThreadDraftState): boolean {
+  return (
+    draft.prompt.length === 0 &&
+    draft.persistedAttachments.length === 0 &&
+    draft.filePaths.length === 0 &&
+    draft.terminalContexts.length === 0 &&
+    draft.provider === null &&
+    draft.providerInstanceId === null &&
+    draft.model === null &&
+    draft.modelOptions === null &&
+    draft.runtimeMode === null &&
+    draft.interactionMode === null &&
+    draft.effort === null &&
+    draft.codexFastMode === false
+  );
+}
+
+/** Runs when the debounced write fires, not on every store update. */
+function toPersistedComposerDraftState(
+  snapshot: ComposerPersistSnapshot,
+): PersistedComposerDraftStoreState {
+  const persistedDraftsByThreadId: PersistedComposerDraftStoreState["draftsByThreadId"] = {};
+  for (const [threadId, draft] of Object.entries(snapshot.draftsByThreadId) as Array<
+    [ThreadId, ComposerThreadDraftState]
+  >) {
+    if (typeof threadId !== "string" || threadId.length === 0) continue;
+    if (isEmptyThreadDraft(draft)) continue;
+    persistedDraftsByThreadId[threadId] = toPersistedThreadDraft(draft);
+  }
+  return {
+    draftsByThreadId: persistedDraftsByThreadId,
+    draftThreadsByThreadId: snapshot.draftThreadsByThreadId,
+    projectDraftThreadIdByProjectId: snapshot.projectDraftThreadIdByProjectId,
+    promptStashes: snapshot.promptStashes,
+  } as PersistedComposerDraftStoreState;
 }
 
 function persistedDraftMatches(threadId: ThreadId, draft: ComposerThreadDraftState): boolean {
@@ -3130,39 +3260,14 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
     {
       name: COMPOSER_DRAFT_STORAGE_KEY,
       version: 1,
-      storage: createJSONStorage(() => composerDebouncedStorage),
-      partialize: (state) => {
-        const persistedDraftsByThreadId: PersistedComposerDraftStoreState["draftsByThreadId"] = {};
-        for (const [threadId, draft] of Object.entries(state.draftsByThreadId)) {
-          if (typeof threadId !== "string" || threadId.length === 0) {
-            continue;
-          }
-          if (
-            draft.prompt.length === 0 &&
-            draft.persistedAttachments.length === 0 &&
-            draft.filePaths.length === 0 &&
-            draft.terminalContexts.length === 0 &&
-            draft.provider === null &&
-            draft.providerInstanceId === null &&
-            draft.model === null &&
-            draft.modelOptions === null &&
-            draft.runtimeMode === null &&
-            draft.interactionMode === null &&
-            draft.effort === null &&
-            draft.codexFastMode === false
-          ) {
-            continue;
-          }
-          const persistedDraft = toPersistedThreadDraft(draft);
-          persistedDraftsByThreadId[threadId as ThreadId] = persistedDraft;
-        }
-        return {
-          draftsByThreadId: persistedDraftsByThreadId,
-          draftThreadsByThreadId: state.draftThreadsByThreadId,
-          projectDraftThreadIdByProjectId: state.projectDraftThreadIdByProjectId,
-          promptStashes: state.promptStashes,
-        };
-      },
+      storage: composerPersistStorage,
+      // References only: serialization is deferred to the debounced write.
+      partialize: (state): ComposerPersistSnapshot => ({
+        draftsByThreadId: state.draftsByThreadId,
+        draftThreadsByThreadId: state.draftThreadsByThreadId,
+        projectDraftThreadIdByProjectId: state.projectDraftThreadIdByProjectId,
+        promptStashes: state.promptStashes,
+      }),
       merge: (persistedState, currentState) => {
         const normalizedPersisted = normalizePersistedComposerDraftState(persistedState);
         const draftsByThreadId = Object.fromEntries(

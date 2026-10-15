@@ -14,7 +14,7 @@ import {
   type UserMessageSkillCall,
 } from "@t3tools/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
-import { StrictMode, useRef, useState } from "react";
+import { StrictMode, useLayoutEffect, useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {} from "@vitest/browser-playwright"; // Types cdp() as a Playwright CDPSession.
 import { cdp, page, userEvent } from "vitest/browser";
@@ -24,6 +24,7 @@ import type { deriveTimelineEntries, LiveWorkActivity } from "../../session-logi
 import { parsePersistedAppSettings } from "../../appSettings";
 import type { TurnDiffSummary } from "../../types";
 import { readTimelineScrollAnchor } from "./timelineScrollAnchors";
+import { setNowTickerClockForTests } from "../../lib/nowTicker";
 import { MessagesTimeline } from "./MessagesTimeline";
 import { ComposerDock } from "./composer/ComposerDock";
 import type { ImageAttachmentActionItem } from "./imageAttachmentActions";
@@ -274,7 +275,16 @@ function TimelineHarness(
       ? "2026-03-04T12:00:00.000Z"
       : props.initialActiveTurnStartedAt,
   );
-  const [nowIso, setNowIso] = useState(props.initialNowIso ?? "2026-03-04T12:05:00.000Z");
+  const [nowIso, setNowIso] = useState(() => {
+    const initial = props.initialNowIso ?? "2026-03-04T12:05:00.000Z";
+    // Live clocks read the shared ticker; pin it so labels stay deterministic.
+    setNowTickerClockForTests(() => Date.parse(initial));
+    return initial;
+  });
+  useLayoutEffect(() => {
+    setNowTickerClockForTests(() => Date.parse(nowIso));
+  }, [nowIso]);
+  useLayoutEffect(() => () => setNowTickerClockForTests(null), []);
   const [liveActivity, setLiveActivity] = useState<LiveWorkActivity>(
     props.initialLiveActivity ?? null,
   );
@@ -340,7 +350,6 @@ function TimelineHarness(
           completionSummary={null}
           turnDiffSummaryByAssistantMessageId={new Map()}
           turnDiffSummaryByTurnId={props.turnDiffSummaryByTurnId ?? new Map()}
-          nowIso={nowIso}
           expandedWorkGroups={expandedWorkGroups}
           onToggleWorkGroup={(groupId, paginatedEntryCount) => {
             setExpandedWorkGroups((current) => {

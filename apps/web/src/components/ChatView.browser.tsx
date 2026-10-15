@@ -5576,6 +5576,77 @@ describe("ChatView timeline (full app)", () => {
     }
   });
 
+  it.each(["started", "steered"] as const)(
+    "follows the tail after a scrolled-up send only when it is %s as a new turn",
+    async (disposition) => {
+      const sentText = `scrolled-up send ${disposition}`;
+      const mounted = await mountChatView({
+        viewport: DEFAULT_VIEWPORT,
+        snapshot: createSnapshotForTargetUser({
+          targetMessageId: "msg-user-follow-tail" as MessageId,
+          targetText: "follow tail target",
+          fillerPairCount: 40,
+          targetPairIndex: 34,
+        }),
+        configureFixture: (nextFixture) => {
+          nextFixture.resolveWsRequest = (body) =>
+            body._tag === WS_METHODS.nextTurnQueueSubmit && getSubmittedTurnCommand(body)
+              ? {
+                  type: "result",
+                  result: { disposition, submissionId: body.submissionId, sequence: 1 },
+                }
+              : null;
+        },
+      });
+
+      try {
+        await waitForTimelineScrollToSettle();
+        const scrollContainer = await waitForElement(
+          () => document.querySelector<HTMLElement>('[data-slot="messages-scroll-container"]'),
+          "Messages scroll container should render before sending.",
+        );
+        scrollContainer.scrollTo({ top: 0, behavior: "auto" });
+        scrollContainer.dispatchEvent(new Event("scroll"));
+        await waitForButtonContainingText("Jump to latest");
+
+        useComposerDraftStore.getState().setPrompt(THREAD_ID, sentText);
+        const sendButton = await waitForSendButton();
+        await vi.waitFor(() => expect(sendButton.disabled).toBe(false), {
+          timeout: 8_000,
+          interval: 16,
+        });
+        sendButton.click();
+        await vi.waitFor(
+          () => expect(getDispatchCommandRequests("thread.turn.start")).toHaveLength(1),
+          { timeout: 8_000, interval: 16 },
+        );
+        const messageId = getSubmittedTurnCommand(
+          getDispatchCommandRequests("thread.turn.start")[0]!,
+        )?.message?.messageId;
+        expect(messageId).toBeTruthy();
+
+        if (disposition === "started") {
+          await waitForTimelineRowVisible(
+            `[data-message-id="${messageId}"]`,
+            "A send that starts a new turn should bring the user's message into view.",
+          );
+          await vi.waitFor(
+            () => expect(document.body.textContent).not.toContain("Jump to latest"),
+            { timeout: 8_000, interval: 16 },
+          );
+        } else {
+          for (let frame = 0; frame < 10; frame += 1) await waitForLayout();
+          expect(document.body.textContent).toContain("Jump to latest");
+          expect(scrollContainer.scrollTop).toBeLessThan(
+            scrollContainer.scrollHeight - scrollContainer.clientHeight * 2,
+          );
+        }
+      } finally {
+        await mounted.cleanup();
+      }
+    },
+  );
+
   it("does not scroll the background chat from cmd+enter inside a dialog popup", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,

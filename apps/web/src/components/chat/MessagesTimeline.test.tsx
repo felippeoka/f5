@@ -310,7 +310,6 @@ describe("MessagesTimeline", () => {
             completionSummary={null}
             turnDiffSummaryByAssistantMessageId={new Map()}
             turnDiffSummaryByTurnId={new Map()}
-            nowIso="2026-03-17T19:12:40.000Z"
             expandedWorkGroups={{}}
             onToggleWorkGroup={() => {}}
             onOpenTurnDiff={() => {}}
@@ -406,7 +405,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:40.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -461,7 +459,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -521,7 +518,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -578,7 +574,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -636,7 +631,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -698,7 +692,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -782,7 +775,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -843,7 +835,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -896,7 +887,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -964,7 +954,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1032,7 +1021,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1091,7 +1079,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1148,7 +1135,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1209,7 +1195,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1267,7 +1252,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1319,7 +1303,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1372,7 +1355,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1428,7 +1410,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1483,7 +1464,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1563,7 +1543,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1617,7 +1596,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1670,7 +1648,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1723,7 +1700,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1777,7 +1753,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1829,7 +1804,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1884,7 +1858,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -1947,7 +1920,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -2018,7 +1990,6 @@ describe("MessagesTimeline", () => {
             ],
           ])
         }
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -2076,7 +2047,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -2130,7 +2100,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -2224,7 +2193,6 @@ describe("MessagesTimeline", () => {
               ],
             ])
           }
-          nowIso="2026-03-17T19:12:30.000Z"
           expandedWorkGroups={{}}
           onToggleWorkGroup={() => {}}
           onOpenTurnDiff={() => {}}
@@ -2326,7 +2294,6 @@ describe("MessagesTimeline", () => {
               ],
             ])
           }
-          nowIso="2026-03-17T19:12:30.000Z"
           expandedWorkGroups={{}}
           onToggleWorkGroup={() => {}}
           onOpenTurnDiff={() => {}}
@@ -2421,7 +2388,6 @@ describe("MessagesTimeline", () => {
               ],
             ])
           }
-          nowIso="2026-03-17T19:12:30.000Z"
           expandedWorkGroups={{}}
           onToggleWorkGroup={() => {}}
           onOpenTurnDiff={() => {}}
@@ -2503,7 +2469,6 @@ describe("MessagesTimeline", () => {
           completionSummary={null}
           turnDiffSummaryByAssistantMessageId={new Map()}
           turnDiffSummaryByTurnId={new Map()}
-          nowIso="2026-03-17T19:12:30.000Z"
           expandedWorkGroups={{}}
           onToggleWorkGroup={() => {}}
           onOpenTurnDiff={() => {}}
@@ -2626,7 +2591,6 @@ describe("MessagesTimeline", () => {
               ],
             ])
           }
-          nowIso="2026-03-17T19:12:30.000Z"
           expandedWorkGroups={{}}
           onToggleWorkGroup={() => {}}
           onOpenTurnDiff={() => {}}
@@ -2706,7 +2670,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -2790,7 +2753,6 @@ describe("MessagesTimeline", () => {
               ],
             ])
           }
-          nowIso="2026-03-17T19:12:30.000Z"
           expandedWorkGroups={{}}
           onToggleWorkGroup={() => {}}
           onOpenTurnDiff={() => {}}
@@ -2851,7 +2813,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -2916,7 +2877,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:31.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -2975,7 +2935,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:31.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}
@@ -3087,7 +3046,6 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         turnDiffSummaryByTurnId={new Map()}
-        nowIso="2026-03-17T19:12:31.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         onOpenTurnDiff={() => {}}

@@ -22,6 +22,10 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 
 ### Added
 
+- Error boundaries around each route and each right-panel tab: a failing page or tab shows "Try again" and "Copy error report" in place while the sidebar, composer and other tabs keep working.
+- A "Window title" setting in Settings > General chooses whether thread and workflow titles show the project name (default) or the thread or workflow title, which can appear in screen shares and window switchers.
+- CI boots the server under Bun (`bun run test:bun-server-boot`) so a Bun-incompatible import fails the build instead of `bun run dev`.
+
 - New "F5 Graphite" default theme with Inter, a cobalt accent, derived faint/attention/chrome tokens, stricter contrast checks, a `text-2xs`/`text-ui` type scale, motion tokens, and a design-token test that rejects raw palette colours, arbitrary text sizes, faded text and pixel radii anywhere in the web app (`apps/web/scripts/codemod-ui-tokens.ts` rewrites most of them). Text inputs no longer default to monospace; path, URL, port and shortcut fields opt in. The default theme keeps its id, so everyone on it gets Graphite, and the interface font changes from DM Sans to Inter; the previous palette stays available as "F5 Black (classic)" in Appearance (its secondary text is slightly lighter to meet WCAG AA). DM Sans is no longer bundled, so an interface or chat font saved as "DM Sans" before this release resets to the default once. The `destructive-foreground` theme token now means red text on ordinary surfaces rather than text on a red fill; a custom theme override that is unreadable on its background (under 4.5:1) is ignored in favour of the generated colour.
 - Independent thread summary settings, defaulting new and existing installations to
   Codex/OpenAI with GPT-5.6 Luna and low reasoning effort. Summary inputs (messages,
@@ -65,7 +69,7 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 - `NOTICE.md`, `ARCHITECTURE.md` (root stub), `SECURITY.md`, `CODE_OF_CONDUCT.md`, and `THIRD_PARTY_LICENSES.md` at the repository root.
 - `docs/provider-prerequisites.md` covering both Codex and Claude Code install/auth.
 - Documentation index at `docs/README.md`.
-- Drift test comparing the README env-var table against `turbo.json` `globalEnv`.
+- Drift test (`scripts/env-docs-drift.test.ts`) checking that every `F5_*`/`T3CODE_*` variable in `turbo.json` `globalEnv` is documented in `docs/environment.md`.
 - Server-authoritative thread pins and snoozes with global pin ordering, durable expiry, wake
   predicates, and one-time migration of legacy browser-local pins.
 - Race-safe thread title regeneration using current conversation context, correlated requests,
@@ -103,6 +107,20 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
   an error survives reconnects while a later failure with identical text remains visible.
 
 ### Fixed
+
+- Telemetry is off unless `T3CODE_POSTHOG_KEY` is set. Builds without a key no longer create an anonymous id, open an HTTP client or send heartbeats.
+- Streaming assistant replies no longer re-read every message in the thread for each delta; the projection reads only the affected row, so long threads stay responsive while a reply streams. A message row owned by another thread is never overwritten.
+- Code blocks no longer crash with a React hook-order error when a highlighted block is shown again from cache, and two different code blocks can no longer share a cached highlight.
+- The marketing site's download buttons and repository links point at F5 releases (`lopes-felipe/f5`, overridable with `F5_RELEASE_REPOSITORY` at build time) instead of upstream T3 Code; corrupt or failed release lookups are handled instead of showing broken links.
+- The once-a-second elapsed-time clock no longer re-renders the whole chat timeline; only the live "working" label and running command cards update.
+- Code-review and investigation workflow stages complete only with the turn they dispatched. A stale or user-started turn on a reused stage thread can no longer stand in for the stage's own output, and a stage whose provider confirms delivery only after the turn finishes (or across a restart) still completes. Stages started before this release keep the previous rule. Planning workflows are not yet covered.
+- The desktop app's backend crash budget resets after a minute of healthy running, so isolated crashes days apart no longer exhaust restarts; restarts back off exponentially up to 10 seconds.
+- Typing in the composer no longer serializes every thread's draft on each keystroke; drafts are serialized once when the debounced write runs.
+- Native window and browser tab titles follow the current page (Usage, Pull Requests, Settings, or the project or thread of the open thread or workflow), with the profile name appended outside the default profile, instead of a fixed app name.
+- Sending a message while scrolled up follows the new turn to the bottom when it starts a new turn; steering a running turn leaves your scroll position alone.
+- The workflow run inspector loads only when expanded, refreshes when the run changes, and shows a retryable error instead of an empty panel.
+- Screen readers announce "Response ready", "Response failed", "Response stopped", or that approval or input is needed, once per turn, instead of a generic or repeated status.
+- `bun run dev` starts the server again; Bun-incompatible `node:sqlite` imports are loaded lazily per runtime.
 
 - Claude turn costs are no longer over-counted. The Agent SDK reports a running total per session,
   which F5 was adding to workflow budgets and usage reporting on every turn, so a long thread could

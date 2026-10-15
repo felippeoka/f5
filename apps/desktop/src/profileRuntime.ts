@@ -36,6 +36,77 @@ export async function ensureProfileBackend(
   await operations.ready();
 }
 
+export const MAX_BACKEND_RESTART_ATTEMPTS = 6;
+/** Confirmed health for this long forgives earlier crashes. */
+export const BACKEND_HEALTHY_RESET_MS = 60_000;
+const BACKEND_HEALTH_POLL_MS = 1_000;
+
+/**
+ * Consecutive failures back off exponentially and stop the profile after
+ * {@link MAX_BACKEND_RESTART_ATTEMPTS}; {@link monitorBackendHealth} resets
+ * the count once a process has stayed healthy.
+ */
+export function planBackendRestart(
+  runtime: Pick<ProfileBackendRuntime, "restartAttempt">,
+): { readonly kind: "stop" } | { readonly kind: "restart"; readonly delayMs: number } {
+  if (runtime.restartAttempt >= MAX_BACKEND_RESTART_ATTEMPTS) return { kind: "stop" };
+  const delayMs = Math.min(500 * 2 ** runtime.restartAttempt, 10_000);
+  runtime.restartAttempt += 1;
+  return { kind: "restart", delayMs };
+}
+
+/**
+ * Waits for the process generation to answer readiness, then calls
+ * `onSustainedHealth` if it is still current and ready
+ * {@link BACKEND_HEALTHY_RESET_MS} later. Returns a cancel function; a
+ * cancelled or superseded monitor never reports health, even when a check
+ * was already in flight.
+ */
+export function monitorBackendHealth(input: {
+  readonly isCurrent: () => boolean;
+  readonly checkReady: () => Promise<boolean>;
+  readonly onSustainedHealth: () => void;
+  readonly healthyForMs?: number;
+  readonly pollMs?: number;
+}): () => void {
+  const healthyForMs = input.healthyForMs ?? BACKEND_HEALTHY_RESET_MS;
+  const pollMs = input.pollMs ?? BACKEND_HEALTH_POLL_MS;
+  let cancelled = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const active = () => !cancelled && input.isCurrent();
+  const schedule = (delayMs: number, next: () => Promise<void>) => {
+    if (!active()) return;
+    timer = setTimeout(() => {
+      timer = null;
+      void next();
+    }, delayMs);
+    timer.unref?.();
+  };
+  const ready = async () => {
+    try {
+      return await input.checkReady();
+    } catch {
+      return false;
+    }
+  };
+  const awaitFirstHealth = async (): Promise<void> => {
+    if (!active()) return;
+    if (await ready()) schedule(healthyForMs, confirmSustainedHealth);
+    else schedule(pollMs, awaitFirstHealth);
+  };
+  const confirmSustainedHealth = async (): Promise<void> => {
+    if (!active()) return;
+    if ((await ready()) && active()) input.onSustainedHealth();
+    else schedule(pollMs, awaitFirstHealth);
+  };
+  schedule(0, awaitFirstHealth);
+  return () => {
+    cancelled = true;
+    if (timer) clearTimeout(timer);
+    timer = null;
+  };
+}
+
 export async function waitForProfileBackend(
   isRunning: () => boolean,
   checkReady: () => Promise<boolean>,

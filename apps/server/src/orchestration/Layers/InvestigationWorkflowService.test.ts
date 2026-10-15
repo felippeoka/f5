@@ -22,6 +22,11 @@ import {
   type OrchestrationEngineShape,
 } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import {
+  ProviderTurnDeliveryRepository,
+  type ProviderTurnDelivery,
+  type ProviderTurnDeliveryRepositoryShape,
+} from "../Services/ProviderTurnDeliveryRepository.ts";
 import { InvestigationWorkflowServiceLive } from "./InvestigationWorkflowService.ts";
 
 const NOW = "2026-04-12T12:00:00.000Z";
@@ -440,7 +445,12 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<voi
   }
 }
 
-async function createHarness(initialSnapshot: OrchestrationReadModel) {
+async function createHarness(
+  initialSnapshot: OrchestrationReadModel,
+  options?: {
+    getDeliveryByCommandId?: ProviderTurnDeliveryRepositoryShape["getByCommandId"];
+  },
+) {
   let snapshot = initialSnapshot;
   const dispatched: OrchestrationCommand[] = [];
   const queue = await Effect.runPromise(Queue.unbounded<OrchestrationEvent>());
@@ -540,6 +550,13 @@ async function createHarness(initialSnapshot: OrchestrationReadModel) {
           generateThreadTitle,
         } as unknown as TextGenerationShape),
       ),
+      Layer.provideMerge(
+        options?.getDeliveryByCommandId
+          ? Layer.succeed(ProviderTurnDeliveryRepository, {
+              getByCommandId: options.getDeliveryByCommandId,
+            } as unknown as ProviderTurnDeliveryRepositoryShape)
+          : Layer.empty,
+      ),
     ),
   );
 
@@ -604,7 +621,92 @@ describe("InvestigationWorkflowService", () => {
     expect(workflow?.investigatorA.investigationStatus).toBe("running");
     expect(workflow?.investigatorB.investigationStatus).toBe("running");
     expect(threadCreateCommands(harness.dispatched)).toHaveLength(2);
-    expect(threadTurnStartCommands(harness.dispatched)).toHaveLength(2);
+    const turnStarts = threadTurnStartCommands(harness.dispatched);
+    expect(turnStarts).toHaveLength(2);
+    expect(workflow?.investigatorA.investigationDispatchCommandId).toBe(
+      turnStarts.find(
+        (command) => command.threadId === workflow?.investigatorA.investigationThreadId,
+      )?.commandId,
+    );
+    expect(workflow?.investigatorB.investigationDispatchCommandId).toBe(
+      turnStarts.find(
+        (command) => command.threadId === workflow?.investigatorB.investigationThreadId,
+      )?.commandId,
+    );
+  });
+
+  it("completes a running stage only with the turn its dispatch started", async () => {
+    const dispatchA = CommandId.makeUnsafe("dispatch-investigation-a");
+    const completed = makeCompletedInvestigationWorkflow();
+    const workflow: InvestigationWorkflow = {
+      ...completed,
+      investigatorA: {
+        ...completed.investigatorA,
+        investigationStatus: "running",
+        investigationTurnId: null,
+        investigationMessageId: null,
+        investigationDispatchCommandId: dispatchA,
+      },
+    };
+    const threadsWithTurnA = (suffix: string) => [
+      makeReportThread({
+        threadId: workflow.investigatorA.investigationThreadId,
+        messageId: `message-investigation-a-${suffix}`,
+        turnId: `turn-investigation-a-${suffix}`,
+        text: `Investigation A ${suffix} report`,
+      }),
+      makeReportThread({
+        threadId: workflow.investigatorB.investigationThreadId,
+        messageId: "message-investigation-b",
+        turnId: "turn-investigation-b",
+        text: "Investigation B report",
+      }),
+    ];
+    harness = await createHarness(makeReadModel({ workflow, threads: threadsWithTurnA("stale") }), {
+      getDeliveryByCommandId: (commandId) =>
+        Effect.succeed(
+          commandId === dispatchA
+            ? ({
+                commandId: dispatchA,
+                state: "accepted",
+                providerTurnId: TurnId.makeUnsafe("turn-investigation-a-own"),
+              } as ProviderTurnDelivery)
+            : null,
+        ),
+    });
+    await harness.start();
+
+    expect(harness.getSnapshot().investigationWorkflows[0]?.investigatorA.investigationStatus).toBe(
+      "running",
+    );
+    expect(threadTurnStartCommands(harness.dispatched)).toHaveLength(0);
+
+    harness.setSnapshot(
+      makeReadModel({
+        workflow: harness.getSnapshot().investigationWorkflows[0]!,
+        threads: threadsWithTurnA("own"),
+      }),
+    );
+    await harness.emit(
+      makeEvent("thread.message-sent", {
+        threadId: workflow.investigatorA.investigationThreadId,
+        messageId: MessageId.makeUnsafe("message-investigation-a-own"),
+        role: "assistant",
+        text: "Investigation A own report",
+        turnId: TurnId.makeUnsafe("turn-investigation-a-own"),
+        streaming: false,
+        createdAt: NOW,
+        updatedAt: NOW,
+      } as OrchestrationEvent["payload"]),
+    );
+    await waitFor(
+      () =>
+        harness!.getSnapshot().investigationWorkflows[0]?.investigatorA.crossReviewStatus ===
+        "running",
+    );
+    expect(harness.getSnapshot().investigationWorkflows[0]?.investigatorA.investigationTurnId).toBe(
+      "turn-investigation-a-own",
+    );
   });
 
   it("rejects identical investigator provider and model", async () => {

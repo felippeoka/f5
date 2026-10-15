@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { DatabaseSync } from "node:sqlite";
 import { createReadStream, createWriteStream } from "node:fs";
 import type { Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -11,6 +10,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { version as appVersion } from "../package.json" with { type: "json" };
 import { ServerConfig, type ServerConfigShape } from "./config.ts";
+import { openRuntimeSqliteDatabase } from "./persistence/runtimeSqlite.ts";
 import {
   backupTemporaryStorageBudget,
   parseBackupArchive,
@@ -109,8 +109,8 @@ function validateJsonFile(path: string, label: string): Promise<void> {
   });
 }
 
-export function validateBackupDatabase(path: string): void {
-  const database = new DatabaseSync(path, { readOnly: true });
+export async function validateBackupDatabase(path: string): Promise<void> {
+  const database = await openRuntimeSqliteDatabase(path, { readOnly: true });
   try {
     const integrity = database.prepare("PRAGMA integrity_check").all() as Array<
       Record<string, unknown>
@@ -122,14 +122,14 @@ export function validateBackupDatabase(path: string): void {
       .prepare(
         "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'",
       )
-      .get() as { present?: number } | undefined;
+      .get() as { present?: number } | null | undefined;
     if (!migrationTable?.present) throw new Error("Backup database migration metadata is missing.");
     const latest = database
       .prepare("SELECT max(migration_id) AS version FROM effect_sql_migrations")
-      .get() as { version?: number | null };
-    if ((latest.version ?? 0) > LATEST_MIGRATION_ID) {
+      .get() as { version?: number | null } | null | undefined;
+    if ((latest?.version ?? 0) > LATEST_MIGRATION_ID) {
       throw new Error(
-        `Backup schema version ${latest.version} is newer than supported version ${LATEST_MIGRATION_ID}.`,
+        `Backup schema version ${latest?.version} is newer than supported version ${LATEST_MIGRATION_ID}.`,
       );
     }
   } finally {
@@ -139,7 +139,7 @@ export function validateBackupDatabase(path: string): void {
 
 async function validateRestoredPayload(payloadDir: string): Promise<void> {
   const databasePath = resolve(payloadDir, "database.sqlite");
-  validateBackupDatabase(databasePath);
+  await validateBackupDatabase(databasePath);
   const settingsPath = resolve(payloadDir, "settings.json");
   if (await exists(settingsPath)) await validateJsonFile(settingsPath, "Backup settings");
   const keybindingsPath = resolve(payloadDir, "keybindings.json");

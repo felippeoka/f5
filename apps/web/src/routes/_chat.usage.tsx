@@ -1,12 +1,16 @@
 import { useAppSettings } from "../appSettings";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { RouteErrorView } from "../components/RouteErrorView";
+
 import { AppTitlebar } from "../components/AppTitlebar";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { UsageDashboard } from "../components/usage/UsageDashboard";
 import { SidebarInset } from "../components/ui/sidebar";
 
 function UsageRouteView() {
   const { settings, updateSettings } = useAppSettings();
+  useDocumentTitle("Usage");
   const { tab } = Route.useSearch();
   const navigate = Route.useNavigate();
   return (
@@ -29,4 +33,5 @@ export const Route = createFileRoute("/_chat/usage")({
   validateSearch: (search: Record<string, unknown>): { tab?: "activity" | "limits" } =>
     search.tab === "activity" || search.tab === "limits" ? { tab: search.tab } : {},
   component: UsageRouteView,
+  errorComponent: RouteErrorView,
 });

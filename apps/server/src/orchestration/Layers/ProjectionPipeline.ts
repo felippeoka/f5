@@ -340,26 +340,29 @@ function previousProjectedMessageCharacters(
   });
 }
 
-function estimateThreadContextTokensForMessageEvent(input: {
-  readonly currentMessages: ReadonlyArray<ProjectionThreadMessage>;
-  readonly payload: Extract<OrchestrationEvent, { type: "thread.message-sent" }>["payload"];
-  readonly estimatedContextTokens: number | null;
-}): number {
-  const currentMessage = input.currentMessages.find(
-    (message) => message.messageId === input.payload.messageId,
+function estimateThreadContextTokensFromMessages(
+  messages: ReadonlyArray<ProjectionThreadMessage>,
+): number {
+  return roughTokenEstimateFromCharacters(
+    messages.reduce((sum, message) => sum + projectionMessageCharacters(message), 0),
   );
-  const shouldRecomputeFromMessages = input.estimatedContextTokens === null;
+}
 
-  if (shouldRecomputeFromMessages) {
-    return roughTokenEstimateFromCharacters(
-      input.currentMessages.reduce((sum, message) => sum + projectionMessageCharacters(message), 0),
-    );
-  }
-
+/** Incremental estimate from the already-projected message; needs only that one row. */
+function estimateThreadContextTokensAfterMessageEvent(input: {
+  readonly currentMessage: ProjectionThreadMessage | undefined;
+  readonly payload: Extract<OrchestrationEvent, { type: "thread.message-sent" }>["payload"];
+  readonly estimatedContextTokens: number;
+}): number {
   return estimateContextTokensAfterMessageUpdate({
     previousEstimatedContextTokens: input.estimatedContextTokens,
-    previousMessageCharacters: previousProjectedMessageCharacters(currentMessage, input.payload),
-    nextMessageCharacters: currentMessage ? projectionMessageCharacters(currentMessage) : 0,
+    previousMessageCharacters: previousProjectedMessageCharacters(
+      input.currentMessage,
+      input.payload,
+    ),
+    nextMessageCharacters: input.currentMessage
+      ? projectionMessageCharacters(input.currentMessage)
+      : 0,
   });
 }
 
@@ -440,6 +443,28 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
   const projectionProjectSkillRepository = yield* ProjectionProjectSkillRepository;
   const projectionThreadRepository = yield* ProjectionThreadRepository;
   const projectionThreadMessageRepository = yield* ProjectionThreadMessageRepository;
+
+  // Streaming emits a message-sent event per delta, so only the null-estimate
+  // recompute may read the whole thread; the incremental path reads one row.
+  const estimateContextTokensForMessageEvent = (
+    payload: Extract<OrchestrationEvent, { type: "thread.message-sent" }>["payload"],
+    estimatedContextTokens: number | null,
+  ) =>
+    estimatedContextTokens === null
+      ? projectionThreadMessageRepository
+          .listByThreadId({ threadId: payload.threadId })
+          .pipe(Effect.map(estimateThreadContextTokensFromMessages))
+      : projectionThreadMessageRepository
+          .getByMessageId({ threadId: payload.threadId, messageId: payload.messageId })
+          .pipe(
+            Effect.map((currentMessage) =>
+              estimateThreadContextTokensAfterMessageEvent({
+                currentMessage: Option.getOrUndefined(currentMessage),
+                payload,
+                estimatedContextTokens,
+              }),
+            ),
+          );
   const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
   const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
   const projectionThreadCommandExecutionRepository =
@@ -1083,19 +1108,15 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           const existingSessionRow = yield* projectionThreadSessionRepository.getByThreadId({
             threadId: event.payload.threadId,
           });
-          const currentMessages = yield* projectionThreadMessageRepository.listByThreadId({
-            threadId: event.payload.threadId,
-          });
           const hasProviderTokenUsage =
             Option.isSome(existingSessionRow) &&
             existingSessionRow.value.tokenUsageSource === "provider";
           const estimatedContextTokens = hasProviderTokenUsage
             ? existingRow.value.estimatedContextTokens
-            : estimateThreadContextTokensForMessageEvent({
-                currentMessages,
-                payload: event.payload,
-                estimatedContextTokens: existingRow.value.estimatedContextTokens,
-              });
+            : yield* estimateContextTokensForMessageEvent(
+                event.payload,
+                existingRow.value.estimatedContextTokens,
+              );
 
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
@@ -1293,11 +1314,11 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
     Effect.gen(function* () {
       switch (event.type) {
         case "thread.message-sent": {
-          const existingRows = yield* projectionThreadMessageRepository.listByThreadId({
-            threadId: event.payload.threadId,
-          });
-          const existingMessage = existingRows.find(
-            (row) => row.messageId === event.payload.messageId,
+          const existingMessage = Option.getOrUndefined(
+            yield* projectionThreadMessageRepository.getByMessageId({
+              threadId: event.payload.threadId,
+              messageId: event.payload.messageId,
+            }),
           );
           const nextMessage = resolveProjectedMessageState(existingMessage, event.payload);
           const nextAttachments =
@@ -1749,24 +1770,22 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           if (Option.isNone(existingRow)) {
             return;
           }
-          const currentMessages = yield* projectionThreadMessageRepository.listByThreadId({
-            threadId: event.payload.threadId,
-          });
-          const existingThreadRow = yield* projectionThreadRepository.getById({
-            threadId: event.payload.threadId,
-          });
           const hasProviderTokenUsage = existingRow.value.tokenUsageSource === "provider";
           const estimatedContextTokens = hasProviderTokenUsage
             ? existingRow.value.estimatedContextTokens
-            : estimateThreadContextTokensForMessageEvent({
-                currentMessages,
-                payload: event.payload,
-                estimatedContextTokens:
-                  existingRow.value.estimatedContextTokens ??
-                  (Option.isSome(existingThreadRow)
-                    ? existingThreadRow.value.estimatedContextTokens
-                    : null),
-              });
+            : yield* estimateContextTokensForMessageEvent(
+                event.payload,
+                existingRow.value.estimatedContextTokens ??
+                  Option.match(
+                    yield* projectionThreadRepository.getById({
+                      threadId: event.payload.threadId,
+                    }),
+                    {
+                      onNone: () => null,
+                      onSome: (thread) => thread.estimatedContextTokens,
+                    },
+                  ),
+              );
           yield* projectionThreadSessionRepository.upsert({
             ...existingRow.value,
             estimatedContextTokens,

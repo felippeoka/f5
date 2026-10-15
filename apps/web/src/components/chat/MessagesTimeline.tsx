@@ -18,6 +18,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type MutableRefObject,
   type ReactNode,
 } from "react";
@@ -97,6 +98,7 @@ import {
 } from "./MessagesTimeline.logic";
 import { TimelineTurnRail } from "./TimelineTurnRail";
 import { WorkingRibbon, type WorkingRibbonReleaseReason } from "./WorkingRibbon";
+import { useNowIso } from "../../lib/nowTicker";
 import type { RibbonPoint } from "./WorkingRibbon.logic";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
@@ -231,6 +233,12 @@ interface MessagesTimelineProps {
   listRef: React.RefObject<LegendListRef | null>;
   entryRowIndexMapRef?: MutableRefObject<ReadonlyMap<string, number> | null>;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  /**
+   * Bumped when a send starts a new turn: the next tail advance is followed
+   * even if the user had scrolled up. Steers, queued and rejected sends never
+   * bump it.
+   */
+  followNextTailNonce?: number;
   hasOlderHistory?: boolean;
   isLoadingOlderHistory?: boolean;
   hasHistoryLoadError?: boolean;
@@ -240,19 +248,6 @@ interface MessagesTimelineProps {
   completionSummary: string | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   turnDiffSummaryByTurnId: Map<TurnId, TurnDiffSummary>;
-  /**
-   * TODO(perf): `nowIso` ticks every second while a turn is in flight, which
-   * re-renders the entire timeline through this component. Upstream's
-   * react-virtual implementation kept the clock out of the hot path by
-   * pushing `nowIso` through a `TimelineRowCtx` / `WorkingTimer` +
-   * `LiveMessageMeta` split so only the rows that actually display elapsed
-   * time (the working indicator and the in-flight message meta) re-render
-   * on each tick. We intentionally kept the simpler prop-drilled shape for
-   * the port since LegendList's cell-level reuse already amortizes most of
-   * the cost, but if profiling under LegendList shows frame drops during
-   * long streaming turns we should port that split.
-   */
-  nowIso: string;
   expandedWorkGroups: Record<string, number>;
   onToggleWorkGroup: (groupId: string, paginatedEntryCount: number) => void;
   /**
@@ -375,6 +370,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   listRef,
   entryRowIndexMapRef,
   onIsAtEndChange,
+  followNextTailNonce = 0,
   hasOlderHistory = false,
   isLoadingOlderHistory = false,
   hasHistoryLoadError = false,
@@ -384,7 +380,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   completionSummary,
   turnDiffSummaryByAssistantMessageId,
   turnDiffSummaryByTurnId,
-  nowIso,
   expandedWorkGroups,
   onToggleWorkGroup,
   workGroupCollapseOverrides = EMPTY_WORK_GROUP_COLLAPSE_OVERRIDES,
@@ -737,6 +732,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [lastRowId, listRef, onIsAtEndChange, rowCount]);
 
+  // Runs before the tail-follow effect above, so rows committed together with
+  // the nonce (a bootstrap send's optimistic row) are followed too.
+  const followNextTailNonceRef = useRef(followNextTailNonce);
+  useLayoutEffect(() => {
+    if (followNextTailNonceRef.current === followNextTailNonce) return;
+    followNextTailNonceRef.current = followNextTailNonce;
+    isAtEndRef.current = true;
+  }, [followNextTailNonce]);
+
   const syncIsAtEndFromListState = useCallback(() => {
     const state = listRef.current?.getState?.();
     if (state) {
@@ -940,8 +944,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // NOTE: This closure depends on many callbacks/state slices from props (see
   // ChatView's `<MessagesTimeline … />` wiring), so memoizing it via
   // useCallback would require a long dependency list that changes every render
-  // anyway. We intentionally leave it unmemoized; see also the `nowIso` TODO
-  // on the prop for the same reason.
+  // anyway. We intentionally leave it unmemoized. Live clocks are leaf
+  // components subscribed to the shared ticker, so they stay out of it.
   const legendListExtraData = useMemo(
     () => [
       settings.expandMcpToolCalls,
@@ -959,7 +963,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       markdownCwd,
       allDirectoriesExpanded,
-      nowIso,
       revertTurnCountByUserMessageId,
       canRestoreFiles,
       nativeSessionCapabilities,
@@ -995,7 +998,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workGroupCollapseOverrides,
       isRevertingCheckpoint,
       markdownCwd,
-      nowIso,
       resolvedTheme,
       settings.expandMcpToolCallCardsByDefault,
       settings.expandMcpToolCalls,
@@ -1573,13 +1575,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                 })()}
                 <div className="mt-1.5 flex min-h-7 items-center justify-between gap-2">
                   <p className="text-2xs text-muted-foreground tabular-nums">
-                    {formatMessageMeta(
-                      row.message.createdAt,
-                      row.message.streaming
-                        ? formatElapsed(row.durationStart, nowIso)
-                        : formatElapsed(row.durationStart, row.message.completedAt),
-                      timestampFormat,
-                    )}
+                    <LiveMessageMeta
+                      createdAt={row.message.createdAt}
+                      durationStart={row.durationStart}
+                      completedAt={row.message.completedAt}
+                      streaming={row.message.streaming}
+                      timestampFormat={timestampFormat}
+                    />
                   </p>
                   <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-(--duration-fast) focus-within:opacity-100 group-hover/assistant-message:opacity-100 has-[[data-popup-open]]:opacity-100 pointer-coarse:opacity-100">
                     <AssistantMessageActions rawText={row.message.text} />
@@ -1606,7 +1608,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             threadId={threadId}
             execution={row.commandExecution}
             expanded={expandedCommandExecutions[row.commandExecution.id] ?? false}
-            nowIso={nowIso}
             timestampFormat={timestampFormat}
             onToggle={() => onToggleCommandExecution(row.commandExecution.id)}
           />
@@ -1626,7 +1627,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             </span>
             {reducedMotion ? (
               <span className="shrink-0 tabular-nums">
-                {formatWorkingLabel(row.createdAt, nowIso)}
+                <LiveWorkingLabel startedAt={row.createdAt} />
               </span>
             ) : (
               // Picks the label up as a steerable ribbon; looks like plain text at rest.
@@ -1655,7 +1656,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   setRibbonOrigin({ x: rect.right, y: rect.top + rect.height / 2 });
                 }}
               >
-                {formatWorkingLabel(row.createdAt, nowIso)}
+                <LiveWorkingLabel startedAt={row.createdAt} />
               </button>
             )}
             {row.activity ? (
@@ -1783,8 +1784,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       />
       {/* Outside the virtualized list so scrolling and cell recycling never unmount it. */}
       {ribbonOrigin && isWorking ? (
-        <WorkingRibbon
-          text={formatWorkingLabel(activeTurnStartedAt, nowIso)}
+        <LiveWorkingRibbon
+          startedAt={activeTurnStartedAt}
           origin={ribbonOrigin}
           onRelease={handleRibbonRelease}
           onOrphanedFocus={restoreRibbonFocus}
@@ -2139,6 +2140,34 @@ function formatMessageMeta(
 ): string {
   if (!duration) return formatTimestamp(createdAt, timestampFormat);
   return `${formatTimestamp(createdAt, timestampFormat)} • ${duration}`;
+}
+
+// Live clocks are leaves on the shared 1 Hz ticker so a tick re-renders only
+// the text that shows elapsed time, never the timeline or its rows.
+function LiveMessageMeta(props: {
+  createdAt: string;
+  durationStart: string;
+  completedAt: string | undefined;
+  streaming: boolean;
+  timestampFormat: TimestampFormat;
+}) {
+  const nowIso = useNowIso(props.streaming);
+  return formatMessageMeta(
+    props.createdAt,
+    formatElapsed(props.durationStart, props.streaming ? nowIso : props.completedAt),
+    props.timestampFormat,
+  );
+}
+
+function LiveWorkingLabel(props: { startedAt: string | null }) {
+  return formatWorkingLabel(props.startedAt, useNowIso(true));
+}
+
+function LiveWorkingRibbon(
+  props: Omit<ComponentProps<typeof WorkingRibbon>, "text"> & { startedAt: string | null },
+) {
+  const { startedAt, ...ribbonProps } = props;
+  return <WorkingRibbon {...ribbonProps} text={formatWorkingLabel(startedAt, useNowIso(true))} />;
 }
 
 const UserMessageTerminalContextInlineLabel = memo(

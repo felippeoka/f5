@@ -297,6 +297,9 @@ function normalizeOnboardingLiteStatus(value: unknown): OnboardingLiteStatus {
   return "eligible";
 }
 
+export const WINDOW_TITLE_DETAIL_OPTIONS = ["project", "thread"] as const;
+export type WindowTitleDetail = (typeof WINDOW_TITLE_DETAIL_OPTIONS)[number];
+
 export const AppSettingsSchema = Schema.Struct({
   linkOpenTarget: Schema.Literals(["system", "preview"]).pipe(
     Schema.withConstructorDefault(() => Option.some("system" as const)),
@@ -503,6 +506,11 @@ export const AppSettingsSchema = Schema.Struct({
   workspaceFileTreeEntryLimit: WorkspaceFileTreeEntryLimitSchema,
   timestampFormat: Schema.Literals(["locale", "12-hour", "24-hour"]).pipe(
     Schema.withConstructorDefault(() => Option.some(DEFAULT_TIMESTAMP_FORMAT)),
+  ),
+  /** Window and tab titles show the project by default so thread titles stay out of screen shares. */
+  windowTitleDetail: Schema.Literals(WINDOW_TITLE_DETAIL_OPTIONS).pipe(
+    Schema.withConstructorDefault(() => Option.some("project" as const)),
+    Schema.withDecodingDefault(() => "project" as const),
   ),
   favoriteModels: Schema.Array(FavoriteModelSchema).pipe(
     Schema.withConstructorDefault(() => Option.some([])),
@@ -1153,4 +1161,19 @@ export function useDiffWordWrap(): boolean {
     [],
   );
   return useSyncExternalStore(subscribe, getSnapshot, () => DEFAULT_APP_SETTINGS.diffWordWrap);
+}
+
+/** Primitive selector so title updates ignore unrelated setting writes. */
+export function useWindowTitleDetail(): WindowTitleDetail {
+  const subscribe = useCallback(
+    (listener: () => void) => subscribeLocalStorageKey(APP_SETTINGS_STORAGE_KEY, listener),
+    [],
+  );
+  const getSnapshot = useCallback(
+    () =>
+      parsePersistedAppSettings(readLocalStorageRawItem(APP_SETTINGS_STORAGE_KEY))
+        .windowTitleDetail,
+    [],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot, () => DEFAULT_APP_SETTINGS.windowTitleDetail);
 }

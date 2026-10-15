@@ -45,7 +45,6 @@ describe("CommandTranscriptCard", () => {
           status: "completed",
         })}
         expanded={false}
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={() => {}}
         onExpandedBodyResize={() => {}}
@@ -67,7 +66,6 @@ describe("CommandTranscriptCard", () => {
           updatedAt: "2026-03-20T12:00:00.500Z",
         })}
         expanded={false}
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={() => {}}
         onExpandedBodyResize={() => {}}
@@ -89,7 +87,6 @@ describe("CommandTranscriptCard", () => {
           detail: command,
         })}
         expanded
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={() => {}}
         onExpandedBodyResize={() => {}}
@@ -112,7 +109,6 @@ describe("CommandTranscriptCard", () => {
           title: "Echo greeting",
         })}
         expanded
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={() => {}}
         onExpandedBodyResize={() => {}}
@@ -136,7 +132,6 @@ describe("CommandTranscriptCard", () => {
           title: "Ran command",
         })}
         expanded
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={() => {}}
         onExpandedBodyResize={() => {}}
@@ -159,7 +154,6 @@ describe("CommandTranscriptCard", () => {
           title: "Ran command",
         })}
         expanded
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={() => {}}
         onExpandedBodyResize={() => {}}
@@ -184,7 +178,6 @@ describe("CommandTranscriptCard", () => {
           title: "Command run",
         })}
         expanded
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={() => {}}
         onExpandedBodyResize={() => {}}
@@ -203,7 +196,6 @@ describe("CommandTranscriptCard", () => {
           command: "/bin/zsh -lc 'FOO=bar bun --watch $HOME ./script.sh $(pwd) 42'",
         })}
         expanded
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={() => {}}
         onExpandedBodyResize={() => {}}
@@ -237,7 +229,6 @@ describe("CommandTranscriptCard", () => {
           output: "/Users/felipelopes/dev/wolt/f3-code",
         })}
         expanded
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={() => {}}
         onExpandedBodyResize={() => {}}
@@ -255,7 +246,6 @@ describe("CommandTranscriptCard", () => {
       <CommandTranscriptCard
         execution={makeExecution()}
         expanded={false}
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={() => {}}
         onExpandedBodyResize={() => {}}
@@ -272,7 +262,6 @@ describe("CommandTranscriptCard", () => {
       <CommandTranscriptCard
         execution={makeExecution()}
         expanded
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={() => {}}
         onExpandedBodyResize={() => {}}
@@ -296,7 +285,6 @@ describe("CommandTranscriptCard", () => {
           ].join("\n"),
         })}
         expanded
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={() => {}}
         onExpandedBodyResize={() => {}}

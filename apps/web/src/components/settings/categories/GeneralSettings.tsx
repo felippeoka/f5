@@ -16,6 +16,11 @@ const TIMESTAMP_FORMAT_LABELS = {
   "24-hour": "24-hour",
 } as const;
 
+const WINDOW_TITLE_DETAIL_LABELS = {
+  project: "Project name",
+  thread: "Thread title",
+} as const;
+
 const MERGE_METHOD_LABELS = {
   "last-used": "Last used for the repository",
   squash: "Squash",
@@ -329,7 +334,7 @@ export function GeneralSettings() {
 
       <SettingsCard
         title="Time & locale"
-        description="Choose how dates and times appear across the app."
+        description="Choose how dates, times and window titles appear across the app."
       >
         <div className="space-y-4">
           <SettingsRow
@@ -364,15 +369,41 @@ export function GeneralSettings() {
             }
           />
 
-          {settings.timestampFormat !== defaults.timestampFormat ? (
+          <SettingsRow
+            title="Window title"
+            description="What window and tab titles show for threads and workflows. Thread titles can appear in screen shares and window switchers."
+            control={
+              <Select
+                value={settings.windowTitleDetail}
+                onValueChange={(value) => {
+                  if (value !== "project" && value !== "thread") return;
+                  updateSettings({ windowTitleDetail: value });
+                }}
+              >
+                <SelectTrigger className="w-40" aria-label="Window title">
+                  <SelectValue>
+                    {WINDOW_TITLE_DETAIL_LABELS[settings.windowTitleDetail]}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end">
+                  <SelectItem value="project">{WINDOW_TITLE_DETAIL_LABELS.project}</SelectItem>
+                  <SelectItem value="thread">{WINDOW_TITLE_DETAIL_LABELS.thread}</SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
+
+          {settings.timestampFormat !== defaults.timestampFormat ||
+          settings.windowTitleDetail !== defaults.windowTitleDetail ? (
             <div className="flex justify-end">
               <Button
                 size="xs"
                 variant="outline"
                 onClick={() =>
                   updateSettings(
-                    buildAppSettingsPatch(["timestampFormat"], {
+                    buildAppSettingsPatch(["timestampFormat", "windowTitleDetail"], {
                       timestampFormat: defaults.timestampFormat,
+                      windowTitleDetail: defaults.windowTitleDetail,
                     }),
                   )
                 }

@@ -1,5 +1,6 @@
 ---
 import Layout from "../layouts/Layout.astro";
+import { RELEASES_URL } from "../lib/releases";
 ---
 
 <Layout title="Download — F5" description="Download F5 for macOS, Windows, or Linux.">
@@ -59,14 +60,14 @@ import Layout from "../layouts/Layout.astro";
 
   <p class="releases-link">
     Looking for older versions? Check the
-    <a href="https://github.com/pingdotgg/t3code/releases" target="_blank" rel="noopener noreferrer">
+    <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
       GitHub releases page<span aria-hidden="true"> &#8599;</span>
     </a>
   </p>
 </Layout>
 
 <script>
-  import { fetchLatestRelease, RELEASES_URL } from "../lib/releases";
+  import { fetchLatestRelease, findAssetBySuffix, RELEASES_URL } from "../lib/releases";
 
   async function init() {
     const versionLabel = document.getElementById("version-label");
@@ -89,12 +90,7 @@ import Layout from "../layouts/Layout.astro";
         const suffix = card.dataset.asset;
         if (!suffix) return;
 
-        const match = (release.assets ?? []).find((a) => a.name.endsWith(`-${suffix}`));
-        if (match) {
-          card.href = match.browser_download_url;
-        } else {
-          card.href = RELEASES_URL;
-        }
+        card.href = findAssetBySuffix(release.assets, suffix)?.browser_download_url ?? RELEASES_URL;
       });
     } catch {
       if (versionLabel) {

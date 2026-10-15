@@ -407,7 +407,7 @@ export function makeServerOrchestrationRuntimeLayer() {
     Layer.provideMerge(projectionSnapshotQueryLayer),
     Layer.provideMerge(textGenerationLayer),
   );
-  const investigationWorkflowServiceLayer = InvestigationWorkflowServiceLive.pipe(
+  const investigationWorkflowServiceBaseLayer = InvestigationWorkflowServiceLive.pipe(
     Layer.provideMerge(orchestrationLayer),
     Layer.provideMerge(projectionSnapshotQueryLayer),
     Layer.provideMerge(textGenerationLayer),
@@ -428,6 +428,9 @@ export function makeServerOrchestrationRuntimeLayer() {
     Layer.provideMerge(providerTurnDeliveryWorkerLayer),
   );
   const codeReviewWorkflowServiceLayer = codeReviewWorkflowServiceBaseLayer.pipe(
+    Layer.provideMerge(providerTurnDeliveryWorkerLayer),
+  );
+  const investigationWorkflowServiceLayer = investigationWorkflowServiceBaseLayer.pipe(
     Layer.provideMerge(providerTurnDeliveryWorkerLayer),
   );
   const checkpointReactorLayer = CheckpointReactorLive.pipe(

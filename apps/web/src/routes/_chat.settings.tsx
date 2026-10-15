@@ -4,9 +4,12 @@ import {
 } from "../components/settings/ProjectSettingsScope";
 import { ProjectId } from "@t3tools/contracts";
 import { createFileRoute } from "@tanstack/react-router";
+
+import { RouteErrorView } from "../components/RouteErrorView";
 import { useCallback } from "react";
 
 import { SettingsLayout } from "../components/settings/SettingsLayout";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { SettingsRouteContext } from "../components/settings/SettingsRouteContext";
 import {
   getSettingsItemDescriptor,
@@ -18,6 +21,7 @@ import { useSettingsRouteState } from "../components/settings/useSettingsRouteSt
 
 function SettingsRouteView() {
   const search = Route.useSearch();
+  useDocumentTitle("Settings");
   const navigate = Route.useNavigate();
   const handleProjectIdChange = useCallback(
     (projectId: ProjectId | null) => {
@@ -108,4 +112,5 @@ export const Route = createFileRoute("/_chat/settings")({
     };
   },
   component: SettingsRouteView,
+  errorComponent: RouteErrorView,
 });

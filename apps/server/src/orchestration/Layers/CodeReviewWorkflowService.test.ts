@@ -24,9 +24,14 @@ import {
   type OrchestrationEngineShape,
 } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
-import type { ProviderTurnDelivery } from "../Services/ProviderTurnDeliveryRepository.ts";
+import {
+  ProviderTurnDeliveryRepository,
+  type ProviderTurnDelivery,
+  type ProviderTurnDeliveryRepositoryShape,
+} from "../Services/ProviderTurnDeliveryRepository.ts";
 import {
   ProviderTurnDeliveryWorker,
+  type ProviderTurnDeliveryOutcome,
   type ProviderTurnDeliveryWorkerShape,
 } from "../Services/ProviderTurnDeliveryWorker.ts";
 import { CodeReviewWorkflowServiceLive } from "./CodeReviewWorkflowService.ts";
@@ -360,6 +365,7 @@ async function createHarness(
   options?: {
     failDispatch?: (command: OrchestrationCommand, count: number) => unknown | undefined;
     providerTurnDeliveryWorker?: ProviderTurnDeliveryWorkerShape;
+    getDeliveryByCommandId?: ProviderTurnDeliveryRepositoryShape["getByCommandId"];
   },
 ) {
   let snapshot = initialSnapshot;
@@ -475,14 +481,23 @@ async function createHarness(
       } as unknown as TextGenerationShape),
     ),
   );
+  const withDeliveryWorker = options?.providerTurnDeliveryWorker
+    ? serviceLayer.pipe(
+        Layer.provideMerge(
+          Layer.succeed(ProviderTurnDeliveryWorker, options.providerTurnDeliveryWorker),
+        ),
+      )
+    : serviceLayer;
   const runtime = ManagedRuntime.make(
-    options?.providerTurnDeliveryWorker
-      ? serviceLayer.pipe(
+    options?.getDeliveryByCommandId
+      ? withDeliveryWorker.pipe(
           Layer.provideMerge(
-            Layer.succeed(ProviderTurnDeliveryWorker, options.providerTurnDeliveryWorker),
+            Layer.succeed(ProviderTurnDeliveryRepository, {
+              getByCommandId: options.getDeliveryByCommandId,
+            } as unknown as ProviderTurnDeliveryRepositoryShape),
           ),
         )
-      : serviceLayer,
+      : withDeliveryWorker,
   );
 
   const service = await runtime.runPromise(Effect.service(CodeReviewWorkflowService));
@@ -2918,5 +2933,228 @@ describe("CodeReviewWorkflowService", () => {
           command.workflow.reviewerA.error === "Reviewer failed after startup",
       ),
     );
+  });
+});
+
+describe("CodeReviewWorkflowService stage dispatch correlation", () => {
+  let harness: Awaited<ReturnType<typeof createHarness>> | null = null;
+  const DISPATCH_A = CommandId.makeUnsafe("dispatch-reviewer-a");
+
+  afterEach(async () => {
+    if (harness) {
+      await harness.dispose();
+    }
+    harness = null;
+  });
+
+  function runningReviewerWorkflow(dispatchCommandId?: CommandId) {
+    return makeWorkflow({
+      reviewerA: {
+        ...makeWorkflow().reviewerA,
+        status: "running",
+        ...(dispatchCommandId ? { dispatchCommandId } : {}),
+      },
+      reviewerB: {
+        ...makeWorkflow().reviewerB,
+        status: "completed",
+        pinnedTurnId: "turn-b",
+        pinnedAssistantMessageId: "assistant-b",
+      },
+    });
+  }
+
+  function snapshotWithReviewerATurn(workflow: CodeReviewWorkflow, suffix: string) {
+    return makeReadModel({
+      workflow,
+      threads: [
+        makeCompletedThread({ threadId: workflow.reviewerA.threadId, suffix }),
+        makeCompletedThread({ threadId: workflow.reviewerB.threadId, suffix: "b" }),
+      ],
+    });
+  }
+
+  function readyEvent(threadId: ThreadId) {
+    return makeEvent("thread.session-set", {
+      threadId,
+      session: {
+        threadId,
+        status: "ready",
+        providerName: "codex",
+        runtimeMode: "full-access",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: AFTER_ERROR,
+      },
+    });
+  }
+
+  function acceptedDelivery(threadId: ThreadId, turnId: string) {
+    return makeProviderTurnDelivery(threadId, "accepted", {
+      deliveryId: DISPATCH_A,
+      commandId: DISPATCH_A,
+      providerTurnId: TurnId.makeUnsafe(turnId),
+      errorCode: null,
+      errorDetail: null,
+      certainty: null,
+    });
+  }
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+  const reviewerACompletions = () =>
+    harness!.dispatched.filter(
+      (
+        command,
+      ): command is Extract<
+        OrchestrationCommand,
+        { type: "project.code-review-workflow.upsert" }
+      > =>
+        command.type === "project.code-review-workflow.upsert" &&
+        command.workflow.reviewerA.status === "completed",
+    );
+
+  it("ignores a finished turn on the stage thread that its dispatch did not start", async () => {
+    const workflow = runningReviewerWorkflow(DISPATCH_A);
+    harness = await createHarness(snapshotWithReviewerATurn(workflow, "stale"), {
+      getDeliveryByCommandId: (commandId) =>
+        Effect.succeed(
+          commandId === DISPATCH_A
+            ? acceptedDelivery(workflow.reviewerA.threadId, "turn-own")
+            : null,
+        ),
+    });
+    await harness.start();
+    await harness.emit(readyEvent(workflow.reviewerA.threadId));
+    await settle();
+    expect(reviewerACompletions()).toHaveLength(0);
+    expect(harness.dispatched.some((command) => command.type === "thread.create")).toBe(false);
+
+    harness.setSnapshot(
+      snapshotWithReviewerATurn(harness.getSnapshot().codeReviewWorkflows[0]!, "own"),
+    );
+    await harness.emit(readyEvent(workflow.reviewerA.threadId));
+    await waitFor(() =>
+      harness!.dispatched.some(
+        (command) => command.type === "thread.create" && command.title === "Review Merge",
+      ),
+    );
+
+    expect(reviewerACompletions()[0]?.workflow.reviewerA.pinnedTurnId).toBe("turn-own");
+    const mergeTurn = harness.dispatched.find(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.start" }> =>
+        command.type === "thread.turn.start",
+    );
+    const consolidation = lastWorkflowUpsert(harness.dispatched)?.workflow.consolidation;
+    expect(consolidation?.status).toBe("running");
+    expect(consolidation?.dispatchCommandId).toBe(mergeTurn?.commandId);
+  });
+
+  it("completes the stage when its delivery is accepted after the turn already finished", async () => {
+    const workflow = runningReviewerWorkflow(DISPATCH_A);
+    let delivery: ProviderTurnDelivery = makeProviderTurnDelivery(
+      workflow.reviewerA.threadId,
+      "sending",
+      { deliveryId: DISPATCH_A, commandId: DISPATCH_A },
+    );
+    const outcomes = await Effect.runPromise(Queue.unbounded<ProviderTurnDeliveryOutcome>());
+    harness = await createHarness(snapshotWithReviewerATurn(workflow, "own"), {
+      getDeliveryByCommandId: () => Effect.succeed(delivery),
+      providerTurnDeliveryWorker: makeDeliveryWorker({
+        outcomes: Stream.fromQueue(outcomes),
+        recheck: () => Effect.succeed(delivery),
+      }),
+    });
+    await harness.start();
+    await harness.emit(readyEvent(workflow.reviewerA.threadId));
+    await settle();
+    expect(reviewerACompletions()).toHaveLength(0);
+
+    delivery = acceptedDelivery(workflow.reviewerA.threadId, "turn-own");
+    await Effect.runPromise(
+      Queue.offer(outcomes, {
+        deliveryId: DISPATCH_A,
+        commandId: DISPATCH_A,
+        threadId: workflow.reviewerA.threadId,
+        state: "accepted",
+        detail: null,
+      }),
+    );
+    await waitFor(() =>
+      harness!.dispatched.some(
+        (command) => command.type === "thread.create" && command.title === "Review Merge",
+      ),
+    );
+    expect(reviewerACompletions()[0]?.workflow.reviewerA.pinnedTurnId).toBe("turn-own");
+  });
+
+  it("attributes a turn that finished across a restart once startup recheck accepts the dispatch", async () => {
+    const workflow = runningReviewerWorkflow(DISPATCH_A);
+    let delivery: ProviderTurnDelivery = makeProviderTurnDelivery(
+      workflow.reviewerA.threadId,
+      "sending",
+      { deliveryId: DISPATCH_A, commandId: DISPATCH_A },
+    );
+    const recheck = vi.fn<ProviderTurnDeliveryWorkerShape["recheck"]>((_threadId, deliveryId) =>
+      Effect.sync(() => {
+        if (deliveryId === DISPATCH_A) {
+          delivery = acceptedDelivery(workflow.reviewerA.threadId, "turn-own");
+        }
+        return delivery;
+      }),
+    );
+    harness = await createHarness(snapshotWithReviewerATurn(workflow, "own"), {
+      getDeliveryByCommandId: () => Effect.succeed(delivery),
+      providerTurnDeliveryWorker: makeDeliveryWorker({ recheck }),
+    });
+    await harness.start();
+
+    expect(recheck).toHaveBeenCalledWith(workflow.reviewerA.threadId, DISPATCH_A);
+    expect(reviewerACompletions()[0]?.workflow.reviewerA.pinnedTurnId).toBe("turn-own");
+    expect(
+      harness.dispatched.some(
+        (command) => command.type === "thread.create" && command.title === "Review Merge",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps the any-finished-turn rule for stages recorded without a dispatch", async () => {
+    const workflow = runningReviewerWorkflow();
+    const getDeliveryByCommandId = vi.fn<ProviderTurnDeliveryRepositoryShape["getByCommandId"]>(
+      () => Effect.succeed(null),
+    );
+    harness = await createHarness(snapshotWithReviewerATurn(workflow, "legacy"), {
+      getDeliveryByCommandId,
+    });
+    await harness.start();
+
+    await waitFor(() => reviewerACompletions().length > 0);
+    expect(reviewerACompletions()[0]?.workflow.reviewerA.pinnedTurnId).toBe("turn-legacy");
+    expect(getDeliveryByCommandId).not.toHaveBeenCalled();
+  });
+
+  it("records each reviewer's dispatch command when it starts", async () => {
+    const workflow = makeWorkflow();
+    harness = await createHarness(
+      makeReadModel({
+        workflow,
+        threads: [
+          makeThread({ id: workflow.reviewerA.threadId }),
+          makeThread({ id: workflow.reviewerB.threadId }),
+        ],
+      }),
+    );
+    await harness.start();
+
+    const turnStarts = harness.dispatched.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.start" }> =>
+        command.type === "thread.turn.start",
+    );
+    const upserted = lastWorkflowUpsert(harness.dispatched)?.workflow;
+    expect(upserted?.reviewerA.dispatchCommandId).toBe(
+      turnStarts.find((command) => command.threadId === workflow.reviewerA.threadId)?.commandId,
+    );
+    expect(upserted?.reviewerB.dispatchCommandId).toBe(
+      turnStarts.find((command) => command.threadId === workflow.reviewerB.threadId)?.commandId,
+    );
+    expect(upserted?.reviewerA.dispatchCommandId).not.toBe(upserted?.reviewerB.dispatchCommandId);
   });
 });

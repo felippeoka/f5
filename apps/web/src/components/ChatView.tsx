@@ -301,7 +301,7 @@ import { OlderActivityHistoryControl } from "./chat/OlderActivityHistoryControl"
 import { NewerMessageHistoryControl } from "./chat/NewerMessageHistoryControl";
 
 import { ChatHeader } from "./chat/ChatHeader";
-import { ChatStatusAnnouncer } from "./chat/ChatStatusAnnouncer";
+import { ChatStatusAnnouncer, deriveChatStatusOutcome } from "./chat/ChatStatusAnnouncer";
 import { useComposerFocusRequestStore } from "../composerFocusRequestStore";
 import { JumpToLatestButton } from "./chat/JumpToLatestButton";
 import { ComposerDock, ComposerDockColumn } from "./chat/composer/ComposerDock";
@@ -826,7 +826,6 @@ export default function ChatView({
 
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
-  const [nowTick, setNowTick] = useState(() => Date.now());
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
   const [pullRequestDialogState, setPullRequestDialogState] =
@@ -870,11 +869,25 @@ export default function ChatView({
   // nudges the wheel. When the ref isn't attached yet (first send before the
   // list has mounted) retry on the next animation frame so the flip applies
   // as soon as the list is available.
-  const pinToEnd = useCallback(() => {
+  // Admission can resolve after the user switched threads (this view is keyed
+  // per thread); an unmounted view must neither scroll nor keep retrying.
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+  const pinToEnd = useCallback((framesLeft = 30) => {
+    if (!isMountedRef.current) return;
     const list = legendListRef.current;
     if (!list) {
-      if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
-        window.requestAnimationFrame(() => pinToEnd());
+      if (
+        framesLeft > 0 &&
+        typeof window !== "undefined" &&
+        typeof window.requestAnimationFrame === "function"
+      ) {
+        window.requestAnimationFrame(() => pinToEnd(framesLeft - 1));
       }
       return;
     }
@@ -883,6 +896,14 @@ export default function ChatView({
     setShowScrollToBottom(false);
     list.scrollToEnd?.({ animated: true });
   }, []);
+  const [followNextTailNonce, setFollowNextTailNonce] = useState(0);
+  // Only a send that starts a new turn follows the tail; steering, queueing
+  // and rejected sends leave the reader where they are.
+  const followNewTurn = useCallback(() => {
+    if (!isMountedRef.current) return;
+    setFollowNextTailNonce((nonce) => nonce + 1);
+    pinToEnd();
+  }, [pinToEnd]);
   // Lazy-init so the Debouncer instance is constructed exactly once — passing
   // `new Debouncer(...)` directly to `useRef` would allocate a fresh instance on
   // every render (only the first is retained, the rest are thrown away).
@@ -1718,7 +1739,6 @@ export default function ChatView({
   const canCompactConversation =
     activeThread !== undefined &&
     (activeThread.messages.length > 1 || activeThread.activities.length > 0);
-  const nowIso = new Date(nowTick).toISOString();
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const threadTasks = activeThread?.tasks ?? EMPTY_TASKS;
   const nativeGoal = useMemo(() => latestNativeGoal(threadActivities), [threadActivities]);
@@ -2014,6 +2034,13 @@ export default function ChatView({
   // Includes blocking provider forms, which `blockingUserInputs` leaves out.
   const isAwaitingUser =
     activePendingApproval !== null || pendingUserInputs.some(isBlockingUserInput);
+  // Reconnecting is not agent work; counting it would re-announce outcomes.
+  const chatStatusOutcome = deriveChatStatusOutcome({
+    isWorking: phase === "running" || isSendBusy,
+    hasPendingApproval: activePendingApproval !== null,
+    hasBlockingUserInput: pendingUserInputs.some(isBlockingUserInput),
+    latestTurnState: activeLatestTurn?.state ?? null,
+  });
   const latestAssistantOutputAt = useMemo(
     () => deriveLatestAssistantOutputAt(activeThread?.messages ?? [], liveTurnId),
     [activeThread?.messages, liveTurnId],
@@ -3589,16 +3616,6 @@ export default function ChatView({
     [activeProjectName, activeThreadBranch, envMode],
   );
 
-  useEffect(() => {
-    if (phase !== "running" && !isSendBusy) return;
-    const timer = window.setInterval(() => {
-      setNowTick(Date.now());
-    }, 1000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [isSendBusy, phase]);
-
   const removeOptimisticMessage = useCallback((messageId: MessageId) => {
     setOptimisticUserMessages((existing) => {
       const removedMessages = existing.filter((message) => message.id === messageId);
@@ -3748,7 +3765,8 @@ export default function ChatView({
         rollback: PendingTurnDispatchRollback,
         error: unknown,
       ) => void;
-      onStarted?: () => void;
+      /** Called for a turn that started or a message steered into the active turn. */
+      onStarted?: (disposition: "started" | "steered") => void;
       onQueued?: () => void;
       intent?: SendIntent;
       interruptActiveForSendNow?: boolean;
@@ -3815,7 +3833,7 @@ export default function ChatView({
             if (submission.disposition !== "started" && submission.disposition !== "steered") {
               throw new Error(submission.detail ?? "The turn was not accepted.");
             }
-            return { sequence: submission.sequence };
+            return { sequence: submission.sequence, disposition: submission.disposition };
           });
         if (result === null) {
           return { ok: true as const, disposition: "queued" as const };
@@ -3824,7 +3842,7 @@ export default function ChatView({
           .getState()
           .removeOptimistic(input.command.threadId, input.command.commandId);
         rememberAcceptedTurnMentions(input.command.commandId);
-        input.onStarted?.();
+        input.onStarted?.(result.disposition);
         updateStorePendingTurnDispatch(input.command.threadId, (current) => {
           if (!current || current.commandId !== input.command.commandId) {
             return current;
@@ -3834,7 +3852,7 @@ export default function ChatView({
             acceptedSequence: result.sequence,
           };
         });
-        return { ok: true as const, disposition: "started" as const };
+        return { ok: true as const, disposition: result.disposition };
       } catch (error) {
         const message = error instanceof Error ? error.message : input.failureMessage;
         if (isTransportConnectionErrorMessage(message)) {
@@ -5171,7 +5189,10 @@ export default function ChatView({
       };
       // A first send creates its thread inside the submit request, so its bubble
       // is shown right away instead of waiting for the admission result.
-      if (bootstrap) addOptimisticTimelineMessage();
+      if (bootstrap) {
+        addOptimisticTimelineMessage();
+        followNewTurn();
+      }
       await dispatchPendingTurnStartCommand({
         api,
         command,
@@ -5182,10 +5203,13 @@ export default function ChatView({
         intent,
         interruptActiveForSendNow: intent === "send-now" && phase === "running",
         onNonTransportFailure: restoreDraftAfterFailure,
-        onStarted: () => {
+        onStarted: (disposition) => {
           // Add the timeline bubble only after durable admission reports that
           // this turn actually started. Queued turns belong in the queue panel.
-          if (!bootstrap) addOptimisticTimelineMessage();
+          if (!bootstrap) {
+            addOptimisticTimelineMessage();
+            if (disposition === "started") followNewTurn();
+          }
           onAdmitted?.();
         },
         onQueued: () => {
@@ -5545,8 +5569,9 @@ export default function ChatView({
           preparingWorktree: false,
           localDispatch,
           failureMessage: "Failed to send plan follow-up.",
-          onStarted: () => {
+          onStarted: (disposition) => {
             onAdmitted?.();
+            if (disposition === "started") followNewTurn();
             setOptimisticUserMessages((existing) => [
               ...existing,
               {
@@ -7213,7 +7238,11 @@ export default function ChatView({
           >
             {/* Messages Wrapper */}
             <div className="relative flex min-h-0 flex-1 flex-col" data-composer-dock-host>
-              <ChatStatusAnnouncer threadId={activeThread.id} isWorking={isWorking} />
+              <ChatStatusAnnouncer
+                threadId={activeThread.id}
+                turnId={activeLatestTurn?.turnId ?? null}
+                outcome={chatStatusOutcome}
+              />
               {shouldRenderTimeline ? (
                 <MessagesTimeline
                   key={activeThread.id}
@@ -7225,6 +7254,7 @@ export default function ChatView({
                   listRef={legendListRef}
                   entryRowIndexMapRef={timelineEntryRowIndexMapRef}
                   onIsAtEndChange={onIsAtEndChange}
+                  followNextTailNonce={followNextTailNonce}
                   hasOlderHistory={hasOlderTimelineHistory}
                   isLoadingOlderHistory={activeThreadHistory.stage === "backfilling"}
                   hasHistoryLoadError={activeThreadHistory.stage === "error"}
@@ -7234,7 +7264,6 @@ export default function ChatView({
                   completionSummary={completionSummary}
                   turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
                   turnDiffSummaryByTurnId={turnDiffSummaryByTurnId}
-                  nowIso={nowIso}
                   expandedWorkGroups={expandedWorkGroups}
                   onToggleWorkGroup={onToggleWorkGroup}
                   workGroupCollapseOverrides={workGroupCollapseOverrides}

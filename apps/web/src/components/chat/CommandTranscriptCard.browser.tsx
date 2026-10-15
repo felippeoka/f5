@@ -70,7 +70,6 @@ describe("CommandTranscriptCard", () => {
       <CommandTranscriptCard
         execution={makeExecution()}
         expanded={false}
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={onToggle}
         onExpandedBodyResize={() => {}}
@@ -120,7 +119,6 @@ describe("CommandTranscriptCard", () => {
             title: expanded ? "Read project instructions" : null,
           })}
           expanded={expanded}
-          nowIso="2026-03-20T12:00:02.000Z"
           timestampFormat="locale"
           onToggle={onToggle}
           onExpandedBodyResize={() => {}}
@@ -161,7 +159,6 @@ describe("CommandTranscriptCard", () => {
           output: "/Users/felipelopes/dev/wolt/f3-code",
         })}
         expanded
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={() => {}}
         onExpandedBodyResize={() => {}}
@@ -198,7 +195,6 @@ describe("CommandTranscriptCard", () => {
           title: "Echo greeting",
         })}
         expanded={false}
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={() => {}}
         onExpandedBodyResize={() => {}}

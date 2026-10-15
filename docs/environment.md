@@ -18,6 +18,7 @@ Prefer `F5_*` variables for F5-owned state. The legacy `T3CODE_*` prefix remains
 | `F5_BACKUP_MAX_TEMPORARY_BYTES`    | Maximum combined restore staging footprint; defaults to 16 GiB                               |
 | `F5_BACKUP_MAX_EXPANSION_RATIO`    | Maximum gzip expansion ratio; defaults to 200×                                               |
 | `F5_BACKUP_MIN_FREE_BYTES`         | Free disk space restore staging leaves; defaults to 512 MiB                                  |
+| `F5_RELEASE_REPOSITORY`            | Marketing site build: GitHub `owner/name` for download links; defaults to `lopes-felipe/f5`  |
 | `T3CODE_PORT`                      | Server port                                                                                  |
 | `T3CODE_MODE`                      | Operating mode                                                                               |
 | `T3CODE_AUTH_TOKEN`                | Authentication token for WebSocket connections                                               |
@@ -30,11 +31,18 @@ Prefer `F5_*` variables for F5-owned state. The legacy `T3CODE_*` prefix remains
 | `T3CODE_LOG_THREAD_OPEN_TIMINGS`   | Log per-thread open timing diagnostics                                                       |
 | `T3CODE_LOG_PROJECTION_TIMINGS`    | Log orchestration projection timing diagnostics                                              |
 | `T3CODE_OBSERVABILITY_ENABLED`     | Enable local ndjson trace/metrics export                                                     |
+| `T3CODE_TELEMETRY_ENABLED`         | Set to `false` to force anonymous usage telemetry off even when a key is configured          |
+| `T3CODE_POSTHOG_KEY`               | PostHog project key for anonymous usage telemetry; empty by default, which disables it       |
+| `T3CODE_POSTHOG_HOST`              | PostHog ingestion host; defaults to `https://us.i.posthog.com`                               |
 | `T3CODE_DESKTOP_WS_URL`            | WebSocket URL override (used by the desktop app)                                             |
 | `PORT`                             | Fallback HTTP port (used when `T3CODE_PORT` unset)                                           |
 | `ELECTRON_RENDERER_PORT`           | Port for the Electron renderer dev server                                                    |
 | `VITE_WS_URL`                      | WebSocket URL for the web frontend (dev)                                                     |
 | `VITE_DEV_SERVER_URL`              | Vite dev server URL for proxy mode                                                           |
+
+Anonymous usage telemetry is off by default. It is active only when `T3CODE_POSTHOG_KEY` is
+non-empty and `T3CODE_TELEMETRY_ENABLED` is not `false`. While inactive, F5 records, buffers and
+sends nothing, and does not create the telemetry identifier file.
 
 Restore limits are enforced while streaming, before extraction, and against the combined raw plus
 extracted staging footprint. F5 also reserves free space on the staging volume. Increase the caps or

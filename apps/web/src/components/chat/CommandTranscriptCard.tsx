@@ -23,6 +23,7 @@ import { formatElapsed } from "../../session-logic";
 import { formatTimestamp } from "../../timestampFormat";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { cn } from "~/lib/utils";
+import { useNowIso } from "../../lib/nowTicker";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 
@@ -30,7 +31,6 @@ interface CommandTranscriptCardProps {
   threadId?: ThreadId | null;
   execution: OrchestrationCommandExecutionSummary | OrchestrationCommandExecution;
   expanded: boolean;
-  nowIso: string;
   timestampFormat: TimestampFormat;
   onToggle: () => void;
   onExpandedBodyResize?: () => void;
@@ -177,7 +177,6 @@ export const CommandTranscriptCard = memo(function CommandTranscriptCard({
   threadId = null,
   execution,
   expanded,
-  nowIso,
   timestampFormat,
   onToggle,
   onExpandedBodyResize,
@@ -273,6 +272,8 @@ export const CommandTranscriptCard = memo(function CommandTranscriptCard({
     };
   }, [expanded, onExpandedBodyResize]);
 
+  // Only a running command subscribes to the shared clock.
+  const nowIso = useNowIso(detailSource.status === "running");
   const duration = formatElapsed(
     detailSource.startedAt,
     detailSource.completedAt ??
