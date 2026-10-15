@@ -1,11 +1,9 @@
 import type { UsageQuotaSample } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 
-import { formatTimeUntil } from "../../../lib/usageLimits";
+import { formatTimeUntil, formatUsageResumeTime } from "../../../lib/usageLimits";
 import { projectQuota, type QuotaProjection } from "../../../lib/usageQuotaProjection";
 import { cn } from "../../../lib/utils";
-
-const timeFormatter = () => new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
 
 function durationLabel(milliseconds: number): string {
   const minutes = Math.max(0, Math.round(milliseconds / 60_000));
@@ -14,10 +12,15 @@ function durationLabel(milliseconds: number): string {
   return hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
 }
 
-function forecastText(projection: QuotaProjection | null, resetsAt: string | null): string | null {
+function forecastText(
+  projection: QuotaProjection | null,
+  resetsAt: string | null,
+  now: number,
+): string | null {
   if (!projection || !resetsAt) return null;
+  // Includes the date when the hit is not today, so multi-day windows read clearly.
   if (projection.kind === "will-hit")
-    return `At this pace: limit reached ~${timeFormatter().format(new Date(projection.at))} (${durationLabel(
+    return `At this pace: limit reached ~${formatUsageResumeTime(projection.at, new Date(now))} (${durationLabel(
       Date.parse(resetsAt) - Date.parse(projection.at),
     )} before reset)`;
   if (projection.kind === "under")
@@ -118,7 +121,7 @@ export function QuotaMeter(props: {
           now,
         })
       : null;
-  const forecast = forecastText(projection, props.resetsAt);
+  const forecast = forecastText(projection, props.resetsAt, now);
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-3 text-xs">

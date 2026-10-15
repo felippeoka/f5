@@ -1142,6 +1142,10 @@ describe("limits", () => {
         .element(page.getByText("Reset time passed; awaiting updated usage"))
         .toBeVisible();
       await expect.element(page.getByText(/At this pace: limit reached/)).toBeVisible();
+      // The projected hit is days away, so the forecast names the day.
+      await expect
+        .element(page.getByText(/At this pace: limit reached/))
+        .toHaveTextContent(/limit reached ~[A-Z][a-z]{2}, [A-Z][a-z]{2} \d{1,2}/);
       await expect.element(page.getByTestId("quota-sparkline")).toBeInTheDocument();
       await expect
         .element(page.getByText(/range affects only Codex UTC token history/))

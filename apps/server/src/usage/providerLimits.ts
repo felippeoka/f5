@@ -430,17 +430,51 @@ export function makeProviderLimits(input: {
       sections: [emptyAccountSection("provider-limits")],
     },
     read,
-    {
-      identity: accountUsageIdentity(input.provider, [
-        input.environment.HOME || input.environment.USERPROFILE || os.homedir(),
-        input.environment.XDG_DATA_HOME,
-        input.environment.OPENCODE_AUTH_CONTENT,
-        input.serverUrl,
-        ...Object.keys(input.environment)
-          .filter((key) => key.startsWith("F5_CLIPROXY_") || key === "F5_ANTIGRAVITY_PROJECT")
-          .sort()
-          .map((key) => `${key}=${input.environment[key] ?? ""}`),
-      ]),
-    },
+    { identity: providerLimitsIdentity(input) },
   );
+}
+
+/** Environment variables that `read` uses to select an account or endpoint. */
+const IDENTITY_ENV_KEYS = [
+  "XDG_DATA_HOME",
+  "XDG_CONFIG_HOME",
+  "APPDATA",
+  "OPENCODE_AUTH_CONTENT",
+  "OPENCODE_API_KEY",
+  "CURSOR_AUTH_TOKEN",
+  "CURSOR_API_KEY",
+  "CURSOR_API_ENDPOINT",
+  "AGENT_CLI_CREDENTIAL_STORE",
+  "GROK_AUTH",
+  "GROK_HOME",
+  "XAI_API_KEY",
+] as const;
+
+/**
+ * Persisted-history identity: a hash of every input the reader uses to pick
+ * the account, so changing any of them discards the previous account's
+ * snapshot and samples. Hashing keeps secrets out of storage.
+ */
+export function providerLimitsIdentity(input: {
+  readonly provider: ProviderKind;
+  readonly environment: NodeJS.ProcessEnv;
+  readonly serverUrl?: string;
+  readonly apiEndpoint?: string;
+}): string {
+  const env = input.environment;
+  return accountUsageIdentity(input.provider, [
+    env.HOME || env.USERPROFILE || os.homedir(),
+    input.serverUrl,
+    input.apiEndpoint,
+    ...IDENTITY_ENV_KEYS.map((key) => `${key}=${env[key] ?? ""}`),
+    ...Object.keys(env)
+      .filter(
+        (key) =>
+          key.startsWith("F5_CLIPROXY_") ||
+          key === "F5_ANTIGRAVITY_PROJECT" ||
+          (key.startsWith("GROK_") && key !== "GROK_AUTH" && key !== "GROK_HOME"),
+      )
+      .sort()
+      .map((key) => `${key}=${env[key] ?? ""}`),
+  ]);
 }

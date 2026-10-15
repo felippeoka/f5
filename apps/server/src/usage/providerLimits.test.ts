@@ -1,8 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { normalizeProviderLimits } from "./providerLimits.ts";
+import { normalizeProviderLimits, providerLimitsIdentity } from "./providerLimits.ts";
 import { normalizeResetCredits, normalizeRateLimits } from "./codexAccountUsage.ts";
 
 describe("provider limits", () => {
+  it("changes the history identity when any account-selecting input changes", () => {
+    const base = { HOME: "/users/me" };
+    const identity = (
+      environment: NodeJS.ProcessEnv,
+      extra: { serverUrl?: string; apiEndpoint?: string } = {},
+    ) => providerLimitsIdentity({ provider: "cursor", environment, ...extra });
+    const reference = identity(base);
+    expect(identity({ ...base })).toBe(reference);
+    // Unrelated variables do not split the account.
+    expect(identity({ ...base, PATH: "/bin" })).toBe(reference);
+    for (const change of [
+      { CURSOR_AUTH_TOKEN: "token-b" },
+      { CURSOR_API_KEY: "key-b" },
+      { CURSOR_API_ENDPOINT: "https://other" },
+      { AGENT_CLI_CREDENTIAL_STORE: "file" },
+      { XDG_CONFIG_HOME: "/cfg" },
+      { APPDATA: "/appdata" },
+      { GROK_AUTH: "{}" },
+      { GROK_HOME: "/grok" },
+      { GROK_CONFIG: "/grok.toml" },
+      { OPENCODE_API_KEY: "oc" },
+      { F5_CLIPROXY_ACCOUNT_ID: "acct" },
+    ])
+      expect(identity({ ...base, ...change }), JSON.stringify(change)).not.toBe(reference);
+    expect(identity(base, { apiEndpoint: "https://other" })).not.toBe(reference);
+    expect(identity(base, { serverUrl: "http://localhost:1" })).not.toBe(reference);
+    // Secrets are hashed, never stored verbatim.
+    expect(identity({ ...base, CURSOR_AUTH_TOKEN: "secret-token" })).not.toContain("secret");
+  });
+
   it("uses Cursor dashboard percentages and rejects non-finite values", () => {
     expect(
       normalizeProviderLimits("cursor", {
