@@ -29,6 +29,8 @@ import { openInPreferredEditor } from "../editorPreferences";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
+import { classifyCodeHighlight, normalizeFenceLanguage } from "../lib/codeHighlightPolicy";
+import { highlightCodeInWorker } from "../lib/codeHighlightWorkerClient";
 import type { MarkdownHighlighter } from "../lib/markdownHighlighter";
 import {
   EMPTY_STREAMING_MARKDOWN_STATE,
@@ -71,13 +73,12 @@ const highlightedCodeCache = new LRUCache<string>(
   MAX_HIGHLIGHT_CACHE_ENTRIES,
   MAX_HIGHLIGHT_CACHE_MEMORY_BYTES,
 );
+/** Languages with a retained highlighter promise, least recently used first. */
+const MAX_RETAINED_HIGHLIGHTER_LANGUAGES = 24;
 const highlighterPromiseCache = new Map<string, Promise<MarkdownHighlighter>>();
 
 function extractFenceLanguage(className: string | undefined): string {
-  const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
-  const raw = match?.[1] ?? "text";
-  // Shiki doesn't bundle a gitignore grammar; ini is a close match (#685)
-  return raw === "gitignore" ? "ini" : raw;
+  return normalizeFenceLanguage(className?.match(CODE_FENCE_LANGUAGE_REGEX)?.[1]);
 }
 
 function nodeToPlainText(node: ReactNode): string {
@@ -134,7 +135,11 @@ function estimateHighlightedSize(html: string, cacheKey: string): number {
 
 function getHighlighterPromise(language: string): Promise<MarkdownHighlighter> {
   const cached = highlighterPromiseCache.get(language);
-  if (cached) return cached;
+  if (cached) {
+    highlighterPromiseCache.delete(language);
+    highlighterPromiseCache.set(language, cached);
+    return cached;
+  }
 
   const promise = import("../lib/markdownHighlighter")
     .then((module) => module.getMarkdownHighlighter(language))
@@ -143,6 +148,10 @@ function getHighlighterPromise(language: string): Promise<MarkdownHighlighter> {
       throw error;
     });
   highlighterPromiseCache.set(language, promise);
+  if (highlighterPromiseCache.size > MAX_RETAINED_HIGHLIGHTER_LANGUAGES) {
+    const oldest = highlighterPromiseCache.keys().next().value;
+    if (oldest !== undefined) highlighterPromiseCache.delete(oldest);
+  }
   return promise;
 }
 
@@ -198,6 +207,8 @@ interface SuspenseShikiCodeBlockProps {
   className: string | undefined;
   code: string;
   themeName: DiffThemeName;
+  /** Unhighlighted rendering, shown while a worker job runs or after it fails. */
+  plain?: ReactNode;
 }
 
 function ShikiHtml({ html }: { html: string }) {
@@ -212,10 +223,28 @@ export function SuspenseShikiCodeBlock({
   className,
   code,
   themeName,
+  plain,
 }: SuspenseShikiCodeBlockProps) {
   const language = extractFenceLanguage(className);
   const cacheKey = createHighlightCacheKey(code, language, themeName);
   const cachedHighlightedHtml = highlightedCodeCache.get(cacheKey);
+
+  const mode = classifyCodeHighlight(code);
+  if (mode !== "inline") {
+    // Stays mounted across streaming deltas and cache hits, so a "Highlight
+    // code" opt-in on a growing block is kept.
+    return (
+      <WorkerHighlightedCode
+        cacheKey={cacheKey}
+        cachedHtml={cachedHighlightedHtml}
+        code={code}
+        language={language}
+        themeName={themeName}
+        plain={plain ?? <pre>{code}</pre>}
+        onDemand={mode === "on-demand"}
+      />
+    );
+  }
 
   if (cachedHighlightedHtml != null) {
     return <ShikiHtml html={cachedHighlightedHtml} />;
@@ -266,6 +295,85 @@ function HighlightOnCacheMiss({
   }, [cacheKey, highlightedHtml]);
 
   return <ShikiHtml html={highlightedHtml} />;
+}
+
+/**
+ * Large blocks highlight in a web worker, huge ones only on request, so neither
+ * blocks the main thread. Plain text shows meanwhile and if the worker fails.
+ */
+function WorkerHighlightedCode({
+  cacheKey,
+  cachedHtml,
+  code,
+  language,
+  themeName,
+  plain,
+  onDemand,
+}: {
+  cacheKey: string;
+  cachedHtml: string | null;
+  code: string;
+  language: string;
+  themeName: DiffThemeName;
+  plain: ReactNode;
+  onDemand: boolean;
+}) {
+  const [optedIn, setOptedIn] = useState(false);
+  const requested = !onDemand || optedIn;
+  // Tagged with the content it belongs to: deltas change `cacheKey` in place.
+  const [result, setResult] = useState<{
+    cacheKey: string;
+    status: "highlighted" | "failed";
+    html: string;
+  } | null>(null);
+  const current = result?.cacheKey === cacheKey ? result : null;
+
+  useEffect(() => {
+    if (!requested || cachedHtml != null) return;
+    const controller = new AbortController();
+    highlightCodeInWorker({ code, language, theme: themeName, signal: controller.signal }).then(
+      (html) => {
+        highlightedCodeCache.set(cacheKey, html, estimateHighlightedSize(html, cacheKey));
+        setResult({ cacheKey, status: "highlighted", html });
+      },
+      (error: unknown) => {
+        if (error instanceof Error && error.name === "AbortError") return;
+        console.warn(
+          `Code highlighting failed for language "${language}", showing plain text.`,
+          error instanceof Error ? error.message : error,
+        );
+        setResult({ cacheKey, status: "failed", html: "" });
+      },
+    );
+    return () => controller.abort();
+  }, [cacheKey, cachedHtml, code, language, requested, themeName]);
+
+  const html = cachedHtml ?? (current?.status === "highlighted" ? current.html : null);
+  if (html != null) {
+    return <ShikiHtml html={html} />;
+  }
+  return (
+    <div
+      className="chat-markdown-plain-code"
+      data-code-highlight={
+        current?.status === "failed" ? "failed" : requested ? "pending" : "on-demand"
+      }
+    >
+      {!requested ? (
+        <div className="flex items-center gap-2 px-3 pt-2 text-xs text-muted-foreground">
+          <span>Large block shown as plain text.</span>
+          <button
+            type="button"
+            className="underline underline-offset-2 hover:text-foreground"
+            onClick={() => setOptedIn(true)}
+          >
+            Highlight code
+          </button>
+        </div>
+      ) : null}
+      {plain}
+    </div>
+  );
 }
 
 // Matches inline markdown links: `[text](href)` / `[text](href "title")`.
@@ -509,6 +617,7 @@ const RenderedMarkdownFragment = memo(function RenderedMarkdownFragment(props: {
                   className={codeBlock.className}
                   code={codeBlock.code}
                   themeName={diffThemeName}
+                  plain={<pre {...props}>{children}</pre>}
                 />
               </Suspense>
             </SurfaceErrorBoundary>

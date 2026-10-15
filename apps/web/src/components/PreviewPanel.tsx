@@ -5,6 +5,7 @@ import { isAgentBrowserActive, useAgentBrowserActivityStore } from "../agentBrow
 import { useAppSettings } from "../appSettings";
 import { useSettings, type UnifiedWebSettings } from "../hooks/useSettings";
 import { useStore } from "../store";
+import { selectThreadById } from "../threadSelectors";
 import { PreviewAgentOverlay } from "./PreviewAgentOverlay";
 import { setAttachmentSource } from "../lib/attachmentUploadQueue";
 import { notifyPreviewFocused } from "../lib/previewFocus";
@@ -669,9 +670,7 @@ export default function PreviewPanel({ threadId, onClose, visible = true }: Prev
   const canGoBack = activeSession?.canGoBack ?? false;
   const canGoForward = activeSession?.canGoForward ?? false;
   const previewAutomation = desktopPreview?.automation;
-  const projectId = useStore(
-    (store) => store.threads.find((entry) => entry.id === threadId)?.projectId,
-  );
+  const projectId = useStore((store) => selectThreadById(store, threadId)?.projectId);
   // Project-resolved settings: the same allowlist the server enforces for this thread.
   const externalHostsKey = useSettings(selectPreviewExternalHostsKey, projectId);
   const sessionTabIdsKey = sessions.map((session) => session.tabId).join("\n");

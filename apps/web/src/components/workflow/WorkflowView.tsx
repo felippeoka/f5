@@ -1,3 +1,4 @@
+import type { ThreadId } from "@t3tools/contracts";
 import {
   planningWorkflowDocumentType,
   WORKFLOW_DOCUMENT_PROFILES,
@@ -13,6 +14,8 @@ import { useTheme } from "../../hooks/useTheme";
 import { WORKFLOW_TYPE_DIALOG_LABEL } from "../../lib/workflowType";
 import { readNativeApi } from "../../nativeApi";
 import { useStore } from "../../store";
+import { useThreadsByIds } from "../../threadSelectors";
+import { threadIdsForWorkflow } from "./workflowUtils";
 import ChatMarkdown from "../ChatMarkdown";
 import { FileChip } from "../chat/FileChip";
 import {
@@ -51,6 +54,8 @@ function retryErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Failed to retry workflow.";
 }
 
+const EMPTY_WORKFLOW_THREAD_IDS: readonly ThreadId[] = [];
+
 export function WorkflowView(props: { workflowId: string }) {
   const navigate = useNavigate();
   const { resolvedTheme } = useTheme();
@@ -61,7 +66,12 @@ export function WorkflowView(props: { workflowId: string }) {
   const workflow = useStore((store) =>
     store.planningWorkflows.find((entry) => entry.id === props.workflowId),
   );
-  const threads = useStore((store) => store.threads);
+  // Only this workflow's threads: unrelated streaming does not re-render the view.
+  const workflowThreadIds = useMemo(
+    () => (workflow ? threadIdsForWorkflow(workflow) : EMPTY_WORKFLOW_THREAD_IDS),
+    [workflow],
+  );
+  const threads = useThreadsByIds(workflowThreadIds);
   const cwd = useStore(
     (store) => store.projects.find((project) => project.id === workflow?.projectId)?.cwd,
   );

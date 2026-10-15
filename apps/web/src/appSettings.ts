@@ -1155,30 +1155,40 @@ export function useAppSettings() {
   } as const;
 }
 
+let appSettingsSnapshot: { raw: string | null; settings: AppSettings } | null = null;
+
+/**
+ * The persisted app settings, parsed once per stored value. The same object is
+ * returned until storage changes, so it can back `useSyncExternalStore`.
+ */
+export function readAppSettingsSnapshot(): AppSettings {
+  const raw = readLocalStorageRawItem(APP_SETTINGS_STORAGE_KEY);
+  if (appSettingsSnapshot?.raw !== raw) {
+    appSettingsSnapshot = { raw, settings: parsePersistedAppSettings(raw) };
+  }
+  return appSettingsSnapshot.settings;
+}
+
+export function subscribeAppSettings(listener: () => void): () => void {
+  return subscribeLocalStorageKey(APP_SETTINGS_STORAGE_KEY, listener);
+}
+
 /** Primitive selector for hot rendering paths; unrelated setting writes keep the same snapshot. */
 export function useDiffWordWrap(): boolean {
-  const subscribe = useCallback(
-    (listener: () => void) => subscribeLocalStorageKey(APP_SETTINGS_STORAGE_KEY, listener),
-    [],
+  const getSnapshot = useCallback(() => readAppSettingsSnapshot().diffWordWrap, []);
+  return useSyncExternalStore(
+    subscribeAppSettings,
+    getSnapshot,
+    () => DEFAULT_APP_SETTINGS.diffWordWrap,
   );
-  const getSnapshot = useCallback(
-    () => parsePersistedAppSettings(readLocalStorageRawItem(APP_SETTINGS_STORAGE_KEY)).diffWordWrap,
-    [],
-  );
-  return useSyncExternalStore(subscribe, getSnapshot, () => DEFAULT_APP_SETTINGS.diffWordWrap);
 }
 
 /** Primitive selector so title updates ignore unrelated setting writes. */
 export function useWindowTitleDetail(): WindowTitleDetail {
-  const subscribe = useCallback(
-    (listener: () => void) => subscribeLocalStorageKey(APP_SETTINGS_STORAGE_KEY, listener),
-    [],
+  const getSnapshot = useCallback(() => readAppSettingsSnapshot().windowTitleDetail, []);
+  return useSyncExternalStore(
+    subscribeAppSettings,
+    getSnapshot,
+    () => DEFAULT_APP_SETTINGS.windowTitleDetail,
   );
-  const getSnapshot = useCallback(
-    () =>
-      parsePersistedAppSettings(readLocalStorageRawItem(APP_SETTINGS_STORAGE_KEY))
-        .windowTitleDetail,
-    [],
-  );
-  return useSyncExternalStore(subscribe, getSnapshot, () => DEFAULT_APP_SETTINGS.windowTitleDetail);
 }

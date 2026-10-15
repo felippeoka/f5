@@ -35,7 +35,8 @@ import { gitRemoveWorktreeMutationOptions } from "../../../lib/gitReactQuery";
 import { readNativeApi } from "../../../nativeApi";
 import { useStore } from "../../../store";
 import { useTerminalStateStore } from "../../../terminalStateStore";
-import type { Project, Thread } from "../../../types";
+import { liveThreadActivityAt, useThreadSummaries } from "../../../threadSelectors";
+import type { Project, ThreadListItem } from "../../../types";
 import { cn } from "../../../lib/utils";
 import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
@@ -54,7 +55,7 @@ type ArchiveItem =
       subtitle: string;
       sortAt: string;
       archivedAt: string;
-      thread: Thread;
+      thread: ThreadListItem;
     }
   | {
       kind: "workflow";
@@ -138,7 +139,7 @@ function formatArchiveDate(value: string): string {
 export function ArchiveSettings() {
   const navigate = useNavigate();
   const projects = useStore((store) => store.projects);
-  const threads = useStore((store) => store.threads);
+  const threads = useThreadSummaries();
   const planningWorkflows = useStore((store) => store.planningWorkflows);
   const codeReviewWorkflows = useStore((store) => store.codeReviewWorkflows);
   const investigationWorkflows = useStore((store) => store.investigationWorkflows);
@@ -171,8 +172,8 @@ export function ArchiveSettings() {
         projectId: thread.projectId,
         title: thread.title,
         subtitle: thread.worktreePath ?? "Thread",
-        sortAt: thread.lastInteractionAt,
-        archivedAt: thread.archivedAt ?? thread.lastInteractionAt,
+        sortAt: liveThreadActivityAt(thread),
+        archivedAt: thread.archivedAt ?? liveThreadActivityAt(thread),
         thread,
       }));
     return [
@@ -240,7 +241,7 @@ export function ArchiveSettings() {
     async (threadIds: ReadonlyArray<ThreadId>) => {
       return deleteThreadsWithCleanup({
         threadIds,
-        threads,
+        threads: useStore.getState().threads,
         projects,
         activeThreadId: routeThreadId,
         getThreads: () => useStore.getState().threads,
@@ -268,7 +269,6 @@ export function ArchiveSettings() {
       projects,
       removeWorktreeMutation,
       routeThreadId,
-      threads,
     ],
   );
 

@@ -20,7 +20,7 @@ import { isMacPlatform } from "../../lib/utils";
 import { readNativeApi } from "../../nativeApi";
 import { useStore } from "../../store";
 import { useThreadSelectionStore } from "../../threadSelectionStore";
-import type { Project, Thread } from "../../types";
+import type { Project, ThreadListItem } from "../../types";
 import {
   attachedFileReferenceWarnings,
   createCachedAbsolutePathComparisonNormalizer,
@@ -56,9 +56,9 @@ export interface ThreadContextMenuOptions {
  */
 export function useSidebarThreadActions(input: {
   projects: ReadonlyArray<Project>;
-  threads: ReadonlyArray<Thread>;
+  threads: ReadonlyArray<ThreadListItem>;
   routeThreadId: ThreadId | null;
-  activeThread: Thread | undefined;
+  activeThread: ThreadListItem | undefined;
   activeDraftThread: DraftThreadState | null;
   confirmThreadDelete: boolean;
 }) {
@@ -75,7 +75,7 @@ export function useSidebarThreadActions(input: {
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const [renamingThreadId, setRenamingThreadId] = useState<ThreadId | null>(null);
 
-  const attachDropToThread = (event: React.DragEvent, thread: Thread) => {
+  const attachDropToThread = (event: React.DragEvent, thread: ThreadListItem) => {
     if (!event.dataTransfer.types.includes("Files")) return;
     event.preventDefault();
     event.stopPropagation();
@@ -420,7 +420,7 @@ export function useSidebarThreadActions(input: {
   );
 
   const handleThreadRowDoubleClick = useCallback(
-    (event: MouseEvent, thread: Thread, options?: { isDraft?: boolean }) => {
+    (event: MouseEvent, thread: ThreadListItem, options?: { isDraft?: boolean }) => {
       const shouldRename = shouldStartThreadRowRenameOnDoubleClick({
         isDraft: options?.isDraft === true,
         isRenaming: renamingThreadId === thread.id,

@@ -26,6 +26,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useStore } from "~/store";
+import { selectThreadById } from "~/threadSelectors";
+import { useShallow } from "zustand/react/shallow";
 import { readNativeApi } from "~/nativeApi";
 import { rewriteComposerRuntimeSkillInvocationForSend } from "../ChatView.logic";
 import { EMPTY_QUEUE_THREAD_STATE, useNextTurnQueueStore } from "~/nextTurnQueueStore";
@@ -77,7 +79,20 @@ export function NextTurnQueuePanel({
   readonly projectSkills?: ReadonlyArray<ProjectSkill> | null | undefined;
 }) {
   const connection = useWsConnectionState();
-  const thread = useStore((store) => store.threads.find((entry) => entry.id === threadId));
+  // Steering eligibility only; message deltas leave these fields unchanged.
+  const thread = useStore(
+    useShallow((store) => {
+      const entry = selectThreadById(store, threadId);
+      return entry
+        ? {
+            activeTurnId: entry.session?.activeTurnId ?? null,
+            sessionGeneration: entry.session?.capabilities?.generation ?? null,
+            interactionMode: entry.interactionMode,
+            runtimeMode: entry.runtimeMode,
+          }
+        : undefined;
+    }),
+  );
   const state = useNextTurnQueueStore(
     (store) => store.byThreadId[threadId] ?? EMPTY_QUEUE_THREAD_STATE,
   );
@@ -543,7 +558,7 @@ export function NextTurnQueuePanel({
                   canSteer={
                     turnSteering &&
                     Boolean(
-                      thread?.session?.activeTurnId &&
+                      thread?.activeTurnId &&
                       thread.interactionMode === item.command.interactionMode &&
                       thread.runtimeMode === item.command.runtimeMode,
                     )
@@ -556,18 +571,14 @@ export function NextTurnQueuePanel({
                         await api.nextTurnQueue.steer({
                           itemId: candidate.itemId,
                           expectedRevision: snapshot.revision,
-                          ...(thread?.session?.capabilities
-                            ? {
-                                expectedSessionGeneration: thread.session.capabilities.generation,
-                              }
+                          ...(thread?.sessionGeneration != null
+                            ? { expectedSessionGeneration: thread.sessionGeneration }
                             : {}),
                         }),
                       );
                     })
                   }
-                  canRunNow={
-                    !thread?.session?.activeTurnId && snapshot.reasonCode !== "active_turn"
-                  }
+                  canRunNow={!thread?.activeTurnId && snapshot.reasonCode !== "active_turn"}
                   onRunNow={async (candidate) =>
                     runItemMutation(candidate, async () => {
                       const api = readNativeApi();

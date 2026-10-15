@@ -2,16 +2,19 @@ import type { ThreadId } from "@t3tools/contracts";
 import { ArrowRightIcon, PinIcon, PinOffIcon } from "lucide-react";
 import { forwardRef, useCallback } from "react";
 
+import { useNowMinute } from "../../lib/nowTicker";
 import { formatAbsoluteTimeLabel, formatRelativeTimeLabel } from "../../lib/relativeTime";
 import { cn } from "../../lib/utils";
-import { resolveThreadStatusPillForThread, type ThreadStatus } from "../../threadStatus";
-import type { Project, Thread } from "../../types";
+import type { ThreadSummary } from "../../threadSelectors";
+import { pillForStatus, type ThreadStatus } from "../../threadStatus";
+import type { Project } from "../../types";
 import { ProjectIcon } from "../ProjectIcon";
+import { useLiveThreadActivityAt } from "../thread/ThreadActivityTime";
 import { ThreadQueueCountBadge } from "../thread/ThreadQueueCountBadge";
 import { ThreadStatusPillBadge } from "../thread/ThreadStatusPillBadge";
 
 interface HomeThreadRowProps {
-  readonly thread: Thread;
+  readonly thread: ThreadSummary;
   readonly project: Project | undefined;
   readonly onSelect: (threadId: ThreadId) => void;
   /**
@@ -45,11 +48,14 @@ export const HomeThreadRow = forwardRef<HTMLButtonElement, HomeThreadRowProps>(
     { thread, project, onSelect, rowIndex, isPinned, onTogglePin, reasonTag, urgencyStatus },
     ref,
   ) {
-    const pill = resolveThreadStatusPillForThread(thread);
+    "use memo";
+    const pill = pillForStatus(thread.status);
     const title = thread.title.trim() || "Untitled thread";
     const projectName = project?.name ?? "Unknown project";
-    const relativeLabel = formatRelativeTimeLabel(thread.lastInteractionAt);
-    const absoluteLabel = formatAbsoluteTimeLabel(thread.lastInteractionAt);
+    const activityAt = useLiveThreadActivityAt(thread.id, thread.lastInteractionAt);
+    useNowMinute();
+    const relativeLabel = formatRelativeTimeLabel(activityAt);
+    const absoluteLabel = formatAbsoluteTimeLabel(activityAt);
     const urgencyClass = urgencyStatus ? (URGENCY_BORDER_BY_STATUS[urgencyStatus] ?? null) : null;
 
     const handleTogglePin = useCallback(

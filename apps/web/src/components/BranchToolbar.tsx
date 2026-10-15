@@ -5,7 +5,10 @@ import { useCallback } from "react";
 import { newCommandId } from "../lib/utils";
 import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
+import { useShallow } from "zustand/react/shallow";
+
 import { useStore } from "../store";
+import { selectThreadById } from "../threadSelectors";
 import {
   EnvMode,
   resolveDraftEnvModeAfterBranchChange,
@@ -34,13 +37,27 @@ export default function BranchToolbar({
   onCheckoutPullRequestRequest,
   onComposerFocusRequest,
 }: BranchToolbarProps) {
-  const threads = useStore((store) => store.threads);
+  // Only the workspace fields; a streaming delta on this thread does not re-render the toolbar.
+  const serverThread = useStore(
+    useShallow((store) => {
+      const thread = selectThreadById(store, threadId);
+      return thread
+        ? {
+            id: thread.id,
+            projectId: thread.projectId,
+            branch: thread.branch,
+            worktreePath: thread.worktreePath,
+            hasSession: thread.session !== null,
+            sessionVersion: JSON.stringify(thread.session ?? null),
+          }
+        : undefined;
+    }),
+  );
   const projects = useStore((store) => store.projects);
   const setThreadBranchAction = useStore((store) => store.setThreadBranch);
   const draftThread = useComposerDraftStore((store) => store.getDraftThread(threadId));
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
 
-  const serverThread = threads.find((thread) => thread.id === threadId);
   const activeProjectId = serverThread?.projectId ?? draftThread?.projectId ?? null;
   const activeProject = projects.find((project) => project.id === activeProjectId);
   const activeThreadId = serverThread?.id ?? (draftThread ? threadId : undefined);
@@ -54,9 +71,9 @@ export default function BranchToolbar({
     draftThreadEnvMode: draftThread?.envMode,
   });
 
-  const workspaceVersion = JSON.stringify(serverThread?.session ?? null);
+  const workspaceVersion = serverThread?.sessionVersion ?? "null";
   const canApplyWorkspace = () => {
-    const latestServer = useStore.getState().threads.find((thread) => thread.id === threadId);
+    const latestServer = selectThreadById(useStore.getState(), threadId);
     const latestDraft = useComposerDraftStore.getState().getDraftThread(threadId);
     const latest = latestServer ?? latestDraft;
     const latestProject = useStore
@@ -83,7 +100,7 @@ export default function BranchToolbar({
       const api = readNativeApi();
       // If the effective cwd is about to change, stop the running session so the
       // next message creates a new one with the correct cwd.
-      if (serverThread?.session && worktreePath !== activeWorktreePath && api) {
+      if (serverThread?.hasSession && worktreePath !== activeWorktreePath && api) {
         void api.orchestration
           .dispatchCommand({
             type: "thread.session.stop",
@@ -119,7 +136,7 @@ export default function BranchToolbar({
     },
     [
       activeThreadId,
-      serverThread?.session,
+      serverThread?.hasSession,
       activeWorktreePath,
       hasServerThread,
       setThreadBranchAction,

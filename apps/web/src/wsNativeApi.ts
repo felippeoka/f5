@@ -1,6 +1,10 @@
 import { useAgentComputerActivityStore } from "./agentComputerActivityStore";
 import { NATIVE_OPERATION_WS_METHODS } from "@t3tools/contracts";
-import type { ProfileListResult, ProviderAccountEvent } from "@t3tools/contracts";
+import type {
+  ProfileListResult,
+  ProjectWatchedPathsChangedPayload,
+  ProviderAccountEvent,
+} from "@t3tools/contracts";
 import {
   ProjectCloneJob,
   AGENTS_WS_CHANNELS,
@@ -76,6 +80,9 @@ const providerAdvisoriesUpdatedListeners = new Set<
 >();
 const gitActionProgressListeners = new Set<(payload: GitActionProgressEvent) => void>();
 const gitStatusInvalidatedListeners = new Set<(payload: GitStatusInvalidatedPayload) => void>();
+const watchedPathsChangedListeners = new Set<
+  (payload: ProjectWatchedPathsChangedPayload) => void
+>();
 const previewEventListeners = new Set<(payload: PreviewEvent) => void>();
 const previewLocalServersUpdatedListeners = new Set<(payload: DiscoveredLocalServerList) => void>();
 const previewAutomationRequestListeners = new Set<(payload: PreviewAutomationRequest) => void>();
@@ -297,6 +304,16 @@ export function createWsNativeApi(): NativeApi {
   transport.subscribe(WS_CHANNELS.gitActionProgress, (message) => {
     const payload = message.data;
     for (const listener of gitActionProgressListeners) {
+      try {
+        listener(payload);
+      } catch {
+        // Swallow listener errors
+      }
+    }
+  });
+  transport.subscribe(WS_CHANNELS.projectsWatchedPathsChanged, (message) => {
+    const payload = message.data;
+    for (const listener of watchedPathsChangedListeners) {
       try {
         listener(payload);
       } catch {
@@ -594,6 +611,13 @@ export function createWsNativeApi(): NativeApi {
         transport.request(WS_METHODS.projectsCancelContentSearch, input),
       writeFile: (input) => transport.request(WS_METHODS.projectsWriteFile, input),
       readFile: (input) => transport.request(WS_METHODS.projectsReadFile, input),
+      setWatchedPaths: (input) => transport.request(WS_METHODS.projectsSetWatchedPaths, input),
+      onWatchedPathsChanged: (callback) => {
+        watchedPathsChangedListeners.add(callback);
+        return () => {
+          watchedPathsChangedListeners.delete(callback);
+        };
+      },
       openHtmlPreview: (input) => transport.request(WS_METHODS.projectsOpenHtmlPreview, input),
       issueAssetUrl: (input) => transport.request(WS_METHODS.projectsIssueAssetUrl, input),
     },

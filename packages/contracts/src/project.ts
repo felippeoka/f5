@@ -196,6 +196,41 @@ export const ProjectWriteFileResult = Schema.Union([
 ]);
 export type ProjectWriteFileResult = typeof ProjectWriteFileResult.Type;
 
+/** Paths one client may watch per workspace; open files plus visible directories. */
+export const PROJECT_WATCHED_PATHS_MAX = 512;
+
+export const ProjectSetWatchedPathsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  files: Schema.Array(Schema.String).check(Schema.isMaxLength(PROJECT_WATCHED_PATHS_MAX)),
+  directories: Schema.Array(Schema.String).check(Schema.isMaxLength(PROJECT_WATCHED_PATHS_MAX)),
+});
+export type ProjectSetWatchedPathsInput = typeof ProjectSetWatchedPathsInput.Type;
+
+export const ProjectSetWatchedPathsResult = Schema.Struct({
+  watched: NonNegativeInt,
+  /** Some paths are polled because watching failed; keep broader refreshes. */
+  degraded: Schema.Boolean,
+  rejected: Schema.Array(Schema.String),
+});
+export type ProjectSetWatchedPathsResult = typeof ProjectSetWatchedPathsResult.Type;
+
+export const ProjectWatchedPathChange = Schema.Struct({
+  relativePath: Schema.String,
+  kind: Schema.Literals(["file", "directory"]),
+  change: Schema.Literals(["created", "changed", "deleted"]),
+  /** Advances on every observed change of this path. */
+  revision: NonNegativeInt,
+});
+export type ProjectWatchedPathChange = typeof ProjectWatchedPathChange.Type;
+
+export const ProjectWatchedPathsChangedPayload = Schema.Struct({
+  cwd: Schema.String,
+  /** Empty when only the watch status (`degraded`) changed. */
+  changes: Schema.Array(ProjectWatchedPathChange),
+  degraded: Schema.Boolean,
+});
+export type ProjectWatchedPathsChangedPayload = typeof ProjectWatchedPathsChangedPayload.Type;
+
 export const PROJECT_READ_FILE_MAX_SIZE = 2 * 1024 * 1024; // 2MB
 
 export const ProjectReadFileInput = Schema.Struct({

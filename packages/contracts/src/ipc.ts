@@ -94,6 +94,9 @@ import type {
   ProjectListDirectoryInput,
   ProjectListEntriesResult,
   ProjectReadFileInput,
+  ProjectSetWatchedPathsInput,
+  ProjectSetWatchedPathsResult,
+  ProjectWatchedPathsChangedPayload,
   ProjectIssueAssetUrlInput,
   ProjectOpenHtmlPreviewInput,
   ProjectIssueAssetUrlResult,
@@ -761,6 +764,11 @@ export interface NativeApi {
     openHtmlPreview: (input: ProjectOpenHtmlPreviewInput) => Promise<{ url: string }>;
     issueAssetUrl: (input: ProjectIssueAssetUrlInput) => Promise<ProjectIssueAssetUrlResult>;
     readFile: (input: ProjectReadFileInput) => Promise<ProjectReadFileResult>;
+    /** Replaces this client's watched files and directories for `cwd`. */
+    setWatchedPaths: (input: ProjectSetWatchedPathsInput) => Promise<ProjectSetWatchedPathsResult>;
+    onWatchedPathsChanged: (
+      callback: (payload: ProjectWatchedPathsChangedPayload) => void,
+    ) => () => void;
   };
   filesystem: {
     browse: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;

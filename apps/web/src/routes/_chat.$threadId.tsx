@@ -68,6 +68,7 @@ import {
   isLatestTurnSettled,
 } from "../session-logic";
 import { useStore } from "../store";
+import { useThread } from "../threadSelectors";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
 import { AppTitlebar } from "~/components/AppTitlebar";
 
@@ -334,8 +335,8 @@ function ChatThreadRouteView() {
   });
   const search = Route.useSearch();
   const { settings } = useAppSettings();
-  const thread = useStore((store) => store.threads.find((entry) => entry.id === threadId));
-  const threadExists = useStore((store) => store.threads.some((thread) => thread.id === threadId));
+  const thread = useThread(threadId);
+  const threadExists = thread !== undefined;
   const draftThread = useComposerDraftStore(
     (store) => store.draftThreadsByThreadId[threadId] ?? null,
   );

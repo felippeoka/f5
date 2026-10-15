@@ -6,9 +6,16 @@ import { render } from "vitest-browser-react";
 import type { ReactNode } from "react";
 import FileViewPanel from "./FileViewPanel";
 import { providerQueryKeys } from "../lib/providerReactQuery";
+import { resetWorkspaceWatchForTests, startWorkspaceWatchSync } from "../lib/workspaceWatch";
+import type { ProjectWatchedPathsChangedPayload } from "@t3tools/contracts";
 
 const route = vi.hoisted(() => ({ fileViewPath: "app.ts" }));
-const api = vi.hoisted(() => ({ readFile: vi.fn(), writeFile: vi.fn() }));
+const api = vi.hoisted(() => ({
+  readFile: vi.fn(),
+  writeFile: vi.fn(),
+  setWatchedPaths: vi.fn(),
+  onWatchedPathsChanged: vi.fn(),
+}));
 vi.mock("../nativeApi", () => ({
   ensureNativeApi: () => ({ projects: api }),
   readNativeApi: () => ({ projects: api }),
@@ -220,6 +227,63 @@ it("keeps canonical draft identity after save and recovers edits typed afterward
     await expect.element(screen.getByRole("textbox")).toHaveValue("recover after save");
   } finally {
     await screen.unmount();
+    client.clear();
+  }
+});
+
+it("watches the open file and turns an external edit into a conflict for a dirty draft", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const original = {
+    relativePath: "app.ts",
+    contents: "original",
+    byteLength: 8,
+    truncated: false,
+    contentSha256: "old-hash",
+  };
+  const external = { ...original, contents: "external edit", contentSha256: "external-hash" };
+  let pushChange: ((payload: ProjectWatchedPathsChangedPayload) => void) | undefined;
+  api.onWatchedPathsChanged.mockImplementation(
+    (listener: (payload: ProjectWatchedPathsChangedPayload) => void) => {
+      pushChange = listener;
+      return () => undefined;
+    },
+  );
+  api.setWatchedPaths.mockResolvedValue({ watched: 1, degraded: false, rejected: [] });
+  api.readFile.mockResolvedValue(original);
+  const stopWatching = startWorkspaceWatchSync(client);
+  const screen = await render(
+    <QueryClientProvider client={client}>
+      <FileViewPanel mode="sheet" />
+    </QueryClientProvider>,
+  );
+  try {
+    await vi.waitFor(() =>
+      expect(api.setWatchedPaths).toHaveBeenCalledWith({
+        cwd: "/repo",
+        files: ["app.ts"],
+        directories: [],
+      }),
+    );
+    await screen.getByRole("button", { name: "Edit file", exact: true }).click();
+    await screen.getByRole("textbox", { name: "File source editor" }).fill("my unsaved draft");
+    const readsBefore = api.readFile.mock.calls.length;
+
+    api.readFile.mockResolvedValue(external);
+    pushChange!({
+      cwd: "/repo",
+      changes: [{ relativePath: "app.ts", kind: "file", change: "changed", revision: 1 }],
+      degraded: false,
+    });
+
+    await vi.waitFor(() => expect(api.readFile.mock.calls.length).toBeGreaterThan(readsBefore));
+    await expect
+      .element(screen.getByText("File changed outside this editor", { exact: true }))
+      .toBeVisible();
+    await expect.element(screen.getByRole("textbox")).toHaveValue("my unsaved draft");
+  } finally {
+    await screen.unmount();
+    stopWatching();
+    resetWorkspaceWatchForTests();
     client.clear();
   }
 });

@@ -39,6 +39,7 @@ import {
 import { cn } from "../lib/utils";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useStore } from "../store";
+import { useShallow } from "zustand/react/shallow";
 import { AgentRow, type AgentRowActions } from "./AgentsPanelRow";
 import {
   AlertDialog,
@@ -669,14 +670,17 @@ export function AgentsPanel(props: {
     }
     return ids;
   }, [pendingStops, props.model]);
-  const threads = useStore((state) => state.threads);
-  const capabilitiesByThreadId = useMemo(() => {
-    const map = new Map<ThreadId, ProviderSessionCapabilities>();
-    for (const thread of threads) {
-      if (thread.session?.capabilities) map.set(thread.id, thread.session.capabilities);
-    }
-    return map;
-  }, [threads]);
+  // Shallow-compared map: streaming deltas keep each session's capabilities
+  // reference, so the panel does not re-render for every token.
+  const capabilitiesByThreadId = useStore(
+    useShallow((state) => {
+      const map = new Map<ThreadId, ProviderSessionCapabilities>();
+      for (const thread of state.threads) {
+        if (thread.session?.capabilities) map.set(thread.id, thread.session.capabilities);
+      }
+      return map;
+    }),
+  );
 
   const targetFor = (entry: AgentsPanelEntry): NativeTaskTarget | null => {
     const capabilities = capabilitiesByThreadId.get(entry.threadId);

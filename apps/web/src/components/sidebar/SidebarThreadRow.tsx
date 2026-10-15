@@ -15,13 +15,13 @@ import type { ReactNode } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
-import { formatRelativeTimeLabel } from "../../lib/relativeTime";
 import { cn } from "../../lib/utils";
 import { useThreadSelectionStore } from "../../threadSelectionStore";
-import { hasUnseenCompletion, type ThreadStatusPill } from "../../threadStatus";
-import type { Thread } from "../../types";
+import type { ThreadStatusPill } from "../../threadStatus";
+import type { ThreadListItem } from "../../types";
 import { InlineTitleEditor } from "../InlineTitleEditor";
 import { resolveSidebarComposerDraftPreview, resolveThreadRowClassName } from "../Sidebar.logic";
+import { ThreadRelativeActivityTime } from "../thread/ThreadActivityTime";
 import { ThreadQueueCountBadge } from "../thread/ThreadQueueCountBadge";
 import { ThreadStatusPillBadge } from "../thread/ThreadStatusPillBadge";
 import { ThreadWorktreeIndicator } from "../ThreadWorktreeIndicator";
@@ -45,7 +45,7 @@ import type { SidebarThreadActions } from "./useSidebarThreadActions";
 export type SidebarThreadRowSection = "workflow" | "active" | "snoozed" | "archived" | "attention";
 
 export interface SidebarThreadRowProps {
-  thread: Thread;
+  thread: ThreadListItem;
   section: SidebarThreadRowSection;
   isActive: boolean;
   isDraft?: boolean | undefined;
@@ -58,6 +58,8 @@ export interface SidebarThreadRowProps {
   threadStatus: ThreadStatusPill | null;
   prStatus: PrStatusIndicator | null;
   terminalStatus: TerminalStatusIndicator | null;
+  /** A completed turn the user has not seen yet. */
+  isUnread: boolean;
   isRenaming: boolean;
   actions: SidebarThreadActions;
 }
@@ -67,6 +69,7 @@ export const SIDEBAR_ROW_REVEAL_CLASS_NAME =
   "opacity-0 group-hover/thread-row:opacity-100 group-focus-within/thread-row:opacity-100 pointer-coarse:opacity-100";
 
 export function SidebarThreadRow(props: SidebarThreadRowProps) {
+  "use memo";
   const {
     thread,
     section,
@@ -76,6 +79,7 @@ export function SidebarThreadRow(props: SidebarThreadRowProps) {
     threadStatus,
     prStatus,
     terminalStatus,
+    isUnread,
     isRenaming,
     actions,
   } = props;
@@ -134,7 +138,7 @@ export function SidebarThreadRow(props: SidebarThreadRowProps) {
           resolveThreadRowClassName({
             isActive,
             isSelected,
-            isUnread: section !== "archived" && hasUnseenCompletion(thread),
+            isUnread: section !== "archived" && isUnread,
           }),
         )}
         onClick={(event) => {
@@ -250,10 +254,11 @@ export function SidebarThreadTitle({
   displayTitle,
   withTestId = true,
 }: {
-  thread: Thread;
+  thread: ThreadListItem;
   displayTitle?: string | undefined;
   withTestId?: boolean | undefined;
 }) {
+  "use memo";
   const suppressTooltip = useMediaQuery("(hover: none), (pointer: coarse)");
   const visibleTitle = displayTitle ?? thread.title;
   const tooltip = displayTitle && displayTitle !== thread.title ? thread.title : visibleTitle;
@@ -308,7 +313,7 @@ export function PinnedThreadDragHandle({ threadId }: { threadId: ThreadId }) {
 }
 
 export function ThreadRowTrailingMeta(props: {
-  thread: Pick<Thread, "id" | "branch" | "worktreePath" | "titleRegeneration">;
+  thread: Pick<ThreadListItem, "id" | "branch" | "worktreePath" | "titleRegeneration">;
   lastInteractionAt: string;
   terminalStatus: TerminalStatusIndicator | null;
   isHighlighted: boolean;
@@ -320,6 +325,7 @@ export function ThreadRowTrailingMeta(props: {
     onClick: () => void;
   } | null;
 }) {
+  "use memo";
   const action = props.action ?? null;
   const draft = useComposerDraftStore((store) => store.draftsByThreadId[props.thread.id]);
   const draftPreview =
@@ -374,7 +380,10 @@ export function ThreadRowTrailingMeta(props: {
               "group-hover/thread-row:invisible group-focus-within/thread-row:invisible pointer-coarse:invisible",
           )}
         >
-          {formatRelativeTimeLabel(props.lastInteractionAt)}
+          <ThreadRelativeActivityTime
+            threadId={props.thread.id}
+            fallback={props.lastInteractionAt}
+          />
         </span>
         {action && ActionIcon ? (
           <span className="absolute inset-y-0 right-0 flex items-center">

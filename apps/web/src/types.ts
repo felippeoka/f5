@@ -204,6 +204,45 @@ export interface Thread {
   threadReferences?: ThreadReference[] | undefined;
 }
 
+/**
+ * The list-level fields of a thread. `Thread` is assignable to it, so list
+ * helpers typed against it accept both full threads (and unsaved drafts) and
+ * summaries.
+ *
+ * `lastInteractionAt` is an ordering key here: it refreshes only when the
+ * relative activity order of threads changes, so every streaming delta does
+ * not produce a new summary. Sorting by it always matches sorting the live
+ * threads. Render a live timestamp with `useThreadActivityAt` instead.
+ */
+export type ThreadListItem = Pick<
+  Thread,
+  | "id"
+  | "projectId"
+  | "title"
+  | "titleState"
+  | "titleSource"
+  | "titleRevision"
+  | "titleUpdatedAt"
+  | "titleRegeneration"
+  | "model"
+  | "modelSelection"
+  | "runtimeMode"
+  | "interactionMode"
+  | "codexThreadId"
+  | "createdAt"
+  | "archivedAt"
+  | "pinnedAt"
+  | "pinOrderKey"
+  | "snoozedUntil"
+  | "snoozedAt"
+  | "lastVisitedAt"
+  | "lastInteractionAt"
+  | "branch"
+  | "worktreePath"
+  | "threadReferences"
+  | "error"
+>;
+
 export interface ThreadSession {
   provider: ProviderKind;
   providerInstanceId?: ProviderInstanceId | null | undefined;

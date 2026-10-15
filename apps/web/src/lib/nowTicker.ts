@@ -96,3 +96,33 @@ export function useNow(enabled: boolean): number {
 export function useNowIso(enabled: boolean): string {
   return new Date(useNow(enabled)).toISOString();
 }
+
+const MINUTE_MS = 60_000;
+
+function getMinuteSnapshot(): number {
+  const now = getNowSnapshot();
+  return now - (now % MINUTE_MS);
+}
+
+/**
+ * The shared clock floored to the minute, for relative labels ("5m ago"). It
+ * rides the 1 Hz ticker but re-renders its caller only when the minute turns.
+ */
+export function useNowMinute(): number {
+  return useSyncExternalStore(subscribeNow, getMinuteSnapshot, getMinuteSnapshot);
+}
+
+function getHourSnapshot(): number {
+  // Local hour, so half-hour time zones turn at their own hour and midnight.
+  const hour = new Date(getNowSnapshot());
+  hour.setMinutes(0, 0, 0);
+  return hour.getTime();
+}
+
+/**
+ * The shared clock floored to the local hour, for greetings and day buckets
+ * ("Today", "Yesterday"); re-renders its caller once an hour.
+ */
+export function useNowHour(): number {
+  return useSyncExternalStore(subscribeNow, getHourSnapshot, getHourSnapshot);
+}

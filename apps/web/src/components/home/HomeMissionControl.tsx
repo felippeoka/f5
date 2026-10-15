@@ -32,8 +32,15 @@ import { cn, isMacPlatform } from "../../lib/utils";
 import { useStore } from "../../store";
 import { orderedPinnedThreadIds, toggleThreadPin } from "../../threadPinSnooze";
 import { useNextTurnQueueStore } from "../../nextTurnQueueStore";
-import { resolveThreadStatusForThread, type ThreadStatus } from "../../threadStatus";
-import type { Project, Thread } from "../../types";
+import { useNowHour } from "../../lib/nowTicker";
+import {
+  liveThreadActivityAt,
+  type ThreadSummary,
+  useLiveActivityBuckets,
+  useThreadSummaries,
+} from "../../threadSelectors";
+import type { ThreadStatus } from "../../threadStatus";
+import type { Project } from "../../types";
 import { resolvePrimaryNewThreadProjectId } from "../Sidebar.logic";
 import { LowDiskSpaceBanner } from "../chat/LowDiskSpaceBanner";
 import { ProjectIcon } from "../ProjectIcon";
@@ -54,17 +61,17 @@ const QUICK_JUMP_PROJECT_LIMIT = 4;
 type RecentStatusFilter = "all" | "completed" | "idle";
 
 interface MissionControlBuckets {
-  attention: Thread[];
-  working: Thread[];
-  recent: Thread[];
+  attention: ThreadSummary[];
+  working: ThreadSummary[];
+  recent: ThreadSummary[];
   workingOverflow: number;
 }
 
 function bucketThreads(
-  sortedThreads: ReadonlyArray<Thread>,
+  sortedThreads: ReadonlyArray<ThreadSummary>,
   statusByThreadId: ReadonlyMap<ThreadId, ThreadStatus>,
   pausedQueueThreadIds: ReadonlySet<ThreadId>,
-  workflowThreads: ReadonlyArray<Thread>,
+  workflowThreads: ReadonlyArray<ThreadSummary>,
 ): MissionControlBuckets {
   const {
     attention,
@@ -223,7 +230,7 @@ function QuickStartChips({ chips }: { readonly chips: ReadonlyArray<QuickStartCh
 
 function SmartResumeBanner(props: {
   readonly awayLabel: string;
-  readonly thread: Thread;
+  readonly thread: ThreadSummary;
   readonly project: Project | undefined;
   readonly onResume: () => void;
   readonly onDismiss: () => void;
@@ -275,9 +282,10 @@ function SmartResumeBanner(props: {
 }
 
 export function HomeMissionControl() {
+  "use memo";
   const navigate = useNavigate();
   const projects = useStore((state) => state.projects);
-  const threads = useStore((state) => state.threads);
+  const threads = useThreadSummaries();
   const planningWorkflows = useStore((state) => state.planningWorkflows);
   const codeReviewWorkflows = useStore((state) => state.codeReviewWorkflows);
   const investigationWorkflows = useStore((state) => state.investigationWorkflows);
@@ -331,7 +339,7 @@ export function HomeMissionControl() {
     const workflowThreads = selectVisibleWorkflowThreads(workflowInput);
     const statusById = new Map<ThreadId, ThreadStatus>();
     for (const thread of [...sorted, ...workflowThreads]) {
-      statusById.set(thread.id, resolveThreadStatusForThread(thread));
+      statusById.set(thread.id, thread.status);
     }
     const projectMap = new Map<ProjectId, Project>();
     for (const project of projects) {
@@ -340,13 +348,13 @@ export function HomeMissionControl() {
     const reasonByThreadId = new Map<ThreadId, string>();
     for (const thread of [...sorted, ...workflowThreads]) {
       const status = statusById.get(thread.id) ?? "none";
-      const tag = resolveAttentionReasonTag(status, thread.lastInteractionAt);
+      const tag = resolveAttentionReasonTag(status, liveThreadActivityAt(thread));
       if (pausedQueueThreadIds.has(thread.id))
         reasonByThreadId.set(thread.id, QUEUE_PAUSED_REASON_TAG);
       else if (tag) reasonByThreadId.set(thread.id, tag);
     }
 
-    const recentAllList: Thread[] = [];
+    const recentAllList: ThreadSummary[] = [];
     for (const thread of sorted) {
       const status = statusById.get(thread.id) ?? "none";
       if (
@@ -407,10 +415,10 @@ export function HomeMissionControl() {
 
   // Pinned threads float above everything and ignore the Recent filters.
   const pinnedThreads = useMemo(() => {
-    if (pinnedThreadIds.length === 0) return [] as Thread[];
-    const byId = new Map<ThreadId, Thread>();
+    if (pinnedThreadIds.length === 0) return [] as ThreadSummary[];
+    const byId = new Map<ThreadId, ThreadSummary>();
     for (const thread of threads) byId.set(thread.id, thread);
-    const collected: Thread[] = [];
+    const collected: ThreadSummary[] = [];
     for (const id of pinnedThreadIds) {
       const thread = byId.get(id);
       if (thread) collected.push(thread);
@@ -429,7 +437,7 @@ export function HomeMissionControl() {
       statusFilter === "all"
         ? filteredByProject
         : filteredByProject.filter((thread) => {
-            const status = resolveThreadStatusForThread(thread);
+            const status = thread.status;
             if (statusFilter === "completed") return status === "completed";
             return status === "none";
           });
@@ -466,7 +474,11 @@ export function HomeMissionControl() {
 
   const onTogglePin = useCallback(
     (threadId: ThreadId) => {
-      void toggleThreadPin({ threadId, threads, expectedRevision: pinRevision }).catch((error) => {
+      void toggleThreadPin({
+        threadId,
+        threads: useStore.getState().threads,
+        expectedRevision: pinRevision,
+      }).catch((error) => {
         toastManager.add({
           type: "error",
           title: "Failed to update pinned threads",
@@ -474,7 +486,7 @@ export function HomeMissionControl() {
         });
       });
     },
-    [pinRevision, threads],
+    [pinRevision],
   );
 
   const modifierKey =
@@ -541,8 +553,19 @@ export function HomeMissionControl() {
     writeLastHomeVisitAt();
   }, []);
 
-  const recentGroups = useMemo(() => groupThreadsByActivity(recentTruncated), [recentTruncated]);
-  const greeting = resolveGreeting();
+  // A clock input, so neither the greeting nor "Today" freezes while Home stays open.
+  const nowHour = useNowHour();
+  const recentBuckets = useLiveActivityBuckets(recentTruncated, nowHour);
+  const recentGroups = useMemo(
+    () =>
+      groupThreadsByActivity(
+        recentTruncated,
+        new Date(nowHour),
+        (_thread, index) => recentBuckets[index] ?? "earlier",
+      ),
+    [nowHour, recentBuckets, recentTruncated],
+  );
+  const greeting = resolveGreeting(new Date(nowHour).getHours());
   const defaultProjectId = resolvePrimaryNewThreadProjectId({
     activeThreadProjectId: null,
     activeDraftProjectId: null,
@@ -550,13 +573,17 @@ export function HomeMissionControl() {
     firstProjectId: projects[0]?.id ?? null,
   });
 
-  // One flat index so j/k spans every section in reading order.
-  let rowCursor = 0;
-  const nextRowIndex = () => {
-    const value = rowCursor;
-    rowCursor += 1;
-    return value;
-  };
+  // One flat index so j/k spans every section in reading order: each section
+  // starts where the previous one's rendered rows end.
+  const attentionRowOffset = pinnedThreads.length;
+  const workingRowOffset = attentionRowOffset + visibleAttention.length;
+  const recentRowOffset = workingRowOffset + buckets.working.length;
+  const recentGroupRowOffsets: number[] = [];
+  let recentGroupRowOffset = recentRowOffset;
+  for (const group of recentGroups) {
+    recentGroupRowOffsets.push(recentGroupRowOffset);
+    recentGroupRowOffset += group.threads.length;
+  }
 
   const projectFilterOptions: ReadonlyArray<{
     readonly value: ProjectId | "all";
@@ -587,9 +614,7 @@ export function HomeMissionControl() {
         onClick: () => onSelectThread(mostRecentThread.id),
       });
     }
-    const firstPlanReady = buckets.attention.find(
-      (thread) => resolveThreadStatusForThread(thread) === "plan-ready",
-    );
+    const firstPlanReady = buckets.attention.find((thread) => thread.status === "plan-ready");
     if (firstPlanReady && firstPlanReady.id !== mostRecentThread?.id) {
       const title = firstPlanReady.title.trim() || "Untitled thread";
       chips.push({
@@ -640,13 +665,13 @@ export function HomeMissionControl() {
         {pinnedThreads.length > 0 ? (
           <Section label="Pinned" count={pinnedThreads.length}>
             <div className="flex flex-col">
-              {pinnedThreads.map((thread) => (
+              {pinnedThreads.map((thread, index) => (
                 <HomeThreadRow
                   key={thread.id}
                   thread={thread}
                   project={projectsById.get(thread.projectId)}
                   onSelect={onSelectThread}
-                  rowIndex={nextRowIndex()}
+                  rowIndex={index}
                   isPinned
                   onTogglePin={onTogglePin}
                 />
@@ -658,14 +683,14 @@ export function HomeMissionControl() {
         {buckets.attention.length > 0 ? (
           <Section label="Needs you" count={buckets.attention.length}>
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-              {visibleAttention.map((thread) => (
+              {visibleAttention.map((thread, index) => (
                 <HomeAttentionCard
                   key={thread.id}
                   thread={thread}
                   project={projectsById.get(thread.projectId)}
                   status={statusByThreadId.get(thread.id)}
                   reasonTag={attentionReasonByThreadId.get(thread.id)}
-                  rowIndex={nextRowIndex()}
+                  rowIndex={attentionRowOffset + index}
                   onOpen={onOpenAttentionThread}
                 />
               ))}
@@ -691,13 +716,13 @@ export function HomeMissionControl() {
             overflow={buckets.workingOverflow}
           >
             <div className="flex flex-col">
-              {buckets.working.map((thread) => (
+              {buckets.working.map((thread, index) => (
                 <HomeThreadRow
                   key={thread.id}
                   thread={thread}
                   project={projectsById.get(thread.projectId)}
                   onSelect={onSelectThread}
-                  rowIndex={nextRowIndex()}
+                  rowIndex={workingRowOffset + index}
                   isPinned={pinnedIdSet.has(thread.id)}
                   onTogglePin={onTogglePin}
                   urgencyStatus={statusByThreadId.get(thread.id)}
@@ -736,18 +761,18 @@ export function HomeMissionControl() {
                 </p>
               ) : (
                 <>
-                  {recentGroups.map((group) => (
+                  {recentGroups.map((group, groupIndex) => (
                     <div key={group.bucket} className="flex flex-col">
                       <SectionLabel as="h3" className="px-2.5">
                         {group.label}
                       </SectionLabel>
-                      {group.threads.map((thread) => (
+                      {group.threads.map((thread, index) => (
                         <HomeThreadRow
                           key={thread.id}
                           thread={thread}
                           project={projectsById.get(thread.projectId)}
                           onSelect={onSelectThread}
-                          rowIndex={nextRowIndex()}
+                          rowIndex={(recentGroupRowOffsets[groupIndex] ?? recentRowOffset) + index}
                           isPinned={pinnedIdSet.has(thread.id)}
                           onTogglePin={onTogglePin}
                         />
