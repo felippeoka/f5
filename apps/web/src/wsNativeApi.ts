@@ -821,6 +821,7 @@ export function createWsNativeApi(): NativeApi {
       consumeResetCredit: (input) => transport.request(USAGE_WS_METHODS.consumeResetCredit, input),
       getAccounts: (input) => transport.request(USAGE_WS_METHODS.getAccounts, input),
       getSummary: (input) => transport.request(USAGE_WS_METHODS.getSummary, input),
+      getQuotaHistory: () => transport.request(USAGE_WS_METHODS.getQuotaHistory, {}),
     },
     nativeOperations: {
       resolve: (input) => transport.request(NATIVE_OPERATION_WS_METHODS.resolve, input),

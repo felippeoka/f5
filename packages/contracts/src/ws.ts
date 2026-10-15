@@ -286,6 +286,7 @@ import {
   USAGE_WS_METHODS,
   UsageConsumeResetCreditInput,
   UsageGetAccountsInput,
+  UsageGetQuotaHistoryInput,
   UsageGetSummaryInput,
 } from "./usage";
 import { ELICITATION_WS_METHODS, ElicitationSubmitInput } from "./elicitation";
@@ -570,6 +571,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(USAGE_WS_METHODS.consumeResetCredit, UsageConsumeResetCreditInput),
   tagRequestBody(USAGE_WS_METHODS.getAccounts, UsageGetAccountsInput),
   tagRequestBody(USAGE_WS_METHODS.getSummary, UsageGetSummaryInput),
+  tagRequestBody(USAGE_WS_METHODS.getQuotaHistory, UsageGetQuotaHistoryInput),
   tagRequestBody(NATIVE_OPERATION_WS_METHODS.resolve, NativeOperationResolutionInput),
   tagRequestBody(NATIVE_OPERATION_WS_METHODS.fork, NativeForkInput),
   tagRequestBody(NATIVE_OPERATION_WS_METHODS.execute, NativeOperationInput),

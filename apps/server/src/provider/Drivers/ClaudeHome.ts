@@ -4,6 +4,22 @@ import type { ClaudeSettings } from "@t3tools/contracts";
 import { Effect, Path } from "effect";
 
 import { expandHomePath } from "../../pathExpansion.ts";
+import { accountUsageIdentity } from "../../usage/accountUsage.ts";
+
+/**
+ * Account identity for persisted usage history. Hashes the environment the
+ * usage probe actually runs with, so a home-only configuration change is a
+ * different account.
+ */
+export function claudeAccountUsageIdentity(binaryPath: string, env: NodeJS.ProcessEnv): string {
+  return accountUsageIdentity("claude", [
+    binaryPath,
+    env.HOME,
+    env.USERPROFILE,
+    env.CLAUDE_CONFIG_DIR,
+    env.ANTHROPIC_API_KEY,
+  ]);
+}
 
 export const resolveClaudeHomePath = Effect.fn("resolveClaudeHomePath")(function* (
   config: Pick<ClaudeSettings, "homePath">,

@@ -54,7 +54,11 @@ import {
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { buildAccountExecutionEnvironment } from "../../providerProcessEnv";
-import { makeClaudeContinuationGroupKey, makeClaudeEnvironment } from "./ClaudeHome.ts";
+import {
+  claudeAccountUsageIdentity,
+  makeClaudeContinuationGroupKey,
+  makeClaudeEnvironment,
+} from "./ClaudeHome.ts";
 import { parseClaudeLaunchArgs } from "@t3tools/shared/cliArgs";
 
 export const resolveClaudeOneOffLaunchArgs = Effect.fn("resolveClaudeOneOffLaunchArgs")(function* (
@@ -226,7 +230,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
             ];
           }),
         ),
-        { readerOwnsTimeout: true },
+        {
+          identity: claudeAccountUsageIdentity(
+            effectiveConfig.binaryPath,
+            claudeProcessEnvironment,
+          ),
+          readerOwnsTimeout: true,
+        },
       );
 
       const checkProvider = checkClaudeProviderStatus(

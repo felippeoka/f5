@@ -189,7 +189,12 @@ export function readCodexAccountSections(client: CodexControlClient, timeoutMs =
 // Owned by the provider instance scope: configuration changes retire both the
 // cached account data and any in-flight control process.
 export function makeCodexAccountUsage(
-  instance: { instanceId: ProviderInstanceId; displayName: string; enabled: boolean },
+  instance: {
+    instanceId: ProviderInstanceId;
+    displayName: string;
+    enabled: boolean;
+    identity: string;
+  },
   environment: CodexControlEnvironmentConfig & { processEnvironment: NodeJS.ProcessEnv },
 ) {
   return makeAccountUsageCapability(
@@ -203,6 +208,6 @@ export function makeCodexAccountUsage(
       sections: [emptyAccountSection("codex-tokens"), emptyAccountSection("codex-limits")],
     },
     probeCodexAccountSections(environment),
-    { readerOwnsTimeout: true },
+    { identity: instance.identity, readerOwnsTimeout: true },
   );
 }

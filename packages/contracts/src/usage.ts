@@ -15,6 +15,7 @@ export const USAGE_WS_METHODS = {
   getSummary: "usage.getSummary",
   getAccounts: "usage.getAccounts",
   consumeResetCredit: "usage.consumeResetCredit",
+  getQuotaHistory: "usage.getQuotaHistory",
 } as const;
 
 export const UsageRange = Schema.Literals(["24h", "7d", "30d", "90d"]);
@@ -55,9 +56,25 @@ export type UsageTurnFact = typeof UsageTurnFact.Type;
 export const UsageGetSummaryInput = Schema.Struct({
   range: UsageRange,
   provider: Schema.optional(ProviderKind),
+  projectId: Schema.optional(ProjectId),
   timeZone: TrimmedNonEmptyString,
 });
 export type UsageGetSummaryInput = typeof UsageGetSummaryInput.Type;
+
+/**
+ * Per-field reporting coverage. Counts come from the persisted nullable
+ * columns, so a reported zero counts as present.
+ */
+export const UsageFieldReporting = Schema.Struct({
+  recordedTurnCount: NonNegativeInt,
+  legacyCostEventCount: NonNegativeInt,
+  inputTokenTurnCount: NonNegativeInt,
+  outputTokenTurnCount: NonNegativeInt,
+  cacheReadTokenTurnCount: NonNegativeInt,
+  cacheWriteTokenTurnCount: NonNegativeInt,
+  totalTokenTurnCount: NonNegativeInt,
+});
+export type UsageFieldReporting = typeof UsageFieldReporting.Type;
 
 export const UsageMetrics = Schema.Struct({
   turnCount: NonNegativeInt,
@@ -71,6 +88,9 @@ export const UsageMetrics = Schema.Struct({
   estimatedCostUsd: Schema.optional(Schema.NullOr(NonNegativeNumber)),
   pricedTurnCount: NonNegativeInt,
   unpricedTurnCount: NonNegativeInt,
+  reporting: Schema.optional(Schema.NullOr(UsageFieldReporting)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
 });
 export type UsageMetrics = typeof UsageMetrics.Type;
 
@@ -87,6 +107,7 @@ export const UsageBucket = Schema.Struct({
   key: TrimmedNonEmptyString,
   label: TrimmedNonEmptyString,
   startAt: IsoDateTime,
+  endAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(Schema.withDecodingDefault(() => null)),
   metrics: UsageMetrics,
   composition: Schema.optional(Schema.NullOr(UsageTokenComposition)).pipe(
     Schema.withDecodingDefault(() => null),
@@ -100,6 +121,33 @@ export const UsageProviderBreakdown = Schema.Struct({
   metrics: UsageMetrics,
 });
 export type UsageProviderBreakdown = typeof UsageProviderBreakdown.Type;
+
+export const UsageProjectBreakdown = Schema.Struct({
+  projectId: Schema.NullOr(ProjectId),
+  title: Schema.NullOr(TrimmedNonEmptyString),
+  deleted: Schema.Boolean,
+  metrics: UsageMetrics,
+});
+export type UsageProjectBreakdown = typeof UsageProjectBreakdown.Type;
+
+export const UsageThreadBreakdown = Schema.Struct({
+  threadId: ThreadId,
+  projectId: Schema.NullOr(ProjectId),
+  title: Schema.NullOr(TrimmedNonEmptyString),
+  deleted: Schema.Boolean,
+  metrics: UsageMetrics,
+});
+export type UsageThreadBreakdown = typeof UsageThreadBreakdown.Type;
+
+export const UsageProjectScope = Schema.Struct({
+  selectedProjectId: Schema.NullOr(ProjectId),
+  /** Every project with data in the range and provider; ignores the project filter. */
+  byProject: Schema.Array(UsageProjectBreakdown),
+  /** Top threads, filtered to the selected project. */
+  topThreads: Schema.Array(UsageThreadBreakdown),
+  threadCount: NonNegativeInt,
+});
+export type UsageProjectScope = typeof UsageProjectScope.Type;
 
 export const UsageCoverage = Schema.Struct({
   coverageStartedAt: IsoDateTime,
@@ -175,6 +223,15 @@ export const UsageSummary = Schema.Struct({
   buckets: Schema.Array(UsageBucket),
   byProvider: Schema.Array(UsageProviderBreakdown),
   coverage: UsageCoverage,
+  nextBucketAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  projectScope: Schema.optional(Schema.NullOr(UsageProjectScope)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  previousMetrics: Schema.optional(Schema.NullOr(UsageMetrics)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
 });
 export type UsageSummary = typeof UsageSummary.Type;
 
@@ -297,3 +354,23 @@ export const UsageAccount = Schema.Struct({
 export type UsageAccount = typeof UsageAccount.Type;
 export const UsageAccounts = Schema.Array(UsageAccount);
 export type UsageAccounts = typeof UsageAccounts.Type;
+
+export const UsageQuotaSample = Schema.Struct({
+  at: IsoDateTime,
+  usedPercent: NonNegativeNumber,
+});
+export type UsageQuotaSample = typeof UsageQuotaSample.Type;
+export const UsageQuotaSeries = Schema.Struct({
+  accountKey: TrimmedNonEmptyString,
+  windowKey: TrimmedNonEmptyString,
+  resetsAt: IsoDateTime,
+  samples: Schema.Array(UsageQuotaSample),
+});
+export type UsageQuotaSeries = typeof UsageQuotaSeries.Type;
+export const UsageQuotaHistory = Schema.Struct({
+  generatedAt: IsoDateTime,
+  series: Schema.Array(UsageQuotaSeries),
+});
+export type UsageQuotaHistory = typeof UsageQuotaHistory.Type;
+export const UsageGetQuotaHistoryInput = Schema.Struct({});
+export type UsageGetQuotaHistoryInput = typeof UsageGetQuotaHistoryInput.Type;

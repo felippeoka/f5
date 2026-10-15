@@ -8,11 +8,15 @@ export function emptyAccountSection(kind: AccountUsageSection["kind"]): AccountU
   return { kind, outcome: "unavailable", lastAttemptAt: null, snapshot: null, errorCode: null };
 }
 
-/** Each capability belongs to its provider scope; request cancellation cannot cancel its jobs. */
+/**
+ * Each capability belongs to its provider scope; request cancellation cannot
+ * cancel its jobs. `identity` is a hash of the account configuration, so
+ * persisted history never stores raw secrets.
+ */
 export const makeAccountUsageCapability = <E>(
   initial: UsageAccount,
   read: Effect.Effect<ReadonlyArray<AccountUsageSection>, E>,
-  options: { readonly readerOwnsTimeout?: boolean } = {},
+  options: { readonly identity: string; readonly readerOwnsTimeout?: boolean },
 ) =>
   Effect.gen(function* () {
     const scope = yield* Effect.scope;
@@ -108,10 +112,13 @@ export const makeAccountUsageCapability = <E>(
           );
         }),
       );
-    const refreshAccount = (permits: Parameters<AccountUsageCapability["refresh"]>[1]) =>
+    const refreshAccount: NonNullable<AccountUsageCapability["refreshAccount"]> = (
+      permits,
+      mode = "force",
+    ) =>
       Effect.gen(function* () {
         const previousCompletion = yield* Ref.get(lastCompleted);
-        yield* refresh("force", permits);
+        yield* refresh(mode, permits);
         const pending = inFlight;
         if (pending) yield* Deferred.await(pending);
         const snapshot = yield* Ref.get(state);
@@ -121,12 +128,13 @@ export const makeAccountUsageCapability = <E>(
         return {
           snapshot,
           fresh,
-          ...(!joined && completed !== null
+          ...(mode === "force" && !joined && completed !== null
             ? { nextAllowedAt: new Date(completed + 5000).toISOString() }
             : {}),
         };
       });
     return {
+      identity: options.identity,
       getSnapshot: Ref.get(state),
       refresh,
       refreshAccount,

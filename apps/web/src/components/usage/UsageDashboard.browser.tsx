@@ -1,10 +1,14 @@
 import "../../index.css";
 
-import type { UsageMetrics, UsageSummary, UsageAccounts } from "@t3tools/contracts";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { page } from "vitest/browser";
-import { render } from "vitest-browser-react";
-
+import {
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  type UsageAccounts,
+  type UsageBucket,
+  type UsageMetrics,
+  type UsageSummary,
+} from "@t3tools/contracts";
 import {
   QueryClient,
   QueryClientProvider,
@@ -12,25 +16,67 @@ import {
   onlineManager,
 } from "@tanstack/react-query";
 import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
+import type { ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { page, userEvent } from "vitest/browser";
+import { render } from "vitest-browser-react";
+
+import {
   decodeUsageSummary,
   usageAccountsQueryOptions,
   usageQueryKeys,
 } from "../../lib/usageReactQuery";
 import { ResetCreditButton } from "./ResetCreditButton";
-import { ProviderInstanceId } from "@t3tools/contracts";
 import { UsageDashboard, UsageDashboardView } from "./UsageDashboard";
 
 const api = vi.hoisted(() => ({
   getSummary: vi.fn(),
   getAccounts: vi.fn(),
+  getQuotaHistory: vi.fn(),
   consumeResetCredit: vi.fn(),
+}));
+const connection = vi.hoisted(() => ({
+  state: {
+    phase: "connected" as "connected" | "reconnecting",
+    attemptCount: 1,
+    connectedAt: "2026-08-15T00:00:00.000Z" as string | null,
+    disconnectedAt: null,
+    lastError: null,
+    lastErrorAt: null,
+  },
 }));
 vi.mock("../../hooks/useSettings", () => ({
   useSettings: (select: (settings: { usagePriceOverrides: [] }) => unknown) =>
     select({ usagePriceOverrides: [] }),
   useUpdateSettings: () => ({ updateSettings: vi.fn() }),
 }));
-vi.mock("../../nativeApi", () => ({ ensureNativeApi: () => ({ usage: api }) }));
+const listeners = vi.hoisted(() => ({
+  domain: new Set<(event: { type: string; payload?: unknown }) => void>(),
+  storage: new Set<() => void>(),
+}));
+vi.mock("../../nativeApi", () => ({
+  ensureNativeApi: () => ({
+    usage: api,
+    orchestration: {
+      onDomainEvent: (listener: (event: { type: string; payload?: unknown }) => void) => {
+        listeners.domain.add(listener);
+        return () => listeners.domain.delete(listener);
+      },
+    },
+    storage: {
+      onInvalidated: (listener: () => void) => {
+        listeners.storage.add(listener);
+        return () => listeners.storage.delete(listener);
+      },
+    },
+  }),
+}));
+vi.mock("../../wsConnectionState", () => ({ useWsConnectionState: () => connection.state }));
 
 function metrics(overrides: Partial<UsageMetrics> = {}): UsageMetrics {
   return {
@@ -44,12 +90,20 @@ function metrics(overrides: Partial<UsageMetrics> = {}): UsageMetrics {
     providerReportedCostUsd: 0.42,
     pricedTurnCount: 1,
     unpricedTurnCount: 1,
+    reporting: {
+      recordedTurnCount: 2,
+      legacyCostEventCount: 0,
+      inputTokenTurnCount: 2,
+      outputTokenTurnCount: 2,
+      cacheReadTokenTurnCount: 2,
+      cacheWriteTokenTurnCount: 2,
+      totalTokenTurnCount: 2,
+    },
     ...overrides,
   };
 }
 
 const codex = {
-  status: "available",
   fetchedAt: "2026-08-15T12:00:00.000Z",
   tokenSummary: {
     lifetimeTokens: "1250000",
@@ -72,8 +126,8 @@ const codex = {
       credits: { hasCredits: true, unlimited: false, balance: "12.50" },
     },
   ],
-  message: null,
 };
+
 function accounts(): UsageAccounts {
   return [
     {
@@ -106,28 +160,33 @@ function accounts(): UsageAccounts {
   ];
 }
 
-function summary(): UsageSummary {
+const composition = {
+  uncachedInputTokens: 200,
+  outputTokens: 100,
+  cacheReadTokens: 300,
+  cacheWriteTokens: 0,
+  unattributedTokens: 0,
+};
+
+function bucket(key: string, overrides: Partial<UsageBucket> = {}): UsageBucket {
+  return {
+    key,
+    label: key.slice(5),
+    startAt: `${key}T00:00:00.000Z`,
+    endAt: null,
+    metrics: metrics({ turnCount: 1, totalTokens: 600 }),
+    composition,
+    ...overrides,
+  };
+}
+
+function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
   return {
     range: "7d",
     timeZone: "UTC",
     generatedAt: "2026-08-15T12:00:00.000Z",
     metrics: metrics(),
-    buckets: [
-      {
-        key: "2026-08-14",
-        label: "Aug 14",
-        composition: null,
-        startAt: "2026-08-14T00:00:00.000Z",
-        metrics: metrics({ turnCount: 1, totalTokens: 400 }),
-      },
-      {
-        key: "2026-08-15",
-        label: "Aug 15",
-        composition: null,
-        startAt: "2026-08-15T00:00:00.000Z",
-        metrics: metrics({ turnCount: 1, totalTokens: 800 }),
-      },
-    ],
+    buckets: [bucket("2026-08-14"), bucket("2026-08-15")],
     byProvider: [
       { provider: "codex", model: "gpt-5.6", metrics: metrics() },
       {
@@ -144,6 +203,15 @@ function summary(): UsageSummary {
           providerReportedCostUsd: null,
           pricedTurnCount: 0,
           unpricedTurnCount: 1,
+          reporting: {
+            recordedTurnCount: 1,
+            legacyCostEventCount: 0,
+            inputTokenTurnCount: 0,
+            outputTokenTurnCount: 0,
+            cacheReadTokenTurnCount: 0,
+            cacheWriteTokenTurnCount: 0,
+            totalTokenTurnCount: 0,
+          },
         }),
       },
     ],
@@ -151,20 +219,94 @@ function summary(): UsageSummary {
       coverageStartedAt: "2026-08-12T00:00:00.000Z",
       rangeStartedAt: "2026-08-09T00:00:00.000Z",
       partialHistory: true,
-      historicalCostTurnCount: 1,
+      historicalCostTurnCount: 0,
       tokenUnreportedTurnCount: 1,
       costUnreportedTurnCount: 1,
       providersMissingTokens: ["cursor"],
       providersMissingCost: ["cursor"],
     },
+    nextBucketAt: null,
+    projectScope: null,
+    previousMetrics: null,
+    ...overrides,
   };
 }
 
-describe("UsageDashboardView", () => {
-  afterEach(() => {
-    document.body.innerHTML = "";
-  });
+const projectA = ProjectId.makeUnsafe("project-a");
+const projectB = ProjectId.makeUnsafe("project-b");
 
+function scoped(): UsageSummary {
+  return summary({
+    projectScope: {
+      selectedProjectId: null,
+      byProject: [
+        {
+          projectId: projectA,
+          title: "Alpha",
+          deleted: false,
+          metrics: metrics({ totalTokens: 900 }),
+        },
+        { projectId: projectB, title: null, deleted: true, metrics: metrics({ totalTokens: 300 }) },
+        {
+          projectId: null,
+          title: null,
+          deleted: false,
+          metrics: metrics({ totalTokens: 0, providerReportedCostUsd: 0.1 }),
+        },
+      ],
+      topThreads: [
+        {
+          threadId: ThreadId.makeUnsafe("thread-live"),
+          projectId: projectA,
+          title: "Fix bug",
+          deleted: false,
+          metrics: metrics({ totalTokens: 800 }),
+        },
+        {
+          threadId: ThreadId.makeUnsafe("thread-gone"),
+          projectId: projectB,
+          title: null,
+          deleted: true,
+          metrics: metrics({ totalTokens: 300 }),
+        },
+      ],
+      threadCount: 14,
+    },
+  });
+}
+
+async function renderWithRouter(ui: ReactNode) {
+  const router = createRouter({
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+    routeTree: createRootRoute({ component: () => ui }),
+  });
+  return render(<RouterProvider router={router} />);
+}
+
+const headers = () => [...document.querySelectorAll("th")].map((th) => th.textContent);
+
+function client() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+const limitsTab = () => <UsageDashboard search={{ tab: "limits" }} onSearchChange={() => {}} />;
+
+async function renderDashboard(queryClient: QueryClient, ui: ReactNode = <UsageDashboard />) {
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
+
+beforeEach(() => {
+  api.getQuotaHistory.mockResolvedValue({ generatedAt: codex.fetchedAt, series: [] });
+});
+
+afterEach(() => {
+  vi.resetAllMocks();
+  focusManager.setFocused(undefined);
+  onlineManager.setOnline(true);
+  document.body.innerHTML = "";
+});
+
+describe("UsageDashboardView", () => {
   it("labels provider-reported values and keeps missing values unreported", async () => {
     const onRangeChange = vi.fn();
     const screen = await render(
@@ -176,7 +318,6 @@ describe("UsageDashboardView", () => {
         fetching={false}
       />,
     );
-
     try {
       await expect
         .element(
@@ -186,13 +327,17 @@ describe("UsageDashboardView", () => {
         )
         .toBeVisible();
       await expect
-        .element(page.getByRole("img", { name: "Token usage chart for 7 days (UTC)" }))
+        .element(page.getByRole("group", { name: "Token usage chart for 7 days (UTC)" }))
         .toBeVisible();
       await expect
         .element(page.getByText("$0.42 + unpriced", { exact: true }).first())
         .toBeVisible();
       await expect.element(page.getByText("Unpriced", { exact: true }).first()).toBeVisible();
+      await expect.element(page.getByText("Unreported", { exact: true })).toBeVisible();
       await expect.element(page.getByText(/no price was estimated/i)).toBeVisible();
+      await expect
+        .element(page.getByText(/Complete retained recording is available from/))
+        .toBeVisible();
       await expect
         .element(page.getByText("Codex — default configuration", { exact: true }))
         .toBeVisible();
@@ -201,9 +346,348 @@ describe("UsageDashboardView", () => {
       await expect
         .element(page.getByRole("progressbar", { name: "Codex · 5-hour limit" }))
         .toBeVisible();
-
       await page.getByRole("button", { name: "30 days" }).click();
       expect(onRangeChange).toHaveBeenCalledWith("30d");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("renders an entire older summary without coverage, scope, or bucket ends", async () => {
+    const old = summary() as Record<string, unknown>;
+    delete old.projectScope;
+    delete old.previousMetrics;
+    delete old.nextBucketAt;
+    const strip = (value: UsageMetrics) => {
+      const { reporting: _reporting, ...rest } = value;
+      return rest;
+    };
+    const decoded = decodeUsageSummary({
+      ...old,
+      metrics: strip(summary().metrics),
+      buckets: summary().buckets.map(({ composition: _c, endAt: _e, ...entry }) => ({
+        ...entry,
+        metrics: strip(entry.metrics),
+      })),
+      byProvider: summary().byProvider.map((entry) => ({
+        ...entry,
+        metrics: strip(entry.metrics),
+      })),
+    });
+    expect(decoded.buckets[0]?.composition).toBeNull();
+    expect(decoded.metrics.reporting).toBeNull();
+    expect(decoded.projectScope).toBeNull();
+    const screen = await render(
+      <UsageDashboardView summary={decoded} range="7d" onRangeChange={() => {}} fetching={false} />,
+    );
+    try {
+      await expect
+        .element(page.getByRole("group", { name: "Token usage chart for 7 days (UTC)" }))
+        .toBeVisible();
+      expect(headers()).toContain("Usage records");
+      await expect.element(page.getByRole("button", { name: "Recorded turns" })).toBeDisabled();
+      await expect
+        .element(page.getByText("Field coverage unavailable from this server."))
+        .toBeVisible();
+      await expect.element(page.getByText("Field coverage unavailable").first()).toBeVisible();
+      await expect.element(page.getByText("Projects and threads")).not.toBeInTheDocument();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("shows deltas, New, hidden deltas, and cache rate", async () => {
+    const current = metrics({ totalTokens: 1_500, providerReportedCostUsd: 1, pricedTurnCount: 1 });
+    const screen = await render(
+      <UsageDashboardView
+        summary={summary({
+          metrics: current,
+          previousMetrics: metrics({
+            totalTokens: 1_000,
+            providerReportedCostUsd: 0,
+            pricedTurnCount: 1,
+          }),
+        })}
+        range="7d"
+        fetching={false}
+      />,
+    );
+    try {
+      await expect.element(page.getByText("+50% vs previous 7 days")).toBeVisible();
+      await expect.element(page.getByText("New vs previous 7 days")).toBeVisible();
+      await expect.element(page.getByText("60% of input served from cache")).toBeVisible();
+      await screen.rerender(
+        <UsageDashboardView
+          summary={summary({
+            metrics: current,
+            previousMetrics: metrics({
+              totalTokens: 1_000,
+              pricedTurnCount: 0,
+              reporting: { ...metrics().reporting!, totalTokenTurnCount: 1 },
+            }),
+          })}
+          range="7d"
+          fetching={false}
+        />,
+      );
+      await expect.element(page.getByText(/vs previous 7 days/)).not.toBeInTheDocument();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("filters by project, links live threads, and labels deleted and unattributed rows", async () => {
+    const onProjectChange = vi.fn();
+    const screen = await renderWithRouter(
+      <UsageDashboardView
+        summary={scoped()}
+        range="7d"
+        fetching={false}
+        projectOptions={[{ id: projectA, label: "Alpha" }]}
+        onProjectChange={onProjectChange}
+      />,
+    );
+    try {
+      await expect.element(page.getByRole("button", { name: "Alpha" })).toBeVisible();
+      await expect.element(page.getByText("Unattributed historical cost")).toBeVisible();
+      await expect
+        .element(page.getByRole("button", { name: "Unknown project (deleted)" }))
+        .toBeVisible();
+      expect(headers()).toContain("Share");
+      await page.getByRole("button", { name: "Alpha" }).click();
+      expect(onProjectChange).toHaveBeenCalledWith(projectA);
+      await page.getByRole("button", { name: "Threads" }).click();
+      await expect
+        .element(page.getByRole("link", { name: "Fix bug" }))
+        .toHaveAttribute("href", "/thread-live");
+      await expect.element(page.getByText("Untitled thread (deleted)")).toBeVisible();
+      await expect
+        .element(page.getByRole("link", { name: "Untitled thread (deleted)" }))
+        .not.toBeInTheDocument();
+      await expect.element(page.getByText("Showing top 2 of 14 threads")).toBeVisible();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("shares projects of the whole catalog and threads of the selected total", async () => {
+    const value = scoped();
+    const screen = await renderWithRouter(
+      <UsageDashboardView
+        summary={{
+          ...value,
+          metrics: metrics({ totalTokens: 300 }),
+          projectScope: { ...value.projectScope!, selectedProjectId: projectB },
+        }}
+        range="7d"
+        fetching={false}
+      />,
+    );
+    try {
+      await expect.element(page.getByText("Projects and threads")).toBeVisible();
+      // 900 of 1,200 catalog tokens, not 900 of the filtered 300.
+      await expect.element(page.getByRole("cell", { name: "75%" })).toBeVisible();
+      await expect.element(page.getByRole("cell", { name: "25%" })).toBeVisible();
+      expect(document.body.textContent).not.toContain("300%");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("hides the share column when there are no tokens", async () => {
+    const value = scoped();
+    const screen = await renderWithRouter(
+      <UsageDashboardView
+        summary={{ ...value, metrics: metrics({ totalTokens: 0 }) }}
+        range="7d"
+        fetching={false}
+      />,
+    );
+    try {
+      await expect.element(page.getByText("Projects and threads")).toBeVisible();
+      // Projects still share the catalog's tokens.
+      expect(headers()).toContain("Share");
+      await page.getByRole("button", { name: "Threads" }).click();
+      await expect.element(page.getByText(/Showing top 2 of 14 threads/)).toBeVisible();
+      expect(headers()).not.toContain("Share");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("offers a Set price shortcut for unpriced models", async () => {
+    const onSetPrice = vi.fn();
+    const screen = await render(
+      <UsageDashboardView
+        summary={summary()}
+        range="7d"
+        fetching={false}
+        onSetPrice={onSetPrice}
+      />,
+    );
+    try {
+      await page.getByRole("button", { name: "Set price for gpt-5.6" }).click();
+      expect(onSetPrice).toHaveBeenCalledWith("codex", "gpt-5.6");
+    } finally {
+      await screen.unmount();
+    }
+  });
+});
+
+describe("usage chart", () => {
+  it("switches modes and shows cost empty and zero states", async () => {
+    const onMetricChange = vi.fn();
+    const view = (value: UsageSummary, metric: "tokens" | "cost" | "turns") => (
+      <UsageDashboardView
+        summary={value}
+        range="7d"
+        fetching={false}
+        metric={metric}
+        onMetricChange={onMetricChange}
+      />
+    );
+    const screen = await render(view(summary(), "tokens"));
+    try {
+      await page.getByRole("button", { name: "Cost", exact: true }).click();
+      expect(onMetricChange).toHaveBeenCalledWith("cost");
+      await screen.rerender(view(summary(), "cost"));
+      await expect
+        .element(page.getByRole("group", { name: "Cost chart for 7 days (UTC)" }))
+        .toBeVisible();
+      await expect.element(page.getByRole("list", { name: "Cost chart legend" })).toBeVisible();
+      await screen.rerender(view(summary(), "turns"));
+      await expect
+        .element(page.getByRole("group", { name: "Recorded turns chart for 7 days (UTC)" }))
+        .toBeVisible();
+      const unpriced = summary({
+        buckets: summary().buckets.map((entry) => ({
+          ...entry,
+          metrics: metrics({ pricedTurnCount: 0, providerReportedCostUsd: null }),
+        })),
+      });
+      await screen.rerender(view(unpriced, "cost"));
+      await expect.element(page.getByText("No priced activity in this range")).toBeVisible();
+      const zeroCost = summary({
+        buckets: summary().buckets.map((entry) => ({
+          ...entry,
+          metrics: metrics({ pricedTurnCount: 1, providerReportedCostUsd: 0 }),
+        })),
+      });
+      await screen.rerender(view(zeroCost, "cost"));
+      await expect
+        .element(page.getByRole("group", { name: "Cost chart for 7 days (UTC)" }))
+        .toBeVisible();
+      expect(document.body.textContent).toContain("$0.00");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("has one tab stop, arrow/Home/End navigation, a focus tooltip, and pinned details", async () => {
+    const buckets = Array.from({ length: 7 }, (_, index) =>
+      bucket(`2026-08-${(9 + index).toString().padStart(2, "0")}`, {
+        metrics: metrics({ totalTokens: index === 3 ? 0 : 100 * (index + 1) }),
+        composition:
+          index === 3
+            ? { ...composition, uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
+            : composition,
+      }),
+    );
+    const screen = await render(
+      <UsageDashboardView summary={summary({ buckets })} range="7d" fetching={false} />,
+    );
+    try {
+      const columns = document.querySelectorAll<HTMLButtonElement>("[data-chart-column]");
+      expect([...columns].filter((column) => column.tabIndex === 0)).toHaveLength(1);
+      expect(columns[6]!.tabIndex).toBe(0);
+      columns[6]!.focus();
+      await expect.element(page.getByTestId("usage-chart-tooltip")).toBeVisible();
+      await expect
+        .element(page.getByTestId("usage-chart-tooltip"))
+        .toHaveTextContent(/Reported cost: \$0\.42.*Recorded turns: 2/);
+      await userEvent.keyboard("{Home}");
+      expect(document.activeElement).toBe(columns[0]);
+      await userEvent.keyboard("{ArrowRight}{ArrowRight}{ArrowRight}");
+      expect(document.activeElement).toBe(columns[3]);
+      // Zero-valued buckets are selectable.
+      await userEvent.keyboard("{Enter}");
+      await expect
+        .element(page.getByRole("region", { name: "Selected interval details" }))
+        .toBeVisible();
+      await expect.element(page.getByText("Aug 12, 2026 (UTC)").last()).toBeVisible();
+      await page.getByRole("button", { name: "Next interval" }).click();
+      await expect.element(page.getByText("Aug 13, 2026 (UTC)").last()).toBeVisible();
+      columns[4]!.focus();
+      await userEvent.keyboard("{End}");
+      expect(document.activeElement).toBe(columns[6]);
+      await userEvent.keyboard("{Escape}");
+      await expect
+        .element(page.getByRole("region", { name: "Selected interval details" }))
+        .not.toBeInTheDocument();
+      await page.getByText("Show data table").click();
+      await expect.element(page.getByRole("cell", { name: "Aug 15, 2026 (UTC)" })).toBeVisible();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("keeps positive bar slots for 90 buckets at 320px and selects first, middle, and last", async () => {
+    await page.viewport(320, 900);
+    const buckets = Array.from({ length: 90 }, (_, index) =>
+      bucket(new Date(Date.UTC(2026, 4, 18 + index)).toISOString().slice(0, 10), {
+        metrics: metrics({ totalTokens: index % 10 === 0 ? 0 : 100 }),
+      }),
+    );
+    const screen = await render(
+      <UsageDashboardView
+        summary={summary({ range: "90d", buckets })}
+        range="90d"
+        fetching={false}
+      />,
+    );
+    try {
+      const columns = [...document.querySelectorAll<HTMLButtonElement>("[data-chart-column]")];
+      expect(columns).toHaveLength(90);
+      for (const column of columns)
+        expect(
+          column.querySelector<HTMLElement>("[data-chart-bar]")!.getBoundingClientRect().width,
+        ).toBeGreaterThan(0);
+      for (const index of [0, 45, 89]) {
+        await userEvent.click(columns[index]!);
+        expect(columns[index]!.getAttribute("aria-pressed")).toBe("true");
+        await userEvent.click(columns[index]!);
+      }
+    } finally {
+      await screen.unmount();
+      await page.viewport(1280, 900);
+    }
+  });
+
+  it("keeps the selection across refreshes and clamps when the key leaves the range", async () => {
+    const screen = await render(
+      <UsageDashboardView summary={summary()} range="7d" fetching={false} />,
+    );
+    try {
+      let columns = document.querySelectorAll<HTMLButtonElement>("[data-chart-column]");
+      await userEvent.click(columns[0]!);
+      expect(columns[0]!.getAttribute("aria-pressed")).toBe("true");
+      await screen.rerender(<UsageDashboardView summary={summary()} range="7d" fetching={false} />);
+      columns = document.querySelectorAll<HTMLButtonElement>("[data-chart-column]");
+      expect(columns[0]!.getAttribute("aria-pressed")).toBe("true");
+      await screen.rerender(
+        <UsageDashboardView
+          summary={summary({ buckets: [bucket("2026-08-15"), bucket("2026-08-16")] })}
+          range="7d"
+          fetching={false}
+        />,
+      );
+      await expect
+        .poll(() =>
+          document
+            .querySelectorAll<HTMLButtonElement>("[data-chart-column]")[1]
+            ?.getAttribute("aria-pressed"),
+        )
+        .toBe("true");
     } finally {
       await screen.unmount();
     }
@@ -211,427 +695,655 @@ describe("UsageDashboardView", () => {
 });
 
 describe("query-connected usage dashboard", () => {
-  afterEach(() => {
-    vi.resetAllMocks();
-    focusManager.setFocused(undefined);
-    onlineManager.setOnline(true);
-  });
-  it("keeps successful history visible after a rejected refresh and catches account rejection", async () => {
+  it("keeps successful history visible after a rejected refresh", async () => {
     api.getSummary.mockResolvedValueOnce(summary()).mockRejectedValue(new Error("offline"));
-    api.getAccounts.mockResolvedValueOnce(accounts()).mockRejectedValue(new Error("offline"));
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const screen = await render(
-      <QueryClientProvider client={client}>
-        <UsageDashboard />
-      </QueryClientProvider>,
-    );
+    api.getAccounts.mockResolvedValue(accounts());
+    const queryClient = client();
+    const screen = await renderDashboard(queryClient);
     try {
-      await expect.element(page.getByRole("heading", { name: "Usage", exact: true })).toBeVisible();
-      await expect.element(page.getByText("Codex — default configuration")).toBeVisible();
+      await expect.element(page.getByRole("heading", { name: "F5 activity" })).toBeVisible();
       await page.getByRole("button", { name: "Refresh usage" }).click();
       await expect
         .element(page.getByRole("alert"))
-        .toHaveTextContent("Historical usage refresh failed. Account usage refresh failed.");
-      await expect.element(page.getByRole("heading", { name: "Usage", exact: true })).toBeVisible();
-      await expect
-        .element(page.getByRole("heading", { name: "Usage is unavailable" }))
-        .not.toBeInTheDocument();
+        .toHaveTextContent("Historical usage refresh failed.");
+      await expect.element(page.getByRole("heading", { name: "F5 activity" })).toBeVisible();
       await page.getByRole("button", { name: "Dismiss refresh error" }).click();
       await expect.element(page.getByRole("alert")).not.toBeInTheDocument();
-      expect(api.getAccounts).toHaveBeenLastCalledWith({ refresh: "force" });
+      // History refresh never forces account probes.
+      expect(api.getAccounts).toHaveBeenCalledTimes(1);
     } finally {
       await screen.unmount();
-      client.clear();
+      queryClient.clear();
     }
   });
-  it("polls only memory while jobs run, disables duplicate refresh, and leaves accounts independent of range", async () => {
-    const running = accounts().map((a) => ({ ...a, refreshState: "refreshing" as const }));
+
+  it("forces account refresh independently, reports queued jobs, and polls memory only", async () => {
+    const running = accounts().map((entry) => ({ ...entry, refreshState: "refreshing" as const }));
     api.getSummary.mockResolvedValue(summary());
     api.getAccounts
       .mockResolvedValueOnce(accounts())
       .mockResolvedValueOnce(running)
       .mockResolvedValue(accounts());
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const screen = await render(
-      <QueryClientProvider client={client}>
-        <UsageDashboard />
-      </QueryClientProvider>,
-    );
+    const queryClient = client();
+    const screen = await renderDashboard(queryClient, limitsTab());
     try {
       await expect.element(page.getByText("Codex — default configuration")).toBeVisible();
-      await page.getByRole("button", { name: "Refresh usage" }).click();
-      await expect.element(page.getByRole("button", { name: "Refresh usage" })).toBeDisabled();
+      await page.getByRole("button", { name: "Refresh limits" }).click();
+      await expect.element(page.getByText("Refresh queued.")).toBeVisible();
       await expect.poll(() => api.getAccounts.mock.calls.length).toBe(3);
       expect(api.getAccounts.mock.calls.map((call) => call[0])).toEqual([
         { refresh: "if-stale" },
         { refresh: "force" },
         { refresh: "none" },
       ]);
-      await expect.element(page.getByRole("button", { name: "Refresh usage" })).toBeEnabled();
+      await expect.element(page.getByRole("button", { name: "Refresh limits" })).toBeEnabled();
       await page.getByRole("button", { name: "30 days" }).click();
       expect(api.getAccounts).toHaveBeenCalledTimes(3);
       expect(usageAccountsQueryOptions().refetchIntervalInBackground).toBe(false);
     } finally {
       await screen.unmount();
-      client.clear();
+      queryClient.clear();
     }
   });
+
+  it("explains when a forced refresh starts no job", async () => {
+    api.getSummary.mockResolvedValue(summary());
+    api.getAccounts.mockResolvedValue(accounts());
+    const queryClient = client();
+    const screen = await renderDashboard(queryClient, limitsTab());
+    try {
+      await expect.element(page.getByText("Codex — default configuration")).toBeVisible();
+      await page.getByRole("button", { name: "Refresh limits" }).click();
+      await expect.element(page.getByText(/No new refresh job started/)).toBeVisible();
+    } finally {
+      await screen.unmount();
+      queryClient.clear();
+    }
+  });
+
+  it("shows account errors independently of history state", async () => {
+    api.getSummary.mockResolvedValue(summary());
+    api.getAccounts.mockResolvedValueOnce(accounts()).mockRejectedValue(new Error("offline"));
+    const queryClient = client();
+    const screen = await renderDashboard(queryClient);
+    try {
+      await expect.element(page.getByText("Codex — default configuration")).toBeVisible();
+      // The Activity tab keeps plain account cards: no refresh controls or history.
+      await expect
+        .element(page.getByRole("button", { name: "Refresh limits" }))
+        .not.toBeInTheDocument();
+      expect(api.getQuotaHistory).not.toHaveBeenCalled();
+      queryClient.setQueryData(usageQueryKeys.accounts, accounts(), {
+        updatedAt: Date.now() - 301_000,
+      });
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+      await expect
+        .element(page.getByRole("alert"))
+        .toHaveTextContent("Account snapshots could not be refreshed.");
+      await expect.element(page.getByText("Codex — default configuration")).toBeVisible();
+      await expect.element(page.getByRole("heading", { name: "F5 activity" })).toBeVisible();
+    } finally {
+      await screen.unmount();
+      queryClient.clear();
+    }
+  });
+
+  it("lets Retry join a pending forced refresh instead of cancelling it", async () => {
+    let releaseForce!: (value: UsageAccounts) => void;
+    api.getSummary.mockResolvedValue(summary());
+    api.getAccounts
+      .mockResolvedValueOnce(accounts())
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockImplementationOnce(
+        () =>
+          new Promise<UsageAccounts>((resolve) => {
+            releaseForce = resolve;
+          }),
+      )
+      .mockResolvedValue(accounts());
+    const queryClient = client();
+    const screen = await renderDashboard(queryClient, limitsTab());
+    try {
+      await expect.element(page.getByText("Codex — default configuration")).toBeVisible();
+      await page.getByRole("button", { name: "Refresh limits" }).click();
+      await expect.element(page.getByRole("alert")).toBeVisible();
+      await page.getByRole("button", { name: "Refresh limits" }).click();
+      await expect.poll(() => api.getAccounts.mock.calls.length).toBe(3);
+      // The previous error and its Retry stay visible while the force runs.
+      await page.getByRole("button", { name: "Retry" }).click();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(api.getAccounts).toHaveBeenCalledTimes(3);
+      releaseForce(accounts());
+      await expect.element(page.getByRole("button", { name: "Refresh limits" })).toBeEnabled();
+      expect(api.getAccounts.mock.calls.map((call) => call[0])).toEqual([
+        { refresh: "if-stale" },
+        { refresh: "force" },
+        { refresh: "force" },
+      ]);
+    } finally {
+      await screen.unmount();
+      queryClient.clear();
+    }
+  });
+
+  it("refreshes history on usage events (throttled) and storage purges, not on other events", async () => {
+    api.getSummary.mockResolvedValue(summary());
+    api.getAccounts.mockResolvedValue(accounts());
+    const queryClient = client();
+    const screen = await renderDashboard(queryClient);
+    try {
+      await expect.element(page.getByRole("heading", { name: "F5 activity" })).toBeVisible();
+      expect(api.getSummary).toHaveBeenCalledTimes(1);
+      for (const listener of listeners.domain) listener({ type: "thread.created" });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(api.getSummary).toHaveBeenCalledTimes(1);
+      // A burst of usage events collapses into one refresh.
+      for (let index = 0; index < 5; index++)
+        for (const listener of listeners.domain) listener({ type: "thread.usage-recorded" });
+      await expect.poll(() => api.getSummary.mock.calls.length).toBe(2);
+      await new Promise((resolve) => setTimeout(resolve, 1_300));
+      expect(api.getSummary.mock.calls.length).toBeLessThanOrEqual(3);
+      const before = api.getSummary.mock.calls.length;
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+      for (const listener of listeners.storage) listener();
+      await expect.poll(() => api.getSummary.mock.calls.length).toBe(before + 1);
+      // Account snapshots are never re-probed by history events.
+      expect(api.getAccounts).toHaveBeenCalledTimes(1);
+    } finally {
+      await screen.unmount();
+      queryClient.clear();
+    }
+    expect(listeners.domain.size).toBe(0);
+    expect(listeners.storage.size).toBe(0);
+  });
+
+  it("keeps a forced refresh pending across tab switches", async () => {
+    let releaseForce!: (value: UsageAccounts) => void;
+    api.getSummary.mockResolvedValue(summary());
+    api.getAccounts
+      .mockResolvedValueOnce(accounts())
+      .mockImplementationOnce(
+        () =>
+          new Promise<UsageAccounts>((resolve) => {
+            releaseForce = resolve;
+          }),
+      )
+      .mockResolvedValue(accounts());
+    const queryClient = client();
+    const screen = await renderDashboard(queryClient);
+    try {
+      await page.getByRole("tab", { name: "Limits" }).click();
+      await page.getByRole("button", { name: "Refresh limits" }).click();
+      await expect.poll(() => api.getAccounts.mock.calls.length).toBe(2);
+      await page.getByRole("tab", { name: "Activity" }).click();
+      await expect.element(page.getByRole("heading", { name: "F5 activity" })).toBeVisible();
+      await page.getByRole("tab", { name: "Limits" }).click();
+      // The remounted panel still sees the pending forced refresh.
+      await expect.element(page.getByRole("button", { name: "Refresh limits" })).toBeDisabled();
+      releaseForce(accounts());
+      await expect.element(page.getByRole("button", { name: "Refresh limits" })).toBeEnabled();
+      expect(api.getAccounts).toHaveBeenCalledTimes(2);
+    } finally {
+      await screen.unmount();
+      queryClient.clear();
+    }
+  });
+
+  it("rolls over at the next bucket boundary, deferring to reconnect while offline", async () => {
+    const soon = () => new Date(Date.now() + 400).toISOString();
+    api.getSummary.mockImplementation(async () => summary({ nextBucketAt: soon() }));
+    api.getAccounts.mockResolvedValue(accounts());
+    const queryClient = client();
+    const screen = await renderDashboard(queryClient);
+    try {
+      await expect.element(page.getByRole("heading", { name: "F5 activity" })).toBeVisible();
+      expect(api.getSummary).toHaveBeenCalledTimes(1);
+      await expect.poll(() => api.getSummary.mock.calls.length, { timeout: 3_000 }).toBe(2);
+      // Offline at the boundary: only mark stale; reconnect fetches.
+      api.getSummary.mockImplementation(async () =>
+        summary({ nextBucketAt: new Date(Date.now() + 3_600_000).toISOString() }),
+      );
+      onlineManager.setOnline(false);
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      expect(api.getSummary).toHaveBeenCalledTimes(2);
+      onlineManager.setOnline(true);
+      await expect.poll(() => api.getSummary.mock.calls.length).toBe(3);
+    } finally {
+      await screen.unmount();
+      queryClient.clear();
+    }
+  });
+
+  it("refreshes a cached summary whose bucket boundary already passed, once", async () => {
+    const expired = summary({ nextBucketAt: new Date(Date.now() - 60_000).toISOString() });
+    api.getSummary.mockResolvedValue(expired);
+    api.getAccounts.mockResolvedValue(accounts());
+    const queryClient = client();
+    queryClient.setQueryData(
+      usageQueryKeys.summary("7d", Intl.DateTimeFormat().resolvedOptions().timeZone),
+      expired,
+    );
+    const screen = await renderDashboard(queryClient);
+    try {
+      await expect.element(page.getByRole("heading", { name: "F5 activity" })).toBeVisible();
+      await expect.poll(() => api.getSummary.mock.calls.length).toBe(1);
+      // The refreshed summary still carries the expired boundary: no loop.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(api.getSummary).toHaveBeenCalledTimes(1);
+    } finally {
+      await screen.unmount();
+      queryClient.clear();
+    }
+  });
+
   it("refreshes stale accounts on focus and reconnect without background polling", async () => {
     api.getSummary.mockResolvedValue(summary());
     api.getAccounts.mockResolvedValue(accounts());
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const screen = await render(
-      <QueryClientProvider client={client}>
-        <UsageDashboard />
-      </QueryClientProvider>,
-    );
+    const queryClient = client();
+    const screen = await renderDashboard(queryClient);
     try {
       await expect.element(page.getByText("Codex — default configuration")).toBeVisible();
-      client.setQueryData(usageQueryKeys.accounts, accounts(), { updatedAt: Date.now() - 301_000 });
+      queryClient.setQueryData(usageQueryKeys.accounts, accounts(), {
+        updatedAt: Date.now() - 301_000,
+      });
       focusManager.setFocused(false);
       focusManager.setFocused(true);
       await expect.poll(() => api.getAccounts.mock.calls.length).toBe(2);
-      client.setQueryData(usageQueryKeys.accounts, accounts(), { updatedAt: Date.now() - 301_000 });
+      queryClient.setQueryData(usageQueryKeys.accounts, accounts(), {
+        updatedAt: Date.now() - 301_000,
+      });
       onlineManager.setOnline(false);
       onlineManager.setOnline(true);
       await expect.poll(() => api.getAccounts.mock.calls.length).toBe(3);
     } finally {
       await screen.unmount();
-      client.clear();
+      queryClient.clear();
+    }
+  });
+
+  it.each(["pending", "failed"])(
+    "renders account snapshots while initial history is %s",
+    async (state) => {
+      if (state === "pending") api.getSummary.mockImplementation(() => new Promise(() => {}));
+      else api.getSummary.mockRejectedValue(new Error("history offline"));
+      api.getAccounts.mockResolvedValue(accounts());
+      const queryClient = client();
+      const screen = await renderDashboard(queryClient);
+      try {
+        await expect
+          .element(page.getByRole("region", { name: "Account usage and limits" }))
+          .toBeVisible();
+        await expect
+          .element(page.getByRole("progressbar", { name: "Codex · 5-hour limit" }))
+          .toBeVisible();
+        if (state === "failed")
+          await expect
+            .element(page.getByRole("heading", { name: "Usage is unavailable" }))
+            .toBeVisible();
+      } finally {
+        await screen.unmount();
+        queryClient.clear();
+      }
+    },
+  );
+
+  it("shows an unsupported message for a project filter on an older server", async () => {
+    api.getSummary.mockResolvedValue(summary({ projectScope: null }));
+    api.getAccounts.mockResolvedValue(accounts());
+    const queryClient = client();
+    const screen = await renderDashboard(
+      queryClient,
+      <UsageDashboard search={{ projectId: projectA }} onSearchChange={() => {}} />,
+    );
+    try {
+      await expect
+        .element(page.getByText(/Project filtering is unsupported by this server/))
+        .toBeVisible();
+      await expect.element(page.getByText("Total tokens")).not.toBeInTheDocument();
+      expect(api.getSummary).toHaveBeenCalledWith(expect.objectContaining({ projectId: projectA }));
+    } finally {
+      await screen.unmount();
+      queryClient.clear();
+    }
+  });
+
+  it("treats a project scope mismatch as an error", async () => {
+    api.getSummary.mockResolvedValue(scoped());
+    api.getAccounts.mockResolvedValue(accounts());
+    const queryClient = client();
+    const screen = await renderDashboard(
+      queryClient,
+      <UsageDashboard search={{ projectId: projectB }} onSearchChange={() => {}} />,
+    );
+    try {
+      await expect.element(page.getByText(/different project than requested/)).toBeVisible();
+    } finally {
+      await screen.unmount();
+      queryClient.clear();
+    }
+  });
+
+  it("preserves other params when one control changes and falls back to saved defaults", async () => {
+    api.getSummary.mockResolvedValue(summary());
+    api.getAccounts.mockResolvedValue(accounts());
+    const onSearchChange = vi.fn();
+    const queryClient = client();
+    const screen = await renderDashboard(
+      queryClient,
+      <UsageDashboard
+        search={{ provider: "codex" }}
+        defaults={{ tab: "activity", range: "30d" }}
+        onSearchChange={onSearchChange}
+      />,
+    );
+    try {
+      await expect
+        .element(page.getByRole("button", { name: "30 days" }))
+        .toHaveAttribute("aria-pressed", "true");
+      expect(api.getSummary).toHaveBeenCalledWith(
+        expect.objectContaining({ range: "30d", provider: "codex" }),
+      );
+      await page.getByRole("button", { name: "7 days" }).click();
+      expect(onSearchChange).toHaveBeenCalledWith({ range: "7d" });
+      await page.getByRole("tab", { name: "Limits" }).click();
+      expect(onSearchChange).toHaveBeenCalledWith({ tab: "limits" });
+    } finally {
+      await screen.unmount();
+      queryClient.clear();
+    }
+  });
+
+  it("opens the price editor prefilled from Set price", async () => {
+    api.getSummary.mockResolvedValue(summary());
+    api.getAccounts.mockResolvedValue(accounts());
+    const queryClient = client();
+    const screen = await renderDashboard(queryClient);
+    try {
+      await page.getByRole("button", { name: "Set price for cursor-agent" }).click();
+      await expect.element(page.getByLabelText("Model")).toHaveValue("cursor-agent");
+      await expect.element(page.getByRole("combobox", { name: /^Provider/ })).toHaveValue("cursor");
+      await expect.element(page.getByLabelText("Input price")).toHaveFocus();
+    } finally {
+      await screen.unmount();
+      queryClient.clear();
     }
   });
 });
 
-it("decodes an entire older summary and renders its nonzero fallback bars", async () => {
-  const old = {
-    ...summary(),
-    buckets: summary().buckets.map(({ composition: _composition, ...bucket }) => bucket),
+describe("limits", () => {
+  const claudeAccount = (overrides: Partial<UsageAccounts[number]["sections"][number]> = {}) => {
+    const now = Date.now();
+    const fetchedAt = new Date(now - 60_000).toISOString();
+    const resetsAt = new Date(now + (5 * 24 + 10) * 3_600_000 + 120_000).toISOString();
+    const account: UsageAccounts[number] = {
+      key: "claude:test",
+      provider: "claudeAgent",
+      providerInstanceId: null,
+      displayName: "Claude",
+      enabled: true,
+      refreshState: "idle",
+      sections: [
+        {
+          kind: "claude-usage",
+          outcome: "available",
+          lastAttemptAt: fetchedAt,
+          errorCode: null,
+          snapshot: {
+            fetchedAt,
+            data: {
+              subscriptionLabel: "Pro",
+              limitsAvailable: true,
+              windows: [
+                { key: "seven_day", label: "Weekly limit", utilization: 40, resetsAt },
+                {
+                  key: "five_hour",
+                  label: "5-hour limit",
+                  utilization: 10,
+                  resetsAt: new Date(now - 60_000).toISOString(),
+                },
+              ],
+              extraUsage: null,
+            },
+          },
+          ...overrides,
+        } as UsageAccounts[number]["sections"][number],
+      ],
+    };
+    return { account, fetchedAt, resetsAt, now };
   };
-  const decoded = decodeUsageSummary(old);
-  expect(decoded.buckets[0]?.composition).toBeNull();
-  const screen = await render(
-    <UsageDashboardView summary={decoded} range="7d" onRangeChange={() => {}} fetching={false} />,
-  );
-  try {
-    await expect
-      .element(page.getByRole("img", { name: "Token usage chart for 7 days (UTC)" }))
-      .toBeVisible();
-  } finally {
-    await screen.unmount();
-  }
-});
 
-it("renders Claude unknown and zero meters distinctly alongside Codex, with neutral limit states", async () => {
-  await page.viewport(1280, 2100);
-  const claude: UsageAccounts[number] = {
-    key: "claude:test",
-    provider: "claudeAgent",
-    providerInstanceId: null,
-    displayName: "Claude",
-    enabled: true,
-    refreshState: "idle",
-    sections: [
-      {
-        kind: "claude-usage",
-        outcome: "available",
-        lastAttemptAt: codex.fetchedAt,
-        errorCode: null,
-        snapshot: {
-          fetchedAt: codex.fetchedAt,
-          data: {
-            subscriptionLabel: "Pro",
-            limitsAvailable: true,
-            windows: [
-              { key: "five_hour", label: "5-hour limit", utilization: null, resetsAt: "bad date" },
-              { key: "seven_day", label: "Weekly limit", utilization: 0, resetsAt: null },
-            ],
-            extraUsage: { enabled: true, utilization: 105.4 },
+  it("renders reset countdowns in days, expired resets, and forecasts from history", async () => {
+    const { account, resetsAt, now } = claudeAccount();
+    api.getSummary.mockResolvedValue(summary());
+    api.getAccounts.mockResolvedValue([account]);
+    api.getQuotaHistory.mockResolvedValue({
+      generatedAt: new Date(now).toISOString(),
+      series: [
+        {
+          accountKey: "claude:test",
+          windowKey: "seven_day",
+          resetsAt,
+          samples: [
+            { at: new Date(now - 20 * 3_600_000).toISOString(), usedPercent: 10 },
+            { at: new Date(now - 10 * 3_600_000).toISOString(), usedPercent: 25 },
+          ],
+        },
+      ],
+    });
+    const queryClient = client();
+    const screen = await renderDashboard(
+      queryClient,
+      <UsageDashboard search={{ tab: "limits" }} onSearchChange={() => {}} />,
+    );
+    try {
+      await expect.element(page.getByText(/in 5d 10h/)).toBeVisible();
+      await expect
+        .element(page.getByText("Reset time passed; awaiting updated usage"))
+        .toBeVisible();
+      await expect.element(page.getByText(/At this pace: limit reached/)).toBeVisible();
+      await expect.element(page.getByTestId("quota-sparkline")).toBeInTheDocument();
+      await expect
+        .element(page.getByText(/range affects only Codex UTC token history/))
+        .toBeVisible();
+    } finally {
+      await screen.unmount();
+      queryClient.clear();
+    }
+  });
+
+  it("shows no projection when history is unavailable, and labels restored snapshots", async () => {
+    const { account } = claudeAccount({ lastAttemptAt: null, outcome: "unavailable" });
+    api.getSummary.mockResolvedValue(summary());
+    api.getAccounts.mockResolvedValue([account]);
+    api.getQuotaHistory.mockRejectedValue(new Error("unknown method"));
+    const queryClient = client();
+    const screen = await renderDashboard(
+      queryClient,
+      <UsageDashboard search={{ tab: "limits" }} onSearchChange={() => {}} />,
+    );
+    try {
+      await expect.element(page.getByText(/Last known before restart/)).toBeVisible();
+      await expect.poll(() => api.getQuotaHistory.mock.calls.length).toBeGreaterThan(0);
+      await expect.element(page.getByText(/At this pace: limit reached/)).not.toBeInTheDocument();
+      await expect.element(page.getByRole("alert")).not.toBeInTheDocument();
+    } finally {
+      await screen.unmount();
+      queryClient.clear();
+    }
+  });
+
+  it("renders Claude unknown and zero meters distinctly alongside Codex", async () => {
+    const claude: UsageAccounts[number] = {
+      key: "claude:test",
+      provider: "claudeAgent",
+      providerInstanceId: null,
+      displayName: "Claude",
+      enabled: true,
+      refreshState: "idle",
+      sections: [
+        {
+          kind: "claude-usage",
+          outcome: "available",
+          lastAttemptAt: codex.fetchedAt,
+          errorCode: null,
+          snapshot: {
+            fetchedAt: codex.fetchedAt,
+            data: {
+              subscriptionLabel: "Pro",
+              limitsAvailable: true,
+              windows: [
+                {
+                  key: "five_hour",
+                  label: "5-hour limit",
+                  utilization: null,
+                  resetsAt: "bad date",
+                },
+                { key: "seven_day", label: "Weekly limit", utilization: 0, resetsAt: null },
+              ],
+              extraUsage: { enabled: true, utilization: 105.4 },
+            },
           },
         },
-      },
-    ],
-  };
-  const screen = await render(
-    <UsageDashboardView
-      summary={{
-        ...summary(),
-        buckets: summary().buckets.map((bucket, index) => ({
-          ...bucket,
-          composition: {
-            uncachedInputTokens: 120 * (index + 1),
-            outputTokens: 80 * (index + 1),
-            cacheReadTokens: 160 * (index + 1),
-            cacheWriteTokens: 40 * (index + 1),
-            unattributedTokens: 0,
-          },
-        })),
-      }}
-      accounts={[...accounts(), claude]}
-      range="7d"
-      onRangeChange={() => {}}
-      fetching={false}
-    />,
-  );
-  try {
-    await expect
-      .element(page.getByRole("progressbar", { name: "Claude · 5-hour limit" }))
-      .not.toHaveAttribute("aria-valuenow");
-    await expect
-      .element(page.getByRole("progressbar", { name: "Claude · Weekly limit" }))
-      .toHaveAttribute("aria-valuenow", "100");
-    await expect
-      .element(page.getByRole("progressbar", { name: "Codex · 5-hour limit" }))
-      .toBeVisible();
-    await expect.element(page.getByText("Unknown", { exact: true })).toBeVisible();
-    await expect.element(page.getByText("Extra usage enabled")).toBeVisible();
-    await expect
-      .element(page.getByRole("progressbar", { name: "Claude \u00b7 Extra usage" }))
-      .toHaveAttribute("aria-valuetext", "0% remaining");
-    await expect
-      .element(page.getByRole("progressbar", { name: "Claude \u00b7 Extra usage" }))
-      .toHaveAttribute("aria-valuenow", "0");
-  } finally {
-    await screen.unmount();
-  }
-});
-
-it.each([
-  ["disabled", "Claude is disabled in provider settings."],
-  ["unsupported", "This installed Claude version does not expose account usage and rate limits."],
-  ["unavailable", "The account usage request timed out."],
-  ["no-limits", "Plan limits aren't reported for this Claude session."],
-] as const)("confines the %s state to its Claude card", async (state, message) => {
-  const fetchedAt = "2026-09-05T00:00:00Z";
-  const account: UsageAccounts[number] = {
-    key: "claude:state",
-    provider: "claudeAgent",
-    providerInstanceId: null,
-    displayName: "Claude",
-    enabled: state !== "disabled",
-    refreshState: "idle",
-    sections: [
-      {
-        kind: "claude-usage",
-        outcome:
-          state === "unsupported"
-            ? "unsupported"
-            : state === "unavailable"
-              ? "unavailable"
-              : "available",
-        lastAttemptAt: fetchedAt,
-        errorCode: state === "unavailable" ? "timeout" : null,
-        snapshot:
-          state === "no-limits" || state === "unavailable"
-            ? {
-                fetchedAt,
-                data: {
-                  subscriptionLabel: null,
-                  limitsAvailable: false,
-                  windows: [],
-                  extraUsage: null,
-                },
-              }
-            : null,
-      },
-    ],
-  };
-  const screen = await render(
-    <UsageDashboardView
-      summary={summary()}
-      accounts={[account]}
-      range="7d"
-      onRangeChange={() => {}}
-      fetching={false}
-    />,
-  );
-  try {
-    await expect.element(page.getByText(message, { exact: state !== "unavailable" })).toBeVisible();
-    await expect.element(page.getByRole("heading", { name: "F5 activity" })).toBeVisible();
-    if (state === "unavailable")
-      await expect.element(page.getByText(/Showing data from/)).toBeVisible();
-  } finally {
-    await screen.unmount();
-  }
-});
-
-it("gives a zero bucket no visible bar and uses the Codex snapshot's UTC clock", async () => {
-  const value = summary();
-  const screen = await render(
-    <UsageDashboardView
-      summary={{
-        ...value,
-        generatedAt: "2026-09-05T12:00:00Z",
-        buckets: value.buckets.map((bucket, index) =>
-          index === 0 ? { ...bucket, metrics: metrics({ totalTokens: 0 }) } : bucket,
-        ),
-      }}
-      accounts={accounts()}
-      range="24h"
-      onRangeChange={() => {}}
-      fetching={false}
-    />,
-  );
-  try {
-    const chart = document.querySelector('[role="img"]');
-    const zeroBar = chart?.querySelector<HTMLElement>('[style*="height: 0%"]');
-    expect(zeroBar?.getBoundingClientRect().height).toBe(0);
-    await expect.element(page.getByText("Account tokens \u00b7 Today (UTC)")).toBeVisible();
-    await expect.element(page.getByText("40K", { exact: true })).toBeVisible();
-  } finally {
-    await screen.unmount();
-  }
-});
-
-it.each(["pending", "failed"])(
-  "renders account snapshots while initial history is %s",
-  async (state) => {
-    if (state === "pending") api.getSummary.mockImplementation(() => new Promise(() => {}));
-    else api.getSummary.mockRejectedValue(new Error("history offline"));
-    api.getAccounts.mockResolvedValue(accounts());
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      ],
+    };
     const screen = await render(
-      <QueryClientProvider client={client}>
-        <UsageDashboard />
-      </QueryClientProvider>,
+      <UsageDashboardView
+        summary={summary()}
+        accounts={[...accounts(), claude]}
+        range="7d"
+        onRangeChange={() => {}}
+        fetching={false}
+      />,
     );
     try {
       await expect
-        .element(page.getByRole("region", { name: "Account usage and limits" }))
-        .toBeVisible();
+        .element(page.getByRole("progressbar", { name: "Claude · 5-hour limit" }))
+        .not.toHaveAttribute("aria-valuenow");
       await expect
-        .element(page.getByRole("progressbar", { name: "Codex \u00b7 5-hour limit" }))
-        .toBeVisible();
-      if (state === "failed")
-        await expect
-          .element(page.getByRole("heading", { name: "Usage is unavailable" }))
-          .toBeVisible();
+        .element(page.getByRole("progressbar", { name: "Claude · Weekly limit" }))
+        .toHaveAttribute("aria-valuenow", "100");
+      await expect.element(page.getByText("Unknown", { exact: true })).toBeVisible();
+      await expect
+        .element(page.getByRole("progressbar", { name: "Claude · Extra usage" }))
+        .toHaveAttribute("aria-valuetext", "0% remaining");
+      await expect.element(page.getByText(/over limit \(105% used\)/)).toBeVisible();
     } finally {
       await screen.unmount();
-      client.clear();
-      vi.resetAllMocks();
     }
-  },
-);
+  });
 
-it("keeps account snapshots visible when an uncached history range is loading", async () => {
-  api.getSummary.mockResolvedValueOnce(summary()).mockImplementation(() => new Promise(() => {}));
-  api.getAccounts.mockResolvedValue(accounts());
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const screen = await render(
-    <QueryClientProvider client={client}>
-      <UsageDashboard />
-    </QueryClientProvider>,
-  );
-  try {
-    await expect.element(page.getByRole("button", { name: "30 days" })).toBeVisible();
-    await page.getByRole("button", { name: "30 days" }).click();
-    await expect
-      .element(page.getByRole("progressbar", { name: "Codex \u00b7 5-hour limit" }))
-      .toBeVisible();
-    expect(api.getAccounts).toHaveBeenCalledTimes(1);
-  } finally {
-    await screen.unmount();
-    client.clear();
-    vi.resetAllMocks();
-  }
-});
+  it.each([
+    ["disabled", "Claude is disabled in provider settings."],
+    ["unsupported", "This installed Claude version does not expose account usage and rate limits."],
+    ["unavailable", "The account usage request timed out."],
+    ["no-limits", "Plan limits aren't reported for this Claude session."],
+  ] as const)("confines the %s state to its Claude card", async (state, message) => {
+    const fetchedAt = "2026-09-05T00:00:00Z";
+    const account: UsageAccounts[number] = {
+      key: "claude:state",
+      provider: "claudeAgent",
+      providerInstanceId: null,
+      displayName: "Claude",
+      enabled: state !== "disabled",
+      refreshState: "idle",
+      sections: [
+        {
+          kind: "claude-usage",
+          outcome:
+            state === "unsupported"
+              ? "unsupported"
+              : state === "unavailable"
+                ? "unavailable"
+                : "available",
+          lastAttemptAt: fetchedAt,
+          errorCode: state === "unavailable" ? "timeout" : null,
+          snapshot:
+            state === "no-limits" || state === "unavailable"
+              ? {
+                  fetchedAt,
+                  data: {
+                    subscriptionLabel: null,
+                    limitsAvailable: false,
+                    windows: [],
+                    extraUsage: null,
+                  },
+                }
+              : null,
+        },
+      ],
+    };
+    const screen = await render(
+      <UsageDashboardView
+        summary={summary()}
+        accounts={[account]}
+        range="7d"
+        onRangeChange={() => {}}
+        fetching={false}
+      />,
+    );
+    try {
+      await expect
+        .element(page.getByText(message, { exact: state !== "unavailable" }))
+        .toBeVisible();
+      await expect.element(page.getByRole("heading", { name: "F5 activity" })).toBeVisible();
+      if (state === "unavailable")
+        await expect.element(page.getByText(/Showing data from/)).toBeVisible();
+    } finally {
+      await screen.unmount();
+    }
+  });
 
-it("uses absolute freshness timestamps that stay truthful after idle time without reads", async () => {
-  api.getSummary.mockResolvedValue(summary());
-  api.getAccounts.mockResolvedValue(accounts());
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const screen = await render(
-    <QueryClientProvider client={client}>
-      <UsageDashboard />
-    </QueryClientProvider>,
-  );
-  try {
-    const stamp = page.getByText(/Token history \u00b7 Updated/);
-    await expect.element(stamp).toBeVisible();
-    const before = stamp.element().textContent;
-    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 3_600_000);
-    expect(stamp.element().textContent).toBe(before);
-    expect(before).not.toMatch(/ago|just now|\?/);
-    expect(api.getAccounts).toHaveBeenCalledTimes(1);
-    expect(
-      page
-        .getByText(
-          "Provider-native ChatGPT/Codex account totals and quota windows. These are not dollar costs.",
-        )
-        .elements(),
-    ).toHaveLength(1);
-  } finally {
-    vi.restoreAllMocks();
-    await screen.unmount();
-    client.clear();
-    vi.resetAllMocks();
-  }
-});
+  it("uses the Codex snapshot's UTC clock for account tokens", async () => {
+    const screen = await render(
+      <UsageDashboardView
+        summary={{ ...summary(), generatedAt: "2026-09-05T12:00:00Z" }}
+        accounts={accounts()}
+        range="24h"
+        onRangeChange={() => {}}
+        fetching={false}
+      />,
+    );
+    try {
+      await expect.element(page.getByText("Account tokens · Today (UTC)")).toBeVisible();
+      await expect.element(page.getByText("40K", { exact: true })).toBeVisible();
+    } finally {
+      await screen.unmount();
+    }
+  });
 
-it("requests an uncached refresh and shows an account loading placeholder", async () => {
-  api.getSummary.mockResolvedValue(summary());
-  let finishAccounts!: (value: UsageAccounts) => void;
-  api.getAccounts
-    .mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finishAccounts = resolve;
-        }),
-    )
-    .mockResolvedValue(accounts());
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const screen = await render(
-    <QueryClientProvider client={client}>
-      <UsageDashboard />
-    </QueryClientProvider>,
-  );
-  try {
-    await expect.element(page.getByRole("status", { name: "Loading account usage" })).toBeVisible();
-    finishAccounts(accounts());
-    await expect
-      .element(page.getByRole("region", { name: "Account usage and limits" }))
-      .toBeVisible();
-    await page.getByRole("button", { name: "Refresh usage" }).click();
-    await expect.element(page.getByText("Account refresh requested.")).toBeVisible();
-    expect(api.getAccounts).toHaveBeenCalledTimes(2);
-  } finally {
-    await screen.unmount();
-    client.clear();
-    vi.resetAllMocks();
-  }
-});
-
-it("confirms the named account and window before redeeming and reuses ambiguous keys", async () => {
-  api.consumeResetCredit
-    .mockRejectedValueOnce(new Error("lost connection"))
-    .mockResolvedValue({ outcome: "alreadyRedeemed" });
-  const client = new QueryClient();
-  const screen = await render(
-    <QueryClientProvider client={client}>
-      <ResetCreditButton
-        instanceId={ProviderInstanceId.make("codex-test")}
-        accountName="Work account"
-        windowName="5-hour window"
-        count={1}
-      />
-    </QueryClientProvider>,
-  );
-  try {
-    await page.getByRole("button", { name: "Use reset credit (1)" }).click();
-    await expect
-      .element(page.getByText("This redeems one credit for Work account to reset 5-hour window."))
-      .toBeVisible();
-    expect(api.consumeResetCredit).not.toHaveBeenCalled();
-    await page.getByRole("button", { name: "Cancel", exact: true }).click();
-    expect(api.consumeResetCredit).not.toHaveBeenCalled();
-    await page.getByRole("button", { name: "Use reset credit (1)" }).click();
-    await page.getByRole("button", { name: "Confirm redemption" }).click();
-    await expect.element(page.getByRole("alert")).toBeVisible();
-    await page.getByRole("button", { name: "Confirm redemption" }).click();
-    await expect.poll(() => api.consumeResetCredit.mock.calls.length).toBe(2);
-    expect(api.consumeResetCredit.mock.calls[0]).toEqual(api.consumeResetCredit.mock.calls[1]);
-  } finally {
-    await screen.unmount();
-    client.clear();
-  }
+  it("confirms the named account and window before redeeming and reuses ambiguous keys", async () => {
+    api.consumeResetCredit
+      .mockRejectedValueOnce(new Error("lost connection"))
+      .mockResolvedValue({ outcome: "alreadyRedeemed" });
+    const queryClient = new QueryClient();
+    const screen = await render(
+      <QueryClientProvider client={queryClient}>
+        <ResetCreditButton
+          instanceId={ProviderInstanceId.make("codex-test")}
+          accountName="Work account"
+          windowName="5-hour window"
+          count={1}
+        />
+      </QueryClientProvider>,
+    );
+    try {
+      await page.getByRole("button", { name: "Use reset credit (1)" }).click();
+      await expect
+        .element(page.getByText("This redeems one credit for Work account to reset 5-hour window."))
+        .toBeVisible();
+      expect(api.consumeResetCredit).not.toHaveBeenCalled();
+      await page.getByRole("button", { name: "Cancel", exact: true }).click();
+      expect(api.consumeResetCredit).not.toHaveBeenCalled();
+      await page.getByRole("button", { name: "Use reset credit (1)" }).click();
+      await page.getByRole("button", { name: "Confirm redemption" }).click();
+      await expect.element(page.getByRole("alert")).toBeVisible();
+      await page.getByRole("button", { name: "Confirm redemption" }).click();
+      await expect.poll(() => api.consumeResetCredit.mock.calls.length).toBe(2);
+      expect(api.consumeResetCredit.mock.calls[0]).toEqual(api.consumeResetCredit.mock.calls[1]);
+    } finally {
+      await screen.unmount();
+      queryClient.clear();
+    }
+  });
 });

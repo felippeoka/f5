@@ -1192,6 +1192,9 @@ describe("WebSocket Server", () => {
     expect(refreshedAccounts.error).toBeUndefined();
     expect(refreshedAccounts.result).toEqual([]);
     expect(response.result).not.toHaveProperty("codexAccount");
+    const history = await sendRequest(ws, USAGE_WS_METHODS.getQuotaHistory, {});
+    expect(history.error).toBeUndefined();
+    expect(history.result).toEqual({ generatedAt: expect.any(String), series: [] });
   });
 
   it("routes thread-scoped agent snapshots and dismissals", async () => {
@@ -1271,6 +1274,7 @@ describe("WebSocket Server", () => {
                 },
               ];
             }),
+            { identity: "test:claude" },
           );
           const instance = {
             instanceId,
@@ -1885,6 +1889,7 @@ describe("WebSocket Server", () => {
           refreshAccount: () => Effect.succeed({ snapshot: null, fresh: false }),
           getSummary: () => Effect.die("unused usage summary"),
           getAccounts: () => Effect.succeed([]),
+          getQuotaHistory: Effect.die("unused quota history"),
         }),
         Layer.succeed(providerSessionDirectoryModule.ProviderSessionDirectory, {} as any),
         Layer.succeed(workflowServiceModule.WorkflowService, {} as any),
@@ -2158,6 +2163,7 @@ describe("WebSocket Server", () => {
           refreshAccount: () => Effect.succeed({ snapshot: null, fresh: false }),
           getSummary: () => Effect.die("unused usage summary"),
           getAccounts: () => Effect.succeed([]),
+          getQuotaHistory: Effect.die("unused quota history"),
         }),
         Layer.succeed(providerSessionDirectoryModule.ProviderSessionDirectory, {
           getBinding: (requestedThreadId: ThreadId) =>
@@ -4790,6 +4796,7 @@ describe("WebSocket Server", () => {
             sections: [emptyAccountSection("codex-limits")],
           },
           Effect.succeed([]),
+          { identity: "test:codex" },
         );
         const instance = {
           instanceId: usageInstanceId,

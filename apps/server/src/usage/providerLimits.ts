@@ -10,6 +10,7 @@ import type {
   AccountUsageSection,
 } from "@t3tools/contracts";
 import { makeAccountUsageCapability, emptyAccountSection } from "./Layers/AccountUsageService.ts";
+import { accountUsageIdentity } from "./accountUsage.ts";
 import { asRecord, asNonNegativeNumber, asTrimmedString, resetDate } from "./accountUsageJson.ts";
 
 export function normalizeProviderLimits(
@@ -429,5 +430,17 @@ export function makeProviderLimits(input: {
       sections: [emptyAccountSection("provider-limits")],
     },
     read,
+    {
+      identity: accountUsageIdentity(input.provider, [
+        input.environment.HOME || input.environment.USERPROFILE || os.homedir(),
+        input.environment.XDG_DATA_HOME,
+        input.environment.OPENCODE_AUTH_CONTENT,
+        input.serverUrl,
+        ...Object.keys(input.environment)
+          .filter((key) => key.startsWith("F5_CLIPROXY_") || key === "F5_ANTIGRAVITY_PROJECT")
+          .sort()
+          .map((key) => `${key}=${input.environment[key] ?? ""}`),
+      ]),
+    },
   );
 }

@@ -5,6 +5,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { Effect, Path } from "effect";
 
 import {
+  claudeAccountUsageIdentity,
   makeClaudeCapabilitiesCacheKey,
   makeClaudeContinuationGroupKey,
   makeClaudeEnvironment,
@@ -42,6 +43,27 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
           );
           expect(linux.HOME).toBe(path.resolve("/custom"));
         }),
+    );
+    it.effect("changes the usage history identity when only the configured home changes", () =>
+      Effect.gen(function* () {
+        const base = { HOME: "/users/me", F5_PROFILE_ISOLATED: "1" };
+        for (const platform of ["darwin", "linux"] as const) {
+          const work = yield* makeClaudeEnvironment({ homePath: "/homes/work" }, base, platform);
+          const personal = yield* makeClaudeEnvironment(
+            { homePath: "/homes/personal" },
+            base,
+            platform,
+          );
+          const unset = yield* makeClaudeEnvironment({ homePath: "" }, base, platform);
+          const identities = new Set(
+            [work, personal, unset].map((env) => claudeAccountUsageIdentity("claude", env)),
+          );
+          expect(identities.size).toBe(3);
+          expect(claudeAccountUsageIdentity("claude", work)).toBe(
+            claudeAccountUsageIdentity("claude", { ...work }),
+          );
+        }
+      }),
     );
     it.effect("uses the process home when no Claude home override is configured", () =>
       Effect.gen(function* () {
