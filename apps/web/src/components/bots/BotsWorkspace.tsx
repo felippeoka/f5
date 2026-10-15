@@ -332,12 +332,17 @@ export function NewBotTaskDialog(props: {
     clientProjects[0]?.id ??
     null;
 
+  // Reset only when the dialog opens or its source changes: the store replaces
+  // the thread object on every message, which must not clear the user's text.
   useEffect(() => {
     if (!props.open) return;
-    setTitle(sourceThread ? sourceThread.title : "");
+    const thread = props.sourceThreadId
+      ? useStore.getState().threads.find((entry) => entry.id === props.sourceThreadId)
+      : undefined;
+    setTitle(thread ? thread.title : "");
     setInstructions("");
     setOperationId(newOperationId());
-  }, [props.open, sourceThread]);
+  }, [props.open, props.sourceThreadId]);
 
   const submit = async () => {
     if (!client || !effectiveProjectId) return;

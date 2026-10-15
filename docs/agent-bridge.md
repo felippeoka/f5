@@ -19,7 +19,7 @@ Agents can:
 - create a thread or queue a message, and wait for that turn's progress
 
 Every bridge turn runs with **Supervised** (`approval-required`) permissions. F5 asks you before
-actions, exactly as for your own turns, and keeps the turn supervised even if you later change
+the agent's actions, exactly as for your own turns, and keeps the turn supervised even if you later change
 the thread's mode. Providers that cannot run supervised turns (such as Muse Code) are not
 offered. `send_message` is refused for threads that are not supervised.
 
@@ -52,9 +52,15 @@ settings card shows:
 F5 never writes ChatGPT or Codex configuration. When F5 or the bridge is not running, the shim
 answers each request with JSON-RPC error `-32002`.
 
-The ChatGPT desktop app shares `~/.codex/config.toml` with the Codex CLI. Processes F5 launches
-for agents and terminals carry `F5_AGENT_PROCESS=1`; under that marker the shim serves an empty
-tool list and refuses every call, so F5's own agents cannot drive F5 through the bridge.
+The ChatGPT desktop app shares `~/.codex/config.toml` with the Codex CLI, so F5's own Codex
+agents may load the same shim. The shim serves an empty tool list and refuses every call when it
+runs under F5: either its environment carries `F5_AGENT_PROCESS=1` (set on every process F5
+launches for agents and terminals), or the F5 server that wrote `local.json` is one of its
+parent processes. The process check covers launchers that clear the environment, such as Codex;
+on Windows only the environment marker applies.
+
+This guard is best effort, not a security boundary. An agent with shell access runs as your user
+and can read `local.json` and call the listener directly.
 
 ## Tools
 
@@ -70,8 +76,10 @@ tool list and refuses every call, so F5's own agents cannot drive F5 through the
 | `wait_for_submission` | `f5.turns` | `{submissionId, timeoutSeconds≤45}`                                                                                     |
 
 `create_thread` uses a new git worktree from the project's current branch by default and the
-checkout for non-git projects. Without `providerInstanceId` it uses F5's text-generation default
-provider, or the first enabled provider that supports supervised turns.
+checkout for non-git projects. If the project has a setup script, F5 runs it in the new worktree
+without asking, as it does for worktree threads you create. Without `providerInstanceId` it uses
+F5's text-generation default provider, or the first ready provider that supports supervised
+turns, with that provider's default model.
 
 `wait_for_submission` returns `queued`, `preparing-worktree`, `blocked` (with a reason),
 `running`, `awaiting-approval`, `awaiting-input`, `completed`, `failed`, `interrupted`, or
@@ -83,23 +91,28 @@ Writes take an optional `clientRequestId`; F5 generates one when it is missing a
 Retrying with the same id returns the original result, even after a crash between admission and
 the response, and never creates a second thread or turn. Reusing an id with different arguments
 fails. The stored command is replayed verbatim, so a changed default provider does not alter a
-retry.
+retry. A retry of a request that never reached the queue is checked again first: if the project
+is no longer shared or the thread is no longer supervised, it is rejected. Completed receipts
+are kept for 30 days; after that, the id and its submission are forgotten.
 
 ### Limits
 
-Each limit is checked before anything is admitted; errors include `retryAfterSeconds`.
+Each limit is checked before anything is admitted, one request at a time, so concurrent requests
+cannot overshoot it; errors include `retryAfterSeconds`.
 
 - per client: 2 concurrent waits, 10 `create_thread` per hour, 30 `send_message` per hour, and 3
   of its messages waiting in one thread's queue
-- globally: at most 4 bridge-created threads running at once; above that `create_thread` reports
-  that F5 is busy
+- globally: at most 4 bridge-created threads running, queued, or preparing a worktree at once;
+  above that `create_thread` reports that F5 is busy
 
 ## Task board
 
 F5 can also assign work to a connected agent. Open **Bots** in the sidebar, choose **New task**,
 and pick the client, a shared project, a title, and instructions. The thread menu's **Assign task
-to bot…** pre-fills the task from that thread. The agent sees only the title, instructions, the
-project's display name, and its own activity — never paths, files, transcripts, or settings.
+to bot…** pre-fills the task from that thread. The task tools show the agent only the title,
+instructions, the project's display name, and its own activity — never paths, files,
+transcripts, or settings. (The thread tools above are separate: `list_projects` returns each
+shared project's workspace root.)
 
 | Tool                   | What it does                                                    |
 | ---------------------- | --------------------------------------------------------------- |

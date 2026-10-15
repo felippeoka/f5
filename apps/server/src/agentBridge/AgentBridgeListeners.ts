@@ -222,6 +222,7 @@ export async function startLocalListener(input: {
       port: listener.port,
       token,
       startedAt,
+      serverPid: process.pid,
     });
   } catch (cause) {
     await listener.close();

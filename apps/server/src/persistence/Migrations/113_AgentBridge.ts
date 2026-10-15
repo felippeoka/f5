@@ -27,12 +27,20 @@ export default Effect.gen(function* () {
     args_hash TEXT NOT NULL,
     command_json TEXT,
     related_ids_json TEXT NOT NULL DEFAULT '{}',
+    thread_id TEXT,
+    submission_id TEXT,
     result_json TEXT,
     status TEXT NOT NULL CHECK (status IN ('pending', 'completed')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (namespace, request_id)
   )`;
+  yield* sql`CREATE INDEX agent_bridge_requests_submission
+    ON agent_bridge_requests(namespace, submission_id) WHERE submission_id IS NOT NULL`;
+  yield* sql`CREATE INDEX agent_bridge_requests_thread
+    ON agent_bridge_requests(namespace, thread_id) WHERE thread_id IS NOT NULL`;
+  yield* sql`CREATE INDEX agent_bridge_requests_status
+    ON agent_bridge_requests(status, updated_at)`;
   yield* sql`CREATE TABLE agent_bridge_threads (
     thread_id TEXT PRIMARY KEY,
     client_id TEXT NOT NULL,

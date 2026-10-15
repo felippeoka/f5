@@ -12,6 +12,7 @@ import type { Readable, Writable } from "node:stream";
 import { jsonRpcError, jsonRpcSuccess, type JsonRpcRequest } from "../mcp/jsonRpcHttp.ts";
 import { AGENT_PROCESS_ENV } from "../providerProcessEnv.ts";
 import { readAgentBridgeLocalCredentials } from "./localCredentials.ts";
+import { isAncestorProcess } from "./processAncestry.ts";
 import { AGENT_BRIDGE_MCP_PATH } from "./AgentBridgeListeners.ts";
 import {
   AGENT_BRIDGE_SERVER_INFO,
@@ -32,12 +33,17 @@ export interface AgentBridgeStdioOptions {
   readonly output: Writable;
   readonly env?: NodeJS.ProcessEnv;
   readonly fetch?: typeof fetch;
+  /** Whether the F5 server process is an ancestor of this shim. */
+  readonly isServerAncestor?: (serverPid: number) => boolean;
 }
 
 /**
  * Replies served without contacting F5 when the shim runs inside one of F5's
  * own agent processes. The ChatGPT desktop app and the Codex CLI share
  * `~/.codex/config.toml`, so F5's Codex agents would otherwise see the bridge.
+ *
+ * Best effort, not a security boundary: an agent with shell access runs as the
+ * same user and can read `local.json` itself.
  */
 function recursionGuardReply(request: JsonRpcRequest) {
   switch (request.method) {
@@ -67,7 +73,17 @@ function recursionGuardReply(request: JsonRpcRequest) {
 export function runAgentBridgeStdio(options: AgentBridgeStdioOptions): Promise<void> {
   const env = options.env ?? process.env;
   const fetchImpl = options.fetch ?? fetch;
-  const insideAgent = env[AGENT_PROCESS_ENV] === "1";
+  const markedAgent = env[AGENT_PROCESS_ENV] === "1";
+  const isServerAncestor = options.isServerAncestor ?? ((pid: number) => isAncestorProcess(pid));
+  const ancestry = new Map<number, boolean>();
+  const runsUnderServer = (serverPid: number) => {
+    let known = ancestry.get(serverPid);
+    if (known === undefined) {
+      known = isServerAncestor(serverPid);
+      ancestry.set(serverPid, known);
+    }
+    return known;
+  };
   let negotiatedVersion: string | undefined;
   const pending = new Set<Promise<void>>();
 
@@ -80,12 +96,15 @@ export function runAgentBridgeStdio(options: AgentBridgeStdioOptions): Promise<v
     const fail = (message: string) => {
       if (!isNotification) write(jsonRpcError(request.id, AGENT_BRIDGE_UNAVAILABLE_CODE, message));
     };
-    if (insideAgent) {
+    const refuse = () => {
       if (!isNotification) write(recursionGuardReply(request));
-      return;
-    }
+    };
+    if (markedAgent) return refuse();
     const credentials = await readAgentBridgeLocalCredentials(options.credentialsPath);
     if (!credentials) return fail(UNAVAILABLE_MESSAGE);
+    // The marker does not survive every launcher; the process tree does.
+    if (credentials.serverPid !== undefined && runsUnderServer(credentials.serverPid))
+      return refuse();
     let response: Response;
     try {
       response = await fetchImpl(`http://127.0.0.1:${credentials.port}${AGENT_BRIDGE_MCP_PATH}`, {
@@ -116,7 +135,14 @@ export function runAgentBridgeStdio(options: AgentBridgeStdioOptions): Promise<v
       const version = (body as { result?: { protocolVersion?: unknown } }).result?.protocolVersion;
       if (typeof version === "string") negotiatedVersion = version;
     }
-    if (!isNotification) write(body);
+    if (isNotification) return;
+    // HTTP-level errors (413, 404, 500) carry no JSON-RPC envelope or id.
+    const isJsonRpc =
+      body !== null &&
+      typeof body === "object" &&
+      (body as { jsonrpc?: unknown }).jsonrpc === "2.0";
+    if (!isJsonRpc) return fail(`F5 Agent Bridge returned HTTP ${response.status}.`);
+    write(body);
   };
 
   return new Promise<void>((resolve) => {

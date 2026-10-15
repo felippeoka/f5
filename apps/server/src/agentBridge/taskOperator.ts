@@ -207,6 +207,15 @@ export function makeTaskOperator(deps: {
         const task = yield* tasks.getTask(input.taskId);
         if (!task) return yield* fail("not-found", "Task not found.");
         const clients = action === "resume" ? yield* listClients : [];
+        if (action === "resume") {
+          const model = yield* host.readSnapshot.pipe(
+            Effect.mapError(
+              (error) => new BotTaskError({ code: "storage", message: error.message }),
+            ),
+          );
+          if (!model.projects.some((p) => p.id === task.projectId && p.deletedAt === null))
+            return yield* fail("invalid-state", "The task's project was deleted.");
+        }
         const outcome = yield* tasks.control(
           { namespace: OPERATOR_NAMESPACE, operationId, tool: `${action}Task`, args },
           {

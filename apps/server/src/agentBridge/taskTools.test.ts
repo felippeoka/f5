@@ -1,10 +1,12 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { DEFAULT_SERVER_SETTINGS, ProjectId, ThreadId } from "@t3tools/contracts";
-import { Effect, Layer } from "effect";
+import { Duration, Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { TestClock } from "effect/testing";
 
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import { pruneAgentBridgeHistory } from "./AgentBridgeService.ts";
 import { makeAgentBridgeStore, type AgentBridgeClientRecord } from "./AgentBridgeStore.ts";
 import { BotTaskError, makeBotTaskStore } from "./BotTaskStore.ts";
 import { makeAgentBridgeLimiters } from "./rateLimits.ts";
@@ -420,6 +422,29 @@ layer("Agent Bridge task board", (it) => {
     }),
   );
 
+  it.effect("a deleted project's tasks cannot be resumed, read, or claimed", () =>
+    Effect.gen(function* () {
+      const { createTask, run, opId, operator, host, attempt } = yield* setup();
+      const task = yield* createTask();
+      yield* operator.controlTask("pause", { operationId: opId(), taskId: task.id });
+      // The project id stays in exposedProjectIds after deletion.
+      host.projects = host.projects.map((entry) =>
+        entry.id === "exposed" ? { ...entry, deletedAt: "2026-10-02T00:00:00.000Z" } : entry,
+      );
+      const resumed = yield* attempt(
+        operator.controlTask("resume", { operationId: opId(), taskId: task.id }),
+      );
+      assert.isFalse(resumed.ok);
+      assert.include(!resumed.ok ? resumed.error.message : "", "deleted");
+      for (const name of ["get_task", "claim_task"]) {
+        const result = yield* run(name, { taskId: task.id, operationId: opId() });
+        assert.strictEqual(result.error?.message, "Task not found.");
+      }
+      const listed = yield* run("list_tasks", {});
+      assert.deepStrictEqual(listed.value.tasks, []);
+    }),
+  );
+
   it.effect("progress is limited per task; identical retries are free", () =>
     Effect.gen(function* () {
       const { createTask, claim, run, opId, advance } = yield* setup();
@@ -486,6 +511,38 @@ layer("Agent Bridge task board", (it) => {
       );
       assert.include(types, "created");
       assert.include(types, "claimed");
+    }),
+  );
+
+  it.effect("history pruning takes a fresh cutoff on every run and keeps pending receipts", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const store = makeAgentBridgeStore(sql);
+      const tasks = makeBotTaskStore(sql);
+      // TestClock starts at the epoch, far before any other test's rows.
+      const day = 24 * 60 * 60 * 1000;
+      const at = new Date(10 * day).toISOString();
+      const namespace = `prune-${crypto.randomUUID()}`;
+      for (const requestId of ["done", "open"])
+        yield* store.insertPendingRequest({
+          namespace,
+          requestId,
+          tool: "send_message",
+          argsHash: "hash",
+          command: null,
+          relatedIds: {},
+          at,
+        });
+      yield* store.completeRequest({ namespace, requestId: "done", result: {}, at });
+
+      yield* TestClock.adjust(Duration.millis(35 * day));
+      assert.strictEqual((yield* pruneAgentBridgeHistory({ tasks, store })).receipts, 0);
+      assert.isNotNull(yield* store.getRequest(namespace, "done"));
+
+      yield* TestClock.adjust(Duration.millis(10 * day));
+      assert.strictEqual((yield* pruneAgentBridgeHistory({ tasks, store })).receipts, 1);
+      assert.isNull(yield* store.getRequest(namespace, "done"));
+      assert.isNotNull(yield* store.getRequest(namespace, "open"));
     }),
   );
 

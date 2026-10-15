@@ -1,13 +1,14 @@
 import {
   AGENT_BRIDGE_LOCAL_CLIENT_ID,
   type AgentBridgeClient,
+  type AgentBridgeSettingsPatch,
   type AgentBridgeState,
   type AgentBridgeStdioSetup,
   type ProjectId,
 } from "@t3tools/contracts";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
+import { type UnifiedWebSettings, useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { ensureNativeApi } from "../../nativeApi";
 import { onServerWelcome } from "../../wsNativeApi";
 import { Badge } from "../ui/badge";
@@ -91,14 +92,29 @@ export function AgentBridgeSettings() {
   const { projects } = useSettingsRouteContext();
   const { state, error } = useAgentBridgeState();
   const exposed = new Set<string>(agentBridge.exposedProjectIds);
+  // Send only the changed fields; the server deep-merges `agentBridge`.
+  const patchAgentBridge = useCallback(
+    (patch: AgentBridgeSettingsPatch) =>
+      updateSettings({ agentBridge: patch } as Partial<UnifiedWebSettings>),
+    [updateSettings],
+  );
+  // Quick toggles build on the last list sent, not on a render that predates it.
+  const exposedRef = useRef(agentBridge.exposedProjectIds);
+  const pendingToggles = useRef(0);
+  useEffect(() => {
+    if (pendingToggles.current === 0) exposedRef.current = agentBridge.exposedProjectIds;
+  }, [agentBridge.exposedProjectIds]);
   const setExposed = useCallback(
     (projectId: ProjectId, checked: boolean) => {
-      const next = checked
-        ? [...agentBridge.exposedProjectIds.filter((id) => id !== projectId), projectId]
-        : agentBridge.exposedProjectIds.filter((id) => id !== projectId);
-      void updateSettings({ agentBridge: { ...agentBridge, exposedProjectIds: next } });
+      const current = exposedRef.current.filter((id) => id !== projectId);
+      const next = checked ? [...current, projectId] : current;
+      exposedRef.current = next;
+      pendingToggles.current += 1;
+      void patchAgentBridge({ exposedProjectIds: next }).finally(() => {
+        pendingToggles.current -= 1;
+      });
     },
-    [agentBridge, updateSettings],
+    [patchAgentBridge],
   );
 
   return (
@@ -121,9 +137,7 @@ export function AgentBridgeSettings() {
           <Switch
             checked={agentBridge.enabled}
             aria-label="Enable Agent Bridge"
-            onCheckedChange={(checked) =>
-              void updateSettings({ agentBridge: { ...agentBridge, enabled: checked } })
-            }
+            onCheckedChange={(checked) => void patchAgentBridge({ enabled: checked })}
           />
         }
       />

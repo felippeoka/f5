@@ -14,9 +14,10 @@ import {
   type ThreadId,
   type TurnSubmissionResult,
 } from "@t3tools/contracts";
-import { Effect, PubSub, Stream } from "effect";
+import { Deferred, Effect, PubSub, Stream } from "effect";
 
 import type { NextTurnQueueSubmissionRecord } from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
+import type { ProjectionTurnState } from "../../persistence/Services/ProjectionTurns.ts";
 import {
   AgentBridgeHostError,
   type AgentBridgeHostShape,
@@ -108,6 +109,12 @@ export class FakeAgentBridgeHost {
   branches = new Map<string, string | null>();
   queues = new Map<string, NextTurnQueueSnapshot>();
   records = new Map<string, NextTurnQueueSubmissionRecord>();
+  turnStates = new Map<string, ProjectionTurnState>();
+  /** Counts getThreadDetails and readSnapshot calls. */
+  detailReads = 0;
+  snapshotReads = 0;
+  /** While set, submissions wait for it before reaching the queue. */
+  submissionGate: Deferred.Deferred<void> | null = null;
   submissions: NextTurnQueueSubmitInput[] = [];
   results = new Map<string, TurnSubmissionResult>();
   dispatched: ThreadActivityAppendCommand[] = [];
@@ -118,20 +125,21 @@ export class FakeAgentBridgeHost {
   readonly domainEvents = Effect.runSync(PubSub.unbounded<OrchestrationEvent>());
 
   readonly shape: AgentBridgeHostShape = {
-    readSnapshot: Effect.sync(
-      () =>
-        ({
-          snapshotSequence: 0,
-          projects: this.projects,
-          threads: this.threads,
-          planningWorkflows: [],
-          codeReviewWorkflows: [],
-          investigationWorkflows: [],
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        }) as unknown as OrchestrationReadModel,
-    ),
+    readSnapshot: Effect.sync(() => {
+      this.snapshotReads += 1;
+      return {
+        snapshotSequence: 0,
+        projects: this.projects,
+        threads: this.threads,
+        planningWorkflows: [],
+        codeReviewWorkflows: [],
+        investigationWorkflows: [],
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      } as unknown as OrchestrationReadModel;
+    }),
     getThreadDetails: (threadId) =>
       Effect.sync(() => {
+        this.detailReads += 1;
         const found = this.threads.find((entry) => entry.id === threadId);
         return {
           threadId,
@@ -146,6 +154,7 @@ export class FakeAgentBridgeHost {
           detailSequence: 0,
         } as never;
       }),
+    getTurnState: ({ turnId }) => Effect.sync(() => this.turnStates.get(turnId) ?? null),
     getThreadDiff: ({ fromTurnCount, toTurnCount }) =>
       Effect.succeed(`diff ${fromTurnCount ?? 0}..${toTurnCount}`),
     getQueueSnapshot: (threadId) =>
@@ -159,28 +168,9 @@ export class FakeAgentBridgeHost {
     getProjectGitBranch: (cwd) =>
       Effect.sync(() => (this.branches.has(cwd) ? (this.branches.get(cwd) ?? null) : "main")),
     submitTurnSubmission: (body, options) =>
-      Effect.suspend(() => {
-        if (this.failNextBeforeAdmission) {
-          const failure = this.failNextBeforeAdmission;
-          this.failNextBeforeAdmission = null;
-          return Effect.fail(new AgentBridgeHostError(failure));
-        }
-        if (options.submissionSource !== "automation") return Effect.die("not automation");
-        const existing = this.results.get(body.submissionId);
-        if (existing) return Effect.succeed(existing);
-        this.submissions.push(body);
-        const result: TurnSubmissionResult = {
-          disposition: "started",
-          submissionId: body.submissionId,
-          sequence: this.submissions.length,
-        };
-        this.results.set(body.submissionId, result);
-        if (this.failNextAfterAdmission) {
-          this.failNextAfterAdmission = false;
-          return Effect.fail(new AgentBridgeHostError({ message: "connection lost" }));
-        }
-        return Effect.succeed(result);
-      }),
+      Effect.suspend(() =>
+        this.submissionGate ? Deferred.await(this.submissionGate) : Effect.void,
+      ).pipe(Effect.andThen(this.admitSubmission(body, options))),
     dispatch: (command) =>
       Effect.sync(() => {
         // The engine dedupes by command receipt.
@@ -188,4 +178,32 @@ export class FakeAgentBridgeHost {
           this.dispatched.push(command);
       }),
   };
+
+  private admitSubmission(
+    body: NextTurnQueueSubmitInput,
+    options: { readonly submissionSource: "automation" },
+  ) {
+    return Effect.suspend(() => {
+      if (this.failNextBeforeAdmission) {
+        const failure = this.failNextBeforeAdmission;
+        this.failNextBeforeAdmission = null;
+        return Effect.fail(new AgentBridgeHostError(failure));
+      }
+      if (options.submissionSource !== "automation") return Effect.die("not automation");
+      const existing = this.results.get(body.submissionId);
+      if (existing) return Effect.succeed(existing);
+      this.submissions.push(body);
+      const result: TurnSubmissionResult = {
+        disposition: "started",
+        submissionId: body.submissionId,
+        sequence: this.submissions.length,
+      };
+      this.results.set(body.submissionId, result);
+      if (this.failNextAfterAdmission) {
+        this.failNextAfterAdmission = false;
+        return Effect.fail(new AgentBridgeHostError({ message: "connection lost" }));
+      }
+      return Effect.succeed(result);
+    });
+  }
 }

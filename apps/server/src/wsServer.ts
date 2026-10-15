@@ -129,6 +129,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import { createLogger } from "./logger";
 import { NextTurnQueueStore } from "./nextTurnQueue/Services/NextTurnQueueStore.ts";
+import { makeProjectionTurnRepository } from "./persistence/Layers/ProjectionTurns.ts";
 import {
   NextTurnQueueDispatcher,
   type NextTurnQueueDispatcherShape,
@@ -3040,6 +3041,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       message: error.message,
       ...(typeof error.code === "string" ? { code: error.code } : {}),
     });
+  const agentBridgeTurns = yield* makeProjectionTurnRepository.pipe(
+    Effect.provideService(SqlClient.SqlClient, sql),
+  );
   const agentBridgeHost: AgentBridgeHostShape = {
     readSnapshot: awaitOrchestrationRuntimeForRoute.pipe(
       Effect.flatMap(({ orchestrationEngine }) => orchestrationEngine.getReadModel()),
@@ -3049,6 +3053,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       projectionReadModelQuery
         .getThreadDetails({ threadId })
         .pipe(Effect.mapError(toAgentBridgeHostError)),
+    getTurnState: (input) =>
+      agentBridgeTurns.getByTurnId(input).pipe(
+        Effect.map((turn) => (Option.isSome(turn) ? turn.value.state : null)),
+        Effect.mapError(toAgentBridgeHostError),
+      ),
     getThreadDiff: ({ threadId, fromTurnCount, toTurnCount }) =>
       (fromTurnCount === undefined
         ? checkpointDiffQuery.getFullThreadDiff({ threadId, toTurnCount })

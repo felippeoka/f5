@@ -169,16 +169,20 @@ export function makeTaskTools(deps: TaskToolsDeps): ReadonlyArray<AgentBridgeToo
     grantGeneration: caller.client.grantGeneration,
   });
 
-  /** The caller's task in a project still shared with it. */
+  /** The caller's task in a project that still exists and is still shared with it. */
   const requireTask = (caller: AgentBridgeCaller, taskId: string) =>
-    tasks.getTask(taskId).pipe(
-      taskError,
-      Effect.flatMap((task) =>
-        task && task.clientId === caller.client.id && caller.visibleProjectIds.has(task.projectId)
-          ? Effect.succeed(task)
-          : Effect.fail(toolError("Task not found.")),
-      ),
-    );
+    Effect.gen(function* () {
+      const task = yield* tasks.getTask(taskId).pipe(taskError);
+      const live = yield* projectNames;
+      if (
+        !task ||
+        task.clientId !== caller.client.id ||
+        !caller.visibleProjectIds.has(task.projectId) ||
+        !live.has(task.projectId)
+      )
+        return yield* toolError("Task not found.");
+      return task;
+    });
 
   const summarize = (task: BotTaskRecord, names: ReadonlyMap<string, string>) => ({
     taskId: task.id,
@@ -245,15 +249,15 @@ export function makeTaskTools(deps: TaskToolsDeps): ReadonlyArray<AgentBridgeToo
     run: (args, caller) =>
       Effect.gen(function* () {
         const input = yield* decodeArgs(ListTasksArgs)(args);
+        const names = yield* projectNames;
         const page = yield* tasks
           .listTasks({
             clientId: caller.client.id,
-            projectIds: caller.visibleProjectIds,
+            projectIds: new Set([...caller.visibleProjectIds].filter((id) => names.has(id))),
             statuses: input.statuses,
             cursor: input.cursor,
           })
           .pipe(taskError);
-        const names = yield* projectNames;
         return {
           tasks: page.tasks.map((task) => summarize(task, names)),
           nextCursor: page.nextCursor,

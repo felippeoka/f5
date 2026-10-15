@@ -3460,7 +3460,8 @@ describe("WebSocket Server", () => {
         agentBridge: { enabled: true, exposedProjectIds: ["project-bridge"] },
       });
       await vi.waitFor(() => expect(fs.existsSync(credentialsPath)).toBe(true), SLOW_WAIT);
-      expect(fs.statSync(credentialsPath).mode & 0o777).toBe(0o600);
+      if (process.platform !== "win32")
+        expect(fs.statSync(credentialsPath).mode & 0o777).toBe(0o600);
 
       const projects = await callTool(stateDir, "list_projects", {});
       expect(

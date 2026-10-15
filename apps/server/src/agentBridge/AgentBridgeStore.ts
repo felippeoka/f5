@@ -126,17 +126,18 @@ export interface AgentBridgeStore {
     namespace: string,
     requestId: string,
   ) => Effect.Effect<AgentBridgeRequestRecord | null, AgentBridgeStoreError>;
-  /** Looks a receipt up by a related id, scoped to one namespace. */
-  readonly findRequestByRelatedId: (input: {
+  /** The receipt of one turn submission, scoped to one namespace. */
+  readonly findRequestBySubmissionId: (input: {
     readonly namespace: string;
-    readonly key: string;
-    readonly value: string;
+    readonly submissionId: string;
   }) => Effect.Effect<AgentBridgeRequestRecord | null, AgentBridgeStoreError>;
   /** Submission ids this namespace sent to one thread. */
   readonly listSubmissionIdsForThread: (input: {
     readonly namespace: string;
     readonly threadId: string;
   }) => Effect.Effect<ReadonlyArray<string>, AgentBridgeStoreError>;
+  /** Deletes completed receipts last written before `before`; returns how many. */
+  readonly pruneCompletedRequests: (before: string) => Effect.Effect<number, AgentBridgeStoreError>;
   /**
    * Inserts a pending receipt (and, for a created thread, its ownership row)
    * and increments the workspace revision, in one transaction. Returns the
@@ -222,24 +223,35 @@ export const makeAgentBridgeStore = (sql: SqlClient.SqlClient): AgentBridgeStore
       wrap("getRevision"),
     ),
     getRequest: (namespace, requestId) => getRequest(namespace, requestId).pipe(wrap("getRequest")),
-    findRequestByRelatedId: ({ namespace, key, value }) =>
+    findRequestBySubmissionId: ({ namespace, submissionId }) =>
       sql<RequestRow>`SELECT namespace, request_id, tool, args_hash, command_json, related_ids_json,
           result_json, status, created_at
         FROM agent_bridge_requests
-        WHERE namespace = ${namespace} AND json_extract(related_ids_json, ${`$.${key}`}) = ${value}
+        WHERE namespace = ${namespace} AND submission_id = ${submissionId}
         LIMIT 1`.pipe(
         Effect.map((rows) => (rows[0] ? toRequest(rows[0]) : null)),
-        wrap("findRequestByRelatedId"),
+        wrap("findRequestBySubmissionId"),
       ),
     listSubmissionIdsForThread: ({ namespace, threadId }) =>
-      sql<{ submission_id: string | null }>`SELECT json_extract(related_ids_json, '$.submissionId')
-          AS submission_id
+      sql<{ submission_id: string }>`SELECT submission_id
         FROM agent_bridge_requests
-        WHERE namespace = ${namespace}
-          AND json_extract(related_ids_json, '$.threadId') = ${threadId}`.pipe(
-        Effect.map((rows) => rows.flatMap((row) => (row.submission_id ? [row.submission_id] : []))),
+        WHERE namespace = ${namespace} AND thread_id = ${threadId}
+          AND submission_id IS NOT NULL`.pipe(
+        Effect.map((rows) => rows.map((row) => row.submission_id)),
         wrap("listSubmissionIdsForThread"),
       ),
+    pruneCompletedRequests: (before) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const rows = yield* sql<{ n: number }>`SELECT COUNT(*) AS n FROM agent_bridge_requests
+              WHERE status = 'completed' AND updated_at < ${before}`;
+            yield* sql`DELETE FROM agent_bridge_requests
+              WHERE status = 'completed' AND updated_at < ${before}`;
+            return rows[0]?.n ?? 0;
+          }),
+        )
+        .pipe(wrap("pruneCompletedRequests")),
     insertPendingRequest: (input) =>
       sql
         .withTransaction(
@@ -248,9 +260,10 @@ export const makeAgentBridgeStore = (sql: SqlClient.SqlClient): AgentBridgeStore
             if (existing) return { inserted: false as const, existing };
             yield* sql`INSERT INTO agent_bridge_requests
                 (namespace, request_id, tool, args_hash, command_json, related_ids_json,
-                 result_json, status, created_at, updated_at)
+                 thread_id, submission_id, result_json, status, created_at, updated_at)
               VALUES (${input.namespace}, ${input.requestId}, ${input.tool}, ${input.argsHash},
                 ${JSON.stringify(input.command)}, ${JSON.stringify(input.relatedIds)},
+                ${input.relatedIds.threadId ?? null}, ${input.relatedIds.submissionId ?? null},
                 NULL, 'pending', ${input.at}, ${input.at})`;
             if (input.createdThread) {
               yield* sql`INSERT INTO agent_bridge_threads (thread_id, client_id, request_id, created_at)

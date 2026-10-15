@@ -16,11 +16,13 @@ import type {
   ServerProvider,
   ServerSettings,
   ThreadId,
+  TurnId,
   TurnSubmissionResult,
 } from "@t3tools/contracts";
 import { Data, type Effect, type Stream } from "effect";
 
 import type { NextTurnQueueSubmissionRecord } from "../nextTurnQueue/Services/NextTurnQueueStore.ts";
+import type { ProjectionTurnState } from "../persistence/Services/ProjectionTurns.ts";
 
 export class AgentBridgeHostError extends Data.TaggedError("AgentBridgeHostError")<{
   readonly message: string;
@@ -37,6 +39,11 @@ export interface AgentBridgeHostShape {
   readonly getThreadDetails: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationThreadDetails, AgentBridgeHostError>;
+  /** The lifecycle state of one turn, or null when F5 has no record of it. */
+  readonly getTurnState: (input: {
+    readonly threadId: ThreadId;
+    readonly turnId: TurnId;
+  }) => Effect.Effect<ProjectionTurnState | null, AgentBridgeHostError>;
   /** Whole-thread diff up to `toTurnCount`, or one turn when `fromTurnCount` is given. */
   readonly getThreadDiff: (input: {
     readonly threadId: ThreadId;

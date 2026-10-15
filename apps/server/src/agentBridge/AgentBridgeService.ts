@@ -18,7 +18,7 @@ import {
   type OrchestrationEvent,
   type ServerSettings,
 } from "@t3tools/contracts";
-import { Duration, Effect, Schedule, Schema, Scope, Semaphore, Stream } from "effect";
+import { Clock, Duration, Effect, Schedule, Schema, Scope, Semaphore, Stream } from "effect";
 
 import type { AgentBridgeHostShape } from "./AgentBridgeHost.ts";
 import { startLocalListener, type LocalListener } from "./AgentBridgeListeners.ts";
@@ -37,6 +37,21 @@ import { makeThreadTools, type AgentBridgeCaller } from "./threadTools.ts";
 export const AGENT_BRIDGE_STATE_COALESCE_MS = 400;
 const TOUCH_INTERVAL_MS = 60_000;
 const PRUNE_INTERVAL = Duration.hours(6);
+
+/**
+ * Deletes task progress and completed retry receipts past the 30-day
+ * retention. The cutoff comes from the clock on every run.
+ */
+export const pruneAgentBridgeHistory = (input: {
+  readonly tasks: BotTaskStore;
+  readonly store: AgentBridgeStore;
+}) =>
+  Effect.gen(function* () {
+    const before = progressRetentionBoundary(new Date(yield* Clock.currentTimeMillis));
+    const progress = yield* input.tasks.pruneProgress(before);
+    const receipts = yield* input.store.pruneCompletedRequests(before);
+    return { progress, receipts };
+  });
 
 export interface AgentBridgeServiceShape {
   readonly getState: Effect.Effect<AgentBridgeState>;
@@ -213,12 +228,14 @@ export const makeAgentBridgeService = (input: {
       ),
       Effect.forkScoped,
     );
-    yield* input.tasks.pruneProgress(progressRetentionBoundary(new Date())).pipe(
-      Effect.tap((pruned) =>
-        pruned > 0 ? Effect.logInfo("agentBridge.tasks.progress.pruned", { pruned }) : Effect.void,
+    yield* pruneAgentBridgeHistory({ tasks: input.tasks, store }).pipe(
+      Effect.tap(({ progress, receipts }) =>
+        progress > 0 || receipts > 0
+          ? Effect.logInfo("agentBridge.pruned", { progress, receipts })
+          : Effect.void,
       ),
       Effect.catch((error) =>
-        Effect.logWarning("agentBridge.tasks.prune.failed", { detail: error.message }),
+        Effect.logWarning("agentBridge.prune.failed", { detail: error.message }),
       ),
       Effect.repeat(Schedule.spaced(PRUNE_INTERVAL)),
       Effect.forkScoped,

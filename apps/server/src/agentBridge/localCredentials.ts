@@ -13,6 +13,8 @@ export interface AgentBridgeLocalCredentials {
   readonly port: number;
   readonly token: string;
   readonly startedAt: string;
+  /** The F5 server process; the STDIO shim refuses to serve its descendants. */
+  readonly serverPid?: number;
 }
 
 export const agentBridgeLocalCredentialsPath = (stateDir: string): string =>
@@ -75,7 +77,14 @@ export async function readAgentBridgeLocalCredentials(
       typeof parsed.startedAt !== "string"
     )
       return null;
-    return { port: parsed.port, token: parsed.token, startedAt: parsed.startedAt };
+    return {
+      port: parsed.port,
+      token: parsed.token,
+      startedAt: parsed.startedAt,
+      ...(typeof parsed.serverPid === "number" && Number.isInteger(parsed.serverPid)
+        ? { serverPid: parsed.serverPid }
+        : {}),
+    };
   } catch {
     return null;
   }

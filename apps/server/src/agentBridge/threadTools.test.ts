@@ -3,16 +3,19 @@ import { assert, it } from "@effect/vitest";
 import {
   AGENT_BRIDGE_LOCAL_CLIENT_ID,
   CommandId,
+  DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
   ProviderInstanceId,
   ThreadId,
   TurnId,
   type NextTurnQueueSnapshot,
+  type OrchestrationEvent,
 } from "@t3tools/contracts";
-import { Effect, Exit, Fiber, Layer, PubSub } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, PubSub } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { TestClock } from "effect/testing";
 
+import type { NextTurnQueueSubmissionRecord } from "../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { makeAgentBridgeStore, type AgentBridgeClientRecord } from "./AgentBridgeStore.ts";
 import { AGENT_BRIDGE_LIMITS, makeAgentBridgeLimiters } from "./rateLimits.ts";
@@ -25,6 +28,32 @@ import {
 } from "./threadTools.ts";
 
 const layer = it.layer(SqlitePersistenceMemory.pipe(Layer.provideMerge(NodeServices.layer)));
+
+const startedRecord = (
+  submissionId: string,
+  threadId: string,
+  messageId: string,
+): NextTurnQueueSubmissionRecord => ({
+  submissionId: CommandId.makeUnsafe(submissionId),
+  threadId: ThreadId.makeUnsafe(threadId),
+  requestHash: "",
+  itemId: null,
+  messageId: messageId as never,
+  disposition: "started",
+  resultSequence: null,
+  reasonCode: null,
+  createdAt: "",
+  settledAt: "",
+});
+
+const latestTurn = (turnId: string, state: "running" | "completed") => ({
+  turnId: TurnId.makeUnsafe(turnId),
+  state,
+  requestedAt: "2026-01-01T00:00:00.000Z",
+  startedAt: null,
+  completedAt: null,
+  assistantMessageId: null,
+});
 
 const setup = (options: { now?: () => number } = {}) =>
   Effect.gen(function* () {
@@ -194,6 +223,24 @@ layer("Agent Bridge thread tools", (it) => {
       const created = yield* run("create_thread", { projectId: "exposed", prompt: "Hi" });
       assert.isTrue(created.ok);
       assert.strictEqual(host.submissions[0]!.command.modelSelection?.instanceId, "codex");
+    }),
+  );
+
+  it.effect("defaults to the provider's coding model, not the text-generation model", () =>
+    Effect.gen(function* () {
+      const { host, run } = yield* setup();
+      const codingDefault = DEFAULT_MODEL_BY_PROVIDER.codex;
+      host.providers = [provider("codex", "codex", ["small-model", codingDefault])];
+      host.settings = {
+        ...DEFAULT_SERVER_SETTINGS,
+        textGenerationModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "small-model",
+        },
+      };
+      const created = yield* run("create_thread", { projectId: "exposed", prompt: "Hi" });
+      assert.isTrue(created.ok);
+      assert.strictEqual(host.submissions[0]!.command.model, codingDefault);
     }),
   );
 
@@ -436,6 +483,154 @@ layer("Agent Bridge thread tools", (it) => {
         const exit = yield* Fiber.await(waiting);
         assert.isTrue(Exit.hasInterrupts(exit));
       }
+    }),
+  );
+
+  it.effect("re-checks access before resubmitting a pending receipt", () =>
+    Effect.gen(function* () {
+      const { host, run, caller } = yield* setup();
+      host.threads = [thread("t-sup", "exposed")];
+      const sendArgs = { threadId: "t-sup", prompt: "Hi", clientRequestId: "req-mode" };
+      host.failNextBeforeAdmission = { message: "busy" };
+      assert.isFalse((yield* run("send_message", sendArgs)).ok);
+      host.threads = [thread("t-sup", "exposed", { runtimeMode: "full-access" })];
+      const sent = yield* run("send_message", sendArgs);
+      assert.deepInclude(sent.ok ? sent.value : {}, {
+        disposition: "rejected",
+        reason: "The thread is no longer supervised.",
+      });
+
+      const createArgs = { projectId: "exposed", prompt: "Hi", clientRequestId: "req-unshare" };
+      host.failNextBeforeAdmission = { message: "busy" };
+      assert.isFalse((yield* run("create_thread", createArgs)).ok);
+      const unshared: AgentBridgeCaller = { ...caller, visibleProjectIds: new Set() };
+      const created = yield* run("create_thread", createArgs, unshared);
+      assert.deepInclude(created.ok ? created.value : {}, { disposition: "rejected" });
+      assert.strictEqual(host.submissions.length, 0);
+      const status = yield* run(
+        "wait_for_submission",
+        { submissionId: created.ok ? created.value.submissionId : "", timeoutSeconds: 0 },
+        unshared,
+      );
+      assert.deepInclude(status.ok ? status.value : {}, { status: "rejected" });
+    }),
+  );
+
+  it.effect("reports how an earlier submission's turn ended after a later turn starts", () =>
+    Effect.gen(function* () {
+      const { host, run } = yield* setup();
+      host.threads = [thread("t-sup", "exposed")];
+      const sent = yield* run("send_message", { threadId: "t-sup", prompt: "Hi" });
+      const submissionId: string = sent.ok ? sent.value.submissionId : "";
+      host.records.set(submissionId, startedRecord(submissionId, "t-sup", "m-1"));
+      host.threads = [
+        thread("t-sup", "exposed", {
+          messages: [{ id: "m-1", turnId: "turn-1" }] as never,
+          latestTurn: latestTurn("turn-2", "running"),
+        }),
+      ];
+      for (const [state, status] of [
+        ["error", "failed"],
+        ["interrupted", "interrupted"],
+        ["completed", "completed"],
+      ] as const) {
+        host.turnStates.set("turn-1", state);
+        const result = yield* run("wait_for_submission", { submissionId, timeoutSeconds: 0 });
+        assert.deepInclude(result.ok ? result.value : {}, { status, turnId: "turn-1" });
+      }
+    }),
+  );
+
+  it.effect("counts admitted submissions the queue does not show yet against the limits", () =>
+    Effect.gen(function* () {
+      const { host, run } = yield* setup();
+      host.threads = [thread("t-sup", "exposed")];
+      const burst = (count: number, call: (index: number) => ReturnType<typeof run>) =>
+        Effect.gen(function* () {
+          // Submissions stay in flight, so the queue never shows them.
+          const gate = yield* Deferred.make<void>();
+          host.submissionGate = gate;
+          let refused = 0;
+          const fibers = yield* Effect.forEach(
+            Array.from({ length: count }, (_, index) => index),
+            (index) =>
+              call(index).pipe(
+                Effect.tap((result) =>
+                  Effect.sync(() => {
+                    if (!result.ok) refused += 1;
+                  }),
+                ),
+                Effect.forkChild,
+              ),
+          );
+          for (let attempt = 0; attempt < 1_000 && refused < 2; attempt += 1)
+            yield* Effect.yieldNow;
+          yield* Deferred.succeed(gate, undefined);
+          host.submissionGate = null;
+          return yield* Effect.forEach(fibers, Fiber.join);
+        });
+
+      const perThread = AGENT_BRIDGE_LIMITS.queuedBridgeItemsPerThread;
+      const sent = yield* burst(perThread + 2, (index) =>
+        run("send_message", { threadId: "t-sup", prompt: `Hi ${index}` }),
+      );
+      assert.strictEqual(sent.filter((result) => result.ok).length, perThread);
+      assert.include(
+        sent.find((result) => !result.ok)?.error?.message ?? "",
+        "may wait in one thread's queue",
+      );
+
+      const global = AGENT_BRIDGE_LIMITS.runningBridgeThreadsGlobal;
+      const created = yield* burst(global + 2, (index) =>
+        run("create_thread", { projectId: "exposed", prompt: `Task ${index}` }),
+      );
+      assert.strictEqual(created.filter((result) => result.ok).length, global);
+      assert.include(created.find((result) => !result.ok)?.error?.message ?? "", "busy");
+    }),
+  );
+
+  it.effect("ignores streamed output while waiting and maps the turn once", () =>
+    Effect.gen(function* () {
+      const { host, run } = yield* setup();
+      host.threads = [thread("t-sup", "exposed")];
+      const sent = yield* run("send_message", { threadId: "t-sup", prompt: "Hi" });
+      const submissionId: string = sent.ok ? sent.value.submissionId : "";
+      host.records.set(submissionId, startedRecord(submissionId, "t-sup", "m-1"));
+      const running = (state: "running" | "completed") =>
+        thread("t-sup", "exposed", {
+          messages: [{ id: "m-1", turnId: "turn-1" }] as never,
+          latestTurn: latestTurn("turn-1", state),
+        });
+      host.threads = [running("running")];
+      const event = (type: string, payload: Record<string, unknown> = {}) =>
+        ({ type, aggregateId: "t-sup", payload }) as unknown as OrchestrationEvent;
+      const fiber = yield* run("wait_for_submission", { submissionId, timeoutSeconds: 45 }).pipe(
+        Effect.forkChild,
+      );
+      // Publish until the waiter's subscription is live.
+      const before = host.snapshotReads;
+      for (let attempt = 0; attempt < 20 && host.snapshotReads <= before + 1; attempt += 1) {
+        yield* PubSub.publish(host.domainEvents, event("thread.activity-appended"));
+        yield* Effect.yieldNow;
+      }
+      assert.isAbove(host.snapshotReads, before + 1);
+
+      const live = host.snapshotReads;
+      for (let index = 0; index < 20; index += 1) {
+        yield* PubSub.publish(host.domainEvents, event("thread.message-sent", { streaming: true }));
+        yield* PubSub.publish(host.domainEvents, event("thread.command-execution-output-appended"));
+        yield* Effect.yieldNow;
+      }
+      assert.strictEqual(host.snapshotReads, live);
+
+      host.threads = [running("completed")];
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        yield* PubSub.publish(host.domainEvents, event("thread.session-set"));
+        yield* Effect.yieldNow;
+      }
+      const done = yield* Fiber.join(fiber);
+      assert.deepInclude(done.ok ? done.value : {}, { status: "completed", timedOut: false });
+      assert.strictEqual(host.detailReads, 1);
     }),
   );
 

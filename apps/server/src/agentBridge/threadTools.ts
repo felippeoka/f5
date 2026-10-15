@@ -18,8 +18,10 @@ import {
   MessageId,
   ProjectId,
   ThreadId,
+  type TurnId,
   type AgentBridgeScope,
   type ClientThreadTurnStartCommand,
+  type OrchestrationEvent,
   type OrchestrationReadModel,
   type OrchestrationThread,
   type ProviderKind,
@@ -32,11 +34,25 @@ import { createModelSelection } from "@t3tools/shared/model";
 import { setupProjectScript } from "@t3tools/shared/projectScripts";
 import { runtimeModeCapabilities } from "@t3tools/shared/runtimeMode";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/worktree";
-import { Clock, Data, Deferred, Duration, Effect, Schema, SchemaIssue, Stream } from "effect";
+import {
+  Clock,
+  Data,
+  Deferred,
+  Duration,
+  Effect,
+  Schema,
+  SchemaIssue,
+  Semaphore,
+  Stream,
+} from "effect";
 
 import { canonicalJsonHash } from "../canonicalJsonHash.ts";
 import type { AgentBridgeHostShape } from "./AgentBridgeHost.ts";
-import type { AgentBridgeClientRecord, AgentBridgeStore } from "./AgentBridgeStore.ts";
+import type {
+  AgentBridgeClientRecord,
+  AgentBridgeRequestRecord,
+  AgentBridgeStore,
+} from "./AgentBridgeStore.ts";
 import { AGENT_BRIDGE_LIMITS, type AgentBridgeLimiters } from "./rateLimits.ts";
 
 export const AGENT_BRIDGE_PROMPT_MAX_BYTES = 32 * 1024;
@@ -217,6 +233,12 @@ export const SUBMISSION_STATUSES = [
 ] as const;
 export type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number];
 
+/** Streamed output never changes a submission's status, so it does not wake waiters. */
+const isStreamingOutput = (event: OrchestrationEvent) =>
+  (event.type === "thread.message-sent" && event.payload.streaming) ||
+  event.type === "thread.command-execution-output-appended" ||
+  event.type === "thread.usage-recorded";
+
 /** Statuses a waiter keeps waiting through. */
 const IN_FLIGHT_STATUSES = new Set<SubmissionStatus>(["queued", "preparing-worktree", "running"]);
 
@@ -345,20 +367,60 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
   }
 
   interface InflightSubmission {
+    readonly clientId: string;
     readonly argsHash: string;
     readonly done: Deferred.Deferred<unknown, AgentBridgeToolError>;
+    /** Set once admitted; counted by the limits until the queue holds it. */
+    admitted?: Admission;
   }
   const inflight = new Map<string, InflightSubmission>();
+
+  // Admission checks and the limits they count run one at a time, so a burst
+  // of requests with different clientRequestIds cannot all pass a check
+  // before any of them is admitted.
+  const admissionLock = Semaphore.makeUnsafe(1);
+
+  /** Admitted submissions of this process that the queue may not show yet. */
+  const inflightAdmissions = () =>
+    [...inflight.values()].flatMap((entry) =>
+      entry.admitted ? [{ clientId: entry.clientId, admission: entry.admitted }] : [],
+    );
 
   const isSettledRejection = (error: { readonly code?: string }) =>
     error.code === BOOTSTRAP_THREAD_NOT_CREATED_ERROR_CODE ||
     error.code === BOOTSTRAP_THREAD_DELETED_ERROR_CODE;
+
+  /**
+   * Why a stored command may no longer be submitted, or null. Retries of a
+   * pending receipt skip `admit`, so access is checked again here.
+   */
+  const revokedReason = (caller: AgentBridgeCaller, admission: Admission) =>
+    snapshot.pipe(
+      Effect.map((model) => {
+        if (admission.createsThread) {
+          const projectId = admission.command.bootstrap?.createThread?.projectId;
+          const shared = model.projects.some(
+            (project) =>
+              project.id === projectId &&
+              project.deletedAt === null &&
+              caller.visibleProjectIds.has(project.id),
+          );
+          return shared ? null : "The project is no longer shared with this client.";
+        }
+        const thread = visibleThread(model, caller, admission.threadId);
+        if (!thread) return "The thread is no longer shared with this client.";
+        if (thread.runtimeMode !== "approval-required")
+          return "The thread is no longer supervised.";
+        return null;
+      }),
+    );
 
   const submitOnce = (input: {
     readonly caller: AgentBridgeCaller;
     readonly tool: string;
     readonly requestId: string;
     readonly argsHash: string;
+    readonly entry: InflightSubmission;
     readonly admit: Effect.Effect<Admission, AgentBridgeToolError>;
     readonly consume: () => void;
   }): Effect.Effect<unknown, AgentBridgeToolError> =>
@@ -367,61 +429,85 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
       const conflict = toolError(
         "That clientRequestId was already used with different arguments. Use a new clientRequestId.",
       );
-      let existing = yield* store.getRequest(namespace, input.requestId).pipe(storeError);
-      let admission: Admission;
-      if (existing) {
-        if (existing.tool !== input.tool || existing.argsHash !== input.argsHash)
-          return yield* conflict;
-        if (existing.status === "completed") return existing.result;
-        admission = existing.command as Admission;
-      } else {
-        admission = yield* input.admit;
-        const at = now().toISOString();
-        const inserted = yield* store
-          .insertPendingRequest({
-            namespace,
-            requestId: input.requestId,
-            tool: input.tool,
-            argsHash: input.argsHash,
-            command: admission,
-            relatedIds: { threadId: admission.threadId, submissionId: admission.submissionId },
-            ...(admission.createsThread
-              ? { createdThread: { threadId: admission.threadId, clientId: namespace } }
-              : {}),
-            at,
-          })
-          .pipe(storeError);
-        if (!inserted.inserted) {
-          existing = inserted.existing;
+      type Receipt =
+        | { readonly kind: "completed"; readonly result: unknown }
+        | { readonly kind: "resumed" | "admitted"; readonly admission: Admission };
+      const fromExisting = (
+        existing: AgentBridgeRequestRecord,
+      ): Effect.Effect<Receipt, AgentBridgeToolError> =>
+        Effect.gen(function* () {
           if (existing.tool !== input.tool || existing.argsHash !== input.argsHash)
             return yield* conflict;
-          if (existing.status === "completed") return existing.result;
-          admission = existing.command as Admission;
-        } else {
-          input.consume();
-          yield* notify(inserted.revision, [admission.threadId]);
-        }
-      }
+          return existing.status === "completed"
+            ? { kind: "completed", result: existing.result }
+            : { kind: "resumed", admission: existing.command as Admission };
+        });
+      const existing = yield* store.getRequest(namespace, input.requestId).pipe(storeError);
+      const receipt: Receipt = existing
+        ? yield* fromExisting(existing)
+        : yield* admissionLock.withPermits(1)(
+            Effect.gen(function* () {
+              const admission = yield* input.admit;
+              const inserted = yield* store
+                .insertPendingRequest({
+                  namespace,
+                  requestId: input.requestId,
+                  tool: input.tool,
+                  argsHash: input.argsHash,
+                  command: admission,
+                  relatedIds: {
+                    threadId: admission.threadId,
+                    submissionId: admission.submissionId,
+                  },
+                  ...(admission.createsThread
+                    ? { createdThread: { threadId: admission.threadId, clientId: namespace } }
+                    : {}),
+                  at: now().toISOString(),
+                })
+                .pipe(storeError);
+              if (!inserted.inserted) return yield* fromExisting(inserted.existing);
+              input.entry.admitted = admission;
+              input.consume();
+              yield* notify(inserted.revision, [admission.threadId]);
+              return { kind: "admitted", admission } satisfies Receipt;
+            }),
+          );
+      if (receipt.kind === "completed") return receipt.result;
+      const { admission } = receipt;
+      input.entry.admitted = admission;
+
+      // A resumed receipt may predate an unshare or a mode change. Once the
+      // queue has accepted the submission, the retry only reads its result.
+      const revoked =
+        receipt.kind === "resumed" &&
+        (yield* host
+          .getSubmission(CommandId.makeUnsafe(admission.submissionId))
+          .pipe(hostError)) === null
+          ? yield* revokedReason(input.caller, admission)
+          : null;
 
       // The stored command is identical on every retry, so the queue's
       // canonical hash matches and it replays its own result.
-      const submitted = yield* host
-        .submitTurnSubmission(
-          {
-            submissionId: CommandId.makeUnsafe(admission.submissionId),
-            command: admission.command,
-            intent: admission.intent,
-          },
-          { submissionSource: "automation" },
-        )
-        .pipe(
-          Effect.map((result) => ({ ok: true as const, result })),
-          Effect.catch((error) =>
-            isSettledRejection(error)
-              ? Effect.succeed({ ok: false as const, reason: error.message })
-              : Effect.fail(toolError(error.message)),
-          ),
-        );
+      const submitted =
+        revoked !== null
+          ? { ok: false as const, reason: revoked }
+          : yield* host
+              .submitTurnSubmission(
+                {
+                  submissionId: CommandId.makeUnsafe(admission.submissionId),
+                  command: admission.command,
+                  intent: admission.intent,
+                },
+                { submissionSource: "automation" },
+              )
+              .pipe(
+                Effect.map((result) => ({ ok: true as const, result })),
+                Effect.catch((error) =>
+                  isSettledRejection(error)
+                    ? Effect.succeed({ ok: false as const, reason: error.message })
+                    : Effect.fail(toolError(error.message)),
+                ),
+              );
 
       const disposition = submitted.ok ? submissionDisposition(submitted.result) : "rejected";
       if (disposition !== "rejected") {
@@ -498,11 +584,12 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
         return yield* Deferred.await(joined.done);
       }
       const entry: InflightSubmission = {
+        clientId: input.caller.client.id,
         argsHash,
         done: yield* Deferred.make<unknown, AgentBridgeToolError>(),
       };
       inflight.set(key, entry);
-      return yield* submitOnce({ ...input, requestId, argsHash }).pipe(
+      return yield* submitOnce({ ...input, requestId, argsHash, entry }).pipe(
         Effect.onExit((exit) =>
           Effect.sync(() => inflight.delete(key)).pipe(
             Effect.andThen(Deferred.done(entry.done, exit)),
@@ -551,41 +638,65 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
           return yield* toolError(`Unknown model for ${providerLabel(provider)}.`);
         return { provider, model: requested.model };
       }
+      // The text-generation setting picks the provider only: its model is the
+      // small one F5 uses for titles and commit messages, not for coding turns.
+      const driverDefault = isKnownProviderKind(provider.driver)
+        ? DEFAULT_MODEL_BY_PROVIDER[provider.driver as ProviderKind]
+        : undefined;
       const model =
-        (provider.instanceId === textDefault.instanceId ? textDefault.model : undefined) ??
-        provider.models[0]?.slug ??
-        (isKnownProviderKind(provider.driver)
-          ? DEFAULT_MODEL_BY_PROVIDER[provider.driver as ProviderKind]
-          : undefined);
+        (driverDefault !== undefined &&
+        (provider.models.length === 0 ||
+          provider.models.some((entry) => entry.slug === driverDefault))
+          ? driverDefault
+          : undefined) ?? provider.models[0]?.slug;
       if (!model) return yield* toolError(`${providerLabel(provider)} reports no models.`);
       return { provider, model };
     });
 
-  const runningBridgeThreads = (model: OrchestrationReadModel) =>
-    store.listCreatedThreadIds().pipe(
-      storeError,
-      Effect.map((ids) => {
-        const created = new Set(ids);
-        return model.threads.filter(
-          (thread) =>
-            created.has(thread.id) && thread.deletedAt === null && isThreadRunning(thread),
-        ).length;
-      }),
-    );
+  /**
+   * Bridge-created threads that hold work: running, or with their first turn
+   * still being admitted, queued, or preparing its worktree.
+   */
+  const busyBridgeThreads = (model: OrchestrationReadModel) =>
+    Effect.gen(function* () {
+      const created = new Set(yield* store.listCreatedThreadIds().pipe(storeError));
+      const busy = new Set(
+        inflightAdmissions()
+          .filter((entry) => entry.admission.createsThread)
+          .map((entry) => entry.admission.threadId),
+      );
+      for (const thread of model.threads) {
+        if (!created.has(thread.id) || thread.deletedAt !== null || busy.has(thread.id)) continue;
+        if (isThreadRunning(thread)) {
+          busy.add(thread.id);
+          continue;
+        }
+        if (thread.latestTurn !== null) continue;
+        const queue = yield* host.getQueueSnapshot(thread.id).pipe(hostError);
+        if (
+          queue.items.length > 0 &&
+          queue.blockedKind !== "paused" &&
+          queue.blockedKind !== "error"
+        )
+          busy.add(thread.id);
+      }
+      return busy.size;
+    });
 
   // ── submission status ──
 
+  /**
+   * `knownTurns` caches submission → turn id for one waiter: once a turn has
+   * started, the message never moves to another turn.
+   */
   const submissionStatus = (
     caller: AgentBridgeCaller,
     submissionId: string,
+    knownTurns: Map<string, TurnId> = new Map(),
   ): Effect.Effect<SubmissionStatusResult, AgentBridgeToolError> =>
     Effect.gen(function* () {
       const receipt = yield* store
-        .findRequestByRelatedId({
-          namespace: caller.client.id,
-          key: "submissionId",
-          value: submissionId,
-        })
+        .findRequestBySubmissionId({ namespace: caller.client.id, submissionId })
         .pipe(storeError);
       const threadId = receipt?.relatedIds.threadId;
       if (!receipt || !threadId) return yield* notFound("Submission");
@@ -636,14 +747,28 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
           reason: record.reasonCode ?? record.disposition,
         };
       // Started: follow the turn that carries the submitted message.
-      const details = yield* host.getThreadDetails(thread.id).pipe(hostError);
-      const message = details.messages.find((entry) => entry.id === record.messageId);
-      const turnId = message?.turnId ?? null;
-      if (turnId === null || thread.latestTurn?.turnId !== turnId) {
-        if (turnId !== null) return { ...base, status: "completed" as const, turnId };
-        return { ...base, status: "running" as const };
+      let turnId = knownTurns.get(submissionId) ?? null;
+      if (turnId === null) {
+        const details = yield* host.getThreadDetails(thread.id).pipe(hostError);
+        turnId = details.messages.find((entry) => entry.id === record.messageId)?.turnId ?? null;
+        if (turnId !== null) knownTurns.set(submissionId, turnId);
       }
+      if (turnId === null) return { ...base, status: "running" as const };
       const withTurn = { ...base, turnId };
+      if (thread.latestTurn?.turnId !== turnId) {
+        // A later turn has started; report how this one ended.
+        const state = yield* host.getTurnState({ threadId: thread.id, turnId }).pipe(hostError);
+        switch (state) {
+          case "completed":
+            return { ...withTurn, status: "completed" as const };
+          case "interrupted":
+            return { ...withTurn, status: "interrupted" as const };
+          case "error":
+            return { ...withTurn, status: "failed" as const };
+          default:
+            return { ...withTurn, status: "running" as const };
+        }
+      }
       switch (thread.latestTurn.state) {
         case "completed":
           return { ...withTurn, status: "completed" as const };
@@ -671,7 +796,8 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
   ) =>
     Effect.scoped(
       Effect.gen(function* () {
-        const first = yield* submissionStatus(caller, submissionId);
+        const knownTurns = new Map<string, TurnId>();
+        const first = yield* submissionStatus(caller, submissionId, knownTurns);
         if (!IN_FLIGHT_STATUSES.has(first.status) || timeoutSeconds <= 0)
           return {
             ...first,
@@ -692,14 +818,16 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
           Effect.forkScoped,
         );
         yield* host.domainEvents.pipe(
-          Stream.filter((event) => event.aggregateId === first.threadId),
+          Stream.filter(
+            (event) => event.aggregateId === first.threadId && !isStreamingOutput(event),
+          ),
           Stream.runForEach(() => signal),
           Effect.forkScoped,
         );
         const deadline = (yield* Clock.currentTimeMillis) + timeoutSeconds * 1000;
         while (true) {
           wake = yield* Deferred.make<void>();
-          const status = yield* submissionStatus(caller, submissionId);
+          const status = yield* submissionStatus(caller, submissionId, knownTurns);
           if (!IN_FLIGHT_STATUSES.has(status.status)) return { ...status, timedOut: false };
           const remaining = deadline - (yield* Clock.currentTimeMillis);
           if (remaining <= 0) return { ...status, timedOut: true };
@@ -953,9 +1081,7 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
                 `At most ${AGENT_BRIDGE_LIMITS.createThreadPerHour} threads per hour.`,
                 { retryAfterSeconds: limited.retryAfterSeconds },
               );
-            if (
-              (yield* runningBridgeThreads(model)) >= AGENT_BRIDGE_LIMITS.runningBridgeThreadsGlobal
-            )
+            if ((yield* busyBridgeThreads(model)) >= AGENT_BRIDGE_LIMITS.runningBridgeThreadsGlobal)
               return yield* toolError(
                 `F5 is busy: ${AGENT_BRIDGE_LIMITS.runningBridgeThreadsGlobal} bridge threads are already running.`,
                 { retryAfterSeconds: 60 },
@@ -1071,10 +1197,16 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
                 .listSubmissionIdsForThread({ namespace: caller.client.id, threadId: thread.id })
                 .pipe(storeError),
             );
-            if (
-              queue.items.filter((item) => mine.has(item.submissionId)).length >=
-              AGENT_BRIDGE_LIMITS.queuedBridgeItemsPerThread
-            )
+            // Admitted messages the queue does not show yet count too.
+            const waiting = new Set(
+              queue.items
+                .filter((item) => mine.has(item.submissionId))
+                .map((item) => item.submissionId as string),
+            );
+            for (const entry of inflightAdmissions())
+              if (entry.clientId === caller.client.id && entry.admission.threadId === thread.id)
+                waiting.add(entry.admission.submissionId);
+            if (waiting.size >= AGENT_BRIDGE_LIMITS.queuedBridgeItemsPerThread)
               return yield* toolError(
                 `At most ${AGENT_BRIDGE_LIMITS.queuedBridgeItemsPerThread} of your messages may wait in one thread's queue.`,
                 { retryAfterSeconds: 30 },

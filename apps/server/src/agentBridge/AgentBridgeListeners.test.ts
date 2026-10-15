@@ -17,6 +17,7 @@ import { startLocalListener, type LocalListener } from "./AgentBridgeListeners.t
 import type { AgentBridgeClientRecord, AgentBridgeStore } from "./AgentBridgeStore.ts";
 import { readAgentBridgeLocalCredentials } from "./localCredentials.ts";
 import { assertMcpVersion, handleMcpRequest, UnsupportedMcpVersionError } from "./mcpProtocol.ts";
+import { isAncestorProcess, parentProcessId } from "./processAncestry.ts";
 import { makeAgentBridgeLimiters } from "./rateLimits.ts";
 import { AGENT_BRIDGE_UNAVAILABLE_CODE, runAgentBridgeStdio } from "./stdioShim.ts";
 import { FakeAgentBridgeHost, project } from "./testing/fakeHost.ts";
@@ -183,7 +184,8 @@ describe("local listener", () => {
     const credentials = await readAgentBridgeLocalCredentials(credentialsPath);
     expect(credentials).toMatchObject({ port: listener.port, token: listener.token });
     expect(Buffer.from(listener.token, "base64url")).toHaveLength(32);
-    expect(fs.statSync(credentialsPath).mode & 0o777).toBe(0o600);
+    // Windows reports 0o666 for any writable file; POSIX modes do not apply there.
+    if (process.platform !== "win32") expect(fs.statSync(credentialsPath).mode & 0o777).toBe(0o600);
     expect(
       fs.readdirSync(path.dirname(credentialsPath)).filter((name) => name.endsWith(".tmp")),
     ).toEqual([]);
@@ -270,7 +272,7 @@ describe("local listener", () => {
 describe("agent-bridge-stdio", () => {
   async function runShim(
     lines: ReadonlyArray<unknown>,
-    options: { credentialsPath: string; env?: NodeJS.ProcessEnv },
+    options: { credentialsPath: string; env?: NodeJS.ProcessEnv; fetch?: typeof fetch },
   ) {
     const input = new PassThrough();
     const output = new PassThrough();
@@ -281,6 +283,7 @@ describe("agent-bridge-stdio", () => {
       input,
       output,
       env: options.env ?? {},
+      ...(options.fetch ? { fetch: options.fetch } : {}),
     });
     for (const line of lines) input.write(`${JSON.stringify(line)}\n`);
     input.end();
@@ -303,6 +306,77 @@ describe("agent-bridge-stdio", () => {
     );
     expect(replies.find((reply) => reply.id === 2)?.result).toEqual({ tools: [] });
     expect(replies.find((reply) => reply.id === 3)?.error.code).toBe(AGENT_BRIDGE_UNAVAILABLE_CODE);
+  });
+
+  it("serves no tools when the F5 server is an ancestor, with no marker in the environment", async () => {
+    // A stripped environment, as Codex gives stdio MCP servers. The shim walks
+    // its real process tree: the test runner's parent stands in for F5.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "f5-agent-bridge-ancestry-"));
+    const credentialsPath = path.join(dir, "local.json");
+    fs.writeFileSync(
+      credentialsPath,
+      JSON.stringify({
+        port: 9,
+        token: "t",
+        startedAt: new Date().toISOString(),
+        serverPid: process.ppid,
+      }),
+    );
+    let forwarded = false;
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const chunks: string[] = [];
+    output.on("data", (chunk: Buffer) => chunks.push(chunk.toString("utf8")));
+    const done = runAgentBridgeStdio({
+      credentialsPath,
+      input,
+      output,
+      env: {},
+      fetch: (async () => {
+        forwarded = true;
+        return new Response("{}");
+      }) as unknown as typeof fetch,
+    });
+    input.end(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+    await done;
+    expect(forwarded).toBe(false);
+    expect(JSON.parse(chunks.join("").trim()).result).toEqual({ tools: [] });
+  });
+
+  it("finds ancestors by walking parent processes", () => {
+    const parents = new Map([
+      [40, 30],
+      [30, 20],
+      [20, 1],
+    ]);
+    const parentOf = (pid: number) => parents.get(pid) ?? null;
+    expect(isAncestorProcess(20, 40, parentOf)).toBe(true);
+    expect(isAncestorProcess(99, 40, parentOf)).toBe(false);
+    // The real walk needs `ps` (macOS) or /proc (Linux); sandboxes may block both.
+    if (parentProcessId(process.pid) === process.ppid) {
+      expect(isAncestorProcess(process.ppid, process.pid)).toBe(true);
+      expect(isAncestorProcess(2 ** 22 + 7, process.pid)).toBe(false);
+    }
+  });
+
+  it("answers HTTP errors without a JSON-RPC envelope with an error for that request", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "f5-agent-bridge-http-error-"));
+    const credentialsPath = path.join(dir, "local.json");
+    fs.writeFileSync(
+      credentialsPath,
+      JSON.stringify({ port: 9, token: "t", startedAt: new Date().toISOString() }),
+    );
+    const replies = await runShim([{ jsonrpc: "2.0", id: 7, method: "tools/list" }], {
+      credentialsPath,
+      fetch: (async () =>
+        new Response(JSON.stringify({ error: "request_too_large" }), {
+          status: 413,
+        })) as unknown as typeof fetch,
+    });
+    expect(replies).toHaveLength(1);
+    expect(replies[0]?.id).toBe(7);
+    expect(replies[0]?.error.code).toBe(AGENT_BRIDGE_UNAVAILABLE_CODE);
+    expect(replies[0]?.error.message).toContain("413");
   });
 
   it("returns -32002 when F5 or the bridge is down", async () => {
