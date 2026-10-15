@@ -70,6 +70,16 @@ export const runMuseReadOnlyPrompt =
             clientVersion: "0.0.0",
           });
           try {
+            // Same rule as provider sessions: the read-only profile is not the
+            // only fence, so no prompt runs without the host sandbox.
+            const { sandboxAvailability, sandboxUnavailableReason } = host.initializeResult;
+            if (sandboxAvailability !== "available") {
+              throw new Error(
+                `Muse Code reports its sandbox is ${sandboxAvailability ?? "unreported"}${
+                  sandboxUnavailableReason ? ` (${sandboxUnavailableReason})` : ""
+                }. F5 only runs Muse Code with its sandbox on.`,
+              );
+            }
             const session = await host.client.startSession({
               workspaceRoot: input.cwd,
               approvalMode: "denyUnmatched",

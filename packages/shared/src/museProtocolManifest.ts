@@ -106,7 +106,6 @@ export const MUSE_CLIENT_METHODS_USED = [
   "session/setReasoningEffort",
   "session/setApprovalMode",
   "model/list",
-  "media/upload",
   "view/subscribe",
   "view/page",
   "approval/decide",

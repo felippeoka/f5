@@ -49,11 +49,18 @@ describe("MspRequestGate", () => {
     expect(gate.inFlight).toBe(2);
   });
 
-  it("times out and releases its slot", async () => {
+  it("times out but holds its slot until the host answers", async () => {
     const gate = new MspRequestGate(1);
+    let answer: (value: string) => void = () => undefined;
     await expect(
-      gate.run("slow", 10, () => new Promise<never>(() => undefined)),
+      gate.run("slow", 10, () => new Promise<string>((resolve) => (answer = resolve))),
     ).rejects.toMatchObject({ kind: "timeout" });
+    expect(gate.inFlight).toBe(1);
+    await expect(gate.run("blocked", 1_000, async () => "ok")).rejects.toMatchObject({
+      kind: "overloaded",
+    });
+    answer("late");
+    await Promise.resolve();
     expect(gate.inFlight).toBe(0);
     await expect(gate.run("fast", 1_000, async () => "ok")).resolves.toBe("ok");
   });

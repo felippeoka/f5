@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import * as nodePath from "node:path";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -10,6 +13,7 @@ import {
 } from "@t3tools/contracts";
 import { Effect, Fiber, Layer, Schema, ServiceMap, Stream } from "effect";
 
+import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { openMspHost } from "../msp/MspSessionRuntime.ts";
 import { memoryNativeCommandIdStore } from "../msp/nativeCommandIds.ts";
@@ -37,6 +41,7 @@ const HarnessLayer = Layer.effect(
     const adapter = yield* makeMuseAdapter(Schema.decodeSync(MuseSettings)({}), {
       instanceId: INSTANCE,
       nativeCommandIds: memoryNativeCommandIdStore(),
+      sessionOpenTimeoutMs: 1_000,
       openHost: () =>
         Effect.promise(async () => {
           const mock = new MockMspHost();
@@ -351,7 +356,7 @@ it.layer(HarnessLayer)("MuseAdapter", (it) => {
     }),
   );
 
-  it.effect("classifies a rejected turn as not sent and pins the native id on retries", () =>
+  it.effect("classifies a rejected turn as not sent and retries it under a fresh native id", () =>
     Effect.gen(function* () {
       const harness = yield* MuseHarness;
       const threadId = ThreadId.make("thread-delivery");
@@ -373,9 +378,10 @@ it.layer(HarnessLayer)("MuseAdapter", (it) => {
       assert.equal(failure.deliveryRetryable, false);
       host.handlers.delete("turn/start");
       yield* harness.adapter.sendTurn({ threadId, input: "hi", deliveryId });
+      // The host answered the first attempt; reusing its id would replay the rejection.
       const commandIds = host.requestsFor("turn/start").map((request) => request.params.commandId);
       assert.equal(commandIds.length, 2);
-      assert.equal(commandIds[0], commandIds[1]);
+      assert.notEqual(commandIds[0], commandIds[1]);
       yield* harness.adapter.stopSession(threadId);
     }),
   );
@@ -591,6 +597,266 @@ it.layer(HarnessLayer)("MuseAdapter", (it) => {
       yield* harness.adapter.sendTurn({ threadId, input: "go" });
       yield* harness.adapter.interruptTurn(threadId, TurnId.make("turn-1"));
       assert.equal(host.requestsFor("turn/interrupt")[0]?.params.turnId, "turn-1");
+      yield* harness.adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("sends images inline as the SDK contract requires, with a stable payload", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      const config = yield* ServerConfig;
+      const attachment = {
+        type: "image" as const,
+        id: "thread-muse-image-12345678-1234-1234-1234-123456789abc",
+        name: "diagram.png",
+        mimeType: "image/png",
+        sizeBytes: 4,
+      };
+      const attachmentPath = nodePath.join(
+        config.attachmentsDir,
+        attachmentRelativePath(attachment),
+      );
+      mkdirSync(nodePath.dirname(attachmentPath), { recursive: true });
+      writeFileSync(attachmentPath, Uint8Array.from([1, 2, 3, 4]));
+      const threadId = ThreadId.make("thread-image");
+      yield* start(harness, threadId);
+      const host = harness.hosts.at(-1)!;
+      yield* harness.adapter.sendTurn({ threadId, input: "look", attachments: [attachment] });
+      host.notify("turn/completed", { turnId: "turn-1", terminal: "completed" });
+      yield* tick();
+      yield* harness.adapter.sendTurn({ threadId, input: "look", attachments: [attachment] });
+      assert.equal(host.requestsFor("media/upload").length, 0);
+      const inputs = host.requestsFor("turn/start").map((request) => request.params.input);
+      assert.deepEqual(inputs[0], [
+        { type: "text", text: "look" },
+        {
+          type: "image",
+          mediaType: "image/png",
+          base64Data: Buffer.from([1, 2, 3, 4]).toString("base64"),
+        },
+      ]);
+      assert.deepEqual(inputs[1], inputs[0]);
+      yield* harness.adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("projects a terminal event and approvals recovered by gap fill", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      const { events, stop } = yield* collect(harness.adapter);
+      const threadId = ThreadId.make("thread-gap");
+      yield* start(harness, threadId);
+      const host = harness.hosts.at(-1)!;
+      yield* harness.adapter.sendTurn({ threadId, input: "go" });
+      host.notify("turn/started", { turnId: "turn-1", commandId: "c" });
+      yield* tick();
+      const after = `cursor-${host.cursorCounter}`;
+      const missed = (method: string, viewCursor: string, params: Record<string, unknown>) => ({
+        method,
+        params: { sessionId: host.sessionId, viewCursor, ...params },
+      });
+      host.handlers.set("view/page", () => ({
+        events: [
+          missed("item/completed", "gap-1", {
+            item: {
+              itemId: "a1",
+              kind: "agentMessage",
+              revision: 1,
+              status: "completed",
+              turnId: "turn-1",
+              text: "Done",
+            },
+          }),
+          missed("turn/completed", "gap-2", { turnId: "turn-1", terminal: "completed" }),
+        ],
+        nextCursor: "gap-2",
+      }));
+      host.handlers.set("approval/listPending", () => ({
+        approvals: [
+          {
+            approvalId: "ap-gap",
+            currentRequirementId: { approvalId: "ap-gap", sourceIndex: 0 },
+            availableChoices: [
+              { choiceId: "ok", decision: "approved", scope: "once", label: "OK" },
+            ],
+            subject: { kind: "command" },
+            toolName: "shell",
+            turnId: "turn-1",
+          },
+        ],
+        userInputs: [],
+      }));
+      host.notify("view/gap", { after, next: "gap-2" });
+      yield* tick(200);
+      assert.ok(host.requestsFor("view/page").length >= 1);
+      const completed = events.find(
+        (event) => event.type === "turn.completed" && event.turnId === "turn-1",
+      );
+      assert.equal(
+        completed?.type === "turn.completed" ? completed.payload.state : "",
+        "completed",
+      );
+      assert.ok(events.some((event) => event.type === "item.completed" && event.itemId === "a1"));
+      assert.ok(
+        events.some(
+          (event) => event.type === "request.opened" && event.requestId === "ap-gap#ap-gap:0",
+        ),
+      );
+      const [session] = (yield* harness.adapter.listSessions()).filter(
+        (entry) => entry.threadId === threadId,
+      );
+      assert.equal(session?.status, "ready");
+      yield* stop;
+      yield* harness.adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("keeps a turn whose retract was declined and settles an accepted one", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      const { events, stop } = yield* collect(harness.adapter);
+      const threadId = ThreadId.make("thread-retract");
+      yield* start(harness, threadId);
+      const host = harness.hosts.at(-1)!;
+      yield* harness.adapter.sendTurn({ threadId, input: "one" });
+      host.notify("turn/started", { turnId: "turn-1", commandId: "c1" });
+      host.notify("turn/retracted", { turnId: "turn-1", commandId: "c1", outcome: "declined" });
+      yield* tick();
+      assert.isFalse(events.some((event) => event.type === "turn.aborted"));
+      yield* harness.adapter.interruptTurn(threadId, TurnId.make("turn-1"));
+      assert.equal(host.requestsFor("turn/interrupt").length, 1);
+      host.notify("turn/completed", { turnId: "turn-1", terminal: "cancelled" });
+      yield* tick();
+      assert.equal(events.filter((event) => event.type === "turn.completed").length, 1);
+
+      yield* harness.adapter.sendTurn({ threadId, input: "two" });
+      host.notify("turn/started", { turnId: "turn-2", commandId: "c2" });
+      host.notify("turn/retracted", { turnId: "turn-2", commandId: "c2" });
+      yield* tick();
+      assert.ok(events.some((event) => event.type === "turn.aborted" && event.turnId === "turn-2"));
+      const [session] = (yield* harness.adapter.listSessions()).filter(
+        (entry) => entry.threadId === threadId,
+      );
+      assert.equal(session?.status, "ready");
+      yield* stop;
+      yield* harness.adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("refuses new work once permissions diverge and settles the active turn", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      const { events, stop } = yield* collect(harness.adapter);
+      const threadId = ThreadId.make("thread-diverge-active");
+      yield* start(harness, threadId);
+      const host = harness.hosts.at(-1)!;
+      host.handlers.set("turn/interrupt", (params) => {
+        setTimeout(
+          () => host.notify("turn/completed", { turnId: "turn-1", terminal: "cancelled" }),
+          20,
+        );
+        return { commandId: params.commandId, status: "accepted", turnId: "turn-1" };
+      });
+      yield* harness.adapter.sendTurn({ threadId, input: "go" });
+      host.notify("turn/started", { turnId: "turn-1", commandId: "c" });
+      yield* tick();
+      const startedAt = Date.now();
+      host.notify("session/approvalModeChanged", {
+        mode: "allowAll",
+        clientName: "other",
+        commandId: "c",
+        source: "approvalReconfigure",
+      });
+      yield* tick(5);
+      const refused = yield* harness.adapter
+        .sendTurn({ threadId, input: "more" })
+        .pipe(Effect.result);
+      assert.equal(refused._tag, "Failure");
+      assert.match(refused._tag === "Failure" ? refused.failure.message : "", /permissions/);
+      yield* tick(200);
+      assert.isFalse(yield* harness.adapter.hasSession(threadId));
+      assert.isBelow(Date.now() - startedAt, 2_000);
+      const completed = events.find((event) => event.type === "turn.completed");
+      assert.equal(
+        completed?.type === "turn.completed" ? completed.payload.state : "",
+        "cancelled",
+      );
+      assert.equal(host.requestsFor("turn/start").length, 1);
+      yield* stop;
+    }),
+  );
+
+  it.effect("fails a session start the host never answers", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      harness.configure = (host) => {
+        host.handlers.set("session/start", () => new Promise<never>(() => undefined));
+      };
+      const threadId = ThreadId.make("thread-hung-start");
+      const result = yield* start(harness, threadId).pipe(Effect.result);
+      harness.configure = () => undefined;
+      assert.equal(result._tag, "Failure");
+      assert.match(result._tag === "Failure" ? result.failure.message : "", /timed out/);
+      assert.isFalse(yield* harness.adapter.hasSession(threadId));
+      // The thread lock was released.
+      yield* start(harness, threadId);
+      yield* harness.adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("switches a resumed session to the requested model", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      const threadId = ThreadId.make("thread-resume-model");
+      const selection = { instanceId: INSTANCE, model: "muse-other" };
+      const session = yield* harness.adapter.startSession({
+        threadId,
+        provider: "muse",
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: selection,
+        resumeCursor: {
+          schemaVersion: 1,
+          mspSessionId: "msp-session-1",
+          viewCursor: "c1",
+          durability: "durable",
+        },
+      });
+      const host = harness.hosts.at(-1)!;
+      assert.deepEqual(
+        host.requestsFor("session/setModel").map((request) => request.params.model),
+        [{ modelId: "muse-other" }],
+      );
+      assert.equal(session.model, "muse-other");
+      yield* harness.adapter.sendTurn({ threadId, input: "go", modelSelection: selection });
+      assert.equal(host.requestsFor("session/setModel").length, 1);
+      yield* harness.adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("reports a failure before turn/start as not sent", () =>
+    Effect.gen(function* () {
+      const harness = yield* MuseHarness;
+      const threadId = ThreadId.make("thread-pre-turn");
+      yield* start(harness, threadId);
+      const host = harness.hosts.at(-1)!;
+      host.handlers.set("session/setModel", () => {
+        throw mspError("modelNotFound");
+      });
+      const result = yield* harness.adapter
+        .sendTurn({
+          threadId,
+          input: "go",
+          modelSelection: { instanceId: INSTANCE, model: "muse-missing" },
+        })
+        .pipe(Effect.result);
+      const failure =
+        result._tag === "Failure"
+          ? (result.failure as { deliveryCertainty?: string; deliveryRetryable?: boolean })
+          : {};
+      assert.equal(failure.deliveryCertainty, "not_sent");
+      assert.equal(failure.deliveryRetryable, false);
+      assert.equal(host.requestsFor("turn/start").length, 0);
       yield* harness.adapter.stopSession(threadId);
     }),
   );

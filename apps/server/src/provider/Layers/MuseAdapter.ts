@@ -75,6 +75,7 @@ import {
   classifyMspDelivery,
   describeMspError,
   isMuseRuntimeMode,
+  MSP_REQUEST_TIMEOUT_MS,
   MSP_TURN_START_TIMEOUT_MS,
   type MspHost,
   mspErrorKind,
@@ -107,8 +108,12 @@ const PROVIDER = "muse" as const;
 const MUSE_RESUME_VERSION = 1 as const;
 const CURSOR_PERSIST_INTERVAL_MS = 5_000;
 const CANCEL_SETTLE_TIMEOUT_MS = 10_000;
-const MEDIA_UPLOAD_CHUNK_BYTES = 512 * 1024;
 const DEFAULT_REASONING_EFFORT = "high";
+/** How long a splice-fill may run before F5 stops waiting to reconcile it. */
+const GAP_FILL_WAIT_MS = 60_000;
+const GAP_FILL_POLL_MS = 25;
+/** Settled ids kept for duplicate suppression; older ones are dropped first. */
+const MAX_REMEMBERED_IDS = 5_000;
 const RESUME_HYDRATION_KINDS = new Set([
   "boundaryPruned",
   "boundaryUnusable",
@@ -155,6 +160,8 @@ export interface MuseAdapterOptions {
   readonly nativeEventLogger?: EventNdjsonLogger;
   readonly nativeCommandIds?: NativeCommandIdStore;
   readonly clientVersion?: string;
+  /** Deadline for `session/start` and `session/resume`; defaults to the MSP request timeout. */
+  readonly sessionOpenTimeoutMs?: number;
   /** Test seam: open a host in the given scope instead of spawning `muse serve`. */
   readonly openHost?: (input: {
     readonly cwd: string;
@@ -174,7 +181,7 @@ interface MuseSessionContext {
   readonly handle: MuseHostHandle;
   readonly mspSessionId: string;
   readonly runtimeMode: MuseRuntimeMode;
-  readonly notifications: Queue.Queue<Notification | { readonly method: "$gapError" }>;
+  readonly notifications: Queue.Queue<Notification | AdapterSignal>;
   mspSession: MspSession;
   session: ProviderSession;
   viewCursor: string | null;
@@ -193,7 +200,22 @@ interface MuseSessionContext {
   readonly settledApprovalRequests: Set<ApprovalRequestId>;
   readonly userInputs: Map<ApprovalRequestId, UserInputRequestParams>;
   readonly settledUserInputs: Set<string>;
-  readonly turns: Map<string, Array<unknown>>;
+  gapReconcilePending: boolean;
+  readonly declinedRetracts: Set<string>;
+}
+
+/** Adapter-internal entries on the notification queue, processed in order with host frames. */
+type AdapterSignal = { readonly method: "$gapError" } | { readonly method: "$gapFilled" };
+
+/** Records an id, dropping the oldest once the set is full. */
+function remember<A>(set: Set<A>, value: A): void {
+  set.delete(value);
+  set.add(value);
+  while (set.size > MAX_REMEMBERED_IDS) {
+    const oldest = set.values().next();
+    if (oldest.done) return;
+    set.delete(oldest.value);
+  }
 }
 
 function selectionValue(
@@ -307,6 +329,43 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         : Effect.succeed(ctx);
     };
 
+    /** A session whose permissions diverged is stopping and takes no new work or decisions. */
+    const requireUsableSession = (threadId: ThreadId, method: string) =>
+      Effect.flatMap(requireSession(threadId), (ctx) =>
+        ctx.diverged
+          ? Effect.fail(
+              new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method,
+                detail: "Muse Code permissions changed; the session is stopping.",
+                deliveryCertainty: "not_sent",
+                deliveryRetryable: false,
+              }),
+            )
+          : Effect.succeed(ctx),
+      );
+
+    /**
+     * A failure before `turn/start` was written: the turn provably never
+     * reached the host. Timeouts and transport losses may be retried; an
+     * answer the host gave (an unknown model, say) may not.
+     */
+    const beforeTurnStart = (error: ProviderAdapterRequestError): ProviderAdapterRequestError => {
+      if (error.deliveryCertainty) return error;
+      const classification = classifyMspDelivery(error.cause);
+      return new ProviderAdapterRequestError({
+        provider: error.provider,
+        method: error.method,
+        detail: error.detail,
+        deliveryCertainty: "not_sent",
+        deliveryRetryable:
+          classification.certainty === "not_sent"
+            ? classification.retryable
+            : classification.certainty === "ambiguous",
+        ...(error.cause !== undefined ? { cause: error.cause } : {}),
+      });
+    };
+
     const settleTurnWaiters = (ctx: MuseSessionContext, turnId: string) => {
       const waiters = ctx.turnSettleWaiters.get(turnId);
       ctx.turnSettleWaiters.delete(turnId);
@@ -384,7 +443,12 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         yield* Scope.close(ctx.scope, Exit.void).pipe(Effect.ignore, Effect.forkDetach);
       });
 
-    /** Interrupt, wait for the turn to settle, then stop with `runtime.error`. */
+    /**
+     * Mark the session diverged (no new turns or decisions), then interrupt,
+     * wait for the turn to settle, and stop with `runtime.error`. The wait runs
+     * off the notification fiber, which is the one that delivers the turn's
+     * terminal event.
+     */
     const failClosed = (ctx: MuseSessionContext, message: string) =>
       Effect.gen(function* () {
         if (ctx.stopped || ctx.diverged) return;
@@ -395,13 +459,15 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
           payload: { message, class: "permission_error" },
         });
         const turnId = ctx.activeTurnId;
-        if (turnId) {
-          yield* call("turn/interrupt", () =>
-            ctx.handle.host.command("turn/interrupt", { sessionId: ctx.mspSessionId, turnId }),
-          ).pipe(Effect.ignore);
-          yield* awaitTurnSettled(ctx, turnId, CANCEL_SETTLE_TIMEOUT_MS);
-        }
-        yield* stopSessionInternal(ctx, { exitKind: "error", reason: message });
+        yield* Effect.gen(function* () {
+          if (turnId) {
+            yield* call("turn/interrupt", () =>
+              ctx.handle.host.command("turn/interrupt", { sessionId: ctx.mspSessionId, turnId }),
+            ).pipe(Effect.ignore);
+            yield* awaitTurnSettled(ctx, turnId, CANCEL_SETTLE_TIMEOUT_MS);
+          }
+          yield* stopSessionInternal(ctx, { exitKind: "error", reason: message });
+        }).pipe(Effect.forkDetach);
       });
 
     const emitItem = (ctx: MuseSessionContext, item: Item, force = false) =>
@@ -411,16 +477,16 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         if (!force && previous !== undefined && previous >= item.revision) return;
         if (ctx.completedItems.has(item.itemId)) return;
         ctx.projectedRevisions.set(item.itemId, item.revision);
-        if (!projected) return;
+        if (!projected) {
+          if (item.status !== "inProgress") ctx.projectedRevisions.delete(item.itemId);
+          return;
+        }
         const turnId = item.turnId ?? ctx.activeTurnId;
         const completed = projected.status !== "inProgress";
         if (completed) {
-          ctx.completedItems.add(item.itemId);
-          if (turnId) {
-            const items = ctx.turns.get(turnId) ?? [];
-            items.push(item);
-            ctx.turns.set(turnId, items);
-          }
+          // From here `completedItems` alone suppresses re-projection.
+          ctx.projectedRevisions.delete(item.itemId);
+          remember(ctx.completedItems, item.itemId);
           // Completed text is authoritative: stream whatever the deltas missed.
           if (projected.itemType === "assistant_message" && typeof item.text === "string") {
             const streamed = ctx.streamedText.get(item.itemId) ?? "";
@@ -504,7 +570,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         const pending = ctx.approvals.get(requestId);
         if (!pending) return;
         ctx.approvals.delete(requestId);
-        ctx.settledApprovalRequests.add(requestId);
+        remember(ctx.settledApprovalRequests, requestId);
         if (ctx.approvalRequestByApprovalId.get(pending.approvalId) === requestId) {
           ctx.approvalRequestByApprovalId.delete(pending.approvalId);
         }
@@ -613,6 +679,163 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         });
       });
 
+    const settleUserInput = (ctx: MuseSessionContext, settled: UserInputSettledParams) =>
+      Effect.gen(function* () {
+        const requestId = ApprovalRequestId.make(settled.userInputId);
+        const pending = ctx.userInputs.get(requestId);
+        remember(ctx.settledUserInputs, settled.userInputId);
+        if (!pending) return;
+        ctx.userInputs.delete(requestId);
+        const answers = Object.fromEntries(
+          settled.answers.map((answer) => [
+            answer.questionId,
+            answer.selectedLabels ?? answer.selectedLabel ?? answer.freeText ?? "",
+          ]),
+        );
+        yield* offer({
+          type: "user-input.resolved",
+          ...(yield* stamp(ctx.threadId, pending.turnId)),
+          requestId: RuntimeRequestId.make(requestId),
+          payload: {
+            answers,
+            receipt: settled.outcome === "answered" ? "resolved" : "cancelled",
+          },
+        });
+      });
+
+    /** The turn ended: project its remaining items, then `turn.completed`. */
+    const completeTurn = (
+      ctx: MuseSessionContext,
+      turnId: string,
+      outcome: {
+        readonly terminal: string;
+        readonly reason?: string;
+        readonly usage?: unknown;
+        readonly errorMessage?: string;
+      },
+    ) =>
+      Effect.gen(function* () {
+        for (const item of ctx.mspSession.fold.items.list()) {
+          if (item.turnId === turnId) yield* emitItem(ctx, item as Item);
+        }
+        endTurn(ctx, turnId);
+        yield* offer({
+          type: "turn.completed",
+          ...(yield* stamp(ctx.threadId, turnId)),
+          ...cursorField(ctx, true),
+          payload: {
+            state: museTurnState(outcome.terminal),
+            stopReason: outcome.reason ?? outcome.terminal,
+            ...(outcome.usage ? { usage: outcome.usage } : {}),
+            ...(outcome.errorMessage ? { errorMessage: outcome.errorMessage } : {}),
+          },
+        });
+        settleTurnWaiters(ctx, turnId);
+      });
+
+    const abortTurn = (ctx: MuseSessionContext, turnId: string, reason: string) =>
+      Effect.gen(function* () {
+        endTurn(ctx, turnId);
+        yield* offer({
+          type: "turn.aborted",
+          ...(yield* stamp(ctx.threadId, turnId)),
+          ...cursorField(ctx, true),
+          payload: { reason },
+        });
+        settleTurnWaiters(ctx, turnId);
+      });
+
+    const endTurn = (ctx: MuseSessionContext, turnId: string) => {
+      if (ctx.activeTurnId !== turnId) return;
+      ctx.activeTurnId = undefined;
+      const { activeTurnId: _ended, ...rest } = ctx.session;
+      ctx.session = { ...rest, status: "ready" };
+    };
+
+    /**
+     * The SDK fills a delivery gap from `view/page` straight into its fold;
+     * the recovered events never reach connection listeners. Once the fill
+     * lands, project what the fold now knows. A failed fill goes through
+     * `recoverFromGap` instead.
+     */
+    const scheduleGapReconcile = (ctx: MuseSessionContext) =>
+      Effect.gen(function* () {
+        if (ctx.gapReconcilePending) return;
+        ctx.gapReconcilePending = true;
+        const deadline = Date.now() + GAP_FILL_WAIT_MS;
+        yield* Effect.gen(function* () {
+          while (
+            ctx.mspSession.fold.pendingGap !== undefined &&
+            !ctx.stopped &&
+            Date.now() < deadline
+          ) {
+            yield* Effect.sleep(GAP_FILL_POLL_MS);
+          }
+          ctx.gapReconcilePending = false;
+          if (!ctx.stopped && ctx.mspSession.fold.pendingGap === undefined) {
+            Queue.offerUnsafe(ctx.notifications, { method: "$gapFilled" });
+          }
+        }).pipe(Effect.forkIn(ctx.scope));
+      });
+
+    const reconcileFold = (ctx: MuseSessionContext) =>
+      Effect.gen(function* () {
+        const fold = ctx.mspSession.fold;
+        if (!ctx.activeTurnId && fold.activeTurnId) {
+          yield* handleNotification(ctx, {
+            method: "turn/started",
+            params: { sessionId: ctx.mspSessionId, turnId: fold.activeTurnId },
+          } as unknown as Notification);
+        }
+        for (const item of fold.items.list()) yield* emitItem(ctx, item as Item);
+        const turnId = ctx.activeTurnId;
+        const turn = turnId ? fold.turn(turnId) : undefined;
+        if (turnId && turn?.state === "settled") {
+          yield* completeTurn(ctx, turnId, {
+            terminal: String(turn.terminal ?? "completed"),
+            ...(turn.error?.message?.trim() ? { errorMessage: turn.error.message.trim() } : {}),
+          });
+        } else if (
+          turnId &&
+          (turn?.state === "retracted" || turn?.state === "unqueued") &&
+          // The fold also marks a declined retract retracted; that turn still runs.
+          !ctx.declinedRetracts.has(turnId)
+        ) {
+          yield* abortTurn(ctx, turnId, "Muse Code retracted the turn before it ran.");
+        }
+        for (const settled of fold.settledUserInputs()) {
+          yield* settleUserInput(ctx, settled as UserInputSettledParams);
+        }
+        // The host's pending list is authoritative for approvals and questions.
+        yield* reopenPending(ctx);
+        const approvalMode = fold.sessionState.get("session/approvalModeChanged");
+        if (approvalMode && typeof approvalMode.mode === "string") {
+          const check = verifyMusePermissionState({
+            runtimeMode: ctx.runtimeMode,
+            initializeResult: ctx.handle.host.initializeResult,
+            effectiveApprovalMode: approvalMode.mode,
+          });
+          if (!check.ok) {
+            yield* failClosed(ctx, `Muse Code permissions changed mid-session: ${check.reason}`);
+          }
+        }
+      }).pipe(
+        Effect.catch((cause) =>
+          stamp(ctx.threadId, ctx.activeTurnId).pipe(
+            Effect.flatMap((stamped) =>
+              offer({
+                type: "runtime.warning",
+                ...stamped,
+                payload: {
+                  message: `F5 could not reconcile recovered Muse Code history: ${cause.message}`,
+                  category: "protocol",
+                },
+              }),
+            ),
+          ),
+        ),
+      );
+
     const handleNotification = (ctx: MuseSessionContext, notification: Notification) =>
       Effect.gen(function* () {
         const params = (notification.params ?? {}) as Record<string, unknown>;
@@ -640,40 +863,26 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
           }
           case "turn/completed": {
             if (!turnId) return;
-            for (const item of ctx.mspSession.fold.items.list()) {
-              if (item.turnId === turnId) yield* emitItem(ctx, item as Item);
-            }
             const error = params.error as { message?: string } | undefined;
-            const terminal = typeof params.terminal === "string" ? params.terminal : "completed";
-            if (ctx.activeTurnId === turnId) ctx.activeTurnId = undefined;
-            const { activeTurnId: _ended, ...rest } = ctx.session;
-            ctx.session = { ...rest, status: "ready" };
-            yield* offer({
-              type: "turn.completed",
-              ...(yield* stamp(ctx.threadId, turnId)),
-              ...cursorField(ctx, true),
-              payload: {
-                state: museTurnState(terminal),
-                stopReason: typeof params.reason === "string" ? params.reason : terminal,
-                ...(params.usage ? { usage: params.usage } : {}),
-                ...(error?.message?.trim() ? { errorMessage: error.message.trim() } : {}),
-              },
+            return yield* completeTurn(ctx, turnId, {
+              terminal: typeof params.terminal === "string" ? params.terminal : "completed",
+              ...(typeof params.reason === "string" ? { reason: params.reason } : {}),
+              ...(params.usage ? { usage: params.usage } : {}),
+              ...(error?.message?.trim() ? { errorMessage: error.message.trim() } : {}),
             });
-            settleTurnWaiters(ctx, turnId);
-            return;
           }
           case "turn/retracted": {
             if (!turnId) return;
-            if (ctx.activeTurnId === turnId) ctx.activeTurnId = undefined;
-            yield* offer({
-              type: "turn.aborted",
-              ...(yield* stamp(ctx.threadId, turnId)),
-              ...cursorField(ctx, true),
-              payload: { reason: "Muse Code retracted the turn before it ran." },
-            });
-            settleTurnWaiters(ctx, turnId);
-            return;
+            // A declined retract leaves the turn running to its own terminal
+            // event. An absent or unrecognized outcome reads as accepted.
+            if (params.outcome === "declined") {
+              remember(ctx.declinedRetracts, turnId);
+              return;
+            }
+            return yield* abortTurn(ctx, turnId, "Muse Code retracted the turn before it ran.");
           }
+          case "view/gap":
+            return yield* scheduleGapReconcile(ctx);
           case "item/started":
           case "item/updated":
           case "item/completed": {
@@ -717,30 +926,8 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
           }
           case "userInput/requested":
             return yield* openUserInput(ctx, params as unknown as UserInputRequestParams);
-          case "userInput/settled": {
-            const settled = params as unknown as UserInputSettledParams;
-            const requestId = ApprovalRequestId.make(settled.userInputId);
-            const pending = ctx.userInputs.get(requestId);
-            ctx.settledUserInputs.add(settled.userInputId);
-            if (!pending) return;
-            ctx.userInputs.delete(requestId);
-            const answers = Object.fromEntries(
-              settled.answers.map((answer) => [
-                answer.questionId,
-                answer.selectedLabels ?? answer.selectedLabel ?? answer.freeText ?? "",
-              ]),
-            );
-            yield* offer({
-              type: "user-input.resolved",
-              ...(yield* stamp(ctx.threadId, pending.turnId)),
-              requestId: RuntimeRequestId.make(requestId),
-              payload: {
-                answers,
-                receipt: settled.outcome === "answered" ? "resolved" : "cancelled",
-              },
-            });
-            return;
-          }
+          case "userInput/settled":
+            return yield* settleUserInput(ctx, params as unknown as UserInputSettledParams);
           case "session/todoListChanged": {
             const items = Array.isArray(params.items) ? params.items : [];
             yield* offer({
@@ -861,11 +1048,16 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         yield* hydrate(ctx, read);
         ctx.viewCursor = read.viewCursor;
         const resumed = yield* call("session/resume", () =>
-          ctx.handle.host.client.resumeSession({
-            sessionId: ctx.mspSessionId,
-            cursor: read.viewCursor,
-            excludeItems: true,
-          }),
+          ctx.handle.host.gate.run(
+            "session/resume",
+            options?.sessionOpenTimeoutMs ?? MSP_REQUEST_TIMEOUT_MS,
+            () =>
+              ctx.handle.host.client.resumeSession({
+                sessionId: ctx.mspSessionId,
+                cursor: read.viewCursor,
+                excludeItems: true,
+              }),
+          ),
         );
         ctx.mspSession = resumed;
         attachGapHandler(ctx, resumed);
@@ -926,12 +1118,17 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
     }) =>
       Effect.gen(function* () {
         const { host } = input.handle;
+        // The SDK has no response deadline of its own; a host that stops
+        // answering must not hold the thread lock forever.
+        const openTimeoutMs = options?.sessionOpenTimeoutMs ?? MSP_REQUEST_TIMEOUT_MS;
         const startFresh = call("session/start", () =>
-          host.client.startSession({
-            workspaceRoot: input.cwd,
-            approvalMode: verifyExpectedMode(input.runtimeMode),
-            ...(input.modelId ? { modelId: input.modelId } : {}),
-          }),
+          host.gate.run("session/start", openTimeoutMs, () =>
+            host.client.startSession({
+              workspaceRoot: input.cwd,
+              approvalMode: verifyExpectedMode(input.runtimeMode),
+              ...(input.modelId ? { modelId: input.modelId } : {}),
+            }),
+          ),
         );
         if (!input.resume) {
           return { session: yield* startFresh, freshReason: undefined, hydrate: undefined };
@@ -947,10 +1144,12 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         const attempt = (cursor: string | null) =>
           Effect.tryPromise({
             try: () =>
-              host.client.resumeSession({
-                sessionId: input.resume!.mspSessionId,
-                ...(cursor ? { cursor } : { excludeItems: true }),
-              }),
+              host.gate.run("session/resume", openTimeoutMs, () =>
+                host.client.resumeSession({
+                  sessionId: input.resume!.mspSessionId,
+                  ...(cursor ? { cursor } : { excludeItems: true }),
+                }),
+              ),
             catch: (cause) => new MuseCallFailure({ cause }),
           });
         const resumed = yield* attempt(input.resume.viewCursor).pipe(Effect.result);
@@ -1060,9 +1259,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
                   }),
               ),
             );
-            const notifications = yield* Queue.unbounded<
-              Notification | { readonly method: "$gapError" }
-            >();
+            const notifications = yield* Queue.unbounded<Notification | AdapterSignal>();
             const unsubscribe = handle.host.connection.addListener((notification) => {
               Queue.offerUnsafe(notifications, notification);
             });
@@ -1095,9 +1292,21 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
                 reasoningEffort: requestedEffort,
               }),
             );
+            const opening = opened.session.opening;
+            // `session/resume` takes no model: the host keeps the stored one
+            // until F5 switches it explicitly.
+            let currentModelId = opening?.result.session.modelId ?? undefined;
+            if (selection?.model && selection.model !== currentModelId) {
+              yield* call("session/setModel", () =>
+                handle.host.command("session/setModel", {
+                  sessionId: opened.session.sessionId,
+                  model: { modelId: selection.model },
+                }),
+              );
+              currentModelId = selection.model;
+            }
 
             const now = yield* nowIso;
-            const opening = opened.session.opening;
             const viewCursor = opening?.result.viewCursor ?? null;
             const ctx: MuseSessionContext = {
               threadId: input.threadId,
@@ -1113,7 +1322,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
                 status: "ready",
                 runtimeMode,
                 cwd,
-                ...(selection?.model ? { model: selection.model } : {}),
+                ...(currentModelId ? { model: currentModelId } : {}),
                 threadId: input.threadId,
                 createdAt: now,
                 updatedAt: now,
@@ -1121,7 +1330,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
               viewCursor,
               lastCursorPersistAt: 0,
               activeTurnId: undefined,
-              currentModelId: selection?.model ?? opening?.result.session.modelId ?? undefined,
+              currentModelId,
               currentEffort: requestedEffort,
               stopped: false,
               diverged: false,
@@ -1134,7 +1343,8 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
               settledApprovalRequests: new Set(),
               userInputs: new Map(),
               settledUserInputs: new Set(),
-              turns: new Map(),
+              gapReconcilePending: false,
+              declinedRetracts: new Set(),
             };
             ctx.session = { ...ctx.session, resumeCursor: resumeCursorOf(ctx) };
             attachGapHandler(ctx, opened.session);
@@ -1144,7 +1354,9 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
               Stream.runForEach((entry) =>
                 entry.method === "$gapError"
                   ? recoverFromGap(ctx, undefined)
-                  : handleNotification(ctx, entry as Notification),
+                  : entry.method === "$gapFilled"
+                    ? reconcileFold(ctx)
+                    : handleNotification(ctx, entry as Notification),
               ),
               Effect.forkIn(sessionScope),
             );
@@ -1251,7 +1463,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
           if (!path) {
             return yield* new ProviderAdapterRequestError({
               provider: PROVIDER,
-              method: "media/upload",
+              method: "turn/start",
               detail: `Invalid attachment id '${attachment.id}'.`,
               deliveryCertainty: "not_sent",
               deliveryRetryable: false,
@@ -1262,7 +1474,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
               (cause) =>
                 new ProviderAdapterRequestError({
                   provider: PROVIDER,
-                  method: "media/upload",
+                  method: "turn/start",
                   detail: cause.message,
                   deliveryCertainty: "not_sent",
                   deliveryRetryable: false,
@@ -1270,26 +1482,13 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
                 }),
             ),
           );
-          const uploadId = randomUUID();
-          const chunkCount = Math.max(1, Math.ceil(bytes.length / MEDIA_UPLOAD_CHUNK_BYTES));
-          for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
-            const chunk = bytes.subarray(
-              chunkIndex * MEDIA_UPLOAD_CHUNK_BYTES,
-              (chunkIndex + 1) * MEDIA_UPLOAD_CHUNK_BYTES,
-            );
-            yield* call("media/upload", () =>
-              ctx.handle.host.command("media/upload", {
-                sessionId: ctx.mspSessionId,
-                uploadId,
-                chunkIndex,
-                chunkCount,
-                chunkBase64: Buffer.from(chunk).toString("base64"),
-                mediaType: attachment.mimeType,
-                totalBytes: bytes.length,
-              }),
-            );
-          }
-          parts.push({ type: "image", uploadId, mediaType: attachment.mimeType });
+          // MSP carries images inline; `media/upload` is for video only. Inline
+          // bytes also keep a retried turn's payload identical under its pinned id.
+          parts.push({
+            type: "image",
+            mediaType: attachment.mimeType,
+            base64Data: Buffer.from(bytes).toString("base64"),
+          });
         }
         if (parts.length === 0) {
           return yield* new ProviderAdapterValidationError({
@@ -1337,7 +1536,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
       withThreadLock(
         input.threadId,
         Effect.gen(function* () {
-          const ctx = yield* requireSession(input.threadId);
+          const ctx = yield* requireUsableSession(input.threadId, "turn/start");
           if (input.interactionMode === "plan") {
             return yield* new ProviderAdapterValidationError({
               provider: PROVIDER,
@@ -1346,7 +1545,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
                 "Muse Code cannot enforce plan mode: MSP 1.4 cannot switch a running session to a read-only profile.",
             });
           }
-          yield* applySelection(ctx, input);
+          yield* applySelection(ctx, input).pipe(Effect.mapError(beforeTurnStart));
           const parts = yield* buildInput(ctx, input);
           const nativeCommandId = input.deliveryId
             ? yield* nativeCommandIds.resolve({
@@ -1362,7 +1561,16 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
                 return ctx.mspSession.sendUserTurn({ input: parts });
               }),
             catch: (error) => requestError("turn/start", error),
-          });
+          }).pipe(
+            // Keep the native id only while the outcome is unknown. Once the host
+            // has answered, its dedupe would replay that answer, so a later retry
+            // of this delivery is a new attempt under a fresh id.
+            Effect.tapError((error) =>
+              input.deliveryId && classifyMspDelivery(error.cause).certainty !== "ambiguous"
+                ? nativeCommandIds.forget(input.deliveryId)
+                : Effect.void,
+            ),
+          );
           ctx.activeTurnId = turn.turnId;
           ctx.session = {
             ...ctx.session,
@@ -1382,7 +1590,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
       withThreadLock(
         input.threadId,
         Effect.gen(function* () {
-          const ctx = yield* requireSession(input.threadId);
+          const ctx = yield* requireUsableSession(input.threadId, "turn/steer");
           if (!ctx.activeTurnId || ctx.activeTurnId !== input.expectedTurnId) {
             return yield* new ProviderAdapterRequestError({
               provider: PROVIDER,
@@ -1423,7 +1631,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
       decision: ProviderApprovalDecision,
     ) =>
       Effect.gen(function* () {
-        const ctx = yield* requireSession(threadId);
+        const ctx = yield* requireUsableSession(threadId, "approval/decide");
         const pending = ctx.approvals.get(requestId);
         if (!pending) {
           return yield* new ProviderAdapterRequestError({
@@ -1481,7 +1689,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
       answers,
     ) =>
       Effect.gen(function* () {
-        const ctx = yield* requireSession(threadId);
+        const ctx = yield* requireUsableSession(threadId, "userInput/answer");
         const pending = ctx.userInputs.get(requestId);
         if (!pending) {
           return yield* new ProviderAdapterRequestError({

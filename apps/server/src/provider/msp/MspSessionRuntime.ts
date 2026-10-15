@@ -165,10 +165,23 @@ export class MspRequestGate {
       );
     }
     this.#inFlight += 1;
+    let sent: Promise<T>;
+    try {
+      sent = send();
+    } catch (error) {
+      this.#inFlight -= 1;
+      throw error;
+    }
+    // The slot frees when the host answers, not when F5 stops waiting: a timed
+    // out request is still outstanding on the wire.
+    sent.then(
+      () => (this.#inFlight -= 1),
+      () => (this.#inFlight -= 1),
+    );
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
-        send(),
+        sent,
         new Promise<never>((_, reject) => {
           timer = setTimeout(
             () =>
@@ -182,7 +195,6 @@ export class MspRequestGate {
       ]);
     } finally {
       if (timer) clearTimeout(timer);
-      this.#inFlight -= 1;
     }
   }
 }
