@@ -23,15 +23,35 @@ public final class ComputerDeviceLock {
   deinit { close(descriptor) }
 }
 
+/// The request and execution generation that pressed an input.
+public struct HeldComputerInputOwner: Hashable {
+  public let requestId: String
+  public let generation: Int
+  public init(requestId: String, generation: Int) {
+    self.requestId = requestId
+    self.generation = generation
+  }
+}
 /// Used under the helper's input lock. Drain before releasing so cancellation is idempotent.
 public struct HeldComputerInputs<Key: Hashable> {
-  private var values = Set<Key>()
+  private var values: [Key: HeldComputerInputOwner?] = [:]
   public init() {}
-  public mutating func insert(_ key: Key) { values.insert(key) }
-  public mutating func remove(_ key: Key) { values.remove(key) }
+  public mutating func insert(_ key: Key, owner: HeldComputerInputOwner? = nil) {
+    values[key] = owner
+  }
+  public mutating func remove(_ key: Key) { values.removeValue(forKey: key) }
   public mutating func drain() -> Set<Key> {
-    let released = values
+    let released = Set(values.keys)
     values.removeAll()
+    return released
+  }
+  /// Release only one request's (or generation's) inputs; unowned inputs always match.
+  public mutating func drain(where matches: (HeldComputerInputOwner) -> Bool) -> Set<Key> {
+    var released = Set<Key>()
+    for (key, owner) in values where owner.map(matches) ?? true {
+      released.insert(key)
+    }
+    for key in released { values.removeValue(forKey: key) }
     return released
   }
 }

@@ -19,6 +19,14 @@ interface Binding {
   version: number;
   overrides: Map<string, ComputerGrant | null>;
   actionsApproved: boolean;
+  /** Electron minted a background receipt for this provider session. */
+  backgroundApproved: boolean;
+}
+export interface ComputerTakeoverConsent {
+  readonly requestId: string;
+  readonly appId: string;
+  readonly appName?: string;
+  readonly turnId: string;
 }
 export interface RememberedComputerGrant extends ComputerGrant {
   readonly projectId: string;
@@ -74,7 +82,73 @@ export class ComputerAccessService {
       version: 1,
       overrides: new Map(),
       actionsApproved: false,
+      backgroundApproved: false,
     });
+  }
+  backgroundApproved(threadId: string): boolean {
+    const binding = this.bindings.get(threadId);
+    return !!binding && binding.actionsApproved && binding.backgroundApproved;
+  }
+  /** Electron binds the session receipt to the policy revision; a new revision needs a new one. */
+  revokeBackgroundApproval(threadId: string): void {
+    const binding = this.bindings.get(threadId);
+    if (!binding?.backgroundApproved) return;
+    binding.backgroundApproved = false;
+    ++binding.version;
+    this.options.changed(threadId);
+  }
+  /**
+   * Native foreground-takeover consent. Never changes grants; resolves true only when the user
+   * allowed it in Electron's dialog. The request id is chosen by the caller so Electron can
+   * correlate it with the separately sent takeover acquisition.
+   */
+  requestTakeover(
+    threadId: string,
+    takeover: ComputerTakeoverConsent,
+    reason: string,
+  ): Promise<boolean> {
+    const binding = this.bindings.get(threadId);
+    if (!binding) throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
+    if (
+      [...this.pending.values()].some(
+        (entry) =>
+          entry.request.threadId === threadId && entry.request.kind === "foreground-takeover",
+      )
+    )
+      throw new ComputerControlError({ _tag: "Busy", holder: "same-profile" });
+    const request: ComputerAccessRequested = {
+      requestId: takeover.requestId,
+      projectId: binding.projectId,
+      sessionGeneration: binding.generation,
+      threadId,
+      reason: reason.slice(0, 500),
+      kind: "foreground-takeover",
+      takeover: {
+        appId: takeover.appId,
+        ...(takeover.appName ? { appName: takeover.appName.slice(0, 200) } : {}),
+        threadId,
+        turnId: takeover.turnId,
+        reason: reason.slice(0, 500),
+      },
+      apps: [],
+    };
+    return new Promise((resolve) => {
+      const timer = setTimeout(
+        () => this.deny(request.requestId),
+        this.options.timeoutMs ?? 300_000,
+      );
+      this.pending.set(request.requestId, {
+        request,
+        generation: binding.generation,
+        turnId: takeover.turnId,
+        timer,
+        resolve: (answer) => resolve(answer?.allowForegroundTakeover === true),
+      });
+      this.options.request(request);
+    });
+  }
+  cancelRequest(requestId: string): void {
+    this.deny(requestId);
   }
   projectId(threadId: string): string | undefined {
     return this.bindings.get(threadId)?.projectId;
@@ -124,6 +198,7 @@ export class ComputerAccessService {
     reason: string,
     kind: "apps" | "session-actions" = "apps",
     typing = false,
+    background = false,
   ): Promise<ComputerAccessAnswer | null> {
     const binding = this.bindings.get(threadId);
     if (!binding) throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
@@ -167,6 +242,7 @@ export class ComputerAccessService {
       reason: reason.slice(0, 500),
       kind,
       ...(typing ? { typingRequested: true } : {}),
+      ...(background && kind === "session-actions" ? { background: true } : {}),
       apps: candidates.slice(0, 10).map((app) => ({
         appId: app.appId,
         name: app.name,
@@ -198,6 +274,18 @@ export class ComputerAccessService {
       if (!binding || binding.generation !== pending.generation) {
         this.deny(answer.requestId);
         throw new Error("This session ended.");
+      }
+      if (pending.request.kind === "foreground-takeover") {
+        // Consent only; Electron arms the takeover itself. Grants never change here.
+        this.pending.delete(answer.requestId);
+        clearTimeout(pending.timer);
+        pending.resolve(answer);
+        this.options.settled(
+          answer.requestId,
+          pending.request.threadId,
+          answer.allowForegroundTakeover === true,
+        );
+        return;
       }
       const approvalVersion = binding.version;
       const decisions = pending.request.apps.map((app) => {
@@ -281,6 +369,9 @@ export class ComputerAccessService {
       }
       if (pending.request.kind === "session-actions") {
         binding.actionsApproved = answer.allowSessionActions === true;
+        // Only Electron can mint the receipt; a missing one keeps background closed.
+        if (pending.request.background)
+          binding.backgroundApproved = binding.actionsApproved && !!answer.sessionReceipt;
         if (!binding.actionsApproved)
           this.deniedThisTurn.add(
             `${pending.request.threadId}\0${pending.turnId}\0session-actions`,
@@ -336,6 +427,7 @@ export class ComputerAccessService {
     if (!binding) return;
     for (const grant of this.grants(threadId)) binding.overrides.set(grant.appId, null);
     binding.actionsApproved = false;
+    binding.backgroundApproved = false;
     ++binding.version;
     this.options.changed(threadId);
     for (const [id, pending] of this.pending)

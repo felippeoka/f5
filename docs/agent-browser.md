@@ -323,6 +323,71 @@ re-prompts report `missing-permissions`. F5 opens the appropriate Settings pane 
 explicit user action; capture errors never silently invoke a permission prompt. Main and
 helper permission identities must agree before release certification.
 
+### Background delivery and per-app leases
+
+Settings → Computer use → Execution mode chooses `foreground` (default) or `background`
+(`computerUseExecutionMode`, machine-wide, no project override). Background lets each agent
+act inside one named, granted app through Accessibility without moving the pointer or
+changing focus, so the user keeps working. It is a macOS-only preview behind a closed gate
+(`COMPUTER_BACKGROUND_PREVIEW` in `apps/desktop/src/computer/certification.ts`; development
+override `F5_COMPUTER_BACKGROUND_DEV=1`) and the helper compiles it only with
+`-DF5_BACKGROUND_AX`. When the preference is background but delivery is unavailable, tools
+fail with the reason (`unsupported-platform`, `peer-capability`, `preview-off`,
+`permissions`, `monitor-unhealthy`) instead of silently using the foreground.
+
+Peers negotiate `background-ax-v1` without changing protocol version 1: the backend hello
+lists capabilities, Electron answers with `hostCapabilities`, and the helper hello lists its
+own (empty unless built with background support). A legacy peer on any hop keeps the thread
+foreground-only and receives only the legacy single-holder `leaseChanged` message.
+
+Leases have a scope: `foreground`, `app` (background, one app) or `takeover` (foreground for
+one app, bound to a native approval receipt). One lease per thread; several threads may hold
+`app` leases for different apps at once. `app` leases on the same app conflict, and a
+foreground or takeover lease conflicts with everything. Chrome/browser-integration leases
+are foreground. The helper keeps a permit per execution generation, so suspending, draining
+or retiring one thread never affects another; physical input tagged to a target app stops
+only the thread acting in it, while untagged input pauses foreground holders only.
+
+The first background mutation in a session needs a native session approval (“F5 may keep
+acting in granted apps while you work elsewhere”), including full-access sessions. Electron
+mints the session receipt; it is bound to profile, backend incarnation, thread, session and
+policy revision. Every tool call is classified before display selection or screenshot
+preparation:
+
+- `screenshot`, `zoom`, `type`, `inspect`, `openApp` and `elementAction` (`press` and
+  `setValue` only) need `app` in background;
+  otherwise the tool reports `app-required` (“Specify app: the app to act in.”).
+- App screenshots show only that app's windows (`captureScope: "app"`, no cursor or menu
+  bar) and never authorize display coordinates.
+- `type` inserts text through accessibility and reads it back; `verification.verified:
+false` means confirm with inspect or a screenshot. Secure text entry waits
+  (`waiting: "secure-input"`).
+- `click`, `drag`, `scroll`, `key`, `move` and `activateApp` report `ForegroundRequired`.
+  Apps listed in `COMPUTER_BACKGROUND_POLICY.foregroundOnly` and apps that activate
+  themselves during background actions also require the foreground.
+
+`computer_request_foreground {app, reason}` asks for an explicit takeover of one app. Electron
+reserves the takeover, shows a native dialog quoting the reason, waits until the user's input
+has been idle for 1.5 s (30 s limit), drains every background holder, rechecks readiness and
+then arms the lease. Foreground steps on that app reuse it until the turn ends, the agent
+passes `executionMode: "background"`, or a stop/policy event revokes it. While a takeover is
+armed, other threads get `TargetBlocked foreground-busy`; acting in another app reports
+`TargetBlocked other-app`. If the user is using the target app, background actions report
+`TargetBlocked user-active` without latching a pause.
+
+Changing computer-relevant settings runs a policy admission barrier: the server closes
+admissions, bumps each binding's policy revision, cancels pending consent/takeovers and
+execution, sends `observationInvalidate` and awaits its drain, applies the change and reopens.
+Electron rejects older revisions afterwards and the session approval must be granted again.
+Interruptions before dispatch report `Interrupted`; after dispatch, `OutcomeUnknown`, which
+quarantines the thread until the user resumes locally. The banner and live card show every
+holder with its delivery, app, execution state (`active`, `waiting-secure-input`, `paused`,
+`recovery`, pending takeover) and pause cause; background-only control uses a quieter style.
+
+`bun apps/desktop/src/computer/rehearseBackgroundMacos.ts` is the Phase 0 delivery spike for
+the certified background apps; it writes a bounded metadata report to
+`docs/computer-certification/<date>-macos-background-delivery-spike.json`.
+
 ### Visual feedback and persistence
 
 Main shows click-through, protected overlay windows on every display, with provider
@@ -2020,6 +2085,16 @@ For background inspection without changing focus or starting a provider session:
 ```sh
 bun apps/desktop/src/computer/rehearseInspectMacos.ts --helper apps/desktop/dist-native/mac-arm64/f5-computer-helper --output /tmp/f5-background-inspection.json
 ```
+
+For the Phase 0 background-delivery spike (accessibility press, setValue and app-filtered
+capture on a background fixture, checking the frontmost app never changes), build the helper
+with `swift build -Xswiftc -DF5_BACKGROUND_AX` and run:
+
+```sh
+bun apps/desktop/src/computer/rehearseBackgroundMacos.ts --helper <background-enabled helper>
+```
+
+It refuses to overwrite an existing receipt and fails when the helper lacks `background-ax-v1`.
 
 The [current read-only preflight](computer-certification/2026-10-12-macos-gate-preflight-856ae44523.json)
 confirms development permissions on one Retina display. Signing remains deferred;

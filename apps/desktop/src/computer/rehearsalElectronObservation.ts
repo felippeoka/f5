@@ -131,8 +131,11 @@ export class ElectronRehearsalObservation {
   private grantChanges = 0;
   private lastGrantCount = 0;
   private hostStatus: { available: boolean; reason?: string } | undefined;
-  receive(raw: unknown): void {
-    if (!Schema.is(DesktopComputerHostMessage)(raw)) return;
+  receive(input: unknown): void {
+    // Decode (not `is`): legacy holders without a scope decode to the foreground scope.
+    const decoded = Schema.decodeUnknownExit(DesktopComputerHostMessage)(input);
+    if (decoded._tag !== "Success") return;
+    const raw = decoded.value;
     if (raw.type === "status") {
       this.hostStatus = raw.status.available
         ? { available: true }
@@ -243,6 +246,9 @@ export class ElectronRehearsalObservation {
       this.operations.push(summary);
     } else if (raw.type === "leaseChanged") {
       this.held = raw.holder !== null;
+      this.leaseObserved ||= this.held;
+    } else if (raw.type === "leasesChanged") {
+      this.held = raw.holders.length > 0;
       this.leaseObserved ||= this.held;
     } else if (raw.type === "pauseChanged") {
       if (raw.paused) this.pauseObserved = true;

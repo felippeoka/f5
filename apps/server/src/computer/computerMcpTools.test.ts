@@ -14,7 +14,7 @@ const display = {
   pixelSize: { width: 100, height: 100 },
   modelSize: { width: 100, height: 100 },
 };
-function setup(displays = [display]) {
+function setup(displays = [display], delivery: "foreground" | "background" = "foreground") {
   const invoke = vi.fn(
     async (_thread: string, _session: string, input: { op: string }): Promise<unknown> =>
       input.op === "screenshot"
@@ -32,6 +32,9 @@ function setup(displays = [display]) {
     invoke,
     host: { status: () => ({ available: true, displays }) },
     requestAccess: vi.fn(async () => ({})),
+    requestForeground: vi.fn(async () => ({ foreground: true, appId: "one" })),
+    classify: vi.fn(async () => delivery),
+    access: { grants: () => [{ appId: "one", tier: "full" }] },
     reportToolFailure: vi.fn(),
   };
   return {
@@ -115,8 +118,11 @@ describe("shared computer tool catalog", () => {
       COMPUTER_TOOL_DEFINITIONS.find((tool) => tool.name === "computer_scroll")?.description,
     ).toContain("Positive deltaY scrolls down; positive deltaX scrolls right.");
   });
-  it("installs one catalog of fifteen tools, with only discovery tools always loaded", () => {
-    expect(COMPUTER_TOOL_DEFINITIONS).toHaveLength(15);
+  it("installs one catalog of sixteen tools, with only discovery tools always loaded", () => {
+    expect(COMPUTER_TOOL_DEFINITIONS).toHaveLength(16);
+    expect(COMPUTER_TOOL_DEFINITIONS.map((tool) => tool.name)).toContain(
+      "computer_request_foreground",
+    );
     expect(
       COMPUTER_TOOL_DEFINITIONS.filter((tool) => tool.alwaysLoad).map((tool) => tool.name),
     ).toEqual(["computer_status", "computer_request_access"]);
@@ -147,6 +153,65 @@ describe("shared computer tool catalog", () => {
     );
     h.context.geometry.clear();
     expect((await callComputerTool(h.context, "computer_move", { x: 3, y: 4 })).isError).toBe(true);
+  });
+  it("classifies background screenshots before display selection and keys them by app scope", async () => {
+    const h = setup([display, { ...display, displayId: "other" }], "background");
+    h.invoke.mockImplementation(async (_thread, _session, input) =>
+      input.op === "screenshot"
+        ? {
+            displayId: "d",
+            geometryGeneration: "g",
+            modelSize: display.modelSize,
+            mimeType: "image/jpeg",
+            data: "aGVsbG8=",
+            hiddenContent: true,
+            captureScope: "app",
+          }
+        : [{ appId: "one", name: "Fixture" }],
+    );
+    const screenshot = await callComputerTool(h.context, "computer_screenshot", {
+      app: "Fixture",
+    });
+    expect(screenshot.isError).toBeFalsy();
+    expect(h.broker.classify).toHaveBeenCalledWith("t", "s", "screenshot", "one", {
+      executionMode: undefined,
+      action: undefined,
+    });
+    const call = h.invoke.mock.calls.find(([, , input]) => input.op === "screenshot")![2];
+    expect(call).toMatchObject({ op: "screenshot", appId: "one" });
+    expect(call).not.toHaveProperty("displayId");
+    // An app-scoped capture never authorizes display coordinates.
+    expect(() => h.context.geometry.generation("d")).toThrow("Take a computer_screenshot first.");
+    // A later lookup of the same granted app resolves from the cache.
+    await callComputerTool(h.context, "computer_zoom", {
+      app: "Fixture",
+      x: 0,
+      y: 0,
+      width: 10,
+      height: 10,
+    });
+    expect(h.invoke.mock.calls.filter(([, , input]) => input.op === "resolveApps")).toHaveLength(1);
+  });
+  it("requires an app for background observations and routes foreground requests", async () => {
+    const h = setup([display], "background");
+    const missing = await callComputerTool(h.context, "computer_screenshot", {});
+    expect(missing.isError).toBe(true);
+    expect(missing.structuredContent).toMatchObject({
+      error: { message: "Specify app: the app to act in." },
+    });
+    expect(h.broker.reportToolFailure).toHaveBeenLastCalledWith(
+      "t",
+      "s",
+      "screenshot",
+      "app-required",
+    );
+    expect(h.invoke).not.toHaveBeenCalled();
+    const foreground = await callComputerTool(h.context, "computer_request_foreground", {
+      app: "Fixture",
+      reason: "Needs a drag",
+    });
+    expect(foreground.isError).toBeFalsy();
+    expect(h.broker.requestForeground).toHaveBeenCalledWith("t", "s", "Fixture", "Needs a drag");
   });
   it("requires a display on multi-monitor machines before the first capture", async () => {
     const h = setup([display, { ...display, displayId: "other" }]);

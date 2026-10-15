@@ -30,8 +30,13 @@ export interface ComputerHelper {
     },
   ): Promise<unknown>;
   control(message: Record<string, unknown>): void;
-  suspend(): Promise<void>;
+  /** Suspend one generation (or everything) and wait for the helper's acknowledgement. */
+  suspend(executionGeneration?: number): Promise<void>;
   onEvent(callback: (message: Record<string, unknown>) => void): () => void;
+  /** Capabilities the running helper advertised in its hello. */
+  capabilities?(): ReadonlyArray<string>;
+  /** Resolves once every earlier mutation of that generation has finished in the helper. */
+  drain?(executionGeneration: number, timeoutMs: number): Promise<void>;
 }
 export class ComputerHelperClient implements ComputerHelper {
   private child: ChildProcessWithoutNullStreams | null = null;
@@ -47,6 +52,7 @@ export class ComputerHelperClient implements ComputerHelper {
   private terminalFailure = false;
   private observationRecovery: ChildProcessWithoutNullStreams | undefined;
   private childExited: Promise<void> = Promise.resolve();
+  private helperCapabilities: ReadonlyArray<string> = [];
   constructor(
     private readonly root: string,
     private readonly executable: string,
@@ -60,6 +66,9 @@ export class ComputerHelperClient implements ComputerHelper {
   }
   status(): ComputerAutomationBackendStatus {
     return this.state;
+  }
+  capabilities(): ReadonlyArray<string> {
+    return this.ready ? this.helperCapabilities : [];
   }
   start(): void {
     if (this.closing || this.child) return;
@@ -169,6 +178,9 @@ export class ComputerHelperClient implements ComputerHelper {
         return;
       }
       this.ready = true;
+      this.helperCapabilities = Array.isArray(message.capabilities)
+        ? message.capabilities.filter((entry): entry is string => typeof entry === "string")
+        : [];
       this.lastHeartbeat = this.now();
       this.control({ type: "permissions" });
     } else if (message.type === "status") {
@@ -279,12 +291,47 @@ export class ComputerHelperClient implements ComputerHelper {
     await this.suspend();
     if (this.child === child) child.kill("SIGKILL");
   }
-  async suspend(): Promise<void> {
+  /**
+   * Wait until every earlier mutation of one generation has finished. A helper that cannot
+   * drain within the bound is retired; its replacement starts only after a confirmed exit.
+   */
+  async drain(executionGeneration: number, timeoutMs = 5000): Promise<void> {
+    const child = this.child;
+    if (!child || !this.ready) return;
+    const id = randomUUID();
+    try {
+      await this.sendRequest(
+        id,
+        { type: "drain", requestId: id, executionGeneration },
+        Math.min(5000, timeoutMs),
+        false,
+      );
+    } catch {
+      if (this.child !== child) return;
+      const exited = this.childExited;
+      this.child = null;
+      this.ready = false;
+      this.fail({ available: false, reason: "helper-crashed", detail: "Helper did not drain." });
+      child.kill("SIGKILL");
+      if (!this.closing && !this.terminalFailure) void this.restartAfterExit(exited);
+      throw new ComputerControlError({ _tag: "OutcomeUnknown" });
+    }
+  }
+  async suspend(executionGeneration?: number): Promise<void> {
     const child = this.child;
     if (!child) return;
     const id = randomUUID();
     try {
-      await this.sendRequest(id, { type: "suspend", requestId: id }, 50, false);
+      await this.sendRequest(
+        id,
+        {
+          type: "suspend",
+          requestId: id,
+          ...(executionGeneration !== undefined ? { executionGeneration } : {}),
+        },
+        50,
+        false,
+      );
     } catch {
       if (this.child !== child) return;
       this.child = null;

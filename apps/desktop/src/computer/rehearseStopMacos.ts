@@ -227,7 +227,7 @@ try {
         hostChannel!.answerAccess(profile, rehearsalAccessAnswer(access, incarnation, appId));
       },
     );
-    lease.subscribe((holder) => hostChannel?.publishLease(holder));
+    lease.subscribe(() => hostChannel?.publishLeases());
     helper.onEvent((message) => {
       if (message.type === "status")
         hostChannel?.broadcast({ type: "status", status: helper.status() });
@@ -276,6 +276,8 @@ try {
       ...authorization,
       backend: "native",
       threadTitle: "Physical stop rehearsal",
+      scope: { kind: "foreground" },
+      policyRevision: 0,
     });
     authorization = { ...authorization, executionGeneration: holder.executionGeneration };
     await request({ op: "activateApp", appId, screenshot: false });
@@ -342,7 +344,7 @@ try {
   }
   const apps = (await request({ op: "listApps" })) as ComputerApp[];
   evidence.fixtureStillFrontmost = apps.some((app) => app.appId === appId && app.frontmost);
-  evidence.leaseReleased = lease.current() === null;
+  evidence.leaseReleased = lease.holders().length === 0;
   fixture.child.stdin?.write("FINISH\n");
   await waitFor(() => evidence.observationEndedAtMs !== undefined);
   if (freezeBackend) {

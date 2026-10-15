@@ -23,9 +23,11 @@ it("shows Pause after an old action's lease ends and keeps Resume visible once p
   const pause = vi.fn(async (id: string, paused: boolean) => store.setPaused(id, paused));
   window.desktopBridge = { computerAutomation: { setPaused: pause } } as never;
   store.record({ threadId, op: "type", status: "completed", backend: "native" });
-  store.setLease({ threadId, backend: "native" });
+  store.setLeases({
+    holders: [{ threadId, backend: "native", delivery: "foreground", state: "active" }],
+  });
   clock.mockReturnValue(130000);
-  store.setLease({ threadId: null });
+  store.setLeases({ holders: [] });
   const screen = await render(<AgentComputerLiveCard threadId={threadId} />);
   try {
     await expect.element(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
@@ -76,8 +78,10 @@ it("retains idle controls while apps are granted and removes them after access i
   const clock = vi.spyOn(Date, "now").mockReturnValue(100000);
   const store = useAgentComputerActivityStore.getState();
   store.record({ threadId, op: "type", status: "completed", backend: "native" });
-  store.setLease({ threadId, backend: "native" });
-  store.setLease({ threadId: null });
+  store.setLeases({
+    holders: [{ threadId, backend: "native", delivery: "foreground", state: "active" }],
+  });
+  store.setLeases({ holders: [] });
   store.setGrants(threadId, [{ appId: "fixture", tier: "full", allowTyping: false }]);
   clock.mockReturnValue(200000);
   const screen = await render(<AgentComputerLiveCard threadId={threadId} />);

@@ -1,5 +1,10 @@
-import type { ChromeLeaseHolder, ComputerLeaseHolder } from "@t3tools/contracts";
+import type {
+  ChromeLeaseHolder,
+  ComputerLeaseHolder,
+  ComputerLeaseScope,
+} from "@t3tools/contracts";
 import { ComputerControlError } from "@t3tools/shared/computerControl";
+import { COMPUTER_CHROME_APP_IDS } from "@t3tools/shared/computerExecution";
 
 export function sameChromeHolder(a: ChromeLeaseHolder, b: ChromeLeaseHolder): boolean {
   return (
@@ -11,7 +16,8 @@ export function sameChromeHolder(a: ChromeLeaseHolder, b: ChromeLeaseHolder): bo
 }
 
 /** Native-host registrations are machine resources, held for the provider session.
- * The initial Chrome flow conservatively excludes all concurrent native input. */
+ * Chrome control excludes foreground native input and background control of Chrome itself;
+ * background leases on other apps coexist with it. */
 export class ChromeLeaseAuthority {
   private holder: ChromeLeaseHolder | null = null;
   private paused = false;
@@ -19,8 +25,13 @@ export class ChromeLeaseAuthority {
   current(): ChromeLeaseHolder | null {
     return this.holder;
   }
-  assertNativeAvailable(profileId: string): void {
-    if (this.holder) this.busy(profileId);
+  assertNativeAvailable(
+    profileId: string,
+    scope: ComputerLeaseScope = { kind: "foreground" },
+  ): void {
+    if (!this.holder) return;
+    if (scope.kind === "app" && !COMPUTER_CHROME_APP_IDS.includes(scope.appId)) return;
+    this.busy(profileId);
   }
   acquire(holder: ChromeLeaseHolder, native: ComputerLeaseHolder | null): void {
     if (native)

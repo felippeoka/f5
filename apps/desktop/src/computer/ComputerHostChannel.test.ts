@@ -3,18 +3,26 @@ import type { ChildProcess } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import { ComputerHostChannel } from "./ComputerHostChannel";
 import type { ComputerController } from "./ComputerController";
+import { ComputerLeaseAuthority } from "./ComputerLeaseAuthority";
 function setup(certified = false) {
   const controller = {
     disconnect: vi.fn(),
     setPaused: vi.fn(),
-    lease: { current: () => null },
+    lease: new ComputerLeaseAuthority(),
     invoke: vi.fn(),
+    cancel: vi.fn(),
+    acquire: vi.fn(),
+    inputIdleMs: () => 10_000,
+    isPaused: () => false,
+    drainBackground: vi.fn(async () => () => {}),
   };
   const channel = new ComputerHostChannel(
     controller as unknown as ComputerController,
     () => ({ available: true }),
     vi.fn(),
     { certified: () => certified },
+    undefined,
+    { background: () => ({ available: true }) },
   );
   const process = Object.assign(new EventEmitter(), {
     connected: true,
@@ -22,12 +30,13 @@ function setup(certified = false) {
     disconnect: vi.fn(),
   });
   channel.register("profile", "incarnation", process as unknown as ChildProcess);
-  const hello = () =>
+  const hello = (capabilities?: ReadonlyArray<string>) =>
     process.emit("message", {
       type: "hello",
       profileId: "profile",
       backendIncarnation: "incarnation",
       protocolVersion: 1,
+      ...(capabilities ? { capabilities } : {}),
     });
   return { channel, controller, process, hello };
 }
@@ -72,8 +81,11 @@ describe("private computer host channel", () => {
       grantVersion: 1,
       grants: [],
       backend: "native" as const,
+      scope: { kind: "foreground" as const },
+      policyRevision: 0,
     };
-    h.channel.publishLease(holder);
+    h.controller.lease.acquire(holder);
+    h.channel.publishLeases();
     expect(h.process.send).toHaveBeenLastCalledWith(
       { type: "leaseChanged", holder, otherProfile: false },
       expect.any(Function),
@@ -269,4 +281,223 @@ it("releases an unacknowledged acquisition when the backend times out, using the
   h.process.emit("message", { type: "leaseAccepted", requestId: "accepted" });
   h.process.emit("message", { type: "cancel", requestId: "accepted" });
   expect(release).toHaveBeenCalledOnce();
+});
+
+describe("background capability negotiation", () => {
+  const appHolder = {
+    profileId: "profile",
+    threadId: "t",
+    sessionGeneration: "s",
+    turnId: "turn",
+    executionGeneration: 1,
+    grantVersion: 1,
+    grants: [],
+    backend: "native" as const,
+    threadTitle: "Thread",
+    scope: { kind: "app" as const, appId: "com.apple.calculator" },
+    policyRevision: 0,
+  };
+  const sent = (h: ReturnType<typeof setup>) =>
+    h.process.send.mock.calls.map(([message]) => message as Record<string, unknown>);
+  it("keeps legacy peers on single-holder leases and foreground-only status", () => {
+    const h = setup();
+    h.hello();
+    expect(sent(h).map((message) => message.type)).toEqual(["status", "leaseChanged"]);
+    expect(sent(h)[0]).toEqual({ type: "status", status: { available: true } });
+    h.process.emit("message", { type: "leaseAcquire", requestId: "bg", holder: appHolder });
+    expect(h.process.disconnect).toHaveBeenCalled();
+  });
+  it("advertises background to capable peers and requires an Electron session receipt", async () => {
+    const h = setup();
+    h.hello(["background-ax-v1"]);
+    expect(sent(h).map((message) => message.type)).toEqual([
+      "hostCapabilities",
+      "status",
+      "leasesChanged",
+    ]);
+    expect(sent(h)[1]).toEqual({
+      type: "status",
+      status: { available: true, background: { available: true } },
+    });
+    h.process.emit("message", { type: "leaseAcquire", requestId: "no-receipt", holder: appHolder });
+    await vi.waitFor(() =>
+      expect(sent(h).at(-1)).toMatchObject({
+        type: "response",
+        requestId: "no-receipt",
+        error: { _tag: "NotGranted" },
+      }),
+    );
+    expect(h.controller.acquire).not.toHaveBeenCalled();
+    h.process.emit("message", {
+      type: "accessRequested",
+      request: {
+        requestId: "session",
+        threadId: "t",
+        sessionGeneration: "s",
+        reason: "Work in Calculator",
+        kind: "session-actions",
+        background: true,
+        apps: [],
+      },
+    });
+    h.channel.answerAccess("profile", {
+      requestId: "session",
+      backendIncarnation: "incarnation",
+      decisions: [],
+      allowSessionActions: true,
+    });
+    expect(sent(h).at(-1)).toMatchObject({
+      type: "accessAnswer",
+      answer: { allowSessionActions: true, sessionReceipt: expect.any(String) },
+    });
+    h.controller.acquire.mockReturnValue(appHolder);
+    h.process.emit("message", { type: "leaseAcquire", requestId: "ok", holder: appHolder });
+    expect(h.controller.acquire).toHaveBeenCalledOnce();
+  });
+  it("arms an approved takeover only after consent and keeps it across consent cleanup", async () => {
+    const h = setup();
+    h.hello(["background-ax-v1"]);
+    h.process.emit("message", {
+      type: "accessRequested",
+      request: {
+        requestId: "session",
+        threadId: "t",
+        sessionGeneration: "s",
+        reason: "r",
+        kind: "session-actions",
+        background: true,
+        apps: [],
+      },
+    });
+    h.channel.answerAccess("profile", {
+      requestId: "session",
+      backendIncarnation: "incarnation",
+      decisions: [],
+      allowSessionActions: true,
+    });
+    h.process.emit("message", {
+      type: "accessRequested",
+      request: {
+        requestId: "approval",
+        threadId: "t",
+        sessionGeneration: "s",
+        reason: "Need to drag",
+        kind: "foreground-takeover",
+        takeover: {
+          appId: "com.apple.calculator",
+          threadId: "t",
+          turnId: "turn",
+          reason: "Need to drag",
+        },
+        apps: [],
+      },
+    });
+    h.process.emit("message", {
+      type: "foregroundTakeoverAcquire",
+      requestId: "takeover",
+      approvalRequestId: "approval",
+      holder: {
+        ...appHolder,
+        scope: {
+          kind: "takeover",
+          appId: "com.apple.calculator",
+          approvalReceipt: "approval",
+        },
+      },
+    });
+    expect(h.controller.lease.pendingTakeover()?.appId).toBe("com.apple.calculator");
+    expect(sent(h).some((message) => message.requestId === "takeover")).toBe(false);
+    h.channel.answerAccess("profile", {
+      requestId: "approval",
+      backendIncarnation: "incarnation",
+      decisions: [],
+      allowForegroundTakeover: true,
+    });
+    // The server's consent cleanup cancels only the consent record.
+    h.process.emit("message", { type: "cancel", requestId: "approval" });
+    await vi.waitFor(() =>
+      expect(sent(h).find((message) => message.requestId === "takeover")).toMatchObject({
+        type: "response",
+        result: { scope: { kind: "takeover", appId: "com.apple.calculator" } },
+      }),
+    );
+    const armed = h.controller.lease.takeover()!;
+    expect(h.channel.execution.validTakeover(armed, "incarnation")).toBe(true);
+    expect(h.channel.execution.validTakeover(armed, "other-incarnation")).toBe(false);
+    h.process.emit("message", { type: "leaseRelease", requestId: "x", holder: armed });
+    expect(h.channel.execution.validTakeover(armed, "incarnation")).toBe(false);
+  });
+  it("cancels a pending takeover on denial and on cancel without arming", async () => {
+    const h = setup();
+    h.hello(["background-ax-v1"]);
+    h.channel.execution.approveSession({
+      profileId: "profile",
+      backendIncarnation: "incarnation",
+      threadId: "t",
+      sessionGeneration: "s",
+      policyRevision: 0,
+    });
+    const takeover = (requestId: string) =>
+      h.process.emit("message", {
+        type: "foregroundTakeoverAcquire",
+        requestId,
+        approvalRequestId: `${requestId}-approval`,
+        holder: {
+          ...appHolder,
+          scope: { kind: "takeover", appId: "com.apple.calculator", approvalReceipt: "x" },
+        },
+      });
+    takeover("cancelled");
+    h.process.emit("message", { type: "cancel", requestId: "cancelled" });
+    expect(h.controller.lease.pendingTakeover()).toBeNull();
+    takeover("denied");
+    h.process.emit("message", {
+      type: "accessRequested",
+      request: {
+        requestId: "denied-approval",
+        threadId: "t",
+        reason: "r",
+        kind: "foreground-takeover",
+        apps: [],
+      },
+    });
+    h.channel.answerAccess("profile", {
+      requestId: "denied-approval",
+      backendIncarnation: "incarnation",
+      decisions: [],
+      allowForegroundTakeover: false,
+    });
+    await vi.waitFor(() =>
+      expect(sent(h).find((message) => message.requestId === "denied")).toMatchObject({
+        error: { _tag: "NotGranted" },
+      }),
+    );
+    expect(h.controller.lease.holders()).toEqual([]);
+    expect(h.controller.lease.pendingTakeover()).toBeNull();
+  });
+  it("rejects leases from an older policy revision after an invalidation", async () => {
+    const h = setup();
+    h.hello(["background-ax-v1"]);
+    Object.assign(h.controller, { invalidateThread: vi.fn(async () => {}) });
+    h.process.emit("message", {
+      type: "observationInvalidate",
+      requestId: "inv",
+      threadId: "t",
+      policyRevision: 3,
+    });
+    await vi.waitFor(() =>
+      expect(sent(h).at(-1)).toEqual({ type: "response", requestId: "inv", result: true }),
+    );
+    h.process.emit("message", {
+      type: "leaseAcquire",
+      requestId: "stale",
+      holder: { ...appHolder, scope: { kind: "foreground" }, policyRevision: 2 },
+    });
+    await vi.waitFor(() =>
+      expect(sent(h).at(-1)).toMatchObject({
+        requestId: "stale",
+        error: { _tag: "Interrupted", cause: "access-changed" },
+      }),
+    );
+  });
 });

@@ -1,10 +1,25 @@
-import type { ComputerAutomationBackendStatus } from "@t3tools/contracts";
+import type { ComputerAutomationBackendStatus, ComputerBackgroundStatus } from "@t3tools/contracts";
 import { release } from "node:os";
 
 /** Only signed, installed certification runs may open these gates. */
 export const COMPUTER_CONTROL_CERTIFIED = { darwin: false, win32: false } as const;
 /** Explicit opt-in preview availability is separate from signed-build certification. */
 export const COMPUTER_CONTROL_PREVIEW = { darwin: true, win32: false } as const;
+/**
+ * Background (accessibility-only) control alongside the user. Closed until the macOS delivery
+ * spike and the real-app rehearsal scenarios pass; unpackaged builds may opt in for rehearsal.
+ */
+export const COMPUTER_BACKGROUND_PREVIEW = { darwin: false, win32: false } as const;
+export function computerBackgroundGate(
+  platform: string,
+  packaged: boolean,
+  devOverride: string | undefined,
+): ComputerBackgroundStatus {
+  if (platform !== "darwin") return { available: false, reason: "unsupported-platform" };
+  if (!COMPUTER_BACKGROUND_PREVIEW.darwin && (packaged || devOverride !== "1"))
+    return { available: false, reason: "preview-off" };
+  return { available: true };
+}
 export const CHROME_CONTROL_CERTIFIED = {
   claude: { darwin: false, win32: false },
   codex: { darwin: false, win32: false },

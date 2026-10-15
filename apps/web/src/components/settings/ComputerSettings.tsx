@@ -1,9 +1,40 @@
+import type {
+  ComputerAutomationBackendStatus,
+  ComputerBackgroundUnavailableReason,
+} from "@t3tools/contracts";
 import { useComputerStatus, computerSettingsCanEnable } from "../../hooks/useComputerStatus";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { Button } from "../ui/button";
 import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { SettingsRow } from "./SettingsCard";
+const BACKGROUND_UNAVAILABLE: Record<ComputerBackgroundUnavailableReason, string> = {
+  "unsupported-platform": "Background control is macOS only.",
+  "peer-capability": "This F5 build or helper does not support background control.",
+  "preview-off": "Background control is not enabled in this build yet.",
+  permissions: "Grant computer control permissions first.",
+  "monitor-unhealthy": "The input monitor is unavailable; restart F5 or retry the helper.",
+};
+/** Background needs the F5 helper's negotiated capability; built-in backends stay foreground. */
+export function backgroundUnavailableReason(
+  status: ComputerAutomationBackendStatus | null | undefined,
+): string | undefined {
+  if (!status) return "Checking…";
+  if (!status.available) return BACKGROUND_UNAVAILABLE.permissions;
+  if (!status.background) return BACKGROUND_UNAVAILABLE["peer-capability"];
+  if (status.background.available) return undefined;
+  return BACKGROUND_UNAVAILABLE[status.background.reason ?? "peer-capability"];
+}
+export function computerExecutionModeDescription(
+  mode: "foreground" | "background",
+  unavailable: string | undefined,
+): string {
+  const base =
+    "Foreground uses your mouse and keyboard. Background lets each agent act inside one approved app without moving your pointer or focus, using F5 computer control only.";
+  if (mode === "background" && unavailable)
+    return `${base} Background is selected but unavailable: ${unavailable} Agents get an error until you switch to foreground.`;
+  return unavailable && mode === "foreground" ? `${base} ${unavailable}` : base;
+}
 export function ComputerSettings() {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
@@ -93,6 +124,42 @@ export function ComputerSettings() {
             <SelectPopup>
               <SelectItem value="auto">Automatic (built-in when available)</SelectItem>
               <SelectItem value="f5">F5 only</SelectItem>
+            </SelectPopup>
+          </Select>
+        }
+      />
+      <SettingsRow
+        title="Execution mode"
+        description={computerExecutionModeDescription(
+          settings.computerUseExecutionMode,
+          backgroundUnavailableReason(status),
+        )}
+        control={
+          <Select
+            value={settings.computerUseExecutionMode}
+            onValueChange={(value) => {
+              if (value === "foreground" || value === "background")
+                updateSettings({ computerUseExecutionMode: value });
+            }}
+          >
+            <SelectTrigger className="w-64" aria-label="Computer execution mode">
+              <SelectValue>
+                {settings.computerUseExecutionMode === "background"
+                  ? "Background (alongside you)"
+                  : "Foreground"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              <SelectItem value="foreground">Foreground</SelectItem>
+              <SelectItem
+                value="background"
+                disabled={
+                  settings.computerUseExecutionMode !== "background" &&
+                  backgroundUnavailableReason(status) !== undefined
+                }
+              >
+                Background (alongside you)
+              </SelectItem>
             </SelectPopup>
           </Select>
         }

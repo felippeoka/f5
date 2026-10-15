@@ -99,7 +99,7 @@ channel = new RehearsalHostChannel(
       channel.answerAccess(profileId, rehearsalAccessAnswer(request, incarnation, fixtureAppId));
   },
 );
-const offLease = lease.subscribe((holder) => channel.publishLease(holder));
+const offLease = lease.subscribe(() => channel.publishLeases());
 const stop = () => {
   cancelled = true;
   controller.stop();
@@ -213,7 +213,7 @@ try {
       realAppReceivedExactlyOnePress: fixture.presses() === 1,
       realAppReceivedExpectedUnicodeText: fixture.typed(),
       serverReleasedTurnLease: serverReleasedLease,
-      leaseReleasedAfterWorkerExit: lease.current() === null,
+      leaseReleasedAfterWorkerExit: lease.holders().length === 0,
     };
     const passed = Object.values(checks).every(Boolean) && !physicalInterruption && !cancelled;
     results.push({

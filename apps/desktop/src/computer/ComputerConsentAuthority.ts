@@ -30,7 +30,21 @@ export class ComputerConsentAuthority {
         backendIncarnation: offered.backendIncarnation,
         decisions: [],
       };
-      if (request.kind !== "apps") {
+      if (request.kind === "foreground-takeover") {
+        const takeover = request.takeover;
+        const appName = quoteUntrusted(takeover?.appName ?? takeover?.appId ?? "this app");
+        const choice = await this.options.show(profileId, {
+          type: "warning",
+          title: "F5 computer access",
+          message: `Let the agent take the foreground in ${appName}?`,
+          detail: `F5 waits until you stop typing and moving the pointer, then brings ${appName} to the front and controls the pointer and keyboard there until the turn ends. Your input or ⌃⌘Esc stops it.\nApp identity: ${quoteUntrusted(takeover?.appId ?? "")}\nAgent’s unverified reason: ${quoteUntrusted(takeover?.reason ?? request.reason)}`,
+          buttons: ["Deny", "Allow foreground"],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+        });
+        answer = { ...answer, allowForegroundTakeover: choice.response === 1 };
+      } else if (request.kind !== "apps") {
         const setup = request.chromeSetup;
         const choice = await this.options.show(profileId, {
           type: "warning",
@@ -41,7 +55,7 @@ export class ComputerConsentAuthority {
               : "Allow session computer actions?",
           detail: setup
             ? `Current browser targets:\n${setup.previousTargets.join("\n")}\nNew target:\n${setup.targetPath}\nThis integration can act on sites you are signed in to.`
-            : `Allow this agent session to control apps you separately approve?\nAgent’s unverified reason: ${quoteUntrusted(request.reason)}`,
+            : `Allow this agent session to control apps you separately approve?${request.background ? "\nF5 may keep acting in granted apps while you work elsewhere." : ""}\nAgent’s unverified reason: ${quoteUntrusted(request.reason)}`,
           buttons: ["Deny", "Allow"],
           defaultId: 0,
           cancelId: 0,
@@ -92,13 +106,18 @@ export class ComputerConsentAuthority {
     }
   }
 
-  async confirmResume(profileId: string, threadTitle: string): Promise<boolean> {
+  async confirmResume(
+    profileId: string,
+    threadTitle: string,
+    context: { recovery?: boolean } = {},
+  ): Promise<boolean> {
     const choice = await this.options.show(profileId, {
       type: "warning",
       title: "Resume F5 computer control?",
       message: `Resume computer control for ${threadTitle}?`,
-      detail:
-        "Physical input will pause control again. The agent must take a fresh screenshot before clicking.",
+      detail: context.recovery
+        ? "Action outcome is unknown; check the app before resuming. Resuming confirms you checked it; the agent must inspect the app again before acting."
+        : "Physical input will pause control again. The agent must take a fresh screenshot before clicking.",
       buttons: ["Cancel", "Resume"],
       defaultId: 0,
       cancelId: 0,

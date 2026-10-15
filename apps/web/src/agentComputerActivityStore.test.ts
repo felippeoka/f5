@@ -1,6 +1,7 @@
 import { ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isAgentComputerActive, useAgentComputerActivityStore } from "./agentComputerActivityStore";
+import { computerUseBannerText } from "./components/ComputerUseBanner";
 const threadId = ThreadId.makeUnsafe("computer-thread");
 beforeEach(() =>
   useAgentComputerActivityStore.setState({
@@ -10,7 +11,7 @@ beforeEach(() =>
     grants: {},
     requests: {},
     paused: {},
-    lease: { threadId: null },
+    leases: { holders: [] },
     lastLeaseAt: {},
   }),
 );
@@ -64,9 +65,11 @@ describe("computer activity", () => {
     try {
       const store = useAgentComputerActivityStore.getState();
       store.record({ threadId, op: "type", status: "completed", backend: "native" });
-      store.setLease({ threadId, backend: "native" });
+      store.setLeases({
+        holders: [{ threadId, backend: "native", delivery: "foreground", state: "active" }],
+      });
       clock.mockReturnValue(130000);
-      store.setLease({ threadId: null });
+      store.setLeases({ holders: [] });
       const state = useAgentComputerActivityStore.getState();
       expect(state.lastLeaseAt[threadId]).toBe(130000);
       expect(
@@ -138,5 +141,90 @@ describe("computer activity", () => {
     });
     expect(useAgentComputerActivityStore.getState().requests.missing).toBeUndefined();
     expect(useAgentComputerActivityStore.getState().paused[threadId]).toBe(true);
+  });
+  it("tracks several holders and stamps only the removed ones", () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(5000);
+    try {
+      const other = ThreadId.makeUnsafe("other-thread");
+      const store = useAgentComputerActivityStore.getState();
+      store.setLeases({
+        holders: [
+          {
+            threadId,
+            backend: "native",
+            delivery: "background",
+            appId: "com.apple.TextEdit",
+            appName: "TextEdit",
+            state: "active",
+          },
+          { threadId: other, backend: "native", delivery: "background", state: "active" },
+        ],
+      });
+      expect(useAgentComputerActivityStore.getState().appNames["com.apple.TextEdit"]).toBe(
+        "TextEdit",
+      );
+      store.setLeases({
+        holders: [{ threadId: other, backend: "native", delivery: "background", state: "active" }],
+      });
+      expect(useAgentComputerActivityStore.getState().lastLeaseAt).toEqual({ [threadId]: 5000 });
+    } finally {
+      clock.mockRestore();
+    }
+  });
+});
+describe("computer use banner text", () => {
+  const holder = {
+    threadId,
+    backend: "native" as const,
+    delivery: "background" as const,
+    appId: "com.apple.TextEdit",
+    appName: "TextEdit",
+    state: "active" as const,
+  };
+  it("names the app for background control and counts several agents", () => {
+    expect(computerUseBannerText({ holders: [holder] }, false)).toBe(
+      "An agent is working in TextEdit in the background",
+    );
+    expect(
+      computerUseBannerText(
+        { holders: [holder, { ...holder, threadId: ThreadId.makeUnsafe("b") }] },
+        false,
+      ),
+    ).toBe("2 agents are working in the background");
+  });
+  it("prefers foreground control, pending takeover and explains pauses", () => {
+    expect(
+      computerUseBannerText(
+        { holders: [holder, { ...holder, delivery: "foreground", appId: undefined }] },
+        false,
+      ),
+    ).toBe("An agent is controlling this computer");
+    expect(
+      computerUseBannerText(
+        {
+          holders: [holder],
+          pendingTakeover: { threadId, appId: "x", appName: "Notes", state: "waiting-idle" },
+        },
+        false,
+      ),
+    ).toBe("An agent will take over Notes when you stop using the mouse and keyboard");
+    expect(
+      computerUseBannerText(
+        { holders: [{ ...holder, state: "paused", pauseCause: "target-active" }] },
+        false,
+      ),
+    ).toBe("Computer control paused · you are using that app");
+    expect(
+      computerUseBannerText(
+        { holders: [{ ...holder, state: "recovery", pauseCause: "outcome-unknown" }] },
+        false,
+      ),
+    ).toBe(
+      "Computer control stopped · check TextEdit before resuming · last action's result is unknown",
+    );
+    expect(computerUseBannerText({ holders: [], otherProfile: true }, false)).toBe(
+      "An agent in another F5 profile is controlling this computer",
+    );
+    expect(computerUseBannerText({ holders: [] }, false)).toBeNull();
   });
 });

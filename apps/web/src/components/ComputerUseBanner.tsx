@@ -1,37 +1,107 @@
 import { useNavigate } from "@tanstack/react-router";
+import type { AgentComputerUseChanged, AgentComputerUseHolder } from "@t3tools/contracts";
 import { MonitorIcon, SquareIcon } from "lucide-react";
 import { useAgentComputerActivityStore } from "../agentComputerActivityStore";
 import { useStore } from "../store";
 import { Button } from "./ui/button";
 import { pauseComputerThread, stopComputerTurn } from "./computerControls";
+
+const PAUSE_CAUSE_LABEL: Record<NonNullable<AgentComputerUseHolder["pauseCause"]>, string> = {
+  paused: "",
+  "kill-switch": "stop shortcut",
+  "user-input": "you used the mouse or keyboard",
+  "permit-expired": "F5 lost contact with the helper",
+  "target-active": "you are using that app",
+  activation: "an app changed focus",
+  "outcome-unknown": "last action's result is unknown",
+  "access-changed": "access changed",
+};
+
+/** The holder the banner speaks for: foreground control first, then the first background one. */
+export function primaryComputerHolder(
+  leases: typeof AgentComputerUseChanged.Type,
+): AgentComputerUseHolder | undefined {
+  return leases.holders.find((holder) => holder.delivery === "foreground") ?? leases.holders[0];
+}
+
+export function computerUseBannerText(
+  leases: typeof AgentComputerUseChanged.Type,
+  pausedLocally: boolean,
+): string | null {
+  const pending = leases.pendingTakeover;
+  if (pending) {
+    const app = pending.appName ?? "an app";
+    return pending.state === "waiting-idle"
+      ? `An agent will take over ${app} when you stop using the mouse and keyboard`
+      : `An agent is asking to take over ${app}`;
+  }
+  const holder = primaryComputerHolder(leases);
+  if (!holder)
+    return leases.otherProfile
+      ? "An agent in another F5 profile is controlling this computer"
+      : null;
+  const app = holder.appName ?? (holder.appId ? "an app" : undefined);
+  const cause = holder.pauseCause ? PAUSE_CAUSE_LABEL[holder.pauseCause] : "";
+  const state = pausedLocally && holder.state === "active" ? "paused" : holder.state;
+  switch (state) {
+    case "paused":
+      return `Computer control paused${cause ? ` · ${cause}` : ""}`;
+    case "recovery":
+      return `Computer control stopped${app ? ` · check ${app} before resuming` : ""}${cause ? ` · ${cause}` : ""}`;
+    case "waiting-secure-input":
+      return `Agent waiting${app ? ` in ${app}` : ""} while secure text entry is active`;
+    case "pending-consent":
+    case "waiting-idle":
+    case "active":
+      break;
+  }
+  if (holder.delivery === "foreground")
+    return holder.appId
+      ? `An agent is controlling ${app} in the foreground`
+      : "An agent is controlling this computer";
+  const background = leases.holders.filter((entry) => entry.delivery === "background");
+  return background.length > 1
+    ? `${background.length} agents are working in the background`
+    : `An agent is working in ${app ?? "an app"} in the background`;
+}
+
 export function ComputerUseBanner() {
-  const lease = useAgentComputerActivityStore((state) => state.lease);
+  const leases = useAgentComputerActivityStore((state) => state.leases);
+  const holder = primaryComputerHolder(leases);
+  const threadId = leases.pendingTakeover?.threadId ?? holder?.threadId;
   const paused = useAgentComputerActivityStore((state) =>
-    lease.threadId ? state.paused[lease.threadId] : false,
+    threadId ? !!state.paused[threadId] : false,
   );
   const navigate = useNavigate();
   const title = useStore((store) =>
-    lease.threadId
-      ? store.threads.find((thread) => thread.id === lease.threadId)?.title
-      : undefined,
+    threadId ? store.threads.find((thread) => thread.id === threadId)?.title : undefined,
   );
-  if (!lease.threadId && !lease.otherProfile) return null;
-  const threadId = lease.threadId;
+  const text = computerUseBannerText(leases, paused);
+  if (!text) return null;
+  // Background-only control is ambient: a quieter style, no takeover of the user's attention.
+  const ambient =
+    !leases.pendingTakeover &&
+    !leases.otherProfile &&
+    holder?.delivery === "background" &&
+    holder.state === "active" &&
+    !paused;
+  const backend = holder?.backend;
   return (
     <div
       role="status"
-      className="fixed top-2 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full border border-warning/50 bg-background/95 py-1 pr-1 pl-3 text-sm shadow-md"
+      className={
+        ambient
+          ? "fixed top-2 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-background/95 py-1 pr-1 pl-3 text-muted-foreground text-sm shadow-sm"
+          : "fixed top-2 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full border border-warning/50 bg-background/95 py-1 pr-1 pl-3 text-sm shadow-md"
+      }
       data-testid="computer-use-banner"
+      data-delivery={holder?.delivery}
     >
-      <MonitorIcon className="size-4 text-warning-foreground" />
+      <MonitorIcon className={ambient ? "size-4" : "size-4 text-warning-foreground"} />
       <span>
-        {lease.otherProfile
-          ? "An agent in another F5 profile is controlling this computer"
-          : paused
-            ? "Computer control paused"
-            : "An agent is controlling this computer"}
+        {text}
         {title ? ` · ${title}` : ""}
-        {lease.backend ? ` · ${lease.backend === "native" ? "F5" : lease.backend}` : ""}
+        {backend ? ` · ${backend === "native" ? "F5" : backend}` : ""}
       </span>
       {threadId ? (
         <>
@@ -53,9 +123,7 @@ export function ComputerUseBanner() {
           <Button
             size="xs"
             variant="destructive"
-            title={
-              lease.backend === "native" ? "Stop computer input" : "Stops after the current action"
-            }
+            title={backend === "native" ? "Stop computer input" : "Stops after the current action"}
             onClick={() => void stopComputerTurn(threadId).catch(() => undefined)}
           >
             <SquareIcon />

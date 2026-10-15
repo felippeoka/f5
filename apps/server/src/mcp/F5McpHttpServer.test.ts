@@ -49,7 +49,7 @@ it.effect(
         assert.equal((yield* post("preview", computerToken)).status, 401);
         const list = yield* post("computer", computerToken);
         assert.equal(list.status, 200);
-        assert.equal(list.body.result?.tools.length, 15);
+        assert.equal(list.body.result?.tools.length, 16);
         assert.ok(list.body.result?.tools.every((tool) => tool.name.startsWith("computer_")));
         computerSession.dispose();
         previewSession.dispose();
@@ -69,6 +69,7 @@ it.effect(
           subscribe: () => () => {},
           releaseSession: () => {},
           invoke,
+          classify: async () => "foreground",
         };
         const preview = makePreviewAutomationBroker();
         const server = yield* makePreviewMcpHttpServer.pipe(

@@ -115,13 +115,16 @@ export class RehearsalProfileIsolation {
     this.configured = true;
     this.identities = identities;
   }
-  receive(profileId: string, raw: unknown, direction: "backend" | "main") {
+  receive(profileId: string, input: unknown, direction: "backend" | "main") {
     if (!this.configured) return;
     const index = this.identities.findIndex((i) => i.profileId === profileId);
-    if (index < 0 || ++this.messages > 4096 || !Schema.is(DesktopComputerHostMessage)(raw)) {
+    // Decode (not `is`): legacy holders without a scope decode to the foreground scope.
+    const decoded = Schema.decodeUnknownExit(DesktopComputerHostMessage)(input);
+    if (index < 0 || ++this.messages > 4096 || decoded._tag !== "Success") {
       this.invalid = true;
       return;
     }
+    const raw = decoded.value;
     const identity = this.identities[index]!;
     const foreign = this.identities[1 - index]!;
     const stats = this.stats[index]!;
@@ -147,6 +150,16 @@ export class RehearsalProfileIsolation {
         if (raw.holder.profileId !== profileId || raw.holder.threadId !== identity.threadId)
           stats.invalidBanner = true;
       }
+    } else if (raw.type === "leasesChanged") {
+      stats.held = raw.holders.length > 0;
+      if (raw.otherProfile) stats.anonymousBanners++;
+      if (raw.holders.length) stats.ownBanners++;
+      if (
+        raw.holders.some(
+          (holder) => holder.profileId !== profileId || holder.threadId !== identity.threadId,
+        )
+      )
+        stats.invalidBanner = true;
     } else if (raw.type === "response" && raw.error?._tag === "Busy") {
       stats.busy++;
       stats.busyWhileForeignHeld ||=
@@ -154,9 +167,15 @@ export class RehearsalProfileIsolation {
       if (raw.error.threadTitle !== undefined) stats.foreignIdentity = true;
     }
     if (
-      ["leaseChanged", "activity", "pauseChanged", "accessRequested", "accessAnswer"].includes(
-        raw.type,
-      )
+      [
+        "leaseChanged",
+        "leasesChanged",
+        "executionStateChanged",
+        "activity",
+        "pauseChanged",
+        "accessRequested",
+        "accessAnswer",
+      ].includes(raw.type)
     ) {
       const encoded = JSON.stringify(raw);
       stats.foreignIdentity ||=

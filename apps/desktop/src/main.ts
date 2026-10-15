@@ -25,7 +25,12 @@ import { captureMacWindow } from "./snapShot/MacSnapShot";
 import { profileStateDir } from "@t3tools/shared/profilePaths";
 import { closeWindowsForQuit } from "./quitPreflight";
 import { installDesktopAttention } from "./desktopAttention";
-import { computerCertificationStatus, CHROME_CONTROL_CERTIFIED } from "./computer/certification";
+import {
+  computerBackgroundGate,
+  computerCertificationStatus,
+  CHROME_CONTROL_CERTIFIED,
+} from "./computer/certification";
+import { COMPUTER_BACKGROUND_CAPABILITY, type ComputerBackgroundStatus } from "@t3tools/contracts";
 import { ComputerHelperClient } from "./computer/ComputerHelperClient";
 import { ComputerLeaseAuthority } from "./computer/ComputerLeaseAuthority";
 import { ComputerController } from "./computer/ComputerController";
@@ -307,6 +312,29 @@ function initializeComputerSystem(): void {
     }
     return native;
   };
+  // Desktop + helper half of background availability; each backend adds its own capability.
+  const backgroundStatus = (): ComputerBackgroundStatus => {
+    const gate = computerBackgroundGate(
+      process.platform,
+      app.isPackaged,
+      process.env.F5_COMPUTER_BACKGROUND_DEV,
+    );
+    if (!gate.available) return gate;
+    const current = status();
+    if (!current.available)
+      return {
+        available: false,
+        reason: current.reason === "monitor-unhealthy" ? "monitor-unhealthy" : "permissions",
+      };
+    if (!helper.capabilities().includes(COMPUTER_BACKGROUND_CAPABILITY))
+      return { available: false, reason: "peer-capability" };
+    return { available: true };
+  };
+  // Settings show why background control is unavailable on this desktop.
+  const rendererStatus = () => {
+    const current = status();
+    return current.available ? { ...current, background: backgroundStatus() } : current;
+  };
   const controller = new ComputerController(lease, helper, overlay, {
     f5Pids: () => [process.pid, ...app.getAppMetrics().map((metric) => metric.pid)],
     f5BundlePath:
@@ -339,9 +367,52 @@ function initializeComputerSystem(): void {
           turnId: holder.turnId,
         });
     },
+    backgroundAvailable: () => backgroundStatus().available,
+    executionState: (profileId, update) =>
+      computerSystem?.channel.sendExecutionState(profileId, update),
+    takeoverValid: (holder) =>
+      computerSystem?.channel.execution.validTakeover(
+        holder,
+        computerSystem.channel.incarnation(holder.profileId),
+      ) ?? false,
+    holderStopped: (holder) =>
+      computerSystem?.channel.execution.revokeTakeovers(
+        (receipt) => receipt.profileId === holder.profileId && receipt.threadId === holder.threadId,
+      ),
   });
   const killChord =
     process.platform === "darwin" ? "Control+Command+Escape" : "Control+Alt+Shift+F12";
+  // One owner-aware registration covers native holders, the Chrome lease and a pending
+  // takeover. Returns false when the chord could not be registered.
+  let killChordRegistered = false;
+  const syncKillChord = (): boolean => {
+    const chromeHolder = computerSystem?.channel.chrome.current() ?? null;
+    const needed =
+      lease.holders().length > 0 || lease.pendingTakeover() !== null || chromeHolder !== null;
+    if (!needed) {
+      if (killChordRegistered) globalShortcut.unregister(killChord);
+      killChordRegistered = false;
+      return true;
+    }
+    if (killChordRegistered) return true;
+    try {
+      killChordRegistered = globalShortcut.register(killChord, () => {
+        controller.stop("kill-switch");
+        const chrome = computerSystem?.channel.chrome.current();
+        if (chrome) {
+          computerSystem?.channel.pauseChrome(chrome.profileId, chrome.threadId, true);
+          computerSystem?.channel.send(chrome.profileId, {
+            type: "chromeInterrupted",
+            threadId: chrome.threadId,
+            sessionGeneration: chrome.sessionGeneration,
+          });
+        }
+      });
+    } catch {
+      killChordRegistered = false;
+    }
+    return killChordRegistered;
+  };
   const channel = new ComputerHostChannel(
     controller,
     status,
@@ -354,7 +425,9 @@ function initializeComputerSystem(): void {
             ? "An agent wants to change a browser's native messaging setup."
             : request.kind === "session-actions"
               ? "An agent wants permission to control approved apps."
-              : `An agent wants to use ${request.apps.map((app) => app.name).join(", ")}.`,
+              : request.kind === "foreground-takeover"
+                ? `An agent wants the foreground in ${request.takeover?.appName ?? "an app"}.`
+                : `An agent wants to use ${request.apps.map((app) => app.name).join(", ")}.`,
       });
       notice.on("click", () => {
         void openProfile(profileId);
@@ -364,46 +437,34 @@ function initializeComputerSystem(): void {
     {
       certified: (provider) =>
         CHROME_CONTROL_CERTIFIED[provider][process.platform === "win32" ? "win32" : "darwin"],
-      changed: (holder) => {
-        globalShortcut.unregister(killChord);
-        if (holder) {
-          const registered = globalShortcut.register(killChord, () => {
-            channel.pauseChrome(holder.profileId, holder.threadId, true);
-            channel.send(holder.profileId, {
-              type: "chromeInterrupted",
-              threadId: holder.threadId,
-              sessionGeneration: holder.sessionGeneration,
-            });
-          });
-          if (!registered) throw new Error("The computer-control kill shortcut is unavailable.");
-        }
+      changed: () => {
+        if (!syncKillChord()) throw new Error("The computer-control kill shortcut is unavailable.");
       },
     },
+    undefined,
+    { background: backgroundStatus },
   );
   computerSystem = { helper, controller, channel, overlay };
-  lease.subscribe((holder) => {
-    channel.publishLease(holder);
-    globalShortcut.unregister(killChord);
-    if (holder) {
-      try {
-        if (!globalShortcut.register(killChord, () => controller.stop("kill-switch")))
-          controller.stop("paused");
-      } catch {
-        controller.stop("paused");
-      }
-    }
+  lease.subscribe(() => {
+    channel.publishLeases();
+    if (syncKillChord()) return;
+    // Without the emergency shortcut neither native control nor a takeover may proceed.
+    lease.cancelTakeover();
+    controller.stop("paused");
   });
   let lastComputerStatus = "";
   helper.onEvent((message) => {
-    if (message.type !== "status") return;
+    if (message.type !== "status" && message.type !== "hello") return;
     const currentStatus = status();
-    const serialized = JSON.stringify(currentStatus);
+    const serialized = JSON.stringify([currentStatus, backgroundStatus()]);
     if (serialized === lastComputerStatus) return;
     lastComputerStatus = serialized;
-    if (!currentStatus.available && lease.current()) controller.stop();
-    channel.broadcast({ type: "status", status: currentStatus });
+    // Helper unavailability stops every native holder and any pending takeover.
+    if (!currentStatus.available && (lease.holders().length > 0 || lease.pendingTakeover()))
+      controller.stop();
+    channel.broadcastStatus();
     for (const id of appRendererWebContentsIds)
-      electronWebContents.fromId(id)?.send("desktop-computer:status-changed", currentStatus);
+      electronWebContents.fromId(id)?.send("desktop-computer:status-changed", rendererStatus());
   });
   const consent = new ComputerConsentAuthority({
     platform: process.platform === "win32" ? "win32" : "darwin",
@@ -433,7 +494,7 @@ function initializeComputerSystem(): void {
         throw new Error("Untrusted computer-control origin.");
       return runtime.profile.id;
     },
-    status,
+    status: rendererStatus,
     retry: () => {
       if (
         computerCertificationStatus(
@@ -453,7 +514,7 @@ function initializeComputerSystem(): void {
         (controller.requiresLocalResume(profileId, threadId) ||
           (chromeHolder?.profileId === profileId && chromeHolder.threadId === threadId))
       ) {
-        if (!(await consent.confirmResume(profileId, target.title)))
+        if (!(await consent.confirmResume(profileId, target.title, { recovery: target.recovery })))
           throw new Error("Computer control remains paused.");
         if (
           controller.resumeTarget(profileId, threadId).authorization !== target.authorization ||
@@ -3865,6 +3926,7 @@ function cancelQuit(): void {
 }
 
 async function cleanupBeforeExit(): Promise<void> {
+  computerSystem?.channel.close();
   computerSystem?.controller.close();
   computerSystem?.overlay.close();
   computerSystem?.helper.close();

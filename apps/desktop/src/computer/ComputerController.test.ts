@@ -18,7 +18,13 @@ const auth: ComputerAuthorization = {
   grantVersion: 1,
   grants: [],
 };
-const holder: ComputerLeaseHolder = { ...auth, backend: "native", threadTitle: "Thread" };
+const holder: ComputerLeaseHolder = {
+  ...auth,
+  backend: "native",
+  threadTitle: "Thread",
+  scope: { kind: "foreground" },
+  policyRevision: 0,
+};
 function make() {
   let event: (message: Record<string, unknown>) => void = () => {};
   const request = vi.fn(
@@ -105,7 +111,10 @@ describe("main computer controller", () => {
     );
     try {
       const pending = h.controller.invoke(envelope("old-helper"));
-      const interrupted = expect(pending).rejects.toMatchObject({ error: { _tag: "Interrupted" } });
+      // The helper already received it: the outcome is unknown, never "interrupted".
+      const interrupted = expect(pending).rejects.toMatchObject({
+        error: { _tag: "OutcomeUnknown" },
+      });
       await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(1));
       h.controller.stop();
       await interrupted;
@@ -169,12 +178,12 @@ describe("main computer controller", () => {
   it("rejects acquisition when the shortcut observer immediately revokes the lease", () => {
     const h = make();
     h.lease.release(h.held);
-    const off = h.lease.subscribe((current) => {
-      if (current) h.controller.stop();
+    const off = h.lease.subscribe((holders) => {
+      if (holders.length) h.controller.stop();
     });
     try {
       expect(() => h.controller.acquire(holder)).toThrow();
-      expect(h.lease.current()).toBeNull();
+      expect(h.lease.holders()).toEqual([]);
       expect(h.request).not.toHaveBeenCalled();
     } finally {
       off();
@@ -195,20 +204,20 @@ describe("main computer controller", () => {
       h.controller.close();
     }
   });
-  it("publishes a recent-input pause when a different thread tries to acquire an idle device", () => {
+  it("refuses foreground acquisition during recent input without latching a pause", () => {
     const h = make();
     const next = { ...holder, threadId: "next-thread" };
     try {
       h.event({ type: "physicalInput" });
       h.paused.mockClear();
-      expect(() => h.controller.acquire(next)).toThrow();
-      expect(h.lease.current()).toBeNull();
-      expect(h.paused).toHaveBeenCalledExactlyOnceWith(next, "user-input");
+      expect(() => h.controller.acquire(next)).toThrow(
+        expect.objectContaining({ error: { _tag: "TargetBlocked", kind: "user-active" } }),
+      );
+      expect(h.lease.holders()).toEqual([]);
+      expect(h.paused).not.toHaveBeenCalled();
       const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 2000);
       try {
-        // Waiting cannot silently clear the latch; only an explicit resume can.
-        expect(() => h.controller.acquire(next)).toThrow();
-        h.controller.setPaused("p", "next-thread", false);
+        // Acquisition is non-latching: once the user is idle the agent may proceed.
         expect(h.controller.acquire(next).threadId).toBe("next-thread");
       } finally {
         clock.mockRestore();
@@ -241,9 +250,9 @@ describe("main computer controller", () => {
     try {
       h.event({ type: "heartbeat", suspended: true });
       h.event({ type: "permitExpired", executionGeneration: h.held.executionGeneration - 1 });
-      expect(h.lease.current()).toEqual(h.held);
+      expect(h.lease.holders()).toEqual([h.held]);
       h.event({ type: "permitExpired", executionGeneration: h.held.executionGeneration });
-      expect(h.lease.current()).toBeNull();
+      expect(h.lease.holders()).toEqual([]);
       expect(h.paused).toHaveBeenCalledWith(h.held, "permit-expired");
     } finally {
       h.controller.close();
@@ -280,7 +289,7 @@ describe("main computer controller", () => {
     const h = make();
     try {
       h.event({ type: "physicalInput" });
-      expect(h.lease.current()).toBeNull();
+      expect(h.lease.holders()).toEqual([]);
       const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 5000);
       try {
         h.event({ type: "killSwitch" });
@@ -323,11 +332,12 @@ describe("main computer controller", () => {
       await vi.waitFor(() => expect(h.request).toHaveBeenCalled());
       const queued = h.controller.invoke(envelope("queued"));
       h.event({ type: "killSwitch" });
-      await expect(action).rejects.toMatchObject({
+      // Sent to the helper without confirmation: unknown. Still queued: interrupted.
+      await expect(action).rejects.toMatchObject({ error: { _tag: "OutcomeUnknown" } });
+      await expect(queued).rejects.toMatchObject({
         error: { _tag: "Interrupted", cause: "kill-switch" },
       });
-      await expect(queued).rejects.toMatchObject({ error: { _tag: "Interrupted" } });
-      expect(h.lease.current()).toBeNull();
+      expect(h.lease.holders()).toEqual([]);
       expect(h.helper.suspend).toHaveBeenCalled();
       expect(h.activity).toHaveBeenLastCalledWith(
         "p",
@@ -399,9 +409,7 @@ describe("main computer controller", () => {
       const action = h.controller.invoke(envelope("active"));
       await vi.waitFor(() => expect(h.request).toHaveBeenCalled());
       h.controller.updateGrants({ ...auth, grantVersion: 2 });
-      await expect(action).rejects.toMatchObject({
-        error: { _tag: "Interrupted", cause: "access-changed" },
-      });
+      await expect(action).rejects.toMatchObject({ error: { _tag: "OutcomeUnknown" } });
       expect(h.helper.control).toHaveBeenCalledWith({ type: "cancel", requestId: "active" });
       finish({ ok: true });
     } finally {

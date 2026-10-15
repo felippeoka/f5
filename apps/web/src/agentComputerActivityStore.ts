@@ -5,6 +5,7 @@ import type {
   ComputerAccessPush,
   ComputerAccessSettled,
   AgentComputerUseChanged,
+  AgentComputerUseHolder,
 } from "@t3tools/contracts";
 import { isAgentActivityRecent } from "./agentActivityWindow";
 interface ComputerState {
@@ -17,7 +18,8 @@ interface ComputerState {
     (typeof ComputerAccessPush.Type & { settled?: boolean; allowed?: boolean }) | undefined
   >;
   paused: Record<string, boolean | undefined>;
-  lease: typeof AgentComputerUseChanged.Type;
+  /** Every holder in this profile: delivery, target app, execution state and pause cause. */
+  leases: typeof AgentComputerUseChanged.Type;
   lastLeaseAt: Record<string, number | undefined>;
   record: (activity: ComputerActivity) => void;
   request: (request: typeof ComputerAccessPush.Type) => void;
@@ -25,8 +27,9 @@ interface ComputerState {
   setGrants: (threadId: string, grants: ReadonlyArray<ComputerGrant>) => void;
   setPaused: (threadId: string, paused: boolean) => void;
   resetConnection: () => void;
-  setLease: (lease: typeof AgentComputerUseChanged.Type) => void;
+  setLeases: (leases: typeof AgentComputerUseChanged.Type) => void;
 }
+const NO_LEASES: typeof AgentComputerUseChanged.Type = { holders: [] };
 export const useAgentComputerActivityStore = create<ComputerState>((set) => ({
   resetConnection: () =>
     set({
@@ -36,7 +39,7 @@ export const useAgentComputerActivityStore = create<ComputerState>((set) => ({
       grants: {},
       requests: {},
       paused: {},
-      lease: { threadId: null },
+      leases: NO_LEASES,
       lastLeaseAt: {},
     }),
   appNames: {},
@@ -45,7 +48,7 @@ export const useAgentComputerActivityStore = create<ComputerState>((set) => ({
   grants: {},
   requests: {},
   paused: {},
-  lease: { threadId: null },
+  leases: NO_LEASES,
   lastLeaseAt: {},
   record: (activity) =>
     set((state) => {
@@ -93,15 +96,37 @@ export const useAgentComputerActivityStore = create<ComputerState>((set) => ({
     })),
   setPaused: (threadId, paused) =>
     set((state) => ({ paused: { ...state.paused, [threadId]: paused } })),
-  setLease: (lease) =>
-    set((state) => ({
-      lease,
-      lastLeaseAt:
-        state.lease.threadId && state.lease.threadId !== lease.threadId
-          ? { ...state.lastLeaseAt, [state.lease.threadId]: Date.now() }
+  setLeases: (leases) =>
+    set((state) => {
+      const now = Date.now();
+      const removed = state.leases.holders.filter(
+        (holder) => !leases.holders.some((next) => next.threadId === holder.threadId),
+      );
+      return {
+        leases,
+        appNames: {
+          ...state.appNames,
+          ...Object.fromEntries(
+            leases.holders.flatMap((holder) =>
+              holder.appId && holder.appName ? [[holder.appId, holder.appName]] : [],
+            ),
+          ),
+        },
+        lastLeaseAt: removed.length
+          ? {
+              ...state.lastLeaseAt,
+              ...Object.fromEntries(removed.map((holder) => [holder.threadId, now])),
+            }
           : state.lastLeaseAt,
-    })),
+      };
+    }),
 }));
+export function computerHolderFor(
+  leases: typeof AgentComputerUseChanged.Type,
+  threadId: string,
+): AgentComputerUseHolder | undefined {
+  return leases.holders.find((holder) => holder.threadId === threadId);
+}
 export function isAgentComputerActive(
   activity: (ComputerActivity & { at: number }) | undefined,
   now: number,
