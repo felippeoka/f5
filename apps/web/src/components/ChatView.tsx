@@ -135,7 +135,9 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
   derivePhase,
+  createTimelineEntryCache,
   deriveTimelineEntries,
+  type TimelineEntryCache,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
   deriveLatestAssistantOutputAt,
@@ -164,6 +166,8 @@ import {
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
 import { nextRewindDraftReadTicket, useStore } from "../store";
+import { selectThreadIndexById, useThread, useThreadSummaries } from "../threadSelectors";
+import { useTestRenderCountProps } from "../lib/testRenderCount";
 import {
   deletePendingTurnDispatchArtifacts,
   getPendingTurnDispatchArtifacts,
@@ -648,13 +652,13 @@ export default function ChatView({
   focusTimelineEntryId,
   focusTimelineEntryKind = "message",
 }: ChatViewProps) {
+  const testRenderCountProps = useTestRenderCountProps();
   const nextTurnQueueState = useNextTurnQueueStore(
     (store) => store.byThreadId[threadId] ?? EMPTY_QUEUE_THREAD_STATE,
   );
-  const threads = useStore((store) => store.threads);
+  // Summaries only: other threads' streaming deltas must not re-render this view.
+  const threadSummaries = useThreadSummaries();
   const projects = useStore((store) => store.projects);
-  const mediaRootsRef = useRef({ projects, threads });
-  mediaRootsRef.current = { projects, threads };
   const [referencedAsset, setReferencedAsset] = useState<{
     identity: ProjectIssueAssetUrlInput["identity"];
     path: string;
@@ -1000,7 +1004,7 @@ export default function ChatView({
     [composerTerminalContexts, removeComposerDraftTerminalContext, setPrompt, threadId],
   );
 
-  const serverThread = threads.find((t) => t.id === threadId);
+  const serverThread = useThread(threadId);
   const fallbackDraftProject = projects.find((project) => project.id === draftThread?.projectId);
   const localDraftError = serverThread ? null : (localDraftErrorsByThreadId[threadId] ?? null);
   const localDraftThread = useMemo(
@@ -2260,6 +2264,11 @@ export default function ChatView({
       existing ? refreshExpandedImageActionSources(existing, imageSources) : existing,
     );
   }, [timelineMessages]);
+  // Reuses unchanged entries (and the array itself) across streaming deltas so
+  // memoized timeline rows only re-render when their own entry changed.
+  const timelineEntryCacheRef = useRef<TimelineEntryCache | null>(null);
+  timelineEntryCacheRef.current ??= createTimelineEntryCache();
+  const timelineEntryCache = timelineEntryCacheRef.current;
   const timelineEntries = useMemo(
     () =>
       deriveTimelineEntries(
@@ -2267,8 +2276,15 @@ export default function ChatView({
         activeThread?.proposedPlans ?? [],
         workLogEntries,
         commandExecutions,
+        timelineEntryCache,
       ),
-    [activeThread?.proposedPlans, commandExecutions, timelineMessages, workLogEntries],
+    [
+      activeThread?.proposedPlans,
+      commandExecutions,
+      timelineEntryCache,
+      timelineMessages,
+      workLogEntries,
+    ],
   );
   const lastFocusedTimelineEntryIdRef = useRef<string | null>(null);
   const attemptedTimelineAnchorLoadRef = useRef<string | null>(null);
@@ -2791,7 +2807,7 @@ export default function ChatView({
     (targetThreadId: ThreadId | null, error: string | null) => {
       if (!targetThreadId) return;
       const nextError = sanitizeThreadErrorMessage(error);
-      if (threads.some((thread) => thread.id === targetThreadId)) {
+      if (selectThreadIndexById(useStore.getState()).has(targetThreadId)) {
         setStoreThreadError(targetThreadId, nextError);
         return;
       }
@@ -2805,7 +2821,7 @@ export default function ChatView({
         };
       });
     },
-    [setStoreThreadError, threads],
+    [setStoreThreadError],
   );
 
   const focusComposer = useCallback(() => {
@@ -6589,7 +6605,7 @@ export default function ChatView({
 
       const parsed = normalizeFilePathForDiffLookup(filePath, workspaceRoot);
       if (!parsed || !parsed.workspaceRelative) {
-        const roots = mediaRootsRef.current;
+        const roots = useStore.getState();
         const target = resolveChatAssetTarget(
           filePath,
           workspaceRoot,
@@ -6759,7 +6775,7 @@ export default function ChatView({
   );
   const rewindWorkspaceShared =
     Boolean(workspaceRoot) &&
-    threads.some(
+    threadSummaries.some(
       (other) =>
         other.id !== activeThread?.id &&
         (other.worktreePath ?? projects.find((project) => project.id === other.projectId)?.cwd) ===
@@ -7100,6 +7116,8 @@ export default function ChatView({
       </Dialog>
       <div
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background"
+        data-chat-view-thread-id={threadId}
+        {...testRenderCountProps}
         onDragEnter={onComposerDragEnter}
         onDragOver={onComposerDragOver}
         onDragLeave={onComposerDragLeave}

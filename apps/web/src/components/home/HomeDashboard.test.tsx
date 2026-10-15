@@ -6,6 +6,7 @@ import { HomeAttentionCard, attentionCardActionLabel } from "./HomeAttentionCard
 import { resolveGreeting } from "./HomeMissionControl";
 import { appendQuickStartText } from "./HomeQuickStart";
 import { HomeThreadRow } from "./HomeThreadRow";
+import { toThreadSummary } from "../../threadSelectors";
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
@@ -75,7 +76,7 @@ describe("HomeAttentionCard", () => {
   it("puts the keyboard index on its action button", () => {
     const markup = renderToStaticMarkup(
       <HomeAttentionCard
-        thread={makeThread()}
+        thread={toThreadSummary(makeThread())}
         project={undefined}
         status="awaiting-input"
         reasonTag="waiting 5m"
@@ -93,7 +94,11 @@ describe("HomeAttentionCard", () => {
 describe("HomeThreadRow", () => {
   it("renders no status chip for an idle thread", () => {
     const markup = renderToStaticMarkup(
-      <HomeThreadRow thread={makeThread()} project={undefined} onSelect={() => {}} />,
+      <HomeThreadRow
+        thread={toThreadSummary(makeThread())}
+        project={undefined}
+        onSelect={() => {}}
+      />,
     );
     expect(markup).toContain("Wire up the dashboard");
     expect(markup).not.toContain("Idle");

@@ -144,6 +144,9 @@ const READ_ONLY_METHODS = new Set([
   "projects.readFile",
   "projects.searchContents",
   "projects.searchEntries",
+  // Idempotent and workspace-read-only: replaces this client's watch set, and
+  // must be resendable right after a reconnect, before resynchronization.
+  "projects.setWatchedPaths",
   "providerAccount.status",
   "review.previewDiff",
   "server.getClaudeTranscriptRepair",

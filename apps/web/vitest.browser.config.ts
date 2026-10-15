@@ -16,6 +16,12 @@ export default mergeConfig(
         "~": srcPath,
       },
     },
+    server: {
+      // Transforming the first "use memo" module loads Babel and the React
+      // Compiler (about half a second); do it at startup instead of inside
+      // whichever test first renders an annotated component.
+      warmup: { clientFiles: ["./src/components/Sidebar.tsx"] },
+    },
     test: {
       include: [
         "src/editorDrafts.browser.ts",
@@ -25,6 +31,7 @@ export default mergeConfig(
         "src/components/ChatMarkdown.browser.tsx",
         "src/components/RightPanelHost.browser.tsx",
         "src/hooks/useMigrateClientSettings.browser.ts",
+        "src/hooks/useSettings.browser.tsx",
         "src/components/FileViewPanel.browser.tsx",
         "src/components/chat/ComposerSendControl.browser.tsx",
         "src/hooks/inputSafety.browser.tsx",

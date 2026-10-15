@@ -2,11 +2,14 @@ import type { ThreadId } from "@t3tools/contracts";
 import { ArrowRightIcon, PauseIcon } from "lucide-react";
 
 import { QUEUE_PAUSED_REASON_TAG } from "../../lib/attentionReason";
+import { useNowMinute } from "../../lib/nowTicker";
 import { formatAbsoluteTimeLabel, formatRelativeTimeLabel } from "../../lib/relativeTime";
 import { cn } from "../../lib/utils";
-import { resolveThreadStatusPillForThread, type ThreadStatus } from "../../threadStatus";
-import type { Project, Thread } from "../../types";
+import type { ThreadSummary } from "../../threadSelectors";
+import { pillForStatus, type ThreadStatus } from "../../threadStatus";
+import type { Project } from "../../types";
 import { ProjectIcon } from "../ProjectIcon";
+import { useLiveThreadActivityAt } from "../thread/ThreadActivityTime";
 import { ThreadStatusPillBadge } from "../thread/ThreadStatusPillBadge";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -37,15 +40,18 @@ const CARD_ACCENT_BY_STATUS: Partial<Record<ThreadStatus, string>> = {
  * the plan, question or approval controls live.
  */
 export function HomeAttentionCard(props: {
-  readonly thread: Thread;
+  readonly thread: ThreadSummary;
   readonly project: Project | undefined;
   readonly status: ThreadStatus | undefined;
   readonly reasonTag?: string | undefined;
   readonly rowIndex?: number | undefined;
   readonly onOpen: (threadId: ThreadId) => void;
 }) {
+  "use memo";
   const { thread, project, status } = props;
-  const pill = resolveThreadStatusPillForThread(thread);
+  const pill = pillForStatus(thread.status);
+  const activityAt = useLiveThreadActivityAt(thread.id, thread.lastInteractionAt);
+  useNowMinute();
   const title = thread.title.trim() || "Untitled thread";
   const projectName = project?.name ?? "Unknown project";
   const actionLabel = attentionCardActionLabel(status);
@@ -72,9 +78,9 @@ export function HomeAttentionCard(props: {
         <span className="min-w-0 truncate font-mono">{projectName}</span>
         <span
           className="ms-auto shrink-0 tabular-nums"
-          title={formatAbsoluteTimeLabel(thread.lastInteractionAt) || undefined}
+          title={formatAbsoluteTimeLabel(activityAt) || undefined}
         >
-          {formatRelativeTimeLabel(thread.lastInteractionAt)}
+          {formatRelativeTimeLabel(activityAt)}
         </span>
       </div>
       <p className="line-clamp-2 text-sm font-medium text-foreground" title={title}>

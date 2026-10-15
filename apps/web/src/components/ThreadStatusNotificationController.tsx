@@ -12,7 +12,8 @@ import type { ThreadId } from "@t3tools/contracts";
 
 import { useAppSettings } from "../appSettings";
 import { useStore } from "../store";
-import { resolveThreadStatusForThread, type ThreadStatus } from "../threadStatus";
+import { useThreadSummaries } from "../threadSelectors";
+import type { ThreadStatus } from "../threadStatus";
 import {
   diffThreadStatusNotifications,
   dismissThreadStatusNotificationPrompt,
@@ -36,7 +37,7 @@ export function ThreadStatusNotificationControllerContent({
   navigateToThread: (threadId: ThreadId) => void | Promise<void>;
 }) {
   const threadsHydrated = useStore((store) => store.threadsHydrated);
-  const threads = useStore((store) => store.threads);
+  const threads = useThreadSummaries();
   const projects = useStore((store) => store.projects);
   const { settings } = useAppSettings();
   const systemEnabled =
@@ -85,7 +86,7 @@ export function ThreadStatusNotificationControllerContent({
       threadId: thread.id,
       threadTitle: thread.title,
       projectName: projectNameById.get(thread.projectId) ?? null,
-      status: resolveThreadStatusForThread(thread),
+      status: thread.status,
       snoozed: isSnoozedThread(thread) || Boolean(thread.archivedAt),
     }));
   }, [projects, threads]);

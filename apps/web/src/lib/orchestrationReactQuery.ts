@@ -26,6 +26,7 @@ import {
 } from "./threadOpenTrace";
 import { ensureNativeApi } from "../nativeApi";
 import { useStore } from "../store";
+import { retainThreadDetail } from "./threadDetailRetention";
 import { ensureThreadHistoryState } from "./threadHistory";
 import type { ThreadHistoryState } from "../types";
 
@@ -860,6 +861,9 @@ export function useThreadDetail(threadId: ThreadId | null | undefined) {
       clearThreadDetailBuffer(threadId);
     };
   }, [clearThreadDetailBuffer, threadId]);
+
+  // Shown details stay hydrated; detail retention evicts only inactive threads.
+  useEffect(() => (threadId ? retainThreadDetail(threadId) : undefined), [threadId]);
 
   const query = useQuery<OrchestrationThreadTailDetails>({
     queryKey: threadId

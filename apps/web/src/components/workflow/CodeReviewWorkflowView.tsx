@@ -1,3 +1,4 @@
+import type { ThreadId } from "@t3tools/contracts";
 import { useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
@@ -5,6 +6,8 @@ import { useThreadDetail } from "../../lib/orchestrationReactQuery";
 import { WORKFLOW_TYPE_DIALOG_LABEL } from "../../lib/workflowType";
 import { readNativeApi } from "../../nativeApi";
 import { useStore } from "../../store";
+import { useThreadsByIds } from "../../threadSelectors";
+import { threadIdsForCodeReviewWorkflow } from "./codeReviewWorkflowUtils";
 import ChatMarkdown from "../ChatMarkdown";
 import {
   AlertDialog,
@@ -45,6 +48,8 @@ interface DuplicateRisk {
   readonly threadIds: readonly string[];
 }
 
+const EMPTY_WORKFLOW_THREAD_IDS: readonly ThreadId[] = [];
+
 export function CodeReviewWorkflowView(props: { workflowId: string }) {
   const navigate = useNavigate();
   const [busy, setBusy] = useState<"retry" | "delete" | null>(null);
@@ -52,7 +57,12 @@ export function CodeReviewWorkflowView(props: { workflowId: string }) {
   const workflow = useStore((store) =>
     store.codeReviewWorkflows.find((entry) => entry.id === props.workflowId),
   );
-  const threads = useStore((store) => store.threads);
+  // Only this workflow's threads: unrelated streaming does not re-render the view.
+  const workflowThreadIds = useMemo(
+    () => (workflow ? threadIdsForCodeReviewWorkflow(workflow) : EMPTY_WORKFLOW_THREAD_IDS),
+    [workflow],
+  );
+  const threads = useThreadsByIds(workflowThreadIds);
   const consolidationThreadId = workflow?.consolidation.threadId ?? null;
   useThreadDetail(consolidationThreadId);
   const threadById = useMemo(

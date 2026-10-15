@@ -27,6 +27,7 @@ import {
 } from "../../lib/botWorkspaceReactQuery";
 import { cn } from "../../lib/utils";
 import { useStore } from "../../store";
+import { selectThreadById, useThreadSummary } from "../../threadSelectors";
 import ChatMarkdown from "../ChatMarkdown";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -244,16 +245,15 @@ function TaskControls({ task }: { task: BotTask }) {
 function TaskDetail({ taskId }: { taskId: string }) {
   const query = useQuery(botTaskQueryOptions(taskId));
   const projects = useStore((state) => state.projects);
-  const threads = useStore((state) => state.threads);
+  const sourceThread = useThreadSummary(
+    query.data?.sourceThreadId ? ThreadId.makeUnsafe(query.data.sourceThreadId) : null,
+  );
   const now = useNow();
   const task = query.data;
   if (query.isError)
     return <p className="p-4 text-sm text-destructive">{errorMessage(query.error)}</p>;
   if (!task) return <p className="p-4 text-sm text-muted-foreground">Loading…</p>;
   const project = projects.find((entry) => entry.id === task.projectId);
-  const sourceThread = task.sourceThreadId
-    ? threads.find((entry) => entry.id === task.sourceThreadId)
-    : undefined;
   return (
     <div className="space-y-4 p-4">
       <header className="space-y-1">
@@ -308,10 +308,9 @@ export function NewBotTaskDialog(props: {
 }) {
   const queryClient = useQueryClient();
   const projects = useStore((state) => state.projects);
-  const threads = useStore((state) => state.threads);
-  const sourceThread = props.sourceThreadId
-    ? threads.find((thread) => thread.id === props.sourceThreadId)
-    : undefined;
+  const sourceThread = useThreadSummary(
+    props.sourceThreadId ? ThreadId.makeUnsafe(props.sourceThreadId) : null,
+  );
   const eligibleClients = props.clients.filter(
     (client) => client.revokedAt === null && client.scopes.includes("f5.tasks"),
   );
@@ -337,7 +336,7 @@ export function NewBotTaskDialog(props: {
   useEffect(() => {
     if (!props.open) return;
     const thread = props.sourceThreadId
-      ? useStore.getState().threads.find((entry) => entry.id === props.sourceThreadId)
+      ? selectThreadById(useStore.getState(), ThreadId.makeUnsafe(props.sourceThreadId))
       : undefined;
     setTitle(thread ? thread.title : "");
     setInstructions("");

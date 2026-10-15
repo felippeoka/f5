@@ -56,8 +56,6 @@ import {
   onServerConfigUpdated,
   onServerWelcome,
 } from "../wsNativeApi";
-import { providerQueryKeys } from "../lib/providerReactQuery";
-import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 import {
   applyThreadCommandExecutionEventToQueryCache,
@@ -82,6 +80,14 @@ import {
   warmThreadBundle,
   type ThreadWarmProfile,
 } from "../lib/threadPreload";
+import { startThreadDetailRetention } from "../lib/threadDetailRetention";
+import {
+  invalidateAllWorkspaceQueries,
+  invalidateWorkspaceForEvent,
+  isWorkspaceEffectEvent,
+  type ThreadWorkspace,
+} from "../lib/workspaceInvalidation";
+import { startWorkspaceWatchSync } from "../lib/workspaceWatch";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -368,6 +374,8 @@ function EventRouter() {
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const navigate = useNavigate();
   const { settings, updateSettings } = useAppSettings();
+  useEffect(() => startThreadDetailRetention(queryClient), [queryClient]);
+  useEffect(() => startWorkspaceWatchSync(queryClient), [queryClient]);
   useEffect(() => {
     document.documentElement.dataset.diffColorScheme = settings.diffColorPalette;
   }, [settings.diffColorPalette]);
@@ -493,12 +501,23 @@ function EventRouter() {
       }
     };
 
-    const invalidateProviderAndProjectQueries = () => {
-      void queryClient.invalidateQueries({ queryKey: providerQueryKeys.all });
-      void queryClient.invalidateQueries({ queryKey: providerQueryKeys.fileContentAll });
-      // Invalidate workspace entry queries so the @-mention file picker
-      // reflects files created, deleted, or restored during this turn.
-      void queryClient.invalidateQueries({ queryKey: projectQueryKeys.all });
+    const resolveThreadWorkspace = (threadId: ThreadId): ThreadWorkspace | null => {
+      const { threads, projects } = useStore.getState();
+      const thread = threads.find((entry) => entry.id === threadId);
+      const project = thread ? projects.find((entry) => entry.id === thread.projectId) : undefined;
+      const cwd = thread?.worktreePath ?? project?.cwd;
+      return thread && cwd ? { cwd, projectId: thread.projectId } : null;
+    };
+    // Turn diffs and reverts refresh the affected workspace (file contents,
+    // listings, the @-mention picker's entries); events from an unknown
+    // workspace refresh every workspace.
+    const invalidateWorkspaceQueriesForEvents = (events: ReadonlyArray<OrchestrationEvent>) => {
+      for (const event of events) {
+        if (!isWorkspaceEffectEvent(event)) continue;
+        if (invalidateWorkspaceForEvent(queryClient, event, resolveThreadWorkspace) === "broad") {
+          return;
+        }
+      }
     };
 
     const removeOrphanedTerminalsForCurrentStoreThreads = () => {
@@ -618,9 +637,7 @@ function EventRouter() {
         useComposerMentionHistoryStore.getState().forgetThread(event.payload.threadId);
         removeOrphanedTerminalsForCurrentStoreThreads();
       }
-      if (event.type === "thread.turn-diff-completed" || event.type === "thread.reverted") {
-        invalidateProviderAndProjectQueries();
-      }
+      invalidateWorkspaceQueriesForEvents([event]);
     };
 
     // Live event coalescing. The server forwards every token delta as its own
@@ -665,14 +682,10 @@ function EventRouter() {
       let sawThreadCreated = false;
       let sawThreadDeleted = false;
       let sawProjectDeleted = false;
-      let sawProviderInvalidating = false;
       for (const event of batch) {
         if (event.type === "thread.created") sawThreadCreated = true;
         if (event.type === "thread.deleted") sawThreadDeleted = true;
         if (event.type === "project.deleted") sawProjectDeleted = true;
-        if (event.type === "thread.turn-diff-completed" || event.type === "thread.reverted") {
-          sawProviderInvalidating = true;
-        }
         switch (event.type) {
           case "thread.deleted":
           case "thread.reverted":
@@ -696,9 +709,7 @@ function EventRouter() {
           .retainThreads(new Set(useStore.getState().threads.map((thread) => thread.id)));
         removeOrphanedTerminalsForCurrentStoreThreads();
       }
-      if (sawProviderInvalidating) {
-        invalidateProviderAndProjectQueries();
-      }
+      invalidateWorkspaceQueriesForEvents(batch);
       if (import.meta.env.DEV && batch.length >= 64) {
         console.info("EventRouter coalesced a large batch", {
           size: batch.length,
@@ -951,6 +962,8 @@ function EventRouter() {
           })),
       });
       if (pendingWelcomeRecovery !== null) {
+        // Turns may have finished while disconnected.
+        invalidateAllWorkspaceQueries(queryClient);
         // Cancel any older startup/recovery prefetch work before invalidating.
         // Signaled callers skip their late store writes, so an old RPC
         // response cannot repopulate the query cache or Zustand after we clear
@@ -1168,6 +1181,8 @@ function EventRouter() {
       if (event.sequence !== latestSequence + 1) {
         flushPending();
         bufferEvent(event);
+        // Missed events may have changed files in any workspace.
+        invalidateAllWorkspaceQueries(queryClient);
         pendingSnapshot = true;
         clearSnapshotRetry();
         void syncSnapshot();

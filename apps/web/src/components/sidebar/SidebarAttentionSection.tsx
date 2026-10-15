@@ -5,7 +5,7 @@ import { ChevronRightIcon } from "lucide-react";
 
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { cn } from "../../lib/utils";
-import type { Project, Thread } from "../../types";
+import type { Project, ThreadListItem } from "../../types";
 import { SidebarMenuSub } from "../ui/sidebar";
 import { SidebarThreadRow } from "./SidebarThreadRow";
 import type { SidebarThreadRowIndicators } from "./SidebarWorkflowItem";
@@ -23,12 +23,13 @@ const EMPTY_THREAD_IDS: readonly ThreadId[] = [];
  */
 export function SidebarAttentionSection(props: {
   /** Ordered attention threads (already frozen while the sidebar is hovered). */
-  threads: readonly Thread[];
+  threads: readonly ThreadListItem[];
   projectsById: ReadonlyMap<ProjectId, Project>;
   routeThreadId: ThreadId | null;
-  indicatorsForThread: (thread: Thread) => SidebarThreadRowIndicators;
+  indicatorsForThread: (thread: ThreadListItem) => SidebarThreadRowIndicators;
   actions: SidebarThreadActions;
 }) {
+  "use memo";
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useLocalStorage(
     SIDEBAR_ATTENTION_COLLAPSED_STORAGE_KEY,

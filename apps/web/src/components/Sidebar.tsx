@@ -25,7 +25,7 @@ import { isArchivedWorkflow } from "@t3tools/shared/workflowArchive";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { useAppSettings } from "../appSettings";
-import { useComposerDraftStore } from "../composerDraftStore";
+import { selectProjectDraftThread, useComposerDraftStore } from "../composerDraftStore";
 import { useStartupReady } from "../lib/startupReady";
 import { cn, newCommandId } from "../lib/utils";
 import {
@@ -42,7 +42,7 @@ import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useWorkflowCreateDialogStore } from "../workflowCreateDialogStore";
-import { useThreadStatusById } from "../hooks/useThreadStatusById";
+import { useSummaryStatusById } from "../hooks/useThreadStatusById";
 import {
   bucketThreadsByAttention,
   selectStandaloneThreadsByActivity,
@@ -51,7 +51,9 @@ import {
 import { useNextTurnQueueStore } from "../nextTurnQueueStore";
 import { pillForStatus } from "../threadStatus";
 import { toastManager } from "./ui/toast";
-import { type Project, type Thread } from "../types";
+import { useTestRenderCountProps } from "../lib/testRenderCount";
+import { useThreadSummaries } from "../threadSelectors";
+import { type Project, type ThreadListItem } from "../types";
 import { Button } from "./ui/button";
 import {
   AlertDialog,
@@ -111,9 +113,33 @@ import { useSidebarThreadActions } from "./sidebar/useSidebarThreadActions";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 
+/** Deletes a project's threads, then the project; throws the first failure. */
+async function deleteProjectWithThreads(input: {
+  api: NonNullable<ReturnType<typeof readNativeApi>>;
+  projectId: ProjectId;
+  threadIds: ThreadId[];
+  deleteThreads: (
+    threadIds: ReadonlyArray<ThreadId>,
+  ) => Promise<{ failures: ReadonlyArray<{ error: unknown }> }>;
+  clearProjectDraftThreadId: (projectId: ProjectId) => void;
+}): Promise<void> {
+  const result = await input.deleteThreads(input.threadIds);
+  const failure = result.failures[0];
+  if (failure) throw failure.error;
+
+  input.clearProjectDraftThreadId(input.projectId);
+  await input.api.orchestration.dispatchCommand({
+    type: "project.delete",
+    commandId: newCommandId(),
+    projectId: input.projectId,
+  });
+}
+
 export default function Sidebar() {
+  "use memo";
+  const testRenderCountProps = useTestRenderCountProps();
   const projects = useStore((store) => store.projects);
-  const threads = useStore((store) => store.threads);
+  const threads = useThreadSummaries();
   const planningWorkflows = useStore((store) => store.planningWorkflows);
   const codeReviewWorkflows = useStore((store) => store.codeReviewWorkflows);
   const investigationWorkflows = useStore((store) => store.investigationWorkflows);
@@ -126,10 +152,6 @@ export default function Sidebar() {
   const projectDraftThreadIdByProjectId = useComposerDraftStore(
     (store) => store.projectDraftThreadIdByProjectId,
   );
-  const getDraftThreadByProjectId = useComposerDraftStore(
-    (store) => store.getDraftThreadByProjectId,
-  );
-  const getDraftThread = useComposerDraftStore((store) => store.getDraftThread);
   const terminalStateByThreadId = useTerminalStateStore((state) => state.terminalStateByThreadId);
   const clearProjectDraftThreadId = useComposerDraftStore(
     (store) => store.clearProjectDraftThreadId,
@@ -156,7 +178,7 @@ export default function Sidebar() {
   const activeThread = routeThreadId
     ? threads.find((thread) => thread.id === routeThreadId)
     : undefined;
-  const activeDraftThread = routeThreadId ? getDraftThread(routeThreadId) : null;
+  const activeDraftThread = routeThreadId ? (draftThreadsByThreadId[routeThreadId] ?? null) : null;
   const { data: keybindings = EMPTY_KEYBINDINGS } = useQuery({
     ...serverConfigQueryOptions(),
     select: (config) => config.keybindings,
@@ -205,7 +227,11 @@ export default function Sidebar() {
     mostRecentProjectId,
     firstProjectId,
   });
-  const threadStatusById = useThreadStatusById(threads);
+  const threadStatusById = useSummaryStatusById(threads);
+  const unreadThreadIds = useMemo(
+    () => new Set(threads.filter((thread) => thread.unread).map((thread) => thread.id)),
+    [threads],
+  );
   const threadActions = useSidebarThreadActions({
     projects,
     threads,
@@ -272,8 +298,9 @@ export default function Sidebar() {
     }
     return map;
   }, [threadGitStatusCwds, threadGitStatusQueries, threadGitTargets]);
-  const indicatorsForThread = (thread: Thread): SidebarThreadRowIndicators => ({
+  const indicatorsForThread = (thread: ThreadListItem): SidebarThreadRowIndicators => ({
     threadStatus: pillForStatus(threadStatusById.get(thread.id) ?? "none"),
+    isUnread: unreadThreadIds.has(thread.id),
     prStatus: prStatusIndicator(prByThreadId.get(thread.id) ?? null),
     terminalStatus: terminalStatusFromRunningIds(
       selectThreadTerminalState(terminalStateByThreadId, thread.id).runningTerminalIds,
@@ -290,14 +317,16 @@ export default function Sidebar() {
             planningWorkflows,
             codeReviewWorkflows,
             investigationWorkflows,
-            draftThread: getDraftThreadByProjectId(project.id),
+            draftThread: selectProjectDraftThread(
+              { draftThreadsByThreadId, projectDraftThreadIdByProjectId },
+              project.id,
+            ),
           }),
         ]),
       ),
     [
       codeReviewWorkflows,
       draftThreadsByThreadId,
-      getDraftThreadByProjectId,
       investigationWorkflows,
       planningWorkflows,
       projectDraftThreadIdByProjectId,
@@ -371,7 +400,7 @@ export default function Sidebar() {
 
   const handleSidebarSearchResultOpened = useCallback(() => {
     setSidebarSearchQuery("");
-  }, []);
+  }, [setSidebarSearchQuery]);
 
   const focusMostRecentThreadForProject = useCallback(
     (projectId: ProjectId) => {
@@ -396,26 +425,32 @@ export default function Sidebar() {
     onProjectAdded: handleNewThread,
     onExistingProject: focusMostRecentThreadForProject,
   });
-  const toggleWorkflowCollapsed = useCallback((workflowId: string, fallbackExpanded: boolean) => {
-    setWorkflowExpandedById((current) =>
-      toggleWorkflowThreadListExpansion({
-        workflowId,
-        workflowExpandedById: current,
-        fallbackExpanded,
-      }),
-    );
-  }, []);
-  const handleWorkflowCreated = useCallback((workflowId: string) => {
-    setWorkflowExpandedById((current) => {
-      if (current[workflowId] === true) {
-        return current;
-      }
-      return {
-        ...current,
-        [workflowId]: true,
-      };
-    });
-  }, []);
+  const toggleWorkflowCollapsed = useCallback(
+    (workflowId: string, fallbackExpanded: boolean) => {
+      setWorkflowExpandedById((current) =>
+        toggleWorkflowThreadListExpansion({
+          workflowId,
+          workflowExpandedById: current,
+          fallbackExpanded,
+        }),
+      );
+    },
+    [setWorkflowExpandedById],
+  );
+  const handleWorkflowCreated = useCallback(
+    (workflowId: string) => {
+      setWorkflowExpandedById((current) => {
+        if (current[workflowId] === true) {
+          return current;
+        }
+        return {
+          ...current,
+          [workflowId]: true,
+        };
+      });
+    },
+    [setWorkflowExpandedById],
+  );
   useEffect(() => {
     if (!lastCreatedWorkflowId) return;
     handleWorkflowCreated(lastCreatedWorkflowId);
@@ -454,7 +489,7 @@ export default function Sidebar() {
 
   const cancelProjectRename = useCallback(() => {
     setRenamingProjectId(null);
-  }, []);
+  }, [setRenamingProjectId]);
 
   const commitProjectRename = useCallback(
     async (projectId: ProjectId, newTitle: string, originalTitle: string) => {
@@ -496,7 +531,7 @@ export default function Sidebar() {
       // an error). Collapse only after the command round-trips.
       finishRename();
     },
-    [],
+    [setRenamingProjectId],
   );
 
   const changeProjectWorkspaceRoot = useCallback(
@@ -549,7 +584,7 @@ export default function Sidebar() {
   );
 
   const removeProjectWithThreads = useCallback(
-    async (project: Project, projectThreads: ReadonlyArray<Thread>): Promise<void> => {
+    async (project: Project, projectThreads: ReadonlyArray<ThreadListItem>): Promise<void> => {
       const api = readNativeApi();
       if (!api) return;
 
@@ -567,14 +602,12 @@ export default function Sidebar() {
       if (!confirmed) return;
 
       try {
-        const result = await deleteThreads(projectThreads.map((thread) => thread.id));
-        if (result.failures.length > 0) throw result.failures[0]!.error;
-
-        clearProjectDraftThreadId(project.id);
-        await api.orchestration.dispatchCommand({
-          type: "project.delete",
-          commandId: newCommandId(),
+        await deleteProjectWithThreads({
+          api,
           projectId: project.id,
+          threadIds: projectThreads.map((thread) => thread.id),
+          deleteThreads,
+          clearProjectDraftThreadId,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error removing project.";
@@ -640,7 +673,14 @@ export default function Sidebar() {
 
       await removeProjectWithThreads(project, []);
     },
-    [changeProjectWorkspaceRoot, navigate, projects, removeProjectWithThreads, threads],
+    [
+      changeProjectWorkspaceRoot,
+      navigate,
+      projects,
+      removeProjectWithThreads,
+      setRenamingProjectId,
+      threads,
+    ],
   );
 
   const projectDnDSensors = useSensors(
@@ -896,7 +936,7 @@ export default function Sidebar() {
         return next;
       });
     },
-    [],
+    [setExpandedThreadListsByProject],
   );
 
   const collapseThreadListForProject = useCallback(
@@ -909,29 +949,35 @@ export default function Sidebar() {
         return next;
       });
     },
-    [],
+    [setExpandedThreadListsByProject],
   );
 
-  const toggleArchivedSectionForProject = useCallback((projectId: ProjectId) => {
-    setCollapsedArchivedSectionsByProject((current) => {
-      const next = new Set(current);
-      if (next.has(projectId)) {
-        next.delete(projectId);
-      } else {
-        next.add(projectId);
-      }
-      return next;
-    });
-  }, []);
+  const toggleArchivedSectionForProject = useCallback(
+    (projectId: ProjectId) => {
+      setCollapsedArchivedSectionsByProject((current) => {
+        const next = new Set(current);
+        if (next.has(projectId)) {
+          next.delete(projectId);
+        } else {
+          next.add(projectId);
+        }
+        return next;
+      });
+    },
+    [setCollapsedArchivedSectionsByProject],
+  );
 
-  const toggleSnoozedSectionForProject = useCallback((projectId: ProjectId) => {
-    setCollapsedSnoozedSectionsByProject((current) => {
-      const next = new Set(current);
-      if (next.has(projectId)) next.delete(projectId);
-      else next.add(projectId);
-      return next;
-    });
-  }, []);
+  const toggleSnoozedSectionForProject = useCallback(
+    (projectId: ProjectId) => {
+      setCollapsedSnoozedSectionsByProject((current) => {
+        const next = new Set(current);
+        if (next.has(projectId)) next.delete(projectId);
+        else next.add(projectId);
+        return next;
+      });
+    },
+    [setCollapsedSnoozedSectionsByProject],
+  );
 
   useEffect(() => {
     if (archivedSectionsInitializedRef.current || !threadsHydrated) {
@@ -987,7 +1033,12 @@ export default function Sidebar() {
   };
 
   return (
-    <div ref={sidebarHoverAnchorRef} className="contents">
+    <div
+      ref={sidebarHoverAnchorRef}
+      className="contents"
+      data-sidebar-root=""
+      {...testRenderCountProps}
+    >
       <SidebarBrandHeader update={desktopUpdate} />
       <SidebarPrimaryActions
         projectId={primaryProjectId}

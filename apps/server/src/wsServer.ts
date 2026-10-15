@@ -1,6 +1,7 @@
 import { rpcBusyTotal } from "./observability/Metrics";
 import { rpcLane, RpcAdmission } from "@t3tools/shared/rpcScheduling";
 import { writeWorkspaceFile } from "./WorkspaceFileWriter";
+import { WorkspaceWatchRegistry } from "./workspaceWatch";
 import {
   agentComputerUsePush,
   ComputerAutomationBroker,
@@ -2319,6 +2320,15 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   );
   const activeContentSearchesByClient = new WeakMap<WebSocket, Map<string, string>>();
   let nextContentSearchKey = 1;
+  // Open files and visible directories per client; released on disconnect.
+  const workspaceWatchRegistry = new WorkspaceWatchRegistry<WebSocket>({
+    notify: (client, notification) => {
+      void Effect.runPromise(
+        pushBus.publishClient(client, WS_CHANNELS.projectsWatchedPathsChanged, notification),
+      );
+    },
+  });
+  yield* Effect.addFinalizer(() => Effect.sync(() => workspaceWatchRegistry.dispose()));
   const threadCommandExecutionQuery = yield* ThreadCommandExecutionQuery;
   const threadFileChangeQuery = yield* ThreadFileChangeQuery;
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
@@ -4411,6 +4421,22 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         });
       }
 
+      case WS_METHODS.projectsSetWatchedPaths: {
+        const body = stripRequestTag(request.body);
+        return yield* Effect.tryPromise({
+          try: async () => {
+            const result = await workspaceWatchRegistry.setWatchedPaths(ws, body);
+            // A request still queued when the socket closed must not outlive it.
+            if (ws.readyState !== ws.OPEN) workspaceWatchRegistry.releaseSubscriber(ws);
+            return result;
+          },
+          catch: (cause) =>
+            new RouteRequestError({
+              message: `Failed to watch workspace paths: ${String(cause)}`,
+            }),
+        });
+      }
+
       case WS_METHODS.projectsReadFile: {
         const body = stripRequestTag(request.body);
         const target = yield* resolveWorkspaceReadPath({
@@ -6416,6 +6442,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       }
       disconnectRecorded = true;
       rpcAdmissions.delete(ws);
+      workspaceWatchRegistry.releaseSubscriber(ws);
       const activeContentSearches = activeContentSearchesByClient.get(ws);
       activeContentSearchesByClient.delete(ws);
       if (activeContentSearches) {

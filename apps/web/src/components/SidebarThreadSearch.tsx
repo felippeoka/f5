@@ -17,8 +17,10 @@ import { useOpenGlobalSearchResult } from "../hooks/useOpenGlobalSearchResult";
 import { buildGlobalSearchQueryInput, parseGlobalSearchQuery } from "../lib/globalSearchQuery";
 import { formatRelativeTimeLabel } from "../lib/relativeTime";
 import { ensureNativeApi } from "../nativeApi";
-import type { Project, Thread } from "../types";
+import { liveThreadActivityAt } from "../threadSelectors";
+import type { Project } from "../types";
 import { HighlightedText } from "./HighlightedText";
+import type { CommandPaletteThread } from "./CommandPalette.logic";
 import { buildSidebarThreadSearchItems } from "./Sidebar.search.logic";
 import { Kbd } from "./ui/kbd";
 
@@ -179,7 +181,7 @@ function SearchResultButton(props: {
 export function SidebarThreadSearchResults(props: {
   query: string;
   projects: ReadonlyArray<Project>;
-  threads: ReadonlyArray<Thread>;
+  threads: ReadonlyArray<CommandPaletteThread>;
   activeThreadId?: ThreadId;
   onResultOpened: () => void;
 }) {
@@ -199,6 +201,7 @@ export function SidebarThreadSearchResults(props: {
           await navigate({ to: "/$threadId", params: { threadId: thread.id } });
           props.onResultOpened();
         },
+        activityAtOf: liveThreadActivityAt,
         limit: SIDEBAR_LOCAL_RESULT_LIMIT,
       }),
     [

@@ -10,6 +10,7 @@ import {
   scheduleThreadDetailRefreshIfProvisional,
   warmThreadFileChanges,
 } from "./orchestrationReactQuery";
+import { isThreadDetailPrefetchOverBudget } from "./threadDetailRetention";
 import { getVisibleThreads, sortThreadsByActivity } from "./threadOrdering";
 import { useStore } from "../store";
 
@@ -190,7 +191,7 @@ export function scheduleLiveThreadWarmForDomainEvent(
 
   const currentState = useStore.getState();
   const thread = currentState.threads.find((entry) => entry.id === threadId);
-  if (!thread || thread.detailsLoaded) {
+  if (!thread || thread.detailsLoaded || isThreadDetailPrefetchOverBudget()) {
     return null;
   }
 
@@ -368,6 +369,9 @@ export async function preloadRecentThreadDetails(
       // `candidates[i]` to `Thread | undefined`. Skip rather than exit so a
       // sparse-array oddity doesn't starve the other workers in the pool.
       if (!threadId) continue;
+      // Pinned (visible, loading) details already exceed the retention budget:
+      // anything warmed now would only be evicted again.
+      if (isThreadDetailPrefetchOverBudget()) return;
       try {
         await warmThreadBundle(queryClient, threadId, {
           ...(options?.signal ? { signal: options.signal } : {}),

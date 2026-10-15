@@ -31,6 +31,7 @@ import { useTheme } from "../hooks/useTheme";
 import { resolveDiffThemeName } from "../lib/diffRendering";
 import { looksLikeAbsoluteFilePath } from "../lib/normalizeFilePathForDiff";
 import { fileContentQueryOptions, providerQueryKeys } from "../lib/providerReactQuery";
+import { useWatchedWorkspacePaths } from "../lib/workspaceWatch";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { readNativeApi } from "../nativeApi";
 import { type RightPanelSurface, useRightPanelStore } from "../rightPanelStore";
@@ -140,12 +141,13 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
   const renderedMarkdown = Boolean(
     filePath && /\.(?:md|mdown|markdown)$/iu.test(filePath) && !showSource,
   );
+  const watchedFilePath =
+    canDisplayFileInPanel && (!mediaKind || showSource) ? filePath : undefined;
   const fileQuery = useQuery(
-    fileContentQueryOptions({
-      cwd: workspaceRoot,
-      relativePath: canDisplayFileInPanel && (!mediaKind || showSource) ? filePath : undefined,
-    }),
+    fileContentQueryOptions({ cwd: workspaceRoot, relativePath: watchedFilePath }),
   );
+  // External edits refetch the file; a dirty draft turns into a conflict below.
+  useWatchedWorkspacePaths(workspaceRoot, watchedFilePath ? [watchedFilePath] : [], []);
   const [editing, setEditing] = useState(false);
   const [draftContents, setDraftContents] = useState("");
   const [saving, setSaving] = useState(false);

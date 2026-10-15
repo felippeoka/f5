@@ -43,7 +43,8 @@ import {
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { isWsInteractionBlocked, useWsConnectionState } from "../wsConnectionState";
 import { SETTINGS_CATEGORY_LABELS, type SettingsCategory } from "./settings/settingsCategories";
-import { resolveThreadStatusPillForThread } from "../threadStatus";
+import { useThreadSummaries } from "../threadSelectors";
+import { pillForStatus } from "../threadStatus";
 import ThreadCyclePicker from "./ThreadCyclePicker";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
@@ -123,7 +124,7 @@ export default function ThreadRecencyController() {
   const currentRouteThreadId =
     currentRouteTarget?.kind === "thread" ? currentRouteTarget.threadId : null;
   const projects = useStore((store) => store.projects);
-  const threads = useStore((store) => store.threads);
+  const threads = useThreadSummaries();
   const planningWorkflows = useStore((store) => store.planningWorkflows);
   const codeReviewWorkflows = useStore((store) => store.codeReviewWorkflows);
   const investigationWorkflows = useStore((store) => store.investigationWorkflows);
@@ -492,7 +493,7 @@ export default function ThreadRecencyController() {
           title: thread?.title ?? (isDraft ? DEFAULT_NEW_THREAD_TITLE : target.threadId),
           subtitle: showProject && projectId ? (projectMap.get(projectId)?.name ?? null) : null,
           badgeLabel: null,
-          threadStatusPill: thread ? resolveThreadStatusPillForThread(thread) : null,
+          threadStatusPill: thread ? pillForStatus(thread.status) : null,
           isDraft,
           isStale,
         };

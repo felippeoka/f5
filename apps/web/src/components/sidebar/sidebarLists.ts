@@ -21,7 +21,7 @@ import {
   sortThreadsByActivity,
 } from "../../lib/threadOrdering";
 import { workflowDisplayType } from "../../lib/workflowType";
-import type { Project, Thread } from "../../types";
+import type { Project, Thread, ThreadListItem } from "../../types";
 import { orderActiveSidebarThreads, projectSnoozedThreads } from "../Sidebar.pinSnooze.logic";
 import { deriveCodeReviewTimelinePhases } from "../workflow/codeReviewWorkflowSidebarTimeline";
 import { threadIdsForCodeReviewWorkflow } from "../workflow/codeReviewWorkflowUtils";
@@ -74,7 +74,7 @@ export type ArchivedSidebarItem =
       key: string;
       sortAt: string;
       createdAt: string;
-      thread: Thread;
+      thread: ThreadListItem;
     }
   | {
       kind: "workflow";
@@ -95,12 +95,12 @@ export interface SidebarWorkflowMeta {
   overallState: WorkflowOverallState;
 }
 
-export interface ProjectSidebarLists {
+export interface ProjectSidebarLists<T extends ThreadListItem = ThreadListItem> {
   projectWorkflows: SidebarWorkflowEntry[];
-  workflowThreadsByKey: Map<string, Thread[]>;
+  workflowThreadsByKey: Map<string, T[]>;
   workflowMetaByKey: Map<string, SidebarWorkflowMeta>;
-  activeThreads: Thread[];
-  snoozedThreads: Thread[];
+  activeThreads: Array<T | Thread>;
+  snoozedThreads: T[];
   archivedSidebarItems: ArchivedSidebarItem[];
   projectDraftThreadId: ThreadId | null;
 }
@@ -117,14 +117,14 @@ export function workflowEntryKey(entry: SidebarWorkflowEntry): string {
   return `${entry.type}:${entry.workflow.id}`;
 }
 
-export function buildProjectSidebarLists(input: {
+export function buildProjectSidebarLists<T extends ThreadListItem>(input: {
   project: Project;
-  threads: ReadonlyArray<Thread>;
+  threads: ReadonlyArray<T>;
   planningWorkflows: ReadonlyArray<PlanningWorkflow>;
   codeReviewWorkflows: ReadonlyArray<CodeReviewWorkflow>;
   investigationWorkflows: ReadonlyArray<InvestigationWorkflow>;
   draftThread: SidebarProjectDraftThread | null;
-}): ProjectSidebarLists {
+}): ProjectSidebarLists<T> {
   const {
     project,
     threads,

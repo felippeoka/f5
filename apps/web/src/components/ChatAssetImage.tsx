@@ -1,10 +1,11 @@
 import { AssetDocumentContext } from "./AssetDocumentContext";
 import { resolveChatAssetTarget } from "../lib/chatAssetTarget";
 import { AssetImageGallery, type AssetGalleryState } from "./AssetImageGallery";
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { ProjectIssueAssetUrlInput } from "@t3tools/contracts";
 import { useStore } from "../store";
+import { useThreadSummaries } from "../threadSelectors";
 import { readNativeApi } from "../nativeApi";
 import { getServerHttpOrigin } from "../lib/serverHttpOrigin";
 import { useAppSettings } from "../appSettings";
@@ -60,7 +61,8 @@ export function ChatAssetImage({
   const { settings } = useAppSettings();
   const documentContext = useContext(AssetDocumentContext);
   const projects = useStore((state) => state.projects);
-  const threads = useStore((state) => state.threads);
+  // Summaries keep worktree paths without changing on every streaming delta.
+  const threads = useThreadSummaries();
   const anchor = useRef<HTMLSpanElement>(null);
   const [visible, setVisible] = useState(false);
   const [gallery, setGallery] = useState<AssetGalleryState | null>(null);
@@ -76,7 +78,11 @@ export function ChatAssetImage({
     return () => observer.disconnect();
   }, []);
   const remote = /^https:\/\//iu.test(src);
-  let target = visible && !remote ? resolveChatAssetTarget(src, cwd, projects, threads) : undefined;
+  const workspaceTarget = useMemo(
+    () => (visible && !remote ? resolveChatAssetTarget(src, cwd, projects, threads) : undefined),
+    [cwd, projects, remote, src, threads, visible],
+  );
+  let target = workspaceTarget;
   if (visible && !remote && documentContext && !/^(?:[a-z]+:|[\\/])/iu.test(src)) {
     try {
       const documentUrl = new URL(documentContext.relativePath, "https://asset.invalid/");

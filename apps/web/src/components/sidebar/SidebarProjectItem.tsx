@@ -15,7 +15,8 @@ import type { ReactNode } from "react";
 import type { DraftThreadState } from "../../composerDraftStore";
 import { getVisibleThreadsWithPinnedDraft, isDraftThreadId } from "../../lib/draftThreads";
 import { cn } from "../../lib/utils";
-import type { Project, Thread } from "../../types";
+import type { ThreadSummary } from "../../threadSelectors";
+import type { Project, ThreadListItem } from "../../types";
 import { InlineTitleEditor } from "../InlineTitleEditor";
 import { ProjectIcon } from "../ProjectIcon";
 import {
@@ -105,7 +106,7 @@ export interface SidebarProjectActions {
 
 export interface SidebarProjectItemProps {
   project: Project;
-  sidebarLists: ProjectSidebarLists;
+  sidebarLists: ProjectSidebarLists<ThreadSummary>;
   freezeSnapshot: SidebarHoverFreezeSnapshot | null;
   threadPreviewLimit: number;
   activeExpanded: boolean;
@@ -123,7 +124,7 @@ export interface SidebarProjectItemProps {
   workflowShortcutLabel: string | null;
   dndSensors: SensorDescriptor<SensorOptions>[];
   collisionDetection: CollisionDetection;
-  indicatorsForThread: (thread: Thread) => SidebarThreadRowIndicators;
+  indicatorsForThread: (thread: ThreadListItem) => SidebarThreadRowIndicators;
   threadActions: SidebarThreadActions;
   projectActions: SidebarProjectActions;
 }
@@ -203,6 +204,7 @@ function SectionToggleRow(props: { label: ReactNode; expanded: boolean; onToggle
 }
 
 export function SidebarProjectItem(props: SidebarProjectItemProps) {
+  "use memo";
   const {
     project,
     sidebarLists,
@@ -530,6 +532,7 @@ export function SidebarProjectItem(props: SidebarProjectItemProps) {
                           threadStatus={null}
                           prStatus={null}
                           terminalStatus={null}
+                          isUnread={indicatorsForThread(thread).isUnread}
                           isRenaming={false}
                           actions={threadActions}
                         />
