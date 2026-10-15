@@ -11,6 +11,10 @@ import {
   ensureProfileBackend,
   isProfileBackendRunning,
   waitForProfileBackend,
+  BACKEND_HEALTHY_RESET_MS,
+  MAX_BACKEND_RESTART_ATTEMPTS,
+  monitorBackendHealth,
+  planBackendRestart,
 } from "./profileRuntime";
 import { buildDesktopBackendEnv } from "./backendEnv";
 
@@ -220,4 +224,118 @@ it("reopens a stopped profile without stranding either retained window", async (
   expect(retainedWindows.map((window) => window.thread)).toEqual(["thread-a", "thread-b"]);
   expect(reserve).toHaveBeenCalledTimes(1);
   expect(mint).toHaveBeenCalledTimes(1);
+});
+
+describe("backend restart budget", () => {
+  const crash = (state: { restartAttempt: number }) => planBackendRestart(state);
+
+  it("stops a rapid crash loop after six restarts with exponential backoff", () => {
+    const state = { restartAttempt: 0 };
+    const plans = Array.from({ length: MAX_BACKEND_RESTART_ATTEMPTS + 1 }, () => crash(state));
+    expect(plans.slice(0, -1).map((plan) => (plan.kind === "restart" ? plan.delayMs : -1))).toEqual(
+      [500, 1000, 2000, 4000, 8000, 10_000],
+    );
+    expect(plans.at(-1)).toEqual({ kind: "stop" });
+  });
+
+  it("keeps recovering from widely spaced crashes after sustained health", async () => {
+    vi.useFakeTimers();
+    try {
+      const state = { restartAttempt: 0 };
+      for (let crashIndex = 0; crashIndex < MAX_BACKEND_RESTART_ATTEMPTS * 3; crashIndex += 1) {
+        expect(crash(state).kind).toBe("restart");
+        monitorBackendHealth({
+          isCurrent: () => true,
+          checkReady: async () => true,
+          onSustainedHealth: () => {
+            state.restartAttempt = 0;
+          },
+        });
+        await vi.advanceTimersByTimeAsync(BACKEND_HEALTHY_RESET_MS + 1);
+        expect(state.restartAttempt).toBe(0);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not forgive crashes before health is confirmed for the full window", async () => {
+    vi.useFakeTimers();
+    try {
+      let ready = false;
+      const onSustainedHealth = vi.fn();
+      monitorBackendHealth({
+        isCurrent: () => true,
+        checkReady: async () => ready,
+        onSustainedHealth,
+      });
+      await vi.advanceTimersByTimeAsync(BACKEND_HEALTHY_RESET_MS * 2);
+      expect(onSustainedHealth).not.toHaveBeenCalled();
+      ready = true;
+      await vi.advanceTimersByTimeAsync(BACKEND_HEALTHY_RESET_MS - 2_000);
+      expect(onSustainedHealth).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(onSustainedHealth).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never lets a stale or cancelled generation reset a newer process's count", async () => {
+    vi.useFakeTimers();
+    try {
+      const state = { restartAttempt: 0, generation: 1 };
+      const monitorFor = (generation: number) =>
+        monitorBackendHealth({
+          isCurrent: () => state.generation === generation,
+          checkReady: async () => true,
+          onSustainedHealth: () => {
+            state.restartAttempt = 0;
+          },
+        });
+      monitorFor(1);
+      await vi.advanceTimersByTimeAsync(10);
+      // Generation 1 crashes and generation 2 starts crashing before it is healthy.
+      crash(state);
+      state.generation = 2;
+      crash(state);
+      await vi.advanceTimersByTimeAsync(BACKEND_HEALTHY_RESET_MS * 2);
+      expect(state.restartAttempt).toBe(2);
+
+      const cancel = monitorFor(2);
+      await vi.advanceTimersByTimeAsync(BACKEND_HEALTHY_RESET_MS / 2);
+      cancel();
+      await vi.advanceTimersByTimeAsync(BACKEND_HEALTHY_RESET_MS * 2);
+      expect(state.restartAttempt).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores a readiness answer that arrives after cancellation", async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveCheck: ((ready: boolean) => void) | undefined;
+      let checks = 0;
+      const onSustainedHealth = vi.fn();
+      const cancel = monitorBackendHealth({
+        isCurrent: () => true,
+        checkReady: () => {
+          checks += 1;
+          return checks === 1
+            ? Promise.resolve(true)
+            : new Promise((resolve) => (resolveCheck = resolve));
+        },
+        onSustainedHealth,
+      });
+      await vi.advanceTimersByTimeAsync(BACKEND_HEALTHY_RESET_MS + 1);
+      expect(resolveCheck).toBeDefined();
+      cancel();
+      resolveCheck?.(true);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(onSustainedHealth).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

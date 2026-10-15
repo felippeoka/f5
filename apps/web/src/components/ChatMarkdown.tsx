@@ -43,27 +43,7 @@ import { readNativeApi } from "../nativeApi";
 import { inferEntryKindFromPath } from "../vscode-icons";
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
-
-class CodeHighlightErrorBoundary extends React.Component<
-  { fallback: ReactNode; children: ReactNode },
-  { hasError: boolean }
-> {
-  constructor(props: { fallback: ReactNode; children: ReactNode }) {
-    super(props);
-    this.state = { hasError: false };
-  }
-
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-
-  override render() {
-    if (this.state.hasError) {
-      return this.props.fallback;
-    }
-    return this.props.children;
-  }
-}
+import { SurfaceErrorBoundary } from "./ui/SurfaceErrorBoundary";
 
 interface ChatMarkdownProps {
   text: string;
@@ -127,12 +107,21 @@ function extractCodeBlock(
   };
 }
 
-function createHighlightCacheKey(code: string, language: string, themeName: DiffThemeName): string {
-  return `${fnv1a32(code).toString(36)}:${code.length}:${language}:${themeName}`;
+/**
+ * Exact cache identity: the full source is part of the key, so two sources
+ * can never share an entry the way a hash-plus-length key could.
+ */
+export function createHighlightCacheKey(
+  code: string,
+  language: string,
+  themeName: DiffThemeName,
+): string {
+  return `${language}\u0000${themeName}\u0000${code}`;
 }
 
-function estimateHighlightedSize(html: string, code: string): number {
-  return Math.max(html.length * 2, code.length * 3);
+/** Charges the key (which holds the full source) as well as the HTML, both UTF-16. */
+function estimateHighlightedSize(html: string, cacheKey: string): number {
+  return (html.length + cacheKey.length) * 2;
 }
 
 function getHighlighterPromise(language: string): Promise<MarkdownHighlighter> {
@@ -203,20 +192,48 @@ interface SuspenseShikiCodeBlockProps {
   themeName: DiffThemeName;
 }
 
-function SuspenseShikiCodeBlock({ className, code, themeName }: SuspenseShikiCodeBlockProps) {
+function ShikiHtml({ html }: { html: string }) {
+  return <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+/**
+ * Cache hits and misses render different components, so each keeps a fixed
+ * hook order when a block flips from miss to hit between renders.
+ */
+export function SuspenseShikiCodeBlock({
+  className,
+  code,
+  themeName,
+}: SuspenseShikiCodeBlockProps) {
   const language = extractFenceLanguage(className);
   const cacheKey = createHighlightCacheKey(code, language, themeName);
   const cachedHighlightedHtml = highlightedCodeCache.get(cacheKey);
 
   if (cachedHighlightedHtml != null) {
-    return (
-      <div
-        className="chat-markdown-shiki"
-        dangerouslySetInnerHTML={{ __html: cachedHighlightedHtml }}
-      />
-    );
+    return <ShikiHtml html={cachedHighlightedHtml} />;
   }
 
+  return (
+    <HighlightOnCacheMiss
+      cacheKey={cacheKey}
+      code={code}
+      language={language}
+      themeName={themeName}
+    />
+  );
+}
+
+function HighlightOnCacheMiss({
+  cacheKey,
+  code,
+  language,
+  themeName,
+}: {
+  cacheKey: string;
+  code: string;
+  language: string;
+  themeName: DiffThemeName;
+}) {
   const highlighter = use(getHighlighterPromise(language));
   const highlightedHtml = useMemo(() => {
     try {
@@ -236,13 +253,11 @@ function SuspenseShikiCodeBlock({ className, code, themeName }: SuspenseShikiCod
     highlightedCodeCache.set(
       cacheKey,
       highlightedHtml,
-      estimateHighlightedSize(highlightedHtml, code),
+      estimateHighlightedSize(highlightedHtml, cacheKey),
     );
-  }, [cacheKey, code, highlightedHtml]);
+  }, [cacheKey, highlightedHtml]);
 
-  return (
-    <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
-  );
+  return <ShikiHtml html={highlightedHtml} />;
 }
 
 // Matches inline markdown links: `[text](href)` / `[text](href "title")`.
@@ -475,7 +490,12 @@ const RenderedMarkdownFragment = memo(function RenderedMarkdownFragment(props: {
 
         return (
           <MarkdownCodeBlock code={codeBlock.code}>
-            <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
+            {/* Not keyed on the code: a failed highlighter load would retry on every streaming delta. */}
+            <SurfaceErrorBoundary
+              name="code-highlight"
+              resetKeys={[codeBlock.className, diffThemeName]}
+              fallback={<pre {...props}>{children}</pre>}
+            >
               <Suspense fallback={<pre {...props}>{children}</pre>}>
                 <SuspenseShikiCodeBlock
                   className={codeBlock.className}
@@ -483,7 +503,7 @@ const RenderedMarkdownFragment = memo(function RenderedMarkdownFragment(props: {
                   themeName={diffThemeName}
                 />
               </Suspense>
-            </CodeHighlightErrorBoundary>
+            </SurfaceErrorBoundary>
           </MarkdownCodeBlock>
         );
       },

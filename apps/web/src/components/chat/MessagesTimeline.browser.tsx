@@ -14,7 +14,7 @@ import {
   type UserMessageSkillCall,
 } from "@t3tools/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
-import { StrictMode, useRef, useState } from "react";
+import { StrictMode, useLayoutEffect, useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {} from "@vitest/browser-playwright"; // Types cdp() as a Playwright CDPSession.
 import { cdp, page, userEvent } from "vitest/browser";
@@ -24,6 +24,7 @@ import type { deriveTimelineEntries, LiveWorkActivity } from "../../session-logi
 import { parsePersistedAppSettings } from "../../appSettings";
 import type { TurnDiffSummary } from "../../types";
 import { readTimelineScrollAnchor } from "./timelineScrollAnchors";
+import { setNowTickerClockForTests } from "../../lib/nowTicker";
 import { MessagesTimeline } from "./MessagesTimeline";
 import { ComposerDock } from "./composer/ComposerDock";
 import type { ImageAttachmentActionItem } from "./imageAttachmentActions";
@@ -257,6 +258,8 @@ interface TimelineHarnessApi {
     nowIso?: string;
     liveActivity?: LiveWorkActivity;
   }) => void;
+  /** Mirrors ChatView's send-follow: appends entries and requests a tail follow in one commit. */
+  followNewTurn: (entries: TimelineEntry[]) => void;
 }
 
 function TimelineHarness(
@@ -274,7 +277,16 @@ function TimelineHarness(
       ? "2026-03-04T12:00:00.000Z"
       : props.initialActiveTurnStartedAt,
   );
-  const [nowIso, setNowIso] = useState(props.initialNowIso ?? "2026-03-04T12:05:00.000Z");
+  const [nowIso, setNowIso] = useState(() => {
+    const initial = props.initialNowIso ?? "2026-03-04T12:05:00.000Z";
+    // Live clocks read the shared ticker; pin it so labels stay deterministic.
+    setNowTickerClockForTests(() => Date.parse(initial));
+    return initial;
+  });
+  useLayoutEffect(() => {
+    setNowTickerClockForTests(() => Date.parse(nowIso));
+  }, [nowIso]);
+  useLayoutEffect(() => () => setNowTickerClockForTests(null), []);
   const [liveActivity, setLiveActivity] = useState<LiveWorkActivity>(
     props.initialLiveActivity ?? null,
   );
@@ -291,6 +303,7 @@ function TimelineHarness(
   const [expandedFileChangeDiffs, setExpandedFileChangeDiffs] = useState<Record<string, boolean>>(
     {},
   );
+  const [followNextTailNonce, setFollowNextTailNonce] = useState(0);
   const listRef = useRef<LegendListRef | null>(null);
   const queryClientRef = useRef<QueryClient>(props.queryClient ?? makeQueryClient());
   // Expose the list ref out through the callback so tests can observe the
@@ -314,6 +327,10 @@ function TimelineHarness(
           setActiveTurnStartedAt(nextState.activeTurnStartedAt ?? null);
         }
       },
+      followNewTurn: (nextEntries) => {
+        setEntries(nextEntries);
+        setFollowNextTailNonce((nonce) => nonce + 1);
+      },
     });
   }
 
@@ -334,13 +351,13 @@ function TimelineHarness(
           activeTurnStartedAt={activeTurnStartedAt}
           liveActivity={liveActivity}
           listRef={listRef}
+          followNextTailNonce={followNextTailNonce}
           onIsAtEndChange={props.onIsAtEndChangeSpy}
           timelineEntries={entries}
           completionDividerBeforeEntryId={null}
           completionSummary={null}
           turnDiffSummaryByAssistantMessageId={new Map()}
           turnDiffSummaryByTurnId={props.turnDiffSummaryByTurnId ?? new Map()}
-          nowIso={nowIso}
           expandedWorkGroups={expandedWorkGroups}
           onToggleWorkGroup={(groupId, paginatedEntryCount) => {
             setExpandedWorkGroups((current) => {
@@ -1103,6 +1120,58 @@ describe("MessagesTimeline (LegendList)", () => {
           ).toBe(false);
         }
       });
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("follows the tail from a scrolled-up position when a new turn requests it", async () => {
+    const initialEntries = makeOverflowEntries(16);
+    const isAtEndCalls: boolean[] = [];
+    let api: TimelineHarnessApi | null = null;
+    let currentRef: LegendListRef | null = null;
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <TimelineHarness
+        initialEntries={initialEntries}
+        initialHeight={240}
+        onIsAtEndChangeSpy={(value) => isAtEndCalls.push(value)}
+        onListRefChange={(ref) => {
+          currentRef = ref;
+        }}
+        setApi={(nextApi) => {
+          api = nextApi;
+        }}
+      />,
+      { container: host },
+    );
+
+    try {
+      expect(api).not.toBeNull();
+
+      const scrollContainer = await waitForScrollContainer(host);
+      await scrollTimelineToOffset(currentRef, scrollContainer, 0);
+      scrollContainer.dispatchEvent(new Event("scroll"));
+      await vi.waitFor(() => expect(isAtEndCalls.at(-1)).toBe(false));
+
+      api!.followNewTurn([
+        ...initialEntries,
+        makeUserEntry("msg-user-followed-tail", "followed tail target", 121),
+      ]);
+
+      await vi.waitFor(
+        () => {
+          const appendedRow = host.querySelector<HTMLElement>(
+            '[data-message-id="msg-user-followed-tail"]',
+          );
+          expect(appendedRow, "The followed row should be rendered.").not.toBeNull();
+          expect(isElementVisibleWithinContainer(appendedRow!, scrollContainer)).toBe(true);
+        },
+        { timeout: 4_000 },
+      );
     } finally {
       await screen.unmount();
       host.remove();

@@ -348,6 +348,58 @@ try {
     .locator('[data-sidebar="menu-action"]')
     .and(page.getByRole("button", { name: "Project actions for workspace", exact: true }))
     .waitFor({ timeout: 60_000 });
+
+  // Page and native window titles follow the route; no surface falls back to an error.
+  const nativeTitle = () =>
+    application.evaluate(
+      ({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()
+          .find((window) => !window.isDestroyed())
+          ?.getTitle() ?? null,
+    );
+  const waitForTitles = async (expected) => {
+    const deadline = Date.now() + 10_000;
+    let documentTitle = null;
+    let windowTitle = null;
+    while (Date.now() < deadline) {
+      documentTitle = await page.title();
+      windowTitle = await nativeTitle();
+      if (documentTitle === expected && windowTitle === expected) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (documentTitle !== expected || windowTitle !== expected)
+      throw new Error(
+        `Expected title "${expected}", got document "${documentTitle}" and window "${windowTitle}"`,
+      );
+    const fallbacks = await page.locator('[data-slot="surface-error"]').count();
+    if (fallbacks !== 0) throw new Error(`An error fallback is showing on "${expected}"`);
+  };
+  const openRoute = (hash) =>
+    page.evaluate((target) => {
+      window.location.hash = target;
+    }, hash);
+  const selectWindowTitleDetail = async (label) => {
+    await page.getByLabel("Window title", { exact: true }).click();
+    await page.getByRole("option", { name: label, exact: true }).click();
+  };
+  const threadHash = new URL(page.url()).hash;
+  await waitForTitles("workspace · F5");
+  await openRoute("#/usage");
+  await waitForTitles("Usage · F5");
+  await openRoute("#/pull-requests");
+  await waitForTitles("Pull Requests · F5");
+  await openRoute("#/settings");
+  await waitForTitles("Settings · F5");
+  await selectWindowTitleDetail("Thread title");
+  await openRoute(threadHash);
+  await waitForTitles("New thread · F5");
+  await openRoute("#/settings");
+  await waitForTitles("Settings · F5");
+  await selectWindowTitleDetail("Project name");
+  await openRoute(threadHash);
+  await waitForTitles("workspace · F5");
+  await page.locator('[contenteditable="true"]').waitFor({ timeout: 60_000 });
+
   await page.locator('[contenteditable="true"]').fill("**a****b**\n# Title **bold**");
   await page.reload();
   await page.locator('[contenteditable="true"]').waitFor({ timeout: 60_000 });
@@ -433,6 +485,9 @@ try {
   )
     throw new Error("Desktop attention badge was not updated");
   await page.evaluate(() => window.desktopBridge.setAttentionBadge(0));
+  // Without a PostHog key the server never creates an anonymous telemetry id.
+  if (existsSync(join(state, "anonymous-id")))
+    throw new Error("Telemetry created an anonymous id without a configured key");
   const observeUnloadDialog = () => {};
   page.on("dialog", observeUnloadDialog);
   await page.evaluate(() => {

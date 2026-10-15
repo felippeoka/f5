@@ -1,10 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+import { RouteErrorView } from "../components/RouteErrorView";
+
 import { PullRequestsView } from "../components/prHub/PullRequestsView";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { SidebarInset } from "../components/ui/sidebar";
 
 function PullRequestsRouteView() {
   const search = Route.useSearch();
+  useDocumentTitle("Pull Requests");
 
   // PullRequestsView renders its own title bar so the view toggle and
   // refresh actions sit in the same row as the breadcrumb.
@@ -23,4 +27,5 @@ export const Route = createFileRoute("/_chat/pull-requests")({
     return typeof raw === "string" && raw.trim().length > 0 ? { pr: raw } : {};
   },
   component: PullRequestsRouteView,
+  errorComponent: RouteErrorView,
 });

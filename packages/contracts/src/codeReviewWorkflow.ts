@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 
 import {
+  CommandId,
   IsoDateTime,
   ProjectId,
   ThreadId,
@@ -8,6 +9,13 @@ import {
   makeEntityId,
 } from "./baseSchemas";
 import { WorkflowModelSlot, WorkflowStepStatus } from "./planningWorkflow";
+
+/**
+ * The `thread.turn.start` command that began a stage's current attempt. Only
+ * that command's turn may complete the stage; absent on stages recorded
+ * before this field existed, which keep the older any-finished-turn rule.
+ */
+export const WorkflowStageDispatchCommandId = Schema.optional(Schema.NullOr(CommandId));
 
 export const CodeReviewWorkflowId = makeEntityId("CodeReviewWorkflowId");
 export type CodeReviewWorkflowId = typeof CodeReviewWorkflowId.Type;
@@ -30,6 +38,7 @@ export const CodeReviewReviewer = Schema.Struct({
   pinnedAssistantMessageId: Schema.NullOr(TrimmedNonEmptyString),
   error: Schema.NullOr(Schema.String),
   retryCount: Schema.optional(Schema.Number).pipe(Schema.withDecodingDefault(() => 0)),
+  dispatchCommandId: WorkflowStageDispatchCommandId,
   updatedAt: IsoDateTime,
 });
 export type CodeReviewReviewer = typeof CodeReviewReviewer.Type;
@@ -42,6 +51,7 @@ export const CodeReviewConsolidation = Schema.Struct({
   pinnedAssistantMessageId: Schema.NullOr(TrimmedNonEmptyString),
   error: Schema.NullOr(Schema.String),
   retryCount: Schema.optional(Schema.Number).pipe(Schema.withDecodingDefault(() => 0)),
+  dispatchCommandId: WorkflowStageDispatchCommandId,
   updatedAt: IsoDateTime,
 });
 export type CodeReviewConsolidation = typeof CodeReviewConsolidation.Type;

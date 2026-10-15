@@ -49,9 +49,13 @@ import {
   ensureProfileBackend,
   isProfileBackendRunning,
   waitForProfileBackend,
+  BACKEND_HEALTHY_RESET_MS,
+  monitorBackendHealth,
+  planBackendRestart,
   MAX_ACTIVE_PROFILE_BACKENDS,
 } from "./profileRuntime";
 import { profilesRootDir } from "@t3tools/shared/profilePaths";
+import { composeNativeWindowTitle } from "./windowTitle";
 import * as ChildProcess from "node:child_process";
 import * as Crypto from "node:crypto";
 import * as FS from "node:fs";
@@ -241,6 +245,8 @@ interface BackendRuntime {
   backendWsUrl: string;
   restartAttempt: number;
   restartTimer: ReturnType<typeof setTimeout> | null;
+  /** Cancels the current process generation's sustained-health monitor. */
+  cancelHealthMonitor: (() => void) | null;
   stopped: boolean;
 }
 const makeBackendRuntime = (profile: ProfileRecord): BackendRuntime => ({
@@ -251,6 +257,7 @@ const makeBackendRuntime = (profile: ProfileRecord): BackendRuntime => ({
   backendWsUrl: "",
   restartAttempt: 0,
   restartTimer: null,
+  cancelHealthMonitor: null,
   stopped: false,
 });
 const defaultBackend = makeBackendRuntime(desktopDefaultProfile(STATE_DIR));
@@ -2913,7 +2920,8 @@ function configureBackendRequestAuthentication(runtime: BackendRuntime = default
 
 function scheduleBackendRestart(reason: string, runtime: BackendRuntime = defaultBackend): void {
   if (isQuitting || runtime.stopped || runtime.restartTimer) return;
-  if (runtime.restartAttempt >= 6) {
+  const plan = planBackendRestart(runtime);
+  if (plan.kind === "stop") {
     runtime.stopped = true;
     dialog.showErrorBox(
       "F5 profile failed to start",
@@ -2922,8 +2930,7 @@ function scheduleBackendRestart(reason: string, runtime: BackendRuntime = defaul
     return;
   }
 
-  const delayMs = Math.min(500 * 2 ** runtime.restartAttempt, 10_000);
-  runtime.restartAttempt += 1;
+  const delayMs = plan.delayMs;
   console.error(`[desktop] backend exited unexpectedly (${reason}); restarting in ${delayMs}ms`);
 
   runtime.restartTimer = setTimeout(() => {
@@ -2960,6 +2967,23 @@ function startBackend(runtime: BackendRuntime = defaultBackend): void {
   });
   runtime.backendProcess = child;
   computerSystem?.channel.register(runtime.profile.id, backendIncarnation, child);
+  stopHealthMonitor(runtime);
+  runtime.cancelHealthMonitor = monitorBackendHealth({
+    isCurrent: () =>
+      !isQuitting &&
+      !runtime.stopped &&
+      runtime.backendProcess === child &&
+      isProfileBackendRunning(runtime),
+    checkReady: () => checkBackendReady(runtime),
+    onSustainedHealth: () => {
+      if (runtime.restartAttempt > 0) {
+        console.info(
+          `[desktop] backend healthy for ${BACKEND_HEALTHY_RESET_MS}ms; resetting restart budget`,
+        );
+      }
+      runtime.restartAttempt = 0;
+    },
+  });
   let backendSessionClosed = false;
   const closeBackendSession = (details: string) => {
     if (backendSessionClosed) return;
@@ -2975,6 +2999,7 @@ function startBackend(runtime: BackendRuntime = defaultBackend): void {
   child.on("error", (error) => {
     if (runtime.backendProcess === child) {
       runtime.backendProcess = null;
+      stopHealthMonitor(runtime);
     }
     closeBackendSession(`pid=${child.pid ?? "unknown"} error=${error.message}`);
     scheduleBackendRestart(error.message, runtime);
@@ -2984,6 +3009,7 @@ function startBackend(runtime: BackendRuntime = defaultBackend): void {
     const current = runtime.backendProcess === child;
     if (runtime.backendProcess === child) {
       runtime.backendProcess = null;
+      stopHealthMonitor(runtime);
     }
     closeBackendSession(
       `pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`,
@@ -3010,8 +3036,31 @@ function startBackend(runtime: BackendRuntime = defaultBackend): void {
   });
 }
 
+function stopHealthMonitor(runtime: BackendRuntime): void {
+  runtime.cancelHealthMonitor?.();
+  runtime.cancelHealthMonitor = null;
+}
+
+async function checkBackendReady(runtime: BackendRuntime): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `${getDesktopBackendHttpOrigin(runtime.backendPort)}/api/bootstrap`,
+      {
+        headers: { Authorization: `Bearer ${runtime.backendAuthToken}` },
+        signal: AbortSignal.timeout(1000),
+        redirect: "error",
+      },
+    );
+    await response.body?.cancel();
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 function stopBackend(runtime: BackendRuntime = defaultBackend): void {
   runtime.stopped = true;
+  stopHealthMonitor(runtime);
   if (runtime.restartTimer) {
     clearTimeout(runtime.restartTimer);
     runtime.restartTimer = null;
@@ -3035,6 +3084,7 @@ async function stopBackendAndWaitForExit(
   runtime: BackendRuntime = defaultBackend,
 ): Promise<void> {
   runtime.stopped = true;
+  stopHealthMonitor(runtime);
   if (runtime.restartTimer) {
     clearTimeout(runtime.restartTimer);
     runtime.restartTimer = null;
@@ -3128,22 +3178,7 @@ async function ensureBackendRunning(runtime: BackendRuntime): Promise<void> {
     ready: () =>
       waitForProfileBackend(
         () => !isQuitting && !runtime.stopped && isProfileBackendRunning(runtime),
-        async () => {
-          try {
-            const response = await fetch(
-              `${getDesktopBackendHttpOrigin(runtime.backendPort)}/api/bootstrap`,
-              {
-                headers: { Authorization: `Bearer ${runtime.backendAuthToken}` },
-                signal: AbortSignal.timeout(1000),
-                redirect: "error",
-              },
-            );
-            await response.body?.cancel();
-            return response.ok;
-          } catch {
-            return false;
-          }
-        },
+        () => checkBackendReady(runtime),
       ),
   });
 }
@@ -3833,12 +3868,17 @@ function createWindow(
     if (url === rendererUrl) rendererCrashRecovery.beginManualRetry();
   });
 
-  window.on("page-title-updated", (event) => {
+  const applyWindowTitle = (pageTitle: string) =>
+    window.setTitle(
+      composeNativeWindowTitle({ pageTitle, appName: APP_DISPLAY_NAME, profile: runtime.profile }),
+    );
+  // Composition stays here so every page title (and its attention prefix) gets the profile.
+  window.on("page-title-updated", (event, title) => {
     event.preventDefault();
-    window.setTitle(`${APP_DISPLAY_NAME} ? ${runtime.profile.name}`);
+    applyWindowTitle(title);
   });
   window.webContents.on("did-finish-load", () => {
-    window.setTitle(`${APP_DISPLAY_NAME} ? ${runtime.profile.name}`);
+    applyWindowTitle(window.webContents.getTitle());
     emitUpdateState();
   });
   window.once("ready-to-show", () => {

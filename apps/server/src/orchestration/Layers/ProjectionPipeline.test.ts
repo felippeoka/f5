@@ -14,6 +14,7 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync, type StatementSync } from "node:sqlite";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { roughTokenEstimateFromCharacters } from "@t3tools/shared/model";
 
@@ -2787,6 +2788,193 @@ projectionLayer("OrchestrationProjectionPipeline", (it) => {
         },
       ]);
     }),
+  );
+
+  it.effect(
+    "projects streaming deltas with one-row reads and never touches another thread's row",
+    () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const projectId = ProjectId.makeUnsafe("project-targeted-reads");
+        const threadA = ThreadId.makeUnsafe("thread-targeted-reads-a");
+        const threadB = ThreadId.makeUnsafe("thread-targeted-reads-b");
+        const sharedMessageId = MessageId.makeUnsafe("message-targeted-shared");
+        const assistantMessageId = MessageId.makeUnsafe("message-targeted-assistant");
+        const createdAt = "2026-10-01T10:00:00.000Z";
+        let sequence = 0;
+        const append = (
+          event: Omit<Parameters<typeof eventStore.append>[0], keyof typeof meta>,
+        ) => {
+          sequence += 1;
+          return eventStore
+            .append({
+              ...meta(sequence),
+              ...event,
+            } as Parameters<typeof eventStore.append>[0])
+            .pipe(Effect.flatMap((saved) => projectionPipeline.projectEvent(saved)));
+        };
+        const meta = (index: number) => ({
+          eventId: EventId.makeUnsafe(`evt-targeted-${index}`),
+          aggregateKind: "thread" as const,
+          occurredAt: createdAt,
+          commandId: CommandId.makeUnsafe(`cmd-targeted-${index}`),
+          causationEventId: null,
+          correlationId: CorrelationId.makeUnsafe(`cmd-targeted-${index}`),
+          metadata: {},
+        });
+        const message = (input: {
+          readonly threadId: ThreadId;
+          readonly messageId: MessageId;
+          readonly role: "user" | "assistant";
+          readonly text: string;
+          readonly streaming: boolean;
+          readonly updatedAt?: string;
+        }) =>
+          append({
+            type: "thread.message-sent",
+            aggregateId: input.threadId,
+            payload: {
+              threadId: input.threadId,
+              messageId: input.messageId,
+              role: input.role,
+              text: input.text,
+              turnId: null,
+              streaming: input.streaming,
+              createdAt,
+              updatedAt: input.updatedAt ?? createdAt,
+            },
+          } as never);
+
+        for (const threadId of [threadA, threadB]) {
+          yield* append({
+            type: "thread.created",
+            aggregateId: threadId,
+            payload: {
+              threadId,
+              projectId,
+              title: threadId,
+              model: "gpt-5.4",
+              runtimeMode: "full-access",
+              branch: null,
+              worktreePath: null,
+              createdAt,
+              updatedAt: createdAt,
+            },
+          } as never);
+          yield* append({
+            type: "thread.session-set",
+            aggregateId: threadId,
+            payload: {
+              threadId,
+              session: {
+                threadId,
+                status: "running",
+                providerName: "codex",
+                runtimeMode: "full-access",
+                activeTurnId: null,
+                lastError: null,
+                updatedAt: createdAt,
+              },
+            },
+          } as never);
+        }
+        yield* message({
+          threadId: threadA,
+          messageId: sharedMessageId,
+          role: "user",
+          text: "thread A owns this row",
+          streaming: false,
+        });
+        // Null estimate: the recompute branch establishes the baseline (4 chars = 1 token).
+        yield* message({
+          threadId: threadB,
+          messageId: MessageId.makeUnsafe("message-targeted-user"),
+          role: "user",
+          text: "abcd",
+          streaming: false,
+        });
+
+        const fullThreadReads: Array<string> = [];
+        const probe = new DatabaseSync(":memory:");
+        const statementPrototype = Object.getPrototypeOf(
+          probe.prepare("SELECT 1"),
+        ) as StatementSync;
+        probe.close();
+        const originalAll = statementPrototype.all;
+        statementPrototype.all = function (this: StatementSync, ...params: unknown[]) {
+          if (
+            this.sourceSQL.includes("FROM projection_thread_messages") &&
+            this.sourceSQL.includes("ORDER BY created_at ASC, message_id ASC")
+          ) {
+            fullThreadReads.push(this.sourceSQL);
+          }
+          return Reflect.apply(originalAll, this, params);
+        } as typeof originalAll;
+        yield* Effect.gen(function* () {
+          for (const delta of ["1234", "5678", "9012"]) {
+            yield* message({
+              threadId: threadB,
+              messageId: assistantMessageId,
+              role: "assistant",
+              text: delta,
+              streaming: true,
+            });
+          }
+          yield* message({
+            threadId: threadB,
+            messageId: assistantMessageId,
+            role: "assistant",
+            text: "",
+            streaming: false,
+            updatedAt: "2026-10-01T10:00:05.000Z",
+          });
+          yield* message({
+            threadId: threadB,
+            messageId: sharedMessageId,
+            role: "assistant",
+            text: "thread B reuses the id",
+            streaming: false,
+          });
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              statementPrototype.all = originalAll;
+            }),
+          ),
+        );
+
+        assert.deepEqual(fullThreadReads, []);
+        const messageRows = yield* sql<{
+          readonly messageId: string;
+          readonly threadId: string;
+          readonly text: string;
+        }>`
+          SELECT message_id AS "messageId", thread_id AS "threadId", text
+          FROM projection_thread_messages
+          WHERE message_id IN (${sharedMessageId}, ${assistantMessageId})
+          ORDER BY message_id ASC
+        `;
+        assert.deepEqual(messageRows, [
+          { messageId: assistantMessageId, threadId: threadB, text: "123456789012" },
+          { messageId: sharedMessageId, threadId: threadA, text: "thread A owns this row" },
+        ]);
+        const estimates = yield* sql<{
+          readonly threadTokens: number;
+          readonly sessionTokens: number;
+        }>`
+          SELECT
+            threads.estimated_context_tokens AS "threadTokens",
+            sessions.estimated_context_tokens AS "sessionTokens"
+          FROM projection_threads threads
+          JOIN projection_thread_sessions sessions ON sessions.thread_id = threads.thread_id
+          WHERE threads.thread_id = ${threadB}
+        `;
+        // 1 user token + 3 delta tokens; the completion adds nothing new, and
+        // the id owned by thread A is neither projected into B nor counted.
+        assert.deepEqual(estimates, [{ threadTokens: 4, sessionTokens: 4 }]);
+      }),
   );
 });
 

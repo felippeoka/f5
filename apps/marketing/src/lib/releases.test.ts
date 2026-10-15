@@ -1,0 +1,146 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { DEFAULT_RELEASE_REPOSITORY, resolveReleaseRepository } from "./releaseRepository";
+import {
+  RELEASE_CACHE_TTL_MS,
+  fetchLatestRelease,
+  parseRelease,
+  pickPlatformAsset,
+  type Release,
+} from "./releases";
+
+const asset = (name: string) => ({
+  name,
+  browser_download_url: `https://github.com/lopes-felipe/f5/releases/download/v1.2.3/${name}`,
+});
+
+const RELEASE: Release = {
+  tag_name: "v1.2.3",
+  html_url: "https://github.com/lopes-felipe/f5/releases/tag/v1.2.3",
+  assets: [
+    asset("T3-Code-1.2.3-arm64.dmg"),
+    asset("T3-Code-1.2.3-x64.dmg"),
+    asset("T3-Code-1.2.3-x64.exe"),
+    asset("T3-Code-1.2.3-x86_64.AppImage"),
+  ],
+};
+
+function memoryStorage(initial: Record<string, string> = {}) {
+  const values = new Map(Object.entries(initial));
+  return {
+    values,
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => void values.set(key, value),
+    removeItem: (key: string) => void values.delete(key),
+  };
+}
+
+const jsonResponse = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+describe("resolveReleaseRepository", () => {
+  it("defaults to the F5 repository and rejects malformed values", () => {
+    expect(resolveReleaseRepository(undefined)).toBe(DEFAULT_RELEASE_REPOSITORY);
+    expect(resolveReleaseRepository("  ")).toBe(DEFAULT_RELEASE_REPOSITORY);
+    expect(resolveReleaseRepository("acme/f5-fork")).toBe("acme/f5-fork");
+    for (const invalid of ["acme", "acme/f5/extra", "https://github.com/acme/f5", "acme/.."]) {
+      expect(() => resolveReleaseRepository(invalid)).toThrow(/owner\/name/);
+    }
+  });
+});
+
+describe("fetchLatestRelease", () => {
+  it("fetches from the configured repository and caches a validated release", async () => {
+    const storage = memoryStorage();
+    const fetchImpl = vi.fn(async () => jsonResponse(RELEASE));
+    const release = await fetchLatestRelease({
+      repository: "lopes-felipe/f5",
+      fetchImpl,
+      storage,
+      now: () => 1_000,
+    });
+    expect(release).toEqual(RELEASE);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.github.com/repos/lopes-felipe/f5/releases/latest",
+      expect.anything(),
+    );
+
+    const again = await fetchLatestRelease({
+      repository: "lopes-felipe/f5",
+      fetchImpl,
+      storage,
+      now: () => 1_000 + RELEASE_CACHE_TTL_MS - 1,
+    });
+    expect(again).toEqual(RELEASE);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("refetches once the cache expires", async () => {
+    const storage = memoryStorage();
+    const fetchImpl = vi.fn(async () => jsonResponse(RELEASE));
+    await fetchLatestRelease({ fetchImpl, storage, now: () => 0 });
+    await fetchLatestRelease({ fetchImpl, storage, now: () => RELEASE_CACHE_TTL_MS });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("discards a corrupt cache entry and fetches", async () => {
+    const storage = memoryStorage({
+      "f5-latest-release:v1:lopes-felipe/f5": "{not json",
+    });
+    const fetchImpl = vi.fn(async () => jsonResponse(RELEASE));
+    await expect(
+      fetchLatestRelease({ repository: "lopes-felipe/f5", fetchImpl, storage, now: () => 0 }),
+    ).resolves.toEqual(RELEASE);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    storage.values.set(
+      "f5-latest-release:v1:lopes-felipe/f5",
+      JSON.stringify({ fetchedAt: 0, release: { tag_name: 1 } }),
+    );
+    await fetchLatestRelease({ repository: "lopes-felipe/f5", fetchImpl, storage, now: () => 1 });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects non-200 responses and unexpected shapes without caching", async () => {
+    const storage = memoryStorage();
+    await expect(
+      fetchLatestRelease({
+        fetchImpl: async () => jsonResponse({ message: "API rate limit exceeded" }, 403),
+        storage,
+      }),
+    ).rejects.toThrow(/HTTP 403/);
+    await expect(
+      fetchLatestRelease({ fetchImpl: async () => jsonResponse({ message: "nope" }), storage }),
+    ).rejects.toThrow(/unexpected shape/);
+    expect(storage.values.size).toBe(0);
+  });
+});
+
+describe("parseRelease", () => {
+  it("drops assets with unexpected names or non-GitHub URLs", () => {
+    const parsed = parseRelease({
+      ...RELEASE,
+      assets: [
+        ...RELEASE.assets,
+        { name: "evil.dmg", browser_download_url: "https://example.com/evil.dmg" },
+        { name: "../x.dmg", browser_download_url: RELEASE.assets[0]!.browser_download_url },
+        "not an asset",
+      ],
+    });
+    expect(parsed?.assets).toEqual(RELEASE.assets);
+    expect(parseRelease({ ...RELEASE, html_url: "javascript:alert(1)" })).toBeNull();
+  });
+});
+
+describe("pickPlatformAsset", () => {
+  it("matches each platform's asset", () => {
+    expect(pickPlatformAsset(RELEASE.assets, { os: "mac", arch: "arm64" })).toContain("-arm64.dmg");
+    expect(pickPlatformAsset(RELEASE.assets, { os: "mac", arch: "x64" })).toContain("-x64.dmg");
+    expect(pickPlatformAsset(RELEASE.assets, { os: "win" })).toContain("-x64.exe");
+    expect(pickPlatformAsset(RELEASE.assets, { os: "linux" })).toContain(".AppImage");
+    expect(
+      pickPlatformAsset([asset("T3-Code-1.2.3-x64.dmg")], { os: "mac", arch: "arm64" }),
+    ).toContain("-x64.dmg");
+    expect(pickPlatformAsset([], { os: "win" })).toBeNull();
+  });
+});

@@ -12,7 +12,7 @@ import {
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { isArchivedWorkflow, isDeletedWorkflow } from "@t3tools/shared/workflowArchive";
-import { Effect, Layer, Stream } from "effect";
+import { Cause, Effect, Layer, Stream } from "effect";
 
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
 import { buildFallbackTitle, resolveBestEffortGeneratedTitle } from "../../threadTitle.ts";
@@ -56,6 +56,15 @@ import {
   workflowTurnBehaviorFields,
 } from "../workflowBehavior.ts";
 import { buildInvestigationWorkflowRecord } from "../workflowRecordBuilders.ts";
+import {
+  ProviderTurnDeliveryWorker,
+  type ProviderTurnDeliveryOutcome,
+} from "../Services/ProviderTurnDeliveryWorker.ts";
+import {
+  makeWorkflowStageDispatchResolver,
+  STARTUP_DISPATCH_RECHECK_TIMEOUT,
+  stageDispatchAllowsTurn,
+} from "../workflowStageDispatch.ts";
 
 type InvestigatorKey = "investigatorA" | "investigatorB";
 type InvestigationWorkflowTitleGenerationWorkItem = {
@@ -184,10 +193,51 @@ function labelForThread(
   return null;
 }
 
+/** Running stages that recorded the command which dispatched their turn. */
+function runningStageDispatches(
+  workflow: InvestigationWorkflow,
+): ReadonlyArray<{ readonly threadId: ThreadId; readonly dispatchCommandId: CommandId }> {
+  const stages: Array<{
+    readonly status: string;
+    readonly threadId: ThreadId | null;
+    readonly dispatchCommandId: CommandId | null | undefined;
+  }> = [];
+  for (const investigator of [workflow.investigatorA, workflow.investigatorB]) {
+    stages.push(
+      {
+        status: investigator.investigationStatus,
+        threadId: investigator.investigationThreadId,
+        dispatchCommandId: investigator.investigationDispatchCommandId,
+      },
+      {
+        status: investigator.crossReviewStatus,
+        threadId: investigator.crossReviewThreadId,
+        dispatchCommandId: investigator.crossReviewDispatchCommandId,
+      },
+      {
+        status: investigator.selfReviewStatus,
+        threadId: investigator.selfReviewThreadId,
+        dispatchCommandId: investigator.selfReviewDispatchCommandId,
+      },
+    );
+  }
+  stages.push({
+    status: workflow.synthesis.status,
+    threadId: workflow.synthesis.threadId,
+    dispatchCommandId: workflow.synthesis.dispatchCommandId,
+  });
+  return stages.flatMap((stage) =>
+    stage.status === "running" && stage.threadId && stage.dispatchCommandId
+      ? [{ threadId: stage.threadId, dispatchCommandId: stage.dispatchCommandId }]
+      : [],
+  );
+}
+
 function withInvestigationRunning(
   workflow: InvestigationWorkflow,
   investigatorKey: InvestigatorKey,
   updatedAt: string,
+  dispatchCommandId: CommandId,
 ): InvestigationWorkflow {
   const investigator = workflow[investigatorKey];
   return updateInvestigator(
@@ -196,6 +246,7 @@ function withInvestigationRunning(
     {
       ...investigator,
       investigationStatus: "running",
+      investigationDispatchCommandId: dispatchCommandId,
       error: clearInvestigatorErrorForPhase(investigator, "investigation"),
       updatedAt,
     },
@@ -280,6 +331,7 @@ function withCrossReviewRunning(
   investigatorKey: InvestigatorKey,
   threadId: ThreadId,
   updatedAt: string,
+  dispatchCommandId: CommandId,
 ): InvestigationWorkflow {
   const current = workflow[investigatorKey];
   return updateInvestigator(
@@ -289,6 +341,7 @@ function withCrossReviewRunning(
       ...current,
       crossReviewThreadId: threadId,
       crossReviewStatus: "running",
+      crossReviewDispatchCommandId: dispatchCommandId,
       error: clearInvestigatorErrorForPhase(current, "crossReview"),
       updatedAt,
     },
@@ -395,6 +448,7 @@ function withSelfReviewRunning(
   investigatorKey: InvestigatorKey,
   threadId: ThreadId,
   updatedAt: string,
+  dispatchCommandId: CommandId,
 ): InvestigationWorkflow {
   const current = workflow[investigatorKey];
   return updateInvestigator(
@@ -404,6 +458,7 @@ function withSelfReviewRunning(
       ...current,
       selfReviewThreadId: threadId,
       selfReviewStatus: "running",
+      selfReviewDispatchCommandId: dispatchCommandId,
       error: clearInvestigatorErrorForPhase(current, "selfReview"),
       updatedAt,
     },
@@ -506,6 +561,7 @@ function withSynthesisRunning(
   workflow: InvestigationWorkflow,
   threadId: ThreadId,
   updatedAt: string,
+  dispatchCommandId: CommandId,
 ): InvestigationWorkflow {
   return {
     ...workflow,
@@ -513,6 +569,7 @@ function withSynthesisRunning(
       ...workflow.synthesis,
       threadId,
       status: "running",
+      dispatchCommandId,
       error: null,
       updatedAt,
     },
@@ -731,6 +788,7 @@ function investigationPromptInvariant(
 
 function startInvestigationTurn(input: {
   readonly orchestrationEngine: OrchestrationEngineShape;
+  readonly commandId: CommandId;
   readonly workflow: InvestigationWorkflow;
   readonly investigator: InvestigationInvestigator;
   readonly lensBranch: "a" | "b";
@@ -758,7 +816,7 @@ function startInvestigationTurn(input: {
   if (promptError) return Effect.fail(promptError);
   return input.orchestrationEngine.dispatch({
     type: "thread.turn.start",
-    commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+    commandId: input.commandId,
     threadId: input.investigator.investigationThreadId,
     message: {
       messageId: MessageId.makeUnsafe(crypto.randomUUID()),
@@ -804,6 +862,7 @@ function createCrossReviewThread(input: {
 
 function startCrossReviewTurn(input: {
   readonly orchestrationEngine: OrchestrationEngineShape;
+  readonly commandId: CommandId;
   readonly workflow: InvestigationWorkflow;
   readonly investigator: InvestigationInvestigator;
   readonly peerLabel: string;
@@ -825,7 +884,7 @@ function startCrossReviewTurn(input: {
   if (promptError) return Effect.fail(promptError);
   return input.orchestrationEngine.dispatch({
     type: "thread.turn.start",
-    commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+    commandId: input.commandId,
     threadId: input.investigator.crossReviewThreadId!,
     message: {
       messageId: MessageId.makeUnsafe(crypto.randomUUID()),
@@ -871,6 +930,7 @@ function createSelfReviewThread(input: {
 
 function startSelfReviewTurn(input: {
   readonly orchestrationEngine: OrchestrationEngineShape;
+  readonly commandId: CommandId;
   readonly workflow: InvestigationWorkflow;
   readonly investigator: InvestigationInvestigator;
   readonly investigationReport: string;
@@ -893,7 +953,7 @@ function startSelfReviewTurn(input: {
   if (promptError) return Effect.fail(promptError);
   return input.orchestrationEngine.dispatch({
     type: "thread.turn.start",
-    commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+    commandId: input.commandId,
     threadId: input.investigator.selfReviewThreadId!,
     message: {
       messageId: MessageId.makeUnsafe(crypto.randomUUID()),
@@ -937,6 +997,7 @@ function createSynthesisThread(input: {
 
 function startSynthesisTurn(input: {
   readonly orchestrationEngine: OrchestrationEngineShape;
+  readonly commandId: CommandId;
   readonly workflow: InvestigationWorkflow;
   readonly contributions: ReadonlyArray<{
     readonly label: string;
@@ -960,7 +1021,7 @@ function startSynthesisTurn(input: {
   if (promptError) return Effect.fail(promptError);
   return input.orchestrationEngine.dispatch({
     type: "thread.turn.start",
-    commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+    commandId: input.commandId,
     threadId: input.workflow.synthesis.threadId!,
     message: {
       messageId: MessageId.makeUnsafe(crypto.randomUUID()),
@@ -1068,6 +1129,8 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
     baseOrchestrationEngine,
     getWorkflowProviders,
   );
+  const providerTurnDeliveryWorker = yield* Effect.serviceOption(ProviderTurnDeliveryWorker);
+  const resolveStageDispatch = yield* makeWorkflowStageDispatchResolver;
 
   const titleGenerationWorker = yield* makeDrainableWorker(
     (item: InvestigationWorkflowTitleGenerationWorkItem) =>
@@ -1166,9 +1229,11 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
             }
           }
         }
+        const dispatchCommandId = CommandId.makeUnsafe(crypto.randomUUID());
         const outcome = yield* Effect.exit(
           startInvestigationTurn({
             orchestrationEngine,
+            commandId: dispatchCommandId,
             workflow: nextWorkflow,
             investigator,
             lensBranch: investigatorKey === "investigatorA" ? "a" : "b",
@@ -1186,7 +1251,12 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
             updatedAt,
           });
         } else {
-          nextWorkflow = withInvestigationRunning(nextWorkflow, investigatorKey, updatedAt);
+          nextWorkflow = withInvestigationRunning(
+            nextWorkflow,
+            investigatorKey,
+            updatedAt,
+            dispatchCommandId,
+          );
         }
         yield* upsertWorkflow(orchestrationEngine, nextWorkflow, updatedAt);
       }
@@ -1206,10 +1276,24 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
         return workflow;
       }
 
+      // Running stages only complete with the turn their own dispatch started.
+      const runningDispatchAllows = (
+        status: string,
+        dispatchCommandId: CommandId | null | undefined,
+      ) =>
+        status === "running"
+          ? resolveStageDispatch(dispatchCommandId).pipe(
+              Effect.map((dispatch) => stageDispatchAllowsTurn(dispatch, completedTurn.turnId)),
+            )
+          : Effect.succeed(false);
+
       const investigation = investigationMatch(workflow, threadId);
       if (
         investigation &&
-        (investigation.investigator.investigationStatus === "running" ||
+        ((yield* runningDispatchAllows(
+          investigation.investigator.investigationStatus,
+          investigation.investigator.investigationDispatchCommandId,
+        )) ||
           (investigation.investigator.investigationStatus === "completed" &&
             (investigation.investigator.investigationTurnId === null ||
               investigation.investigator.investigationMessageId === null)))
@@ -1228,7 +1312,13 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
       }
 
       const crossReview = crossReviewMatch(workflow, threadId);
-      if (crossReview && crossReview.investigator.crossReviewStatus === "running") {
+      if (
+        crossReview &&
+        (yield* runningDispatchAllows(
+          crossReview.investigator.crossReviewStatus,
+          crossReview.investigator.crossReviewDispatchCommandId,
+        ))
+      ) {
         const nextWorkflow = withCrossReviewCompleted({
           workflow,
           investigatorKey: crossReview.investigatorKey,
@@ -1243,7 +1333,13 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
       }
 
       const selfReview = selfReviewMatch(workflow, threadId);
-      if (selfReview && selfReview.investigator.selfReviewStatus === "running") {
+      if (
+        selfReview &&
+        (yield* runningDispatchAllows(
+          selfReview.investigator.selfReviewStatus,
+          selfReview.investigator.selfReviewDispatchCommandId,
+        ))
+      ) {
         const nextWorkflow = withSelfReviewCompleted({
           workflow,
           investigatorKey: selfReview.investigatorKey,
@@ -1257,7 +1353,13 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
         return nextWorkflow;
       }
 
-      if (workflow.synthesis.threadId === threadId && workflow.synthesis.status === "running") {
+      if (
+        workflow.synthesis.threadId === threadId &&
+        (yield* runningDispatchAllows(
+          workflow.synthesis.status,
+          workflow.synthesis.dispatchCommandId,
+        ))
+      ) {
         const nextWorkflow = withSynthesisCompleted({
           workflow,
           turnId: completedTurn.turnId,
@@ -1360,16 +1462,19 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
           }
         }
 
+        const dispatchCommandId = CommandId.makeUnsafe(crypto.randomUUID());
         const runningWorkflow = withCrossReviewRunning(
           pendingWorkflow,
           investigatorKey,
           crossReviewThreadId,
           updatedAt,
+          dispatchCommandId,
         );
         yield* upsertWorkflow(orchestrationEngine, runningWorkflow, updatedAt);
         const turnOutcome = yield* Effect.exit(
           startCrossReviewTurn({
             orchestrationEngine,
+            commandId: dispatchCommandId,
             workflow: runningWorkflow,
             investigator: runningWorkflow[investigatorKey],
             peerLabel: peer.label,
@@ -1483,16 +1588,19 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
           }
         }
 
+        const dispatchCommandId = CommandId.makeUnsafe(crypto.randomUUID());
         const runningWorkflow = withSelfReviewRunning(
           pendingWorkflow,
           investigatorKey,
           selfReviewThreadId,
           updatedAt,
+          dispatchCommandId,
         );
         yield* upsertWorkflow(orchestrationEngine, runningWorkflow, updatedAt);
         const turnOutcome = yield* Effect.exit(
           startSelfReviewTurn({
             orchestrationEngine,
+            commandId: dispatchCommandId,
             workflow: runningWorkflow,
             investigator: runningWorkflow[investigatorKey],
             investigationReport: ownReport,
@@ -1601,11 +1709,18 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
         }
       }
 
-      const runningWorkflow = withSynthesisRunning(pendingWorkflow, synthesisThreadId, updatedAt);
+      const dispatchCommandId = CommandId.makeUnsafe(crypto.randomUUID());
+      const runningWorkflow = withSynthesisRunning(
+        pendingWorkflow,
+        synthesisThreadId,
+        updatedAt,
+        dispatchCommandId,
+      );
       yield* upsertWorkflow(orchestrationEngine, runningWorkflow, updatedAt);
       const turnOutcome = yield* Effect.exit(
         startSynthesisTurn({
           orchestrationEngine,
+          commandId: dispatchCommandId,
           workflow: runningWorkflow,
           contributions: contributions.map((contribution) => ({
             label: contribution.label,
@@ -1760,6 +1875,30 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
       const updatedAt = new Date().toISOString();
       let reconciledWorkflow = workflow;
       let reconciliationSnapshot = snapshot;
+
+      // A restart can leave a stage's delivery `sending` after its turn
+      // finished. Rechecking it against provider history records the
+      // acceptance so the completion passes can attribute the turn.
+      if (providerTurnDeliveryWorker._tag === "Some") {
+        const worker = providerTurnDeliveryWorker.value;
+        yield* Effect.forEach(
+          runningStageDispatches(workflow),
+          ({ threadId, dispatchCommandId }) =>
+            getFinishedConsumableLatestTurn(snapshot.threads.find((entry) => entry.id === threadId))
+              ? worker.recheck(threadId, dispatchCommandId).pipe(
+                  // Bounded: this runs before the event subscription starts.
+                  Effect.timeout(STARTUP_DISPATCH_RECHECK_TIMEOUT),
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning("Investigation stage dispatch recheck failed", {
+                      threadId,
+                      cause: Cause.pretty(cause),
+                    }),
+                  ),
+                )
+              : Effect.void,
+          { discard: true },
+        );
+      }
 
       for (const investigatorKey of ["investigatorA", "investigatorB"] as const) {
         const investigator = reconciledWorkflow[investigatorKey];
@@ -2252,6 +2391,44 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
       ),
     );
 
+  // A provider can report acceptance after the stage's turn already finished
+  // (ACP starts await the whole prompt). The completion events were skipped
+  // while the dispatch was unaccepted, so re-check the stage now.
+  const handleDeliveryOutcome = (outcome: ProviderTurnDeliveryOutcome) =>
+    Effect.gen(function* () {
+      if (outcome.state !== "accepted") {
+        return;
+      }
+      const readModel = yield* orchestrationEngine.getReadModel();
+      const workflow = readModel.investigationWorkflows.find(
+        (entry) =>
+          !isDeletedWorkflow(entry) &&
+          runningStageDispatches(entry).some(
+            (stage) => stage.dispatchCommandId === outcome.commandId,
+          ),
+      );
+      if (!workflow) {
+        return;
+      }
+      const updatedAt = new Date().toISOString();
+      let nextWorkflow = yield* maybeAdvanceWorkflowFromCompletedThread(
+        workflow,
+        readModel,
+        outcome.threadId,
+        updatedAt,
+      );
+      nextWorkflow = yield* maybeStartCrossReviews(nextWorkflow, readModel, updatedAt);
+      nextWorkflow = yield* maybeStartSelfReviews(nextWorkflow, readModel, updatedAt);
+      yield* maybeStartSynthesis(nextWorkflow, readModel, updatedAt);
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logError("InvestigationWorkflowService.handleDeliveryOutcome failed", {
+          commandId: outcome.commandId,
+          cause,
+        }),
+      ),
+    );
+
   const start: InvestigationWorkflowServiceShape["start"] = Effect.gen(function* () {
     yield* reconcileStuckWorkflows.pipe(
       Effect.catchCause((cause) =>
@@ -2260,10 +2437,23 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
         }).pipe(Effect.asVoid),
       ),
     );
-    yield* Stream.runForEach(orchestrationEngine.streamDomainEvents, handleDomainEvent).pipe(
-      Effect.forkScoped,
-      Effect.asVoid,
+    // Delivery outcomes share the domain-event fiber so stage transitions stay
+    // serialized.
+    const domainEvents = orchestrationEngine.streamDomainEvents.pipe(
+      Stream.map((event) => ({ kind: "event" as const, event })),
     );
+    const work =
+      providerTurnDeliveryWorker._tag === "Some"
+        ? Stream.merge(
+            domainEvents,
+            providerTurnDeliveryWorker.value.outcomes.pipe(
+              Stream.map((outcome) => ({ kind: "outcome" as const, outcome })),
+            ),
+          )
+        : domainEvents;
+    yield* Stream.runForEach(work, (item) =>
+      item.kind === "event" ? handleDomainEvent(item.event) : handleDeliveryOutcome(item.outcome),
+    ).pipe(Effect.forkScoped, Effect.asVoid);
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.logError("InvestigationWorkflowService.start failed", { cause }).pipe(

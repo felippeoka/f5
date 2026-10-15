@@ -5,6 +5,8 @@ import {
   type TaskItem,
 } from "@t3tools/contracts";
 import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/react-router";
+
+import { RouteErrorView } from "../components/RouteErrorView";
 import {
   Suspense,
   lazy,
@@ -43,6 +45,7 @@ import {
   parseDiffRouteSearch,
 } from "../diffRouteSearch";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
+import { useContextDocumentTitle } from "../hooks/useDocumentTitle";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useAgentsPanelStore } from "../agentsPanelStore";
 import { useAgentsPanelModel } from "../lib/agentsReactQuery";
@@ -344,6 +347,10 @@ function ChatThreadRouteView() {
       : null,
   );
   const routeThreadExists = threadExists || draftThread !== null;
+  useContextDocumentTitle({
+    projectName: activeProject?.name ?? null,
+    itemTitle: thread?.title ?? (draftThread ? "New thread" : null),
+  });
   const threadDetailQuery = useThreadDetail(thread ? threadId : null);
   const shouldUseRightPanelSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const rightPanelState = useRightPanelStore((store) =>
@@ -905,4 +912,5 @@ export const Route = createFileRoute("/_chat/$threadId")({
     ],
   },
   component: ChatThreadRouteView,
+  errorComponent: RouteErrorView,
 });

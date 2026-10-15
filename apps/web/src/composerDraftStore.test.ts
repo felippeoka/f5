@@ -23,6 +23,8 @@ import {
   type ComposerImageAttachment,
   getComposerReloadStatus,
   createDebouncedStorage,
+  createDeferredStorage,
+  flushComposerDraftPersistence,
   mergePersistedRecords,
   pruneOrphanedDraftThreads,
   resetComposerDraftBaseStorageForTesting,
@@ -814,16 +816,20 @@ describe("composerDraftStore terminal contexts", () => {
   });
 
   it("persists terminal context text so restored drafts remain sendable", () => {
-    useComposerDraftStore
-      .getState()
-      .addTerminalContext(threadId, makeTerminalContext({ id: "ctx-persist" }));
+    const baseStorage = createMockStorage();
+    setComposerDraftBaseStorageForTesting(baseStorage);
+    try {
+      useComposerDraftStore
+        .getState()
+        .addTerminalContext(threadId, makeTerminalContext({ id: "ctx-persist" }));
+      flushComposerDraftPersistence();
+    } finally {
+      resetComposerDraftBaseStorageForTesting();
+    }
 
-    const persistApi = useComposerDraftStore.persist as unknown as {
-      getOptions: () => {
-        partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown;
-      };
-    };
-    const persistedState = persistApi.getOptions().partialize(useComposerDraftStore.getState()) as {
+    const written = baseStorage.setItem.mock.calls.at(-1)?.[1];
+    expect(written, "Expected the draft to be written to storage.").toBeTypeOf("string");
+    const persistedState = (JSON.parse(written!) as { state: unknown }).state as {
       draftsByThreadId?: Record<
         string,
         {
@@ -1467,6 +1473,91 @@ function createMockStorage() {
     }),
   };
 }
+
+describe("deferred draft serialization", () => {
+  const threadId = ThreadId.makeUnsafe("thread-deferred-serialization");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    resetComposerDraftBaseStorageForTesting();
+    vi.useRealTimers();
+  });
+
+  it("writes once per debounce window across 20 rapid prompt edits", () => {
+    const baseStorage = createMockStorage();
+    setComposerDraftBaseStorageForTesting(baseStorage);
+    for (let index = 1; index <= 20; index += 1) {
+      useComposerDraftStore.getState().setPrompt(threadId, "x".repeat(index));
+    }
+    expect(baseStorage.setItem).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(300);
+    expect(baseStorage.setItem).toHaveBeenCalledTimes(1);
+    const written = JSON.parse(baseStorage.setItem.mock.calls[0]![1]) as {
+      state: { draftsByThreadId: Record<string, { prompt: string }> };
+    };
+    expect(written.state.draftsByThreadId[threadId]?.prompt).toBe("x".repeat(20));
+  });
+
+  it("keeps a draft that holds only recovered rewind ids", () => {
+    const baseStorage = createMockStorage();
+    setComposerDraftBaseStorageForTesting(baseStorage);
+    const store = useComposerDraftStore.getState();
+    store.placeRecoveredPrompt(threadId, "rewind-op-1", "recovered prompt");
+    store.setPrompt(threadId, "");
+    vi.advanceTimersByTime(300);
+    const written = JSON.parse(baseStorage.setItem.mock.calls.at(-1)![1]) as {
+      state: { draftsByThreadId: Record<string, { recoveredRewindOperationIds?: string[] }> };
+    };
+    expect(written.state.draftsByThreadId[threadId]?.recoveredRewindOperationIds).toEqual([
+      "rewind-op-1",
+    ]);
+  });
+
+  it("serializes only when the write fires, and lazily for pendingValue", () => {
+    const base = createMockStorage();
+    const serialize = vi.fn((value: { text: string }) => JSON.stringify(value));
+    const storage = createDeferredStorage(base, serialize);
+    for (let index = 0; index < 20; index += 1) storage.setItem("key", { text: `v${index}` });
+    expect(serialize).not.toHaveBeenCalled();
+
+    expect(storage.pendingValue()).toBe('{"text":"v19"}');
+    expect(storage.pendingValue("key")).toBe('{"text":"v19"}');
+    expect(serialize).toHaveBeenCalledTimes(1);
+
+    storage.flush();
+    expect(serialize).toHaveBeenCalledTimes(1);
+    expect(base.setItem).toHaveBeenCalledWith("key", '{"text":"v19"}');
+    expect(storage.pendingValue()).toBeNull();
+  });
+
+  it("keeps an independent debouncer per name", () => {
+    const base = createMockStorage();
+    const storage = createDeferredStorage(base, (value: string) => value);
+    storage.setItem("a", "a1");
+    vi.advanceTimersByTime(200);
+    storage.setItem("b", "b1");
+    vi.advanceTimersByTime(100);
+    expect(base.setItem.mock.calls).toEqual([["a", "a1"]]);
+    vi.advanceTimersByTime(200);
+    expect(base.setItem.mock.calls).toEqual([
+      ["a", "a1"],
+      ["b", "b1"],
+    ]);
+  });
+
+  it("reports a failed serialization instead of throwing from the timer", () => {
+    const base = createMockStorage();
+    const storage = createDeferredStorage(base, () => {
+      throw new Error("quota exceeded");
+    });
+    storage.setItem("key", "value");
+    expect(() => vi.advanceTimersByTime(300)).not.toThrow();
+    expect(base.setItem).not.toHaveBeenCalled();
+  });
+});
 
 describe("createDebouncedStorage", () => {
   beforeEach(() => {

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
+import { setNowTickerClockForTests } from "../../lib/nowTicker";
 import { toastManager } from "../ui/toast";
 import { CommandTranscriptCard } from "./CommandTranscriptCard";
 
@@ -61,6 +62,42 @@ describe("CommandTranscriptCard", () => {
     document.body.innerHTML = "";
   });
 
+  it("stops a running command's clock, without jumping back, once the thread stops working", async () => {
+    const startedAt = Date.parse("2026-03-20T12:00:00.000Z");
+    let now = startedAt + 5_000;
+    setNowTickerClockForTests(() => now);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const host = document.body.appendChild(document.createElement("div"));
+    const ui = (threadWorking: boolean) => (
+      <QueryClientProvider client={queryClient}>
+        <CommandTranscriptCard
+          execution={makeExecution({ status: "running", completedAt: null, exitCode: null })}
+          expanded={false}
+          timestampFormat="locale"
+          threadWorking={threadWorking}
+          onToggle={() => {}}
+        />
+      </QueryClientProvider>
+    );
+    const screen = await render(ui(true), { container: host });
+    try {
+      now = startedAt + 65_000;
+      setNowTickerClockForTests(() => now);
+      await vi.waitFor(() => expect(host.textContent).toContain("1m"));
+      const lastShown = host.textContent;
+
+      await screen.rerender(ui(false));
+      expect(host.textContent).toBe(lastShown);
+      now = startedAt + 600_000;
+      setNowTickerClockForTests(() => now);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(host.textContent).toBe(lastShown);
+    } finally {
+      setNowTickerClockForTests(null);
+      await screen.unmount();
+    }
+  });
+
   it("copies the displayed normalized command and does not toggle expansion", async () => {
     const onToggle = vi.fn();
     const toastSpy = vi.spyOn(toastManager, "add");
@@ -70,7 +107,6 @@ describe("CommandTranscriptCard", () => {
       <CommandTranscriptCard
         execution={makeExecution()}
         expanded={false}
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={onToggle}
         onExpandedBodyResize={() => {}}
@@ -120,7 +156,6 @@ describe("CommandTranscriptCard", () => {
             title: expanded ? "Read project instructions" : null,
           })}
           expanded={expanded}
-          nowIso="2026-03-20T12:00:02.000Z"
           timestampFormat="locale"
           onToggle={onToggle}
           onExpandedBodyResize={() => {}}
@@ -161,7 +196,6 @@ describe("CommandTranscriptCard", () => {
           output: "/Users/felipelopes/dev/wolt/f3-code",
         })}
         expanded
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={() => {}}
         onExpandedBodyResize={() => {}}
@@ -198,7 +232,6 @@ describe("CommandTranscriptCard", () => {
           title: "Echo greeting",
         })}
         expanded={false}
-        nowIso="2026-03-20T12:00:02.000Z"
         timestampFormat="locale"
         onToggle={() => {}}
         onExpandedBodyResize={() => {}}

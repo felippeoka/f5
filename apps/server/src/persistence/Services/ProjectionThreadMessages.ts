@@ -16,7 +16,7 @@ import {
   UserMessageSkillCall,
 } from "@t3tools/contracts";
 import { Schema, ServiceMap } from "effect";
-import type { Effect } from "effect";
+import type { Effect, Option } from "effect";
 
 import type { ProjectionRepositoryError } from "../Errors.ts";
 
@@ -40,6 +40,12 @@ export const ListProjectionThreadMessagesInput = Schema.Struct({
 });
 export type ListProjectionThreadMessagesInput = typeof ListProjectionThreadMessagesInput.Type;
 
+export const GetProjectionThreadMessageInput = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+});
+export type GetProjectionThreadMessageInput = typeof GetProjectionThreadMessageInput.Type;
+
 export const DeleteProjectionThreadMessagesInput = Schema.Struct({
   threadId: ThreadId,
 });
@@ -52,7 +58,8 @@ export interface ProjectionThreadMessageRepositoryShape {
   /**
    * Insert or replace a projected thread message row.
    *
-   * Upserts by `messageId`.
+   * Upserts by `messageId`. A row owned by another thread is never
+   * overwritten.
    */
   readonly upsert: (
     message: ProjectionThreadMessage,
@@ -66,6 +73,16 @@ export interface ProjectionThreadMessageRepositoryShape {
   readonly listByThreadId: (
     input: ListProjectionThreadMessagesInput,
   ) => Effect.Effect<ReadonlyArray<ProjectionThreadMessage>, ProjectionRepositoryError>;
+
+  /**
+   * Read one projected message, scoped to its thread.
+   *
+   * Rows are keyed by `messageId` alone, so the thread scope keeps a message
+   * id reused by another thread from being returned.
+   */
+  readonly getByMessageId: (
+    input: GetProjectionThreadMessageInput,
+  ) => Effect.Effect<Option.Option<ProjectionThreadMessage>, ProjectionRepositoryError>;
 
   /**
    * Delete projected thread messages by thread.

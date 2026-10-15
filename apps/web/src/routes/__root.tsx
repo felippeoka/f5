@@ -1,7 +1,7 @@
 import { useComposerMentionHistoryStore } from "../composerMentionHistoryStore";
 import { usePreviewArtifactRetentionSync } from "../hooks/usePreviewArtifactRetentionSync";
 import { useMigrateClientSettings } from "../hooks/useMigrateClientSettings";
-import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
+import { copyErrorReport, errorDetails, errorMessage } from "../lib/errorReport";
 import {
   acceptProfileWelcome,
   refreshProfiles,
@@ -206,16 +206,7 @@ function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
           <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
             Reload app
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              void writeTextToClipboard(details).then(
-                () => toastManager.add({ type: "success", title: "Error report copied" }),
-                () => toastManager.add({ type: "error", title: "Could not copy error report" }),
-              );
-            }}
-          >
+          <Button size="sm" variant="outline" onClick={() => copyErrorReport(error)}>
             Copy error report
           </Button>
         </div>
@@ -232,34 +223,6 @@ function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
       </section>
     </div>
   );
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-
-  if (typeof error === "string" && error.trim().length > 0) {
-    return error;
-  }
-
-  return "An unexpected router error occurred.";
-}
-
-function errorDetails(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack ?? error.message;
-  }
-
-  if (typeof error === "string") {
-    return error;
-  }
-
-  try {
-    return JSON.stringify(error, null, 2);
-  } catch {
-    return "No additional error details are available.";
-  }
 }
 
 type VisibleRouteMatch = {
