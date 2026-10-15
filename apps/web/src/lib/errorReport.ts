@@ -10,7 +10,7 @@ export function errorMessage(error: unknown): string {
     return error;
   }
 
-  return "An unexpected router error occurred.";
+  return "An unexpected error occurred.";
 }
 
 export function errorDetails(error: unknown): string {
@@ -22,10 +22,15 @@ export function errorDetails(error: unknown): string {
     return error;
   }
 
+  // JSON.stringify returns undefined for undefined, functions and symbols.
   try {
-    return JSON.stringify(error, null, 2);
+    return JSON.stringify(error, null, 2) ?? String(error);
   } catch {
-    return "No additional error details are available.";
+    try {
+      return String(error);
+    } catch {
+      return "No additional error details are available.";
+    }
   }
 }
 

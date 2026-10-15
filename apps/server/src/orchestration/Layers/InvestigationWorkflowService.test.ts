@@ -27,6 +27,11 @@ import {
   type ProviderTurnDelivery,
   type ProviderTurnDeliveryRepositoryShape,
 } from "../Services/ProviderTurnDeliveryRepository.ts";
+import {
+  ProviderTurnDeliveryWorker,
+  type ProviderTurnDeliveryOutcome,
+  type ProviderTurnDeliveryWorkerShape,
+} from "../Services/ProviderTurnDeliveryWorker.ts";
 import { InvestigationWorkflowServiceLive } from "./InvestigationWorkflowService.ts";
 
 const NOW = "2026-04-12T12:00:00.000Z";
@@ -449,6 +454,7 @@ async function createHarness(
   initialSnapshot: OrchestrationReadModel,
   options?: {
     getDeliveryByCommandId?: ProviderTurnDeliveryRepositoryShape["getByCommandId"];
+    providerTurnDeliveryWorker?: Partial<ProviderTurnDeliveryWorkerShape>;
   },
 ) {
   let snapshot = initialSnapshot;
@@ -555,6 +561,20 @@ async function createHarness(
           ? Layer.succeed(ProviderTurnDeliveryRepository, {
               getByCommandId: options.getDeliveryByCommandId,
             } as unknown as ProviderTurnDeliveryRepositoryShape)
+          : Layer.empty,
+      ),
+      Layer.provideMerge(
+        options?.providerTurnDeliveryWorker
+          ? Layer.succeed(ProviderTurnDeliveryWorker, {
+              start: Effect.void,
+              drain: Effect.void,
+              outcomes: Stream.empty,
+              acknowledgeOutcome: () => Effect.void,
+              recheck: () => Effect.succeed(null),
+              retry: () => Effect.die("unsupported"),
+              discard: () => Effect.die("unsupported"),
+              ...options.providerTurnDeliveryWorker,
+            })
           : Layer.empty,
       ),
     ),
@@ -707,6 +727,90 @@ describe("InvestigationWorkflowService", () => {
     expect(harness.getSnapshot().investigationWorkflows[0]?.investigatorA.investigationTurnId).toBe(
       "turn-investigation-a-own",
     );
+  });
+
+  describe("late or restarted dispatch acceptance", () => {
+    const dispatchA = CommandId.makeUnsafe("dispatch-investigation-a");
+    const completed = makeCompletedInvestigationWorkflow();
+    const workflow: InvestigationWorkflow = {
+      ...completed,
+      investigatorA: {
+        ...completed.investigatorA,
+        investigationStatus: "running",
+        investigationTurnId: null,
+        investigationMessageId: null,
+        investigationDispatchCommandId: dispatchA,
+      },
+    };
+    const threads = [
+      makeReportThread({
+        threadId: workflow.investigatorA.investigationThreadId,
+        messageId: "message-investigation-a-own",
+        turnId: "turn-investigation-a-own",
+        text: "Investigation A own report",
+      }),
+      makeReportThread({
+        threadId: workflow.investigatorB.investigationThreadId,
+        messageId: "message-investigation-b",
+        turnId: "turn-investigation-b",
+        text: "Investigation B report",
+      }),
+    ];
+    const delivery = (state: "sending" | "accepted") =>
+      ({
+        deliveryId: dispatchA,
+        commandId: dispatchA,
+        threadId: workflow.investigatorA.investigationThreadId,
+        state,
+        providerTurnId: state === "accepted" ? TurnId.makeUnsafe("turn-investigation-a-own") : null,
+      }) as ProviderTurnDelivery;
+    const investigatorA = () => harness!.getSnapshot().investigationWorkflows[0]?.investigatorA;
+
+    it("completes the stage when acceptance arrives after its turn finished", async () => {
+      let current = delivery("sending");
+      const outcomes = await Effect.runPromise(Queue.unbounded<ProviderTurnDeliveryOutcome>());
+      harness = await createHarness(makeReadModel({ workflow, threads }), {
+        getDeliveryByCommandId: () => Effect.succeed(current),
+        providerTurnDeliveryWorker: {
+          outcomes: Stream.fromQueue(outcomes),
+          recheck: () => Effect.succeed(current),
+        },
+      });
+      await harness.start();
+      expect(investigatorA()?.investigationStatus).toBe("running");
+
+      current = delivery("accepted");
+      await Effect.runPromise(
+        Queue.offer(outcomes, {
+          deliveryId: dispatchA,
+          commandId: dispatchA,
+          threadId: workflow.investigatorA.investigationThreadId,
+          state: "accepted",
+          detail: null,
+        }),
+      );
+      await waitFor(() => investigatorA()?.crossReviewStatus === "running");
+      expect(investigatorA()?.investigationTurnId).toBe("turn-investigation-a-own");
+    });
+
+    it("rechecks the stage's own delivery at startup and completes it", async () => {
+      let current = delivery("sending");
+      const recheck = vi.fn<ProviderTurnDeliveryWorkerShape["recheck"]>((_threadId, deliveryId) =>
+        Effect.sync(() => {
+          if (deliveryId === dispatchA) current = delivery("accepted");
+          return current;
+        }),
+      );
+      harness = await createHarness(makeReadModel({ workflow, threads }), {
+        getDeliveryByCommandId: () => Effect.succeed(current),
+        providerTurnDeliveryWorker: { recheck },
+      });
+      await harness.start();
+
+      expect(recheck).toHaveBeenCalledWith(workflow.investigatorA.investigationThreadId, dispatchA);
+      expect(investigatorA()?.investigationTurnId).toBe("turn-investigation-a-own");
+      expect(investigatorA()?.crossReviewStatus).toBe("running");
+    });
   });
 
   it("rejects identical investigator provider and model", async () => {

@@ -7,17 +7,20 @@ import {
   type ChatStatusOutcome,
 } from "./ChatStatusAnnouncer";
 
-async function mount(initial: {
+interface AnnouncerProps {
   threadId: string;
   turnId: string | null;
   outcome: ChatStatusOutcome;
-}) {
+  attentionRequestId?: string | null;
+}
+
+async function mount(initial: AnnouncerProps) {
   const host = document.body.appendChild(document.createElement("div"));
   const screen = await render(<ChatStatusAnnouncer {...initial} />, { container: host });
-  const region = () => host.querySelector('[aria-live="polite"]')?.textContent ?? null;
-  const update = (next: { threadId: string; turnId: string | null; outcome: ChatStatusOutcome }) =>
-    screen.rerender(<ChatStatusAnnouncer {...next} />);
-  return { region, update };
+  const rawRegion = () => host.querySelector('[aria-live="polite"]')?.textContent ?? null;
+  const region = () => rawRegion()?.replace(/ $/, "") ?? null;
+  const update = (next: AnnouncerProps) => screen.rerender(<ChatStatusAnnouncer {...next} />);
+  return { region, rawRegion, update };
 }
 
 describe("deriveChatStatusOutcome", () => {
@@ -85,6 +88,46 @@ describe("ChatStatusAnnouncer", () => {
     await update({ threadId: "b", turnId: "t10", outcome: "working" });
     expect(region()).toBe("Working");
     await update({ threadId: "b", turnId: "t10", outcome: "completed" });
+    expect(region()).toBe("Response ready");
+  });
+
+  it("announces every approval in one turn, including back-to-back requests", async () => {
+    const { region, rawRegion, update } = await mount({
+      threadId: "a",
+      turnId: "t1",
+      outcome: "working",
+    });
+    const approval = (requestId: string) =>
+      update({
+        threadId: "a",
+        turnId: "t1",
+        outcome: "awaiting-approval",
+        attentionRequestId: requestId,
+      });
+
+    await approval("r1");
+    expect(region()).toBe("Waiting for your approval");
+    await update({ threadId: "a", turnId: "t1", outcome: "working" });
+    expect(region()).toBe("Working");
+    await approval("r2");
+    expect(region()).toBe("Waiting for your approval");
+
+    const before = rawRegion();
+    await approval("r3");
+    expect(region()).toBe("Waiting for your approval");
+    expect(rawRegion()).not.toBe(before);
+  });
+
+  it("announces the next turn after a completed one, even while the send is pending", async () => {
+    const { region, update } = await mount({ threadId: "a", turnId: "t1", outcome: "working" });
+    await update({ threadId: "a", turnId: "t1", outcome: "completed" });
+    expect(region()).toBe("Response ready");
+
+    // The send is busy before the new turn id arrives.
+    await update({ threadId: "a", turnId: "t1", outcome: "working" });
+    expect(region()).toBe("Working");
+    await update({ threadId: "a", turnId: "t2", outcome: "working" });
+    await update({ threadId: "a", turnId: "t2", outcome: "completed" });
     expect(region()).toBe("Response ready");
   });
 });

@@ -2567,7 +2567,7 @@ describe("CodeReviewWorkflowService", () => {
         harness.service.retryWorkflow({ workflowId: workflow.id, scope: "failed" }),
       );
 
-      expect(recheck).toHaveBeenCalledWith(workflow.reviewerA.threadId);
+      expect(recheck).toHaveBeenCalledWith(workflow.reviewerA.threadId, undefined);
       expect(harness.dispatched.some((command) => command.type === "thread.turn.start")).toBe(
         false,
       );
@@ -3114,6 +3114,67 @@ describe("CodeReviewWorkflowService stage dispatch correlation", () => {
         (command) => command.type === "thread.create" && command.title === "Review Merge",
       ),
     ).toBe(true);
+  });
+
+  it("treats a recorded dispatch with no delivery row yet as pending", async () => {
+    const workflow = runningReviewerWorkflow(DISPATCH_A);
+    harness = await createHarness(snapshotWithReviewerATurn(workflow, "earlier"), {
+      getDeliveryByCommandId: () => Effect.succeed(null),
+    });
+    await harness.start();
+    await harness.emit(readyEvent(workflow.reviewerA.threadId));
+    await settle();
+
+    expect(reviewerACompletions()).toHaveLength(0);
+    expect(harness.getSnapshot().codeReviewWorkflows[0]?.reviewerA.status).toBe("running");
+  });
+
+  it("retries the stage's own delivery, not a newer one on the thread", async () => {
+    const userCommand = CommandId.makeUnsafe("user-typed-command");
+    const workflow = makeWorkflow({
+      reviewerA: {
+        ...makeWorkflow().reviewerA,
+        status: "error",
+        error: "Reviewer A failed",
+        dispatchCommandId: DISPATCH_A,
+        updatedAt: ERROR_AT,
+      },
+      reviewerB: { ...makeWorkflow().reviewerB, status: "completed" },
+    });
+    const recheck = vi.fn<ProviderTurnDeliveryWorkerShape["recheck"]>((threadId, deliveryId) =>
+      Effect.succeed(
+        deliveryId === DISPATCH_A
+          ? makeProviderTurnDelivery(threadId, "rejected", {
+              deliveryId: DISPATCH_A,
+              commandId: DISPATCH_A,
+            })
+          : makeProviderTurnDelivery(threadId, "pending", {
+              deliveryId: userCommand,
+              commandId: userCommand,
+            }),
+      ),
+    );
+    const retry = vi.fn<ProviderTurnDeliveryWorkerShape["retry"]>(({ threadId, deliveryId }) =>
+      Effect.succeed(
+        makeProviderTurnDelivery(threadId, "pending", {
+          deliveryId: deliveryId ?? userCommand,
+          commandId: deliveryId ?? userCommand,
+        }),
+      ),
+    );
+    harness = await createHarness(makeReadModel({ workflow }), {
+      providerTurnDeliveryWorker: makeDeliveryWorker({ recheck, retry }),
+    });
+
+    await Effect.runPromise(
+      harness.service.retryWorkflow({ workflowId: workflow.id, scope: "failed" }),
+    );
+
+    expect(recheck).toHaveBeenCalledWith(workflow.reviewerA.threadId, DISPATCH_A);
+    expect(retry).toHaveBeenCalledWith(expect.objectContaining({ deliveryId: DISPATCH_A }));
+    const reviewerA = harness.getSnapshot().codeReviewWorkflows[0]?.reviewerA;
+    expect(reviewerA?.status).toBe("running");
+    expect(reviewerA?.dispatchCommandId).toBe(DISPATCH_A);
   });
 
   it("keeps the any-finished-turn rule for stages recorded without a dispatch", async () => {

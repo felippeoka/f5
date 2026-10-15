@@ -63,8 +63,13 @@ function dispatchLocalStorageChange(key: string) {
   );
 }
 
+/** Reads a raw item; blocked or failing storage reads as missing. */
 export function readLocalStorageRawItem(key: string): string | null {
-  return getIsomorphicLocalStorage().getItem(key);
+  try {
+    return getIsomorphicLocalStorage().getItem(key);
+  } catch {
+    return null;
+  }
 }
 
 export function subscribeLocalStorageKey(key: string, listener: () => void): () => void {

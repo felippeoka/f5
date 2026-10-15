@@ -41,6 +41,15 @@ describe("nowTicker", () => {
     unsubscribe();
   });
 
+  it("serves a fresh value to a first subscriber that reads before subscribing", () => {
+    subscribeNow(() => {})();
+    const stale = getNowSnapshot();
+    vi.setSystemTime(new Date("2026-10-01T01:00:00.000Z"));
+    const fresh = getNowSnapshot();
+    expect(fresh).toBe(stale + 60 * 60 * 1000);
+    expect(getNowSnapshot()).toBe(fresh);
+  });
+
   it("refreshes the snapshot when the ticker restarts", () => {
     subscribeNow(() => {})();
     const before = getNowSnapshot();

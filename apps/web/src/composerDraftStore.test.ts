@@ -1501,6 +1501,21 @@ describe("deferred draft serialization", () => {
     expect(written.state.draftsByThreadId[threadId]?.prompt).toBe("x".repeat(20));
   });
 
+  it("keeps a draft that holds only recovered rewind ids", () => {
+    const baseStorage = createMockStorage();
+    setComposerDraftBaseStorageForTesting(baseStorage);
+    const store = useComposerDraftStore.getState();
+    store.placeRecoveredPrompt(threadId, "rewind-op-1", "recovered prompt");
+    store.setPrompt(threadId, "");
+    vi.advanceTimersByTime(300);
+    const written = JSON.parse(baseStorage.setItem.mock.calls.at(-1)![1]) as {
+      state: { draftsByThreadId: Record<string, { recoveredRewindOperationIds?: string[] }> };
+    };
+    expect(written.state.draftsByThreadId[threadId]?.recoveredRewindOperationIds).toEqual([
+      "rewind-op-1",
+    ]);
+  });
+
   it("serializes only when the write fires, and lazily for pendingValue", () => {
     const base = createMockStorage();
     const serialize = vi.fn((value: { text: string }) => JSON.stringify(value));

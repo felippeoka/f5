@@ -7242,6 +7242,11 @@ export default function ChatView({
                 threadId={activeThread.id}
                 turnId={activeLatestTurn?.turnId ?? null}
                 outcome={chatStatusOutcome}
+                attentionRequestId={
+                  activePendingApproval?.requestId ??
+                  pendingUserInputs.find(isBlockingUserInput)?.requestId ??
+                  null
+                }
               />
               {shouldRenderTimeline ? (
                 <MessagesTimeline

@@ -52,6 +52,7 @@ child.stderr.on("data", (chunk: Buffer) => output.push(chunk.toString()));
 const exited = new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
 
 let ready = false;
+let lastStatus: number | null = null;
 const deadline = Date.now() + READY_TIMEOUT_MS;
 try {
   while (!ready && Date.now() < deadline && child.exitCode === null) {
@@ -60,10 +61,12 @@ try {
         signal: AbortSignal.timeout(1_000),
       });
       await response.body?.cancel();
-      ready = response.status < 500;
+      ready = response.status === 200;
+      if (!ready) lastStatus = response.status;
     } catch {
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      // Not listening yet.
     }
+    if (!ready) await new Promise((resolve) => setTimeout(resolve, 250));
   }
 } finally {
   child.kill("SIGTERM");
@@ -75,7 +78,9 @@ try {
 
 if (!ready) {
   console.error(output.join("").slice(-8_000));
-  console.error(`Server did not become ready under Bun ${process.versions.bun ?? ""}`.trim());
+  console.error(
+    `Server did not become ready under Bun${lastStatus === null ? "" : ` (last /api/bootstrap status ${lastStatus})`}.`,
+  );
   process.exit(1);
 }
 console.log(`Server became ready under Bun on port ${port}.`);

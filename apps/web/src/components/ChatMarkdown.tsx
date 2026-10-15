@@ -490,9 +490,10 @@ const RenderedMarkdownFragment = memo(function RenderedMarkdownFragment(props: {
 
         return (
           <MarkdownCodeBlock code={codeBlock.code}>
+            {/* Not keyed on the code: a failed highlighter load would retry on every streaming delta. */}
             <SurfaceErrorBoundary
               name="code-highlight"
-              resetKeys={[codeBlock.code, codeBlock.className, diffThemeName]}
+              resetKeys={[codeBlock.className, diffThemeName]}
               fallback={<pre {...props}>{children}</pre>}
             >
               <Suspense fallback={<pre {...props}>{children}</pre>}>

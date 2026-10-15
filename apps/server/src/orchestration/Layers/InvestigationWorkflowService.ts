@@ -62,6 +62,7 @@ import {
 } from "../Services/ProviderTurnDeliveryWorker.ts";
 import {
   makeWorkflowStageDispatchResolver,
+  STARTUP_DISPATCH_RECHECK_TIMEOUT,
   stageDispatchAllowsTurn,
 } from "../workflowStageDispatch.ts";
 
@@ -1885,6 +1886,8 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
           ({ threadId, dispatchCommandId }) =>
             getFinishedConsumableLatestTurn(snapshot.threads.find((entry) => entry.id === threadId))
               ? worker.recheck(threadId, dispatchCommandId).pipe(
+                  // Bounded: this runs before the event subscription starts.
+                  Effect.timeout(STARTUP_DISPATCH_RECHECK_TIMEOUT),
                   Effect.catchCause((cause) =>
                     Effect.logWarning("Investigation stage dispatch recheck failed", {
                       threadId,

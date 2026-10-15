@@ -32,6 +32,11 @@ interface CommandTranscriptCardProps {
   execution: OrchestrationCommandExecutionSummary | OrchestrationCommandExecution;
   expanded: boolean;
   timestampFormat: TimestampFormat;
+  /**
+   * Whether the thread is working. A command left `running` on an idle thread
+   * (a missed completion) keeps its last elapsed time instead of counting up.
+   */
+  threadWorking?: boolean;
   onToggle: () => void;
   onExpandedBodyResize?: () => void;
 }
@@ -178,6 +183,7 @@ export const CommandTranscriptCard = memo(function CommandTranscriptCard({
   execution,
   expanded,
   timestampFormat,
+  threadWorking = true,
   onToggle,
   onExpandedBodyResize,
 }: CommandTranscriptCardProps) {
@@ -272,8 +278,8 @@ export const CommandTranscriptCard = memo(function CommandTranscriptCard({
     };
   }, [expanded, onExpandedBodyResize]);
 
-  // Only a running command subscribes to the shared clock.
-  const nowIso = useNowIso(detailSource.status === "running");
+  // Only a running command on a working thread subscribes to the shared clock.
+  const nowIso = useNowIso(detailSource.status === "running" && threadWorking);
   const duration = formatElapsed(
     detailSource.startedAt,
     detailSource.completedAt ??

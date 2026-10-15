@@ -1571,6 +1571,8 @@ function toPersistedThreadDraft(
 
 function isEmptyThreadDraft(draft: ComposerThreadDraftState): boolean {
   return (
+    // Recovered rewind ids stop the same prompt from being restored twice.
+    (draft.recoveredRewindOperationIds?.length ?? 0) === 0 &&
     draft.prompt.length === 0 &&
     draft.persistedAttachments.length === 0 &&
     draft.filePaths.length === 0 &&
@@ -3262,6 +3264,9 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
       version: 1,
       storage: composerPersistStorage,
       // References only: serialization is deferred to the debounced write.
+      // This relies on every store update replacing draft objects rather than
+      // mutating them in place; an in-place mutation would be written without
+      // scheduling a write of its own and could be serialized half-applied.
       partialize: (state): ComposerPersistSnapshot => ({
         draftsByThreadId: state.draftsByThreadId,
         draftThreadsByThreadId: state.draftThreadsByThreadId,

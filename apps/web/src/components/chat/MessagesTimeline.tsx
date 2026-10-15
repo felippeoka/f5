@@ -978,10 +978,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       newestTurnDiffId,
       ribbonOrigin !== null,
       reducedMotion,
+      isWorking,
     ],
     [
       ribbonOrigin !== null,
       reducedMotion,
+      isWorking,
       canRestoreFiles,
       nativeSessionCapabilities,
       effectiveRevertDisabledReason,
@@ -1609,6 +1611,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             execution={row.commandExecution}
             expanded={expandedCommandExecutions[row.commandExecution.id] ?? false}
             timestampFormat={timestampFormat}
+            threadWorking={isWorking}
             onToggle={() => onToggleCommandExecution(row.commandExecution.id)}
           />
           {row.nestedDiagnostics && row.nestedDiagnostics.length > 0 ? (

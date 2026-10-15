@@ -1,4 +1,4 @@
-import { useCallback, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 /**
  * One shared 1 Hz clock. The interval runs only while something subscribes,
@@ -49,6 +49,13 @@ export function subscribeNow(listener: () => void): () => void {
 }
 
 export function getNowSnapshot(): number {
+  // While idle the cached tick goes stale; the first subscriber renders before
+  // it subscribes, so refresh it here. Refreshing at most once per interval
+  // keeps repeated reads within one render stable.
+  if (timer === null) {
+    const now = readClock();
+    if (now - lastTick >= NOW_TICK_INTERVAL_MS) lastTick = now;
+  }
   return lastTick;
 }
 
@@ -66,17 +73,24 @@ const noopUnsubscribe = () => {};
 
 /**
  * Epoch milliseconds that advance once per second while `enabled`. Disabled
- * callers get their mount-time value and do not subscribe, so only the leaf
- * that displays a live duration re-renders on each tick.
+ * callers do not subscribe and keep the last value they showed (their mount
+ * time if they never ticked), so only the leaf that displays a live duration
+ * re-renders on each tick and a stopped clock never jumps backwards.
  */
 export function useNow(enabled: boolean): number {
   const [mountedAt] = useState(() => readClock());
+  const lastShownRef = useRef(mountedAt);
   const subscribe = useCallback(
     (listener: () => void) => (enabled ? subscribeNow(listener) : noopUnsubscribe),
     [enabled],
   );
-  const getSnapshot = enabled ? getNowSnapshot : () => mountedAt;
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const frozen = lastShownRef.current;
+  const getSnapshot = enabled ? getNowSnapshot : () => frozen;
+  const now = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  useEffect(() => {
+    lastShownRef.current = now;
+  }, [now]);
+  return now;
 }
 
 export function useNowIso(enabled: boolean): string {

@@ -112,14 +112,14 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 - Streaming assistant replies no longer re-read every message in the thread for each delta; the projection reads only the affected row, so long threads stay responsive while a reply streams. A message row owned by another thread is never overwritten.
 - Code blocks no longer crash with a React hook-order error when a highlighted block is shown again from cache, and two different code blocks can no longer share a cached highlight.
 - The marketing site's download buttons and repository links point at F5 releases (`lopes-felipe/f5`, overridable with `F5_RELEASE_REPOSITORY` at build time) instead of upstream T3 Code; corrupt or failed release lookups are handled instead of showing broken links.
-- The once-a-second elapsed-time clock no longer re-renders the whole chat timeline; only the live "working" label and running command cards update.
+- The once-a-second elapsed-time clock no longer re-renders the whole chat timeline; only the live "working" label and running command cards update, and a command left running on an idle thread stops counting.
 - Code-review and investigation workflow stages complete only with the turn they dispatched. A stale or user-started turn on a reused stage thread can no longer stand in for the stage's own output, and a stage whose provider confirms delivery only after the turn finishes (or across a restart) still completes. Stages started before this release keep the previous rule. Planning workflows are not yet covered.
 - The desktop app's backend crash budget resets after a minute of healthy running, so isolated crashes days apart no longer exhaust restarts; restarts back off exponentially up to 10 seconds.
 - Typing in the composer no longer serializes every thread's draft on each keystroke; drafts are serialized once when the debounced write runs.
 - Native window and browser tab titles follow the current page (Usage, Pull Requests, Settings, or the project or thread of the open thread or workflow), with the profile name appended outside the default profile, instead of a fixed app name.
 - Sending a message while scrolled up follows the new turn to the bottom when it starts a new turn; steering a running turn leaves your scroll position alone.
 - The workflow run inspector loads only when expanded, refreshes when the run changes, and shows a retryable error instead of an empty panel.
-- Screen readers announce "Response ready", "Response failed", "Response stopped", or that approval or input is needed, once per turn, instead of a generic or repeated status.
+- Screen readers announce each approval or question that needs you (including several in one turn) and announce a turn's outcome ("Response ready", "Response failed" or "Response stopped") once, instead of a generic or repeated status.
 - `bun run dev` starts the server again; Bun-incompatible `node:sqlite` imports are loaded lazily per runtime.
 
 - Claude turn costs are no longer over-counted. The Agent SDK reports a running total per session,

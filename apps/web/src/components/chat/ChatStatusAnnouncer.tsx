@@ -40,60 +40,92 @@ const OUTCOME_MESSAGES: Record<Exclude<ChatStatusOutcome, "idle">, string> = {
   interrupted: "Response stopped",
 };
 
-const MAX_REMEMBERED_TRANSITIONS = 32;
+const MAX_REMEMBERED_OUTCOMES = 32;
+
+function isTerminalOutcome(outcome: ChatStatusOutcome): boolean {
+  return outcome === "completed" || outcome === "failed" || outcome === "interrupted";
+}
 
 interface AnnouncerState {
   readonly threadId: string;
   readonly lastOutcome: ChatStatusOutcome;
-  /** `turnId:outcome` transitions already announced in this thread. */
-  readonly announced: ReadonlyArray<string>;
+  readonly lastAttentionRequestId: string | null;
+  /** `turnId:outcome` terminal outcomes already announced in this thread. */
+  readonly announcedTerminal: ReadonlyArray<string>;
   readonly message: string;
+  /** Bumped per announcement so repeating the same text still changes the DOM. */
+  readonly sequence: number;
+}
+
+function initialState(props: {
+  threadId: string;
+  turnId: string | null;
+  outcome: ChatStatusOutcome;
+  attentionRequestId?: string | null;
+}): AnnouncerState {
+  return {
+    threadId: props.threadId,
+    lastOutcome: props.outcome,
+    lastAttentionRequestId: props.attentionRequestId ?? null,
+    announcedTerminal: [`${props.turnId}:${props.outcome}`],
+    message: "",
+    sequence: 0,
+  };
 }
 
 /**
- * One polite live region for coarse turn transitions. Each turn's outcome is
- * announced once: opening a thread reads nothing, streaming tokens never
- * speak, and a reconnect that briefly reports "working" does not replay an
- * outcome the reader already heard.
+ * One polite live region for coarse turn transitions. Opening a thread reads
+ * nothing and streaming tokens never speak. Every entry into working or into
+ * a wait for the user is announced, including each new approval or question
+ * in the same turn. A turn's final outcome is announced once, so it is not
+ * replayed when the same turn is reported again.
  */
 export function ChatStatusAnnouncer(props: {
   threadId: string;
   turnId: string | null;
   outcome: ChatStatusOutcome;
+  /** The pending approval or question the user is asked about, if any. */
+  attentionRequestId?: string | null;
 }) {
-  const [state, setState] = useState<AnnouncerState>(() => ({
-    threadId: props.threadId,
-    lastOutcome: props.outcome,
-    announced: [`${props.turnId}:${props.outcome}`],
-    message: "",
-  }));
+  const [state, setState] = useState<AnnouncerState>(() => initialState(props));
+  const attentionRequestId = props.attentionRequestId ?? null;
 
   if (state.threadId !== props.threadId) {
-    setState({
-      threadId: props.threadId,
+    setState(initialState(props));
+  } else if (
+    state.lastOutcome !== props.outcome ||
+    (state.lastAttentionRequestId !== attentionRequestId &&
+      (props.outcome === "awaiting-approval" || props.outcome === "awaiting-input"))
+  ) {
+    const next = {
+      ...state,
       lastOutcome: props.outcome,
-      announced: [`${props.turnId}:${props.outcome}`],
-      message: "",
-    });
-  } else if (state.lastOutcome !== props.outcome) {
-    const key = `${props.turnId}:${props.outcome}`;
-    const shouldAnnounce = props.outcome !== "idle" && !state.announced.includes(key);
-    setState({
-      threadId: state.threadId,
-      lastOutcome: props.outcome,
-      announced: shouldAnnounce
-        ? [...state.announced, key].slice(-MAX_REMEMBERED_TRANSITIONS)
-        : state.announced,
-      message:
-        shouldAnnounce && props.outcome !== "idle"
-          ? OUTCOME_MESSAGES[props.outcome]
-          : state.message,
-    });
+      lastAttentionRequestId: attentionRequestId,
+    };
+    if (props.outcome === "idle") {
+      setState(next);
+    } else if (isTerminalOutcome(props.outcome)) {
+      const key = `${props.turnId}:${props.outcome}`;
+      setState(
+        state.announcedTerminal.includes(key)
+          ? // Already heard: clear quietly rather than leave a stale status.
+            { ...next, message: "" }
+          : {
+              ...next,
+              announcedTerminal: [...state.announcedTerminal, key].slice(-MAX_REMEMBERED_OUTCOMES),
+              message: OUTCOME_MESSAGES[props.outcome],
+              sequence: state.sequence + 1,
+            },
+      );
+    } else {
+      setState({ ...next, message: OUTCOME_MESSAGES[props.outcome], sequence: state.sequence + 1 });
+    }
   }
 
   return (
     <div className="sr-only" aria-live="polite" aria-atomic="true">
       {state.message}
+      {state.message && state.sequence % 2 === 1 ? " " : ""}
     </div>
   );
 }

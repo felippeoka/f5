@@ -6,17 +6,26 @@ import { ProviderTurnDeliveryRepository } from "./Services/ProviderTurnDeliveryR
 /**
  * Which provider turn may complete a running workflow stage.
  *
- * - `any`: the stage has no recorded dispatch (legacy stage, no delivery
- *   outbox, or no delivery row for the command), so any finished turn on the
- *   stage thread counts, as before.
- * - `pending`: the stage's turn has not been accepted by the provider yet, or
- *   its delivery failed. No finished turn on the thread belongs to the stage.
+ * - `any`: the stage has no recorded dispatch (a legacy stage) or the server
+ *   runs without a delivery outbox, so any finished turn on the stage thread
+ *   counts, as before.
+ * - `pending`: the stage's turn has not been accepted by the provider yet, its
+ *   delivery failed, or its delivery row does not exist yet. Stages save their
+ *   dispatch id before dispatching, and the row is written with the
+ *   turn-start event, so in that window no finished turn belongs to the stage.
  * - `turn`: only the provider turn accepted for the stage's dispatch counts.
  */
 export type WorkflowStageDispatchTurn =
   | { readonly kind: "any" }
   | { readonly kind: "pending" }
   | { readonly kind: "turn"; readonly turnId: TurnId };
+
+/**
+ * Upper bound for the startup recheck of a finished stage's delivery. It runs
+ * before the workflow services subscribe to domain events and can call the
+ * provider, so it must not stretch that window.
+ */
+export const STARTUP_DISPATCH_RECHECK_TIMEOUT = "5 seconds";
 
 const ANY: WorkflowStageDispatchTurn = { kind: "any" };
 const PENDING: WorkflowStageDispatchTurn = { kind: "pending" };
@@ -51,8 +60,7 @@ export const makeWorkflowStageDispatchResolver = Effect.gen(function* () {
     }
     return repository.value.getByCommandId(dispatchCommandId).pipe(
       Effect.map((delivery): WorkflowStageDispatchTurn => {
-        if (!delivery) return ANY;
-        if (delivery.state === "accepted" && delivery.providerTurnId !== null) {
+        if (delivery?.state === "accepted" && delivery.providerTurnId !== null) {
           return { kind: "turn", turnId: delivery.providerTurnId };
         }
         return PENDING;
