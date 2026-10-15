@@ -161,7 +161,7 @@ function CodexLimits(props: {
               <QuotaMeter
                 key={slot}
                 label={window.label}
-                accessibleName={`Codex · ${window.label}`}
+                accessibleName={`${limit.name ?? limit.id} · ${window.label}`}
                 utilization={window.usedPercent}
                 resetsAt={window.resetsAt}
                 observedAt={snapshot.fetchedAt}

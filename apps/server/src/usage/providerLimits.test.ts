@@ -33,6 +33,39 @@ describe("provider limits", () => {
     expect(identity({ ...base, CURSOR_AUTH_TOKEN: "secret-token" })).not.toContain("secret");
   });
 
+  it("keeps history across rotations that do not change the account", () => {
+    const opencode = (environment: NodeJS.ProcessEnv) =>
+      providerLimitsIdentity({ provider: "opencode", environment });
+    const auth = (goKey: string, otherToken: string) =>
+      JSON.stringify({
+        "opencode-go": { type: "api", key: goKey },
+        anthropic: { type: "oauth", access: otherToken },
+      });
+    // Another provider's token refreshing inside the blob is not an account switch.
+    expect(opencode({ OPENCODE_AUTH_CONTENT: auth("go-a", "t1") })).toBe(
+      opencode({ OPENCODE_AUTH_CONTENT: auth("go-a", "t2") }),
+    );
+    expect(opencode({ OPENCODE_AUTH_CONTENT: auth("go-a", "t1") })).not.toBe(
+      opencode({ OPENCODE_AUTH_CONTENT: auth("go-b", "t1") }),
+    );
+    // The CLIProxy account ID identifies the account; rotating the hub key does not.
+    const hub = (key: string, account: string) =>
+      providerLimitsIdentity({
+        provider: "antigravity",
+        environment: {
+          F5_CLIPROXY_HUB_URL: "https://hub",
+          F5_CLIPROXY_ACCOUNT_ID: account,
+          F5_CLIPROXY_API_KEY: key,
+        },
+      });
+    expect(hub("key-1", "acct")).toBe(hub("key-2", "acct"));
+    expect(hub("key-1", "acct")).not.toBe(hub("key-1", "other"));
+    // A raw API key is the only account signal, so rotating it starts new history.
+    const cursor = (token: string) =>
+      providerLimitsIdentity({ provider: "cursor", environment: { CURSOR_AUTH_TOKEN: token } });
+    expect(cursor("v1")).not.toBe(cursor("v2"));
+  });
+
   it("uses Cursor dashboard percentages and rejects non-finite values", () => {
     expect(
       normalizeProviderLimits("cursor", {

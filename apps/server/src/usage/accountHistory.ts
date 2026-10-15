@@ -6,7 +6,9 @@ import {
 import { quotaWindowsFromSection } from "@t3tools/shared/usageLimit";
 import { Cause, Effect, Option, Schema } from "effect";
 import * as Semaphore from "effect/Semaphore";
+import { createHmac, randomBytes } from "node:crypto";
 
+import { ServerSecretStore } from "../auth/Services/ServerSecretStore.ts";
 import { UsageAccountHistoryRepository } from "../persistence/Services/UsageAccountHistory.ts";
 
 type Snapshot = NonNullable<AccountUsageSection["snapshot"]>;
@@ -52,8 +54,36 @@ export interface AccountHistoryRecorder {
   readonly hydrate: (account: UsageAccount, identity: string | null) => UsageAccount;
 }
 
+// Used only when protected secret storage is unavailable (e.g. tests): history
+// then matches within this process but not across restarts.
+const processIdentityKey = randomBytes(32);
+const IDENTITY_KEY_SECRET = "usage-account-identity-key";
+
+/**
+ * Loads the per-install key for persisted account identities. Identities can
+ * derive from credentials, so stored values are keyed HMACs rather than plain
+ * digests that could be checked against guessed secrets offline.
+ */
+const loadIdentityKey = Effect.gen(function* () {
+  const store = yield* Effect.serviceOption(ServerSecretStore);
+  if (Option.isNone(store)) return processIdentityKey;
+  return yield* store.value
+    .getOrCreateRandom(IDENTITY_KEY_SECRET, 32)
+    .pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning(
+          "Usage identity key unavailable; account history will not survive a restart",
+          Cause.pretty(cause),
+        ).pipe(Effect.as(processIdentityKey)),
+      ),
+    );
+});
+
 export const makeAccountHistoryRecorder = Effect.gen(function* () {
   const repository = yield* UsageAccountHistoryRepository;
+  const identityKey = yield* loadIdentityKey;
+  const protect = (identity: string) =>
+    `hmac:${createHmac("sha256", identityKey).update(identity).digest("hex")}`;
   const lock = yield* Semaphore.make(1);
   const persisted = new Map<string, PersistedSection>();
 
@@ -83,8 +113,9 @@ export const makeAccountHistoryRecorder = Effect.gen(function* () {
     });
   }
 
-  const observe: AccountHistoryRecorder["observe"] = (account, identity) =>
-    lock
+  const observe: AccountHistoryRecorder["observe"] = (account, accountIdentity) => {
+    const identity = protect(accountIdentity);
+    return lock
       .withPermits(1)(
         Effect.gen(function* () {
           const writes: Array<{
@@ -160,6 +191,7 @@ export const makeAccountHistoryRecorder = Effect.gen(function* () {
             : Effect.logWarning("Failed to persist account usage history", Cause.pretty(cause)),
         ),
       );
+  };
 
   const hydrate: AccountHistoryRecorder["hydrate"] = (account, identity) => ({
     ...account,
@@ -172,7 +204,7 @@ export const makeAccountHistoryRecorder = Effect.gen(function* () {
         return section;
       const stored = persisted.get(sectionKey(account.key, section.kind));
       if (!stored || stored.section.kind !== section.kind) return section;
-      if (identity !== null && stored.identity !== identity) return section;
+      if (identity !== null && stored.identity !== protect(identity)) return section;
       const snapshot =
         stored.section.kind === "codex-limits" && stored.section.snapshot
           ? {

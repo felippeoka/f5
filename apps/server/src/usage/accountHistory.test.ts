@@ -1,8 +1,9 @@
 import { assert, it } from "@effect/vitest";
 import type { AccountUsageSection, UsageAccount } from "@t3tools/contracts";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { ServerSecretStore } from "../auth/Services/ServerSecretStore.ts";
 import { UsageAccountHistoryRepositoryLive } from "../persistence/Layers/UsageAccountHistory.ts";
 import Migration0116 from "../persistence/Migrations/116_UsageAccountHistory.ts";
 import * as SqliteClient from "../persistence/NodeSqliteClient.ts";
@@ -149,6 +150,37 @@ it.layer(SqliteClient.layerMemory())("account history recorder", (it) => {
       assert.equal((yield* repository.listSnapshots).length, 0);
       yield* recorder.observe(observed, "id-b");
       assert.equal((yield* repository.listSnapshots).length, 1);
+    }).pipe(Effect.provide(UsageAccountHistoryRepositoryLive)),
+  );
+});
+
+const fixedKeyStore = (key: number) =>
+  Layer.succeed(ServerSecretStore, {
+    get: () => Effect.succeed(null),
+    set: () => Effect.void,
+    remove: () => Effect.void,
+    getOrCreateRandom: (_name, bytes) => Effect.succeed(new Uint8Array(bytes).fill(key)),
+  });
+
+it.layer(SqliteClient.layerMemory())("account identity protection", (it) => {
+  it.effect("stores keyed identities that match only under the same install key", () =>
+    Effect.gen(function* () {
+      yield* Migration0116;
+      const repository = yield* UsageAccountHistoryRepository;
+      const recorder = yield* makeAccountHistoryRecorder.pipe(Effect.provide(fixedKeyStore(1)));
+      yield* recorder.observe(
+        account("claude:a", [claudeSection("2026-10-15T10:00:00.000Z", 20)]),
+        "raw-identity",
+      );
+      const [row] = yield* repository.listSnapshots;
+      assert.match(row!.identity, /^hmac:[0-9a-f]{64}$/);
+      assert.notInclude(row!.identity, "raw-identity");
+
+      const restarted = yield* makeAccountHistoryRecorder.pipe(Effect.provide(fixedKeyStore(1)));
+      assert.isNotNull(restarted.hydrate(freshClaude, "raw-identity").sections[0]!.snapshot);
+      // A different install key cannot match the stored identity.
+      const otherInstall = yield* makeAccountHistoryRecorder.pipe(Effect.provide(fixedKeyStore(2)));
+      assert.isNull(otherInstall.hydrate(freshClaude, "raw-identity").sections[0]!.snapshot);
     }).pipe(Effect.provide(UsageAccountHistoryRepositoryLive)),
   );
 });

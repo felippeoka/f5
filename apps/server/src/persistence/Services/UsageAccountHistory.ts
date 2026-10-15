@@ -56,6 +56,12 @@ export interface UsageAccountHistoryRepositoryShape {
   readonly listSamplesSince: (
     sampledAt: string,
   ) => Effect.Effect<ReadonlyArray<QuotaSampleRow>, ProjectionRepositoryError>;
+  /**
+   * Age-based retention: deletes samples older than `before`, and snapshots
+   * older than `before` whose account is not in `keepAccountKeys`. Recent
+   * rows are never deleted, so a transient registry read cannot erase an
+   * account's history.
+   */
   readonly prune: (input: {
     readonly before: string;
     readonly keepAccountKeys: ReadonlyArray<string>;

@@ -50,9 +50,11 @@ const connection = vi.hoisted(() => ({
     lastErrorAt: null,
   },
 }));
+const settings = vi.hoisted(() => ({
+  current: { usagePriceOverrides: [] as Array<Record<string, unknown>> },
+}));
 vi.mock("../../hooks/useSettings", () => ({
-  useSettings: (select: (settings: { usagePriceOverrides: [] }) => unknown) =>
-    select({ usagePriceOverrides: [] }),
+  useSettings: (select: (value: typeof settings.current) => unknown) => select(settings.current),
   useUpdateSettings: () => ({ updateSettings: vi.fn() }),
 }));
 const listeners = vi.hoisted(() => ({
@@ -301,6 +303,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.resetAllMocks();
+  settings.current = { usagePriceOverrides: [] };
   focusManager.setFocused(undefined);
   onlineManager.setOnline(true);
   document.body.innerHTML = "";
@@ -838,16 +841,20 @@ describe("query-connected usage dashboard", () => {
       for (const listener of listeners.domain) listener({ type: "thread.created" });
       await new Promise((resolve) => setTimeout(resolve, 100));
       expect(api.getSummary).toHaveBeenCalledTimes(1);
-      // A burst of usage events collapses into one refresh.
+      // The first usage event refreshes immediately; the rest of the burst and
+      // a storage purge inside the 5-second window collapse into one trailing
+      // refresh.
       for (let index = 0; index < 5; index++)
         for (const listener of listeners.domain) listener({ type: "thread.usage-recorded" });
       await expect.poll(() => api.getSummary.mock.calls.length).toBe(2);
-      await new Promise((resolve) => setTimeout(resolve, 1_300));
-      expect(api.getSummary.mock.calls.length).toBeLessThanOrEqual(3);
-      const before = api.getSummary.mock.calls.length;
-      await new Promise((resolve) => setTimeout(resolve, 1_100));
       for (const listener of listeners.storage) listener();
-      await expect.poll(() => api.getSummary.mock.calls.length).toBe(before + 1);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      expect(api.getSummary).toHaveBeenCalledTimes(2);
+      await expect
+        .poll(() => api.getSummary.mock.calls.length, { timeout: 6_000, interval: 250 })
+        .toBe(3);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(api.getSummary).toHaveBeenCalledTimes(3);
       // Account snapshots are never re-probed by history events.
       expect(api.getAccounts).toHaveBeenCalledTimes(1);
     } finally {
@@ -1064,6 +1071,35 @@ describe("query-connected usage dashboard", () => {
       await expect.element(page.getByLabelText("Model")).toHaveValue("cursor-agent");
       await expect.element(page.getByRole("combobox", { name: /^Provider/ })).toHaveValue("cursor");
       await expect.element(page.getByLabelText("Input price")).toHaveFocus();
+    } finally {
+      await screen.unmount();
+      queryClient.clear();
+    }
+  });
+
+  it("prefills Set price from an existing override instead of blank rates", async () => {
+    settings.current = {
+      usagePriceOverrides: [
+        {
+          provider: "cursor",
+          model: "cursor-agent",
+          inputUsdPerMillion: 3,
+          outputUsdPerMillion: 15,
+          cacheReadUsdPerMillion: 0.3,
+          cacheWriteUsdPerMillion: null,
+        },
+      ],
+    };
+    api.getSummary.mockResolvedValue(summary());
+    api.getAccounts.mockResolvedValue(accounts());
+    const queryClient = client();
+    const screen = await renderDashboard(queryClient);
+    try {
+      await page.getByRole("button", { name: "Set price for cursor-agent" }).click();
+      await expect.element(page.getByLabelText("Input price")).toHaveValue(3);
+      await expect.element(page.getByLabelText("Output price")).toHaveValue(15);
+      await expect.element(page.getByLabelText("Cache read price")).toHaveValue(0.3);
+      await expect.element(page.getByLabelText("Cache write price")).toHaveValue(null);
     } finally {
       await screen.unmount();
       queryClient.clear();
@@ -1293,6 +1329,43 @@ describe("limits", () => {
       await expect.element(page.getByRole("heading", { name: "F5 activity" })).toBeVisible();
       if (state === "unavailable")
         await expect.element(page.getByText(/Showing data from/)).toBeVisible();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("gives each Codex rate-limit family's meters a distinct accessible name", async () => {
+    const [codexAccount] = accounts();
+    const limits = codexAccount!.sections[1]!;
+    const spark = { ...codex.rateLimits[0]!, id: "codex_spark", name: "Spark" };
+    const twoFamilies = {
+      ...codexAccount!,
+      sections: [
+        codexAccount!.sections[0]!,
+        {
+          ...limits,
+          snapshot: {
+            fetchedAt: codex.fetchedAt,
+            data: { rateLimits: [codex.rateLimits[0]!, spark] },
+          },
+        },
+      ],
+    } as UsageAccounts[number];
+    const screen = await render(
+      <UsageDashboardView
+        summary={summary()}
+        accounts={[twoFamilies]}
+        range="7d"
+        fetching={false}
+      />,
+    );
+    try {
+      await expect
+        .element(page.getByRole("progressbar", { name: "Codex · 5-hour limit" }))
+        .toBeVisible();
+      await expect
+        .element(page.getByRole("progressbar", { name: "Spark · 5-hour limit" }))
+        .toBeVisible();
     } finally {
       await screen.unmount();
     }

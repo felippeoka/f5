@@ -97,29 +97,38 @@ it.layer(SqliteClient.layerMemory())("UsageAccountHistoryRepository", (it) => {
         ],
         samples: [sample("2026-08-01T00:00:00.000Z", 3), sample("2026-10-15T08:00:00.000Z", 4)],
       });
+      yield* repository.recordObservation({
+        accountKey: "cursor:removed",
+        identity: "r",
+        snapshots: [
+          { sectionKind: "provider-limits", fetchedAt: "2026-08-01T00:00:00.000Z", dataJson: "{}" },
+        ],
+        samples: [sample("2026-08-01T00:00:00.000Z", 5)],
+      });
+      // "claude:a" is missing from the keep-list (e.g. mid registry reconcile)
+      // but its recent history survives; only old rows expire.
       yield* repository.prune({
         before: "2026-09-10T00:00:00.000Z",
         keepAccountKeys: ["codex:b"],
       });
       assert.deepStrictEqual(
-        (yield* repository.listSnapshots).map((row) => row.accountKey),
-        ["codex:b"],
+        (yield* repository.listSnapshots).map((row) => row.accountKey).toSorted(),
+        ["claude:a", "codex:b"],
       );
       assert.deepStrictEqual(
-        (yield* repository.listSamplesSince("2026-01-01T00:00:00.000Z")).map(
-          (row) => row.usedPercent,
-        ),
-        [4],
+        (yield* repository.listSamplesSince("2026-01-01T00:00:00.000Z"))
+          .map((row) => [row.accountKey, row.usedPercent])
+          .toSorted(),
+        [
+          ["claude:a", 2],
+          ["codex:b", 4],
+        ],
       );
-      // An empty keep-list only applies age retention; it never wipes accounts.
-      yield* repository.prune({ before: "2026-09-10T00:00:00.000Z", keepAccountKeys: [] });
-      assert.deepStrictEqual(
-        (yield* repository.listSnapshots).map((row) => row.accountKey),
-        ["codex:b"],
-      );
-      assert.equal((yield* repository.listSamplesSince("2026-01-01T00:00:00.000Z")).length, 1);
+      // An empty keep-list never deletes snapshots.
+      yield* repository.prune({ before: "2026-12-01T00:00:00.000Z", keepAccountKeys: [] });
+      assert.equal((yield* repository.listSnapshots).length, 2);
       yield* repository.deleteSnapshot("codex:b", "codex-limits");
-      assert.equal((yield* repository.listSnapshots).length, 0);
+      assert.equal((yield* repository.listSnapshots).length, 1);
     }).pipe(Effect.provide(UsageAccountHistoryRepositoryLive)),
   );
 

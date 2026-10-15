@@ -337,6 +337,8 @@ export type ProjectSettingsOverrides = typeof ProjectSettingsOverrides.Type;
 
 export const ServerSettings = Schema.Struct({
   usagePriceOverrides: Schema.Array(UsagePriceOverride).pipe(Schema.withDecodingDefault(() => [])),
+  /** Background account-limit sampling for quota history and forecasts. */
+  usageBackgroundSampling: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   autoResumeUsageLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   resumeActiveTurnsAfterRestart: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   defaultRuntimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(() => "full-access" as const)),
@@ -514,6 +516,7 @@ const PrHubSettingsPatch = Schema.Struct({
 
 export const ServerSettingsPatch = Schema.Struct({
   usagePriceOverrides: Schema.optionalKey(Schema.Array(UsagePriceOverride)),
+  usageBackgroundSampling: Schema.optionalKey(Schema.Boolean),
   autoResumeUsageLimitedThreads: Schema.optionalKey(Schema.Boolean),
   resumeActiveTurnsAfterRestart: Schema.optionalKey(Schema.Boolean),
   defaultRuntimeMode: Schema.optionalKey(RuntimeMode),

@@ -73,6 +73,7 @@ export function GeneralSettings() {
   const autoResumeUsageLimitedThreads = useSettings(
     (settings) => settings.autoResumeUsageLimitedThreads,
   );
+  const usageBackgroundSampling = useSettings((settings) => settings.usageBackgroundSampling);
   const defaultMergeMethod = useSettings((settings) => settings.prHubDefaultMergeMethod);
   const { updateSettings: updateServerSettings } = useUpdateSettings();
   const setDefaultMergeMethod = (value: "merge" | "squash" | "rebase" | null) => {
@@ -280,6 +281,19 @@ export function GeneralSettings() {
                 checked={autoResumeUsageLimitedThreads}
                 onCheckedChange={(value) =>
                   void updateServerSettings({ autoResumeUsageLimitedThreads: value })
+                }
+              />
+            }
+          />
+          <SettingsRow
+            title="Sample account limits in the background"
+            description="Periodically read account limits, even with the Usage page closed, to keep quota history and forecasts. Off: limits refresh only while you view them."
+            control={
+              <Switch
+                aria-label="Sample account limits in the background"
+                checked={usageBackgroundSampling}
+                onCheckedChange={(value) =>
+                  void updateServerSettings({ usageBackgroundSampling: value })
                 }
               />
             }

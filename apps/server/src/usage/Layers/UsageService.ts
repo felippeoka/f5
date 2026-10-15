@@ -238,6 +238,11 @@ const make = Effect.gen(function* () {
       const shadows = shadowAccounts(yield* registry.listUnavailable).map((shadow) => shadow.key);
       return [...current, ...shadows];
     }),
+    enabled: settingsService.getSettings.pipe(
+      Effect.map((settings) => settings.usageBackgroundSampling),
+      // Unreadable settings must not start background probing.
+      Effect.orElseSucceed(() => false),
+    ),
     permits,
     recorder,
     prune: historyRepository.prune,

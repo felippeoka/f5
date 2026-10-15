@@ -104,13 +104,15 @@ const make = Effect.gen(function* () {
       .withTransaction(
         Effect.gen(function* () {
           yield* sql`DELETE FROM usage_quota_samples WHERE sampled_at < ${input.before}`;
-          // An empty keep-list usually means the provider registry is
-          // momentarily empty (e.g. during a reload); never treat it as
-          // "delete every account".
+          // Orphaned snapshots (removed instances) expire by age too. An
+          // empty keep-list usually means the registry is momentarily empty,
+          // so it never deletes snapshots.
           if (input.keepAccountKeys.length === 0) return;
-          const keep = sql`WHERE NOT (${sql.in("account_key", [...input.keepAccountKeys])})`;
-          yield* sql`DELETE FROM usage_quota_samples ${keep}`;
-          yield* sql`DELETE FROM usage_account_snapshots ${keep}`;
+          yield* sql`
+            DELETE FROM usage_account_snapshots
+            WHERE fetched_at < ${input.before}
+              AND NOT (${sql.in("account_key", [...input.keepAccountKeys])})
+          `;
         }),
       )
       .pipe(Effect.mapError(toPersistenceSqlError("UsageAccountHistoryRepository.prune")));

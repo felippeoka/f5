@@ -65,7 +65,9 @@ const CHART_LABELS: Record<UsageMetric, string> = {
   turns: "Recorded turns chart",
 };
 
-const EVENT_THROTTLE_MS = 1_000;
+// Each refresh rebuilds the summary server-side (several SQLite passes), so
+// streaming turns refresh at most every 5 seconds.
+const EVENT_THROTTLE_MS = 5_000;
 
 function MetricCard(props: {
   readonly label: string;

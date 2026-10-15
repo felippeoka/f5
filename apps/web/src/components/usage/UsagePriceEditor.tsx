@@ -17,6 +17,15 @@ export interface UsagePriceDraft {
   readonly nonce: number;
 }
 
+function priceRates(price: UsagePriceOverride): Array<string> {
+  return [
+    String(price.inputUsdPerMillion),
+    String(price.outputUsdPerMillion),
+    price.cacheReadUsdPerMillion === null ? "" : String(price.cacheReadUsdPerMillion),
+    price.cacheWriteUsdPerMillion === null ? "" : String(price.cacheWriteUsdPerMillion),
+  ];
+}
+
 export function UsagePriceEditor({ draft }: { draft?: UsagePriceDraft | null }) {
   const client = useQueryClient();
   const prices = useSettings((settings) => settings.usagePriceOverrides);
@@ -33,10 +42,16 @@ export function UsagePriceEditor({ draft }: { draft?: UsagePriceDraft | null }) 
     if (!draft) return;
     setProvider(draft.provider);
     setModel(draft.model);
-    setRates(["", "", "", ""]);
+    // An existing override can still leave turns unpriced (missing token
+    // counts); start from it rather than blank rates.
+    const existing = prices.find(
+      (price) => price.provider === draft.provider && price.model === draft.model,
+    );
+    setRates(existing ? priceRates(existing) : ["", "", "", ""]);
     setError(null);
     setOpen(true);
     setFocusRequest(draft.nonce);
+    // Only a new draft (nonce) prefills; later price edits must not reset the form.
   }, [draft]);
   // Focus only after the details element has rendered open.
   useEffect(() => {
@@ -85,12 +100,7 @@ export function UsagePriceEditor({ draft }: { draft?: UsagePriceDraft | null }) 
             onClick={() => {
               setProvider(price.provider);
               setModel(price.model);
-              setRates([
-                String(price.inputUsdPerMillion),
-                String(price.outputUsdPerMillion),
-                price.cacheReadUsdPerMillion === null ? "" : String(price.cacheReadUsdPerMillion),
-                price.cacheWriteUsdPerMillion === null ? "" : String(price.cacheWriteUsdPerMillion),
-              ]);
+              setRates(priceRates(price));
             }}
           >
             Edit
