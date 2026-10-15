@@ -691,6 +691,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     rowCount,
     lastRowId,
   });
+  const followedTailNonceRef = useRef(followNextTailNonce);
   useEffect(() => {
     const previousTailSignature = previousTailSignatureRef.current;
     const nextTailSignature = {
@@ -702,7 +703,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     const didAdvanceTail =
       nextTailSignature.rowCount > previousTailSignature.rowCount ||
       nextTailSignature.lastRowId !== previousTailSignature.lastRowId;
-    const shouldAutoFollow = didAdvanceTail && isAtEndRef.current;
+    // A follow request is honored even if `isAtEndRef` was cleared since the
+    // layout effect below set it: the send's own animated scroll can emit
+    // scroll events from the old position before this passive effect runs.
+    const followRequested = followedTailNonceRef.current !== followNextTailNonce;
+    followedTailNonceRef.current = followNextTailNonce;
+    const shouldAutoFollow = followRequested || (didAdvanceTail && isAtEndRef.current);
     if (!shouldAutoFollow) {
       return;
     }
@@ -730,7 +736,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         window.cancelAnimationFrame(frame);
       }
     };
-  }, [lastRowId, listRef, onIsAtEndChange, rowCount]);
+  }, [followNextTailNonce, lastRowId, listRef, onIsAtEndChange, rowCount]);
 
   // Runs before the tail-follow effect above, so rows committed together with
   // the nonce (a bootstrap send's optimistic row) are followed too.
