@@ -1,6 +1,7 @@
+import { noteWsConnectionOpened, noteWsSynchronized } from "../wsConnectionState";
 import "../index.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 import type { ReactNode } from "react";
 import FileViewPanel from "./FileViewPanel";
@@ -40,6 +41,10 @@ vi.mock("./DiffPanelShell", () => ({
   DiffPanelLoadingState: () => <div>Loading</div>,
 }));
 vi.mock("@pierre/diffs/react", () => ({ File: () => <div>Rendered file</div> }));
+beforeEach(() => {
+  noteWsConnectionOpened();
+  noteWsSynchronized();
+});
 afterEach(() => {
   vi.clearAllMocks();
   route.fileViewPath = "app.ts";
@@ -92,7 +97,10 @@ it("preserves the draft base and blocks saves when a refetch arrives during edit
     await screen.getByRole("textbox").fill("merged edit");
     await screen.getByRole("button", { name: "Save file", exact: true }).click();
     expect(api.writeFile).toHaveBeenCalledWith(
-      expect.objectContaining({ contents: "merged edit", expectedContentSha256: "agent-hash" }),
+      expect.objectContaining({
+        contents: "merged edit",
+        condition: { type: "match", contentSha256: "agent-hash" },
+      }),
     );
   } finally {
     await screen.unmount();

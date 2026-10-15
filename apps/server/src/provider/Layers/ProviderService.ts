@@ -1,3 +1,4 @@
+import { DeliveryAttemptContext } from "../deliveryAttemptContext";
 import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
 import { ComputerAutomationBroker } from "../../computer/ComputerAutomationBroker";
 import { CheckpointStore } from "../../checkpointing/Services/CheckpointStore.ts";
@@ -334,6 +335,17 @@ function toInstructionContextFromSessionStartInput(
 const makeProviderService = (options?: ProviderServiceLiveOptions) =>
   Effect.gen(function* () {
     const nativeScope = yield* Effect.scope;
+    const historyRuntimeId = randomUUID();
+    const submissionTokens = new Map<ThreadId, symbol>();
+    const submissionCompletions = new Map<
+      symbol,
+      {
+        threadId: ThreadId;
+        turnId: TurnId | undefined;
+        terminalIds: Set<TurnId>;
+        done: Deferred.Deferred<void, import("../Errors").ProviderServiceError>;
+      }
+    >();
     const analytics = yield* Effect.service(AnalyticsService);
     const canonicalEventLogger =
       options?.canonicalEventLogger ??
@@ -580,6 +592,16 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             );
           }
           return;
+        }
+        if (event.type === "turn.completed" && event.turnId) {
+          for (const [id, completion] of submissionCompletions) {
+            if (completion.threadId !== event.threadId) continue;
+            if (completion.turnId === event.turnId) {
+              yield* Deferred.succeed(completion.done, undefined);
+              submissionCompletions.delete(id);
+            } else if (completion.turnId === undefined && completion.terminalIds.size < 16)
+              completion.terminalIds.add(event.turnId);
+          }
         }
         yield* persistResumeCursorFromRuntimeEvent(event);
         if (event.type === "user-input.requested" && event.payload.elicitation) {
@@ -1537,6 +1559,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           ...parsed,
           attachments: parsed.attachments ?? [],
         };
+        const submissionToken = Symbol("provider-submission");
         if (!input.input && input.attachments.length === 0) {
           return yield* toValidationError(
             "ProviderService.sendTurn",
@@ -1554,96 +1577,163 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         let metricProvider = "unknown";
         let metricModel = input.model;
         return yield* Effect.gen(function* () {
-          const routed = yield* resolveRoutableSession({
-            threadId: input.threadId,
-            operation: "ProviderService.sendTurn",
-            allowRecovery: input.expectedTurnId === undefined,
-            binding,
-          });
-          metricProvider = routed.adapter.provider;
-          if (
-            (routed.adapter.provider === "grok" ||
-              routed.adapter.provider === "antigravity" ||
-              routed.adapter.provider === "muse") &&
-            input.workflowExecutionProfile?.endsWith("readonly")
-          ) {
-            return yield* toValidationError(
-              "ProviderService.sendTurn",
-              `${PROVIDER_DISPLAY_NAMES[routed.adapter.provider]} cannot enforce read-only workflow turns.`,
-            );
-          }
-          metricModel = input.model;
-          yield* Effect.annotateCurrentSpan({
-            "provider.kind": routed.adapter.provider,
-            ...(input.model ? { "provider.model": input.model } : {}),
-          });
-          const limitError = getProviderAttachmentLimitError(
-            input.attachments,
-            routed.adapter.provider,
-          );
-          if (limitError) return yield* toValidationError("ProviderService.sendTurn", limitError);
-          const attachmentPaths = input.attachments.map((attachment) => {
-            switch (attachment.type) {
-              case "file":
-              case "image": {
-                const localPath = resolveAttachmentPath({
-                  attachmentsDir: serverConfig.attachmentsDir,
-                  attachment,
+          const { routed, nativeAttachments, resolvedAttachments, generation, token } =
+            yield* withProviderThreadAccess(
+              input.threadId,
+              Effect.gen(function* () {
+                const routed = yield* resolveRoutableSession({
+                  threadId: input.threadId,
+                  operation: "ProviderService.sendTurn",
+                  allowRecovery: input.expectedTurnId === undefined,
+                  binding,
                 });
-                return { attachment, localPath };
-              }
-              default:
-                throw new Error(
-                  `Unsupported provider attachment type '${String((attachment as { type?: unknown }).type)}'.`,
-                );
-            }
-          });
-          const missingAttachmentIds = (yield* Effect.promise(() =>
-            Promise.all(
-              attachmentPaths.map(async ({ attachment, localPath }) => {
-                if (localPath === null) return attachment.id;
-                try {
-                  const current = await lstat(localPath);
-                  return current.isFile() && current.size === attachment.sizeBytes
-                    ? null
-                    : attachment.id;
-                } catch {
-                  return attachment.id;
+                metricProvider = routed.adapter.provider;
+                if (
+                  (routed.adapter.provider === "grok" ||
+                    routed.adapter.provider === "antigravity" ||
+                    routed.adapter.provider === "muse") &&
+                  input.workflowExecutionProfile?.endsWith("readonly")
+                ) {
+                  return yield* toValidationError(
+                    "ProviderService.sendTurn",
+                    `${PROVIDER_DISPLAY_NAMES[routed.adapter.provider]} cannot enforce read-only workflow turns.`,
+                  );
                 }
+                metricModel = input.model;
+                yield* Effect.annotateCurrentSpan({
+                  "provider.kind": routed.adapter.provider,
+                  ...(input.model ? { "provider.model": input.model } : {}),
+                });
+                const limitError = getProviderAttachmentLimitError(
+                  input.attachments,
+                  routed.adapter.provider,
+                );
+                if (limitError)
+                  return yield* toValidationError("ProviderService.sendTurn", limitError);
+                const attachmentPaths = input.attachments.map((attachment) => {
+                  switch (attachment.type) {
+                    case "file":
+                    case "image": {
+                      const localPath = resolveAttachmentPath({
+                        attachmentsDir: serverConfig.attachmentsDir,
+                        attachment,
+                      });
+                      return { attachment, localPath };
+                    }
+                    default:
+                      throw new Error(
+                        `Unsupported provider attachment type '${String((attachment as { type?: unknown }).type)}'.`,
+                      );
+                  }
+                });
+                const missingAttachmentIds = (yield* Effect.promise(() =>
+                  Promise.all(
+                    attachmentPaths.map(async ({ attachment, localPath }) => {
+                      if (localPath === null) return attachment.id;
+                      try {
+                        const current = await lstat(localPath);
+                        return current.isFile() && current.size === attachment.sizeBytes
+                          ? null
+                          : attachment.id;
+                      } catch {
+                        return attachment.id;
+                      }
+                    }),
+                  ),
+                )).filter((id): id is string => id !== null);
+                if (missingAttachmentIds.length > 0) {
+                  return yield* toValidationError(
+                    "ProviderService.sendTurn",
+                    `The following attachments changed or are no longer available: ${missingAttachmentIds.join(", ")}`,
+                  );
+                }
+                const resolvedAttachments = attachmentPaths.map(({ attachment, localPath }) => ({
+                  ...attachment,
+                  localPath: localPath!,
+                }));
+                const nativeAttachments = nativeProviderAttachments(
+                  input.attachments,
+                  routed.adapter.provider,
+                );
+                if (input.expectedTurnId !== undefined && !routed.adapter.steerTurn) {
+                  return yield* new ProviderTurnDeliveryError({
+                    certainty: "not_sent",
+                    retryable: false,
+                    detail: "This provider does not support steering.",
+                  });
+                }
+                // Steering re-checks the routed generation and executable support, so
+                // a stale browser cannot steer a session restarted since it looked.
+                if (input.expectedTurnId !== undefined) {
+                  yield* assertSessionAction({
+                    threadId: input.threadId,
+                    action: "steer",
+                    ...(input.expectedSessionGeneration !== undefined
+                      ? { expectedGeneration: input.expectedSessionGeneration }
+                      : {}),
+                  });
+                }
+                const generation = yield* nativeGeneration(input.threadId);
+                if (input.expectedTurnId === undefined) {
+                  if (submissionTokens.has(input.threadId))
+                    return yield* new ProviderTurnDeliveryError({
+                      certainty: "not_sent",
+                      retryable: true,
+                      detail: "An earlier submission still owns this thread.",
+                    });
+                  submissionTokens.set(input.threadId, submissionToken);
+                }
+                return {
+                  routed,
+                  nativeAttachments,
+                  resolvedAttachments,
+                  generation,
+                  token: submissionToken,
+                };
               }),
-            ),
-          )).filter((id): id is string => id !== null);
-          if (missingAttachmentIds.length > 0) {
-            return yield* toValidationError(
-              "ProviderService.sendTurn",
-              `The following attachments changed or are no longer available: ${missingAttachmentIds.join(", ")}`,
             );
-          }
-          const resolvedAttachments = attachmentPaths.map(({ attachment, localPath }) => ({
-            ...attachment,
-            localPath: localPath!,
-          }));
-          const nativeAttachments = nativeProviderAttachments(
-            input.attachments,
-            routed.adapter.provider,
-          );
-          if (input.expectedTurnId !== undefined && !routed.adapter.steerTurn) {
-            return yield* new ProviderTurnDeliveryError({
-              certainty: "not_sent",
-              retryable: false,
-              detail: "This provider does not support steering.",
-            });
-          }
-          // Steering re-checks the routed generation and executable support, so
-          // a stale browser cannot steer a session restarted since it looked.
-          if (input.expectedTurnId !== undefined) {
-            yield* assertSessionAction({
-              threadId: input.threadId,
-              action: "steer",
-              ...(input.expectedSessionGeneration !== undefined
-                ? { expectedGeneration: input.expectedSessionGeneration }
-                : {}),
-            });
+          const deliveryAttempt = yield* DeliveryAttemptContext;
+          let nativeHistoryIdentity: string | null = null;
+          if (deliveryAttempt) {
+            const baseline = yield* routed.adapter
+              .readThread(input.threadId)
+              .pipe(Effect.catchCause(() => Effect.succeed(null)));
+            nativeHistoryIdentity = baseline?.history?.identity ?? null;
+            yield* deliveryAttempt.prepared(
+              baseline
+                ? {
+                    ...baseline,
+                    history: baseline.history
+                      ? {
+                          ...baseline.history,
+                          runtimeId:
+                            baseline.history.provenance === "runtime-local"
+                              ? `${historyRuntimeId}:${generation}`
+                              : null,
+                        }
+                      : {
+                          identity: null,
+                          provenance: "unavailable",
+                          coverage: "unavailable",
+                          boundary: null,
+                          runtimeId: null,
+                        },
+                  }
+                : null,
+            );
+            const stillCurrent = yield* withProviderThreadAccess(
+              input.threadId,
+              nativeGeneration(input.threadId),
+            );
+            if (
+              stillCurrent !== generation ||
+              (input.expectedTurnId === undefined && submissionTokens.get(input.threadId) !== token)
+            )
+              return yield* new ProviderTurnDeliveryError({
+                certainty: "not_sent",
+                retryable: false,
+                detail: "The provider session changed before dispatch.",
+              });
           }
           const turn = yield* input.expectedTurnId !== undefined
             ? routed.adapter.steerTurn!({
@@ -1657,57 +1747,88 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 attachments: nativeAttachments,
                 resolvedAttachments,
               });
-          const inlineIds = new Set(nativeAttachments.map((attachment) => attachment.id));
-          const overflowImages = input.attachments.filter(
-            (attachment) => attachment.type === "image" && !inlineIds.has(attachment.id),
-          );
-          if (overflowImages.length)
-            yield* publishRuntimeEvent({
-              type: "runtime.warning",
-              eventId: EventId.makeUnsafe(randomUUID()),
-              provider: routed.adapter.provider,
-              threadId: input.threadId,
-              turnId: turn.turnId,
-              createdAt: new Date().toISOString(),
-              payload: {
-                category: "provider",
-                message: `${overflowImages.length} image(s) delivered as files because this provider's inline image limit was reached. Saved paths remain available to the agent.`,
-                actionable: false,
-              },
+          if (deliveryAttempt)
+            yield* deliveryAttempt.accepted(turn, {
+              runtimeGeneration: generation,
+              nativeHistoryIdentity,
             });
-          const persistedBinding = yield* directory.getBinding(input.threadId);
-          const persistedRuntimePayload = Option.match(persistedBinding, {
-            onNone: () => undefined,
-            onSome: (binding) => readPersistedRuntimePayloadRecord(binding.runtimePayload),
-          });
-          const persistedInstructionContext = Option.match(persistedBinding, {
-            onNone: () => undefined,
-            onSome: (binding) => readPersistedInstructionContext(binding.runtimePayload),
-          });
-          yield* directory.upsert({
-            threadId: input.threadId,
-            provider: routed.adapter.provider,
-            providerInstanceId: routed.instanceId,
-            status: "running",
-            ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
-            runtimePayload: {
-              ...persistedRuntimePayload,
-              activeTurnId: turn.turnId,
-              lastRuntimeEvent: "provider.sendTurn",
-              lastRuntimeEventAt: new Date().toISOString(),
-              instructionContext: persistedInstructionContext ?? null,
-              firstTurnSent: true,
-            },
-          });
-          yield* analytics.record("provider.turn.sent", {
-            provider: routed.adapter.provider,
-            model: input.model,
-            interactionMode: input.interactionMode,
-            attachmentCount: input.attachments.length,
-            hasInput: typeof input.input === "string" && input.input.trim().length > 0,
-          });
-          return turn;
+          return yield* withProviderThreadAccess(
+            input.threadId,
+            Effect.gen(function* () {
+              const persistedBinding = yield* directory.getBinding(input.threadId);
+              if (
+                Option.isNone(persistedBinding) ||
+                readPersistedSessionGeneration(persistedBinding.value.runtimePayload) !==
+                  generation ||
+                (input.expectedTurnId === undefined &&
+                  submissionTokens.get(input.threadId) !== token)
+              ) {
+                return yield* new ProviderTurnDeliveryError({
+                  certainty: "unknown",
+                  retryable: false,
+                  detail: "The provider session changed while dispatching this turn.",
+                });
+              }
+              const inlineIds = new Set(nativeAttachments.map((attachment) => attachment.id));
+              const overflowImages = input.attachments.filter(
+                (attachment) => attachment.type === "image" && !inlineIds.has(attachment.id),
+              );
+              if (overflowImages.length)
+                yield* publishRuntimeEvent({
+                  type: "runtime.warning",
+                  eventId: EventId.makeUnsafe(randomUUID()),
+                  provider: routed.adapter.provider,
+                  threadId: input.threadId,
+                  turnId: turn.turnId,
+                  createdAt: new Date().toISOString(),
+                  payload: {
+                    category: "provider",
+                    message: `${overflowImages.length} image(s) delivered as files because this provider's inline image limit was reached. Saved paths remain available to the agent.`,
+                    actionable: false,
+                  },
+                });
+              const persistedRuntimePayload = Option.match(persistedBinding, {
+                onNone: () => undefined,
+                onSome: (binding) => readPersistedRuntimePayloadRecord(binding.runtimePayload),
+              });
+              const persistedInstructionContext = Option.match(persistedBinding, {
+                onNone: () => undefined,
+                onSome: (binding) => readPersistedInstructionContext(binding.runtimePayload),
+              });
+              yield* directory.upsert({
+                threadId: input.threadId,
+                provider: routed.adapter.provider,
+                providerInstanceId: routed.instanceId,
+                status: "running",
+                ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
+                runtimePayload: {
+                  ...persistedRuntimePayload,
+                  activeTurnId: routed.adapter.capabilities.turnCompletionOnReturn
+                    ? null
+                    : turn.turnId,
+                  lastRuntimeEvent: "provider.sendTurn",
+                  lastRuntimeEventAt: new Date().toISOString(),
+                  instructionContext: persistedInstructionContext ?? null,
+                  firstTurnSent: true,
+                },
+              });
+              yield* analytics.record("provider.turn.sent", {
+                provider: routed.adapter.provider,
+                model: input.model,
+                interactionMode: input.interactionMode,
+                attachmentCount: input.attachments.length,
+                hasInput: typeof input.input === "string" && input.input.trim().length > 0,
+              });
+              return turn;
+            }),
+          );
         }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (submissionTokens.get(input.threadId) === submissionToken)
+                submissionTokens.delete(input.threadId);
+            }),
+          ),
           withAccountAdmission(serverConfig.stateDir, instanceId, "ProviderService.sendTurn"),
           withMetrics({
             counter: providerTurnsTotal,
@@ -1948,6 +2069,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           schema: ProviderStopSessionInput,
           payload: rawInput,
         });
+        submissionTokens.delete(input.threadId);
         let metricProvider = "unknown";
         return yield* Effect.gen(function* () {
           const routed = yield* resolveRoutableSession({
@@ -1994,6 +2116,11 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               wasActive: routed.isActive,
             },
           );
+          for (const [id, completion] of submissionCompletions)
+            if (completion.threadId === input.threadId && completion.turnId !== undefined) {
+              yield* Deferred.succeed(completion.done, undefined);
+              submissionCompletions.delete(id);
+            }
           yield* analytics.record("provider.session.stopped", {
             provider: routed.adapter.provider,
           });
@@ -2129,7 +2256,25 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           "provider.kind": routed.adapter.provider,
           "provider.thread_id": threadId,
         });
-        return yield* routed.adapter.readThread(routed.threadId);
+        const snapshot = yield* routed.adapter.readThread(routed.threadId);
+        return {
+          ...snapshot,
+          history: snapshot.history
+            ? {
+                ...snapshot.history,
+                runtimeId:
+                  snapshot.history.provenance === "runtime-local"
+                    ? `${historyRuntimeId}:${yield* nativeGeneration(threadId)}`
+                    : null,
+              }
+            : {
+                identity: null,
+                provenance: "unavailable" as const,
+                coverage: "unavailable" as const,
+                boundary: null,
+                runtimeId: null,
+              },
+        };
       });
 
     const rollbackConversation: ProviderServiceShape["rollbackConversation"] = (rawInput) =>
@@ -2550,12 +2695,48 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       ),
     );
 
+    const submitTurn: NonNullable<ProviderServiceShape["submitTurn"]> = (input) =>
+      Effect.gen(function* () {
+        const acceptance = yield* Deferred.make<
+          import("@t3tools/contracts").ProviderTurnStartResult,
+          import("../Errors").ProviderServiceError
+        >();
+        const completion = yield* Deferred.make<void, import("../Errors").ProviderServiceError>();
+        const id = Symbol("owned-submission");
+        const state = {
+          threadId: input.threadId,
+          turnId: undefined as TurnId | undefined,
+          terminalIds: new Set<TurnId>(),
+          done: completion,
+        };
+        submissionCompletions.set(id, state);
+        yield* Effect.forkIn(
+          Effect.gen(function* () {
+            const result = yield* Effect.exit(sendTurn(input));
+            yield* Deferred.done(acceptance, result);
+            if (result._tag === "Failure") {
+              yield* Deferred.failCause(completion, result.cause);
+              submissionCompletions.delete(id);
+              return;
+            }
+            state.turnId = result.value.turnId;
+            if (state.terminalIds.has(result.value.turnId)) {
+              yield* Deferred.succeed(completion, undefined);
+              submissionCompletions.delete(id);
+            }
+          }),
+          nativeScope,
+        );
+        return { acceptance: Deferred.await(acceptance), completion: Deferred.await(completion) };
+      });
+
     return {
       nativeOperations,
       renameThread,
       startSession: (threadId, input) =>
         withProviderThreadAccess(threadId, startSession(threadId, input)),
-      sendTurn: (input) => withProviderThreadAccess(input.threadId, sendTurn(input)),
+      submitTurn,
+      sendTurn: (input) => submitTurn(input).pipe(Effect.flatMap((handle) => handle.acceptance)),
       interruptTurn: (input) => withProviderThreadAccess(input.threadId, interruptTurn(input)),
       respondToRequest: (input) =>
         withProviderThreadAccess(input.threadId, respondToRequest(input)),

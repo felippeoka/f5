@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { killProcessTree } from "@t3tools/shared/processTree";
 import { BoundedTerminalHistory } from "../BoundedTerminalHistory";
 import { readTerminalHistory } from "../historyPersistence";
@@ -26,6 +27,8 @@ import { createLogger } from "../../logger";
 import {
   increment,
   terminalRestartsTotal,
+  terminalSnapshotsTotal,
+  terminalStateChangesTotal,
   terminalSessionsTotal,
 } from "../../observability/Metrics.ts";
 import {
@@ -254,6 +257,8 @@ interface TerminalManagerOptions {
 }
 
 export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> {
+  private readonly epoch = randomUUID();
+  private readonly revisions = new Map<string, { generation: number; revision: number }>();
   private readonly sessions = new Map<string, TerminalSessionState>();
   private readonly accountConfig: ServerConfigShape | undefined;
   private readonly logsDir: string;
@@ -340,10 +345,22 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
         existing.cwd = input.cwd;
         existing.runtimeEnv = nextRuntimeEnv;
         existing.history.clear();
+        this.emitEvent({
+          type: "cleared",
+          threadId: existing.threadId,
+          terminalId: existing.terminalId,
+          createdAt: new Date().toISOString(),
+        });
         await this.persistHistory(existing.threadId, existing.terminalId, existing.history.value());
       } else if (existing.status === "exited" || existing.status === "error") {
         existing.runtimeEnv = nextRuntimeEnv;
         existing.history.clear();
+        this.emitEvent({
+          type: "cleared",
+          threadId: existing.threadId,
+          terminalId: existing.terminalId,
+          createdAt: new Date().toISOString(),
+        });
         await this.persistHistory(existing.threadId, existing.terminalId, existing.history.value());
       } else if (currentRuntimeEnv !== nextRuntimeEnv) {
         existing.runtimeEnv = nextRuntimeEnv;
@@ -363,6 +380,14 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
         existing.rows = targetRows;
         existing.process.resize(targetCols, targetRows);
         existing.updatedAt = new Date().toISOString();
+        this.emitEvent({
+          type: "resized",
+          threadId: existing.threadId,
+          terminalId: existing.terminalId,
+          createdAt: existing.updatedAt,
+          cols: targetCols,
+          rows: targetRows,
+        });
       }
 
       return this.snapshot(existing);
@@ -395,6 +420,14 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     session.rows = input.rows;
     session.updatedAt = new Date().toISOString();
     session.process.resize(input.cols, input.rows);
+    this.emitEvent({
+      type: "resized",
+      threadId: input.threadId,
+      terminalId: input.terminalId,
+      createdAt: session.updatedAt,
+      cols: input.cols,
+      rows: input.rows,
+    });
   }
 
   async clear(raw: TerminalClearInput): Promise<void> {
@@ -403,13 +436,13 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       const session = this.requireSession(input.threadId, input.terminalId);
       session.history.clear();
       session.updatedAt = new Date().toISOString();
-      await this.persistHistory(input.threadId, input.terminalId, session.history.value());
       this.emitEvent({
         type: "cleared",
         threadId: input.threadId,
         terminalId: input.terminalId,
         createdAt: new Date().toISOString(),
       });
+      await this.persistHistory(input.threadId, input.terminalId, session.history.value());
     });
   }
 
@@ -453,6 +486,12 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       const rows = input.rows ?? session.rows;
 
       session.history.clear();
+      this.emitEvent({
+        type: "cleared",
+        threadId: input.threadId,
+        terminalId: input.terminalId,
+        createdAt: new Date().toISOString(),
+      });
       await this.persistHistory(input.threadId, input.terminalId, session.history.value());
       await this.startSession(session, { ...input, cols, rows }, "restarted");
       return this.snapshot(session);
@@ -1150,22 +1189,60 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     return session;
   }
 
+  readSnapshot(input: { threadId: string; terminalId?: string }): TerminalSessionSnapshot | null {
+    recordTerminalMetric(increment(terminalSnapshotsTotal, {}));
+    const session = this.sessions.get(
+      toSessionKey(input.threadId, input.terminalId ?? DEFAULT_TERMINAL_ID),
+    );
+    return session ? this.snapshot(session) : null;
+  }
+
+  private revision(session: { threadId: string; terminalId: string }) {
+    const key = toSessionKey(session.threadId, session.terminalId);
+    let state = this.revisions.get(key);
+    if (!state) {
+      state = { generation: 0, revision: 0 };
+      this.revisions.set(key, state);
+    }
+    return state;
+  }
+
   private snapshot(session: TerminalSessionState): TerminalSessionSnapshot {
     return {
+      epoch: this.epoch,
+      ...this.revision(session),
       threadId: session.threadId,
       terminalId: session.terminalId,
       cwd: session.cwd,
       status: session.status,
       pid: session.pid,
       history: session.history.value(),
+      cols: session.cols,
+      rows: session.rows,
       exitCode: session.exitCode,
       exitSignal: session.exitSignal,
       updatedAt: session.updatedAt,
     };
   }
 
-  private emitEvent(event: TerminalEvent): void {
-    this.emit("event", event);
+  private emitEvent(
+    event: TerminalEvent extends infer E
+      ? E extends TerminalEvent
+        ? Omit<E, "epoch" | "generation" | "revision">
+        : never
+      : never,
+  ): void {
+    const state = this.revision(event);
+    if (event.type === "started" || event.type === "restarted") state.generation++;
+    state.revision++;
+    recordTerminalMetric(increment(terminalStateChangesTotal, { eventType: event.type }));
+    const version = { epoch: this.epoch, ...state };
+    // No await between snapshot capture, revision and publication.
+    this.emit("event", {
+      ...event,
+      ...version,
+      ...("snapshot" in event ? { snapshot: { ...event.snapshot, ...version } } : {}),
+    });
   }
 
   private historyPath(threadId: string, terminalId: string): string {
@@ -1254,6 +1331,7 @@ export const TerminalManagerLive = Layer.effect(
     });
 
     return {
+      snapshot: (input) => Effect.sync(() => runtime.readSnapshot(input)),
       open: (input) => openTerminal(input).pipe(Effect.withSpan("terminal.open")),
       write: (input) =>
         Effect.tryPromise({

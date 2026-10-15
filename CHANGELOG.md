@@ -20,6 +20,17 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 
 ## [Unreleased]
 
+### Reliability
+
+- Keep stop, approvals, user-input answers and supported steering responsive while a provider prompt is pending, and prevent late results from reviving a stopped generation.
+- Run durable deliveries independently across threads, scan a bounded rotating backlog, retain delivery reservations, and preserve unknown history as ambiguous recovery evidence.
+- Save workspace files with explicit create or hash-match conditions, cross-profile connection-owned locks and atomic installation. Artifact exports never overwrite an existing file.
+- Persist revisioned editor draft branches in IndexedDB with explicit recovery choices and concurrent-window discovery.
+- Recover terminals with a read-only revisioned snapshot and bounded event replay, preserving clear and lifecycle ordering.
+- Reserve separate RPC lanes for stop, answers and recovery, reject overload with retryable busy responses, and bound startup event buffering.
+- Keep reading, copying and local drafting available during outages. Server changes resume only after synchronization; reconnect never sends a pending mutation automatically.
+- Bump the wire protocol from 20 to 21 for conditional writes, terminal revisions and busy responses.
+
 ### Added
 
 - Error boundaries around each route and each right-panel tab: a failing page or tab shows "Try again" and "Copy error report" in place while the sidebar, composer and other tabs keep working.

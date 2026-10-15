@@ -1,3 +1,4 @@
+import { isReadOnlyRpc } from "@t3tools/shared/rpcScheduling";
 import {
   getProtocolState,
   requireProtocolUpgrade,
@@ -59,7 +60,13 @@ export class WsRequestError extends Error {
   readonly code: string | undefined;
   readonly checkoutConflict: GitCheckoutConflict | undefined;
 
-  constructor(message: string, code?: string, checkoutConflict?: GitCheckoutConflict) {
+  constructor(
+    message: string,
+    code?: string,
+    checkoutConflict?: GitCheckoutConflict,
+    readonly retryable = false,
+    readonly retryAfterMs?: number,
+  ) {
     super(message);
     this.name = "WsRequestError";
     this.code = code;
@@ -237,6 +244,15 @@ export class WsTransport {
       throw new Error("Request method is required");
     }
 
+    const connection = getWsConnectionState();
+    if (!isReadOnlyRpc(method) && (connection.phase !== "connected" || !connection.synchronized)) {
+      throw new WsRequestError(
+        "Server changes are unavailable until reconnection and synchronization finish. Your draft is preserved.",
+        "ConnectionNotReady",
+        undefined,
+        true,
+      );
+    }
     const id = String(this.nextId++);
     const body = params != null ? { ...params, _tag: method } : { _tag: method };
     const envelope: WsRequestEnvelope = { id, body };
@@ -617,6 +633,8 @@ export class WsTransport {
           message.error.message,
           message.error.code,
           message.error.checkoutConflict,
+          message.error.retryable,
+          message.error.retryAfterMs,
         ),
       );
       return;

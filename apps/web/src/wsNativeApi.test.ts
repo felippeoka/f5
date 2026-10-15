@@ -354,6 +354,9 @@ describe("wsNativeApi", () => {
     api.orchestration.onDomainEvent(onDomainEvent);
 
     const terminalEvent = {
+      epoch: "test",
+      generation: 1,
+      revision: 1,
       threadId: "thread-1",
       terminalId: "terminal-1",
       createdAt: "2026-02-24T00:00:00.000Z",
@@ -424,12 +427,14 @@ describe("wsNativeApi", () => {
     await api.projects.writeFile({
       cwd: "/tmp/project",
       relativePath: "plan.md",
+      condition: { type: "create" },
       contents: "# Plan\n",
     });
 
     expect(requestMock).toHaveBeenCalledWith(WS_METHODS.projectsWriteFile, {
       cwd: "/tmp/project",
       relativePath: "plan.md",
+      condition: { type: "create" },
       contents: "# Plan\n",
     });
   });
@@ -500,6 +505,7 @@ describe("wsNativeApi", () => {
   it("forwards workspace file reads to the websocket project method", async () => {
     requestMock.mockResolvedValue({
       relativePath: "plan.md",
+      condition: { type: "create" },
       contents: "# Plan\n",
       byteLength: 7,
       truncated: false,

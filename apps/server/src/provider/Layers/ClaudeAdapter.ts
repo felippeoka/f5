@@ -7843,7 +7843,17 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
     const readThread: ClaudeAdapterShape["readThread"] = (threadId) =>
       Effect.gen(function* () {
         const context = yield* requireSession(threadId);
-        return yield* snapshotThread(context);
+        const snapshot = yield* snapshotThread(context);
+        return {
+          ...snapshot,
+          history: {
+            identity: context.resumeSessionId ?? null,
+            provenance: "runtime-local" as const,
+            coverage: "partial" as const,
+            boundary: null,
+            runtimeId: null,
+          },
+        };
       });
 
     const rollbackThread: ClaudeAdapterShape["rollbackThread"] = (threadId, numTurns) =>

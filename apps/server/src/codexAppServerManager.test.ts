@@ -2604,6 +2604,7 @@ describe("thread checkpoint control", () => {
       ],
     ]);
     expect(result).toEqual({
+      historyCoverage: "complete",
       threadId: "provider-thread",
       turns: turns.map(({ id, items }) => ({ id, items })),
     });
@@ -2679,6 +2680,7 @@ describe("thread checkpoint control", () => {
       .mockResolvedValueOnce({ data: [], nextCursor: null });
     await expect(manager.readThread(asThreadId("thread_1"))).rejects.toThrow("while paging");
     await expect(manager.readThread(asThreadId("thread_1"))).resolves.toEqual({
+      historyCoverage: "complete",
       threadId: "thread_1",
       turns: [],
     });
@@ -2739,7 +2741,11 @@ describe("thread checkpoint control", () => {
       status: "ready",
       activeTurnId: undefined,
     });
-    expect(result).toEqual({ threadId: "thread_1", turns: [{ id: "turn_1", items: [] }] });
+    expect(result).toEqual({
+      historyCoverage: "complete",
+      threadId: "thread_1",
+      turns: [{ id: "turn_1", items: [] }],
+    });
   });
 
   it("derives the revert boundary from the read-back when no turn id is given", async () => {

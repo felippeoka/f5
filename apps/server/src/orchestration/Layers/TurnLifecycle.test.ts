@@ -1,3 +1,4 @@
+import { DeliveryAttemptContext } from "../../provider/deliveryAttemptContext";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { makeFakeGitCore } from "../../git/testDoubles.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -135,126 +136,134 @@ const question = (threadId: ThreadId, message = true, turnId = "old-turn") =>
     return requestId;
   });
 suite("durable turn lifecycle", (it) => {
-  it.effect(
-    "dispatches steering alongside an unresolved ACP start while keeping starts ordered",
-    () =>
-      Effect.gen(function* () {
-        const threadId = yield* seed("acp-steering");
-        const otherThreadId = yield* seed("acp-next-start");
-        const engine = yield* OrchestrationEngineService;
-        const store = yield* NextTurnQueueStore;
-        const startEntered = yield* Deferred.make<void>();
-        const finishPrompt = yield* Deferred.make<void>();
-        const steerEntered = yield* Deferred.make<void>();
-        const activeTurnId = TurnId.makeUnsafe("acp-active-turn");
-        const delivered: string[] = [];
-        let startFinished = false;
-        const reactor = Layer.succeed(ProviderCommandReactor, {
-          deliverTurnStart: (event: OrchestrationEvent) =>
-            Effect.gen(function* () {
-              delivered.push(event.type);
-              if (event.type === "thread.turn-steer-requested") {
-                assert.equal(startFinished, false);
-                yield* Deferred.succeed(steerEntered, undefined);
-                return { turnId: activeTurnId };
-              }
-              if (event.aggregateId === threadId) {
-                yield* engine.dispatch({
-                  type: "thread.session.set",
-                  commandId: CommandId.makeUnsafe("acp:running"),
-                  threadId,
-                  createdAt: at,
-                  session: {
-                    threadId,
-                    providerName: "codex",
-                    status: "running",
-                    runtimeMode: "full-access",
-                    activeTurnId,
-                    lastError: null,
-                    updatedAt: at,
-                  },
-                });
-                yield* Deferred.succeed(startEntered, undefined);
-                yield* Deferred.await(finishPrompt);
-                startFinished = true;
-              }
+  it.effect("dispatches steering alongside thirteen unresolved ACP starts", () =>
+    Effect.gen(function* () {
+      const threadId = yield* seed("acp-steering");
+      const otherThreadIds = yield* Effect.forEach(
+        Array.from({ length: 12 }, (_, i) => i),
+        (i) => seed(`acp-next-start-${i}`),
+      );
+      const allStarted = yield* Deferred.make<void>();
+      let startedCount = 0;
+      const engine = yield* OrchestrationEngineService;
+      const store = yield* NextTurnQueueStore;
+      const startEntered = yield* Deferred.make<void>();
+      const finishPrompt = yield* Deferred.make<void>();
+      const steerEntered = yield* Deferred.make<void>();
+      const activeTurnId = TurnId.makeUnsafe("acp-active-turn");
+      const delivered: string[] = [];
+      let startFinished = false;
+      const reactor = Layer.succeed(ProviderCommandReactor, {
+        deliverTurnStart: (event: OrchestrationEvent) =>
+          Effect.gen(function* () {
+            const attempt = yield* DeliveryAttemptContext;
+            if (attempt) yield* attempt.prepared(null);
+            delivered.push(event.type);
+            if (event.type === "thread.turn-steer-requested") {
+              assert.equal(startFinished, false);
+              yield* Deferred.succeed(steerEntered, undefined);
               return { turnId: activeTurnId };
-            }),
-          recordTurnStartFailure: () => Effect.void,
-        } as never);
-        const command = (name: string, target = threadId) => ({
-          type: "thread.turn.start" as const,
-          commandId: CommandId.makeUnsafe(`acp:${name}`),
-          threadId: target,
-          message: {
-            messageId: MessageId.makeUnsafe(`acp-message:${name}`),
-            role: "user" as const,
-            text: name,
-            attachments: [],
-          },
-          provider: "codex" as const,
-          model: "gpt-5-codex",
-          runtimeMode: "full-access" as const,
-          interactionMode: "default" as const,
-          createdAt: at,
+            }
+            if (event.type === "thread.turn-start-requested") {
+              const targetThreadId = event.aggregateId as ThreadId;
+              yield* engine.dispatch({
+                type: "thread.session.set",
+                commandId: CommandId.makeUnsafe(`acp:running:${targetThreadId}`),
+                threadId: targetThreadId,
+                createdAt: at,
+                session: {
+                  threadId: targetThreadId,
+                  providerName: "codex",
+                  status: "running",
+                  runtimeMode: "full-access",
+                  activeTurnId,
+                  lastError: null,
+                  updatedAt: at,
+                },
+              });
+              yield* Deferred.succeed(startEntered, undefined);
+              startedCount++;
+              if (startedCount === 13) yield* Deferred.succeed(allStarted, undefined);
+              yield* Deferred.await(finishPrompt);
+              startFinished = true;
+            }
+            return { turnId: activeTurnId };
+          }),
+        recordTurnStartFailure: () => Effect.void,
+      } as never);
+      const command = (name: string, target = threadId) => ({
+        type: "thread.turn.start" as const,
+        commandId: CommandId.makeUnsafe(`acp:${name}`),
+        threadId: target,
+        message: {
+          messageId: MessageId.makeUnsafe(`acp-message:${name}`),
+          role: "user" as const,
+          text: name,
+          attachments: [],
+        },
+        provider: "codex" as const,
+        model: "gpt-5-codex",
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        createdAt: at,
+      });
+      const insert = (name: string, steer = false) =>
+        store.insertSubmission({
+          submissionId: CommandId.makeUnsafe(`acp-submission:${name}`),
+          itemId: CommandId.makeUnsafe(`acp-item:${name}`),
+          requestHash: name,
+          atHead: steer,
+          command: { ...command(name), ...(steer ? { expectedTurnId: activeTurnId } : {}) },
         });
-        const insert = (name: string, steer = false) =>
-          store.insertSubmission({
-            submissionId: CommandId.makeUnsafe(`acp-submission:${name}`),
-            itemId: CommandId.makeUnsafe(`acp-item:${name}`),
-            requestHash: name,
-            atHead: steer,
-            command: { ...command(name), ...(steer ? { expectedTurnId: activeTurnId } : {}) },
-          });
-        yield* Effect.gen(function* () {
-          const worker = yield* ProviderTurnDeliveryWorker;
-          const dispatcher = yield* NextTurnQueueDispatcher;
-          yield* worker.start;
-          yield* Effect.yieldNow;
-          yield* insert("original");
-          yield* dispatcher.notify(threadId);
-          yield* dispatcher.drain;
-          yield* Deferred.await(startEntered);
-          // Another start is durable, but must not overtake the unresolved prompt.
-          yield* engine.dispatch(command("next", otherThreadId));
-          yield* insert("steer", true);
-          yield* dispatcher.notify(threadId);
-          yield* dispatcher.drain;
-          yield* Deferred.await(steerEntered);
-          assert.deepEqual(delivered, [
-            "thread.turn-start-requested",
-            "thread.turn-steer-requested",
-          ]);
-          const draining = yield* worker.drain.pipe(Effect.forkChild);
-          assert.equal(draining.pollUnsafe(), undefined);
-          yield* Deferred.succeed(finishPrompt, undefined);
-          yield* Fiber.join(draining);
-          assert.deepEqual(delivered, [
-            "thread.turn-start-requested",
-            "thread.turn-steer-requested",
-            "thread.turn-start-requested",
-          ]);
-        }).pipe(
-          Effect.provide(
-            Layer.mergeAll(ProviderTurnDeliveryWorkerLive, NextTurnQueueDispatcherLive).pipe(
-              Layer.provide(reactor),
-              Layer.provide(
-                Layer.succeed(ProviderService, {
-                  readThread: () => Effect.succeed({ threadId, turns: [] }),
-                } as never),
-              ),
-              Layer.provide(Layer.succeed(GitCore, makeFakeGitCore().service)),
-              Layer.provide(
-                Layer.succeed(RuntimeReceiptBus, {
-                  publish: () => Effect.void,
-                  stream: Stream.empty,
-                }),
-              ),
-              Layer.provideMerge(ProviderTurnDeliveryRepositoryLive),
-            ),
-          ),
+      yield* Effect.gen(function* () {
+        const worker = yield* ProviderTurnDeliveryWorker;
+        const dispatcher = yield* NextTurnQueueDispatcher;
+        yield* worker.start;
+        yield* Effect.yieldNow;
+        yield* insert("original");
+        yield* dispatcher.notify(threadId);
+        yield* dispatcher.drain;
+        yield* Deferred.await(startEntered);
+        // An unrelated thread starts while this prompt stays unresolved.
+        yield* Effect.forEach(
+          otherThreadIds,
+          (target, i) => engine.dispatch(command(`next-${i}`, target)),
+          { discard: true },
         );
-      }),
+        yield* Deferred.await(allStarted);
+        yield* insert("steer", true);
+        yield* dispatcher.notify(threadId);
+        yield* dispatcher.drain;
+        yield* Deferred.await(steerEntered);
+        assert.equal(delivered.filter((type) => type === "thread.turn-start-requested").length, 13);
+        assert.equal(delivered.filter((type) => type === "thread.turn-steer-requested").length, 1);
+        const draining = yield* worker.drain.pipe(Effect.forkChild);
+        assert.equal(draining.pollUnsafe(), undefined);
+        yield* Deferred.succeed(finishPrompt, undefined);
+        yield* Fiber.join(draining);
+        assert.equal(delivered.filter((type) => type === "thread.turn-start-requested").length, 13);
+        assert.equal(delivered.filter((type) => type === "thread.turn-steer-requested").length, 1);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(ProviderTurnDeliveryWorkerLive, NextTurnQueueDispatcherLive).pipe(
+            Layer.provide(reactor),
+            Layer.provide(
+              Layer.succeed(ProviderService, {
+                readThread: () => Effect.succeed({ threadId, turns: [] }),
+              } as never),
+            ),
+            Layer.provide(Layer.succeed(GitCore, makeFakeGitCore().service)),
+            Layer.provide(
+              Layer.succeed(RuntimeReceiptBus, {
+                publish: () => Effect.void,
+                stream: Stream.empty,
+              }),
+            ),
+            Layer.provideMerge(ProviderTurnDeliveryRepositoryLive),
+          ),
+        ),
+      );
+    }),
   );
   it.effect(
     "rewind removes discarded questions from memory, snapshots and replay, and rejects stale answers",

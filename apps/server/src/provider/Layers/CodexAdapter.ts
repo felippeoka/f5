@@ -2742,6 +2742,13 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
         Effect.map((snapshot) => ({
           threadId,
           turns: snapshot.turns,
+          history: {
+            identity: snapshot.threadId,
+            provenance: "provider-persisted" as const,
+            coverage: snapshot.historyCoverage ?? "partial",
+            boundary: snapshot.turns.at(0)?.id ?? null,
+            runtimeId: null,
+          },
         })),
       );
 

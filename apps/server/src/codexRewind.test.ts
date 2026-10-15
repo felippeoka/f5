@@ -95,6 +95,7 @@ describe("Codex rewind fork fallback", () => {
       expect(send.mock.calls.at(-1)?.[1]).toBe("thread/turns/list");
     });
     expect(await manager.rollbackThread(id, 1, "drop", persist)).toEqual({
+      historyCoverage: "complete",
       threadId: "forked",
       turns: [{ id: "keep", items: [] }],
     });
@@ -146,6 +147,7 @@ describe("Codex rewind fork fallback", () => {
       });
       if (scenario === "valid") {
         expect(await manager.rollbackThread(id, 1, "drop", persist)).toEqual({
+          historyCoverage: "complete",
           threadId: "reloaded",
           turns: [{ id: "keep", items: [] }],
         });

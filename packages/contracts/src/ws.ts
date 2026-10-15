@@ -134,6 +134,7 @@ import {
 } from "./git";
 import {
   TerminalClearInput,
+  TerminalSnapshotInput,
   TerminalCloseInput,
   TerminalEvent,
   TerminalOpenInput,
@@ -362,6 +363,7 @@ export const WS_METHODS = {
 
   // Terminal methods
   terminalOpen: "terminal.open",
+  terminalSnapshot: "terminal.snapshot",
   terminalWrite: "terminal.write",
   terminalResize: "terminal.resize",
   terminalClear: "terminal.clear",
@@ -708,6 +710,7 @@ const WebSocketRequestBody = Schema.Union([
 
   // Terminal methods
   tagRequestBody(WS_METHODS.terminalOpen, TerminalOpenInput),
+  tagRequestBody(WS_METHODS.terminalSnapshot, TerminalSnapshotInput),
   tagRequestBody(WS_METHODS.terminalWrite, TerminalWriteInput),
   tagRequestBody(WS_METHODS.terminalResize, TerminalResizeInput),
   tagRequestBody(WS_METHODS.terminalClear, TerminalClearInput),
@@ -920,6 +923,8 @@ export const WebSocketResponse = Schema.Struct({
     Schema.Struct({
       message: Schema.String,
       code: Schema.optional(Schema.String),
+      retryable: Schema.optional(Schema.Boolean),
+      retryAfterMs: Schema.optional(NonNegativeInt),
       checkoutConflict: Schema.optional(GitCheckoutConflict),
     }),
   ),

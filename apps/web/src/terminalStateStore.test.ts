@@ -10,12 +10,17 @@ function makeTerminalEvent(
   overrides: Partial<TerminalEvent> = {},
 ): TerminalEvent {
   const base = {
+    epoch: "test",
+    generation: 1,
+    revision: 1,
     threadId: THREAD_ID,
     terminalId: "default",
     createdAt: "2026-04-02T20:00:00.000Z",
   };
 
   switch (type) {
+    case "resized":
+      return { ...base, type, cols: 80, rows: 24, ...overrides } as TerminalEvent;
     case "output":
       return { ...base, type, data: "hello\n", ...overrides } as TerminalEvent;
     case "activity":
@@ -34,6 +39,9 @@ function makeTerminalEvent(
         snapshot: {
           threadId: THREAD_ID,
           terminalId: "default",
+          epoch: "test",
+          generation: 1,
+          revision: 1,
           cwd: "/tmp/workspace",
           status: "running",
           pid: 123,
@@ -218,6 +226,9 @@ describe("terminalStateStore actions", () => {
         snapshot: {
           threadId: THREAD_ID,
           terminalId: "setup-bootstrap",
+          epoch: "test",
+          generation: 1,
+          revision: 1,
           cwd: "/tmp/worktree",
           status: "running",
           pid: 123,
@@ -254,6 +265,9 @@ describe("terminalStateStore actions", () => {
         snapshot: {
           threadId: THREAD_ID,
           terminalId: "terminal-2",
+          epoch: "test",
+          generation: 1,
+          revision: 1,
           cwd: "/tmp/workspace",
           status: "running",
           pid: 456,

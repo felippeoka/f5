@@ -18,6 +18,7 @@ export default mergeConfig(
     },
     test: {
       include: [
+        "src/editorDrafts.browser.ts",
         "src/protocolState.browser.tsx",
         "src/components/WorkspaceMediaView.browser.tsx",
         "src/components/AssetImageGallery.browser.tsx",

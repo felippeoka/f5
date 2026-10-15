@@ -124,6 +124,7 @@ export interface ComposerNativeGoalControls {
 
 /** Sending, queueing, interrupting and plan implementation. */
 export interface ComposerSendControls {
+  readonly mutationsUnavailable?: boolean;
   onSend: (event?: { preventDefault: () => void }, intent?: ComposerSendIntent) => Promise<void>;
   onInterrupt: () => Promise<void>;
   phase: SessionPhase;

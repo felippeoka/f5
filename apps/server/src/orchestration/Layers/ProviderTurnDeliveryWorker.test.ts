@@ -143,6 +143,9 @@ const reconcile = (target: ThreadId) =>
   });
 
 const repositoryLayer = Layer.succeed(ProviderTurnDeliveryRepository, {
+  recordDispatchIntent: () => Effect.succeed(true),
+  listCandidateIds: () =>
+    Effect.sync(() => (state.state === "pending" ? [{ deliveryId, threadId }] : [])),
   listActionable: Effect.sync(() => (state.state === "pending" ? [state] : [])),
   listSending: Effect.sync(() => (state.state === "sending" ? [state] : [])),
   listUnprojectedTerminal: Effect.sync(() =>
@@ -170,6 +173,7 @@ const repositoryLayer = Layer.succeed(ProviderTurnDeliveryRepository, {
   markAccepted: (input: { readonly providerTurnId: TurnId }) =>
     Effect.sync(() => {
       state = { ...state, state: "accepted", providerTurnId: input.providerTurnId };
+      return true;
     }),
   markRejected: (input: {
     readonly errorCode: string;
@@ -187,6 +191,7 @@ const repositoryLayer = Layer.succeed(ProviderTurnDeliveryRepository, {
         certainty: input.certainty,
         ...(input.usageLimit ? { usageLimit: input.usageLimit } : {}),
       };
+      return true;
     }),
   requeue: () =>
     Effect.sync(() => {
@@ -276,7 +281,7 @@ const testLayer = ProviderTurnDeliveryWorkerLive.pipe(
 );
 
 it.effect(
-  "ProviderTurnDeliveryWorker recovers an accepted turn beyond the first history page",
+  "ProviderTurnDeliveryWorker keeps uncorrelated history ambiguous beyond the first page",
   () =>
     Effect.gen(function* () {
       resetDelivery();
@@ -292,8 +297,8 @@ it.effect(
       const worker = yield* ProviderTurnDeliveryWorker;
       yield* worker.start;
       yield* worker.drain;
-      assert.equal(state.state, "accepted");
-      assert.equal(state.providerTurnId, "turn-50");
+      assert.equal(state.state, "ambiguous");
+      assert.equal(state.providerTurnId, null);
       assert.equal(requeueCount, 0);
     }).pipe(Effect.provide(testLayer)),
 );
@@ -439,7 +444,7 @@ it.effect("replays later threads even when the first thread cleanup fails", () =
   }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("returns accepted from Recheck even when cleanup fails", () =>
+it.effect("does not infer acceptance from an unrelated new turn during Recheck", () =>
   Effect.gen(function* () {
     resetDelivery();
     state = { ...state, state: "ambiguous", certainty: "unknown" };
@@ -447,8 +452,8 @@ it.effect("returns accepted from Recheck even when cleanup fails", () =>
     providerTurns = [{ id: TurnId.makeUnsafe("rechecked-turn"), items: [] }];
     const worker = yield* ProviderTurnDeliveryWorker;
     const delivery = yield* worker.recheck(threadId);
-    assert.equal(delivery?.state, "accepted");
-    assert.equal(state.state, "accepted");
+    assert.equal(delivery?.state, "ambiguous");
+    assert.equal(state.state, "ambiguous");
     assert.equal(pendingBarrier, true);
   }).pipe(Effect.provide(testLayer)),
 );
@@ -608,7 +613,7 @@ it.effect("Recheck never credits an older delivery with a newer in-flight send's
   }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("Recheck accepts a superseded delivery's turn that predates the newer send", () =>
+it.effect("Recheck keeps a superseded delivery ambiguous without a correlated receipt", () =>
   Effect.gen(function* () {
     resetDelivery();
     state = { ...state, state: "ambiguous", certainty: "unknown" };
@@ -619,8 +624,8 @@ it.effect("Recheck accepts a superseded delivery's turn that predates the newer 
     ];
     const worker = yield* ProviderTurnDeliveryWorker;
     const delivery = yield* worker.recheck(threadId, deliveryId);
-    assert.equal(delivery?.state, "accepted");
-    assert.equal(state.providerTurnId, "older-turn");
+    assert.equal(delivery?.state, "ambiguous");
+    assert.equal(state.providerTurnId, null);
   }).pipe(Effect.provide(testLayer)),
 );
 

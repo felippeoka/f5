@@ -2661,7 +2661,7 @@ it.effect("blocks session creation and turn dispatch during an account change", 
   );
 });
 
-it.effect("uses the admitted binding without rereading routing during send", () => {
+it.effect("does not settle an admitted send after its binding disappears", () => {
   const fake = makeFakeCodexAdapter();
   return Effect.gen(function* () {
     const service = yield* ProviderService;
@@ -2680,9 +2680,11 @@ it.effect("uses the admitted binding without rereading routing during send", () 
       return reads === 1 ? original(id) : Effect.succeed(Option.none());
     });
     try {
-      yield* service.sendTurn({ threadId, input: "hello", attachments: [] });
-      // One admission read and one post-dispatch persistence read.
-      assert.equal(reads, 2);
+      const error = yield* service
+        .sendTurn({ threadId, input: "hello", attachments: [] })
+        .pipe(Effect.flip);
+      assert.equal(error._tag, "ProviderTurnDeliveryError");
+      assert.equal(reads, 3);
       assert.equal(fake.sendTurn.mock.calls.length, 1);
     } finally {
       spy.mockRestore();
@@ -2817,5 +2819,121 @@ it.effect(
         }),
       );
     }).pipe(Effect.provide(layer));
+  },
+);
+
+for (const kind of [
+  "codex",
+  "claudeAgent",
+  "cursor",
+  "grok",
+  "opencode",
+  "antigravity",
+  "muse",
+] as const) {
+  it.effect(
+    `${kind}: controls and another thread progress while transport is unresolved; stopped generations stay stopped`,
+    () =>
+      Effect.gen(function* () {
+        const entered = yield* Deferred.make<void>();
+        const finish = yield* Deferred.make<void>();
+        const fake = makeFakeCodexAdapter(kind);
+        const steerTurn = vi.fn((input: ProviderAdapterSendTurnInput) =>
+          Effect.succeed({ threadId: input.threadId, turnId: input.expectedTurnId! }),
+        );
+        fake.sendTurn.mockImplementation((input) =>
+          Effect.gen(function* () {
+            if (input.input === "unresolved") {
+              yield* Deferred.succeed(entered, undefined);
+              yield* Deferred.await(finish);
+            }
+            return { threadId: input.threadId, turnId: asTurnId(`turn:${input.threadId}`) };
+          }),
+        );
+        yield* Effect.gen(function* () {
+          const service = yield* ProviderService;
+          const directory = yield* ProviderSessionDirectory;
+          const threadId = asThreadId(`unresolved:${kind}`);
+          const other = asThreadId(`other:${kind}`);
+          yield* service.startSession(threadId, {
+            threadId,
+            provider: kind,
+            runtimeMode: "full-access",
+          });
+          const pending = yield* service
+            .sendTurn({ threadId, input: "unresolved" })
+            .pipe(Effect.forkScoped);
+          yield* Deferred.await(entered);
+          yield* service.respondToRequest({
+            threadId,
+            requestId: asRequestId("approval"),
+            decision: "accept",
+          });
+          yield* service.respondToUserInput({
+            threadId,
+            requestId: asRequestId("input"),
+            answers: { answer: "yes" },
+          });
+          if (kind !== "opencode")
+            yield* service.sendTurn({
+              threadId,
+              input: "steer",
+              expectedTurnId: asTurnId(`turn:${threadId}`),
+            });
+          yield* service.interruptTurn({ threadId });
+          yield* service.startSession(other, {
+            threadId: other,
+            provider: kind,
+            runtimeMode: "full-access",
+          });
+          yield* service.sendTurn({ threadId: other, input: "unrelated" });
+          assert.equal(fake.respondToRequest.mock.calls.length, 1);
+          assert.equal(fake.respondToUserInput.mock.calls.length, 1);
+          assert.equal(fake.interruptTurn.mock.calls.length, 1);
+          assert.equal(steerTurn.mock.calls.length, kind === "opencode" ? 0 : 1);
+          yield* service.stopSession({ threadId });
+          yield* Deferred.succeed(finish, undefined);
+          const outcome = yield* Fiber.join(pending).pipe(Effect.flip);
+          assert.equal(outcome._tag, "ProviderTurnDeliveryError");
+          const binding = yield* directory.getBinding(threadId);
+          assert.equal(Option.isSome(binding) && binding.value.status, "stopped");
+        }).pipe(
+          Effect.provide(
+            makeProviderServiceLayerForAdapters(new Map([[kind, { ...fake.adapter, steerTurn }]])),
+          ),
+        );
+      }),
+  );
+}
+
+it.effect(
+  "owns separate acceptance and terminal-completion signals independently of the waiting caller",
+  () => {
+    const fake = makeFakeCodexAdapter();
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const threadId = asThreadId("owned-signals");
+      yield* service.startSession(threadId, {
+        threadId,
+        provider: "codex",
+        runtimeMode: "full-access",
+      });
+      const handle = yield* service.submitTurn!({ threadId, input: "hello" });
+      const accepted = yield* handle.acceptance;
+      const completion = yield* handle.completion.pipe(Effect.forkScoped);
+      assert.equal(completion.pollUnsafe(), undefined);
+      fake.emit({
+        type: "turn.completed",
+        eventId: asEventId("owned-completed"),
+        provider: "codex",
+        threadId,
+        turnId: accepted.turnId,
+        createdAt: new Date().toISOString(),
+        payload: { state: "completed" },
+      });
+      yield* Fiber.join(completion);
+    }).pipe(
+      Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]))),
+    );
   },
 );

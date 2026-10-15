@@ -129,6 +129,7 @@ interface PendingUserInput {
 }
 
 interface CursorSessionContext {
+  readonly historySessionOrigin: "fresh" | "resumed";
   promptsInFlight: number;
   readonly threadId: ThreadId;
   session: ProviderSession;
@@ -879,6 +880,7 @@ export function makeCursorAdapter(
           };
 
           ctx = {
+            historySessionOrigin: "sessionId" in started.sessionSetupResult ? "fresh" : "resumed",
             threadId: input.threadId,
             session,
             scope: sessionScope,
@@ -1392,7 +1394,18 @@ export function makeCursorAdapter(
     const readThread: CursorAdapterShape["readThread"] = (threadId) =>
       Effect.gen(function* () {
         const ctx = yield* requireSession(threadId);
-        return { threadId, turns: ctx.turns };
+        return {
+          threadId,
+          turns: ctx.turns.map((turn) => ({ ...turn, items: [...turn.items] })),
+          history: {
+            sessionOrigin: ctx.historySessionOrigin,
+            identity: JSON.stringify(ctx.session.resumeCursor ?? null),
+            provenance: "runtime-local" as const,
+            coverage: "partial" as const,
+            boundary: null,
+            runtimeId: null,
+          },
+        };
       });
 
     const rollbackThread: CursorAdapterShape["rollbackThread"] = (threadId, numTurns) =>
@@ -1407,7 +1420,18 @@ export function makeCursorAdapter(
         }
         const nextLength = Math.max(0, ctx.turns.length - numTurns);
         ctx.turns.splice(nextLength);
-        return { threadId, turns: ctx.turns };
+        return {
+          threadId,
+          turns: ctx.turns.map((turn) => ({ ...turn, items: [...turn.items] })),
+          history: {
+            sessionOrigin: ctx.historySessionOrigin,
+            identity: JSON.stringify(ctx.session.resumeCursor ?? null),
+            provenance: "runtime-local" as const,
+            coverage: "partial" as const,
+            boundary: null,
+            runtimeId: null,
+          },
+        };
       });
 
     const stopSession: CursorAdapterShape["stopSession"] = (threadId) =>
@@ -1443,6 +1467,7 @@ export function makeCursorAdapter(
     return {
       provider: PROVIDER,
       capabilities: {
+        turnCompletionOnReturn: true,
         sessionModelSwitch: "in-session",
         runtimeCapabilities: providerRuntimeCapabilities(PROVIDER),
       },

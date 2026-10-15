@@ -1,3 +1,5 @@
+import { TerminalRecovery } from "../lib/terminalRecovery";
+import { getWsConnectionState, subscribeWsConnectionState } from "../wsConnectionState";
 import { terminalClipboardAction, terminalRightClickPastes } from "../terminalClipboard";
 import { useProfileState } from "../profileState";
 import { FitAddon } from "@xterm/addon-fit";
@@ -626,12 +628,26 @@ function TerminalViewport({
     window.addEventListener("mouseup", handleMouseUp);
     mount.addEventListener("pointerdown", handlePointerDown);
 
-    const openTerminal = async () => {
-      try {
+    const recovery = new TerminalRecovery(
+      () => api.terminal.snapshot({ threadId, terminalId }),
+      (snapshot) => {
+        const activeTerminal = terminalRef.current;
+        if (!activeTerminal || disposed) return;
+        hasHandledExitRef.current = snapshot.status === "exited";
+        activeTerminal.write("\u001bc");
+        if (snapshot.history) activeTerminal.write(snapshot.history);
+      },
+      (event) => applyTerminalEvent(event),
+    );
+    const openTerminal = () =>
+      recovery.sync(async () => {
         const activeTerminal = terminalRef.current;
         const activeFitAddon = fitAddonRef.current;
-        if (!activeTerminal || !activeFitAddon) return;
+        if (!activeTerminal || !activeFitAddon) return null;
         activeFitAddon.fit();
+        const state = getWsConnectionState();
+        if (state.phase !== "connected" || !state.synchronized)
+          return api.terminal.snapshot({ threadId, terminalId });
         const snapshot = await api.terminal.open({
           threadId,
           terminalId,
@@ -640,26 +656,16 @@ function TerminalViewport({
           rows: activeTerminal.rows,
           ...(runtimeEnv ? { env: runtimeEnv } : {}),
         });
-        if (disposed) return;
-        activeTerminal.write("\u001bc");
-        if (snapshot.history.length > 0) {
-          activeTerminal.write(snapshot.history);
-        }
-        if (autoFocus) {
-          window.requestAnimationFrame(() => {
-            activeTerminal.focus();
-          });
-        }
-      } catch (err) {
-        if (disposed) return;
-        writeSystemMessage(
-          terminal,
-          err instanceof Error ? err.message : "Failed to open terminal",
-        );
-      }
-    };
+        if (autoFocus && !disposed) window.requestAnimationFrame(() => activeTerminal.focus());
+        return snapshot;
+      });
+    const unsubscribeConnection = subscribeWsConnectionState(() => {
+      const state = getWsConnectionState();
+      if (state.phase !== "connected") recovery.disconnect();
+      else if (state.synchronized) void recovery.sync();
+    });
 
-    const unsubscribe = api?.terminal.onEvent((event) => {
+    const applyTerminalEvent = (event: import("@t3tools/contracts").TerminalEvent) => {
       if (event.threadId !== threadId || event.terminalId !== terminalId) return;
       const activeTerminal = terminalRef.current;
       if (!activeTerminal) return;
@@ -714,6 +720,9 @@ function TerminalViewport({
           onSessionExitedRef.current();
         }, 0);
       }
+    };
+    const unsubscribe = api.terminal.onEvent((event) => {
+      if (event.threadId === threadId && event.terminalId === terminalId) recovery.event(event);
     });
 
     const fitTimer = window.setTimeout(() => {
@@ -741,6 +750,8 @@ function TerminalViewport({
       disposed = true;
       window.clearTimeout(fitTimer);
       unsubscribe();
+      unsubscribeConnection();
+      recovery.dispose();
       inputDisposable.dispose();
       selectionDisposable.dispose();
       terminalLinksDisposable.dispose();

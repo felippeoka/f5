@@ -431,3 +431,13 @@ export const makeMetricSnapshotWriter = Effect.fn("makeMetricSnapshotWriter")(fu
     close: () => flush,
   } satisfies MetricSnapshotWriter;
 });
+
+export const rpcBusyTotal = Metric.counter("f5_rpc_busy_total", {
+  description: "RPCs rejected before execution because their lane or byte budget is full.",
+});
+export const terminalSnapshotsTotal = Metric.counter("f5_terminal_snapshots_total", {
+  description: "Read-only terminal recovery snapshots.",
+});
+export const terminalStateChangesTotal = Metric.counter("f5_terminal_state_changes_total", {
+  description: "Published terminal state revisions.",
+});

@@ -261,6 +261,34 @@ describe("TerminalManager", () => {
     return { logsDir, ptyAdapter, manager };
   }
 
+  it("captures monotonic read-only snapshots across output, clear, resize, restart and backend replacement", async () => {
+    const { manager, ptyAdapter } = makeManager();
+    const events: TerminalEvent[] = [];
+    manager.on("event", (event) => events.push(event));
+    expect(manager.readSnapshot({ threadId: "thread-1" })).toBeNull();
+    expect(ptyAdapter.spawnInputs).toHaveLength(0);
+    const first = await manager.open(openInput());
+    ptyAdapter.processes[0]!.emitData("before clear\n");
+    const before = manager.readSnapshot({ threadId: "thread-1" })!;
+    await manager.clear({ threadId: "thread-1" });
+    const cleared = manager.readSnapshot({ threadId: "thread-1" })!;
+    expect(cleared.history).toBe("");
+    expect(cleared.revision).toBeGreaterThan(before.revision);
+    await manager.resize({ threadId: "thread-1", cols: 80, rows: 24 });
+    expect(manager.readSnapshot({ threadId: "thread-1" })!.revision).toBeGreaterThan(
+      cleared.revision,
+    );
+    const restarted = await manager.restart(restartInput());
+    expect(restarted.epoch).toBe(first.epoch);
+    expect(restarted.generation).toBeGreaterThan(first.generation);
+    expect(events.map((event) => event.revision)).toEqual(events.map((_, index) => index + 1));
+    const other = makeManager().manager;
+    const otherSnapshot = await other.open(openInput());
+    expect(otherSnapshot.epoch).not.toBe(first.epoch);
+    manager.dispose();
+    other.dispose();
+  });
+
   it("spawns lazily and reuses running terminal per thread", async () => {
     const { manager, ptyAdapter } = makeManager();
     const [first, second] = await Promise.all([

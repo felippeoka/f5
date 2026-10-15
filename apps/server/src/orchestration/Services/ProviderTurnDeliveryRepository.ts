@@ -22,6 +22,23 @@ export const ProviderTurnDeliveryState = Schema.Literals([
 ]);
 export type ProviderTurnDeliveryState = typeof ProviderTurnDeliveryState.Type;
 
+export const DeliveryHistoryEvidence = Schema.Struct({
+  sessionOrigin: Schema.optional(Schema.Literals(["fresh", "resumed", "unknown"])),
+  identity: Schema.NullOr(Schema.String),
+  provenance: Schema.Literals(["provider-persisted", "runtime-local", "unavailable"]),
+  coverage: Schema.Literals(["complete", "partial", "unavailable"]),
+  boundary: Schema.NullOr(Schema.String),
+  runtimeId: Schema.NullOr(Schema.String),
+});
+
+export const DeliveryAcceptanceReceipt = Schema.Struct({
+  turnId: TurnId,
+  attemptId: Schema.String,
+  runtimeGeneration: Schema.Number,
+  nativeHistoryIdentity: Schema.NullOr(Schema.String),
+  acceptedAt: Schema.String,
+});
+
 export const ProviderTurnDelivery = Schema.Struct({
   deliveryId: CommandId,
   threadId: ThreadId,
@@ -31,6 +48,9 @@ export const ProviderTurnDelivery = Schema.Struct({
   providerTurnId: Schema.NullOr(TurnId),
   attempt: NonNegativeInt,
   preSendTurnIds: Schema.Array(TurnId),
+  acceptanceReceipt: Schema.optional(Schema.NullOr(DeliveryAcceptanceReceipt)),
+  attemptId: Schema.optional(Schema.NullOr(Schema.String)),
+  historyEvidence: Schema.optional(Schema.NullOr(DeliveryHistoryEvidence)),
   event: OrchestrationEvent,
   errorCode: Schema.NullOr(Schema.String),
   errorDetail: Schema.NullOr(Schema.String),
@@ -46,6 +66,13 @@ export type ProviderTurnDelivery = typeof ProviderTurnDelivery.Type;
 export type ProviderTurnDeliveryRepositoryError = PersistenceSqlError | PersistenceDecodeError;
 
 export interface ProviderTurnDeliveryRepositoryShape {
+  readonly listCandidateIds: (input: {
+    readonly afterThreadId: string;
+    readonly limit: number;
+  }) => Effect.Effect<
+    ReadonlyArray<{ readonly deliveryId: CommandId; readonly threadId: ThreadId }>,
+    ProviderTurnDeliveryRepositoryError
+  >;
   readonly listActionable: Effect.Effect<
     ReadonlyArray<ProviderTurnDelivery>,
     ProviderTurnDeliveryRepositoryError
@@ -79,23 +106,33 @@ export interface ProviderTurnDeliveryRepositoryShape {
   readonly getSupersedingPreSendTurnIds: (
     deliveryId: CommandId,
   ) => Effect.Effect<ReadonlyArray<TurnId> | null, ProviderTurnDeliveryRepositoryError>;
+  readonly recordDispatchIntent: (input: {
+    readonly deliveryId: CommandId;
+    readonly attemptId: string;
+    readonly preSendTurnIds: ReadonlyArray<TurnId>;
+    readonly historyEvidence: typeof DeliveryHistoryEvidence.Type | null;
+  }) => Effect.Effect<boolean, ProviderTurnDeliveryRepositoryError>;
   readonly claim: (
     deliveryId: CommandId,
     preSendTurnIds: ReadonlyArray<TurnId>,
+    historyEvidence?: typeof DeliveryHistoryEvidence.Type | null,
   ) => Effect.Effect<ProviderTurnDelivery | null, ProviderTurnDeliveryRepositoryError>;
   readonly markAccepted: (input: {
     readonly deliveryId: CommandId;
     readonly providerTurnId: TurnId;
-  }) => Effect.Effect<void, ProviderTurnDeliveryRepositoryError>;
+    readonly receipt?: typeof DeliveryAcceptanceReceipt.Type | undefined;
+    readonly attemptId?: string | null | undefined;
+  }) => Effect.Effect<boolean, ProviderTurnDeliveryRepositoryError>;
   readonly markRejected: (input: {
     readonly deliveryId: CommandId;
+    readonly attemptId?: string | null | undefined;
     readonly errorCode: string;
     readonly errorDetail: string;
     readonly certainty: "not_sent" | "unknown";
     readonly ambiguous: boolean;
     readonly occurredAt?: string | undefined;
     readonly usageLimit?: OrchestrationUsageLimit | undefined;
-  }) => Effect.Effect<void, ProviderTurnDeliveryRepositoryError>;
+  }) => Effect.Effect<boolean, ProviderTurnDeliveryRepositoryError>;
   readonly requeue: (input: {
     readonly deliveryId: CommandId;
     readonly notBefore: string;

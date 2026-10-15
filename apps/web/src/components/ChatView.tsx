@@ -216,7 +216,7 @@ import { isKeyboardEventComposing } from "../lib/keyboardComposition";
 import { recordModelSelection } from "../modelPreferencesStore";
 import { getCustomModelOptionsByInstance } from "../modelSelection";
 import { useSettings } from "../hooks/useSettings";
-import { isWsInteractionBlocked, useWsConnectionState } from "../wsConnectionState";
+import { useWsConnectionState } from "../wsConnectionState";
 import BranchToolbar from "./BranchToolbar";
 import { useChatViewBranchDriftGuard } from "./ChatViewBranchDriftGuard";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
@@ -682,7 +682,8 @@ export default function ChatView({
     tasksPanelAutoOpenRef.current = tasksPanelAutoOpen;
   }, [tasksPanelAutoOpen]);
   const wsConnectionState = useWsConnectionState();
-  const wsInteractionBlocked = isWsInteractionBlocked(wsConnectionState.phase);
+  const wsInteractionBlocked =
+    wsConnectionState.phase !== "connected" || !wsConnectionState.synchronized;
   const navigate = useNavigate();
   const threadActionController = useThreadActionController({ activeThreadId: threadId });
   const { resolvedTheme } = useTheme();
@@ -4722,6 +4723,14 @@ export default function ChatView({
     onAdmitted?: () => void,
   ) => {
     e?.preventDefault();
+    if (wsInteractionBlocked) {
+      toastManager.add({
+        type: "info",
+        title: "Waiting for connection",
+        description: "Your draft is preserved. Send after synchronization finishes.",
+      });
+      return;
+    }
     const api = readNativeApi();
     if (
       api &&
@@ -7025,6 +7034,7 @@ export default function ChatView({
     nativeGoal: nativeGoalControls,
   };
   const composerSendControls: ComposerSendControls = {
+    mutationsUnavailable: wsInteractionBlocked,
     onSend,
     onInterrupt,
     phase,

@@ -95,11 +95,14 @@ const PlanSidebar = memo(function PlanSidebar({
     setIsSavingToWorkspace(true);
     void api.projects
       .writeFile({
+        condition: { type: "create" },
         cwd: workspaceRoot,
         relativePath: filename,
         contents: normalizePlanMarkdownForExport(planMarkdown),
       })
       .then((result) => {
+        if ("conflict" in result)
+          throw new Error("A file already exists at that path. Choose another path.");
         toastManager.add({
           type: "success",
           title: "Plan saved",

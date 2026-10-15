@@ -36,6 +36,7 @@ export interface ProviderAdapterCapabilities {
    */
   readonly sessionModelSwitch: ProviderSessionModelSwitchMode;
   readonly nativeTurnIdempotency?: boolean;
+  readonly turnCompletionOnReturn?: boolean;
   readonly runtimeCapabilities?: import("@t3tools/contracts").ProviderRuntimeCapabilities;
 }
 
@@ -44,7 +45,19 @@ export interface ProviderThreadTurnSnapshot {
   readonly items: ReadonlyArray<unknown>;
 }
 
+/** Evidence is internal; absent metadata is never authoritative history. */
+export interface ProviderHistoryEvidence {
+  readonly sessionOrigin?: "fresh" | "resumed" | "unknown";
+  readonly identity: string | null;
+  readonly provenance: "provider-persisted" | "runtime-local" | "unavailable";
+  readonly coverage: "complete" | "partial" | "unavailable";
+  readonly boundary: string | null;
+  readonly runtimeId: string | null;
+}
+
 export interface ProviderThreadSnapshot {
+  readonly history?: ProviderHistoryEvidence;
+
   readonly threadId: ThreadId;
   readonly turns: ReadonlyArray<ProviderThreadTurnSnapshot>;
 }

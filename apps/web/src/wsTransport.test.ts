@@ -1,3 +1,4 @@
+import { noteWsSynchronized } from "./wsConnectionState";
 import { serverBootstrapFixture } from "./test/serverBootstrap";
 import { F5_PROTOCOL_VERSION, F5_UPGRADE_REQUIRED_CLOSE_CODE } from "@t3tools/contracts";
 import {
@@ -297,6 +298,7 @@ describe("WsTransport", () => {
     const transport = new WsTransport("ws://localhost:3020");
     const socket = getSocket();
     socket.open();
+    noteWsSynchronized();
     const promise = transport.request(WS_METHODS.gitCheckout, { cwd: "/repo", branch: "main" });
     const envelope = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
     const checkoutConflict = { cwd: "/repo", branch: "main", files: ["index.css"] };
@@ -354,7 +356,7 @@ describe("WsTransport", () => {
     const transport = new WsTransport("ws://localhost:3020");
     const socket = getSocket();
 
-    const requestPromise = transport.request(ORCHESTRATION_WS_METHODS.dispatchCommand, {
+    const requestPromise = transport.request(ORCHESTRATION_WS_METHODS.getSnapshot, {
       command: { type: "noop" },
     });
     void requestPromise.catch(() => undefined);
@@ -371,7 +373,7 @@ describe("WsTransport", () => {
     vi.advanceTimersByTime(1);
     expect(getSlowRpcRequests()).toMatchObject([
       {
-        method: ORCHESTRATION_WS_METHODS.dispatchCommand,
+        method: ORCHESTRATION_WS_METHODS.getSnapshot,
       },
     ]);
 
