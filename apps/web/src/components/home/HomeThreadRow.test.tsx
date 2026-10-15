@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Thread } from "../../types";
 import { HomeThreadRow } from "./HomeThreadRow";
+import { toThreadSummary } from "../../threadSelectors";
 
 function makePlanReadyThread(): Thread {
   return {
@@ -64,7 +65,7 @@ describe("HomeThreadRow", () => {
   it("uses the warning accent for plan-ready urgency rows", () => {
     const markup = renderToStaticMarkup(
       <HomeThreadRow
-        thread={makePlanReadyThread()}
+        thread={toThreadSummary(makePlanReadyThread())}
         project={undefined}
         onSelect={() => {}}
         urgencyStatus="plan-ready"

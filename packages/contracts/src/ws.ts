@@ -151,6 +151,8 @@ import {
   ProjectCloneCancelInput,
   ProjectListDirectoryInput,
   ProjectReadFileInput,
+  ProjectSetWatchedPathsInput,
+  ProjectWatchedPathsChangedPayload,
   ProjectIssueAssetUrlInput,
   ProjectOpenHtmlPreviewInput,
   ProjectSearchEntriesInput,
@@ -334,6 +336,7 @@ export const WS_METHODS = {
   attachmentsGetUploads: "attachments.getUploads",
   attachmentsReleaseUploads: "attachments.releaseUploads",
   projectsReadFile: "projects.readFile",
+  projectsSetWatchedPaths: "projects.setWatchedPaths",
   projectsOpenHtmlPreview: "projects.openHtmlPreview",
   projectsIssueAssetUrl: "projects.issueAssetUrl",
   projectsAuthorizeEntry: "projects.authorizeEntry",
@@ -478,6 +481,7 @@ export const WS_CHANNELS = {
   providerAccountEvent: "providerAccount.event",
   gitActionProgress: "git.actionProgress",
   gitStatusInvalidated: "git.status.invalidate",
+  projectsWatchedPathsChanged: "projects.watchedPathsChanged",
   terminalEvent: "terminal.event",
   previewEvent: "preview.event",
   previewLocalServersUpdated: "preview.localServersUpdated",
@@ -682,6 +686,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.attachmentsGetUploads, AttachmentUploadsInput),
   tagRequestBody(WS_METHODS.attachmentsReleaseUploads, AttachmentUploadsInput),
   tagRequestBody(WS_METHODS.projectsReadFile, ProjectReadFileInput),
+  tagRequestBody(WS_METHODS.projectsSetWatchedPaths, ProjectSetWatchedPathsInput),
   tagRequestBody(WS_METHODS.projectsOpenHtmlPreview, ProjectOpenHtmlPreviewInput),
   tagRequestBody(WS_METHODS.projectsIssueAssetUrl, ProjectIssueAssetUrlInput),
   tagRequestBody(WS_METHODS.projectsAuthorizeEntry, ProjectAuthorizeEntryInput),
@@ -956,6 +961,7 @@ export interface WsPushPayloadByChannel {
   readonly [WS_CHANNELS.providerAdvisoriesUpdated]: typeof ServerProviderAdvisoriesUpdatedPayload.Type;
   readonly [WS_CHANNELS.gitActionProgress]: typeof GitActionProgressEvent.Type;
   readonly [WS_CHANNELS.gitStatusInvalidated]: typeof GitStatusInvalidatedPayload.Type;
+  readonly [WS_CHANNELS.projectsWatchedPathsChanged]: ProjectWatchedPathsChangedPayload;
   readonly [WS_CHANNELS.terminalEvent]: typeof TerminalEvent.Type;
   readonly [WS_CHANNELS.previewEvent]: PreviewEvent;
   readonly [WS_CHANNELS.previewLocalServersUpdated]: DiscoveredLocalServerList;
@@ -1026,6 +1032,10 @@ export const WsPushGitActionProgress = makeWsPushSchema(
 export const WsPushGitStatusInvalidated = makeWsPushSchema(
   WS_CHANNELS.gitStatusInvalidated,
   GitStatusInvalidatedPayload,
+);
+export const WsPushProjectsWatchedPathsChanged = makeWsPushSchema(
+  WS_CHANNELS.projectsWatchedPathsChanged,
+  ProjectWatchedPathsChangedPayload,
 );
 export const WsPushTerminalEvent = makeWsPushSchema(WS_CHANNELS.terminalEvent, TerminalEvent);
 export const WsPushPreviewEvent = makeWsPushSchema(WS_CHANNELS.previewEvent, PreviewEvent);
@@ -1155,6 +1165,7 @@ export const WsPushChannelSchema = Schema.Literals([
   AGENT_BRIDGE_WS_CHANNELS.stateChanged,
   WS_CHANNELS.gitActionProgress,
   WS_CHANNELS.gitStatusInvalidated,
+  WS_CHANNELS.projectsWatchedPathsChanged,
   WS_CHANNELS.serverWelcome,
   WS_CHANNELS.serverConfigUpdated,
   WS_CHANNELS.providerAdvisoriesUpdated,
@@ -1193,6 +1204,7 @@ export const WsPush = Schema.Union([
   WsPushProviderAdvisoriesUpdated,
   WsPushGitActionProgress,
   WsPushGitStatusInvalidated,
+  WsPushProjectsWatchedPathsChanged,
   WsPushTerminalEvent,
   WsPushPreviewEvent,
   WsPushPreviewLocalServersUpdated,

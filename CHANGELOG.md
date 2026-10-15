@@ -33,6 +33,16 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 - Keep reading, copying and local drafting available during outages. Server changes resume only after synchronization; reconnect never sends a pending mutation automatically.
 - Bump the wire protocol from 20 to 21 for conditional writes, terminal revisions and busy responses.
 
+### Performance
+
+- The sidebar, Home, command palette and inactive chat views no longer re-render on every streamed token of another thread. Timeline rows re-render only when their own content changes, and a row that fails to render shows "This entry could not be displayed" with "Copy error report" while the rest of the timeline keeps working.
+- The React Compiler now optimizes the timeline rows, sidebar, Home, command palette results and chat header.
+- Components re-render only when the settings they read change, not on every settings write.
+- The file browser renders only the rows in view, so large folders scroll smoothly; the "Show more entries" button is gone and revealing a file scrolls straight to it.
+- Message bodies of at most 10 inactive threads (32 MiB) stay in memory; older threads reload their latest messages when opened. Drafts, titles and status are always kept. Background prefetching pauses while the threads on screen alone exceed that budget.
+- Large code blocks highlight in a background worker. Blocks over 200 KiB or 4,000 lines show as plain text with a "Highlight code" button, and unknown languages show as plain text.
+- Open files and visible folders refresh when they change outside F5, including editors' atomic saves, renames and deletes. Unsaved edits get the existing conflict notice instead of being replaced; F5 falls back to polling when the file system cannot be watched. After an agent turn only that workspace's files and listings refresh.
+
 ### Added
 
 - Error boundaries around each route and each right-panel tab: a failing page or tab shows "Try again" and "Copy error report" in place while the sidebar, composer and other tabs keep working.

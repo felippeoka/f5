@@ -12,7 +12,17 @@ function compareIsoDescending(left: string, right: string): number {
   return right.localeCompare(left);
 }
 
-export function compareThreadsByActivity(left: Thread, right: Thread): number {
+/** The fields activity ordering reads; `Thread` and thread summaries both fit. */
+export type ActivityOrderedThread = Pick<Thread, "id" | "createdAt" | "lastInteractionAt">;
+
+/** The fields list filtering and ordering read. */
+export type ListedThread = ActivityOrderedThread &
+  Pick<Thread, "projectId" | "archivedAt" | "snoozedUntil">;
+
+export function compareThreadsByActivity(
+  left: ActivityOrderedThread,
+  right: ActivityOrderedThread,
+): number {
   return (
     compareIsoDescending(left.lastInteractionAt, right.lastInteractionAt) ||
     compareIsoDescending(left.createdAt, right.createdAt) ||
@@ -20,7 +30,9 @@ export function compareThreadsByActivity(left: Thread, right: Thread): number {
   );
 }
 
-export function sortThreadsByActivity(threads: ReadonlyArray<Thread>): Thread[] {
+export function sortThreadsByActivity<T extends ActivityOrderedThread>(
+  threads: ReadonlyArray<T>,
+): T[] {
   return threads.toSorted(compareThreadsByActivity);
 }
 
@@ -34,24 +46,26 @@ export function isSnoozedThread(thread: Pick<Thread, "snoozedUntil">, now = Date
   return Number.isFinite(timestamp) && timestamp > now;
 }
 
-export function partitionThreadsBySnooze(
-  threads: ReadonlyArray<Thread>,
+export function partitionThreadsBySnooze<T extends Pick<Thread, "snoozedUntil">>(
+  threads: ReadonlyArray<T>,
   now = Date.now(),
-): { readonly activeThreads: Thread[]; readonly snoozedThreads: Thread[] } {
-  const activeThreads: Thread[] = [];
-  const snoozedThreads: Thread[] = [];
+): { readonly activeThreads: T[]; readonly snoozedThreads: T[] } {
+  const activeThreads: T[] = [];
+  const snoozedThreads: T[] = [];
   for (const thread of threads) {
     (isSnoozedThread(thread, now) ? snoozedThreads : activeThreads).push(thread);
   }
   return { activeThreads, snoozedThreads };
 }
 
-export function partitionThreadsByArchive(threads: ReadonlyArray<Thread>): {
-  readonly activeThreads: Thread[];
-  readonly archivedThreads: Thread[];
+export function partitionThreadsByArchive<T extends Pick<Thread, "archivedAt">>(
+  threads: ReadonlyArray<T>,
+): {
+  readonly activeThreads: T[];
+  readonly archivedThreads: T[];
 } {
-  const activeThreads: Thread[] = [];
-  const archivedThreads: Thread[] = [];
+  const activeThreads: T[] = [];
+  const archivedThreads: T[] = [];
 
   for (const thread of threads) {
     if (isArchivedThread(thread)) {
@@ -64,12 +78,12 @@ export function partitionThreadsByArchive(threads: ReadonlyArray<Thread>): {
   return { activeThreads, archivedThreads };
 }
 
-export function getVisibleThreads(
-  threads: ReadonlyArray<Thread>,
+export function getVisibleThreads<T extends ListedThread>(
+  threads: ReadonlyArray<T>,
   planningWorkflows: ReadonlyArray<PlanningWorkflow>,
   codeReviewWorkflows: ReadonlyArray<CodeReviewWorkflow>,
   investigationWorkflows: ReadonlyArray<InvestigationWorkflow>,
-): Thread[] {
+): T[] {
   const hiddenWorkflowThreadIds = archivedWorkflowThreadIds(
     planningWorkflows,
     codeReviewWorkflows,
@@ -83,13 +97,13 @@ export function getVisibleThreads(
   );
 }
 
-function buildMostRecentThreadByProjectId(
-  threads: ReadonlyArray<Thread>,
+function buildMostRecentThreadByProjectId<T extends ListedThread>(
+  threads: ReadonlyArray<T>,
   planningWorkflows: ReadonlyArray<PlanningWorkflow>,
   codeReviewWorkflows: ReadonlyArray<CodeReviewWorkflow>,
   investigationWorkflows: ReadonlyArray<InvestigationWorkflow>,
-): Map<Project["id"], Thread> {
-  const mostRecentThreadByProjectId = new Map<Project["id"], Thread>();
+): Map<Project["id"], T> {
+  const mostRecentThreadByProjectId = new Map<Project["id"], T>();
   for (const thread of getVisibleThreads(
     threads,
     planningWorkflows,
@@ -104,13 +118,13 @@ function buildMostRecentThreadByProjectId(
   return mostRecentThreadByProjectId;
 }
 
-export function getMostRecentThreadForProject(
+export function getMostRecentThreadForProject<T extends ListedThread>(
   projectId: Project["id"],
-  threads: ReadonlyArray<Thread>,
+  threads: ReadonlyArray<T>,
   planningWorkflows: ReadonlyArray<PlanningWorkflow>,
   codeReviewWorkflows: ReadonlyArray<CodeReviewWorkflow>,
   investigationWorkflows: ReadonlyArray<InvestigationWorkflow>,
-): Thread | null {
+): T | null {
   return (
     buildMostRecentThreadByProjectId(
       threads,
@@ -124,7 +138,7 @@ export function getMostRecentThreadForProject(
 export function compareProjectsByActivity(
   left: Project,
   right: Project,
-  threads: ReadonlyArray<Thread>,
+  threads: ReadonlyArray<ListedThread>,
   planningWorkflows: ReadonlyArray<PlanningWorkflow>,
   codeReviewWorkflows: ReadonlyArray<CodeReviewWorkflow>,
   investigationWorkflows: ReadonlyArray<InvestigationWorkflow>,
@@ -155,7 +169,7 @@ export function compareProjectsByActivity(
 
 export function sortProjectsByActivity(
   projects: ReadonlyArray<Project>,
-  threads: ReadonlyArray<Thread>,
+  threads: ReadonlyArray<ListedThread>,
   planningWorkflows: ReadonlyArray<PlanningWorkflow>,
   codeReviewWorkflows: ReadonlyArray<CodeReviewWorkflow>,
   investigationWorkflows: ReadonlyArray<InvestigationWorkflow>,
@@ -182,7 +196,7 @@ export function sortProjectsByActivity(
 
 export function getMostRecentProject(
   projects: ReadonlyArray<Project>,
-  threads: ReadonlyArray<Thread>,
+  threads: ReadonlyArray<ListedThread>,
   planningWorkflows: ReadonlyArray<PlanningWorkflow>,
   codeReviewWorkflows: ReadonlyArray<CodeReviewWorkflow>,
   investigationWorkflows: ReadonlyArray<InvestigationWorkflow>,

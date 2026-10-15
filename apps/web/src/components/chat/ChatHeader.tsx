@@ -158,6 +158,7 @@ export const ChatHeader = memo(function ChatHeader({
   onTogglePreview,
   onToggleDiff,
 }: ChatHeaderProps) {
+  "use memo";
   const [renamingThreadId, setRenamingThreadId] = useState<ThreadId | null>(null);
   const isRenaming = renamingThreadId === activeThreadId;
   const agentsWorkingLabel =

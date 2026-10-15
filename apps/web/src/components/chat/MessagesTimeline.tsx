@@ -6,21 +6,26 @@ import {
   type MessageId,
   type OrchestrationFileChangeId,
   type OrchestrationFileChangeSummary,
+  type ProviderSessionCapabilities,
   type ThreadId,
   type TurnId,
   type UserMessageSkillCall,
 } from "@t3tools/contracts";
 import {
+  createContext,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ComponentProps,
+  type Dispatch,
   type MutableRefObject,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 import type { InlineExactFileChangeDiffProps } from "./InlineExactFileChangeDiff";
 import type { InlineFileChangeDiffProps } from "./InlineFileChangeDiff";
@@ -78,7 +83,6 @@ import {
   computeMessageDurationStart,
   deriveCodexCollaborationResponseRows,
   deriveTimelineTurnRailItems,
-  findLastUserMessageRowIndex,
   findNearestMinimapMarkerIndex,
   formatWorkingLabel,
   isFileChangeWorkEntry,
@@ -126,6 +130,9 @@ import { buildCollapsedUserMessageText, shouldCollapseUserMessage } from "./user
 import { ReasoningSection } from "./ReasoningSection";
 import { COMPOSER_INLINE_CHIP_CLASS_NAME } from "../composerInlineChip";
 import { DiffSurfaceBoundary } from "../DiffSurfaceBoundary";
+import { SurfaceErrorBoundary, type SurfaceErrorFallbackProps } from "../ui/SurfaceErrorBoundary";
+import { copyErrorReport } from "../../lib/errorReport";
+import { useTestRenderCountProps } from "../../lib/testRenderCount";
 import { VscodeEntryIcon } from "./VscodeEntryIcon";
 import {
   classifyCompactCommand,
@@ -468,116 +475,32 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [initialScrollAtEndEnabled]);
 
-  const rows = useMemo<TimelineRow[]>(() => {
-    const nextRows: TimelineRow[] = [];
-    const durationStartByMessageId = computeMessageDurationStart(
-      timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
-    );
-
-    for (let index = 0; index < timelineEntries.length; index += 1) {
-      const timelineEntry = timelineEntries[index];
-      if (!timelineEntry) {
-        continue;
-      }
-
-      if (timelineEntry.kind === "work") {
-        const groupedEntries = [timelineEntry.entry];
-        const shouldIsolateEntry = shouldRenderWorkEntryAsStandaloneRow(timelineEntry.entry, {
-          settingsExpandMcpToolCalls: settings.expandMcpToolCalls,
-        });
-        let cursor = index + 1;
-        if (!shouldIsolateEntry) {
-          while (cursor < timelineEntries.length) {
-            const nextEntry = timelineEntries[cursor];
-            if (!nextEntry || nextEntry.kind !== "work") break;
-            if (
-              shouldRenderWorkEntryAsStandaloneRow(nextEntry.entry, {
-                settingsExpandMcpToolCalls: settings.expandMcpToolCalls,
-              })
-            ) {
-              break;
-            }
-            groupedEntries.push(nextEntry.entry);
-            cursor += 1;
-          }
-        }
-        nextRows.push({
-          kind: "work",
-          id: timelineEntry.id,
-          createdAt: timelineEntry.createdAt,
-          groupedEntries,
-          isPriorTurn: false,
-          workSummary: summarizeWorkGroup(groupedEntries),
-        });
-        index = cursor - 1;
-        continue;
-      }
-
-      if (timelineEntry.kind === "proposed-plan") {
-        nextRows.push({
-          kind: "proposed-plan",
-          id: timelineEntry.id,
-          createdAt: timelineEntry.createdAt,
-          proposedPlan: timelineEntry.proposedPlan,
-        });
-        continue;
-      }
-
-      if (timelineEntry.kind === "command") {
-        nextRows.push({
-          kind: "command",
-          id: timelineEntry.id,
-          createdAt: timelineEntry.createdAt,
-          commandExecution: timelineEntry.commandExecution,
-          ...(timelineEntry.nestedDiagnostics
-            ? { nestedDiagnostics: timelineEntry.nestedDiagnostics }
-            : {}),
-        });
-        continue;
-      }
-
-      const showCompletionDivider =
-        timelineEntry.message.role === "assistant" &&
-        completionDividerBeforeEntryId === timelineEntry.id;
-
-      nextRows.push({
-        kind: "message",
-        id: timelineEntry.id,
-        createdAt: timelineEntry.createdAt,
-        message: timelineEntry.message,
-        durationStart:
-          durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt,
-        showCompletionDivider,
-        completionSummary: showCompletionDivider ? completionSummary : null,
-      });
-    }
-
-    // Groups above the newest user message belong to finished turns.
-    const lastUserMessageRowIndex = findLastUserMessageRowIndex(nextRows);
-    for (let rowIndex = 0; rowIndex < lastUserMessageRowIndex; rowIndex += 1) {
-      const row = nextRows[rowIndex];
-      if (row?.kind === "work") nextRows[rowIndex] = { ...row, isPriorTurn: true };
-    }
-
-    if (isWorking) {
-      nextRows.push({
-        kind: "working",
-        id: "working-indicator-row",
-        createdAt: activeTurnStartedAt,
-        activity: workingActivityLabel(nextRows, liveActivity),
-      });
-    }
-
-    return nextRows;
-  }, [
-    timelineEntries,
-    completionDividerBeforeEntryId,
-    completionSummary,
-    isWorking,
-    activeTurnStartedAt,
-    liveActivity,
-    settings.expandMcpToolCalls,
-  ]);
+  const rowCacheRef = useRef<TimelineRowCache | null>(null);
+  rowCacheRef.current ??= createTimelineRowCache();
+  const rowCache = rowCacheRef.current;
+  const rows = useMemo(
+    () =>
+      buildTimelineRows({
+        timelineEntries,
+        completionDividerBeforeEntryId,
+        completionSummary,
+        isWorking,
+        activeTurnStartedAt,
+        liveActivity,
+        expandMcpToolCalls: settings.expandMcpToolCalls,
+        cache: rowCache,
+      }),
+    [
+      activeTurnStartedAt,
+      completionDividerBeforeEntryId,
+      completionSummary,
+      isWorking,
+      liveActivity,
+      rowCache,
+      settings.expandMcpToolCalls,
+      timelineEntries,
+    ],
+  );
 
   const rowCount = rows.length;
   const lastRowId = rowCount > 0 ? (rows[rowCount - 1]?.id ?? null) : null;
@@ -947,767 +870,232 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       setRevertPopover(null);
   }, [revertPopover, timelineMessages]);
 
-  // NOTE: This closure depends on many callbacks/state slices from props (see
-  // ChatView's `<MessagesTimeline … />` wiring), so memoizing it via
-  // useCallback would require a long dependency list that changes every render
-  // anyway. We intentionally leave it unmemoized. Live clocks are leaf
-  // components subscribed to the shared ticker, so they stay out of it.
-  const legendListExtraData = useMemo(
-    () => [
-      settings.expandMcpToolCalls,
-      settings.expandMcpToolCallCardsByDefault,
-      settings.showReasoningExpanded,
-      settings.showFileChangeDiffsInline,
-      chatDiffContext,
-      expandedWorkGroups,
-      settings.collapseCompletedWorkLogs,
-      workGroupCollapseOverrides,
-      expandedCommandExecutions,
-      isRevertingCheckpoint,
-      resolvedTheme,
+  const ribbonActive = ribbonOrigin !== null;
+  // Row actions call the latest props through this ref, so their identities
+  // never change and ChatView re-renders do not invalidate memoized rows.
+  const latestRowInputs = {
+    onToggleWorkGroup,
+    onSetWorkGroupExpanded,
+    onOpenTurnDiff,
+    onImageExpand,
+    onImageActionMenu,
+    onToggleCommandExecution,
+    onToggleAllDirectories,
+    onRevertUserMessage,
+    latestMessageId,
+    revertPopover,
+    chatDiffContext,
+  };
+  const latestRowInputsRef = useRef(latestRowInputs);
+  useLayoutEffect(() => {
+    latestRowInputsRef.current = latestRowInputs;
+  });
+  const rowActions = useMemo<TimelineRowActions>(
+    () => ({
+      onToggleWorkGroup: (groupId, paginatedEntryCount) =>
+        latestRowInputsRef.current.onToggleWorkGroup(groupId, paginatedEntryCount),
+      onSetWorkGroupExpanded: (groupId, expanded) =>
+        latestRowInputsRef.current.onSetWorkGroupExpanded?.(groupId, expanded),
+      onOpenTurnDiff: (turnId, filePath) =>
+        latestRowInputsRef.current.onOpenTurnDiff(turnId, filePath),
+      onImageExpand: (preview) => latestRowInputsRef.current.onImageExpand(preview),
+      onImageActionMenu: (item, position) =>
+        latestRowInputsRef.current.onImageActionMenu?.(item, position),
+      onToggleCommandExecution: (commandExecutionId) =>
+        latestRowInputsRef.current.onToggleCommandExecution(commandExecutionId),
+      onToggleAllDirectories: () => latestRowInputsRef.current.onToggleAllDirectories(),
+      onToggleFileChangeDiff: (workEntryId) =>
+        latestRowInputsRef.current.chatDiffContext.onToggleFileChangeDiff(workEntryId),
+      onOpenFileChangeDiff: (fileChangeId, filePath) =>
+        latestRowInputsRef.current.chatDiffContext.onOpenFileChangeDiff(fileChangeId, filePath),
+      setRevertPopoverOpen: (messageId, open) =>
+        setRevertPopover((current) =>
+          open
+            ? {
+                messageId,
+                expectedLatestMessageId: latestRowInputsRef.current.latestMessageId,
+              }
+            : current?.messageId === messageId
+              ? null
+              : current,
+        ),
+      confirmRevert: (messageId, restoreFiles) => {
+        const latest = latestRowInputsRef.current;
+        latest.onRevertUserMessage(
+          messageId,
+          restoreFiles,
+          latest.revertPopover?.messageId === messageId
+            ? latest.revertPopover.expectedLatestMessageId
+            : latest.latestMessageId,
+        );
+      },
+      setChangedFilesPresentationOverrides,
+      startRibbon: (origin) => setRibbonOrigin(origin),
+    }),
+    [],
+  );
+  const rowChatDiffContext = useMemo<ChatDiffContext>(
+    () => ({
+      ...chatDiffContext,
+      onToggleFileChangeDiff: rowActions.onToggleFileChangeDiff,
+      onOpenFileChangeDiff: rowActions.onOpenFileChangeDiff,
+    }),
+    [chatDiffContext, rowActions],
+  );
+  const timelineRowContext = useMemo<TimelineRowContextValue>(
+    () => ({
+      threadId,
+      nativeSessionCapabilities: nativeSessionCapabilities ?? null,
+      expandMcpToolCalls: settings.expandMcpToolCalls,
+      expandMcpToolCallCardsByDefault: settings.expandMcpToolCallCardsByDefault,
+      showReasoningExpanded: settings.showReasoningExpanded,
+      showFileChangeDiffsInline: settings.showFileChangeDiffsInline,
+      collapseCompletedWorkLogs: settings.collapseCompletedWorkLogs,
       timestampFormat,
       workspaceRoot,
       markdownCwd,
-      allDirectoriesExpanded,
-      revertTurnCountByUserMessageId,
-      canRestoreFiles,
-      nativeSessionCapabilities,
-      effectiveRevertDisabledReason,
-      revertPopover,
-      revertImpact,
-      revertDimFromRowIndex,
-      pendingRevert,
-      revertPreferenceKey,
-      turnDiffSummaryByAssistantMessageId,
-      turnDiffSummaryByTurnId,
-      changedFilesPresentationOverrides,
-      newestTurnDiffId,
-      ribbonOrigin !== null,
-      reducedMotion,
-      isWorking,
-    ],
-    [
-      ribbonOrigin !== null,
-      reducedMotion,
-      isWorking,
-      canRestoreFiles,
-      nativeSessionCapabilities,
-      effectiveRevertDisabledReason,
-      revertPopover,
-      revertImpact,
-      revertDimFromRowIndex,
-      pendingRevert,
-      revertPreferenceKey,
-      allDirectoriesExpanded,
-      chatDiffContext,
-      expandedCommandExecutions,
-      expandedWorkGroups,
-      settings.collapseCompletedWorkLogs,
-      workGroupCollapseOverrides,
-      isRevertingCheckpoint,
-      markdownCwd,
       resolvedTheme,
+      isGitRepo: chatDiffContext.isGitRepo,
+      canRestoreFiles,
+      revertDisabledReason: effectiveRevertDisabledReason,
+      revertPreferenceKey,
+      allDirectoriesExpanded,
+      usesCustomImageContextMenu,
+      hasImageActionMenu: onImageActionMenu !== undefined,
+      canSetWorkGroupExpanded: onSetWorkGroupExpanded !== undefined,
+      isWorking,
+      reducedMotion,
+      grabButtonRef,
+      actions: rowActions,
+    }),
+    [
+      allDirectoriesExpanded,
+      canRestoreFiles,
+      chatDiffContext.isGitRepo,
+      effectiveRevertDisabledReason,
+      isWorking,
+      markdownCwd,
+      nativeSessionCapabilities,
+      onImageActionMenu,
+      onSetWorkGroupExpanded,
+      reducedMotion,
+      resolvedTheme,
+      revertPreferenceKey,
+      rowActions,
+      settings.collapseCompletedWorkLogs,
       settings.expandMcpToolCallCardsByDefault,
       settings.expandMcpToolCalls,
       settings.showFileChangeDiffsInline,
       settings.showReasoningExpanded,
+      threadId,
       timestampFormat,
-      turnDiffSummaryByAssistantMessageId,
-      turnDiffSummaryByTurnId,
-      changedFilesPresentationOverrides,
-      newestTurnDiffId,
-      revertTurnCountByUserMessageId,
+      usesCustomImageContextMenu,
       workspaceRoot,
     ],
   );
+  const committedRowExternalsRef = useRef<ReadonlyMap<string, TimelineRowExternalsEntry>>(
+    new Map(),
+  );
+  const rowExternals = useMemo(
+    () =>
+      buildTimelineRowExternals(
+        rows,
+        {
+          threadId,
+          expandedWorkGroups,
+          workGroupCollapseOverrides,
+          turnDiffSummaryByTurnId,
+          chatDiffContext: rowChatDiffContext,
+          revertTurnCountByUserMessageId,
+          revertPopover,
+          revertImpact,
+          turnDiffSummaryByAssistantMessageId,
+          changedFilesPresentationOverrides,
+          newestTurnDiffId,
+          expandedCommandExecutions,
+          ribbonActive,
+        },
+        committedRowExternalsRef.current,
+      ),
+    [
+      changedFilesPresentationOverrides,
+      expandedCommandExecutions,
+      expandedWorkGroups,
+      newestTurnDiffId,
+      revertImpact,
+      revertPopover,
+      revertTurnCountByUserMessageId,
+      ribbonActive,
+      rowChatDiffContext,
+      rows,
+      threadId,
+      turnDiffSummaryByAssistantMessageId,
+      turnDiffSummaryByTurnId,
+      workGroupCollapseOverrides,
+    ],
+  );
+  useLayoutEffect(() => {
+    committedRowExternalsRef.current = rowExternals;
+  }, [rowExternals]);
+  // LegendList caches cell renders until `data` or `extraData` changes, so
+  // every value `renderItem` reads must be here: the revert dimming and the
+  // per-row externals map (a new map only when some row's inputs changed).
+  // Slow-changing values reach rows through context instead.
+  const legendListExtraData = useMemo(
+    () => [revertDimFromRowIndex, pendingRevert, rowExternals],
+    [pendingRevert, revertDimFromRowIndex, rowExternals],
+  );
+  // LegendList's internal dataset tracking can miss row-shape changes during
+  // sequential live updates, so each row contributes its identity (a new row
+  // object means new content) and its external-input version.
   const legendListDataVersion = useMemo(
     () =>
       rows
-        .map((row) => {
-          switch (row.kind) {
-            case "message":
-              return [
-                row.kind,
-                row.id,
-                row.createdAt,
-                row.showCompletionDivider ? "divider" : "no-divider",
-                row.completionSummary ?? "",
-                row.message.streaming ? "streaming" : "stable",
-                row.message.text.length,
-                row.message.reasoningText?.length ?? 0,
-                row.message.skillCall?.name ?? "",
-              ].join(":");
-            case "work":
-              return [
-                row.kind,
-                row.id,
-                row.createdAt,
-                row.isPriorTurn ? "prior" : "current",
-                ...row.groupedEntries.map((entry) => {
-                  const turnDiffSummary = entry.turnId
-                    ? turnDiffSummaryByTurnId.get(entry.turnId)
-                    : undefined;
-                  const checkpointTurnCount = entry.turnId
-                    ? (turnDiffSummary?.checkpointTurnCount ??
-                      chatDiffContext.inferredCheckpointTurnCountByTurnId[entry.turnId] ??
-                      "")
-                    : "";
-                  const fileChangeSummary = entry.fileChangeId
-                    ? chatDiffContext.fileChangeSummariesById[entry.fileChangeId]
-                    : undefined;
-                  return [
-                    entry.id,
-                    entry.label,
-                    entry.status ?? "",
-                    entry.itemType ?? "",
-                    entry.warningCount ?? 1,
-                    entry.diagnostic?.status ?? "",
-                    entry.diagnostic?.outcome ?? "",
-                    entry.diagnostic?.sourcePath ?? "",
-                    entry.diagnostic?.durationMs ?? "",
-                    entry.diagnostic?.output?.length ?? 0,
-                    entry.diagnostic?.entries?.length ?? 0,
-                    entry.turnId ?? "",
-                    checkpointTurnCount,
-                    entry.fileChangeId ?? "",
-                    fileChangeSummary?.status ?? "",
-                    fileChangeSummary?.hasPatch ? "patch" : "no-patch",
-                    ...(entry.nestedDiagnostics?.map((diagnostic) =>
-                      diagnosticDataVersion(diagnostic),
-                    ) ?? []),
-                    isInlineFileChangeDiffExpanded(
-                      entry.id,
-                      chatDiffContext.expandedFileChangeDiffs,
-                    )
-                      ? "expanded"
-                      : "collapsed",
-                  ].join(":");
-                }),
-              ].join("|");
-            case "command":
-              return [
-                row.kind,
-                row.id,
-                row.createdAt,
-                row.commandExecution.status,
-                row.commandExecution.completedAt ?? "",
-                ...(row.nestedDiagnostics?.map((diagnostic) => diagnosticDataVersion(diagnostic)) ??
-                  []),
-              ].join(":");
-            case "proposed-plan":
-              return [row.kind, row.id, row.createdAt, row.proposedPlan.updatedAt].join(":");
-            case "working":
-              return [row.kind, row.id, row.createdAt ?? "", row.activity ?? ""].join(":");
-          }
-        })
-        .join("||"),
-    [rows, turnDiffSummaryByTurnId, chatDiffContext],
+        .map(
+          (row) =>
+            `${row.id}#${timelineObjectVersion(row)}#${rowExternals.get(row.id)?.version ?? ""}`,
+        )
+        .join("|"),
+    [rowExternals, rows],
   );
 
-  const renderRowContent = (row: TimelineRow) => (
-    <TimelineRowWrapper row={row}>
-      {row.kind === "work" &&
-        (() => {
-          const groupId = row.id;
-          const groupState = resolveWorkGroupRenderState(
-            row.groupedEntries,
-            expandedWorkGroups[groupId] ?? WORK_LOG_PAGE_SIZE,
-          );
-          const standaloneExpandedMcpEntry = resolveStandaloneExpandedMcpWorkEntry(
-            row.groupedEntries,
-            {
-              settingsExpandMcpToolCalls: settings.expandMcpToolCalls,
-            },
-          );
-
-          if (standaloneExpandedMcpEntry) {
-            return (
-              <div className="min-w-0 px-1 py-0.5">
-                <WorkEntryRow
-                  workEntry={standaloneExpandedMcpEntry}
-                  timestampFormat={timestampFormat}
-                  expandMcpToolCalls={settings.expandMcpToolCalls}
-                  expandMcpByDefault={settings.expandMcpToolCallCardsByDefault}
-                  turnDiffSummaryByTurnId={turnDiffSummaryByTurnId}
-                  workspaceRoot={workspaceRoot}
-                  markdownCwd={markdownCwd}
-                  resolvedTheme={resolvedTheme}
-                  showFileChangeDiffsInline={settings.showFileChangeDiffsInline}
-                  chatDiffContext={chatDiffContext}
-                  onOpenTurnDiff={onOpenTurnDiff}
-                  onImageExpand={onImageExpand}
-                />
-              </div>
-            );
-          }
-
-          const expanded =
-            workGroupCollapseOverrides[groupId] ??
-            !(row.isPriorTurn && settings.collapseCompletedWorkLogs);
-          if (!expanded) {
-            return (
-              <div className="min-w-0 px-1 py-0.5">
-                <button
-                  type="button"
-                  aria-expanded={false}
-                  data-slot="work-group-summary"
-                  className="flex min-h-7 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-ui text-muted-foreground outline-none transition-colors duration-(--duration-fast) hover:bg-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                  onClick={() => onSetWorkGroupExpanded?.(groupId, true)}
-                >
-                  <ChevronRightIcon
-                    aria-hidden="true"
-                    className="size-3.5 shrink-0 text-faint-foreground"
-                  />
-                  <span className="min-w-0 truncate">{row.workSummary}</span>
-                </button>
-              </div>
-            );
-          }
-          const canCollapse = row.isPriorTurn && onSetWorkGroupExpanded !== undefined;
-
-          return (
-            <div className="rounded-xl border border-border bg-card/50 px-2 py-1.5">
-              {(groupState.showHeader || canCollapse) && (
-                <div className="mb-1 flex min-h-6 items-center justify-between gap-2 px-0.5">
-                  {canCollapse ? (
-                    <button
-                      type="button"
-                      aria-expanded
-                      className="flex min-w-0 items-center gap-1 rounded-sm text-2xs font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                      onClick={() => onSetWorkGroupExpanded?.(groupId, false)}
-                    >
-                      <ChevronDownIcon
-                        aria-hidden="true"
-                        className="size-3.5 shrink-0 text-faint-foreground"
-                      />
-                      <span className="truncate">{row.workSummary}</span>
-                    </button>
-                  ) : (
-                    <SectionLabel as="span" count={row.groupedEntries.length} className="min-h-0">
-                      {groupState.groupLabel}
-                    </SectionLabel>
-                  )}
-                  {groupState.hasOverflow && (
-                    <button
-                      type="button"
-                      className="shrink-0 rounded-sm text-2xs text-muted-foreground outline-none transition-colors duration-(--duration-fast) hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                      onClick={() => onToggleWorkGroup(groupId, groupState.paginatedEntryCount)}
-                    >
-                      {groupState.isExpanded
-                        ? "Show less"
-                        : `Show ${Math.min(WORK_LOG_PAGE_SIZE, groupState.hiddenCount)} more`}
-                    </button>
-                  )}
-                </div>
-              )}
-              <div className="space-y-0.5">
-                {groupState.visibleEntries.map((workEntry) => (
-                  <WorkEntryRow
-                    key={`work-row:${workEntry.id}`}
-                    workEntry={workEntry}
-                    timestampFormat={timestampFormat}
-                    expandMcpToolCalls={settings.expandMcpToolCalls}
-                    expandMcpByDefault={settings.expandMcpToolCallCardsByDefault}
-                    turnDiffSummaryByTurnId={turnDiffSummaryByTurnId}
-                    workspaceRoot={workspaceRoot}
-                    markdownCwd={markdownCwd}
-                    resolvedTheme={resolvedTheme}
-                    showFileChangeDiffsInline={settings.showFileChangeDiffsInline}
-                    chatDiffContext={chatDiffContext}
-                    onOpenTurnDiff={onOpenTurnDiff}
-                    onImageExpand={onImageExpand}
-                  />
-                ))}
-              </div>
-            </div>
-          );
-        })()}
-
-      {row.kind === "message" &&
-        row.message.role === "user" &&
-        (() => {
-          if (String(row.message.id).startsWith("resume:"))
-            return (
-              <div
-                className="my-4 flex items-center gap-3 text-2xs font-medium text-muted-foreground"
-                role="separator"
-              >
-                <span className="h-px flex-1 bg-border" />
-                Resumed after restart
-                <span className="h-px flex-1 bg-border" />
-              </div>
-            );
-          const userImages = (row.message.attachments ?? []).filter(
-            (attachment) => attachment.type === "image",
-          );
-          const userFiles = (row.message.attachments ?? []).filter(
-            (attachment) => attachment.type === "file",
-          );
-          const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
-          const terminalContexts = displayedUserMessage.contexts;
-          const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
-          return (
-            <div className="group/user-message flex flex-col items-end">
-              <div
-                className="max-w-[85%] rounded-xl rounded-br-md border border-border bg-secondary px-4 py-2.5"
-                data-slot="user-message-bubble"
-              >
-                {userFiles.map((file) => (
-                  <AttachmentFileChip key={file.id} file={file} />
-                ))}
-                {userImages.length > 0 && (
-                  <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-                    {userImages.map(
-                      (image: NonNullable<TimelineMessage["attachments"]>[number]) => {
-                        const previewUrl = image.previewUrl;
-                        return (
-                          <div
-                            key={image.id}
-                            className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-                          >
-                            {previewUrl ? (
-                              <button
-                                type="button"
-                                className="h-full w-full cursor-zoom-in"
-                                aria-label={`Preview ${image.name}`}
-                                onContextMenu={(event) => {
-                                  if (!usesCustomImageContextMenu || !onImageActionMenu) return;
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  onImageActionMenu(
-                                    {
-                                      src: image.sourceUrl ?? previewUrl,
-                                      name: image.name,
-                                      mimeType: image.mimeType,
-                                      ...(image.sourceBlob ? { sourceBlob: image.sourceBlob } : {}),
-                                    },
-                                    { x: event.clientX, y: event.clientY },
-                                  );
-                                }}
-                                onClick={() => {
-                                  const preview = buildExpandedImagePreview(userImages, image.id);
-                                  if (!preview) return;
-                                  onImageExpand(preview);
-                                }}
-                              >
-                                <img
-                                  src={previewUrl}
-                                  alt={image.name}
-                                  className="h-full max-h-[220px] w-full object-cover"
-                                  draggable={false}
-                                />
-                              </button>
-                            ) : (
-                              <div className="flex min-h-18 items-center justify-center px-2 py-3 text-center text-2xs text-muted-foreground">
-                                {image.name}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      },
-                    )}
-                  </div>
-                )}
-                {displayedUserMessage.attachedFilePaths.length > 0 && (
-                  <div className="mb-2 flex flex-wrap gap-1.5">
-                    {displayedUserMessage.attachedFilePaths.map((filePath) => {
-                      const displayPath = relativePathForDisplay(filePath, workspaceRoot);
-                      return (
-                        <span
-                          key={filePath}
-                          className={COMPOSER_INLINE_CHIP_CLASS_NAME}
-                          title={displayPath}
-                        >
-                          <VscodeEntryIcon pathValue={filePath} kind="file" theme={resolvedTheme} />
-                          <span className="max-w-[320px] truncate">{displayPath}</span>
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
-                {(displayedUserMessage.visibleText.trim().length > 0 ||
-                  terminalContexts.length > 0) && (
-                  <>
-                    {/* The copy button below uses copyText, which is derived before
-                    visual collapse, so collapsed messages still copy in full. */}
-                    <CollapsibleUserMessageBody
-                      key={row.message.id}
-                      text={displayedUserMessage.visibleText}
-                      skillCall={row.message.skillCall}
-                      terminalContexts={terminalContexts}
-                    />
-                  </>
-                )}
-              </div>
-              <div className="mt-1 flex items-center gap-1 pr-1">
-                <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-(--duration-fast) focus-within:opacity-100 group-hover/user-message:opacity-100 has-[[data-popup-open]]:opacity-100 pointer-coarse:opacity-100">
-                  {displayedUserMessage.copyText && (
-                    <MessageCopyButton text={displayedUserMessage.copyText} />
-                  )}
-                  {threadId &&
-                    row.message.turnId &&
-                    nativeSessionCapabilities?.actions.some(
-                      (action) =>
-                        ["fileCheckpointing", "nativeFork"].includes(action.action) &&
-                        action.supported,
-                    ) && (
-                      <NativeFilePreview
-                        threadId={threadId}
-                        turnId={row.message.turnId}
-                        generation={nativeSessionCapabilities.generation}
-                        filePreview={nativeSessionCapabilities.actions.some(
-                          (action) => action.action === "fileCheckpointing" && action.supported,
-                        )}
-                        nativeFork={
-                          chatDiffContext.isGitRepo &&
-                          nativeSessionCapabilities.actions.some(
-                            (action) => action.action === "nativeFork" && action.supported,
-                          )
-                        }
-                      />
-                    )}
-                  {canRevertAgentWork && (
-                    <UserMessageRevertPopover
-                      open={revertPopover?.messageId === row.message.id}
-                      onOpenChange={(open) =>
-                        setRevertPopover((current) =>
-                          open
-                            ? {
-                                messageId: row.message.id,
-                                expectedLatestMessageId: latestMessageId,
-                              }
-                            : current?.messageId === row.message.id
-                              ? null
-                              : current,
-                        )
-                      }
-                      disabledReason={effectiveRevertDisabledReason}
-                      nativeFileRevert={
-                        !chatDiffContext.isGitRepo &&
-                        nativeSessionCapabilities?.actions.some(
-                          (action) => action.action === "fileCheckpointing" && action.supported,
-                        )
-                      }
-                      nativeFileTarget={
-                        threadId && row.message.turnId && nativeSessionCapabilities
-                          ? {
-                              threadId,
-                              turnId: row.message.turnId,
-                              generation: nativeSessionCapabilities.generation,
-                            }
-                          : undefined
-                      }
-                      canRestoreFiles={canRestoreFiles === true}
-                      impact={revertPopover?.messageId === row.message.id ? revertImpact : null}
-                      presetRestoreFiles={
-                        revertPopover?.messageId === row.message.id
-                          ? revertPopover.presetRestoreFiles
-                          : undefined
-                      }
-                      preferenceKey={revertPreferenceKey}
-                      onConfirm={(restoreFiles) =>
-                        onRevertUserMessage(
-                          row.message.id,
-                          restoreFiles,
-                          revertPopover?.messageId === row.message.id
-                            ? revertPopover.expectedLatestMessageId
-                            : latestMessageId,
-                        )
-                      }
-                    />
-                  )}
-                </div>
-                <p className="text-2xs text-muted-foreground tabular-nums">
-                  {formatTimestamp(row.message.createdAt, timestampFormat)}
-                </p>
-              </div>
-            </div>
-          );
-        })()}
-
-      {row.kind === "message" &&
-        row.message.role === "assistant" &&
-        (() => {
-          const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
-          const reasoningText = row.message.reasoningText?.trim();
-          const isStreamingReasoning =
-            Boolean(row.message.streaming) &&
-            row.message.text.length === 0 &&
-            Boolean(reasoningText);
-          return (
-            <>
-              {row.showCompletionDivider && (
-                <div className="my-3 flex items-center gap-3" role="separator">
-                  <span className="h-px flex-1 bg-border" />
-                  <SectionLabel as="span" className="min-h-0">
-                    {row.completionSummary ?? "Response"}
-                  </SectionLabel>
-                  <span className="h-px flex-1 bg-border" />
-                </div>
-              )}
-              <div className="group/assistant-message min-w-0 px-1 py-0.5">
-                {reasoningText ? (
-                  <ReasoningSection
-                    reasoningText={reasoningText}
-                    defaultExpanded={settings.showReasoningExpanded}
-                    isStreaming={isStreamingReasoning}
-                    cwd={markdownCwd}
-                  />
-                ) : null}
-                <div
-                  className={
-                    /^★ Insight(?:\s|─)/mu.test(messageText)
-                      ? "[&_.chat-markdown_p]:whitespace-pre-line"
-                      : undefined
-                  }
-                >
-                  <ChatMarkdown
-                    text={messageText}
-                    cwd={markdownCwd}
-                    isStreaming={Boolean(row.message.streaming)}
-                  />
-                </div>
-                {(() => {
-                  const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);
-                  if (!turnSummary) return null;
-                  const checkpointFiles = turnSummary.files;
-                  if (checkpointFiles.length === 0) return null;
-                  const summaryStat = summarizeTurnDiffStats(checkpointFiles);
-                  const changedFileCountLabel = String(checkpointFiles.length);
-                  const presentationKey = `${threadId ?? "unknown"}:${turnSummary.turnId}`;
-                  const defaultPresentation = resolveChangedFilesPresentation({
-                    fileCount: checkpointFiles.length,
-                    changedLineCount: changedLineCount(summaryStat),
-                    isNewest: turnSummary.turnId === newestTurnDiffId,
-                  });
-                  const presentation =
-                    changedFilesPresentationOverrides[presentationKey] ?? defaultPresentation;
-                  const isExpanded = presentation === "expanded";
-                  const togglePresentation = () => {
-                    setChangedFilesPresentationOverrides((current) => ({
-                      ...current,
-                      [presentationKey]: isExpanded
-                        ? defaultPresentation === "expanded"
-                          ? "collapsed"
-                          : defaultPresentation
-                        : "expanded",
-                    }));
-                  };
-                  return (
-                    <div className="relative mt-3 rounded-xl border border-border bg-card p-2.5">
-                      <div className="sticky top-0 z-2 -mx-2.5 -mt-2.5 mb-1.5 flex items-center justify-between gap-2 rounded-t-xl border-b border-border bg-card/95 px-2.5 py-1 backdrop-blur-sm supports-backdrop-filter:bg-card/85">
-                        <SectionLabel as="span" count={checkpointFiles.length} className="min-w-0">
-                          <span>Changed files</span>
-                          {hasNonZeroStat(summaryStat) && (
-                            <span className="ms-2 font-normal">
-                              <DiffStatLabel
-                                additions={summaryStat.additions}
-                                deletions={summaryStat.deletions}
-                              />
-                            </span>
-                          )}
-                          <span className="sr-only"> ({changedFileCountLabel})</span>
-                        </SectionLabel>
-                        <div className="flex items-center gap-1">
-                          {isExpanded ? (
-                            <Button
-                              type="button"
-                              size="xs"
-                              variant="ghost"
-                              className="text-muted-foreground"
-                              onClick={() => onToggleAllDirectories()}
-                            >
-                              {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
-                            </Button>
-                          ) : null}
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="ghost"
-                            className="text-muted-foreground"
-                            aria-expanded={isExpanded}
-                            onClick={togglePresentation}
-                          >
-                            {isExpanded ? "Show less" : "Show more"}
-                            <ChevronDownIcon
-                              aria-hidden="true"
-                              className={cn(
-                                "size-3.5 transition-transform duration-(--duration-fast)",
-                                isExpanded && "rotate-180",
-                              )}
-                            />
-                          </Button>
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="outline"
-                            onClick={() =>
-                              onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)
-                            }
-                          >
-                            View diff
-                          </Button>
-                        </div>
-                      </div>
-                      {presentation === "expanded" ? (
-                        <ChangedFilesTree
-                          key={`changed-files-tree:${turnSummary.turnId}`}
-                          turnId={turnSummary.turnId}
-                          files={checkpointFiles}
-                          allDirectoriesExpanded={allDirectoriesExpanded}
-                          resolvedTheme={resolvedTheme}
-                          onOpenTurnDiff={onOpenTurnDiff}
-                        />
-                      ) : presentation === "compact" ? (
-                        <div className="flex flex-wrap gap-1 pt-0.5">
-                          {checkpointFiles
-                            .slice(0, CHANGED_FILES_COMPACT_PREVIEW_COUNT)
-                            .map((file) => (
-                              <FileChip
-                                key={`${turnSummary.turnId}:${file.path}`}
-                                path={file.path}
-                                theme={resolvedTheme}
-                                className="max-w-56"
-                                onClick={() => onOpenTurnDiff(turnSummary.turnId, file.path)}
-                              />
-                            ))}
-                          {checkpointFiles.length > CHANGED_FILES_COMPACT_PREVIEW_COUNT ? (
-                            <span className="inline-flex h-6 items-center px-1 text-2xs text-muted-foreground tabular-nums">
-                              +{checkpointFiles.length - CHANGED_FILES_COMPACT_PREVIEW_COUNT}
-                            </span>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })()}
-                <div className="mt-1.5 flex min-h-7 items-center justify-between gap-2">
-                  <p className="text-2xs text-muted-foreground tabular-nums">
-                    <LiveMessageMeta
-                      createdAt={row.message.createdAt}
-                      durationStart={row.durationStart}
-                      completedAt={row.message.completedAt}
-                      streaming={row.message.streaming}
-                      timestampFormat={timestampFormat}
-                    />
-                  </p>
-                  <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-(--duration-fast) focus-within:opacity-100 group-hover/assistant-message:opacity-100 has-[[data-popup-open]]:opacity-100 pointer-coarse:opacity-100">
-                    <AssistantMessageActions rawText={row.message.text} />
-                  </div>
-                </div>
-              </div>
-            </>
-          );
-        })()}
-
-      {row.kind === "proposed-plan" && (
-        <div className="min-w-0 px-1 py-0.5">
-          <ProposedPlanCard
-            planMarkdown={row.proposedPlan.planMarkdown}
-            cwd={markdownCwd}
-            workspaceRoot={workspaceRoot}
-          />
-        </div>
-      )}
-
-      {row.kind === "command" && (
-        <div className="min-w-0 px-1 py-0.5">
-          <CommandTranscriptCard
-            threadId={threadId}
-            execution={row.commandExecution}
-            expanded={expandedCommandExecutions[row.commandExecution.id] ?? false}
-            timestampFormat={timestampFormat}
-            threadWorking={isWorking}
-            onToggle={() => onToggleCommandExecution(row.commandExecution.id)}
-          />
-          {row.nestedDiagnostics && row.nestedDiagnostics.length > 0 ? (
-            <NestedDiagnosticList diagnostics={row.nestedDiagnostics} className="mt-1" />
+  const renderItem = useCallback(
+    ({ item, index }: { item: TimelineRow; index: number }) => {
+      // Rows from the revert target onward: previewed while the popover is open,
+      // then held dimmed and inert until the revert lands and removes them.
+      const dimmed = revertDimFromRowIndex >= 0 && index >= revertDimFromRowIndex;
+      const reverting = dimmed && pendingRevert !== null;
+      const externalsEntry = rowExternals.get(item.id);
+      return (
+        <div
+          className="mx-auto w-full min-w-0 max-w-(--chat-content-max-width) overflow-x-clip"
+          data-timeline-root="true"
+        >
+          {pendingRevert && index === revertDimFromRowIndex ? (
+            <RevertStatusPill label={pendingRevert.label} />
           ) : null}
-        </div>
-      )}
-
-      {row.kind === "working" && (
-        <div className="py-0.5 pl-1.5">
-          <div className="flex min-w-0 items-center gap-2 pt-1 text-ui text-muted-foreground">
-            <span aria-hidden="true" className="inline-flex shrink-0 items-center gap-0.5">
-              <span className="size-1 rounded-full bg-faint-foreground motion-safe:animate-status-pulse" />
-              <span className="size-1 rounded-full bg-faint-foreground motion-safe:animate-status-pulse motion-safe:[animation-delay:200ms]" />
-              <span className="size-1 rounded-full bg-faint-foreground motion-safe:animate-status-pulse motion-safe:[animation-delay:400ms]" />
-            </span>
-            {reducedMotion ? (
-              <span className="shrink-0 tabular-nums">
-                <LiveWorkingLabel startedAt={row.createdAt} />
-              </span>
-            ) : (
-              // Picks the label up as a steerable ribbon; looks like plain text at rest.
-              <button
-                ref={grabButtonRef}
-                type="button"
-                data-working-ribbon-grab=""
-                // Static: a focused control whose name ticked every second
-                // would be re-announced by screen readers on each tick.
-                aria-label="Working. Press to steer the text"
-                className={cn(
-                  "m-0 shrink-0 cursor-grab appearance-none rounded-sm border-0 bg-transparent p-0 font-[inherit] leading-[inherit] tracking-[inherit] text-inherit tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  ribbonOrigin && "invisible",
-                )}
-                onKeyDown={(event) => {
-                  // Focus returns here while the key that grabbed the ribbon
-                  // may still be held (it dropped for lack of room); its
-                  // autorepeat must not pick the ribbon straight back up.
-                  // Chromium already ignores repeats here; other engines may not.
-                  if (event.repeat && (event.key === "Enter" || event.key === " ")) {
-                    event.preventDefault();
-                  }
-                }}
-                onClick={(event) => {
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  setRibbonOrigin({ x: rect.right, y: rect.top + rect.height / 2 });
-                }}
-              >
-                <LiveWorkingLabel startedAt={row.createdAt} />
-              </button>
+          <div
+            className={cn(
+              "transition-opacity duration-150 motion-reduce:transition-none",
+              dimmed && "opacity-50",
+              reverting && "pointer-events-none select-none opacity-40",
             )}
-            {row.activity ? (
-              <span className="min-w-0 truncate text-muted-foreground">· {row.activity}</span>
+            data-revert-dimmed={dimmed ? "" : undefined}
+            aria-busy={reverting || undefined}
+          >
+            {externalsEntry ? (
+              <TimelineRowView
+                row={item}
+                externals={externalsEntry.externals}
+                rowVersion={externalsEntry.version}
+              />
             ) : null}
           </div>
         </div>
-      )}
-    </TimelineRowWrapper>
+      );
+    },
+    [pendingRevert, revertDimFromRowIndex, rowExternals],
   );
-
-  // Plain function, not memoized: `renderRowContent` depends on every render's
-  // current closure (expansion state, callbacks, nowIso, …), so wrapping this
-  // in useCallback with a dependency list that changes every render would be
-  // dead weight. LegendList handles cell-level reuse itself.
-  const renderItem = ({ item, index }: { item: TimelineRow; index: number }) => {
-    // Rows from the revert target onward: previewed while the popover is open,
-    // then held dimmed and inert until the revert lands and removes them.
-    const dimmed = revertDimFromRowIndex >= 0 && index >= revertDimFromRowIndex;
-    const reverting = dimmed && pendingRevert !== null;
-    return (
-      <div
-        className="mx-auto w-full min-w-0 max-w-(--chat-content-max-width) overflow-x-clip"
-        data-timeline-root="true"
-      >
-        {pendingRevert && index === revertDimFromRowIndex ? (
-          <RevertStatusPill label={pendingRevert.label} />
-        ) : null}
-        <div
-          className={cn(
-            "transition-opacity duration-150 motion-reduce:transition-none",
-            dimmed && "opacity-50",
-            reverting && "pointer-events-none select-none opacity-40",
-          )}
-          data-revert-dimmed={dimmed ? "" : undefined}
-          aria-busy={reverting || undefined}
-        >
-          {renderRowContent(item)}
-        </div>
-      </div>
-    );
-  };
 
   if (!hasMessages && !isWorking) {
     // Render the header slot above the empty-state message so that any
@@ -1727,98 +1115,100 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   }
 
   return (
-    <div className="relative h-full min-h-0">
-      <LegendList<TimelineRow>
-        ref={listRef}
-        data={rows}
-        // LegendList's internal dataset tracking can miss row-shape changes
-        // during sequential live updates unless we provide an explicit version.
-        // That includes both mid-stream insertions and later layout-affecting
-        // changes like response dividers or inline file diffs becoming eligible.
-        dataVersion={legendListDataVersion}
-        keyExtractor={keyExtractor}
-        renderItem={renderItem}
-        // LegendList caches row renders until either the backing data or
-        // extraData changes, so closure-only UI state must flow through here.
-        extraData={legendListExtraData}
-        estimatedItemSize={90}
-        drawDistance={336}
-        // Keep LegendList's bootstrap "start at end" behavior for the initial
-        // mount only. Leaving this enabled on later data updates causes the web
-        // implementation to re-arm its initial-scroll logic and jump away from
-        // historical file-change rows during optimistic sends.
-        initialScrollAtEnd={initialScrollAtEndEnabled}
-        {...(restoredAnchor && !restoredAnchor.atEnd
-          ? rows.some((row) => row.id === restoredAnchor.rowId)
-            ? {
-                initialScrollIndex: {
-                  index: rows.findIndex((row) => row.id === restoredAnchor.rowId),
-                  viewPosition: 0,
-                  viewOffset: restoredAnchor.top,
-                },
-              }
-            : { initialScrollOffset: restoredAnchor.scroll }
-          : {})}
-        // Do not auto-pin on raw data appends. When the user is looking at a
-        // historical file-change diff near the tail of the thread, a new user
-        // turn and its first assistant progress messages should preserve that
-        // viewport instead of snapping to the latest row. We still keep
-        // size/layout-based pinning so streaming growth at the tail continues to
-        // follow when the user is already at the end.
-        maintainScrollAtEnd={{ on: { itemLayout: true, layout: true } }}
-        maintainScrollAtEndThreshold={LEGEND_LIST_IS_AT_END_THRESHOLD}
-        // Stabilize the visible window both when rows resize and when a new user
-        // turn appends data. Without `data: true`, historical work rows can drop
-        // out of the rendered window during live chat updates even though the
-        // row data itself is still present.
-        maintainVisibleContentPosition={{ size: true, data: true }}
-        onScroll={handleScroll}
-        onViewableItemsChanged={handleViewableItemsChanged}
-        // Stable hook for browser tests
-        // queries — the LegendList's overflow container has inline styles that
-        // make class-based selectors fragile.
-        data-slot="messages-scroll-container"
-        className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
-        ListHeaderComponent={
-          <>
-            <div className="h-3 sm:h-4" />
-            {listHeaderContent}
-          </>
-        }
-        // Reserves room for the floating composer dock so the last row
-        // scrolls fully clear of it.
-        ListFooterComponent={
-          <ComposerDockSpacer className="h-[calc(var(--composer-dock-height,0px)+0.75rem)] sm:h-[calc(var(--composer-dock-height,0px)+1rem)]" />
-        }
-      />
-      {/* Outside the virtualized list so scrolling and cell recycling never unmount it. */}
-      {ribbonOrigin && isWorking ? (
-        <LiveWorkingRibbon
-          startedAt={activeTurnStartedAt}
-          origin={ribbonOrigin}
-          onRelease={handleRibbonRelease}
-          onOrphanedFocus={restoreRibbonFocus}
+    <TimelineRowContext.Provider value={timelineRowContext}>
+      <div className="relative h-full min-h-0">
+        <LegendList<TimelineRow>
+          ref={listRef}
+          data={rows}
+          // LegendList's internal dataset tracking can miss row-shape changes
+          // during sequential live updates unless we provide an explicit version.
+          // That includes both mid-stream insertions and later layout-affecting
+          // changes like response dividers or inline file diffs becoming eligible.
+          dataVersion={legendListDataVersion}
+          keyExtractor={keyExtractor}
+          renderItem={renderItem}
+          // LegendList caches row renders until either the backing data or
+          // extraData changes, so closure-only UI state must flow through here.
+          extraData={legendListExtraData}
+          estimatedItemSize={90}
+          drawDistance={336}
+          // Keep LegendList's bootstrap "start at end" behavior for the initial
+          // mount only. Leaving this enabled on later data updates causes the web
+          // implementation to re-arm its initial-scroll logic and jump away from
+          // historical file-change rows during optimistic sends.
+          initialScrollAtEnd={initialScrollAtEndEnabled}
+          {...(restoredAnchor && !restoredAnchor.atEnd
+            ? rows.some((row) => row.id === restoredAnchor.rowId)
+              ? {
+                  initialScrollIndex: {
+                    index: rows.findIndex((row) => row.id === restoredAnchor.rowId),
+                    viewPosition: 0,
+                    viewOffset: restoredAnchor.top,
+                  },
+                }
+              : { initialScrollOffset: restoredAnchor.scroll }
+            : {})}
+          // Do not auto-pin on raw data appends. When the user is looking at a
+          // historical file-change diff near the tail of the thread, a new user
+          // turn and its first assistant progress messages should preserve that
+          // viewport instead of snapping to the latest row. We still keep
+          // size/layout-based pinning so streaming growth at the tail continues to
+          // follow when the user is already at the end.
+          maintainScrollAtEnd={{ on: { itemLayout: true, layout: true } }}
+          maintainScrollAtEndThreshold={LEGEND_LIST_IS_AT_END_THRESHOLD}
+          // Stabilize the visible window both when rows resize and when a new user
+          // turn appends data. Without `data: true`, historical work rows can drop
+          // out of the rendered window during live chat updates even though the
+          // row data itself is still present.
+          maintainVisibleContentPosition={{ size: true, data: true }}
+          onScroll={handleScroll}
+          onViewableItemsChanged={handleViewableItemsChanged}
+          // Stable hook for browser tests
+          // queries — the LegendList's overflow container has inline styles that
+          // make class-based selectors fragile.
+          data-slot="messages-scroll-container"
+          className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+          ListHeaderComponent={
+            <>
+              <div className="h-3 sm:h-4" />
+              {listHeaderContent}
+            </>
+          }
+          // Reserves room for the floating composer dock so the last row
+          // scrolls fully clear of it.
+          ListFooterComponent={
+            <ComposerDockSpacer className="h-[calc(var(--composer-dock-height,0px)+0.75rem)] sm:h-[calc(var(--composer-dock-height,0px)+1rem)]" />
+          }
         />
-      ) : null}
-      {minimapRowIndices.length > 1 ? (
-        <TimelineMinimap
-          rows={rows}
-          markerRowIndices={minimapRowIndices}
-          activeRowIndex={activeMinimapRowIndex}
-          hasUnloadedHistory={hasOlderHistory}
-          onNavigate={(rowIndex) => navigateToTimelineRow(rowIndex, 0.3)}
-        />
-      ) : null}
-      {turnRailItems.length >= TIMELINE_TURN_RAIL_MIN_ITEMS ? (
-        <TimelineTurnRail
-          items={turnRailItems}
-          hasPersistentGutter={turnRailHasPersistentGutter}
-          hitStripWidth={turnRailHitStripWidth}
-          activeTickIndex={turnRailActiveTickIndex}
-          onSelect={(item) => navigateToTimelineRow(item.rowIndex, 0.1)}
-        />
-      ) : null}
-    </div>
+        {/* Outside the virtualized list so scrolling and cell recycling never unmount it. */}
+        {ribbonOrigin && isWorking ? (
+          <LiveWorkingRibbon
+            startedAt={activeTurnStartedAt}
+            origin={ribbonOrigin}
+            onRelease={handleRibbonRelease}
+            onOrphanedFocus={restoreRibbonFocus}
+          />
+        ) : null}
+        {minimapRowIndices.length > 1 ? (
+          <TimelineMinimap
+            rows={rows}
+            markerRowIndices={minimapRowIndices}
+            activeRowIndex={activeMinimapRowIndex}
+            hasUnloadedHistory={hasOlderHistory}
+            onNavigate={(rowIndex) => navigateToTimelineRow(rowIndex, 0.3)}
+          />
+        ) : null}
+        {turnRailItems.length >= TIMELINE_TURN_RAIL_MIN_ITEMS ? (
+          <TimelineTurnRail
+            items={turnRailItems}
+            hasPersistentGutter={turnRailHasPersistentGutter}
+            hitStripWidth={turnRailHitStripWidth}
+            activeTickIndex={turnRailActiveTickIndex}
+            onSelect={(item) => navigateToTimelineRow(item.rowIndex, 0.1)}
+          />
+        ) : null}
+      </div>
+    </TimelineRowContext.Provider>
   );
 });
 
@@ -1969,14 +1359,17 @@ function RevertStatusPill({ label }: { label: string }) {
 // internally, so the ResizeObserver shim is no longer needed.
 const TimelineRowWrapper = memo(function TimelineRowWrapper({
   row,
+  testRenderCountProps,
   children,
 }: {
   row: TimelineRow;
+  testRenderCountProps?: { "data-render-count": number } | undefined;
   children: ReactNode;
 }) {
   return (
     <div
       className="pb-4"
+      {...testRenderCountProps}
       data-timeline-row-id={row.id}
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
@@ -2001,18 +1394,6 @@ type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
 type TimelineProposedPlan = Extract<TimelineEntry, { kind: "proposed-plan" }>["proposedPlan"];
 type TimelineWorkEntry = Extract<TimelineEntry, { kind: "work" }>["entry"];
 type TimelineCommandExecution = Extract<TimelineEntry, { kind: "command" }>["commandExecution"];
-
-function diagnosticDataVersion(entry: TimelineWorkEntry): string {
-  return [
-    entry.id,
-    entry.diagnostic?.status ?? "unknown",
-    entry.diagnostic?.outcome ?? "unknown",
-    entry.diagnostic?.sourcePath ?? "",
-    entry.diagnostic?.durationMs ?? "",
-    entry.diagnostic?.output?.length ?? 0,
-    entry.diagnostic?.entries?.length ?? 0,
-  ].join(":");
-}
 
 function shouldRenderWorkEntryAsStandaloneRow(
   entry: TimelineWorkEntry,
@@ -3881,3 +3262,1110 @@ const WorkEntryRow = memo(function WorkEntryRow(props: {
     </div>
   );
 });
+
+// ── Timeline rows ────────────────────────────────────────────────────
+
+type TimelineRevertImpact = ReturnType<typeof computeRevertImpact>;
+
+/**
+ * Per-row inputs that live outside the row object (expansion flags, turn
+ * diff summaries, revert popover state). Built per row and reused while the
+ * row's `rowVersion` is unchanged, so a memoized row re-renders only when
+ * something it reads changed.
+ */
+type TimelineRowExternals =
+  | {
+      kind: "work";
+      expandedCount: number;
+      collapseOverride: boolean | undefined;
+      turnDiffSummaryByTurnId: Map<TurnId, TurnDiffSummary>;
+      chatDiffContext: ChatDiffContext;
+    }
+  | {
+      kind: "user-message";
+      canRevert: boolean;
+      popoverOpen: boolean;
+      revertImpact: TimelineRevertImpact | null;
+      presetRestoreFiles: boolean | undefined;
+    }
+  | {
+      kind: "assistant-message";
+      turnSummary: TurnDiffSummary | undefined;
+      presentationOverride: ChangedFilesPresentation | undefined;
+      isNewest: boolean;
+    }
+  | { kind: "command"; expanded: boolean }
+  | { kind: "working"; ribbonActive: boolean }
+  | { kind: "static" };
+
+type TimelineRowExternalsOf<K extends TimelineRowExternals["kind"]> = Extract<
+  TimelineRowExternals,
+  { kind: K }
+>;
+
+interface TimelineRowActions {
+  onToggleWorkGroup: (groupId: string, paginatedEntryCount: number) => void;
+  onSetWorkGroupExpanded: (groupId: string, expanded: boolean) => void;
+  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onImageExpand: (preview: ExpandedImagePreview) => void;
+  onImageActionMenu: (item: ImageAttachmentActionItem, position: { x: number; y: number }) => void;
+  onToggleCommandExecution: (commandExecutionId: string) => void;
+  onToggleAllDirectories: () => void;
+  onToggleFileChangeDiff: (workEntryId: string) => void;
+  onOpenFileChangeDiff: (fileChangeId: OrchestrationFileChangeId, filePath?: string) => void;
+  setRevertPopoverOpen: (messageId: MessageId, open: boolean) => void;
+  confirmRevert: (messageId: MessageId, restoreFiles: boolean) => void;
+  setChangedFilesPresentationOverrides: Dispatch<
+    SetStateAction<Readonly<Record<string, ChangedFilesPresentation>>>
+  >;
+  startRibbon: (origin: RibbonPoint) => void;
+}
+
+/**
+ * Slow-changing values every row reads (settings, theme, workspace, stable
+ * actions). A change re-renders every row, so per-row inputs stay out of it.
+ */
+interface TimelineRowContextValue {
+  threadId: ThreadId | null;
+  nativeSessionCapabilities: ProviderSessionCapabilities | null;
+  expandMcpToolCalls: boolean;
+  expandMcpToolCallCardsByDefault: boolean;
+  showReasoningExpanded: boolean;
+  showFileChangeDiffsInline: boolean;
+  collapseCompletedWorkLogs: boolean;
+  timestampFormat: TimestampFormat;
+  workspaceRoot: string | undefined;
+  markdownCwd: string | undefined;
+  resolvedTheme: "light" | "dark";
+  isGitRepo: boolean;
+  canRestoreFiles: boolean | undefined;
+  revertDisabledReason: string | null;
+  revertPreferenceKey: string | undefined;
+  allDirectoriesExpanded: boolean;
+  usesCustomImageContextMenu: boolean;
+  hasImageActionMenu: boolean;
+  canSetWorkGroupExpanded: boolean;
+  isWorking: boolean;
+  reducedMotion: boolean;
+  grabButtonRef: MutableRefObject<HTMLButtonElement | null>;
+  actions: TimelineRowActions;
+}
+
+const TimelineRowContext = createContext<TimelineRowContextValue | null>(null);
+
+function useTimelineRowContext(): TimelineRowContextValue {
+  const value = useContext(TimelineRowContext);
+  if (!value) throw new Error("Timeline rows must render inside MessagesTimeline.");
+  return value;
+}
+
+type WorkTimelineRow = Extract<TimelineRow, { kind: "work" }>;
+type MessageTimelineRow = Extract<TimelineRow, { kind: "message" }>;
+type ProposedPlanTimelineRow = Extract<TimelineRow, { kind: "proposed-plan" }>;
+type CommandTimelineRow = Extract<TimelineRow, { kind: "command" }>;
+type WorkingTimelineRow = Extract<TimelineRow, { kind: "working" }>;
+
+function TimelineRowErrorFallback(props: { error: unknown }) {
+  return (
+    <div
+      role="alert"
+      data-slot="timeline-row-error"
+      className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-border bg-card/50 px-3 py-2 text-xs text-muted-foreground"
+    >
+      <span className="min-w-0 flex-1">This entry could not be displayed</span>
+      <Button
+        size="xs"
+        variant="outline"
+        onClick={() => copyErrorReport(props.error, "Surface: timeline-row")}
+      >
+        Copy error report
+      </Button>
+    </div>
+  );
+}
+
+const renderTimelineRowErrorFallback = (props: SurfaceErrorFallbackProps) => (
+  <TimelineRowErrorFallback error={props.error} />
+);
+
+/**
+ * One timeline row. Memoized on the row object (reused while its entries
+ * are unchanged) and its externals (reused while `rowVersion` is unchanged),
+ * so a streaming delta re-renders only the row it touched. A row that throws
+ * renders a fallback in place while the rest of the timeline stays usable.
+ */
+const TimelineRowView = memo(function TimelineRowView(props: {
+  row: TimelineRow;
+  externals: TimelineRowExternals;
+  rowVersion: string;
+}) {
+  "use memo";
+  const testRenderCountProps = useTestRenderCountProps();
+  return (
+    <TimelineRowWrapper row={props.row} testRenderCountProps={testRenderCountProps}>
+      <SurfaceErrorBoundary
+        name="timeline-row"
+        resetKeys={[props.row, props.rowVersion]}
+        fallback={renderTimelineRowErrorFallback}
+      >
+        <TimelineRowContent row={props.row} externals={props.externals} />
+      </SurfaceErrorBoundary>
+    </TimelineRowWrapper>
+  );
+});
+
+function TimelineRowContent(props: { row: TimelineRow; externals: TimelineRowExternals }) {
+  "use memo";
+  const { row, externals } = props;
+  switch (row.kind) {
+    case "work":
+      return externals.kind === "work" ? (
+        <WorkGroupRowContent row={row} externals={externals} />
+      ) : null;
+    case "message":
+      if (row.message.role === "user") {
+        return externals.kind === "user-message" ? (
+          <UserMessageRowContent row={row} externals={externals} />
+        ) : null;
+      }
+      if (row.message.role === "assistant") {
+        return externals.kind === "assistant-message" ? (
+          <AssistantMessageRowContent row={row} externals={externals} />
+        ) : null;
+      }
+      return null;
+    case "proposed-plan":
+      return <ProposedPlanRowContent row={row} />;
+    case "command":
+      return externals.kind === "command" ? (
+        <CommandRowContent row={row} externals={externals} />
+      ) : null;
+    case "working":
+      return externals.kind === "working" ? (
+        <WorkingRowContent row={row} externals={externals} />
+      ) : null;
+  }
+}
+
+function WorkGroupRowContent(props: {
+  row: WorkTimelineRow;
+  externals: TimelineRowExternalsOf<"work">;
+}) {
+  "use memo";
+  const { row, externals } = props;
+  const {
+    actions,
+    canSetWorkGroupExpanded,
+    collapseCompletedWorkLogs,
+    expandMcpToolCallCardsByDefault,
+    expandMcpToolCalls,
+    markdownCwd,
+    resolvedTheme,
+    showFileChangeDiffsInline,
+    timestampFormat,
+    workspaceRoot,
+  } = useTimelineRowContext();
+  const groupId = row.id;
+  const groupState = resolveWorkGroupRenderState(row.groupedEntries, externals.expandedCount);
+  const standaloneExpandedMcpEntry = resolveStandaloneExpandedMcpWorkEntry(row.groupedEntries, {
+    settingsExpandMcpToolCalls: expandMcpToolCalls,
+  });
+
+  if (standaloneExpandedMcpEntry) {
+    return (
+      <div className="min-w-0 px-1 py-0.5">
+        <WorkEntryRow
+          workEntry={standaloneExpandedMcpEntry}
+          timestampFormat={timestampFormat}
+          expandMcpToolCalls={expandMcpToolCalls}
+          expandMcpByDefault={expandMcpToolCallCardsByDefault}
+          turnDiffSummaryByTurnId={externals.turnDiffSummaryByTurnId}
+          workspaceRoot={workspaceRoot}
+          markdownCwd={markdownCwd}
+          resolvedTheme={resolvedTheme}
+          showFileChangeDiffsInline={showFileChangeDiffsInline}
+          chatDiffContext={externals.chatDiffContext}
+          onOpenTurnDiff={actions.onOpenTurnDiff}
+          onImageExpand={actions.onImageExpand}
+        />
+      </div>
+    );
+  }
+
+  const expanded = externals.collapseOverride ?? !(row.isPriorTurn && collapseCompletedWorkLogs);
+  if (!expanded) {
+    return (
+      <div className="min-w-0 px-1 py-0.5">
+        <button
+          type="button"
+          aria-expanded={false}
+          data-slot="work-group-summary"
+          className="flex min-h-7 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-ui text-muted-foreground outline-none transition-colors duration-(--duration-fast) hover:bg-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => actions.onSetWorkGroupExpanded(groupId, true)}
+        >
+          <ChevronRightIcon
+            aria-hidden="true"
+            className="size-3.5 shrink-0 text-faint-foreground"
+          />
+          <span className="min-w-0 truncate">{row.workSummary}</span>
+        </button>
+      </div>
+    );
+  }
+  const canCollapse = row.isPriorTurn && canSetWorkGroupExpanded;
+
+  return (
+    <div className="rounded-xl border border-border bg-card/50 px-2 py-1.5">
+      {(groupState.showHeader || canCollapse) && (
+        <div className="mb-1 flex min-h-6 items-center justify-between gap-2 px-0.5">
+          {canCollapse ? (
+            <button
+              type="button"
+              aria-expanded
+              className="flex min-w-0 items-center gap-1 rounded-sm text-2xs font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => actions.onSetWorkGroupExpanded(groupId, false)}
+            >
+              <ChevronDownIcon
+                aria-hidden="true"
+                className="size-3.5 shrink-0 text-faint-foreground"
+              />
+              <span className="truncate">{row.workSummary}</span>
+            </button>
+          ) : (
+            <SectionLabel as="span" count={row.groupedEntries.length} className="min-h-0">
+              {groupState.groupLabel}
+            </SectionLabel>
+          )}
+          {groupState.hasOverflow && (
+            <button
+              type="button"
+              className="shrink-0 rounded-sm text-2xs text-muted-foreground outline-none transition-colors duration-(--duration-fast) hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => actions.onToggleWorkGroup(groupId, groupState.paginatedEntryCount)}
+            >
+              {groupState.isExpanded
+                ? "Show less"
+                : `Show ${Math.min(WORK_LOG_PAGE_SIZE, groupState.hiddenCount)} more`}
+            </button>
+          )}
+        </div>
+      )}
+      <div className="space-y-0.5">
+        {groupState.visibleEntries.map((workEntry) => (
+          <WorkEntryRow
+            key={`work-row:${workEntry.id}`}
+            workEntry={workEntry}
+            timestampFormat={timestampFormat}
+            expandMcpToolCalls={expandMcpToolCalls}
+            expandMcpByDefault={expandMcpToolCallCardsByDefault}
+            turnDiffSummaryByTurnId={externals.turnDiffSummaryByTurnId}
+            workspaceRoot={workspaceRoot}
+            markdownCwd={markdownCwd}
+            resolvedTheme={resolvedTheme}
+            showFileChangeDiffsInline={showFileChangeDiffsInline}
+            chatDiffContext={externals.chatDiffContext}
+            onOpenTurnDiff={actions.onOpenTurnDiff}
+            onImageExpand={actions.onImageExpand}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function UserMessageRowContent(props: {
+  row: MessageTimelineRow;
+  externals: TimelineRowExternalsOf<"user-message">;
+}) {
+  "use memo";
+  const { row, externals } = props;
+  const {
+    actions,
+    canRestoreFiles,
+    hasImageActionMenu,
+    isGitRepo,
+    nativeSessionCapabilities,
+    resolvedTheme,
+    revertDisabledReason,
+    revertPreferenceKey,
+    threadId,
+    timestampFormat,
+    usesCustomImageContextMenu,
+    workspaceRoot,
+  } = useTimelineRowContext();
+  if (String(row.message.id).startsWith("resume:"))
+    return (
+      <div
+        className="my-4 flex items-center gap-3 text-2xs font-medium text-muted-foreground"
+        role="separator"
+      >
+        <span className="h-px flex-1 bg-border" />
+        Resumed after restart
+        <span className="h-px flex-1 bg-border" />
+      </div>
+    );
+  const userImages = (row.message.attachments ?? []).filter(
+    (attachment) => attachment.type === "image",
+  );
+  const userFiles = (row.message.attachments ?? []).filter(
+    (attachment) => attachment.type === "file",
+  );
+  const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
+  const terminalContexts = displayedUserMessage.contexts;
+  const canRevertAgentWork = externals.canRevert;
+  return (
+    <div className="group/user-message flex flex-col items-end">
+      <div
+        className="max-w-[85%] rounded-xl rounded-br-md border border-border bg-secondary px-4 py-2.5"
+        data-slot="user-message-bubble"
+      >
+        {userFiles.map((file) => (
+          <AttachmentFileChip key={file.id} file={file} />
+        ))}
+        {userImages.length > 0 && (
+          <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
+            {userImages.map((image: NonNullable<TimelineMessage["attachments"]>[number]) => {
+              const previewUrl = image.previewUrl;
+              return (
+                <div
+                  key={image.id}
+                  className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                >
+                  {previewUrl ? (
+                    <button
+                      type="button"
+                      className="h-full w-full cursor-zoom-in"
+                      aria-label={`Preview ${image.name}`}
+                      onContextMenu={(event) => {
+                        if (!usesCustomImageContextMenu || !hasImageActionMenu) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        actions.onImageActionMenu(
+                          {
+                            src: image.sourceUrl ?? previewUrl,
+                            name: image.name,
+                            mimeType: image.mimeType,
+                            ...(image.sourceBlob ? { sourceBlob: image.sourceBlob } : {}),
+                          },
+                          { x: event.clientX, y: event.clientY },
+                        );
+                      }}
+                      onClick={() => {
+                        const preview = buildExpandedImagePreview(userImages, image.id);
+                        if (!preview) return;
+                        actions.onImageExpand(preview);
+                      }}
+                    >
+                      <img
+                        src={previewUrl}
+                        alt={image.name}
+                        className="h-full max-h-[220px] w-full object-cover"
+                        draggable={false}
+                      />
+                    </button>
+                  ) : (
+                    <div className="flex min-h-18 items-center justify-center px-2 py-3 text-center text-2xs text-muted-foreground">
+                      {image.name}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {displayedUserMessage.attachedFilePaths.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {displayedUserMessage.attachedFilePaths.map((filePath) => {
+              const displayPath = relativePathForDisplay(filePath, workspaceRoot);
+              return (
+                <span
+                  key={filePath}
+                  className={COMPOSER_INLINE_CHIP_CLASS_NAME}
+                  title={displayPath}
+                >
+                  <VscodeEntryIcon pathValue={filePath} kind="file" theme={resolvedTheme} />
+                  <span className="max-w-[320px] truncate">{displayPath}</span>
+                </span>
+              );
+            })}
+          </div>
+        )}
+        {(displayedUserMessage.visibleText.trim().length > 0 || terminalContexts.length > 0) && (
+          <>
+            {/* The copy button below uses copyText, which is derived before
+                    visual collapse, so collapsed messages still copy in full. */}
+            <CollapsibleUserMessageBody
+              key={row.message.id}
+              text={displayedUserMessage.visibleText}
+              skillCall={row.message.skillCall}
+              terminalContexts={terminalContexts}
+            />
+          </>
+        )}
+      </div>
+      <div className="mt-1 flex items-center gap-1 pr-1">
+        <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-(--duration-fast) focus-within:opacity-100 group-hover/user-message:opacity-100 has-[[data-popup-open]]:opacity-100 pointer-coarse:opacity-100">
+          {displayedUserMessage.copyText && (
+            <MessageCopyButton text={displayedUserMessage.copyText} />
+          )}
+          {threadId &&
+            row.message.turnId &&
+            nativeSessionCapabilities?.actions.some(
+              (action) =>
+                ["fileCheckpointing", "nativeFork"].includes(action.action) && action.supported,
+            ) && (
+              <NativeFilePreview
+                threadId={threadId}
+                turnId={row.message.turnId}
+                generation={nativeSessionCapabilities.generation}
+                filePreview={nativeSessionCapabilities.actions.some(
+                  (action) => action.action === "fileCheckpointing" && action.supported,
+                )}
+                nativeFork={
+                  isGitRepo &&
+                  nativeSessionCapabilities.actions.some(
+                    (action) => action.action === "nativeFork" && action.supported,
+                  )
+                }
+              />
+            )}
+          {canRevertAgentWork && (
+            <UserMessageRevertPopover
+              open={externals.popoverOpen}
+              onOpenChange={(open) => actions.setRevertPopoverOpen(row.message.id, open)}
+              disabledReason={revertDisabledReason}
+              nativeFileRevert={
+                !isGitRepo &&
+                nativeSessionCapabilities?.actions.some(
+                  (action) => action.action === "fileCheckpointing" && action.supported,
+                )
+              }
+              nativeFileTarget={
+                threadId && row.message.turnId && nativeSessionCapabilities
+                  ? {
+                      threadId,
+                      turnId: row.message.turnId,
+                      generation: nativeSessionCapabilities.generation,
+                    }
+                  : undefined
+              }
+              canRestoreFiles={canRestoreFiles === true}
+              impact={externals.revertImpact}
+              presetRestoreFiles={externals.presetRestoreFiles}
+              preferenceKey={revertPreferenceKey}
+              onConfirm={(restoreFiles) => actions.confirmRevert(row.message.id, restoreFiles)}
+            />
+          )}
+        </div>
+        <p className="text-2xs text-muted-foreground tabular-nums">
+          {formatTimestamp(row.message.createdAt, timestampFormat)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function AssistantMessageRowContent(props: {
+  row: MessageTimelineRow;
+  externals: TimelineRowExternalsOf<"assistant-message">;
+}) {
+  "use memo";
+  const { row, externals } = props;
+  const { markdownCwd, showReasoningExpanded, timestampFormat } = useTimelineRowContext();
+  const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const reasoningText = row.message.reasoningText?.trim();
+  const isStreamingReasoning =
+    Boolean(row.message.streaming) && row.message.text.length === 0 && Boolean(reasoningText);
+  return (
+    <>
+      {row.showCompletionDivider && (
+        <div className="my-3 flex items-center gap-3" role="separator">
+          <span className="h-px flex-1 bg-border" />
+          <SectionLabel as="span" className="min-h-0">
+            {row.completionSummary ?? "Response"}
+          </SectionLabel>
+          <span className="h-px flex-1 bg-border" />
+        </div>
+      )}
+      <div className="group/assistant-message min-w-0 px-1 py-0.5">
+        {reasoningText ? (
+          <ReasoningSection
+            reasoningText={reasoningText}
+            defaultExpanded={showReasoningExpanded}
+            isStreaming={isStreamingReasoning}
+            cwd={markdownCwd}
+          />
+        ) : null}
+        <div
+          className={
+            /^★ Insight(?:\s|─)/mu.test(messageText)
+              ? "[&_.chat-markdown_p]:whitespace-pre-line"
+              : undefined
+          }
+        >
+          <ChatMarkdown
+            text={messageText}
+            cwd={markdownCwd}
+            isStreaming={Boolean(row.message.streaming)}
+          />
+        </div>
+        <AssistantChangedFiles externals={externals} />
+        <div className="mt-1.5 flex min-h-7 items-center justify-between gap-2">
+          <p className="text-2xs text-muted-foreground tabular-nums">
+            <LiveMessageMeta
+              createdAt={row.message.createdAt}
+              durationStart={row.durationStart}
+              completedAt={row.message.completedAt}
+              streaming={row.message.streaming}
+              timestampFormat={timestampFormat}
+            />
+          </p>
+          <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-(--duration-fast) focus-within:opacity-100 group-hover/assistant-message:opacity-100 has-[[data-popup-open]]:opacity-100 pointer-coarse:opacity-100">
+            <AssistantMessageActions rawText={row.message.text} />
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function AssistantChangedFiles(props: { externals: TimelineRowExternalsOf<"assistant-message"> }) {
+  "use memo";
+  const { externals } = props;
+  const { actions, allDirectoriesExpanded, resolvedTheme, threadId } = useTimelineRowContext();
+  const { turnSummary } = externals;
+  if (!turnSummary) return null;
+  const checkpointFiles = turnSummary.files;
+  if (checkpointFiles.length === 0) return null;
+  const summaryStat = summarizeTurnDiffStats(checkpointFiles);
+  const changedFileCountLabel = String(checkpointFiles.length);
+  const presentationKey = `${threadId ?? "unknown"}:${turnSummary.turnId}`;
+  const defaultPresentation = resolveChangedFilesPresentation({
+    fileCount: checkpointFiles.length,
+    changedLineCount: changedLineCount(summaryStat),
+    isNewest: externals.isNewest,
+  });
+  const presentation = externals.presentationOverride ?? defaultPresentation;
+  const isExpanded = presentation === "expanded";
+  const togglePresentation = () => {
+    actions.setChangedFilesPresentationOverrides((current) => ({
+      ...current,
+      [presentationKey]: isExpanded
+        ? defaultPresentation === "expanded"
+          ? "collapsed"
+          : defaultPresentation
+        : "expanded",
+    }));
+  };
+  return (
+    <div className="relative mt-3 rounded-xl border border-border bg-card p-2.5">
+      <div className="sticky top-0 z-2 -mx-2.5 -mt-2.5 mb-1.5 flex items-center justify-between gap-2 rounded-t-xl border-b border-border bg-card/95 px-2.5 py-1 backdrop-blur-sm supports-backdrop-filter:bg-card/85">
+        <SectionLabel as="span" count={checkpointFiles.length} className="min-w-0">
+          <span>Changed files</span>
+          {hasNonZeroStat(summaryStat) && (
+            <span className="ms-2 font-normal">
+              <DiffStatLabel additions={summaryStat.additions} deletions={summaryStat.deletions} />
+            </span>
+          )}
+          <span className="sr-only"> ({changedFileCountLabel})</span>
+        </SectionLabel>
+        <div className="flex items-center gap-1">
+          {isExpanded ? (
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              className="text-muted-foreground"
+              onClick={() => actions.onToggleAllDirectories()}
+            >
+              {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            className="text-muted-foreground"
+            aria-expanded={isExpanded}
+            onClick={togglePresentation}
+          >
+            {isExpanded ? "Show less" : "Show more"}
+            <ChevronDownIcon
+              aria-hidden="true"
+              className={cn(
+                "size-3.5 transition-transform duration-(--duration-fast)",
+                isExpanded && "rotate-180",
+              )}
+            />
+          </Button>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            onClick={() => actions.onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)}
+          >
+            View diff
+          </Button>
+        </div>
+      </div>
+      {presentation === "expanded" ? (
+        <ChangedFilesTree
+          key={`changed-files-tree:${turnSummary.turnId}`}
+          turnId={turnSummary.turnId}
+          files={checkpointFiles}
+          allDirectoriesExpanded={allDirectoriesExpanded}
+          resolvedTheme={resolvedTheme}
+          onOpenTurnDiff={actions.onOpenTurnDiff}
+        />
+      ) : presentation === "compact" ? (
+        <div className="flex flex-wrap gap-1 pt-0.5">
+          {checkpointFiles.slice(0, CHANGED_FILES_COMPACT_PREVIEW_COUNT).map((file) => (
+            <FileChip
+              key={`${turnSummary.turnId}:${file.path}`}
+              path={file.path}
+              theme={resolvedTheme}
+              className="max-w-56"
+              onClick={() => actions.onOpenTurnDiff(turnSummary.turnId, file.path)}
+            />
+          ))}
+          {checkpointFiles.length > CHANGED_FILES_COMPACT_PREVIEW_COUNT ? (
+            <span className="inline-flex h-6 items-center px-1 text-2xs text-muted-foreground tabular-nums">
+              +{checkpointFiles.length - CHANGED_FILES_COMPACT_PREVIEW_COUNT}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ProposedPlanRowContent(props: { row: ProposedPlanTimelineRow }) {
+  "use memo";
+  const { row } = props;
+  const { markdownCwd, workspaceRoot } = useTimelineRowContext();
+  return (
+    <div className="min-w-0 px-1 py-0.5">
+      <ProposedPlanCard
+        planMarkdown={row.proposedPlan.planMarkdown}
+        cwd={markdownCwd}
+        workspaceRoot={workspaceRoot}
+      />
+    </div>
+  );
+}
+
+function CommandRowContent(props: {
+  row: CommandTimelineRow;
+  externals: TimelineRowExternalsOf<"command">;
+}) {
+  "use memo";
+  const { row, externals } = props;
+  const { actions, isWorking, threadId, timestampFormat } = useTimelineRowContext();
+  return (
+    <div className="min-w-0 px-1 py-0.5">
+      <CommandTranscriptCard
+        threadId={threadId}
+        execution={row.commandExecution}
+        expanded={externals.expanded}
+        timestampFormat={timestampFormat}
+        threadWorking={isWorking}
+        onToggle={() => actions.onToggleCommandExecution(row.commandExecution.id)}
+      />
+      {row.nestedDiagnostics && row.nestedDiagnostics.length > 0 ? (
+        <NestedDiagnosticList diagnostics={row.nestedDiagnostics} className="mt-1" />
+      ) : null}
+    </div>
+  );
+}
+
+function WorkingRowContent(props: {
+  row: WorkingTimelineRow;
+  externals: TimelineRowExternalsOf<"working">;
+}) {
+  "use memo";
+  const { row, externals } = props;
+  const { actions, grabButtonRef, reducedMotion } = useTimelineRowContext();
+  return (
+    <div className="py-0.5 pl-1.5">
+      <div className="flex min-w-0 items-center gap-2 pt-1 text-ui text-muted-foreground">
+        <span aria-hidden="true" className="inline-flex shrink-0 items-center gap-0.5">
+          <span className="size-1 rounded-full bg-faint-foreground motion-safe:animate-status-pulse" />
+          <span className="size-1 rounded-full bg-faint-foreground motion-safe:animate-status-pulse motion-safe:[animation-delay:200ms]" />
+          <span className="size-1 rounded-full bg-faint-foreground motion-safe:animate-status-pulse motion-safe:[animation-delay:400ms]" />
+        </span>
+        {reducedMotion ? (
+          <span className="shrink-0 tabular-nums">
+            <LiveWorkingLabel startedAt={row.createdAt} />
+          </span>
+        ) : (
+          // Picks the label up as a steerable ribbon; looks like plain text at rest.
+          <button
+            ref={grabButtonRef}
+            type="button"
+            data-working-ribbon-grab=""
+            // Static: a focused control whose name ticked every second
+            // would be re-announced by screen readers on each tick.
+            aria-label="Working. Press to steer the text"
+            className={cn(
+              "m-0 shrink-0 cursor-grab appearance-none rounded-sm border-0 bg-transparent p-0 font-[inherit] leading-[inherit] tracking-[inherit] text-inherit tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              externals.ribbonActive && "invisible",
+            )}
+            onKeyDown={(event) => {
+              // Focus returns here while the key that grabbed the ribbon
+              // may still be held (it dropped for lack of room); its
+              // autorepeat must not pick the ribbon straight back up.
+              // Chromium already ignores repeats here; other engines may not.
+              if (event.repeat && (event.key === "Enter" || event.key === " ")) {
+                event.preventDefault();
+              }
+            }}
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              actions.startRibbon({ x: rect.right, y: rect.top + rect.height / 2 });
+            }}
+          >
+            <LiveWorkingLabel startedAt={row.createdAt} />
+          </button>
+        )}
+        {row.activity ? (
+          <span className="min-w-0 truncate text-muted-foreground">· {row.activity}</span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+// ── Row building and versions ────────────────────────────────────────
+
+const timelineObjectVersionIds = new WeakMap<object, number>();
+let lastTimelineObjectVersionId = 0;
+
+/** A stable id per object identity, for version strings that track references. */
+function timelineObjectVersion(value: object | null | undefined): string {
+  if (value == null) return "-";
+  let id = timelineObjectVersionIds.get(value);
+  if (id === undefined) {
+    lastTimelineObjectVersionId += 1;
+    id = lastTimelineObjectVersionId;
+    timelineObjectVersionIds.set(value, id);
+  }
+  return String(id);
+}
+
+function sameRowInputs(left: ReadonlyArray<unknown>, right: ReadonlyArray<unknown>): boolean {
+  return (
+    left.length === right.length && left.every((value, index) => Object.is(value, right[index]))
+  );
+}
+
+/**
+ * Reuse state for `buildTimelineRows`, held in a `useRef`. A row whose inputs
+ * all match by reference keeps its previous object; rows absent from the
+ * current build are pruned.
+ */
+export interface TimelineRowCache {
+  rows: Map<string, { readonly inputs: ReadonlyArray<unknown>; readonly row: TimelineRow }>;
+  result: TimelineRow[] | null;
+}
+
+export function createTimelineRowCache(): TimelineRowCache {
+  return { rows: new Map(), result: null };
+}
+
+export function buildTimelineRows(input: {
+  timelineEntries: ReadonlyArray<TimelineEntry>;
+  completionDividerBeforeEntryId: string | null;
+  completionSummary: string | null;
+  isWorking: boolean;
+  activeTurnStartedAt: string | null;
+  liveActivity: LiveWorkActivity | null;
+  expandMcpToolCalls: boolean;
+  cache: TimelineRowCache;
+}): TimelineRow[] {
+  const { timelineEntries, cache } = input;
+  const nextCacheRows: TimelineRowCache["rows"] = new Map();
+  const reuse = <R extends TimelineRow>(
+    id: string,
+    inputs: ReadonlyArray<unknown>,
+    build: () => R,
+  ): TimelineRow => {
+    const cached = cache.rows.get(id);
+    const row = cached && sameRowInputs(cached.inputs, inputs) ? cached.row : build();
+    nextCacheRows.set(id, { inputs, row });
+    return row;
+  };
+
+  const nextRows: TimelineRow[] = [];
+  const durationStartByMessageId = computeMessageDurationStart(
+    timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
+  );
+  // Work groups above the newest user message belong to finished turns.
+  let lastUserMessageEntryIndex = -1;
+  for (let index = timelineEntries.length - 1; index >= 0; index -= 1) {
+    const entry = timelineEntries[index];
+    if (entry?.kind === "message" && entry.message.role === "user") {
+      lastUserMessageEntryIndex = index;
+      break;
+    }
+  }
+  const isolationOptions = { settingsExpandMcpToolCalls: input.expandMcpToolCalls };
+
+  for (let index = 0; index < timelineEntries.length; index += 1) {
+    const timelineEntry = timelineEntries[index];
+    if (!timelineEntry) {
+      continue;
+    }
+
+    if (timelineEntry.kind === "work") {
+      const groupedEntries = [timelineEntry.entry];
+      const shouldIsolateEntry = shouldRenderWorkEntryAsStandaloneRow(
+        timelineEntry.entry,
+        isolationOptions,
+      );
+      let cursor = index + 1;
+      if (!shouldIsolateEntry) {
+        while (cursor < timelineEntries.length) {
+          const nextEntry = timelineEntries[cursor];
+          if (!nextEntry || nextEntry.kind !== "work") break;
+          if (shouldRenderWorkEntryAsStandaloneRow(nextEntry.entry, isolationOptions)) {
+            break;
+          }
+          groupedEntries.push(nextEntry.entry);
+          cursor += 1;
+        }
+      }
+      const isPriorTurn = index < lastUserMessageEntryIndex;
+      nextRows.push(
+        reuse(timelineEntry.id, ["work", isPriorTurn, ...groupedEntries], () => ({
+          kind: "work",
+          id: timelineEntry.id,
+          createdAt: timelineEntry.createdAt,
+          groupedEntries,
+          isPriorTurn,
+          workSummary: summarizeWorkGroup(groupedEntries),
+        })),
+      );
+      index = cursor - 1;
+      continue;
+    }
+
+    if (timelineEntry.kind === "proposed-plan") {
+      nextRows.push(
+        reuse(timelineEntry.id, ["proposed-plan", timelineEntry.proposedPlan], () => ({
+          kind: "proposed-plan",
+          id: timelineEntry.id,
+          createdAt: timelineEntry.createdAt,
+          proposedPlan: timelineEntry.proposedPlan,
+        })),
+      );
+      continue;
+    }
+
+    if (timelineEntry.kind === "command") {
+      nextRows.push(
+        reuse(
+          timelineEntry.id,
+          ["command", timelineEntry.commandExecution, timelineEntry.nestedDiagnostics],
+          () => ({
+            kind: "command",
+            id: timelineEntry.id,
+            createdAt: timelineEntry.createdAt,
+            commandExecution: timelineEntry.commandExecution,
+            ...(timelineEntry.nestedDiagnostics
+              ? { nestedDiagnostics: timelineEntry.nestedDiagnostics }
+              : {}),
+          }),
+        ),
+      );
+      continue;
+    }
+
+    const showCompletionDivider =
+      timelineEntry.message.role === "assistant" &&
+      input.completionDividerBeforeEntryId === timelineEntry.id;
+    const completionSummary = showCompletionDivider ? input.completionSummary : null;
+    const durationStart =
+      durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt;
+    nextRows.push(
+      reuse(
+        timelineEntry.id,
+        ["message", timelineEntry.message, durationStart, showCompletionDivider, completionSummary],
+        () => ({
+          kind: "message",
+          id: timelineEntry.id,
+          createdAt: timelineEntry.createdAt,
+          message: timelineEntry.message,
+          durationStart,
+          showCompletionDivider,
+          completionSummary,
+        }),
+      ),
+    );
+  }
+
+  if (input.isWorking) {
+    const activity = workingActivityLabel(nextRows, input.liveActivity);
+    nextRows.push(
+      reuse("working-indicator-row", ["working", input.activeTurnStartedAt, activity], () => ({
+        kind: "working",
+        id: "working-indicator-row",
+        createdAt: input.activeTurnStartedAt,
+        activity,
+      })),
+    );
+  }
+
+  cache.rows = nextCacheRows;
+  if (cache.result && sameRowInputs(cache.result, nextRows)) return cache.result;
+  cache.result = nextRows;
+  return nextRows;
+}
+
+export interface TimelineRowExternalsInputs {
+  threadId: ThreadId | null;
+  expandedWorkGroups: Readonly<Record<string, number>>;
+  workGroupCollapseOverrides: Readonly<Record<string, boolean>>;
+  turnDiffSummaryByTurnId: Map<TurnId, TurnDiffSummary>;
+  chatDiffContext: ChatDiffContext;
+  revertTurnCountByUserMessageId: Map<MessageId, number>;
+  revertPopover: { messageId: MessageId; presetRestoreFiles?: boolean } | null;
+  revertImpact: TimelineRevertImpact | null;
+  turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
+  changedFilesPresentationOverrides: Readonly<Record<string, ChangedFilesPresentation>>;
+  newestTurnDiffId: TurnId | null;
+  expandedCommandExecutions: Readonly<Record<string, boolean>>;
+  ribbonActive: boolean;
+}
+
+export interface TimelineRowExternalsEntry {
+  /** Covers exactly the external inputs the row reads. */
+  readonly version: string;
+  readonly externals: TimelineRowExternals;
+}
+
+function describeTimelineRowExternals(
+  row: TimelineRow,
+  inputs: TimelineRowExternalsInputs,
+): { version: string; build: () => TimelineRowExternals } {
+  switch (row.kind) {
+    case "work": {
+      const expandedCount = inputs.expandedWorkGroups[row.id] ?? WORK_LOG_PAGE_SIZE;
+      const collapseOverride = inputs.workGroupCollapseOverrides[row.id];
+      const { chatDiffContext } = inputs;
+      const entryVersions = row.groupedEntries.map((entry) => {
+        const turnSummary = entry.turnId
+          ? inputs.turnDiffSummaryByTurnId.get(entry.turnId)
+          : undefined;
+        const inferredCheckpointTurnCount = entry.turnId
+          ? (chatDiffContext.inferredCheckpointTurnCountByTurnId[entry.turnId] ?? "")
+          : "";
+        const fileChangeSummary = entry.fileChangeId
+          ? chatDiffContext.fileChangeSummariesById[entry.fileChangeId]
+          : undefined;
+        return [
+          timelineObjectVersion(turnSummary),
+          inferredCheckpointTurnCount,
+          timelineObjectVersion(fileChangeSummary),
+          isInlineFileChangeDiffExpanded(entry.id, chatDiffContext.expandedFileChangeDiffs)
+            ? "expanded"
+            : "collapsed",
+        ].join(",");
+      });
+      return {
+        version: [
+          "work",
+          expandedCount,
+          collapseOverride ?? "",
+          chatDiffContext.threadId ?? "",
+          chatDiffContext.isGitRepo ? "git" : "no-git",
+          ...entryVersions,
+        ].join(":"),
+        build: () => ({
+          kind: "work",
+          expandedCount,
+          collapseOverride,
+          turnDiffSummaryByTurnId: inputs.turnDiffSummaryByTurnId,
+          chatDiffContext,
+        }),
+      };
+    }
+    case "message": {
+      if (row.message.role === "user") {
+        const canRevert = inputs.revertTurnCountByUserMessageId.has(row.message.id);
+        const popover =
+          inputs.revertPopover?.messageId === row.message.id ? inputs.revertPopover : null;
+        const revertImpact = popover ? inputs.revertImpact : null;
+        const presetRestoreFiles = popover?.presetRestoreFiles;
+        return {
+          version: [
+            "user",
+            canRevert ? "revert" : "no-revert",
+            popover ? "open" : "closed",
+            timelineObjectVersion(revertImpact),
+            presetRestoreFiles ?? "",
+          ].join(":"),
+          build: () => ({
+            kind: "user-message",
+            canRevert,
+            popoverOpen: popover !== null,
+            revertImpact,
+            presetRestoreFiles,
+          }),
+        };
+      }
+      if (row.message.role === "assistant") {
+        const turnSummary = inputs.turnDiffSummaryByAssistantMessageId.get(row.message.id);
+        const presentationOverride = turnSummary
+          ? inputs.changedFilesPresentationOverrides[
+              `${inputs.threadId ?? "unknown"}:${turnSummary.turnId}`
+            ]
+          : undefined;
+        const isNewest =
+          turnSummary !== undefined && turnSummary.turnId === inputs.newestTurnDiffId;
+        return {
+          version: [
+            "assistant",
+            timelineObjectVersion(turnSummary),
+            presentationOverride ?? "",
+            isNewest ? "newest" : "older",
+          ].join(":"),
+          build: () => ({ kind: "assistant-message", turnSummary, presentationOverride, isNewest }),
+        };
+      }
+      return { version: "static", build: () => ({ kind: "static" }) };
+    }
+    case "command": {
+      const expanded = inputs.expandedCommandExecutions[row.commandExecution.id] ?? false;
+      return {
+        version: `command:${expanded ? "expanded" : "collapsed"}`,
+        build: () => ({ kind: "command", expanded }),
+      };
+    }
+    case "working":
+      return {
+        version: `working:${inputs.ribbonActive ? "ribbon" : "label"}`,
+        build: () => ({ kind: "working", ribbonActive: inputs.ribbonActive }),
+      };
+    case "proposed-plan":
+      return { version: "static", build: () => ({ kind: "static" }) };
+  }
+}
+
+/** Externals per row id, reusing the previous entry while its version holds. */
+export function buildTimelineRowExternals(
+  rows: ReadonlyArray<TimelineRow>,
+  inputs: TimelineRowExternalsInputs,
+  previous: ReadonlyMap<string, TimelineRowExternalsEntry>,
+): ReadonlyMap<string, TimelineRowExternalsEntry> {
+  const next = new Map<string, TimelineRowExternalsEntry>();
+  let changed = rows.length !== previous.size;
+  for (const row of rows) {
+    const { version, build } = describeTimelineRowExternals(row, inputs);
+    const cached = previous.get(row.id);
+    const entry = cached && cached.version === version ? cached : { version, externals: build() };
+    if (entry !== cached) changed = true;
+    next.set(row.id, entry);
+  }
+  // Same map while every row keeps its entry, so LegendList's `extraData`
+  // only changes when some row's external inputs did.
+  return changed ? next : previous;
+}

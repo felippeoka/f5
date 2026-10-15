@@ -25,7 +25,13 @@ import { parsePersistedAppSettings } from "../../appSettings";
 import type { TurnDiffSummary } from "../../types";
 import { readTimelineScrollAnchor } from "./timelineScrollAnchors";
 import { setNowTickerClockForTests } from "../../lib/nowTicker";
-import { MessagesTimeline } from "./MessagesTimeline";
+import {
+  buildTimelineRowExternals,
+  buildTimelineRows,
+  createTimelineRowCache,
+  MessagesTimeline,
+  type TimelineRowExternalsInputs,
+} from "./MessagesTimeline";
 import { ComposerDock } from "./composer/ComposerDock";
 import type { ImageAttachmentActionItem } from "./imageAttachmentActions";
 import { WORK_LOG_PAGE_SIZE } from "./workLogConstants";
@@ -3419,6 +3425,211 @@ describe("MessagesTimeline working ribbon", () => {
       expect(mounted.focusLost).not.toHaveBeenCalled();
     } finally {
       await mounted.cleanup();
+    }
+  });
+});
+
+describe("MessagesTimeline row stability", () => {
+  const EMPTY_CHAT_DIFF_CONTEXT = {
+    threadId: null,
+    isGitRepo: false,
+    inferredCheckpointTurnCountByTurnId: {},
+    expandedFileChangeDiffs: {},
+    fileChangeSummariesById: {},
+    onToggleFileChangeDiff: () => {},
+    onOpenFileChangeDiff: () => {},
+  };
+
+  function externalsInputs(
+    overrides: Partial<TimelineRowExternalsInputs> = {},
+  ): TimelineRowExternalsInputs {
+    return {
+      threadId: null,
+      expandedWorkGroups: {},
+      workGroupCollapseOverrides: {},
+      turnDiffSummaryByTurnId: new Map(),
+      chatDiffContext: EMPTY_CHAT_DIFF_CONTEXT,
+      revertTurnCountByUserMessageId: new Map(),
+      revertPopover: null,
+      revertImpact: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      changedFilesPresentationOverrides: {},
+      newestTurnDiffId: null,
+      expandedCommandExecutions: {},
+      ribbonActive: false,
+      ...overrides,
+    };
+  }
+
+  function buildRows(entries: TimelineEntry[], cache: ReturnType<typeof createTimelineRowCache>) {
+    return buildTimelineRows({
+      timelineEntries: entries,
+      completionDividerBeforeEntryId: null,
+      completionSummary: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      liveActivity: null,
+      expandMcpToolCalls: false,
+      cache,
+    });
+  }
+
+  function withTurnId(entry: TimelineEntry, turnId: TurnId): TimelineEntry {
+    if (entry.kind !== "work") throw new Error("expected a work entry");
+    return { ...entry, entry: { ...entry.entry, turnId } };
+  }
+
+  it("keeps earlier row objects and versions when the last message streams", () => {
+    const cache = createTimelineRowCache();
+    const user = makeUserEntry("row-user", "hello", 0);
+    const work = makeReadWorkEntry("row-work", "src/a.ts", 1);
+    const assistant = makeAssistantEntry("row-assistant", "Hel", 2);
+    const before = buildRows([user, work, assistant], cache);
+    const externalsBefore = buildTimelineRowExternals(before, externalsInputs(), new Map());
+
+    const grown = makeAssistantEntry("row-assistant", "Hello there", 2);
+    const after = buildRows([user, work, grown], cache);
+    const externalsAfter = buildTimelineRowExternals(after, externalsInputs(), externalsBefore);
+
+    expect(after[0]).toBe(before[0]);
+    expect(after[1]).toBe(before[1]);
+    expect(after[2]).not.toBe(before[2]);
+    expect(externalsAfter.get("row-user")).toBe(externalsBefore.get("row-user"));
+    expect(externalsAfter.get("row-work")).toBe(externalsBefore.get("row-work"));
+    // Rebuilding the same entries returns the same array.
+    expect(buildRows([user, work, grown], cache)).toBe(after);
+  });
+
+  it("changes only the rows of the turn whose diff summary changed", () => {
+    const cache = createTimelineRowCache();
+    const turnA = TurnId.makeUnsafe("turn-a");
+    const turnB = TurnId.makeUnsafe("turn-b");
+    const rows = buildRows(
+      [
+        withTurnId(makeReadWorkEntry("work-a", "src/a.ts", 0), turnA),
+        makeUserEntry("user-between", "next", 1),
+        withTurnId(makeReadWorkEntry("work-b", "src/b.ts", 2), turnB),
+      ],
+      cache,
+    );
+    const summaryA = { turnId: turnA, completedAt: "2026-03-04T12:00:00.000Z", files: [] };
+    const externalsBefore = buildTimelineRowExternals(
+      rows,
+      externalsInputs({
+        turnDiffSummaryByTurnId: new Map([[turnA, summaryA as unknown as TurnDiffSummary]]),
+      }),
+      new Map(),
+    );
+    const nextSummaryA = { ...summaryA, checkpointTurnCount: 2 };
+    const externalsAfter = buildTimelineRowExternals(
+      rows,
+      externalsInputs({
+        turnDiffSummaryByTurnId: new Map([[turnA, nextSummaryA as unknown as TurnDiffSummary]]),
+      }),
+      externalsBefore,
+    );
+
+    expect(externalsAfter.get("work-a")?.version).not.toBe(externalsBefore.get("work-a")?.version);
+    expect(externalsAfter.get("work-b")).toBe(externalsBefore.get("work-b"));
+    expect(externalsAfter.get("user-between")).toBe(externalsBefore.get("user-between"));
+  });
+
+  it("prunes cached rows that a rewind removed", () => {
+    const cache = createTimelineRowCache();
+    const user = makeUserEntry("rewind-user", "first", 0);
+    const assistant = makeAssistantEntry("rewind-assistant", "reply", 1);
+    const later = makeUserEntry("rewind-later", "second", 2);
+    buildRows([user, assistant, later], cache);
+    expect([...cache.rows.keys()]).toEqual(["rewind-user", "rewind-assistant", "rewind-later"]);
+
+    const rewound = buildRows([user, assistant], cache);
+    expect(rewound.map((row) => row.id)).toEqual(["rewind-user", "rewind-assistant"]);
+    expect([...cache.rows.keys()]).toEqual(["rewind-user", "rewind-assistant"]);
+  });
+
+  it("re-renders only the streaming row and keeps earlier rows untouched", async () => {
+    let api: TimelineHarnessApi | null = null;
+    const user = makeUserEntry("render-user", "Question", 0);
+    const firstAnswer = makeAssistantEntry("render-first", "First answer", 1);
+    const followUp = makeUserEntry("render-follow-up", "Follow up", 2);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <TimelineHarness
+        initialEntries={[user, firstAnswer, followUp, makeAssistantEntry("render-live", "Str", 3)]}
+        onIsAtEndChangeSpy={() => {}}
+        setApi={(next) => {
+          api = next;
+        }}
+      />,
+      { container: host },
+    );
+    const renderCount = (rowId: string) =>
+      host.querySelector<HTMLElement>(`[data-timeline-row-id="${rowId}"][data-render-count]`)
+        ?.dataset.renderCount;
+
+    try {
+      await vi.waitFor(() => {
+        expect(renderCount("render-first")).toBeDefined();
+        expect(renderCount("render-live")).toBeDefined();
+      });
+      const before = {
+        user: renderCount("render-user"),
+        first: renderCount("render-first"),
+        followUp: renderCount("render-follow-up"),
+        live: renderCount("render-live"),
+      };
+
+      for (const text of ["Strea", "Streami", "Streaming reply"]) {
+        api!.setEntries([user, firstAnswer, followUp, makeAssistantEntry("render-live", text, 3)]);
+        await vi.waitFor(() => {
+          expect(host.textContent).toContain(text);
+        });
+      }
+
+      expect(renderCount("render-user")).toBe(before.user);
+      expect(renderCount("render-first")).toBe(before.first);
+      expect(renderCount("render-follow-up")).toBe(before.followUp);
+      expect(Number(renderCount("render-live"))).toBeGreaterThan(Number(before.live));
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("renders a fallback for a malformed entry while other rows render", async () => {
+    const malformed = makeUserEntry("malformed-user", "broken", 1);
+    if (malformed.kind === "message") {
+      // A non-array attachment list makes the user row throw while rendering.
+      (malformed.message as { attachments: unknown }).attachments = 42;
+    }
+    const host = document.createElement("div");
+    document.body.append(host);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const screen = await render(
+      <TimelineHarness
+        initialEntries={[
+          makeUserEntry("healthy-user", "Healthy question", 0),
+          malformed,
+          makeAssistantEntry("healthy-assistant", "Healthy answer", 2),
+        ]}
+        onIsAtEndChangeSpy={() => {}}
+      />,
+      { container: host },
+    );
+
+    try {
+      await vi.waitFor(() => {
+        const brokenRow = host.querySelector('[data-timeline-row-id="malformed-user"]');
+        expect(brokenRow?.textContent).toContain("This entry could not be displayed");
+        expect(brokenRow?.textContent).toContain("Copy error report");
+        expect(host.textContent).toContain("Healthy question");
+        expect(host.textContent).toContain("Healthy answer");
+      });
+    } finally {
+      consoleError.mockRestore();
+      await screen.unmount();
+      host.remove();
     }
   });
 });

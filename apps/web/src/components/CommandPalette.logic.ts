@@ -6,8 +6,8 @@ import {
 import { type ReactNode } from "react";
 import { formatRelativeTimeLabel } from "../lib/relativeTime";
 import { compareThreadsByActivity, isSnoozedThread } from "../lib/threadOrdering";
-import { resolveThreadStatusPillForThread, type ThreadStatusPill } from "../threadStatus";
-import type { Project, Thread } from "../types";
+import { pillForStatus, type ThreadStatus, type ThreadStatusPill } from "../threadStatus";
+import type { Project, ThreadListItem } from "../types";
 
 export const RECENT_THREAD_LIMIT = 12;
 export const ITEM_ICON_CLASS = "size-4 text-muted-foreground";
@@ -109,13 +109,18 @@ export function buildProjectActionItems(input: {
   }));
 }
 
+/** A palette thread; summaries carry their status, plain list items show none. */
+export type CommandPaletteThread = ThreadListItem & { readonly status?: ThreadStatus };
+
 export function buildThreadActionItems(input: {
-  threads: ReadonlyArray<Thread>;
-  activeThreadId?: Thread["id"];
+  threads: ReadonlyArray<CommandPaletteThread>;
+  activeThreadId?: ThreadListItem["id"];
   projectTitleById: ReadonlyMap<Project["id"], string>;
   icon: ReactNode;
-  runThread: (thread: Thread) => Promise<void>;
-  queuedCountByThreadId?: ReadonlyMap<Thread["id"], number>;
+  runThread: (thread: ThreadListItem) => Promise<void>;
+  queuedCountByThreadId?: ReadonlyMap<ThreadListItem["id"], number>;
+  /** Live activity time for the label; summaries only carry an ordering key. */
+  activityAtOf?: (thread: ThreadListItem) => string | null | undefined;
   limit?: number;
 }): CommandPaletteActionItem[] {
   const sortedThreads = input.threads
@@ -151,8 +156,10 @@ export function buildThreadActionItems(input: {
       searchTerms: [thread.title, thread.id, projectTitle ?? "", thread.branch ?? ""],
       title: thread.title,
       description: descriptionParts.join(" · "),
-      timestamp: formatRelativeTimeLabel(thread.lastInteractionAt ?? thread.createdAt),
-      statusPill: resolveThreadStatusPillForThread(thread),
+      timestamp: formatRelativeTimeLabel(
+        input.activityAtOf?.(thread) ?? thread.lastInteractionAt ?? thread.createdAt,
+      ),
+      statusPill: pillForStatus(thread.status ?? "none"),
       icon: input.icon,
       run: async () => {
         await input.runThread(thread);

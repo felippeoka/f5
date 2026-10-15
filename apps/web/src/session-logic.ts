@@ -1826,28 +1826,64 @@ export function hasToolActivityForTurn(
   return activities.some((activity) => activity.turnId === turnId && activity.tone === "tool");
 }
 
+/**
+ * Per-caller reuse state for `deriveTimelineEntries`, typically held in a
+ * `useRef`. An entry whose source objects are unchanged keeps its previous
+ * object, and an unchanged entry list keeps its previous array, so memoized
+ * timeline rows only re-render when their own entry changed.
+ */
+export interface TimelineEntryCache {
+  entries: Map<string, { readonly sources: ReadonlyArray<unknown>; readonly entry: TimelineEntry }>;
+  result: TimelineEntry[] | null;
+}
+
+export function createTimelineEntryCache(): TimelineEntryCache {
+  return { entries: new Map(), result: null };
+}
+
+function sameSources(left: ReadonlyArray<unknown>, right: ReadonlyArray<unknown>): boolean {
+  return (
+    left.length === right.length && left.every((value, index) => Object.is(value, right[index]))
+  );
+}
+
 export function deriveTimelineEntries(
   messages: ChatMessage[],
   proposedPlans: ProposedPlan[],
   workEntries: WorkLogEntry[],
   commandExecutions: ReadonlyArray<OrchestrationCommandExecutionSummary> = [],
+  cache?: TimelineEntryCache,
 ): TimelineEntry[] {
-  const messageRows: TimelineEntry[] = messages.map((message) => ({
-    id: message.id,
-    kind: "message",
-    createdAt: message.createdAt,
-    message,
-  }));
-  const proposedPlanRows: TimelineEntry[] = proposedPlans.map((proposedPlan) => ({
-    id: proposedPlan.id,
-    kind: "proposed-plan",
-    createdAt: proposedPlan.createdAt,
-    proposedPlan,
-  }));
+  const nextCacheEntries: TimelineEntryCache["entries"] = new Map();
+  const reuse = (
+    id: string,
+    sources: ReadonlyArray<unknown>,
+    build: () => TimelineEntry,
+  ): TimelineEntry => {
+    const cached = cache?.entries.get(id);
+    const entry = cached && sameSources(cached.sources, sources) ? cached.entry : build();
+    nextCacheEntries.set(id, { sources, entry });
+    return entry;
+  };
+
+  const messageRows: TimelineEntry[] = messages.map((message) =>
+    reuse(message.id, [message], () => ({
+      id: message.id,
+      kind: "message",
+      createdAt: message.createdAt,
+      message,
+    })),
+  );
+  const proposedPlanRows: TimelineEntry[] = proposedPlans.map((proposedPlan) =>
+    reuse(proposedPlan.id, [proposedPlan], () => ({
+      id: proposedPlan.id,
+      kind: "proposed-plan",
+      createdAt: proposedPlan.createdAt,
+      proposedPlan,
+    })),
+  );
   const diagnosticEntries = workEntries.filter((entry) => entry.diagnostic !== undefined);
-  const regularWorkEntries = workEntries
-    .filter((entry) => entry.diagnostic === undefined)
-    .map((entry) => ({ ...entry }));
+  const regularWorkEntries = workEntries.filter((entry) => entry.diagnostic === undefined);
   const pendingDiagnosticsByProviderItemId = new Map<string, WorkLogEntry[]>();
   for (const diagnostic of diagnosticEntries) {
     if (!diagnostic.parentProviderItemId) {
@@ -1873,113 +1909,128 @@ export function deriveTimelineEntries(
 
   const workRows: TimelineEntry[] = regularWorkEntries.map((entry) => {
     const nestedDiagnostics = takeDiagnostics(entry.providerItemId);
-    const nestedEntry = nestedDiagnostics ? { ...entry, nestedDiagnostics } : entry;
-    return {
-      id: nestedEntry.id,
-      kind: "work",
-      createdAt: nestedEntry.createdAt,
-      entry: nestedEntry,
-    };
+    return reuse(entry.id, [entry, ...(nestedDiagnostics ?? [])], () => {
+      const nestedEntry = nestedDiagnostics ? { ...entry, nestedDiagnostics } : entry;
+      return {
+        id: nestedEntry.id,
+        kind: "work",
+        createdAt: nestedEntry.createdAt,
+        entry: nestedEntry,
+      };
+    });
   });
-  const commandRows = deriveCommandTimelineEntries(commandExecutions).map((row) => {
-    if (row.kind === "work") {
-      const nestedDiagnostics = takeDiagnostics(row.entry.providerItemId);
-      return nestedDiagnostics ? { ...row, entry: { ...row.entry, nestedDiagnostics } } : row;
-    }
-    if (row.kind === "command") {
-      const nestedDiagnostics = takeDiagnostics(row.commandExecution.providerItemId);
-      return nestedDiagnostics ? { ...row, nestedDiagnostics } : row;
-    }
-    return row;
-  });
+  const commandRows = [...commandExecutions]
+    .toSorted(compareCommandExecutions)
+    .map((commandExecution) => {
+      const providerItemId = commandExecution.providerItemId;
+      const nestedDiagnostics = takeDiagnostics(providerItemId);
+      return reuse(commandExecution.id, [commandExecution, ...(nestedDiagnostics ?? [])], () => {
+        const row = commandTimelineEntry(commandExecution);
+        if (!nestedDiagnostics) return row;
+        if (row.kind === "work") return { ...row, entry: { ...row.entry, nestedDiagnostics } };
+        if (row.kind === "command") return { ...row, nestedDiagnostics };
+        return row;
+      });
+    });
   const uncorrelatedDiagnosticRows: TimelineEntry[] = diagnosticEntries
     .filter(
       (entry) =>
         !entry.parentProviderItemId ||
         pendingDiagnosticsByProviderItemId.has(String(entry.parentProviderItemId)),
     )
-    .map((entry) => ({
-      id: entry.id,
-      kind: "work",
-      createdAt: entry.createdAt,
-      entry,
-    }));
-  return [
+    .map((entry) =>
+      reuse(entry.id, [entry], () => ({
+        id: entry.id,
+        kind: "work",
+        createdAt: entry.createdAt,
+        entry,
+      })),
+    );
+  const result = [
     ...messageRows,
     ...proposedPlanRows,
     ...workRows,
     ...uncorrelatedDiagnosticRows,
     ...commandRows,
   ].toSorted(compareTimelineEntries);
+  if (!cache) return result;
+  cache.entries = nextCacheEntries;
+  if (cache.result && sameSources(cache.result, result)) return cache.result;
+  cache.result = result;
+  return result;
 }
 
 export function deriveCommandTimelineEntries(
   executions: ReadonlyArray<OrchestrationCommandExecutionSummary>,
 ): TimelineEntry[] {
-  return [...executions].toSorted(compareCommandExecutions).map((commandExecution) => {
-    const commandClassification = classifyCompactCommand(commandExecution.command);
-    if (commandClassification.kind === "file-read") {
-      const label =
-        commandExecution.title && !isGenericCommandTitle(commandExecution.title)
-          ? commandExecution.title
-          : "Read file";
-      return {
-        id: commandExecution.id,
-        kind: "work" as const,
-        createdAt: commandExecution.startedAt,
-        entry: {
-          id: commandExecution.id,
-          createdAt: commandExecution.startedAt,
-          label,
-          ...(commandExecution.cwd ? { cwd: commandExecution.cwd } : {}),
-          tone: "tool" as const,
-          turnId: commandExecution.turnId,
-          ...(commandExecution.providerItemId
-            ? { providerItemId: commandExecution.providerItemId }
-            : {}),
-          changedFiles: commandClassification.fileRead.filePaths,
-          requestKind: "file-read" as const,
-          toolTitle: label,
-          ...(commandClassification.fileRead.lineSummary
-            ? { detail: commandClassification.fileRead.lineSummary }
-            : {}),
-        },
-      };
-    }
+  return [...executions].toSorted(compareCommandExecutions).map(commandTimelineEntry);
+}
 
-    if (commandClassification.kind === "search") {
-      const label =
-        commandExecution.title && !isGenericCommandTitle(commandExecution.title)
-          ? commandExecution.title
-          : commandClassification.summary;
-      return {
-        id: commandExecution.id,
-        kind: "work" as const,
-        createdAt: commandExecution.startedAt,
-        entry: {
-          id: commandExecution.id,
-          createdAt: commandExecution.startedAt,
-          label,
-          ...(commandExecution.cwd ? { cwd: commandExecution.cwd } : {}),
-          tone: "tool" as const,
-          turnId: commandExecution.turnId,
-          ...(commandExecution.providerItemId
-            ? { providerItemId: commandExecution.providerItemId }
-            : {}),
-          itemType: "command_execution" as const,
-          requestKind: "command" as const,
-          toolTitle: label,
-        },
-      };
-    }
-
+function commandTimelineEntry(
+  commandExecution: OrchestrationCommandExecutionSummary,
+): TimelineEntry {
+  const commandClassification = classifyCompactCommand(commandExecution.command);
+  if (commandClassification.kind === "file-read") {
+    const label =
+      commandExecution.title && !isGenericCommandTitle(commandExecution.title)
+        ? commandExecution.title
+        : "Read file";
     return {
       id: commandExecution.id,
-      kind: "command" as const,
+      kind: "work" as const,
       createdAt: commandExecution.startedAt,
-      commandExecution,
+      entry: {
+        id: commandExecution.id,
+        createdAt: commandExecution.startedAt,
+        label,
+        ...(commandExecution.cwd ? { cwd: commandExecution.cwd } : {}),
+        tone: "tool" as const,
+        turnId: commandExecution.turnId,
+        ...(commandExecution.providerItemId
+          ? { providerItemId: commandExecution.providerItemId }
+          : {}),
+        changedFiles: commandClassification.fileRead.filePaths,
+        requestKind: "file-read" as const,
+        toolTitle: label,
+        ...(commandClassification.fileRead.lineSummary
+          ? { detail: commandClassification.fileRead.lineSummary }
+          : {}),
+      },
     };
-  });
+  }
+
+  if (commandClassification.kind === "search") {
+    const label =
+      commandExecution.title && !isGenericCommandTitle(commandExecution.title)
+        ? commandExecution.title
+        : commandClassification.summary;
+    return {
+      id: commandExecution.id,
+      kind: "work" as const,
+      createdAt: commandExecution.startedAt,
+      entry: {
+        id: commandExecution.id,
+        createdAt: commandExecution.startedAt,
+        label,
+        ...(commandExecution.cwd ? { cwd: commandExecution.cwd } : {}),
+        tone: "tool" as const,
+        turnId: commandExecution.turnId,
+        ...(commandExecution.providerItemId
+          ? { providerItemId: commandExecution.providerItemId }
+          : {}),
+        itemType: "command_execution" as const,
+        requestKind: "command" as const,
+        toolTitle: label,
+      },
+    };
+  }
+
+  return {
+    id: commandExecution.id,
+    kind: "command" as const,
+    createdAt: commandExecution.startedAt,
+    commandExecution,
+  };
 }
 
 function compareTimelineEntries(left: TimelineEntry, right: TimelineEntry): number {

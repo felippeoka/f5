@@ -96,3 +96,18 @@ export function useNow(enabled: boolean): number {
 export function useNowIso(enabled: boolean): string {
   return new Date(useNow(enabled)).toISOString();
 }
+
+const MINUTE_MS = 60_000;
+
+function getMinuteSnapshot(): number {
+  const now = getNowSnapshot();
+  return now - (now % MINUTE_MS);
+}
+
+/**
+ * The shared clock floored to the minute, for relative labels ("5m ago"). It
+ * rides the 1 Hz ticker but re-renders its caller only when the minute turns.
+ */
+export function useNowMinute(): number {
+  return useSyncExternalStore(subscribeNow, getMinuteSnapshot, getMinuteSnapshot);
+}

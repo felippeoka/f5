@@ -1,16 +1,23 @@
 import { projectSettingsQueryOptions } from "../lib/projectSettingsQuery";
-import { useCallback, useMemo, useRef } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { hashKey, replaceEqualDeep, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ServerSettings,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
+  type ProjectSettingsResult,
   type ServerSettingsPatch,
   type UnifiedSettings,
   type ProjectId,
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 
-import { AppSettingsSchema, type AppSettings, useAppSettings } from "../appSettings";
+import {
+  AppSettingsSchema,
+  type AppSettings,
+  readAppSettingsSnapshot,
+  subscribeAppSettings,
+  useAppSettings,
+} from "../appSettings";
 import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
 import { ensureNativeApi } from "../nativeApi";
 
@@ -50,26 +57,95 @@ export function splitSettingsPatch(patch: Partial<UnifiedWebSettings>): {
   };
 }
 
+interface SettingsSources {
+  readonly appSettings: AppSettings;
+  readonly serverSettings: ServerSettings | undefined;
+  readonly projectSettings: ProjectSettingsResult | undefined;
+}
+
+function mergeSettingsSources(sources: SettingsSources): UnifiedWebSettings {
+  const merged = mergeSettings(sources.appSettings, sources.serverSettings);
+  if (sources.projectSettings) {
+    for (const key of PROJECT_SCOPED_SERVER_SETTING_KEYS) {
+      Object.assign(merged, { [key]: sources.projectSettings.settings[key] });
+    }
+  }
+  return merged;
+}
+
+/**
+ * Merged web-local, server and project settings, narrowed by `selector`.
+ * The selector runs against store snapshots before React decides to render,
+ * so a component re-renders only when its selected value changes (compared
+ * structurally, so object selections stay stable across unrelated writes).
+ */
 export function useSettings<T = UnifiedWebSettings>(
   selector?: (settings: UnifiedWebSettings) => T,
   projectId?: ProjectId,
 ): T {
-  const { settings: appSettings } = useAppSettings();
-  const serverConfigQuery = useQuery(serverConfigQueryOptions());
-  const projectQuery = useQuery({
+  const queryClient = useQueryClient();
+  // Observe both queries for fetching and garbage collection only; results
+  // are read from the cache below so they do not re-render this component.
+  useQuery({ ...serverConfigQueryOptions(), notifyOnChangeProps: [] });
+  useQuery({
     ...projectSettingsQueryOptions(projectId ?? ("" as ProjectId)),
     enabled: !!projectId,
+    notifyOnChangeProps: [],
   });
-  const merged = useMemo(() => {
-    const merged = mergeSettings(appSettings, serverConfigQuery.data?.settings);
-    if (projectQuery.data) {
-      for (const key of PROJECT_SCOPED_SERVER_SETTING_KEYS) {
-        Object.assign(merged, { [key]: projectQuery.data.settings[key] });
+  const projectQueryHash = projectId
+    ? hashKey(projectSettingsQueryOptions(projectId).queryKey)
+    : null;
+
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const configQueryHash = hashKey(serverQueryKeys.config());
+      const unsubscribeAppSettings = subscribeAppSettings(listener);
+      const unsubscribeQueries = queryClient.getQueryCache().subscribe((event) => {
+        const queryHash = event.query.queryHash;
+        if (queryHash === configQueryHash || queryHash === projectQueryHash) listener();
+      });
+      return () => {
+        unsubscribeAppSettings();
+        unsubscribeQueries();
+      };
+    },
+    [projectQueryHash, queryClient],
+  );
+
+  // Memoizes on the source snapshots and the selector identity; inline
+  // selectors re-run each render and structural sharing keeps the result.
+  const getSnapshot = useMemo(() => {
+    let previous: { sources: SettingsSources; merged: UnifiedWebSettings } | null = null;
+    let selected: { merged: UnifiedWebSettings; selector: unknown; value: T } | null = null;
+    return (activeSelector: ((settings: UnifiedWebSettings) => T) | undefined): T => {
+      const sources: SettingsSources = {
+        appSettings: readAppSettingsSnapshot(),
+        serverSettings: queryClient.getQueryData(serverConfigQueryOptions().queryKey)?.settings,
+        projectSettings: projectId
+          ? queryClient.getQueryData(projectSettingsQueryOptions(projectId).queryKey)
+          : undefined,
+      };
+      if (
+        !previous ||
+        previous.sources.appSettings !== sources.appSettings ||
+        previous.sources.serverSettings !== sources.serverSettings ||
+        previous.sources.projectSettings !== sources.projectSettings
+      ) {
+        previous = { sources, merged: mergeSettingsSources(sources) };
       }
-    }
-    return merged;
-  }, [appSettings, serverConfigQuery.data?.settings, projectQuery.data]);
-  return useMemo(() => (selector ? selector(merged) : (merged as T)), [merged, selector]);
+      const { merged } = previous;
+      if (selected && selected.merged === merged && selected.selector === activeSelector) {
+        return selected.value;
+      }
+      const next = activeSelector ? activeSelector(merged) : (merged as T);
+      const value = selected ? replaceEqualDeep(selected.value, next) : next;
+      selected = { merged, selector: activeSelector, value };
+      return value;
+    };
+  }, [projectId, queryClient]);
+  const getSelectedSnapshot = () => getSnapshot(selector);
+
+  return useSyncExternalStore(subscribe, getSelectedSnapshot, getSelectedSnapshot);
 }
 
 export function useUpdateSettings() {

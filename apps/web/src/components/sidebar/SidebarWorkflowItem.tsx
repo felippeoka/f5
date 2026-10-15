@@ -17,7 +17,8 @@ import {
   workflowDisplayType,
 } from "../../lib/workflowType";
 import type { ThreadStatusPill } from "../../threadStatus";
-import type { Thread } from "../../types";
+import type { ThreadSummary } from "../../threadSelectors";
+import type { ThreadListItem } from "../../types";
 import { ModelChip } from "../chat/ModelChip";
 import {
   resolveThreadRowClassName,
@@ -45,6 +46,7 @@ export interface SidebarThreadRowIndicators {
   threadStatus: ThreadStatusPill | null;
   prStatus: PrStatusIndicator | null;
   terminalStatus: TerminalStatusIndicator | null;
+  isUnread: boolean;
 }
 
 const WORKFLOW_STATE_ICON: Record<
@@ -94,7 +96,7 @@ function WorkflowTypeGlyph({
 
 export function SidebarWorkflowItem(props: {
   entry: SidebarWorkflowEntry;
-  workflowThreads: readonly Thread[];
+  workflowThreads: readonly ThreadSummary[];
   /** Role label per thread from the workflow's phases. */
   threadLabels: ReadonlyMap<ThreadId, string>;
   overallState: WorkflowOverallState;
@@ -104,9 +106,10 @@ export function SidebarWorkflowItem(props: {
   overrideExpanded: boolean | undefined;
   onToggleCollapsed: (workflowId: string, fallbackExpanded: boolean) => void;
   onArchive: (workflowId: SidebarWorkflowId, title: string, type: SidebarWorkflowType) => void;
-  indicatorsForThread: (thread: Thread) => SidebarThreadRowIndicators;
+  indicatorsForThread: (thread: ThreadListItem) => SidebarThreadRowIndicators;
   actions: SidebarThreadActions;
 }) {
+  "use memo";
   const { entry, workflowThreads, pathname, routeThreadId, actions } = props;
   const { workflow, type } = entry;
   const navigate = useNavigate();
@@ -236,7 +239,7 @@ export function SidebarWorkflowItem(props: {
               trailingMeta={
                 <ModelChip
                   model={thread.modelSelection?.model ?? thread.model}
-                  sessionProviderName={thread.session?.provider ?? null}
+                  sessionProviderName={thread.sessionProvider}
                   iconOnly
                 />
               }

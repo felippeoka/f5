@@ -566,6 +566,74 @@ function isProjectDraftKeyForProject(key: string, projectId: ProjectId): boolean
   return projectIdFromDraftThreadKey(key) === projectId;
 }
 
+/**
+ * The project's draft thread for `options`' workspace, or its newest draft.
+ * Components pass the maps they subscribe to, so memoization (including the
+ * React Compiler's) tracks them; the store getter hides them behind `get()`.
+ */
+export function selectProjectDraftThread(
+  state: Pick<
+    ComposerDraftStoreState,
+    "draftThreadsByThreadId" | "projectDraftThreadIdByProjectId"
+  >,
+  projectId: ProjectId,
+  options?: {
+    worktreePath?: string | null;
+    envMode?: DraftThreadEnvMode | null;
+  },
+): ProjectDraftThread | null {
+  if (projectId.length === 0) {
+    return null;
+  }
+  if (options !== undefined) {
+    const threadId =
+      state.projectDraftThreadIdByProjectId[projectDraftThreadKey(projectId, options)];
+    if (!threadId) {
+      return null;
+    }
+    const draftThread = state.draftThreadsByThreadId[threadId];
+    if (!draftThread || draftThread.projectId !== projectId) {
+      return null;
+    }
+    return {
+      threadId,
+      ...draftThread,
+    };
+  }
+
+  let latestDraftThread: ProjectDraftThread | null = null;
+  for (const [key, threadId] of Object.entries(state.projectDraftThreadIdByProjectId)) {
+    if (!isProjectDraftKeyForProject(key, projectId)) {
+      continue;
+    }
+    const draftThread = state.draftThreadsByThreadId[threadId];
+    if (!draftThread || draftThread.projectId !== projectId) {
+      continue;
+    }
+    const draftThreadCreatedAtMs = Date.parse(draftThread.createdAt);
+    const latestDraftThreadCreatedAtMs = latestDraftThread
+      ? Date.parse(latestDraftThread.createdAt)
+      : Number.NEGATIVE_INFINITY;
+    const draftThreadSortTime = Number.isFinite(draftThreadCreatedAtMs)
+      ? draftThreadCreatedAtMs
+      : Number.NEGATIVE_INFINITY;
+    const latestDraftThreadSortTime = Number.isFinite(latestDraftThreadCreatedAtMs)
+      ? latestDraftThreadCreatedAtMs
+      : Number.NEGATIVE_INFINITY;
+    if (
+      !latestDraftThread ||
+      draftThreadSortTime > latestDraftThreadSortTime ||
+      (draftThreadSortTime === latestDraftThreadSortTime && threadId > latestDraftThread.threadId)
+    ) {
+      latestDraftThread = {
+        threadId,
+        ...draftThread,
+      };
+    }
+  }
+  return latestDraftThread;
+}
+
 interface ComposerDraftStoreState {
   draftsByThreadId: Record<ThreadId, ComposerThreadDraftState>;
   draftThreadsByThreadId: Record<ThreadId, DraftThreadState>;
@@ -1721,60 +1789,8 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
       projectDraftThreadIdByProjectId: {},
       promptStashes: [],
       imageImportsByThreadId: {},
-      getDraftThreadByProjectId: (projectId, options) => {
-        if (projectId.length === 0) {
-          return null;
-        }
-        const state = get();
-        if (options !== undefined) {
-          const threadId =
-            state.projectDraftThreadIdByProjectId[projectDraftThreadKey(projectId, options)];
-          if (!threadId) {
-            return null;
-          }
-          const draftThread = state.draftThreadsByThreadId[threadId];
-          if (!draftThread || draftThread.projectId !== projectId) {
-            return null;
-          }
-          return {
-            threadId,
-            ...draftThread,
-          };
-        }
-
-        let latestDraftThread: ProjectDraftThread | null = null;
-        for (const [key, threadId] of Object.entries(state.projectDraftThreadIdByProjectId)) {
-          if (!isProjectDraftKeyForProject(key, projectId)) {
-            continue;
-          }
-          const draftThread = state.draftThreadsByThreadId[threadId];
-          if (!draftThread || draftThread.projectId !== projectId) {
-            continue;
-          }
-          const draftThreadCreatedAtMs = Date.parse(draftThread.createdAt);
-          const latestDraftThreadCreatedAtMs = latestDraftThread
-            ? Date.parse(latestDraftThread.createdAt)
-            : Number.NEGATIVE_INFINITY;
-          const draftThreadSortTime = Number.isFinite(draftThreadCreatedAtMs)
-            ? draftThreadCreatedAtMs
-            : Number.NEGATIVE_INFINITY;
-          const latestDraftThreadSortTime = Number.isFinite(latestDraftThreadCreatedAtMs)
-            ? latestDraftThreadCreatedAtMs
-            : Number.NEGATIVE_INFINITY;
-          if (
-            !latestDraftThread ||
-            draftThreadSortTime > latestDraftThreadSortTime ||
-            (draftThreadSortTime === latestDraftThreadSortTime &&
-              threadId > latestDraftThread.threadId)
-          ) {
-            latestDraftThread = {
-              threadId,
-              ...draftThread,
-            };
-          }
-        }
-        return latestDraftThread;
-      },
+      getDraftThreadByProjectId: (projectId, options) =>
+        selectProjectDraftThread(get(), projectId, options),
       getDraftThread: (threadId) => {
         if (threadId.length === 0) {
           return null;

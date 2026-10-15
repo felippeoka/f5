@@ -3041,4 +3041,83 @@ describe("Thread sidebar", () => {
       await mounted.cleanup();
     }
   });
+  it("does not re-render the sidebar or an inactive chat view while another thread streams", async () => {
+    const streamingThreadId = "thread-sidebar-streaming" as ThreadId;
+    const streamingTitle = "Background streaming thread";
+    const mounted = await mountApp({
+      width: 1_400,
+      initialEntries: [`/${THREAD_ID}`],
+      configureFixture: (nextFixture) => {
+        nextFixture.snapshot = createSnapshot([
+          createSnapshotThread({ id: THREAD_ID, title: "Visible thread" }),
+          createSnapshotThread({
+            id: streamingThreadId,
+            title: streamingTitle,
+            lastInteractionAt: "2026-03-11T12:05:00.000Z",
+          }),
+        ]);
+      },
+    });
+
+    try {
+      await waitForSidebarThreadRow(streamingTitle);
+      const sidebarRoot = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-sidebar-root][data-render-count]"),
+        "Sidebar render probe should render.",
+      );
+      const chatView = await waitForElement(
+        () =>
+          document.querySelector<HTMLElement>(
+            `[data-chat-view-thread-id="${THREAD_ID}"][data-render-count]`,
+          ),
+        "Chat view render probe should render.",
+      );
+      // Let startup work (detail loads, settings, queue hydration) settle.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const sidebarRendersBefore = sidebarRoot.dataset.renderCount;
+      const chatViewRendersBefore = chatView.dataset.renderCount;
+      const streamingThreadBefore = useStore
+        .getState()
+        .threads.find((thread) => thread.id === streamingThreadId);
+
+      const baseSequence = useStore.getState().lastAppliedSequence;
+      for (let delta = 1; delta <= 3; delta += 1) {
+        const occurredAt = `2026-03-11T12:05:0${delta}.000Z`;
+        useStore.getState().applyDomainEvent({
+          sequence: baseSequence + delta,
+          eventId: `event-background-delta-${delta}` as never,
+          aggregateKind: "thread",
+          aggregateId: streamingThreadId,
+          occurredAt,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          type: "thread.message-sent",
+          payload: {
+            threadId: streamingThreadId,
+            messageId: "msg-background-assistant" as MessageId,
+            role: "assistant",
+            text: "token ".repeat(delta),
+            attachments: undefined,
+            turnId: null,
+            streaming: true,
+            createdAt: occurredAt,
+            updatedAt: occurredAt,
+          },
+        });
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      }
+
+      const streamingThreadAfter = useStore
+        .getState()
+        .threads.find((thread) => thread.id === streamingThreadId);
+      expect(streamingThreadAfter).not.toBe(streamingThreadBefore);
+      expect(streamingThreadAfter?.lastInteractionAt).toBe("2026-03-11T12:05:03.000Z");
+      expect(sidebarRoot.dataset.renderCount).toBe(sidebarRendersBefore);
+      expect(chatView.dataset.renderCount).toBe(chatViewRendersBefore);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
 });

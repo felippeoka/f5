@@ -1,0 +1,205 @@
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import {
+  normalizeWatchedRelativePath,
+  type WorkspaceWatchNotification,
+  WorkspaceWatchRegistry,
+} from "./workspaceWatch";
+
+type Subscriber = { readonly name: string };
+
+let root: string;
+let registry: WorkspaceWatchRegistry<Subscriber>;
+let notifications: Array<{ subscriber: string } & WorkspaceWatchNotification>;
+
+function createRegistry(
+  options: Partial<ConstructorParameters<typeof WorkspaceWatchRegistry<Subscriber>>[0]> = {},
+) {
+  return new WorkspaceWatchRegistry<Subscriber>({
+    debounceMs: 20,
+    pollIntervalMs: 50,
+    notify: (subscriber, notification) =>
+      notifications.push({ subscriber: subscriber.name, ...notification }),
+    ...options,
+  });
+}
+
+function changesFor(subscriber: string) {
+  return notifications
+    .filter((entry) => entry.subscriber === subscriber)
+    .flatMap((entry) => entry.changes);
+}
+
+async function waitForChange(
+  subscriber: string,
+  match: { relativePath: string; change: string },
+): Promise<void> {
+  await vi.waitFor(
+    () =>
+      expect(changesFor(subscriber)).toContainEqual(
+        expect.objectContaining({ relativePath: match.relativePath, change: match.change }),
+      ),
+    { timeout: 5_000, interval: 20 },
+  );
+}
+
+beforeEach(async () => {
+  root = await fsp.mkdtemp(path.join(os.tmpdir(), "f5-workspace-watch-"));
+  await fsp.mkdir(path.join(root, "src"));
+  await fsp.writeFile(path.join(root, "src", "app.ts"), "export const a = 1;\n");
+  notifications = [];
+  registry = createRegistry();
+});
+
+afterEach(async () => {
+  registry.dispose();
+  await fsp.rm(root, { recursive: true, force: true });
+});
+
+describe("normalizeWatchedRelativePath", () => {
+  it("normalizes workspace-relative paths and rejects escapes", () => {
+    expect(normalizeWatchedRelativePath("./src//app.ts")).toBe("src/app.ts");
+    expect(normalizeWatchedRelativePath("src\\app.ts")).toBe("src/app.ts");
+    expect(normalizeWatchedRelativePath("")).toBe("");
+    expect(normalizeWatchedRelativePath("../outside")).toBeNull();
+    expect(normalizeWatchedRelativePath("src/../../outside")).toBeNull();
+    expect(normalizeWatchedRelativePath(".git/config")).toBeNull();
+    expect(normalizeWatchedRelativePath("/etc/passwd")).toBeNull();
+    expect(normalizeWatchedRelativePath("C:\\Windows")).toBeNull();
+  });
+});
+
+describe("WorkspaceWatchRegistry", () => {
+  const client = { name: "client" };
+
+  it("reports external edits with advancing revisions", async () => {
+    await registry.setWatchedPaths(client, { cwd: root, files: ["src/app.ts"], directories: [] });
+
+    await fsp.writeFile(path.join(root, "src", "app.ts"), "export const a = 2;\n");
+    await waitForChange("client", { relativePath: "src/app.ts", change: "changed" });
+
+    await fsp.writeFile(path.join(root, "src", "app.ts"), "export const a = 33;\n");
+    await vi.waitFor(() => expect(changesFor("client").length).toBeGreaterThanOrEqual(2), {
+      timeout: 5_000,
+    });
+    const revisions = changesFor("client").map((change) => change.revision);
+    expect(revisions).toEqual([...revisions].sort((left, right) => left - right));
+    expect(new Set(revisions).size).toBe(revisions.length);
+  });
+
+  it("follows atomic editor saves that rename a temp file over the target", async () => {
+    await registry.setWatchedPaths(client, { cwd: root, files: ["src/app.ts"], directories: [] });
+
+    const temp = path.join(root, "src", ".app.ts.tmp");
+    await fsp.writeFile(temp, "export const a = 'atomic';\n");
+    await fsp.rename(temp, path.join(root, "src", "app.ts"));
+    await waitForChange("client", { relativePath: "src/app.ts", change: "changed" });
+
+    // The watch was re-armed on the new inode, so later edits still arrive.
+    notifications = [];
+    await fsp.writeFile(path.join(root, "src", "app.ts"), "export const a = 'after';\n");
+    await waitForChange("client", { relativePath: "src/app.ts", change: "changed" });
+  });
+
+  it("reports deletes, then re-creation of the same path", async () => {
+    await registry.setWatchedPaths(client, { cwd: root, files: ["src/app.ts"], directories: [] });
+
+    await fsp.rm(path.join(root, "src", "app.ts"));
+    await waitForChange("client", { relativePath: "src/app.ts", change: "deleted" });
+
+    await fsp.writeFile(path.join(root, "src", "app.ts"), "export const back = true;\n");
+    await waitForChange("client", { relativePath: "src/app.ts", change: "created" });
+  });
+
+  it("reports entries added to and renamed within a watched directory", async () => {
+    await registry.setWatchedPaths(client, { cwd: root, files: [], directories: ["src"] });
+
+    await fsp.writeFile(path.join(root, "src", "new.ts"), "");
+    await waitForChange("client", { relativePath: "src", change: "changed" });
+
+    notifications = [];
+    await fsp.rename(path.join(root, "src", "new.ts"), path.join(root, "src", "renamed.ts"));
+    await waitForChange("client", { relativePath: "src", change: "changed" });
+  });
+
+  it("shares one watch between subscribers and releases it with the last one", async () => {
+    const other = { name: "other" };
+    await registry.setWatchedPaths(client, { cwd: root, files: ["src/app.ts"], directories: [] });
+    await registry.setWatchedPaths(other, { cwd: root, files: ["src/app.ts"], directories: [] });
+    expect(registry.size).toBe(1);
+
+    await fsp.writeFile(path.join(root, "src", "app.ts"), "export const shared = 1;\n");
+    await waitForChange("client", { relativePath: "src/app.ts", change: "changed" });
+    await waitForChange("other", { relativePath: "src/app.ts", change: "changed" });
+
+    registry.releaseSubscriber(client);
+    expect(registry.size).toBe(1);
+    // Replacing the set with nothing releases the remaining watch.
+    await registry.setWatchedPaths(other, { cwd: root, files: [], directories: [] });
+    expect(registry.size).toBe(0);
+  });
+
+  it("rejects paths outside the workspace, including through symlinks", async () => {
+    const outside = await fsp.mkdtemp(path.join(os.tmpdir(), "f5-workspace-watch-outside-"));
+    try {
+      await fsp.symlink(outside, path.join(root, "escape"));
+      const result = await registry.setWatchedPaths(client, {
+        cwd: root,
+        files: ["../secret", ".git/config"],
+        directories: ["escape", "src"],
+      });
+      expect(result.rejected).toEqual(["../secret", ".git/config", "escape"]);
+      expect(result.watched).toBe(1);
+    } finally {
+      await fsp.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to polling when watching fails and reports degraded status", async () => {
+    registry.dispose();
+    registry = createRegistry({
+      watch: () => {
+        throw Object.assign(new Error("ENOSPC: watch limit reached"), { code: "ENOSPC" });
+      },
+    });
+
+    const result = await registry.setWatchedPaths(client, {
+      cwd: root,
+      files: ["src/app.ts"],
+      directories: [],
+    });
+    expect(result.degraded).toBe(true);
+
+    await fsp.writeFile(path.join(root, "src", "app.ts"), "export const polled = 1;\n");
+    await waitForChange("client", { relativePath: "src/app.ts", change: "changed" });
+    expect(notifications.at(-1)?.degraded).toBe(true);
+  });
+
+  it("keeps watching a path that does not exist yet without reporting degraded", async () => {
+    const result = await registry.setWatchedPaths(client, {
+      cwd: root,
+      files: ["src/later.ts"],
+      directories: [],
+    });
+    expect(result.degraded).toBe(false);
+
+    await fsp.writeFile(path.join(root, "src", "later.ts"), "");
+    await waitForChange("client", { relativePath: "src/later.ts", change: "created" });
+  });
+
+  it("stops notifying after a subscriber is released", async () => {
+    await registry.setWatchedPaths(client, { cwd: root, files: ["src/app.ts"], directories: [] });
+    registry.releaseSubscriber(client);
+    expect(registry.size).toBe(0);
+
+    await fsp.writeFile(path.join(root, "src", "app.ts"), "export const ignored = 1;\n");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(notifications).toEqual([]);
+    expect(fs.existsSync(path.join(root, "src", "app.ts"))).toBe(true);
+  });
+});

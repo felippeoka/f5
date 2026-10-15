@@ -83,6 +83,7 @@ import { openFileRightPanelSurface, setSearchParamsForSurface } from "../rightPa
 import { buildGlobalSearchQueryInput, parseGlobalSearchQuery } from "../lib/globalSearchQuery";
 import { formatRelativeTimeLabel } from "../lib/relativeTime";
 import { useStore } from "../store";
+import { liveThreadActivityAt, useThreadSummaries } from "../threadSelectors";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useWorkflowCreateDialogStore } from "../workflowCreateDialogStore";
 import {
@@ -268,7 +269,7 @@ function OpenCommandPaletteDialog(props: {
   const { theme, setTheme } = useTheme();
   const { activeDraftThread, activeThread, handleNewThread, routeThreadId } = useHandleNewThread();
   const projects = useStore((store) => store.projects);
-  const threads = useStore((store) => store.threads);
+  const threads = useThreadSummaries();
   const planningWorkflows = useStore((store) => store.planningWorkflows);
   const codeReviewWorkflows = useStore((store) => store.codeReviewWorkflows);
   const investigationWorkflows = useStore((store) => store.investigationWorkflows);
@@ -600,6 +601,7 @@ function OpenCommandPaletteDialog(props: {
         ...(activeThreadId ? { activeThreadId } : {}),
         projectTitleById,
         queuedCountByThreadId,
+        activityAtOf: liveThreadActivityAt,
         icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
         runThread: async (thread) => {
           await navigate({

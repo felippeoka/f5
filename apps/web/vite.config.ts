@@ -1,5 +1,6 @@
+import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
-import react from "@vitejs/plugin-react";
+import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { defineConfig } from "vite";
 import pkg from "./package.json" with { type: "json" };
@@ -22,15 +23,12 @@ export default defineConfig({
       // workflows, and thread detail only when navigation requires them.
       autoCodeSplitting: true,
     }),
-    react({
-      babel: {
-        // Parse workspace TypeScript/TSX sources explicitly and enable the React compiler.
-        parserOpts: { plugins: ["typescript", "jsx"] },
-        plugins: [["babel-plugin-react-compiler", {}]],
-      },
-      // TODO: Remove this cast once `@vitejs/plugin-react` accepts the current
-      // Babel option shape without widening conflicts in Vite 8 typings.
-    } as unknown as Parameters<typeof react>[0]),
+    react(),
+    // React Compiler, staged: annotation mode compiles only modules and
+    // components that opt in with a "use memo" directive (timeline rows,
+    // sidebar, Home, palette results, chat header). Switching to "infer"
+    // comes after a release without regressions.
+    babel({ presets: [reactCompilerPreset({ compilationMode: "annotation" })] }),
     tailwindcss(),
   ],
   optimizeDeps: {
@@ -39,6 +37,10 @@ export default defineConfig({
       "@pierre/diffs/react",
       "@pierre/diffs/worker/worker.js",
       "react-dom/client",
+      // Imported only by the code highlight worker, so the dev server would
+      // otherwise discover them late and reload the page.
+      "shiki/core",
+      "shiki/engine/javascript",
     ],
   },
   define: {

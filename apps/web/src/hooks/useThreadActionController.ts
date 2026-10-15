@@ -1,7 +1,7 @@
 import { type ThreadId } from "@t3tools/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback } from "react";
 
 import { useAppSettings } from "~/appSettings";
 import { deleteThreadsWithCleanup, setThreadArchived } from "~/archiveActions";
@@ -19,7 +19,8 @@ import {
   toggleThreadPin,
   wakeThread,
 } from "~/threadPinSnooze";
-import type { Thread } from "~/types";
+import { selectThreadById } from "~/threadSelectors";
+import type { Thread, ThreadListItem } from "~/types";
 import { toastManager } from "~/components/ui/toast";
 
 import { useCopyToClipboard } from "./useCopyToClipboard";
@@ -98,7 +99,8 @@ export function useThreadActionController(input: {
   readonly activeThreadId: ThreadId | null;
   readonly onRenameRequested?: ((threadId: ThreadId) => void) | undefined;
 }) {
-  const threads = useStore((state) => state.threads);
+  // Threads are read from the store when a handler runs, so this hook does not
+  // re-render its host for every streaming delta.
   const projects = useStore((state) => state.projects);
   const pinRevision = useStore((state) => state.pinRevision ?? 0);
   const markThreadUnread = useStore((state) => state.markThreadUnread);
@@ -147,14 +149,11 @@ export function useThreadActionController(input: {
     },
   });
 
-  const pinnedThreadIds = useMemo(() => new Set(orderedPinnedThreadIds(threads)), [threads]);
-  const pinnedThreadIdsRef = useRef(pinnedThreadIds);
-  pinnedThreadIdsRef.current = pinnedThreadIds;
   const menuItemsForThread = useCallback(
-    (thread: Thread): ThreadActionMenuItem[] =>
+    (thread: ThreadListItem): ThreadActionMenuItem[] =>
       buildThreadActionMenuItems({
         thread,
-        pinned: pinnedThreadIdsRef.current.has(thread.id),
+        pinned: orderedPinnedThreadIds(useStore.getState().threads).includes(thread.id),
         snoozed: isSnoozedThread(thread),
       }),
     [],
@@ -162,7 +161,7 @@ export function useThreadActionController(input: {
 
   const renameThread = useCallback(
     async (threadId: ThreadId, nextTitle: string): Promise<boolean> => {
-      const thread = threads.find((entry) => entry.id === threadId);
+      const thread = selectThreadById(useStore.getState(), threadId);
       if (!thread) return false;
       const title = nextTitle.trim();
       if (title.length === 0) {
@@ -189,7 +188,7 @@ export function useThreadActionController(input: {
         return false;
       }
     },
-    [threads],
+    [],
   );
 
   const archiveThread = useCallback(async (threadId: ThreadId, archived: boolean) => {
@@ -201,7 +200,7 @@ export function useThreadActionController(input: {
       return await deleteThreadsWithCleanup({
         threadIds,
         getThreads: () => useStore.getState().threads,
-        threads,
+        threads: useStore.getState().threads,
         projects,
         activeThreadId: input.activeThreadId,
         clearComposerDraftForThread,
@@ -228,7 +227,6 @@ export function useThreadActionController(input: {
       navigate,
       projects,
       removeWorktreeMutation,
-      threads,
     ],
   );
 
@@ -242,7 +240,7 @@ export function useThreadActionController(input: {
 
   const executeAction = useCallback(
     async (threadId: ThreadId, actionId: ThreadActionId): Promise<void> => {
-      const thread = threads.find((entry) => entry.id === threadId);
+      const thread = selectThreadById(useStore.getState(), threadId);
       if (!thread) return;
       const api = readNativeApi();
       if (!api) return;
@@ -274,15 +272,17 @@ export function useThreadActionController(input: {
         return;
       }
       if (actionId === "pin" || actionId === "unpin") {
-        await toggleThreadPin({ threadId, threads, expectedRevision: pinRevision }).catch(
-          (error) => {
-            toastManager.add({
-              type: "error",
-              title: "Failed to update pinned threads",
-              description: error instanceof Error ? error.message : "An error occurred.",
-            });
-          },
-        );
+        await toggleThreadPin({
+          threadId,
+          threads: useStore.getState().threads,
+          expectedRevision: pinRevision,
+        }).catch((error) => {
+          toastManager.add({
+            type: "error",
+            title: "Failed to update pinned threads",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          });
+        });
         return;
       }
       if (actionId === "wake") {
@@ -370,7 +370,6 @@ export function useThreadActionController(input: {
       pinRevision,
       projects,
       settings.confirmThreadDelete,
-      threads,
     ],
   );
 

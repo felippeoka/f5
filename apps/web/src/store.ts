@@ -1291,6 +1291,50 @@ export function invalidateThreadDetails(
   };
 }
 
+/**
+ * Drops the detail bodies of inactive threads to bound memory; they rehydrate
+ * from the tail RPC when opened again, like threads never loaded. List-level
+ * fields stay: activities (which drive status pills and are kept current for
+ * unloaded threads) and thread references, so summaries do not change. The
+ * history generation advances so in-flight backfills discard their results.
+ */
+export function evictThreadDetails(state: AppState, threadIds: Iterable<ThreadId>): AppState {
+  const evictIds = new Set(threadIds);
+  if (evictIds.size === 0) {
+    return state;
+  }
+  let threadsChanged = false;
+  const threads = state.threads.map((thread) => {
+    if (!thread.detailsLoaded || !evictIds.has(thread.id)) {
+      return thread;
+    }
+    threadsChanged = true;
+    return {
+      ...thread,
+      messages: [],
+      commandExecutions: [],
+      turnDiffSummaries: [],
+      detailsLoaded: false,
+      tasks: [],
+      tasksTurnId: null,
+      tasksUpdatedAt: null,
+      tasksTracking: null,
+      sessionNotes: null,
+      history: createEmptyThreadHistoryState(
+        ensureThreadHistoryState(thread.history).generation + 1,
+      ),
+    };
+  });
+  if (!threadsChanged) {
+    return state;
+  }
+  let nextState: AppState = { ...state, threads };
+  for (const threadId of evictIds) {
+    nextState = dropThreadDetailBuffer(nextState, threadId);
+  }
+  return nextState;
+}
+
 export function syncStartupSnapshot(
   state: AppState,
   readModel: OrchestrationReadModel,
@@ -2088,6 +2132,7 @@ export function setThreadBranch(
 
 interface AppStore extends AppState {
   invalidateThreadDetails: (options?: { preserveThreadIds?: Iterable<ThreadId> }) => void;
+  evictThreadDetails: (threadIds: Iterable<ThreadId>) => void;
   syncServerReadModel: (readModel: OrchestrationReadModel) => void;
   setThreadRewindDrafts: (
     threadId: ThreadId,
@@ -2146,6 +2191,7 @@ interface AppStore extends AppState {
 export const useStore = create<AppStore>((set) => ({
   ...readPersistedState(),
   invalidateThreadDetails: (options) => set((state) => invalidateThreadDetails(state, options)),
+  evictThreadDetails: (threadIds) => set((state) => evictThreadDetails(state, threadIds)),
   syncServerReadModel: (readModel) => set((state) => syncServerReadModel(state, readModel)),
   setThreadRewindDrafts: (threadId, drafts, ticket) =>
     set((state) => setThreadRewindDrafts(state, threadId, drafts, ticket)),
