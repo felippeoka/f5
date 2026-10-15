@@ -8,6 +8,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  selectLiveActivityBuckets,
   selectThreadActivityOrder,
   selectThreadById,
   selectThreadIds,
@@ -119,6 +120,31 @@ describe("threadSelectors", () => {
       "2026-03-01T00:05:00.000Z",
     );
     expect(selectThreadById(state, THREAD_A)?.lastInteractionAt).toBe("2026-03-01T00:05:03.000Z");
+  });
+
+  it("buckets by live activity when activity crosses midnight without reordering", () => {
+    const yesterday = new Date(2026, 2, 1, 23, 50).toISOString();
+    const earlierYesterday = new Date(2026, 2, 1, 23, 40).toISOString();
+    const today = new Date(2026, 2, 2, 0, 5).toISOString();
+    const now = new Date(2026, 2, 2, 0, 10).getTime();
+    // Own ids: the summary list caches its order across calls.
+    const threadD = ThreadId.makeUnsafe("thread-d");
+    let state = {
+      threads: [makeThread(THREAD_C, yesterday), makeThread(threadD, earlierYesterday)],
+    };
+    selectThreadSummaries(state);
+    state = {
+      threads: replaceThread(
+        state.threads,
+        streamDelta(selectThreadById(state, THREAD_C)!, "after midnight", today),
+      ),
+    };
+
+    // The order held, so the summary keeps yesterday's ordering key...
+    const summaries = selectThreadSummaries(state);
+    expect(summaries[0]?.lastInteractionAt).toBe(yesterday);
+    // ...but grouping reads the live value.
+    expect(selectLiveActivityBuckets(state, summaries, now)).toEqual(["today", "yesterday"]);
   });
 
   it("gives a thread a new summary when an approval request changes its status", () => {

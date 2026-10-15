@@ -19,7 +19,9 @@ export type CodeHighlightWorkerRequest =
 
 export type CodeHighlightWorkerResponse =
   | { readonly type: "result"; readonly id: number; readonly html: string }
-  | { readonly type: "error"; readonly id: number; readonly message: string };
+  | { readonly type: "error"; readonly id: number; readonly message: string }
+  /** A cancelled job's assets were loaded; it was not highlighted. */
+  | { readonly type: "cancelled"; readonly id: number };
 
 /**
  * Grammars one worker may hold before it is replaced, which bounds the memory
@@ -42,9 +44,12 @@ interface PendingJob {
 
 interface WorkerSlot {
   readonly worker: Worker;
+  /** Grammars and themes sent to the worker; un-recorded if loading them fails. */
   readonly languages: Set<string>;
   readonly themes: Set<string>;
   readonly pending: Map<number, PendingJob>;
+  /** Assets each unanswered job carried, including cancelled jobs. */
+  readonly sentAssets: Map<number, { languages: string[]; themes: string[] }>;
 }
 
 let workerFactory: CodeHighlightWorkerFactory = defaultWorkerFactory;
@@ -66,16 +71,24 @@ function createSlot(): WorkerSlot {
     languages: new Set(),
     themes: new Set(),
     pending: new Map(),
+    sentAssets: new Map(),
   };
   worker.addEventListener("message", (event: MessageEvent<CodeHighlightWorkerResponse>) => {
     const response = event.data;
+    const sent = created.sentAssets.get(response.id);
+    created.sentAssets.delete(response.id);
+    if (response.type === "error" && sent) {
+      // The worker may not have loaded them; send them again next time.
+      for (const language of sent.languages) created.languages.delete(language);
+      for (const theme of sent.themes) created.themes.delete(theme);
+    }
     const job = created.pending.get(response.id);
     if (!job) return;
     created.pending.delete(response.id);
     consecutiveFailures = 0;
     if (response.type === "result") {
       job.resolve(response.html);
-    } else {
+    } else if (response.type === "error") {
       job.reject(new Error(response.message));
     }
   });
@@ -146,7 +159,8 @@ export async function highlightCodeInWorker(input: {
   );
   if (input.signal?.aborted) throw abortError();
 
-  const target = acquireSlot(effectiveLanguage);
+  // Slots record grammars by resolved name, so aliases like `ts` match `typescript`.
+  const target = acquireSlot(resolvedLanguage?.name ?? effectiveLanguage);
   const resolvedLanguages =
     resolvedLanguage && !target.languages.has(resolvedLanguage.name) ? [resolvedLanguage] : [];
   const resolvedThemes = target.themes.has(input.theme) ? [] : [resolvedTheme];
@@ -154,6 +168,10 @@ export async function highlightCodeInWorker(input: {
   for (const _theme of resolvedThemes) target.themes.add(input.theme);
 
   const id = nextJobId++;
+  target.sentAssets.set(id, {
+    languages: resolvedLanguages.map((entry) => entry.name),
+    themes: resolvedThemes.length > 0 ? [input.theme] : [],
+  });
   return new Promise<string>((resolve, reject) => {
     const cleanup = () => {
       clearTimeout(timeout);

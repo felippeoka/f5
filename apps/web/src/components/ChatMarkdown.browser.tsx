@@ -145,6 +145,27 @@ describe("SuspenseShikiCodeBlock size limits", () => {
     );
   });
 
+  it("keeps a 'Highlight code' opt-in while the block keeps streaming", async () => {
+    const host = document.body.appendChild(document.createElement("div"));
+    const code = linesOf(4_500, `streamed${Date.now()}_`);
+    const screen = await render(<Block code={code} />, { container: host });
+    Array.from(host.querySelectorAll("button"))
+      .find((element) => element.textContent === "Highlight code")!
+      .click();
+
+    const grown = `${code}\nconst tail = 1;`;
+    await screen.rerender(<Block code={grown} />);
+
+    expect(host.querySelector('[data-code-highlight="on-demand"]')).toBeNull();
+    await vi.waitFor(
+      () =>
+        expect(host.querySelector(".chat-markdown-shiki pre.shiki")?.textContent).toContain(
+          "const tail = 1;",
+        ),
+      { timeout: 20_000 },
+    );
+  });
+
   it("highlights unsupported languages in the worker as plain text", async () => {
     const host = document.body.appendChild(document.createElement("div"));
     const code = linesOf(600, `klingon${Date.now()}_`);

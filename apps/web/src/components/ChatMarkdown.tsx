@@ -229,16 +229,14 @@ export function SuspenseShikiCodeBlock({
   const cacheKey = createHighlightCacheKey(code, language, themeName);
   const cachedHighlightedHtml = highlightedCodeCache.get(cacheKey);
 
-  if (cachedHighlightedHtml != null) {
-    return <ShikiHtml html={cachedHighlightedHtml} />;
-  }
-
   const mode = classifyCodeHighlight(code);
   if (mode !== "inline") {
+    // Stays mounted across streaming deltas and cache hits, so a "Highlight
+    // code" opt-in on a growing block is kept.
     return (
       <WorkerHighlightedCode
-        key={cacheKey}
         cacheKey={cacheKey}
+        cachedHtml={cachedHighlightedHtml}
         code={code}
         language={language}
         themeName={themeName}
@@ -246,6 +244,10 @@ export function SuspenseShikiCodeBlock({
         onDemand={mode === "on-demand"}
       />
     );
+  }
+
+  if (cachedHighlightedHtml != null) {
+    return <ShikiHtml html={cachedHighlightedHtml} />;
   }
 
   return (
@@ -301,6 +303,7 @@ function HighlightOnCacheMiss({
  */
 function WorkerHighlightedCode({
   cacheKey,
+  cachedHtml,
   code,
   language,
   themeName,
@@ -308,24 +311,30 @@ function WorkerHighlightedCode({
   onDemand,
 }: {
   cacheKey: string;
+  cachedHtml: string | null;
   code: string;
   language: string;
   themeName: DiffThemeName;
   plain: ReactNode;
   onDemand: boolean;
 }) {
-  const [requested, setRequested] = useState(!onDemand);
-  const [result, setResult] = useState<
-    { status: "highlighted"; html: string } | { status: "failed" } | null
-  >(null);
+  const [optedIn, setOptedIn] = useState(false);
+  const requested = !onDemand || optedIn;
+  // Tagged with the content it belongs to: deltas change `cacheKey` in place.
+  const [result, setResult] = useState<{
+    cacheKey: string;
+    status: "highlighted" | "failed";
+    html: string;
+  } | null>(null);
+  const current = result?.cacheKey === cacheKey ? result : null;
 
   useEffect(() => {
-    if (!requested) return;
+    if (!requested || cachedHtml != null) return;
     const controller = new AbortController();
     highlightCodeInWorker({ code, language, theme: themeName, signal: controller.signal }).then(
       (html) => {
         highlightedCodeCache.set(cacheKey, html, estimateHighlightedSize(html, cacheKey));
-        setResult({ status: "highlighted", html });
+        setResult({ cacheKey, status: "highlighted", html });
       },
       (error: unknown) => {
         if (error instanceof Error && error.name === "AbortError") return;
@@ -333,29 +342,30 @@ function WorkerHighlightedCode({
           `Code highlighting failed for language "${language}", showing plain text.`,
           error instanceof Error ? error.message : error,
         );
-        setResult({ status: "failed" });
+        setResult({ cacheKey, status: "failed", html: "" });
       },
     );
     return () => controller.abort();
-  }, [cacheKey, code, language, requested, themeName]);
+  }, [cacheKey, cachedHtml, code, language, requested, themeName]);
 
-  if (result?.status === "highlighted") {
-    return <ShikiHtml html={result.html} />;
+  const html = cachedHtml ?? (current?.status === "highlighted" ? current.html : null);
+  if (html != null) {
+    return <ShikiHtml html={html} />;
   }
   return (
     <div
       className="chat-markdown-plain-code"
       data-code-highlight={
-        result?.status === "failed" ? "failed" : requested ? "pending" : "on-demand"
+        current?.status === "failed" ? "failed" : requested ? "pending" : "on-demand"
       }
     >
-      {onDemand && !requested ? (
+      {!requested ? (
         <div className="flex items-center gap-2 px-3 pt-2 text-xs text-muted-foreground">
           <span>Large block shown as plain text.</span>
           <button
             type="button"
             className="underline underline-offset-2 hover:text-foreground"
-            onClick={() => setRequested(true)}
+            onClick={() => setOptedIn(true)}
           >
             Highlight code
           </button>

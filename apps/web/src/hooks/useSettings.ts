@@ -114,6 +114,9 @@ export function useSettings<T = UnifiedWebSettings>(
 
   // Memoizes on the source snapshots and the selector identity; inline
   // selectors re-run each render and structural sharing keeps the result.
+  // The cache may also be written by a render React discards. That is
+  // harmless: a value is only reused for the identical (merged, selector)
+  // pair, and anything else is recomputed against it with `replaceEqualDeep`.
   const getSnapshot = useMemo(() => {
     let previous: { sources: SettingsSources; merged: UnifiedWebSettings } | null = null;
     let selected: { merged: UnifiedWebSettings; selector: unknown; value: T } | null = null;

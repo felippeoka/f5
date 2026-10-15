@@ -147,6 +147,36 @@ describe("workspace watch registry", () => {
     release();
   });
 
+  it("is not reliable while the server rejected part of the watched set", async () => {
+    api.setWatchedPaths.mockResolvedValue({ watched: 1, degraded: false, rejected: ["b.ts"] });
+    const releaseA = retainWatchedWorkspacePath(CWD, "a.ts", "file");
+    const releaseB = retainWatchedWorkspacePath(CWD, "b.ts", "file");
+    await vi.waitFor(() => expect(api.setWatchedPaths).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(isWorkspaceWatchReliable(CWD)).toBe(false);
+    releaseA();
+    releaseB();
+  });
+
+  it("ignores the answer to a request a newer set superseded", async () => {
+    let resolveFirst: (value: unknown) => void = () => {};
+    api.setWatchedPaths.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveFirst = resolve)),
+    );
+    const releaseA = retainWatchedWorkspacePath(CWD, "a.ts", "file");
+    await vi.waitFor(() => expect(api.setWatchedPaths).toHaveBeenCalledTimes(1));
+
+    // A newly retained path is not confirmed yet, so an answer to the
+    // earlier request must not make the workspace reliable.
+    api.setWatchedPaths.mockImplementationOnce(() => new Promise(() => {}));
+    const releaseB = retainWatchedWorkspacePath(CWD, "b.ts", "file");
+    resolveFirst({ watched: 1, degraded: false, rejected: [] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(isWorkspaceWatchReliable(CWD)).toBe(false);
+    releaseA();
+    releaseB();
+  });
+
   it("invalidates exactly the changed file and directory queries", async () => {
     const queryClient = new QueryClient();
     const { keys, invalidated } = seedQueries(queryClient);

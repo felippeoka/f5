@@ -10,7 +10,7 @@ import {
 vi.mock("@pierre/diffs", () => ({
   resolveLanguage: vi.fn(async (language: string) => {
     if (language === "klingon") throw new Error(`"${language}" not found`);
-    return { name: language, data: [] };
+    return { name: language === "typescript-alias" ? "typescript" : language, data: [] };
   }),
   resolveTheme: vi.fn(async (theme: string) => ({ name: theme })),
 }));
@@ -36,6 +36,10 @@ class FakeWorker extends EventTarget {
 
   respond(id: number, html: string) {
     this.dispatchEvent(new MessageEvent("message", { data: { type: "result", id, html } }));
+  }
+
+  respondError(id: number, message: string) {
+    this.dispatchEvent(new MessageEvent("message", { data: { type: "error", id, message } }));
   }
 
   crash() {
@@ -150,6 +154,38 @@ describe("highlightCodeInWorker", () => {
     // The fresh worker receives the theme again along with the new grammar.
     expect(FakeWorker.instances[1]!.highlightRequests()[0]).toMatchObject({
       resolvedLanguages: [{ name: "one-more" }],
+      resolvedThemes: [{ name: "pierre-dark" }],
+    });
+  });
+
+  it("keeps a full worker for an alias of a grammar it already holds", async () => {
+    for (let index = 0; index < CODE_HIGHLIGHT_WORKER_MAX_LANGUAGES - 1; index += 1) {
+      await highlightCodeInWorker({ code: "a", language: `lang${index}`, theme: "pierre-dark" });
+    }
+    await highlightCodeInWorker({ code: "a", language: "typescript", theme: "pierre-dark" });
+
+    await highlightCodeInWorker({ code: "a", language: "typescript-alias", theme: "pierre-dark" });
+
+    expect(FakeWorker.instances).toHaveLength(1);
+  });
+
+  it("sends a grammar again after the worker failed to load it", async () => {
+    setCodeHighlightWorkerFactoryForTests(() => {
+      const worker = new FakeWorker();
+      worker.autoRespond = false;
+      return worker as unknown as Worker;
+    });
+    const failed = highlightCodeInWorker({ code: "a", language: "ts", theme: "pierre-dark" });
+    await vi.waitFor(() => expect(FakeWorker.instances[0]?.highlightRequests()).toHaveLength(1));
+    const worker = FakeWorker.instances[0]!;
+    worker.respondError(worker.highlightRequests()[0]!.id, "grammar failed to load");
+    await expect(failed).rejects.toThrow("grammar failed to load");
+
+    // Left pending; the reset in afterEach rejects it.
+    highlightCodeInWorker({ code: "b", language: "ts", theme: "pierre-dark" }).catch(() => {});
+    await vi.waitFor(() => expect(worker.highlightRequests()).toHaveLength(2));
+    expect(worker.highlightRequests()[1]).toMatchObject({
+      resolvedLanguages: [{ name: "ts" }],
       resolvedThemes: [{ name: "pierre-dark" }],
     });
   });

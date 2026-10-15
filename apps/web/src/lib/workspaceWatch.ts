@@ -1,4 +1,7 @@
-import type { ProjectWatchedPathsChangedPayload } from "@t3tools/contracts";
+import {
+  PROJECT_WATCHED_PATHS_MAX,
+  type ProjectWatchedPathsChangedPayload,
+} from "@t3tools/contracts";
 import type { QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
@@ -24,8 +27,12 @@ const SYNC_DEBOUNCE_MS = 100;
 interface WorkspaceWatchState {
   readonly refCounts: Map<string, number>;
   syncTimer: ReturnType<typeof setTimeout> | null;
+  /** Bumped per request; only the latest request's answer applies. */
+  syncSequence: number;
   /** `null` until the first sync answers; false when the request failed. */
   watching: boolean | null;
+  /** False when some retained path was capped or rejected by the server. */
+  complete: boolean;
   degraded: boolean;
 }
 
@@ -38,7 +45,14 @@ function pathKey(kind: WatchKind, relativePath: string): string {
 function workspaceState(cwd: string): WorkspaceWatchState {
   let state = workspaces.get(cwd);
   if (!state) {
-    state = { refCounts: new Map(), syncTimer: null, watching: null, degraded: false };
+    state = {
+      refCounts: new Map(),
+      syncTimer: null,
+      syncSequence: 0,
+      watching: null,
+      complete: true,
+      degraded: false,
+    };
     workspaces.set(cwd, state);
   }
   return state;
@@ -61,23 +75,39 @@ function syncWorkspace(cwd: string): void {
   if (files.length === 0 && directories.length === 0) {
     workspaces.delete(cwd);
   }
+  // Open files first, then directories, within the per-request limit.
+  const sentFiles = files.slice(0, PROJECT_WATCHED_PATHS_MAX);
+  const sentDirectories = directories.slice(0, PROJECT_WATCHED_PATHS_MAX - sentFiles.length);
+  const capped = sentFiles.length < files.length || sentDirectories.length < directories.length;
+  const sequence = ++state.syncSequence;
+  const current = () => {
+    const latest = workspaces.get(cwd);
+    return latest?.syncSequence === sequence ? latest : undefined;
+  };
   // A synchronous transport failure is handled like a rejected request.
   Promise.resolve()
-    .then(() => api.projects.setWatchedPaths({ cwd, files, directories }))
+    .then(() =>
+      api.projects.setWatchedPaths({ cwd, files: sentFiles, directories: sentDirectories }),
+    )
     .then((result) => {
-      const current = workspaces.get(cwd);
-      if (!current) return;
-      current.degraded = result.degraded;
-      current.watching = true;
+      const latest = current();
+      if (!latest) return;
+      latest.degraded = result.degraded;
+      latest.complete = !capped && result.rejected.length === 0;
+      latest.watching = true;
     })
     .catch(() => {
-      const current = workspaces.get(cwd);
-      if (current) current.watching = false;
+      const latest = current();
+      if (latest) latest.watching = false;
     });
 }
 
 function scheduleSync(cwd: string): void {
   const state = workspaceState(cwd);
+  // Until the server confirms the new set, it may not watch every retained
+  // path; answers to earlier requests no longer apply.
+  state.syncSequence += 1;
+  state.watching = null;
   if (state.syncTimer !== null) return;
   state.syncTimer = setTimeout(() => syncWorkspace(cwd), SYNC_DEBOUNCE_MS);
 }
@@ -110,12 +140,12 @@ export function retainWatchedWorkspacePath(
 }
 
 /**
- * True when the server confirmed it watches `cwd` without falling back to
- * polling, so event-driven refreshes can stay narrow.
+ * True when the server confirmed it watches every retained path of `cwd`
+ * without falling back to polling, so event-driven refreshes can stay narrow.
  */
 export function isWorkspaceWatchReliable(cwd: string): boolean {
   const state = workspaces.get(cwd);
-  return state?.watching === true && !state.degraded;
+  return state?.watching === true && state.complete && !state.degraded;
 }
 
 export function applyWatchedPathsChanged(
@@ -163,8 +193,7 @@ export function startWorkspaceWatchSync(queryClient: QueryClient): () => void {
   const unsubscribeConnection = subscribeWsConnectionState(() => {
     const connected = getWsConnectionState().phase === "connected";
     if (connected && !wasConnected) {
-      for (const [cwd, state] of workspaces) {
-        state.watching = null;
+      for (const cwd of workspaces.keys()) {
         scheduleSync(cwd);
         // Changes during the outage were not observed.
         void queryClient.invalidateQueries({

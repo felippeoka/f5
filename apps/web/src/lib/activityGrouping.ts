@@ -49,10 +49,13 @@ export function bucketActivityAt(iso: string, now: Date = new Date()): ActivityB
 export function groupThreadsByActivity<T extends ActivityGroupedThread>(
   threads: ReadonlyArray<T>,
   now: Date = new Date(),
+  /** Overrides each thread's bucket, for example from live activity times. */
+  bucketOf: (thread: T, index: number) => ActivityBucket = (thread) =>
+    bucketActivityAt(thread.lastInteractionAt, now),
 ): ReadonlyArray<ActivityGroup<T>> {
   const grouped = new Map<ActivityBucket, T[]>();
-  for (const thread of threads) {
-    const bucket = bucketActivityAt(thread.lastInteractionAt, now);
+  for (const [index, thread] of threads.entries()) {
+    const bucket = bucketOf(thread, index);
     const existing = grouped.get(bucket);
     if (existing) {
       existing.push(thread);

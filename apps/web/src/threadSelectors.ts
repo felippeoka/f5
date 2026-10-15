@@ -1,6 +1,7 @@
 import type { ProviderKind, ThreadId } from "@t3tools/contracts";
 import { useShallow } from "zustand/react/shallow";
 
+import { type ActivityBucket, bucketActivityAt } from "./lib/activityGrouping";
 import { compareThreadsByActivity } from "./lib/threadOrdering";
 import { type AppState, useStore } from "./store";
 import {
@@ -357,6 +358,33 @@ export function useOrderedThreadIds(scope: OrderedThreadScope = {}): ReadonlyArr
 /** The live `lastInteractionAt` of one thread, for relative-time leaves. */
 export function useThreadActivityAt(threadId: ThreadId | null | undefined): string | null {
   return useStore((state) => selectThreadById(state, threadId)?.lastInteractionAt ?? null);
+}
+
+/**
+ * Activity buckets ("Today", ...) from each thread's live activity time.
+ * Summaries keep `lastInteractionAt` as an ordering key only, so grouping
+ * can't use it; this re-renders only when a thread changes bucket.
+ */
+export function useLiveActivityBuckets(
+  threads: ReadonlyArray<Pick<ThreadSummary, "id" | "lastInteractionAt">>,
+  now: number,
+): ReadonlyArray<ActivityBucket> {
+  return useStore(useShallow((state) => selectLiveActivityBuckets(state, threads, now)));
+}
+
+export function selectLiveActivityBuckets(
+  state: Pick<AppState, "threads">,
+  threads: ReadonlyArray<Pick<ThreadSummary, "id" | "lastInteractionAt">>,
+  now: number,
+): ActivityBucket[] {
+  const reference = new Date(now);
+  return threads.map((thread) =>
+    bucketActivityAt(
+      // Summaries' value is the fallback for drafts that aren't in the store.
+      selectThreadById(state, thread.id)?.lastInteractionAt ?? thread.lastInteractionAt,
+      reference,
+    ),
+  );
 }
 
 /** The full thread; re-renders whenever that thread changes. */

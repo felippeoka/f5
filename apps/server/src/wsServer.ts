@@ -4424,7 +4424,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case WS_METHODS.projectsSetWatchedPaths: {
         const body = stripRequestTag(request.body);
         return yield* Effect.tryPromise({
-          try: () => workspaceWatchRegistry.setWatchedPaths(ws, body),
+          try: async () => {
+            const result = await workspaceWatchRegistry.setWatchedPaths(ws, body);
+            // A request still queued when the socket closed must not outlive it.
+            if (ws.readyState !== ws.OPEN) workspaceWatchRegistry.releaseSubscriber(ws);
+            return result;
+          },
           catch: (cause) =>
             new RouteRequestError({
               message: `Failed to watch workspace paths: ${String(cause)}`,

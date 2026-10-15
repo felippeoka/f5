@@ -43,11 +43,16 @@ export interface WorkspaceWatchResult {
 
 interface WatchEntry<S> {
   readonly key: string;
-  readonly cwd: string;
-  readonly relativePath: string;
   readonly kind: WorkspaceWatchKind;
   readonly absolutePath: string;
-  readonly subscribers: Set<S>;
+  /**
+   * One OS watch per absolute path, fanned out per registration: a subscriber
+   * can reach the same path from several workspaces (for example `/repo` and
+   * `/repo/nested`), each with its own `cwd` and relative path.
+   */
+  readonly registrations: Map<S, Map<string, string>>;
+  /** Deepest workspace root registered; the path must resolve inside it. */
+  root: string;
   watcher: fs.FSWatcher | null;
   pollTimer: ReturnType<typeof setInterval> | null;
   /** Polling because watching failed, as opposed to waiting for the path to exist. */
@@ -75,6 +80,29 @@ export function normalizeWatchedRelativePath(relativePath: string): string | nul
   return segments.join("/");
 }
 
+function isWithin(root: string, resolved: string): boolean {
+  const relative = path.relative(root, resolved);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+/**
+ * Whether `absolutePath` resolves inside `root`. A path that does not exist
+ * yet is checked through its nearest existing ancestor, so a missing file
+ * below a symlink that leaves the workspace is rejected too.
+ */
+async function resolvesInsideWorkspace(root: string, absolutePath: string): Promise<boolean> {
+  let candidate = absolutePath;
+  for (;;) {
+    try {
+      return isWithin(root, await fsp.realpath(candidate));
+    } catch {
+      const parent = path.dirname(candidate);
+      if (parent === candidate || !isWithin(root, parent)) return false;
+      candidate = parent;
+    }
+  }
+}
+
 async function statSignature(absolutePath: string, kind: WorkspaceWatchKind) {
   try {
     const stat = await fsp.stat(absolutePath);
@@ -92,6 +120,8 @@ export class WorkspaceWatchRegistry<S> {
   private readonly entries = new Map<string, WatchEntry<S>>();
   private readonly keysBySubscriber = new Map<S, Map<string, Set<string>>>();
   private readonly pendingBySubscriber = new Map<S, Map<string, ProjectWatchedPathChange[]>>();
+  /** Serializes each subscriber's calls; `released` stops a pending call from committing. */
+  private readonly callsBySubscriber = new Map<S, { tail: Promise<void>; released: boolean }>();
   private flushScheduled = false;
   private readonly debounceMs: number;
   private readonly pollIntervalMs: number;
@@ -107,9 +137,10 @@ export class WorkspaceWatchRegistry<S> {
 
   /**
    * Replaces the subscriber's watched set for `cwd`. Idempotent, so clients
-   * resend their full set after a reconnect.
+   * resend their full set after a reconnect. Calls from one subscriber apply
+   * in arrival order, so an older set never overwrites a newer one.
    */
-  async setWatchedPaths(
+  setWatchedPaths(
     subscriber: S,
     input: {
       readonly cwd: string;
@@ -117,9 +148,43 @@ export class WorkspaceWatchRegistry<S> {
       readonly directories: ReadonlyArray<string>;
     },
   ): Promise<WorkspaceWatchResult> {
-    const root = await fsp.realpath(input.cwd);
+    let calls = this.callsBySubscriber.get(subscriber);
+    if (!calls) {
+      calls = { tail: Promise.resolve(), released: false };
+      this.callsBySubscriber.set(subscriber, calls);
+    }
+    const state = calls;
+    const run = state.tail.then(() => this.applyWatchedPaths(subscriber, input, state));
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    state.tail = tail;
+    void tail.then(() => {
+      if (state.tail === tail && this.callsBySubscriber.get(subscriber) === state) {
+        this.callsBySubscriber.delete(subscriber);
+      }
+    });
+    return run;
+  }
+
+  private async applyWatchedPaths(
+    subscriber: S,
+    input: {
+      readonly cwd: string;
+      readonly files: ReadonlyArray<string>;
+      readonly directories: ReadonlyArray<string>;
+    },
+    state: { readonly released: boolean },
+  ): Promise<WorkspaceWatchResult> {
     const rejected: string[] = [];
-    const nextKeys = new Set<string>();
+    if (state.released) return { watched: 0, degraded: false, rejected };
+    const root = await fsp.realpath(input.cwd);
+    const nextPaths = new Map<
+      string,
+      { relativePath: string; kind: WorkspaceWatchKind; absolutePath: string }
+    >();
+    const created: string[] = [];
     const requests: Array<{ relativePath: string; kind: WorkspaceWatchKind }> = [
       ...input.files.map((relativePath) => ({ relativePath, kind: "file" as const })),
       ...input.directories.map((relativePath) => ({ relativePath, kind: "directory" as const })),
@@ -128,60 +193,94 @@ export class WorkspaceWatchRegistry<S> {
       .filter(([cwd]) => cwd !== input.cwd)
       .reduce((sum, [, keys]) => sum + keys.size, 0);
 
-    for (const request of requests) {
-      const relativePath = normalizeWatchedRelativePath(request.relativePath);
-      if (relativePath === null || otherCwdCount + nextKeys.size >= this.maxPathsPerSubscriber) {
-        rejected.push(request.relativePath);
-        continue;
+    try {
+      for (const request of requests) {
+        const relativePath = normalizeWatchedRelativePath(request.relativePath);
+        if (relativePath === null || otherCwdCount + nextPaths.size >= this.maxPathsPerSubscriber) {
+          rejected.push(request.relativePath);
+          continue;
+        }
+        const absolutePath = relativePath ? path.join(root, relativePath) : root;
+        if (!(await resolvesInsideWorkspace(root, absolutePath))) {
+          rejected.push(request.relativePath);
+          continue;
+        }
+        const key = `${request.kind}\u0000${absolutePath}`;
+        nextPaths.set(key, { relativePath, kind: request.kind, absolutePath });
+        let entry = this.entries.get(key);
+        if (!entry) {
+          entry = this.createEntry(key, request.kind, absolutePath, root);
+          this.entries.set(key, entry);
+          created.push(key);
+        }
+        await entry.ready;
       }
-      const absolutePath = relativePath ? path.join(root, relativePath) : root;
-      if (!(await this.isInsideWorkspace(root, absolutePath))) {
-        rejected.push(request.relativePath);
-        continue;
-      }
-      const key = `${request.kind}\u0000${absolutePath}`;
-      nextKeys.add(key);
-      let entry = this.entries.get(key);
-      if (!entry) {
-        entry = this.createEntry(key, input.cwd, relativePath, request.kind, absolutePath);
-        this.entries.set(key, entry);
-      }
-      await entry.ready;
-    }
 
-    const byCwd = this.keysBySubscriber.get(subscriber) ?? new Map<string, Set<string>>();
-    const previousKeys = byCwd.get(input.cwd) ?? new Set<string>();
-    for (const key of nextKeys) this.entries.get(key)?.subscribers.add(subscriber);
-    for (const key of previousKeys) {
-      if (!nextKeys.has(key)) this.releaseKey(subscriber, key);
-    }
-    if (nextKeys.size > 0) {
-      byCwd.set(input.cwd, nextKeys);
-      this.keysBySubscriber.set(subscriber, byCwd);
-    } else {
-      byCwd.delete(input.cwd);
-      if (byCwd.size === 0) this.keysBySubscriber.delete(subscriber);
-    }
+      // The subscriber disconnected while this call was pending.
+      if (state.released) return { watched: 0, degraded: false, rejected };
 
-    return {
-      watched: nextKeys.size,
-      degraded: this.isDegraded(nextKeys),
-      rejected,
-    };
+      const byCwd = this.keysBySubscriber.get(subscriber) ?? new Map<string, Set<string>>();
+      const previousKeys = byCwd.get(input.cwd) ?? new Set<string>();
+      for (const [key, { relativePath, kind, absolutePath }] of nextPaths) {
+        let entry = this.entries.get(key);
+        if (!entry) {
+          // Another subscriber released the last reference while this call awaited.
+          entry = this.createEntry(key, kind, absolutePath, root);
+          this.entries.set(key, entry);
+        }
+        if (root.length > entry.root.length) entry.root = root;
+        const registrations = entry.registrations.get(subscriber) ?? new Map<string, string>();
+        registrations.set(input.cwd, relativePath);
+        entry.registrations.set(subscriber, registrations);
+      }
+      for (const key of previousKeys) {
+        if (!nextPaths.has(key)) this.releaseRegistration(subscriber, input.cwd, key);
+      }
+      const nextKeys = new Set(nextPaths.keys());
+      if (nextKeys.size > 0) {
+        byCwd.set(input.cwd, nextKeys);
+        this.keysBySubscriber.set(subscriber, byCwd);
+      } else {
+        byCwd.delete(input.cwd);
+        if (byCwd.size === 0) this.keysBySubscriber.delete(subscriber);
+      }
+
+      return {
+        watched: nextKeys.size,
+        degraded: this.isDegraded(nextKeys),
+        rejected,
+      };
+    } finally {
+      // Entries this call created but never registered (released, or failed).
+      for (const key of created) {
+        const entry = this.entries.get(key);
+        if (entry && entry.registrations.size === 0) {
+          this.closeEntry(entry);
+          this.entries.delete(key);
+        }
+      }
+    }
   }
 
   /** Drops every watch held by a subscriber (for example on disconnect). */
   releaseSubscriber(subscriber: S): void {
+    const calls = this.callsBySubscriber.get(subscriber);
+    if (calls) {
+      calls.released = true;
+      this.callsBySubscriber.delete(subscriber);
+    }
     const byCwd = this.keysBySubscriber.get(subscriber);
     this.keysBySubscriber.delete(subscriber);
     this.pendingBySubscriber.delete(subscriber);
     if (!byCwd) return;
-    for (const keys of byCwd.values()) {
-      for (const key of keys) this.releaseKey(subscriber, key);
+    for (const [cwd, keys] of byCwd) {
+      for (const key of keys) this.releaseRegistration(subscriber, cwd, key);
     }
   }
 
   dispose(): void {
+    for (const calls of this.callsBySubscriber.values()) calls.released = true;
+    this.callsBySubscriber.clear();
     for (const entry of this.entries.values()) this.closeEntry(entry);
     this.entries.clear();
     this.keysBySubscriber.clear();
@@ -193,18 +292,6 @@ export class WorkspaceWatchRegistry<S> {
     return this.entries.size;
   }
 
-  private async isInsideWorkspace(root: string, absolutePath: string): Promise<boolean> {
-    let resolved = absolutePath;
-    try {
-      resolved = await fsp.realpath(absolutePath);
-    } catch {
-      // Not created yet: the lexical path was already validated.
-      return true;
-    }
-    const relative = path.relative(root, resolved);
-    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-  }
-
   private isDegraded(keys: Iterable<string>): boolean {
     for (const key of keys) {
       if (this.entries.get(key)?.watchFailed) return true;
@@ -212,20 +299,26 @@ export class WorkspaceWatchRegistry<S> {
     return false;
   }
 
+  /** Stat signature, or null when missing or now resolving outside the workspace. */
+  private async observe(entry: WatchEntry<S>): Promise<string | null> {
+    const signature = await statSignature(entry.absolutePath, entry.kind);
+    if (signature === null) return null;
+    // The path, or a parent created after registration, may be a symlink out.
+    return (await resolvesInsideWorkspace(entry.root, entry.absolutePath)) ? signature : null;
+  }
+
   private createEntry(
     key: string,
-    cwd: string,
-    relativePath: string,
     kind: WorkspaceWatchKind,
     absolutePath: string,
+    root: string,
   ): WatchEntry<S> {
     const entry: WatchEntry<S> = {
       key,
-      cwd,
-      relativePath,
       kind,
       absolutePath,
-      subscribers: new Set(),
+      registrations: new Map(),
+      root,
       watcher: null,
       pollTimer: null,
       watchFailed: false,
@@ -236,7 +329,7 @@ export class WorkspaceWatchRegistry<S> {
       checking: null,
       disposed: false,
     };
-    entry.ready = statSignature(absolutePath, kind).then((signature) => {
+    entry.ready = this.observe(entry).then((signature) => {
       entry.signature = signature;
       if (!entry.disposed) this.arm(entry);
     });
@@ -306,7 +399,7 @@ export class WorkspaceWatchRegistry<S> {
     while (entry.checking) await entry.checking;
     const run = (async () => {
       const previous = entry.signature;
-      const next = await statSignature(entry.absolutePath, entry.kind);
+      const next = await this.observe(entry);
       if (entry.disposed) return;
       entry.signature = next;
       const inodeChanged = previous?.split(":")[0] !== next?.split(":")[0];
@@ -316,7 +409,6 @@ export class WorkspaceWatchRegistry<S> {
       if (previous === next) return;
       entry.revision += 1;
       this.queueChange(entry, {
-        relativePath: entry.relativePath,
         kind: entry.kind,
         change: next === null ? "deleted" : previous === null ? "created" : "changed",
         revision: entry.revision,
@@ -330,12 +422,17 @@ export class WorkspaceWatchRegistry<S> {
     }
   }
 
-  private queueChange(entry: WatchEntry<S>, change: ProjectWatchedPathChange): void {
-    for (const subscriber of entry.subscribers) {
+  private queueChange(
+    entry: WatchEntry<S>,
+    change: Omit<ProjectWatchedPathChange, "relativePath">,
+  ): void {
+    for (const [subscriber, registrations] of entry.registrations) {
       const byCwd = this.pendingBySubscriber.get(subscriber) ?? new Map();
-      const changes = byCwd.get(entry.cwd) ?? [];
-      changes.push(change);
-      byCwd.set(entry.cwd, changes);
+      for (const [cwd, relativePath] of registrations) {
+        const changes = byCwd.get(cwd) ?? [];
+        changes.push({ ...change, relativePath });
+        byCwd.set(cwd, changes);
+      }
       this.pendingBySubscriber.set(subscriber, byCwd);
     }
     this.scheduleFlush();
@@ -343,9 +440,11 @@ export class WorkspaceWatchRegistry<S> {
 
   /** Watch/poll transitions reach subscribers as an empty change batch. */
   private queueStatusChange(entry: WatchEntry<S>): void {
-    for (const subscriber of entry.subscribers) {
+    for (const [subscriber, registrations] of entry.registrations) {
       const byCwd = this.pendingBySubscriber.get(subscriber) ?? new Map();
-      if (!byCwd.has(entry.cwd)) byCwd.set(entry.cwd, []);
+      for (const cwd of registrations.keys()) {
+        if (!byCwd.has(cwd)) byCwd.set(cwd, []);
+      }
       this.pendingBySubscriber.set(subscriber, byCwd);
     }
     this.scheduleFlush();
@@ -370,11 +469,13 @@ export class WorkspaceWatchRegistry<S> {
     });
   }
 
-  private releaseKey(subscriber: S, key: string): void {
+  private releaseRegistration(subscriber: S, cwd: string, key: string): void {
     const entry = this.entries.get(key);
     if (!entry) return;
-    entry.subscribers.delete(subscriber);
-    if (entry.subscribers.size > 0) return;
+    const registrations = entry.registrations.get(subscriber);
+    registrations?.delete(cwd);
+    if (registrations?.size === 0) entry.registrations.delete(subscriber);
+    if (entry.registrations.size > 0) return;
     this.closeEntry(entry);
     this.entries.delete(key);
   }

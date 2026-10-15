@@ -32,9 +32,11 @@ import { cn, isMacPlatform } from "../../lib/utils";
 import { useStore } from "../../store";
 import { orderedPinnedThreadIds, toggleThreadPin } from "../../threadPinSnooze";
 import { useNextTurnQueueStore } from "../../nextTurnQueueStore";
+import { useNowHour } from "../../lib/nowTicker";
 import {
   liveThreadActivityAt,
   type ThreadSummary,
+  useLiveActivityBuckets,
   useThreadSummaries,
 } from "../../threadSelectors";
 import type { ThreadStatus } from "../../threadStatus";
@@ -551,8 +553,19 @@ export function HomeMissionControl() {
     writeLastHomeVisitAt();
   }, []);
 
-  const recentGroups = useMemo(() => groupThreadsByActivity(recentTruncated), [recentTruncated]);
-  const greeting = resolveGreeting();
+  // A clock input, so neither the greeting nor "Today" freezes while Home stays open.
+  const nowHour = useNowHour();
+  const recentBuckets = useLiveActivityBuckets(recentTruncated, nowHour);
+  const recentGroups = useMemo(
+    () =>
+      groupThreadsByActivity(
+        recentTruncated,
+        new Date(nowHour),
+        (_thread, index) => recentBuckets[index] ?? "earlier",
+      ),
+    [nowHour, recentBuckets, recentTruncated],
+  );
+  const greeting = resolveGreeting(new Date(nowHour).getHours());
   const defaultProjectId = resolvePrimaryNewThreadProjectId({
     activeThreadProjectId: null,
     activeDraftProjectId: null,

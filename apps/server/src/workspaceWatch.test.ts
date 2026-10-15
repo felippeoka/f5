@@ -160,6 +160,134 @@ describe("WorkspaceWatchRegistry", () => {
     }
   });
 
+  it("rejects missing paths below a symlink that leaves the workspace", async () => {
+    const outside = await fsp.mkdtemp(path.join(os.tmpdir(), "f5-workspace-watch-outside-"));
+    try {
+      await fsp.symlink(outside, path.join(root, "escape"));
+      const result = await registry.setWatchedPaths(client, {
+        cwd: root,
+        files: ["escape/new.ts", "src/new.ts"],
+        directories: [],
+      });
+      expect(result.rejected).toEqual(["escape/new.ts"]);
+      expect(result.watched).toBe(1);
+    } finally {
+      await fsp.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("does not follow a missing path once a parent appears as a symlink out", async () => {
+    const outside = await fsp.mkdtemp(path.join(os.tmpdir(), "f5-workspace-watch-outside-"));
+    try {
+      await registry.setWatchedPaths(client, {
+        cwd: root,
+        files: ["later/new.ts"],
+        directories: [],
+      });
+      await fsp.symlink(outside, path.join(root, "later"));
+      await fsp.writeFile(path.join(outside, "new.ts"), "outside\n");
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(changesFor("client")).toEqual([]);
+    } finally {
+      await fsp.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("notifies each workspace that reaches a shared path with its own relative path", async () => {
+    const nested = path.join(root, "nested");
+    await fsp.mkdir(nested);
+    await fsp.writeFile(path.join(nested, "app.ts"), "");
+    const other = { name: "other" };
+    await registry.setWatchedPaths(client, {
+      cwd: root,
+      files: ["nested/app.ts"],
+      directories: [],
+    });
+    await registry.setWatchedPaths(client, { cwd: nested, files: ["app.ts"], directories: [] });
+    await registry.setWatchedPaths(other, { cwd: nested, files: ["app.ts"], directories: [] });
+    expect(registry.size).toBe(1);
+
+    await fsp.writeFile(path.join(nested, "app.ts"), "changed\n");
+    await vi.waitFor(
+      () => {
+        const byCwd = (name: string, cwd: string) =>
+          notifications
+            .filter((entry) => entry.subscriber === name && entry.cwd === cwd)
+            .flatMap((entry) => entry.changes.map((change) => change.relativePath));
+        expect(byCwd("client", root)).toContain("nested/app.ts");
+        expect(byCwd("client", nested)).toContain("app.ts");
+        expect(byCwd("other", nested)).toContain("app.ts");
+      },
+      { timeout: 5_000, interval: 20 },
+    );
+
+    // Dropping one workspace keeps the watch for the other registrations.
+    await registry.setWatchedPaths(client, { cwd: root, files: [], directories: [] });
+    expect(registry.size).toBe(1);
+    registry.releaseSubscriber(client);
+    registry.releaseSubscriber(other);
+    expect(registry.size).toBe(0);
+  });
+
+  it("applies one subscriber's overlapping calls in order", async () => {
+    const slow = registry.setWatchedPaths(client, {
+      cwd: root,
+      files: ["src/app.ts", "src/a.ts", "src/b.ts"],
+      directories: ["src", ""],
+    });
+    const fast = registry.setWatchedPaths(client, { cwd: root, files: [], directories: [] });
+    await Promise.all([slow, fast]);
+    expect(registry.size).toBe(0);
+  });
+
+  it("does not keep watches for a subscriber released while a call is pending", async () => {
+    registry.dispose();
+    registry = createRegistry({
+      watch: (target, listener) => {
+        // Disconnect lands after the call started watching, before it commits.
+        registry.releaseSubscriber(client);
+        return fs.watch(target, listener);
+      },
+    });
+
+    const result = await registry.setWatchedPaths(client, {
+      cwd: root,
+      files: ["src/app.ts"],
+      directories: ["src"],
+    });
+    expect(result.watched).toBe(0);
+    expect(registry.size).toBe(0);
+
+    await fsp.writeFile(path.join(root, "src", "app.ts"), "export const ignored = 1;\n");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(notifications).toEqual([]);
+  });
+
+  it("re-creates a shared watch another subscriber released mid-call", async () => {
+    const other = { name: "other" };
+    registry.dispose();
+    registry = createRegistry({
+      watch: (target, listener) => {
+        // `other` drops the shared file watch while the client's call is
+        // still setting up its directory watch.
+        if (target === srcDirectory) registry.releaseSubscriber(other);
+        return fs.watch(target, listener);
+      },
+    });
+    const srcDirectory = await fsp.realpath(path.join(root, "src"));
+    await registry.setWatchedPaths(other, { cwd: root, files: ["src/app.ts"], directories: [] });
+    const result = await registry.setWatchedPaths(client, {
+      cwd: root,
+      files: ["src/app.ts"],
+      directories: ["src"],
+    });
+    expect(result.watched).toBe(2);
+    expect(registry.size).toBe(2);
+
+    await fsp.writeFile(path.join(root, "src", "app.ts"), "export const kept = 1;\n");
+    await waitForChange("client", { relativePath: "src/app.ts", change: "changed" });
+  });
+
   it("falls back to polling when watching fails and reports degraded status", async () => {
     registry.dispose();
     registry = createRegistry({
