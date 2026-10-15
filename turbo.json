@@ -32,6 +32,7 @@
   ],
   "globalPassThroughEnv": [
     "F5_COMPUTER_CONTROL_DEV",
+    "F5_COMPUTER_BACKGROUND_DEV",
     "PATH",
     "Path",
     "PATHEXT",

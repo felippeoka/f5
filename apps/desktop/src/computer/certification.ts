@@ -6,10 +6,10 @@ export const COMPUTER_CONTROL_CERTIFIED = { darwin: false, win32: false } as con
 /** Explicit opt-in preview availability is separate from signed-build certification. */
 export const COMPUTER_CONTROL_PREVIEW = { darwin: true, win32: false } as const;
 /**
- * Background (accessibility-only) control alongside the user. Closed until the macOS delivery
- * spike and the real-app rehearsal scenarios pass; unpackaged builds may opt in for rehearsal.
+ * Background (accessibility-only) control alongside the user. Available in the macOS preview;
+ * users still choose it in Settings, and the foreground stays the default execution mode.
  */
-export const COMPUTER_BACKGROUND_PREVIEW = { darwin: false, win32: false } as const;
+export const COMPUTER_BACKGROUND_PREVIEW = { darwin: true, win32: false } as const;
 export function computerBackgroundGate(
   platform: string,
   packaged: boolean,

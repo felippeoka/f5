@@ -328,16 +328,16 @@ helper permission identities must agree before release certification.
 Settings → Computer use → Execution mode chooses `foreground` (default) or `background`
 (`computerUseExecutionMode`, machine-wide, no project override). Background lets each agent
 act inside one named, granted app through Accessibility without moving the pointer or
-changing focus, so the user keeps working. It is a macOS-only preview behind a closed gate
-(`COMPUTER_BACKGROUND_PREVIEW` in `apps/desktop/src/computer/certification.ts`; development
-override `F5_COMPUTER_BACKGROUND_DEV=1`) and the helper compiles it only with
-`-DF5_BACKGROUND_AX`. When the preference is background but delivery is unavailable, tools
+changing focus, so the user keeps working. It is a macOS-only preview, open by default
+(`COMPUTER_BACKGROUND_PREVIEW` in `apps/desktop/src/computer/certification.ts`; with the gate
+closed, unpackaged builds can still opt in with `F5_COMPUTER_BACKGROUND_DEV=1`). Foreground
+remains the default execution mode. When the preference is background but delivery is unavailable, tools
 fail with the reason (`unsupported-platform`, `peer-capability`, `preview-off`,
 `permissions`, `monitor-unhealthy`) instead of silently using the foreground.
 
 Peers negotiate `background-ax-v1` without changing protocol version 1: the backend hello
 lists capabilities, Electron answers with `hostCapabilities`, and the helper hello lists its
-own (empty unless built with background support). A legacy peer on any hop keeps the thread
+own (current helpers always list `background-ax-v1`). A legacy peer on any hop keeps the thread
 foreground-only and receives only the legacy single-holder `leaseChanged` message. Electron
 answers with the capability only while the background preview gate is open, so with the gate
 closed every user stays on that legacy protocol and no background path (receipts, policy
@@ -2109,17 +2109,16 @@ bun apps/desktop/src/computer/rehearseInspectMacos.ts --helper apps/desktop/dist
 
 For the Phase 0 background-delivery spike (accessibility press, setValue, selected-text
 typing and app-filtered capture on a background fixture, each with verified read-back, and
-checking the frontmost app never changes), build the helper with
-`swift build -Xswiftc -DF5_BACKGROUND_AX` and run:
+checking the frontmost app never changes), build the helper and run:
 
 ```sh
-bun apps/desktop/src/computer/rehearseBackgroundMacos.ts --helper <background-enabled helper> \
+bun apps/desktop/src/computer/rehearseBackgroundMacos.ts --helper apps/desktop/dist-native/mac-arm64/f5-computer-helper \
   --real-app com.apple.TextEdit --real-app com.apple.Notes
 ```
 
 Each `--real-app` must be a running app from `COMPUTER_BACKGROUND_POLICY.certified`; it is
 probed read-only (inspect and app-scoped capture). Real-app press, setValue and typing stay a
-manual certification step, so this report alone cannot open the preview gate. The script
+manual certification step, so this report alone does not certify an app. The script
 refuses to overwrite an existing receipt and fails when the helper lacks `background-ax-v1`.
 
 The [current read-only preflight](computer-certification/2026-10-12-macos-gate-preflight-856ae44523.json)
