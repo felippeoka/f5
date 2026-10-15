@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { computerCertificationStatus, COMPUTER_CONTROL_CERTIFIED } from "./certification";
+import {
+  computerBackgroundGate,
+  computerCertificationStatus,
+  COMPUTER_CONTROL_CERTIFIED,
+} from "./certification";
 describe("preview availability is not certification", () => {
   it("permits macOS 14+ packaged opt-in preview without a development bypass", () => {
     expect(COMPUTER_CONTROL_CERTIFIED).toEqual({ darwin: false, win32: false });
@@ -15,6 +19,14 @@ describe("preview availability is not certification", () => {
       reason: "not-certified",
     });
     expect(computerCertificationStatus("linux", false, "1", "6.0.0")).toMatchObject({
+      reason: "unsupported-platform",
+    });
+  });
+  it("opens background control on macOS by default, including packaged builds", () => {
+    expect(computerBackgroundGate("darwin", true, undefined)).toEqual({ available: true });
+    expect(computerBackgroundGate("darwin", false, undefined)).toEqual({ available: true });
+    expect(computerBackgroundGate("win32", true, "1")).toEqual({
+      available: false,
       reason: "unsupported-platform",
     });
   });

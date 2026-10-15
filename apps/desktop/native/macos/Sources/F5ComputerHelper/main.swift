@@ -136,14 +136,9 @@ func display(_ id: String) throws -> Display {
   }
   return match
 }
-// Phase 0: background accessibility delivery is compiled in but not advertised until the
-// delivery spike passes. Rehearsal builds pass `-Xswiftc -DF5_BACKGROUND_AX`.
-#if F5_BACKGROUND_AX
-  let backgroundAXEnabled = true
-#else
-  let backgroundAXEnabled = false
-#endif
-let helperCapabilities: [String] = backgroundAXEnabled ? ["background-ax-v1"] : []
+// Background accessibility delivery is always advertised; Electron's preview gate decides
+// whether a session may use it.
+let helperCapabilities: [String] = ["background-ax-v1"]
 /// Per-generation permits. Lock order: never hold `permits`' lock with any other lock.
 let permits = ExecutionPermits()
 /// Guards grants, scopes' target PIDs, the window cache, frontmost PID, input sequence, the
@@ -2024,14 +2019,9 @@ DispatchQueue.global(qos: .userInteractive).async {
         let op = string(request, "op")
         if ["status", "listApps", "resolveApps", "inspect", "screenshot", "zoom"].contains(op) {
           observeQueue.addOperation { execute(message) }
-        } else if backgroundAXEnabled && isBackground(request) {
+        } else if isBackground(request) {
           // Background mutations run per app; foreground input stays on one serial queue.
           appQueue(string(request, "appId")).async { execute(message) }
-        } else if isBackground(request) {
-          emit([
-            "type": "response", "requestId": string(request, "requestId"),
-            "error": ["_tag": "ForegroundRequired", "reason": "unsupported-in-background"],
-          ])
         } else {
           inputQueue.async { execute(message) }
         }
