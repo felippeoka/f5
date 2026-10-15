@@ -1,3 +1,4 @@
+import { noteWsSynchronized, noteWsResynchronizing } from "./wsConnectionState";
 import { serverBootstrapFixture } from "./test/serverBootstrap";
 import { F5_PROTOCOL_VERSION, F5_UPGRADE_REQUIRED_CLOSE_CODE } from "@t3tools/contracts";
 import {
@@ -297,6 +298,7 @@ describe("WsTransport", () => {
     const transport = new WsTransport("ws://localhost:3020");
     const socket = getSocket();
     socket.open();
+    noteWsSynchronized();
     const promise = transport.request(WS_METHODS.gitCheckout, { cwd: "/repo", branch: "main" });
     const envelope = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
     const checkoutConflict = { cwd: "/repo", branch: "main", files: ["index.css"] };
@@ -336,15 +338,15 @@ describe("WsTransport", () => {
 
   it("bounds requests queued before the websocket opens", async () => {
     const transport = new WsTransport("ws://localhost:3020");
-    const pending = Array.from({ length: 256 }, (_, index) =>
-      transport.request(`projects.list.${index}`, undefined, { timeoutMs: null }),
+    const pending = Array.from({ length: 256 }, () =>
+      transport.request("projects.list", undefined, { timeoutMs: null }),
     );
     for (const request of pending) {
       void request.catch(() => undefined);
     }
 
     await expect(
-      transport.request("projects.list.overflow", undefined, { timeoutMs: null }),
+      transport.request("projects.list", undefined, { timeoutMs: null }),
     ).rejects.toThrow("WebSocket request queue is full");
 
     transport.dispose();
@@ -354,7 +356,7 @@ describe("WsTransport", () => {
     const transport = new WsTransport("ws://localhost:3020");
     const socket = getSocket();
 
-    const requestPromise = transport.request(ORCHESTRATION_WS_METHODS.dispatchCommand, {
+    const requestPromise = transport.request(ORCHESTRATION_WS_METHODS.getSnapshot, {
       command: { type: "noop" },
     });
     void requestPromise.catch(() => undefined);
@@ -371,7 +373,7 @@ describe("WsTransport", () => {
     vi.advanceTimersByTime(1);
     expect(getSlowRpcRequests()).toMatchObject([
       {
-        method: ORCHESTRATION_WS_METHODS.dispatchCommand,
+        method: ORCHESTRATION_WS_METHODS.getSnapshot,
       },
     ]);
 
@@ -713,5 +715,67 @@ it("rejects timeout-free websocket requests when HTTP reports an upgrade, withou
   vi.advanceTimersByTime(60_000);
   expect(sockets).toHaveLength(1);
   expect(getWsConnectionState().lastError).toContain("F5 was updated");
+  transport.dispose();
+});
+
+it("admits stop and answers during resynchronization but never queues mutations offline", async () => {
+  const transport = new WsTransport("ws://localhost:3020");
+  const socket = sockets[0]!;
+  socket.open();
+  noteWsResynchronizing();
+  for (const type of [
+    "thread.turn.interrupt",
+    "thread.approval.respond",
+    "thread.user-input.respond",
+  ]) {
+    const pending = transport.request("orchestration.dispatchCommand", { command: { type } });
+    const envelope = JSON.parse(socket.sent.at(-1)!);
+    socket.serverMessage(JSON.stringify({ id: envelope.id, result: {} }));
+    await pending;
+  }
+  const steer = transport.request("nextTurnQueue.steer", {});
+  socket.serverMessage(JSON.stringify({ id: JSON.parse(socket.sent.at(-1)!).id, result: {} }));
+  await steer;
+  for (const method of [
+    "providerAccount.logout",
+    "githubAccount.loginStart",
+    "nativeOperation.resolve",
+  ])
+    await expect(transport.request(method)).rejects.toMatchObject({ code: "ConnectionNotReady" });
+  socket.close();
+  await expect(
+    transport.request("orchestration.dispatchCommand", {
+      command: { type: "thread.turn.interrupt" },
+    }),
+  ).rejects.toMatchObject({ code: "ConnectionNotReady" });
+  transport.dispose();
+});
+
+it("honours retryAfterMs for busy reads without replaying rejected mutations", async () => {
+  const transport = new WsTransport("ws://localhost:3020");
+  const socket = sockets[0]!;
+  socket.open();
+  const pending = transport.request("terminal.snapshot", {});
+  const rejectBusy = () =>
+    socket.serverMessage(
+      JSON.stringify({
+        id: JSON.parse(socket.sent.at(-1)!).id,
+        error: { message: "busy", code: "RpcBusy", retryable: true, retryAfterMs: 500 },
+      }),
+    );
+  rejectBusy();
+  await vi.advanceTimersByTimeAsync(499);
+  expect(socket.sent).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(socket.sent).toHaveLength(2);
+  socket.serverMessage(JSON.stringify({ id: JSON.parse(socket.sent.at(-1)!).id, result: null }));
+  await pending;
+  noteWsSynchronized();
+  const mutation = transport.request("projects.writeFile", {});
+  const rejected = expect(mutation).rejects.toMatchObject({ code: "RpcBusy" });
+  rejectBusy();
+  await rejected;
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(socket.sent).toHaveLength(3);
   transport.dispose();
 });

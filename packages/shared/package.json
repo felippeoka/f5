@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./rpcScheduling": {
+      "types": "./src/rpcScheduling.ts",
+      "import": "./src/rpcScheduling.ts"
+    },
     "./computerRehearsalProfiles": {
       "types": "./src/computerRehearsalProfiles.ts",
       "import": "./src/computerRehearsalProfiles.ts"

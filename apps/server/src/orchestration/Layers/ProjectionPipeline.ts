@@ -1846,6 +1846,33 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
     _attachmentSideEffects,
   ) =>
     Effect.gen(function* () {
+      // Persist release independently of mutable turn projections: rewind must
+      // never resurrect ownership of a delivery that has already settled.
+      if (
+        event.type === "thread.reverted" ||
+        event.type === "thread.turn-diff-completed" ||
+        (event.type === "thread.session-set" &&
+          ["ready", "error", "stopped"].includes(event.payload.session.status))
+      ) {
+        const turnId =
+          event.type === "thread.turn-diff-completed"
+            ? event.payload.turnId
+            : event.type === "thread.session-set"
+              ? event.payload.settledTurnId
+              : undefined;
+        const releaseThread =
+          event.type === "thread.reverted" ||
+          (event.type === "thread.session-set" &&
+            ["error", "stopped"].includes(event.payload.session.status));
+        if (releaseThread || turnId !== undefined)
+          yield* sql`
+          UPDATE provider_turn_deliveries SET reservation_released_at = ${event.occurredAt}
+          WHERE thread_id = ${event.payload.threadId} AND state = 'accepted' AND reservation_released_at IS NULL
+            AND (${releaseThread} OR provider_turn_id = ${turnId ?? null})
+        `.pipe(
+            Effect.mapError(toPersistenceSqlError("ProjectionPipeline.releaseDeliveryReservation")),
+          );
+      }
       switch (event.type) {
         case "thread.turn-start-requested": {
           yield* projectionTurnRepository.replacePendingTurnStart({
@@ -1947,6 +1974,13 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             }
             return;
           }
+          yield* sql`UPDATE provider_turn_deliveries SET reservation_released_at = ${event.occurredAt}
+            WHERE thread_id = ${event.payload.threadId} AND provider_turn_id = ${runningTurn.value.turnId}
+              AND state = 'accepted' AND reservation_released_at IS NULL`.pipe(
+            Effect.mapError(
+              toPersistenceSqlError("ProjectionPipeline.releaseSettledDeliveryReservation"),
+            ),
+          );
           if (runningTurn.value.state !== "running") {
             if (
               event.payload.session.status === "ready" &&

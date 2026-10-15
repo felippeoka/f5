@@ -171,6 +171,7 @@ import type {
 } from "./mcp";
 import type {
   TerminalClearInput,
+  TerminalSnapshotInput,
   TerminalCloseInput,
   TerminalEvent,
   TerminalOpenInput,
@@ -704,6 +705,7 @@ export interface NativeApi {
     confirm: (message: string) => Promise<boolean>;
   };
   terminal: {
+    snapshot: (input: TerminalSnapshotInput) => Promise<TerminalSessionSnapshot | null>;
     open: (input: TerminalOpenInput) => Promise<TerminalSessionSnapshot>;
     write: (input: TerminalWriteInput) => Promise<void>;
     resize: (input: TerminalResizeInput) => Promise<void>;

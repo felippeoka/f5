@@ -1,3 +1,11 @@
+import { makeProviderServiceLive } from "../../provider/Layers/ProviderService";
+import { makeCursorAdapter } from "../../provider/Layers/CursorAdapter";
+import { ProviderAdapterRegistry } from "../../provider/Services/ProviderAdapterRegistry";
+import { makeAdapterRegistryMock } from "../../provider/testUtils/providerAdapterRegistryMock";
+import { AnalyticsService } from "../../telemetry/Services/AnalyticsService";
+import { CursorSettings } from "@t3tools/contracts";
+import { Schema } from "effect";
+import { writeAcpWrapper } from "../../testUtils/cli";
 import { type ServerSettings } from "@t3tools/contracts";
 import fs from "node:fs";
 import os from "node:os";
@@ -169,12 +177,13 @@ describe("ProviderCommandReactor", () => {
     }
     runtime = null;
     for (const stateDir of createdStateDirs) {
-      fs.rmSync(stateDir, { recursive: true, force: true });
+      fs.rmSync(stateDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
     createdStateDirs.clear();
   });
 
   async function createHarness(input?: {
+    readonly realCursorBinary?: string;
     readonly settings?: Partial<ServerSettings>;
     readonly stateDir?: string;
     readonly threadTitle?: string;
@@ -546,71 +555,89 @@ describe("ProviderCommandReactor", () => {
       Layer.provide(OrchestrationCommandReceiptRepositoryLive),
       Layer.provide(SqlitePersistenceMemory),
     );
-    const layer = ProviderCommandReactorLive.pipe(
-      Layer.provideMerge(ServerSettingsService.layerTest(input?.settings)),
-      Layer.provideMerge(orchestrationLayer),
-      Layer.provideMerge(
-        Layer.succeed(ProjectMcpConfigService, {
-          readCommonStoredConfig: () =>
-            Effect.succeed({
-              scope: "common" as const,
-              version: "mcp-version-test",
-              servers: {},
-            }),
-          readProjectStoredConfig: (projectId: ProjectId) =>
-            Effect.succeed({
-              scope: "project" as const,
-              projectId,
-              version: "mcp-version-test",
-              servers: {},
-            }),
-          readEffectiveStoredConfig: (projectId: ProjectId) =>
-            Effect.succeed({
-              projectId,
-              commonVersion: "mcp-version-test",
-              projectVersion: "mcp-version-test",
-              effectiveVersion: "mcp-version-test",
-              servers: {},
-            }),
-          readCommonConfig: () =>
-            Effect.succeed({
-              version: "mcp-version-test",
-              servers: {},
-            }),
-          replaceCommonConfig: (_input) =>
-            Effect.succeed({
-              version: "mcp-version-test",
-              servers: {},
-            }),
-          readProjectConfig: (projectId: ProjectId) =>
-            Effect.succeed({
-              projectId,
-              version: "mcp-version-test",
-              servers: {},
-            }),
-          replaceProjectConfig: (input) =>
-            Effect.succeed({
-              projectId: input.projectId,
-              version: "mcp-version-test",
-              servers: {},
-            }),
-          readEffectiveConfig: (projectId: ProjectId) =>
-            Effect.succeed({
-              projectId,
-              commonVersion: "mcp-version-test",
-              projectVersion: "mcp-version-test",
-              effectiveVersion: "mcp-version-test",
-              servers: {},
-            }),
-          readCodexServers: (projectId: ProjectId) =>
-            Effect.succeed({
-              projectId,
-              effectiveVersion: "mcp-version-test",
-              servers: {},
-            }),
+    const settingsLayer = ServerSettingsService.layerTest(input?.settings);
+    const projectMcpLayer = Layer.succeed(ProjectMcpConfigService, {
+      readCommonStoredConfig: () =>
+        Effect.succeed({
+          scope: "common" as const,
+          version: "mcp-version-test",
+          servers: {},
         }),
-      ),
-      Layer.provideMerge(Layer.succeed(ProviderService, service)),
+      readProjectStoredConfig: (projectId: ProjectId) =>
+        Effect.succeed({
+          scope: "project" as const,
+          projectId,
+          version: "mcp-version-test",
+          servers: {},
+        }),
+      readEffectiveStoredConfig: (projectId: ProjectId) =>
+        Effect.succeed({
+          projectId,
+          commonVersion: "mcp-version-test",
+          projectVersion: "mcp-version-test",
+          effectiveVersion: "mcp-version-test",
+          servers: {},
+        }),
+      readCommonConfig: () =>
+        Effect.succeed({
+          version: "mcp-version-test",
+          servers: {},
+        }),
+      replaceCommonConfig: (_input) =>
+        Effect.succeed({
+          version: "mcp-version-test",
+          servers: {},
+        }),
+      readProjectConfig: (projectId: ProjectId) =>
+        Effect.succeed({
+          projectId,
+          version: "mcp-version-test",
+          servers: {},
+        }),
+      replaceProjectConfig: (input) =>
+        Effect.succeed({
+          projectId: input.projectId,
+          version: "mcp-version-test",
+          servers: {},
+        }),
+      readEffectiveConfig: (projectId: ProjectId) =>
+        Effect.succeed({
+          projectId,
+          commonVersion: "mcp-version-test",
+          projectVersion: "mcp-version-test",
+          effectiveVersion: "mcp-version-test",
+          servers: {},
+        }),
+      readCodexServers: (projectId: ProjectId) =>
+        Effect.succeed({
+          projectId,
+          effectiveVersion: "mcp-version-test",
+          servers: {},
+        }),
+    });
+    const providerLayer = input?.realCursorBinary
+      ? makeProviderServiceLive().pipe(
+          Layer.provide(
+            Layer.effect(
+              ProviderAdapterRegistry,
+              Effect.gen(function* () {
+                const adapter = yield* makeCursorAdapter(
+                  Schema.decodeSync(CursorSettings)({ binaryPath: input.realCursorBinary }),
+                );
+                return makeAdapterRegistryMock({ cursor: adapter });
+              }),
+            ),
+          ),
+          Layer.provide(AnalyticsService.layerTest),
+          Layer.provide(projectMcpLayer),
+          Layer.provide(settingsLayer),
+        )
+      : Layer.succeed(ProviderService, service);
+    const layer = ProviderCommandReactorLive.pipe(
+      Layer.provideMerge(settingsLayer),
+      Layer.provideMerge(orchestrationLayer),
+      Layer.provideMerge(projectMcpLayer),
+      Layer.provideMerge(providerLayer),
       Layer.provideMerge(Layer.succeed(ProviderSessionDirectory, providerSessionDirectory)),
       Layer.provideMerge(
         Layer.succeed(GitCore, { renameBranch, ensureWorktree } as unknown as GitCoreShape),
@@ -667,14 +694,19 @@ describe("ProviderCommandReactor", () => {
     }
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
+    const pendingDeliveries = new Set<Promise<unknown>>();
     // Turn delivery is outbox-owned in production. These focused reactor tests
     // bridge committed turn intents directly into the exposed delivery entrypoint.
     await Effect.runPromise(
       Stream.runForEach(engine.streamDomainEvents, (event) =>
         event.type === "thread.turn-start-requested"
-          ? Effect.promise(() =>
-              runtime.runPromise(reactor.deliverTurnStart(event).pipe(Scope.provide(scope!))),
-            ).pipe(Effect.asVoid)
+          ? Effect.promise(() => {
+              const delivery = runtime.runPromise(
+                reactor.deliverTurnStart(event).pipe(Scope.provide(scope!)),
+              );
+              pendingDeliveries.add(delivery);
+              return delivery.finally(() => pendingDeliveries.delete(delivery));
+            }).pipe(Effect.asVoid)
           : Effect.void,
       ).pipe(Effect.forkScoped, Scope.provide(scope)),
     );
@@ -712,6 +744,8 @@ describe("ProviderCommandReactor", () => {
     }
 
     return {
+      waitForDeliveries: () => Promise.all(pendingDeliveries),
+      actualProvider: await runtime.runPromise(Effect.service(ProviderService)),
       engine,
       reactor,
       runOneOffPrompt,
@@ -809,6 +843,71 @@ describe("ProviderCommandReactor", () => {
         });
     },
   );
+
+  it("composes reactor, ProviderService and Cursor ACP: answers and interrupt reach an unresolved prompt", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "f5-composed-acp-"));
+    createdStateDirs.add(directory);
+    const binary = await writeAcpWrapper(
+      path.join(directory, "cursor"),
+      path.resolve(import.meta.dirname, "../../../scripts/acp-mock-agent.ts"),
+      {
+        env: { T3_ACP_EMIT_TOOL_CALLS: "1", T3_ACP_WAIT_AFTER_PERMISSION: "1" },
+      },
+    );
+    const harness = await createHarness({ realCursorBinary: binary, threadModel: "composer-2" });
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const approvalPromise = Effect.runPromise(
+      Stream.runHead(
+        harness.actualProvider.streamEvents.pipe(
+          Stream.filter((event) => event.type === "request.opened"),
+        ),
+      ),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("composed-acp:start"),
+        threadId,
+        provider: "cursor",
+        model: "composer-2",
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        message: {
+          messageId: MessageId.makeUnsafe("composed-acp:message"),
+          role: "user",
+          text: "run tool",
+          attachments: [],
+        },
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    const approval = await approvalPromise;
+    expect(Option.isSome(approval)).toBe(true);
+    if (Option.isNone(approval) || approval.value.type !== "request.opened")
+      throw new Error("No ACP approval");
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.approval.respond",
+        commandId: CommandId.makeUnsafe("composed-acp:approve"),
+        threadId,
+        requestId: asApprovalRequestId(approval.value.requestId!),
+        decision: "accept",
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    await harness.drain();
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.interrupt",
+        commandId: CommandId.makeUnsafe("composed-acp:interrupt"),
+        threadId,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    await harness.drain();
+    const sessions = await Effect.runPromise(harness.actualProvider.listSessions());
+    expect(sessions.find((session) => session.threadId === threadId)?.status).not.toBe("stopped");
+  }, 15_000);
 
   it("reuses a read-only document merge session for a profile-less refinement", async () => {
     const harness = await createHarness();
@@ -2291,6 +2390,8 @@ describe("ProviderCommandReactor", () => {
     const live = harness.runtimeSessions[0];
     expect(live).toBeDefined();
     harness.runtimeSessions[0] = { ...live!, resumeCursor: { opaque: "live-newer-cursor" } };
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await harness.waitForDeliveries();
     const binding = harness.getBinding(threadId);
     expect(binding).toBeDefined();
     harness.upsertBinding({
@@ -2488,6 +2589,8 @@ describe("ProviderCommandReactor", () => {
       }),
     );
     await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await harness.waitForDeliveries();
     const binding = harness.getBinding(threadId);
     expect(binding).toBeDefined();
     harness.upsertBinding({

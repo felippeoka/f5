@@ -53,7 +53,15 @@ export interface ProviderMcpReloadOutcome {
 /**
  * ProviderServiceShape - Service API for provider session and turn orchestration.
  */
+export interface ProviderSubmissionHandle {
+  readonly acceptance: Effect.Effect<ProviderTurnStartResult, ProviderServiceError>;
+  readonly completion: Effect.Effect<void, ProviderServiceError>;
+}
+
 export interface ProviderServiceShape {
+  /** Registers a service-owned operation; caller cancellation cannot abandon transport. */
+  readonly submitTurn?: (input: ProviderSendTurnInput) => Effect.Effect<ProviderSubmissionHandle>;
+
   readonly nativeOperations?: {
     readonly resolve?: (
       input: import("@t3tools/contracts").NativeOperationResolutionInput,

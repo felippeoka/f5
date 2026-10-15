@@ -375,6 +375,7 @@ const make = Effect.gen(function* () {
   // Serializes turn delivery with MCP-apply restarts per thread, so Apply
   // never stops a session between its idle check and a new turn. Separate
   // from `withProviderThreadAccess`, which startSession takes itself.
+  const activeSubmissions = new Map<ThreadId, number>();
   const threadTurnGates = new Map<ThreadId, { gate: Semaphore.Semaphore; users: number }>();
   const withThreadTurnGate = <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
     Effect.acquireUseRelease(
@@ -2242,7 +2243,13 @@ const make = Effect.gen(function* () {
               const live = (yield* providerService.listSessions()).find(
                 (entry) => entry.threadId === binding.threadId,
               );
-              if (!live || live.activeTurnId || live.status === "running") return false;
+              if (
+                activeSubmissions.has(binding.threadId) ||
+                !live ||
+                live.activeTurnId ||
+                live.status === "running"
+              )
+                return false;
               return yield* restartClaudeSessionForMcpApply(binding, createdAt);
             }),
           );
@@ -2484,7 +2491,24 @@ const make = Effect.gen(function* () {
   });
 
   const deliverTurnStart: ProviderCommandReactorShape["deliverTurnStart"] = (event) =>
-    withThreadTurnGate(event.payload.threadId, processTurnStartRequested(event)).pipe(
+    Effect.acquireUseRelease(
+      withThreadTurnGate(
+        event.payload.threadId,
+        Effect.sync(() =>
+          activeSubmissions.set(
+            event.payload.threadId,
+            (activeSubmissions.get(event.payload.threadId) ?? 0) + 1,
+          ),
+        ),
+      ),
+      () => processTurnStartRequested(event),
+      () =>
+        Effect.sync(() => {
+          const remaining = (activeSubmissions.get(event.payload.threadId) ?? 1) - 1;
+          if (remaining > 0) activeSubmissions.set(event.payload.threadId, remaining);
+          else activeSubmissions.delete(event.payload.threadId);
+        }),
+    ).pipe(
       Effect.tap(() =>
         increment(orchestrationEventsProcessedTotal, {
           eventType: event.type,

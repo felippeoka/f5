@@ -15,11 +15,7 @@ import {
 import { APP_DISPLAY_NAME } from "../branding";
 import { type SlowRpcRequest, useSlowRpcRequests } from "../requestLatencyState";
 import { useSlowRpcWarningEnabled, useWsDisconnectSurfaceEnabled } from "../webLocalFlags";
-import {
-  isWsInteractionBlocked,
-  reconnectWsTransport,
-  useWsConnectionState,
-} from "../wsConnectionState";
+import { reconnectWsTransport, useWsConnectionState } from "../wsConnectionState";
 import { Button } from "./ui/button";
 import { toastManager } from "./ui/toast";
 
@@ -163,8 +159,9 @@ export function WebSocketConnectionSurface({ children }: { readonly children: Re
   const enabled = useWsDisconnectSurfaceEnabled();
   const connectionState = useWsConnectionState();
 
-  const shouldBlock =
-    protocol.upgradeRequired || (enabled && isWsInteractionBlocked(connectionState.phase));
+  const shouldBlock = protocol.upgradeRequired;
+  const disconnected =
+    enabled && (connectionState.phase !== "connected" || !connectionState.synchronized);
   const blockingPhase = connectionState.phase === "reconnecting" ? "reconnecting" : "disconnected";
   const copy = protocol.upgradeRequired
     ? {
@@ -192,6 +189,30 @@ export function WebSocketConnectionSurface({ children }: { readonly children: Re
       <div aria-hidden={shouldBlock || undefined} inert={shouldBlock}>
         {children}
       </div>
+      {disconnected && !protocol.upgradeRequired ? (
+        <aside
+          role="status"
+          className="fixed right-4 bottom-4 z-[90] max-w-sm rounded-lg border border-border bg-card p-3 text-sm shadow-lg"
+        >
+          <p>
+            {connectionState.phase === "connected"
+              ? "Resynchronizing…"
+              : connectionState.phase === "connecting"
+                ? "Connecting…"
+                : "Connection lost. Reconnecting…"}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Reading and local drafts remain available. Server changes resume after synchronization.
+          </p>
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => void reconnectWsTransport().catch(() => undefined)}
+          >
+            Retry now
+          </Button>
+        </aside>
+      ) : null}
       {shouldBlock && copy ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-background/72 px-4 py-10 text-foreground backdrop-blur-sm sm:px-6">
           <section className="w-full max-w-xl rounded-[1.75rem] border border-border/80 bg-card/96 p-6 shadow-2xl shadow-black/25 sm:p-8">

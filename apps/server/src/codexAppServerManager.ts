@@ -312,6 +312,7 @@ export interface CodexThreadTurnSnapshot {
 }
 
 export interface CodexThreadSnapshot {
+  historyCoverage?: "complete" | "partial";
   threadId: string;
   turns: CodexThreadTurnSnapshot[];
 }
@@ -2286,7 +2287,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       cursor = page.nextCursor;
       cursors.add(cursor);
     } while (cursor !== undefined);
-    return { threadId: providerThreadId, turns };
+    return { threadId: providerThreadId, turns, historyCoverage: "complete" };
   }
 
   /**

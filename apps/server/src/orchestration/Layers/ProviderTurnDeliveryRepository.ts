@@ -1,9 +1,12 @@
+import { randomUUID } from "node:crypto";
 import { OrchestrationEvent, OrchestrationUsageLimit, TurnId } from "@t3tools/contracts";
 import { Effect, Layer, Schema, Struct } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { toPersistenceDecodeError, toPersistenceSqlError } from "../../persistence/Errors.ts";
 import {
+  DeliveryHistoryEvidence,
+  DeliveryAcceptanceReceipt,
   ProviderTurnDelivery,
   ProviderTurnDeliveryRepository,
   type ProviderTurnDeliveryRepositoryShape,
@@ -13,6 +16,8 @@ const DbRow = ProviderTurnDelivery.mapFields(
   Struct.assign({
     preSendTurnIds: Schema.fromJsonString(Schema.Array(TurnId)),
     event: Schema.fromJsonString(OrchestrationEvent),
+    historyEvidence: Schema.NullOr(Schema.fromJsonString(DeliveryHistoryEvidence)),
+    acceptanceReceipt: Schema.NullOr(Schema.fromJsonString(DeliveryAcceptanceReceipt)),
     usageLimit: Schema.NullOr(Schema.fromJsonString(OrchestrationUsageLimit)),
   }),
 );
@@ -24,6 +29,24 @@ function mapError(operation: string) {
       : toPersistenceSqlError(`${operation}:query`)(cause);
 }
 
+const deliveryOwnershipAvailable = `(json_extract(candidate.event_json, '$.type') = 'thread.turn-steer-requested' OR NOT EXISTS (
+          SELECT 1 FROM provider_turn_deliveries AS owner
+          WHERE owner.thread_id = candidate.thread_id AND owner.delivery_id != candidate.delivery_id
+            AND json_extract(owner.event_json, '$.type') != 'thread.turn-steer-requested'
+            AND (owner.state IN ('sending', 'ambiguous') OR
+              (owner.state = 'accepted' AND owner.reservation_released_at IS NULL
+                AND NOT EXISTS (SELECT 1 FROM projection_turns AS t WHERE t.thread_id = owner.thread_id AND t.turn_id = owner.provider_turn_id AND t.completed_at IS NOT NULL)
+                AND NOT EXISTS (SELECT 1 FROM projection_thread_sessions AS s WHERE s.thread_id = owner.thread_id AND s.status = 'stopped')))
+        ))`;
+
+const deliveryFifoAvailable = `(json_extract(candidate.event_json, '$.type') = 'thread.turn-steer-requested' OR NOT EXISTS (
+          SELECT 1 FROM provider_turn_deliveries AS earlier
+          WHERE earlier.thread_id = candidate.thread_id
+            AND earlier.state = 'pending'
+            AND (earlier.created_at < candidate.created_at OR
+              (earlier.created_at = candidate.created_at AND earlier.rowid < candidate.rowid))
+        ))`;
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const select = (where: string) =>
@@ -31,7 +54,7 @@ const make = Effect.gen(function* () {
     SELECT
       delivery_id AS "deliveryId", thread_id AS "threadId", command_id AS "commandId",
       message_id AS "messageId", state, provider_turn_id AS "providerTurnId", attempt,
-      pre_send_turn_ids_json AS "preSendTurnIds", event_json AS "event",
+      acceptance_receipt_json AS "acceptanceReceipt", attempt_id AS "attemptId", history_evidence_json AS "historyEvidence", pre_send_turn_ids_json AS "preSendTurnIds", event_json AS "event",
       error_code AS "errorCode", error_detail AS "errorDetail", usage_limit_json AS "usageLimit", certainty,
       not_before AS "notBefore", created_at AS "createdAt", updated_at AS "updatedAt",
       outcome_projected_at AS "outcomeProjectedAt"
@@ -39,20 +62,58 @@ const make = Effect.gen(function* () {
   `);
   const decodeRows = Schema.decodeUnknownEffect(Schema.Array(DbRow));
 
+  const listCandidateIds: ProviderTurnDeliveryRepositoryShape["listCandidateIds"] = ({
+    afterThreadId,
+    limit,
+  }) =>
+    sql
+      .unsafe<{ deliveryId: string; threadId: string }>(
+        `
+      SELECT delivery_id AS "deliveryId", thread_id AS "threadId"
+      FROM provider_turn_deliveries AS candidate
+      WHERE state = 'pending' AND thread_id > ?
+        AND (not_before IS NULL OR not_before <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        AND ${deliveryOwnershipAvailable}
+        AND ${deliveryFifoAvailable}
+        AND NOT EXISTS (
+          SELECT 1 FROM provider_turn_deliveries AS steer
+          WHERE steer.thread_id = candidate.thread_id AND steer.state = 'pending'
+            AND json_extract(steer.event_json, '$.type') = 'thread.turn-steer-requested'
+            AND (json_extract(candidate.event_json, '$.type') != 'thread.turn-steer-requested'
+              OR steer.created_at < candidate.created_at
+              OR (steer.created_at = candidate.created_at AND steer.rowid < candidate.rowid))
+        )
+      ORDER BY thread_id LIMIT ?`,
+        [afterThreadId, Math.min(64, Math.max(1, limit))],
+      )
+      .pipe(
+        Effect.flatMap(
+          Schema.decodeUnknownEffect(
+            Schema.Array(
+              Schema.Struct({
+                deliveryId: ProviderTurnDelivery.fields.deliveryId,
+                threadId: ProviderTurnDelivery.fields.threadId,
+              }),
+            ),
+          ),
+        ),
+        Effect.mapError(mapError("ProviderTurnDelivery.listCandidateIds")),
+      );
+
   const listActionable = select(
-    "WHERE state = 'pending' AND (not_before IS NULL OR julianday(not_before) <= julianday('now')) ORDER BY created_at",
+    "WHERE state = 'pending' AND (not_before IS NULL OR julianday(not_before) <= julianday('now')) ORDER BY created_at LIMIT 64",
   ).pipe(
     Effect.flatMap(decodeRows),
     Effect.mapError(mapError("ProviderTurnDelivery.listActionable")),
   );
 
-  const listSending = select("WHERE state = 'sending' ORDER BY created_at").pipe(
+  const listSending = select("WHERE state = 'sending' ORDER BY created_at LIMIT 64").pipe(
     Effect.flatMap(decodeRows),
     Effect.mapError(mapError("ProviderTurnDelivery.listSending")),
   );
 
   const listUnprojectedTerminal = select(
-    "WHERE state IN ('accepted', 'rejected', 'ambiguous') AND outcome_projected_at IS NULL ORDER BY updated_at",
+    "WHERE state IN ('accepted', 'rejected', 'ambiguous') AND outcome_projected_at IS NULL ORDER BY updated_at LIMIT 64",
   ).pipe(
     Effect.flatMap(decodeRows),
     Effect.mapError(mapError("ProviderTurnDelivery.listUnprojectedTerminal")),
@@ -64,7 +125,7 @@ const make = Effect.gen(function* () {
         `
             SELECT delivery_id AS "deliveryId", thread_id AS "threadId", command_id AS "commandId",
               message_id AS "messageId", state, provider_turn_id AS "providerTurnId", attempt,
-              pre_send_turn_ids_json AS "preSendTurnIds", event_json AS "event",
+              acceptance_receipt_json AS "acceptanceReceipt", attempt_id AS "attemptId", history_evidence_json AS "historyEvidence", pre_send_turn_ids_json AS "preSendTurnIds", event_json AS "event",
               error_code AS "errorCode", error_detail AS "errorDetail", usage_limit_json AS "usageLimit", certainty,
               not_before AS "notBefore", created_at AS "createdAt", updated_at AS "updatedAt",
               outcome_projected_at AS "outcomeProjectedAt"
@@ -88,7 +149,7 @@ const make = Effect.gen(function* () {
         `SELECT delivery_id AS "deliveryId", thread_id AS "threadId",
              command_id AS "commandId", message_id AS "messageId", state,
              provider_turn_id AS "providerTurnId", attempt,
-             pre_send_turn_ids_json AS "preSendTurnIds", event_json AS "event",
+             acceptance_receipt_json AS "acceptanceReceipt", attempt_id AS "attemptId", history_evidence_json AS "historyEvidence", pre_send_turn_ids_json AS "preSendTurnIds", event_json AS "event",
              error_code AS "errorCode", error_detail AS "errorDetail", usage_limit_json AS "usageLimit", certainty,
              not_before AS "notBefore", created_at AS "createdAt", updated_at AS "updatedAt",
              outcome_projected_at AS "outcomeProjectedAt"
@@ -119,7 +180,7 @@ const make = Effect.gen(function* () {
         `SELECT delivery_id AS "deliveryId", thread_id AS "threadId",
              command_id AS "commandId", message_id AS "messageId", state,
              provider_turn_id AS "providerTurnId", attempt,
-             pre_send_turn_ids_json AS "preSendTurnIds", event_json AS "event",
+             acceptance_receipt_json AS "acceptanceReceipt", attempt_id AS "attemptId", history_evidence_json AS "historyEvidence", pre_send_turn_ids_json AS "preSendTurnIds", event_json AS "event",
              error_code AS "errorCode", error_detail AS "errorDetail", usage_limit_json AS "usageLimit", certainty,
              not_before AS "notBefore", created_at AS "createdAt", updated_at AS "updatedAt",
              outcome_projected_at AS "outcomeProjectedAt"
@@ -177,22 +238,47 @@ const make = Effect.gen(function* () {
           Effect.mapError(mapError("ProviderTurnDelivery.getSupersedingPreSendTurnIds")),
         );
 
-  const claim: ProviderTurnDeliveryRepositoryShape["claim"] = (deliveryId, preSendTurnIds) =>
+  const recordDispatchIntent: ProviderTurnDeliveryRepositoryShape["recordDispatchIntent"] = (
+    input,
+  ) =>
+    sql`UPDATE provider_turn_deliveries
+      SET pre_send_turn_ids_json = ${JSON.stringify(input.preSendTurnIds)},
+          history_evidence_json = ${input.historyEvidence ? JSON.stringify(input.historyEvidence) : null}
+      WHERE delivery_id = ${input.deliveryId} AND attempt_id = ${input.attemptId} AND state = 'sending'
+      RETURNING delivery_id`.pipe(
+      Effect.map((rows) => rows.length > 0),
+      Effect.mapError(mapError("ProviderTurnDelivery.recordDispatchIntent")),
+    );
+
+  const claim: ProviderTurnDeliveryRepositoryShape["claim"] = (
+    deliveryId,
+    preSendTurnIds,
+    historyEvidence,
+  ) =>
     Effect.gen(function* () {
       const now = new Date().toISOString();
       const rows = yield* sql.unsafe<Record<string, unknown>>(
         `
-        UPDATE provider_turn_deliveries
-        SET state = 'sending', attempt = attempt + 1, pre_send_turn_ids_json = ?, updated_at = ?
+        UPDATE provider_turn_deliveries AS candidate
+        SET state = 'sending', attempt = attempt + 1, pre_send_turn_ids_json = ?, history_evidence_json = ?, attempt_id = ?, acceptance_receipt_json = NULL, reservation_released_at = NULL, updated_at = ?
         WHERE delivery_id = ? AND state = 'pending'
+          AND (not_before IS NULL OR not_before <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+          AND ${deliveryOwnershipAvailable}
+          AND ${deliveryFifoAvailable}
         RETURNING delivery_id AS "deliveryId", thread_id AS "threadId", command_id AS "commandId",
           message_id AS "messageId", state, provider_turn_id AS "providerTurnId", attempt,
-          pre_send_turn_ids_json AS "preSendTurnIds", event_json AS "event",
+          acceptance_receipt_json AS "acceptanceReceipt", attempt_id AS "attemptId", history_evidence_json AS "historyEvidence", pre_send_turn_ids_json AS "preSendTurnIds", event_json AS "event",
           error_code AS "errorCode", error_detail AS "errorDetail", usage_limit_json AS "usageLimit", certainty,
           not_before AS "notBefore", created_at AS "createdAt", updated_at AS "updatedAt",
           outcome_projected_at AS "outcomeProjectedAt"
       `,
-        [JSON.stringify(preSendTurnIds), now, deliveryId],
+        [
+          JSON.stringify(preSendTurnIds),
+          historyEvidence ? JSON.stringify(historyEvidence) : null,
+          randomUUID(),
+          now,
+          deliveryId,
+        ],
       );
       const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(DbRow))(rows);
       return decoded[0] ?? null;
@@ -202,18 +288,28 @@ const make = Effect.gen(function* () {
     sql
       .withTransaction(
         Effect.gen(function* () {
-          yield* sql`
+          const rows = yield* sql<{ readonly deliveryId: string }>`
       UPDATE provider_turn_deliveries
       SET state = 'accepted', provider_turn_id = ${input.providerTurnId}, certainty = NULL,
+          acceptance_receipt_json = COALESCE(${input.receipt ? JSON.stringify(input.receipt) : null}, acceptance_receipt_json),
           error_code = NULL, error_detail = NULL, usage_limit_json = NULL, not_before = NULL,
           outcome_projected_at = NULL, updated_at = ${new Date().toISOString()}
       WHERE delivery_id = ${input.deliveryId}
         AND state IN ('sending', 'rejected', 'ambiguous')
+        AND (${input.attemptId ?? null} IS NULL OR attempt_id = ${input.attemptId ?? null})
+      RETURNING delivery_id AS "deliveryId"
     `;
+          if (rows.length === 0) return false;
+          // ACP completion can be projected before sendTurn returns its receipt.
+          yield* sql`UPDATE provider_turn_deliveries SET reservation_released_at = ${new Date().toISOString()}
+            WHERE delivery_id = ${input.deliveryId} AND reservation_released_at IS NULL
+              AND EXISTS (SELECT 1 FROM projection_turns t WHERE t.thread_id = provider_turn_deliveries.thread_id
+                AND t.turn_id = ${input.providerTurnId} AND t.completed_at IS NOT NULL)`;
           yield* sql`UPDATE restart_continuations SET provider_turn_id = ${input.providerTurnId} WHERE continuation_id = ${input.deliveryId}`;
+          return true;
         }),
       )
-      .pipe(Effect.asVoid, Effect.mapError(mapError("ProviderTurnDelivery.markAccepted")));
+      .pipe(Effect.mapError(mapError("ProviderTurnDelivery.markAccepted")));
 
   const markRejected: ProviderTurnDeliveryRepositoryShape["markRejected"] = (input) =>
     sql`
@@ -224,7 +320,12 @@ const make = Effect.gen(function* () {
           usage_limit_json = ${input.usageLimit ? JSON.stringify(input.usageLimit) : null},
           outcome_projected_at = NULL, updated_at = ${input.occurredAt ?? new Date().toISOString()}
       WHERE delivery_id = ${input.deliveryId} AND state = 'sending'
-    `.pipe(Effect.asVoid, Effect.mapError(mapError("ProviderTurnDelivery.markRejected")));
+        AND (${input.attemptId ?? null} IS NULL OR attempt_id = ${input.attemptId ?? null})
+      RETURNING delivery_id
+    `.pipe(
+      Effect.map((rows) => rows.length > 0),
+      Effect.mapError(mapError("ProviderTurnDelivery.markRejected")),
+    );
 
   const requeue: ProviderTurnDeliveryRepositoryShape["requeue"] = (input) =>
     sql`
@@ -247,7 +348,7 @@ const make = Effect.gen(function* () {
          RETURNING delivery_id AS "deliveryId", thread_id AS "threadId",
            command_id AS "commandId", message_id AS "messageId", state,
            provider_turn_id AS "providerTurnId", attempt,
-           pre_send_turn_ids_json AS "preSendTurnIds", event_json AS "event",
+           acceptance_receipt_json AS "acceptanceReceipt", attempt_id AS "attemptId", history_evidence_json AS "historyEvidence", pre_send_turn_ids_json AS "preSendTurnIds", event_json AS "event",
            error_code AS "errorCode", error_detail AS "errorDetail", usage_limit_json AS "usageLimit", certainty,
            not_before AS "notBefore", created_at AS "createdAt", updated_at AS "updatedAt",
            outcome_projected_at AS "outcomeProjectedAt"`,
@@ -279,6 +380,8 @@ const make = Effect.gen(function* () {
       `.pipe(Effect.asVoid, Effect.mapError(mapError("ProviderTurnDelivery.markOutcomeProjected")));
 
   return {
+    recordDispatchIntent,
+    listCandidateIds,
     listActionable,
     listSending,
     listUnprojectedTerminal,

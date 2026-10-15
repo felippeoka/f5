@@ -175,15 +175,25 @@ export const ProjectWriteFileInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   relativePath: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_WRITE_FILE_PATH_MAX_LENGTH)),
   contents: Schema.String,
-  expectedContentSha256: Schema.optional(Sha256HexString),
+  condition: Schema.Union([
+    Schema.Struct({ type: Schema.Literal("create") }),
+    Schema.Struct({ type: Schema.Literal("match"), contentSha256: Sha256HexString }),
+  ]),
 });
 export type ProjectWriteFileInput = typeof ProjectWriteFileInput.Type;
 
-export const ProjectWriteFileResult = Schema.Struct({
-  relativePath: TrimmedNonEmptyString,
-  byteLength: NonNegativeInt,
-  contentSha256: Sha256HexString,
-});
+export const ProjectWriteFileResult = Schema.Union([
+  Schema.Struct({
+    relativePath: TrimmedNonEmptyString,
+    byteLength: NonNegativeInt,
+    contentSha256: Sha256HexString,
+  }),
+  Schema.Struct({
+    conflict: Schema.Literal(true),
+    relativePath: TrimmedNonEmptyString,
+    currentContentSha256: Schema.NullOr(Sha256HexString),
+  }),
+]);
 export type ProjectWriteFileResult = typeof ProjectWriteFileResult.Type;
 
 export const PROJECT_READ_FILE_MAX_SIZE = 2 * 1024 * 1024; // 2MB
@@ -195,6 +205,8 @@ export const ProjectReadFileInput = Schema.Struct({
 export type ProjectReadFileInput = typeof ProjectReadFileInput.Type;
 
 export const ProjectReadFileResult = Schema.Struct({
+  workspaceIdentity: Schema.optional(Schema.String),
+  fileIdentity: Schema.optional(Schema.String),
   relativePath: TrimmedNonEmptyString,
   contents: Schema.String,
   byteLength: NonNegativeInt,

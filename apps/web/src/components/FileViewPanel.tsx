@@ -1,3 +1,12 @@
+import {
+  editorDraftRecoveryAvailable,
+  editorDrafts,
+  editorBranch,
+  editorFileKey,
+  type EditorDraft,
+} from "../editorDrafts";
+import { useProfileState } from "../profileState";
+import { useServerMutationsAvailable } from "../wsConnectionState";
 import { FileBreadcrumbs } from "./FileBreadcrumbs";
 import { WorkspaceMediaView, workspaceMediaKind } from "./WorkspaceMediaView";
 import ChatMarkdown from "./ChatMarkdown";
@@ -142,11 +151,27 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveConflict, setSaveConflict] = useState(false);
+  const profileId = useProfileState((state) => state.active?.id ?? "default");
+  const mutationsAvailable = useServerMutationsAvailable();
+  const [draftRecoveryError, setDraftRecoveryError] = useState<string | null>(null);
+  const [recoverableDrafts, setRecoverableDrafts] = useState<EditorDraft[]>([]);
+  const [draftReady, setDraftReady] = useState(false);
+  const draftRevisionRef = useRef(0);
+  const durableDraftRef = useRef<EditorDraft | null>(null);
+  const draftBranchRef = useRef<string | null>(null);
+  const durableFileKey = editorFileKey(
+    profileId,
+    fileQuery.data?.workspaceIdentity ?? workspaceRoot ?? "",
+    fileQuery.data?.fileIdentity ?? filePath ?? "",
+  );
+  const durableKeyRef = useRef(durableFileKey);
+  durableKeyRef.current = durableFileKey;
+
   const canEditFile =
     Boolean(workspaceRoot && filePath && canDisplayFileInPanel) &&
     Boolean(fileQuery.data?.contentSha256) &&
     fileQuery.data?.truncated === false;
-  const fileKey = JSON.stringify([workspaceRoot, filePath]);
+  const fileKey = JSON.stringify([profileId, workspaceRoot, filePath]);
   const fileScopeRef = useRef({ key: fileKey });
   if (fileScopeRef.current.key !== fileKey) fileScopeRef.current = { key: fileKey };
   const fileScope = fileScopeRef.current;
@@ -198,6 +223,89 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
     }
   }, [fileQuery.data?.truncated]);
 
+  useEffect(() => {
+    let disposed = false;
+    durableDraftRef.current = null;
+    draftBranchRef.current = null;
+    setDraftReady(false);
+    setRecoverableDrafts([]);
+    if (!workspaceRoot || !filePath) return;
+    void editorBranch(profileId)
+      .then(async (branchId) => {
+        const drafts = await editorDrafts.list(durableFileKey, true);
+        if (disposed) return;
+        draftBranchRef.current = branchId;
+        if (!editorDraftRecoveryAvailable())
+          setDraftRecoveryError(
+            "Persistent draft recovery is unavailable. These drafts are only held in this window.",
+          );
+        // Every stored branch is offered explicitly. Even this window's branch
+        // may be based on an older version of the file after reload.
+        draftRevisionRef.current = Math.max(
+          0,
+          ...drafts.filter((draft) => draft.branchId === branchId).map((draft) => draft.revision),
+        );
+        setRecoverableDrafts(drafts.filter((draft) => draft.saveStatus !== "saved"));
+        setDraftReady(true);
+      })
+      .catch(() => {
+        if (!disposed) {
+          setDraftRecoveryError(
+            "Draft recovery is unavailable. Keep this window open or copy your edits before closing it.",
+          );
+          setDraftReady(true);
+        }
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [durableFileKey, profileId, workspaceRoot, filePath]);
+
+  useEffect(() => {
+    const discover = (event: Event) => {
+      const detail = (event as CustomEvent<{ fileKey: string; branch: string }>).detail;
+      if (detail.fileKey !== durableFileKey || detail.branch === draftBranchRef.current) return;
+      void editorDrafts
+        .list(durableFileKey)
+        .then((drafts) => {
+          if (durableKeyRef.current === durableFileKey)
+            setRecoverableDrafts(
+              drafts.filter((draft) => draft.branchId !== draftBranchRef.current),
+            );
+        })
+        .catch(() => setDraftRecoveryError("Concurrent draft discovery is unavailable."));
+    };
+    window.addEventListener("f5-editor-draft", discover);
+    return () => window.removeEventListener("f5-editor-draft", discover);
+  }, [durableFileKey]);
+
+  const editDraft = (text: string) => {
+    setDraftContents(text);
+    const base = draftBaseRef.current;
+    if (!base?.hash) return;
+    const branchId = draftBranchRef.current ?? crypto.randomUUID();
+    draftBranchRef.current = branchId;
+    const record: EditorDraft = {
+      key: JSON.stringify([durableFileKey, branchId]),
+      fileKey: durableFileKey,
+      branchId,
+      revision: ++draftRevisionRef.current,
+      text,
+      baseHash: base.hash,
+      baseContents: base.contents,
+      saveStatus: "dirty",
+      updatedAt: Date.now(),
+    };
+    durableDraftRef.current = record;
+    void editorDrafts
+      .put(record)
+      .catch(() =>
+        setDraftRecoveryError(
+          "Draft recovery is unavailable. Your edits remain in this window; copy them before closing it.",
+        ),
+      );
+  };
+
   const saveDraft = useCallback(async () => {
     if (
       !mountedRef.current ||
@@ -209,7 +317,8 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
       fileQuery.data.truncated ||
       !dirty ||
       saving ||
-      saveConflict
+      saveConflict ||
+      !mutationsAvailable
     ) {
       return;
     }
@@ -221,6 +330,8 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
     }
 
     const savedContents = draftContents;
+    const savedDraft = durableDraftRef.current;
+    const savedDraftFileKey = durableFileKey;
     const base = draftBaseRef.current;
     if (base?.key !== fileKey || !base.hash) return;
     if (base.hash !== fileQuery.data.contentSha256) {
@@ -240,8 +351,27 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
         cwd: workspaceRoot,
         relativePath: requestedFilePath,
         contents: savedContents,
-        expectedContentSha256,
+        condition: { type: "match", contentSha256: expectedContentSha256! },
       });
+      if ("conflict" in result)
+        throw new Error(
+          `Workspace file changed before save. Current hash: ${result.currentContentSha256 ?? "unavailable"}`,
+        );
+      if (savedDraft) {
+        await editorDrafts.acknowledge(savedDraft, result.contentSha256).catch(() => {
+          setDraftRecoveryError("The file was saved, but its recovery draft could not be cleared.");
+        });
+        if (durableKeyRef.current === savedDraftFileKey && durableDraftRef.current) {
+          if (durableDraftRef.current.revision === savedDraft.revision)
+            durableDraftRef.current = null;
+          else
+            durableDraftRef.current = {
+              ...durableDraftRef.current,
+              baseContents: savedContents,
+              baseHash: result.contentSha256,
+            };
+        }
+      }
       if (!mountedRef.current || fileScopeRef.current !== fileScope) {
         // The RPC may already have reached disk. Refresh its cache without installing
         // an obsolete response into a new visit to the same file.
@@ -262,6 +392,8 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
         setSaveConflict(false);
       }
       const savedData = {
+        workspaceIdentity: fileQuery.data?.workspaceIdentity,
+        fileIdentity: fileQuery.data?.fileIdentity,
         relativePath: result.relativePath,
         contents: savedContents,
         byteLength: result.byteLength,
@@ -290,6 +422,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
     }
   }, [
     dirty,
+    durableFileKey,
     draftContents,
     fileKey,
     fileScope,
@@ -297,6 +430,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
     fileQuery.data,
     queryClient,
     saveConflict,
+    mutationsAvailable,
     saving,
     workspaceRoot,
   ]);
@@ -449,7 +583,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
           size="icon-xs"
           variant={editing ? "secondary" : "outline"}
           onClick={() => setEditing((current) => !current)}
-          disabled={!canEditFile}
+          disabled={!canEditFile || !draftReady}
           aria-label={editing ? "View rendered file" : "Edit file"}
         >
           <PencilIcon className="size-3.5" />
@@ -459,7 +593,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
             size="icon-xs"
             variant="outline"
             onClick={() => void saveDraft()}
-            disabled={!dirty || saving || saveConflict}
+            disabled={!dirty || saving || saveConflict || !mutationsAvailable}
             aria-label="Save file"
           >
             {saving ? (
@@ -567,6 +701,83 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
               </div>
             </div>
           ) : null}
+          {draftRecoveryError ? (
+            <p role="alert" className="mb-2 text-xs text-destructive">
+              {draftRecoveryError}
+            </p>
+          ) : null}
+          {recoverableDrafts.length > 0 ? (
+            <div className="mb-2 space-y-2 rounded border border-warning/30 p-2 text-xs">
+              <p>Recoverable editor drafts. Other windows may still be editing these branches.</p>
+              {recoverableDrafts.map((draft) => (
+                <div key={draft.key} className="flex items-center gap-2">
+                  <span>
+                    Revision {draft.revision} · {new Date(draft.updatedAt).toLocaleString()}
+                  </span>
+                  <Button
+                    size="xs"
+                    onClick={() => {
+                      // Recover into this window's branch; preserve the source branch.
+                      const branchId =
+                        durableDraftRef.current && durableDraftRef.current.text !== draft.text
+                          ? crypto.randomUUID()
+                          : (draftBranchRef.current ?? crypto.randomUUID());
+                      draftBranchRef.current = branchId;
+                      const recovered = {
+                        ...draft,
+                        branchId,
+                        key: JSON.stringify([durableFileKey, branchId]),
+                        revision:
+                          Math.max(
+                            draftRevisionRef.current,
+                            durableDraftRef.current?.revision ?? 0,
+                            draft.revision,
+                          ) + 1,
+                      };
+                      draftRevisionRef.current = recovered.revision;
+                      durableDraftRef.current = recovered;
+                      draftBaseRef.current = {
+                        key: fileKey,
+                        hash: draft.baseHash,
+                        contents: draft.baseContents,
+                      };
+                      setDraftContents(draft.text);
+                      setEditing(true);
+                      const conflict = fileQuery.data?.contentSha256 !== draft.baseHash;
+                      setSaveConflict(conflict);
+                      setSaveError(
+                        conflict
+                          ? "The file changed since this draft was saved. Your base and draft are preserved."
+                          : null,
+                      );
+                      setRecoverableDrafts([]);
+                      void editorDrafts
+                        .put(recovered)
+                        .catch(() => setDraftRecoveryError("Draft recovery is unavailable."));
+                    }}
+                  >
+                    Recover
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => {
+                      void editorDrafts
+                        .discard(draft.key, draft.revision)
+                        .then(() =>
+                          setRecoverableDrafts((all) =>
+                            all.filter((entry) => entry.key !== draft.key),
+                          ),
+                        )
+                        .catch(() => setDraftRecoveryError("Could not discard the draft."));
+                    }}
+                  >
+                    Discard
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : null}
           {saveError ? (
             <div className="mb-2 flex items-start justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
               <div className="min-w-0">
@@ -602,7 +813,7 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
                 unstyled
                 spellCheck={false}
                 value={draftContents}
-                onChange={(event) => setDraftContents(event.currentTarget.value)}
+                onChange={(event) => editDraft(event.currentTarget.value)}
                 className="min-h-0 flex-1 rounded-none border-0 bg-background/40 shadow-none [&_[data-slot=textarea]]:h-full [&_[data-slot=textarea]]:min-h-0 [&_[data-slot=textarea]]:resize-none [&_[data-slot=textarea]]:font-mono [&_[data-slot=textarea]]:text-xs [&_[data-slot=textarea]]:leading-5"
                 aria-label="File source editor"
               />

@@ -51,7 +51,10 @@ export function ComposerPrimaryAction(props: {
     void send.onSend(undefined, intent);
   const onInterrupt = () => void send.onInterrupt();
   const planActionDisabled =
-    isPendingTurnDispatchBlocked || isConnecting || isComposerImageImportPending;
+    send.mutationsUnavailable ||
+    isPendingTurnDispatchBlocked ||
+    isConnecting ||
+    isComposerImageImportPending;
   const planActionLabel = (idleLabel: string) =>
     isComposerImageImportPending
       ? "Preparing..."
@@ -108,6 +111,7 @@ export function ComposerPrimaryAction(props: {
           hasSendableContent={send.composerSendState.hasSendableContent}
           dispatchBlocked={isPendingTurnDispatchBlocked}
           connecting={isConnecting}
+          unavailable={send.mutationsUnavailable ?? false}
           busy={isComposerSendBusy}
           busyLabel={composerSendBusyLabel}
           {...queueProps}
@@ -180,6 +184,7 @@ export function ComposerPrimaryAction(props: {
             hasSendableContent={send.composerSendState.hasSendableContent}
             dispatchBlocked={isPendingTurnDispatchBlocked}
             connecting={isConnecting}
+            unavailable={send.mutationsUnavailable ?? false}
             busy={isComposerSendBusy || isPreparingWorktree || revertInProgress}
             busyLabel={
               isPreparingWorktree

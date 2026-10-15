@@ -1,3 +1,6 @@
+import { rpcBusyTotal } from "./observability/Metrics";
+import { rpcLane, RpcAdmission } from "@t3tools/shared/rpcScheduling";
+import { writeWorkspaceFile } from "./WorkspaceFileWriter";
 import {
   agentComputerUsePush,
   ComputerAutomationBroker,
@@ -4286,66 +4289,25 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.projectsWriteFile: {
         const body = stripRequestTag(request.body);
-        const target = yield* resolveWorkspaceWritePath({
-          workspaceRoot: body.cwd,
-          relativePath: body.relativePath,
-          path,
-          fileSystem,
-        });
-        const targetStatResult = yield* Effect.exit(fileSystem.stat(target.absolutePath));
-        if (body.expectedContentSha256) {
-          if (
-            Exit.isFailure(targetStatResult) ||
-            targetStatResult.value.type === "Directory" ||
-            Number(targetStatResult.value.size) > PROJECT_READ_FILE_MAX_SIZE
-          ) {
-            return yield* new RouteRequestError({
-              message: `Workspace file changed before save: ${target.relativePath}. Reload file before saving.`,
-            });
-          }
-          const existingBytes = yield* fileSystem.readFile(target.absolutePath).pipe(
-            Effect.mapError(
-              () =>
-                new RouteRequestError({
-                  message: `Workspace file changed before save: ${target.relativePath}. Reload file before saving.`,
-                }),
+        const result = yield* Effect.tryPromise({
+          try: () =>
+            writeWorkspaceFile(
+              body,
+              NodePath.join(
+                serverConfig.profilesRoot ?? NodePath.dirname(serverConfig.stateDir),
+                "locks",
+              ),
             ),
-          );
-          const existingHash = sha256Hex(existingBytes);
-          if (existingHash !== body.expectedContentSha256) {
-            return yield* new RouteRequestError({
-              message: `Workspace file changed before save: ${target.relativePath}. Reload file before saving.`,
-            });
-          }
-        }
-        yield* fileSystem
-          .makeDirectory(path.dirname(target.absolutePath), { recursive: true })
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new RouteRequestError({
-                  message: `Failed to prepare workspace path: ${String(cause)}`,
-                }),
-            ),
-          );
-        yield* fileSystem.writeFileString(target.absolutePath, body.contents).pipe(
-          Effect.mapError(
-            (cause) =>
-              new RouteRequestError({
-                message: `Failed to write workspace file: ${String(cause)}`,
-              }),
-          ),
-        );
-        clearWorkspaceIndexCache(body.cwd, {
-          destroySearchIndex:
-            Exit.isFailure(targetStatResult) || targetStatResult.value.type !== "File",
+          catch: (cause) =>
+            new RouteRequestError({
+              message: cause instanceof Error ? cause.message : String(cause),
+            }),
         });
-        const writtenBytes = Buffer.from(body.contents, "utf8");
-        return {
-          relativePath: target.relativePath,
-          byteLength: writtenBytes.byteLength,
-          contentSha256: sha256Hex(writtenBytes),
-        };
+        if (!("conflict" in result))
+          clearWorkspaceIndexCache(body.cwd, {
+            destroySearchIndex: body.condition.type === "create",
+          });
+        return result;
       }
 
       case WS_METHODS.attachmentsCloneToUpload: {
@@ -4495,6 +4457,8 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             }),
         });
         return {
+          workspaceIdentity: yield* fileSystem.realPath(body.cwd),
+          fileIdentity: target.absolutePath,
           relativePath: target.relativePath,
           contents,
           byteLength,
@@ -4996,6 +4960,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           accountGeneration:
             "accountGeneration" in request.body ? request.body.accountGeneration : undefined,
         });
+
+      case WS_METHODS.terminalSnapshot:
+        return yield* terminalManager.snapshot(stripRequestTag(request.body));
 
       case WS_METHODS.terminalOpen: {
         const body = stripRequestTag(request.body);
@@ -6231,6 +6198,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     }
   });
 
+  const rpcAdmissions = new WeakMap<WebSocket, RpcAdmission>();
   const handleMessage = Effect.fnUntraced(function* (ws: WebSocket, raw: unknown) {
     const sendWsResponse = (response: WsResponseMessage) =>
       encodeWsResponse(response).pipe(
@@ -6261,10 +6229,25 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     }
 
     const method = request.success.body._tag;
+    const admission = rpcAdmissions.get(ws) ?? new RpcAdmission();
+    rpcAdmissions.set(ws, admission);
+    const release = admission.claim(rpcLane(request.success.body), Buffer.byteLength(messageText));
+    if (!release) {
+      yield* increment(rpcBusyTotal, { lane: rpcLane(request.success.body) });
+      return yield* sendWsResponse({
+        id: request.success.id,
+        error: {
+          code: "RpcBusy",
+          retryable: true,
+          retryAfterMs: 250,
+          message: "This request lane is busy. Retry shortly.",
+        },
+      });
+    }
     const result = yield* Effect.exit(
       observeRpcEffect(
         method,
-        routeRequest(ws, request.success),
+        routeRequest(ws, request.success).pipe(Effect.ensuring(Effect.sync(release))),
         rpcTraceAttributesForRequest(request.success),
       ).pipe(
         Effect.withSpan(`rpc.${method}`, {
@@ -6432,6 +6415,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return;
       }
       disconnectRecorded = true;
+      rpcAdmissions.delete(ws);
       const activeContentSearches = activeContentSearchesByClient.get(ws);
       activeContentSearchesByClient.delete(ws);
       if (activeContentSearches) {
