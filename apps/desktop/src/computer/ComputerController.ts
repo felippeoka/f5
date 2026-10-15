@@ -307,13 +307,25 @@ export class ComputerController {
     const settle = () => {
       this.nativeWork.delete(entry);
     };
+    // A timeout or lost reply is not completion: only a drain proves the helper finished. A
+    // generation still stuck in its app stays excluded and is drained again; a retired helper
+    // (drain failure, or a replacement's hello clearing the set) ends the wait.
+    const drainUntilDone = async (): Promise<void> => {
+      while (this.nativeWork.has(entry)) {
+        try {
+          await this.helper.drain!(entry.generation, 5000);
+          break;
+        } catch (cause) {
+          const failure = computerError(cause);
+          if (failure._tag !== "TargetBlocked") break;
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+      settle();
+    };
     native.then(settle, (error: unknown) => {
-      // A timeout or lost reply is not completion: only a drain proves the helper finished.
       if (computerError(error)._tag === "OutcomeUnknown" && this.capable() && this.helper.drain)
-        void this.helper
-          .drain(entry.generation, 5000)
-          .catch(() => undefined)
-          .finally(settle);
+        void drainUntilDone();
       else settle();
     });
   }
@@ -929,9 +941,12 @@ export class ComputerController {
       ...stale.map((holder) => holder.executionGeneration),
       ...[...this.nativeWork].filter((entry) => entry.key === key).map((entry) => entry.generation),
     ]);
+    // A stuck generation reports foreground-busy; the remaining wait below decides the result.
     if (this.capable())
       await Promise.all(
-        [...generations].map((generation) => this.helper.drain?.(generation, 5000)),
+        [...generations].map((generation) =>
+          this.helper.drain?.(generation, 5000).catch(() => undefined),
+        ),
       );
     if (!(await this.awaitNative((entry) => entry.key === key, 5500)))
       throw new ComputerControlError({ _tag: "OutcomeUnknown" });

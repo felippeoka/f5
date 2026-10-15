@@ -1986,15 +1986,20 @@ DispatchQueue.global(qos: .userInteractive).async {
         permits.retire(generation)
         releaseQueue.async { releaseHeldInput(where: { $0.generation == generation }) }
       case "drain":
-        // Acknowledged once every earlier mutation on that generation has finished.
+        // Acknowledged once every earlier mutation on that generation has finished. A
+        // generation stuck inside another app reports `drained: false` instead of going silent,
+        // so Electron can wait on that one thread rather than kill the shared helper.
         if let id = message["requestId"] {
           DispatchQueue.global().async {
             let deadline = ProcessInfo.processInfo.systemUptime + 5
             while locked({ inFlightByGeneration[generation] ?? 0 }) > 0 {
-              if ProcessInfo.processInfo.systemUptime >= deadline { return }
+              if ProcessInfo.processInfo.systemUptime >= deadline {
+                emit(["type": "response", "requestId": id, "result": ["drained": false]])
+                return
+              }
               Thread.sleep(forTimeInterval: 0.01)
             }
-            emit(["type": "response", "requestId": id, "result": [:]])
+            emit(["type": "response", "requestId": id, "result": ["drained": true]])
           }
         }
       case "cancel":

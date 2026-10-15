@@ -32,8 +32,12 @@ import {
 } from "@t3tools/shared/computerExecution";
 import { ServerConfig } from "../config";
 
-/** Above Electron's 300 s consent and 30 s idle wait, below the 340 s tool transport. */
-export const COMPUTER_TAKEOVER_HOST_TIMEOUT_MS = 335_000;
+/**
+ * Electron decides every takeover: its worst case is 300 s consent + 30 s idle window + up to
+ * 5 s drain and 1 s readiness per arming attempt. This sits well above that and below the
+ * tool transport timeout.
+ */
+export const COMPUTER_TAKEOVER_HOST_TIMEOUT_MS = 360_000;
 import { ServerSettingsService } from "../serverSettings";
 import { writeFileStringAtomically } from "../atomicWrite";
 import { resolveAgentBrowserPolicy, type AgentBrowserPolicy } from "../mcp/browserAccess";
@@ -131,6 +135,11 @@ export class ComputerAutomationBrokerRuntime {
   readonly pause: AgentControlPause;
   readonly access: ComputerAccessService;
   private readonly bindings = new Map<string, ComputerBinding>();
+  /**
+   * Last policy revision per thread, kept after a session is released. Electron's minimum
+   * revision per thread only grows, so a replacement session must continue from here.
+   */
+  private readonly threadRevisions = new Map<string, number>();
   /** Admission barrier: while closed, new invocations wait for the policy transition. */
   private admissionsClosed = 0;
   private admissionsReopened: Promise<void> = Promise.resolve();
@@ -316,7 +325,8 @@ export class ComputerAutomationBrokerRuntime {
     const previous = this.bindings.get(threadId);
     if (previous?.generation === generation) return;
     if (previous) this.releaseSession(threadId, previous.generation);
-    this.bindings.set(threadId, { generation, provider, policyRevision: 1 });
+    const policyRevision = Math.max(1, this.threadRevisions.get(threadId) ?? 0);
+    this.bindings.set(threadId, { generation, provider, policyRevision });
   }
   /** Lease holders changed on the desktop: track takeovers and clear stale observations. */
   private leasesUpdated(): void {
@@ -892,8 +902,21 @@ export class ComputerAutomationBrokerRuntime {
       });
     const app = matches[0]!;
     this.access.require(threadId, app.appId, "click");
-    if (!this.access.backgroundApproved(threadId))
-      throw new ComputerControlError({ _tag: "NotGranted", needed: "click" });
+    // A first action may be a click: ask for the session approval here rather than dead-ending
+    // the agent, which has no other tool that grants it.
+    if (!this.access.backgroundApproved(threadId)) {
+      await this.access.requestAccess(
+        threadId,
+        ctx.turnId,
+        [],
+        "Allow this agent session to control apps you approve, while you work elsewhere?",
+        "session-actions",
+        false,
+        true,
+      );
+      if (!this.access.backgroundApproved(threadId))
+        throw new ComputerControlError({ _tag: "NotGranted", needed: "click" });
+    }
     if (binding.holder?.scope.kind === "takeover" && binding.holder.scope.appId === app.appId)
       return { foreground: true, appId: app.appId, name: app.name };
     const revision = binding.policyRevision;
@@ -1131,6 +1154,10 @@ export class ComputerAutomationBrokerRuntime {
       data: { threadId, grantVersion, grants: [] },
     });
     this.access.clearSession(threadId, generation);
+    this.threadRevisions.delete(threadId);
+    this.threadRevisions.set(threadId, binding.policyRevision);
+    if (this.threadRevisions.size > 4096)
+      this.threadRevisions.delete(this.threadRevisions.keys().next().value!);
     this.bindings.delete(threadId);
     for (const key of this.endedTurns)
       if (key.startsWith(`${generation}\0`)) this.endedTurns.delete(key);

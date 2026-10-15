@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ComputerHostChannel } from "./ComputerHostChannel";
 import type { ComputerController } from "./ComputerController";
 import { ComputerLeaseAuthority } from "./ComputerLeaseAuthority";
-function setup(certified = false) {
+function setup(certified = false, advertiseBackground?: boolean) {
   const controller = {
     disconnect: vi.fn(),
     setPaused: vi.fn(),
@@ -24,7 +24,10 @@ function setup(certified = false) {
     vi.fn(),
     { certified: () => certified },
     undefined,
-    { background: () => ({ available: true }) },
+    {
+      background: () => ({ available: true }),
+      ...(advertiseBackground !== undefined ? { advertiseBackground } : {}),
+    },
   );
   const process = Object.assign(new EventEmitter(), {
     connected: true,
@@ -306,6 +309,14 @@ describe("background capability negotiation", () => {
     h.hello();
     expect(sent(h).map((message) => message.type)).toEqual(["status", "leaseChanged"]);
     expect(sent(h)[0]).toEqual({ type: "status", status: { available: true } });
+    h.process.emit("message", { type: "leaseAcquire", requestId: "bg", holder: appHolder });
+    expect(h.process.disconnect).toHaveBeenCalled();
+  });
+  it("never advertises background while the preview gate is closed", () => {
+    const h = setup(false, false);
+    h.hello(["background-ax-v1"]);
+    // A capable backend still gets the legacy protocol: no background path runs.
+    expect(sent(h).map((message) => message.type)).toEqual(["status", "leaseChanged"]);
     h.process.emit("message", { type: "leaseAcquire", requestId: "bg", holder: appHolder });
     expect(h.process.disconnect).toHaveBeenCalled();
   });

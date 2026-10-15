@@ -338,7 +338,11 @@ fail with the reason (`unsupported-platform`, `peer-capability`, `preview-off`,
 Peers negotiate `background-ax-v1` without changing protocol version 1: the backend hello
 lists capabilities, Electron answers with `hostCapabilities`, and the helper hello lists its
 own (empty unless built with background support). A legacy peer on any hop keeps the thread
-foreground-only and receives only the legacy single-holder `leaseChanged` message.
+foreground-only and receives only the legacy single-holder `leaseChanged` message. Electron
+answers with the capability only while the background preview gate is open, so with the gate
+closed every user stays on that legacy protocol and no background path (receipts, policy
+revisions, `observationInvalidate`, execution states) runs. A thread's policy revision keeps
+increasing across provider-session replacement, matching Electron's per-thread minimum.
 
 Leases have a scope: `foreground`, `app` (background, one app) or `takeover` (foreground for
 one app, bound to a native approval receipt). One lease per thread; several threads may hold
@@ -390,7 +394,10 @@ Interruptions before dispatch report `Interrupted`; after dispatch, `OutcomeUnkn
 puts the thread into recovery until the user resumes locally. This covers cancellation,
 timeouts and helper loss alike, and partially typed text. A dispatched mutation keeps
 excluding conflicting scopes (including Chrome) after its lease is released, until the helper
-answers or a drain confirms. When the helper confirmed the OS action before an optional
+answers or a drain confirms. A generation still stuck in its app after the helper's 5 s drain
+bound reports `drained: false`: that work stays excluded and is drained again, a takeover
+gets `foreground-busy`, and the shared helper is retired only if it stops answering
+altogether. When the helper confirmed the OS action before an optional
 screenshot, a later stop keeps `actionCompleted: true` and reports only `screenshotError`.
 Only AX errors that prove nothing was written fall back to `ForegroundRequired
 typing-unsupported`. Screenshots finishing after an invalidation are discarded and

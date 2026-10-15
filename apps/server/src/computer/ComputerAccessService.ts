@@ -133,9 +133,11 @@ export class ComputerAccessService {
       apps: [],
     };
     return new Promise((resolve) => {
+      // Longer than Electron's 300 s takeover consent timer: Electron decides, so an Allow
+      // clicked near its deadline is never denied here first.
       const timer = setTimeout(
         () => this.deny(request.requestId),
-        this.options.timeoutMs ?? 300_000,
+        this.options.timeoutMs ?? 310_000,
       );
       this.pending.set(request.requestId, {
         request,

@@ -301,6 +301,27 @@ describe("background computer control", () => {
       h.controller.close();
     }
   });
+  it("keeps a stuck generation excluded and drains it again instead of retiring the helper", async () => {
+    const h = make();
+    const { ComputerControlError } = await import("@t3tools/shared/computerControl");
+    h.request.mockRejectedValueOnce(new ComputerControlError({ _tag: "OutcomeUnknown" }));
+    vi.mocked(h.helper.drain!).mockRejectedValueOnce(
+      new ComputerControlError({ _tag: "TargetBlocked", kind: "foreground-busy" }),
+    );
+    try {
+      const a = h.controller.acquire(holderFor("a", "com.apple.calculator"));
+      await expect(h.controller.invoke(envelope("stuck", a))).rejects.toMatchObject({
+        error: { _tag: "OutcomeUnknown" },
+      });
+      const scope = { kind: "app" as const, appId: "com.apple.calculator" };
+      await vi.waitFor(() => expect(h.helper.drain).toHaveBeenCalledTimes(1));
+      expect(h.controller.nativeWorkConflicts(scope)).toBe(true);
+      await vi.waitFor(() => expect(h.helper.drain).toHaveBeenCalledTimes(2), { timeout: 2000 });
+      await vi.waitFor(() => expect(h.controller.nativeWorkConflicts(scope)).toBe(false));
+    } finally {
+      h.controller.close();
+    }
+  });
   it("keeps a confirmed action's success when it is cancelled during its screenshot", async () => {
     const h = make();
     h.request.mockImplementationOnce(() => new Promise(() => {}));

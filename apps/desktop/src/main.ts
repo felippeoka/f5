@@ -442,7 +442,14 @@ function initializeComputerSystem(): void {
       },
     },
     undefined,
-    { background: backgroundStatus },
+    {
+      background: backgroundStatus,
+      advertiseBackground: computerBackgroundGate(
+        process.platform,
+        app.isPackaged,
+        process.env.F5_COMPUTER_BACKGROUND_DEV,
+      ).available,
+    },
   );
   computerSystem = { helper, controller, channel, overlay };
   lease.subscribe(() => {

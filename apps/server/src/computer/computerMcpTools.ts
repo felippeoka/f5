@@ -16,8 +16,8 @@ import { z } from "zod";
 import type { McpToolResult } from "../mcp/previewMcpTools";
 import type { ComputerAutomationBrokerRuntime } from "./ComputerAutomationBroker";
 
-/** Above the 335 s takeover host correlation (300 s consent + 30 s idle wait). */
-export const COMPUTER_TOOL_TIMEOUT_MS = 340_000;
+/** Above the 360 s takeover host correlation, so the broker always answers first. */
+export const COMPUTER_TOOL_TIMEOUT_MS = 370_000;
 const coordinate = z.number().int().min(0);
 const displayId = z.string().min(1).max(1024).optional();
 const app = z.string().min(1).max(1024);

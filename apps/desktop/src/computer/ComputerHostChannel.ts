@@ -49,6 +49,12 @@ export class ComputerHostChannel {
       /** Desktop + helper side of background availability; the backend adds its own. */
       background?: () => ComputerBackgroundStatus;
       execution?: ComputerExecutionAuthority;
+      /**
+       * Whether this build offers background delivery at all (the preview gate). When it is
+       * closed, Electron never answers with the capability, so foreground-only users keep the
+       * legacy single-holder protocol and none of the background paths run.
+       */
+      advertiseBackground?: boolean;
     } = {},
   ) {
     this.execution = options.execution ?? new ComputerExecutionAuthority();
@@ -120,7 +126,9 @@ export class ComputerHostChannel {
           return;
         }
         backend.ready = true;
-        backend.capabilities = new Set(message.capabilities ?? []);
+        backend.capabilities = new Set(
+          this.options.advertiseBackground === false ? [] : (message.capabilities ?? []),
+        );
         if (this.capable(backend))
           this.send(profileId, {
             type: "hostCapabilities",

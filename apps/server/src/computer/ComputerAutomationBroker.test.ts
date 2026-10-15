@@ -660,6 +660,53 @@ describe("background delivery", () => {
       h.broker.close();
     }
   });
+  it("continues the policy revision when a thread's session is replaced", async () => {
+    const h = await backgroundHarness();
+    try {
+      await h.broker.policyTransition(async () => undefined);
+      const invalidated = h.ipc.messages.findLast((m) => m.type === "observationInvalidate");
+      if (invalidated?.type !== "observationInvalidate") throw new Error("no invalidation");
+      // Provider restart: a new session generation for the same thread.
+      h.broker.bindSession("t", "s2", "claude");
+      h.ipc.messages.length = 0;
+      const typed = h.broker.invoke("t", "s2", {
+        op: "type",
+        text: "x",
+        appId: "com.apple.TextEdit",
+      });
+      await approveBackgroundSession(h);
+      await typed;
+      const acquire = h.ipc.messages.find((m) => m.type === "leaseAcquire");
+      if (acquire?.type !== "leaseAcquire") throw new Error("no acquire");
+      // Electron keeps its per-thread minimum; the new binding must not fall below it.
+      expect(acquire.holder.policyRevision).toBeGreaterThanOrEqual(invalidated.policyRevision);
+    } finally {
+      h.broker.close();
+    }
+  });
+  it("asks for the background session approval when a takeover comes first", async () => {
+    const h = await backgroundHarness();
+    h.ipc.appResults = [
+      {
+        appId: "com.apple.TextEdit",
+        name: "TextEdit",
+        tier: "full",
+        running: true,
+        frontmost: false,
+      },
+    ];
+    try {
+      const pending = h.broker.requestForeground("t", "s", "TextEdit", "Needs a drag");
+      await approveBackgroundSession(h);
+      await vi.waitFor(() =>
+        expect(h.ipc.messages.some((m) => m.type === "foregroundTakeoverAcquire")).toBe(true),
+      );
+      h.broker.close();
+      await pending.catch(() => undefined);
+    } finally {
+      h.broker.close();
+    }
+  });
   it("closes admissions and bumps the revision during a policy transition", async () => {
     const h = await backgroundHarness();
     try {

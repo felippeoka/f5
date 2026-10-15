@@ -301,11 +301,14 @@ export class ComputerHelperClient implements ComputerHelper {
     const child = this.child;
     if (!child || !this.ready) return;
     const id = randomUUID();
+    let result: unknown;
     try {
-      await this.sendRequest(
+      // The helper answers within its own 5 s bound; the extra second keeps the two deadlines
+      // from racing. Only a helper that stops answering entirely is retired.
+      result = await this.sendRequest(
         id,
         { type: "drain", requestId: id, executionGeneration },
-        Math.min(5000, timeoutMs),
+        Math.min(5000, timeoutMs) + 1000,
         false,
       );
     } catch {
@@ -318,6 +321,9 @@ export class ComputerHelperClient implements ComputerHelper {
       if (!this.closing && !this.terminalFailure) void this.restartAfterExit(exited);
       throw new ComputerControlError({ _tag: "OutcomeUnknown" });
     }
+    // One generation is stuck in its target app; everyone else keeps the shared helper.
+    if ((result as { drained?: unknown } | null)?.drained === false)
+      throw new ComputerControlError({ _tag: "TargetBlocked", kind: "foreground-busy" });
   }
   async readiness(): Promise<{ inputSequence: number; lastUserInputAgeMs: number }> {
     if (!this.child || !this.ready)
