@@ -86,11 +86,11 @@ export function ProfileSwitcher() {
           <Button
             variant="ghost"
             size="xs"
-            render={<Link to="/settings" search={{ category: "profiles" }} />}
+            render={<Link to="/settings" search={{ category: "accounts" }} />}
           >
             Manage profiles
           </Button>
-          <Button size="xs" render={<Link to="/settings" search={{ category: "profiles" }} />}>
+          <Button size="xs" render={<Link to="/settings" search={{ category: "accounts" }} />}>
             <PlusIcon className="size-3" />
             New profile
           </Button>

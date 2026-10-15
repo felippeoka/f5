@@ -951,7 +951,7 @@ function OpenCommandPaletteDialog(props: {
       run: async () => {
         await navigate({
           to: "/settings",
-          search: { ...resolveSettingsNavigationSearch(location), category: "profiles" },
+          search: { ...resolveSettingsNavigationSearch(location), category: "accounts" },
         });
       },
     });
@@ -988,8 +988,8 @@ function OpenCommandPaletteDialog(props: {
           to: "/settings",
           search: {
             ...resolveSettingsNavigationSearch(location),
-            category: "integrations",
-            item: "integrations.keybindings",
+            category: "keyboard",
+            item: "keyboard.keybindings",
           },
         });
       },

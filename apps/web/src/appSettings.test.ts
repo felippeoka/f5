@@ -510,6 +510,30 @@ describe("parsePersistedAppSettings", () => {
     });
   });
 
+  it("falls back to the global sub-agent defaults for projects without an override", () => {
+    const parsed = parsePersistedAppSettings(
+      JSON.stringify({
+        claudeSubagentDefaults: { subagentsEnabled: false, subagentModel: "claude-sonnet-5-5" },
+        claudeProjectSettings: {
+          "project-1": { subagentsEnabled: true, subagentModel: "inherit" },
+        },
+      }),
+    );
+
+    expect(getClaudeProjectSettings(parsed, "project-2")).toEqual({
+      subagentsEnabled: false,
+      subagentModel: "claude-sonnet-5-5",
+    });
+    expect(getClaudeProjectSettings(parsed, "project-1")).toEqual({
+      subagentsEnabled: true,
+      subagentModel: "inherit",
+    });
+    expect(getClaudeProjectSettings(parsePersistedAppSettings(null), "project-3")).toEqual({
+      subagentsEnabled: true,
+      subagentModel: "inherit",
+    });
+  });
+
   it("restores persisted runtime warning visibility values", () => {
     expect(
       parsePersistedAppSettings(

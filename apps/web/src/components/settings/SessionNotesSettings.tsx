@@ -40,7 +40,7 @@ export function SessionNotesSettings({ providers }: { providers: ReadonlyArray<S
   return (
     <section
       className="rounded-xl border border-border bg-card p-5"
-      data-settings-search-target="providers.session-notes"
+      data-settings-search-target="threads.summaries"
     >
       <h2 className="text-sm font-medium text-foreground">Thread summaries</h2>
       <p className="mt-1 text-xs text-muted-foreground">

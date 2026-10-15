@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
+import { TestRouterContext } from "../../../test/routerContext";
 import { SettingsLayout } from "../SettingsLayout";
 import { StorageActionConfirmDialog } from "../StorageActionConfirmDialog";
 import { StorageSettings } from "./StorageSettings";
@@ -40,8 +41,11 @@ vi.mock("./GeneralSettings", () => ({
 vi.mock("./AppearanceSettings", () => ({
   AppearanceSettings: () => <div>Appearance settings mock</div>,
 }));
-vi.mock("./DisplaySettings", () => ({
-  DisplaySettings: () => <div>Display settings mock</div>,
+vi.mock("./ConversationSettings", () => ({
+  ConversationSettings: () => <div>Conversation settings mock</div>,
+}));
+vi.mock("./KeyboardSettings", () => ({
+  KeyboardSettings: () => <div>Keyboard settings mock</div>,
 }));
 vi.mock("./NotificationsSettings", () => ({
   NotificationsSettings: () => <div>Notifications settings mock</div>,
@@ -49,11 +53,28 @@ vi.mock("./NotificationsSettings", () => ({
 vi.mock("./ProvidersSettings", () => ({
   ProvidersSettings: () => <div>Providers settings mock</div>,
 }));
-vi.mock("./IntegrationsSettings", () => ({
-  IntegrationsSettings: () => <div>Integrations settings mock</div>,
+// Project scope reuses the sub-agent controls from this module.
+vi.mock("./ThreadsSettings", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./ThreadsSettings")>()),
+  ThreadsSettings: () => <div>Threads settings mock</div>,
+}));
+vi.mock("./ToolsSettings", () => ({
+  ToolsSettings: () => <div>Tools settings mock</div>,
+}));
+vi.mock("./BrowserComputerSettings", () => ({
+  BrowserComputerSettings: () => <div>BrowserComputer settings mock</div>,
 }));
 vi.mock("./ProjectsSettings", () => ({
   ProjectsSettings: () => <div>Projects settings mock</div>,
+}));
+vi.mock("./ProjectSettings", () => ({
+  ProjectSettings: () => <div>Project settings mock</div>,
+}));
+vi.mock("./GitSettings", () => ({
+  GitSettings: () => <div>Git settings mock</div>,
+}));
+vi.mock("./AccountsSettings", () => ({
+  AccountsSettings: () => <div>Accounts settings mock</div>,
 }));
 vi.mock("./ArchiveSettings", () => ({
   ArchiveSettings: () => <div>Archive settings mock</div>,
@@ -282,7 +303,9 @@ async function renderWithQueryClient(element: React.ReactElement) {
     },
   });
   const screen = await render(
-    <QueryClientProvider client={queryClient}>{element}</QueryClientProvider>,
+    <QueryClientProvider client={queryClient}>
+      <TestRouterContext>{element}</TestRouterContext>
+    </QueryClientProvider>,
   );
   return { screen, queryClient };
 }

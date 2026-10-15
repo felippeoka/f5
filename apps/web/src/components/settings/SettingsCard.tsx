@@ -53,11 +53,13 @@ export function SettingsRow({
   title,
   description,
   control,
+  searchTarget,
   className,
 }: {
   readonly title: ReactNode;
   readonly description?: ReactNode;
   readonly control: ReactNode;
+  readonly searchTarget?: string;
   readonly className?: string;
 }) {
   return (
@@ -66,6 +68,7 @@ export function SettingsRow({
         "flex items-center justify-between gap-4 border-b border-border py-2 last:border-b-0",
         className,
       )}
+      data-settings-search-target={searchTarget}
     >
       <div className="min-w-0">
         <p className="text-sm font-medium text-foreground">{title}</p>

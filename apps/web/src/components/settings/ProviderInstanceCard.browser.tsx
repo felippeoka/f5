@@ -11,6 +11,7 @@ import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
+import { createTestRouter, TestRouterContext } from "../../test/routerContext";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { DRIVER_OPTIONS } from "./providerDriverMeta";
 
@@ -70,6 +71,7 @@ function renderCard(
   } = {},
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const router = createTestRouter();
   return render(
     <ProviderInstanceCard
       instanceId={CODEX_INSTANCE_ID}
@@ -90,7 +92,9 @@ function renderCard(
     />,
     {
       wrapper: ({ children }) => (
-        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        <QueryClientProvider client={queryClient}>
+          <TestRouterContext router={router}>{children}</TestRouterContext>
+        </QueryClientProvider>
       ),
     },
   );

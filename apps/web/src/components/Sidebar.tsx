@@ -640,7 +640,7 @@ export default function Sidebar() {
       if (clicked === "icon") {
         await navigate({
           to: "/settings",
-          search: { category: "projects", item: "projects.icon", projectId },
+          search: { category: "project", item: "project.icon", project: projectId },
         });
         return;
       }

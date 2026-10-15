@@ -120,7 +120,7 @@ export function AgentBridgeSettings() {
   return (
     <SettingsCard
       title="Agent Bridge"
-      searchTarget="integrations.agent-bridge"
+      searchTarget="tools.agent-bridge"
       description="Let an external agent, such as a ChatGPT Dot or any MCP client, read the projects you share, start supervised threads, and take tasks you assign on the Bots page. F5 asks you before those threads act, and agents can never answer approvals, stop work, or change settings."
       actions={
         state ? (

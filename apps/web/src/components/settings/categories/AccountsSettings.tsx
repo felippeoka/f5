@@ -24,7 +24,9 @@ import {
 import { Skeleton } from "../../ui/skeleton";
 import { toastManager } from "../../ui/toast";
 
-export { PROFILES_SETTINGS_DESCRIPTORS } from "./ProfilesSettings.descriptors";
+import { GithubAccountPanel } from "../GithubAccountPanel";
+
+export { ACCOUNTS_SETTINGS_DESCRIPTORS } from "./AccountsSettings.descriptors";
 
 /** The registry keeps removed profiles under `<profiles root>/.trash`. */
 function metadataRootFor(active: ProfileSummary | null): string | null {
@@ -34,7 +36,7 @@ function metadataRootFor(active: ProfileSummary | null): string | null {
     : active.stateDir.replace(/[\\/][^\\/]+$/, "");
 }
 
-export function ProfilesSettings() {
+export function AccountsSettings() {
   const { profiles, diagnostic, active, loadState, loadError, isRefreshing } = useProfileState();
   const [createOpen, setCreateOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<ProfileSummary | null>(null);
@@ -83,7 +85,7 @@ export function ProfilesSettings() {
 
       <section
         className="rounded-2xl border border-border bg-card"
-        data-settings-search-target="profiles.manage"
+        data-settings-search-target="accounts.profiles"
       >
         <div className="flex flex-col gap-3 border-b border-border px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
@@ -185,11 +187,12 @@ export function ProfilesSettings() {
       </section>
 
       {active ? <ProfileAccountsSection profile={active} /> : null}
+      <GithubAccountPanel />
 
       {metadataRoot || active ? (
         <section
           className="rounded-xl border border-border bg-card p-5"
-          data-settings-search-target="profiles.storage"
+          data-settings-search-target="accounts.storage"
         >
           <div className="mb-4">
             <h2 className="text-sm font-medium text-foreground">Profile storage</h2>

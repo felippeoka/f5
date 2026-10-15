@@ -214,7 +214,7 @@ export function GithubAccountPanel() {
   return (
     <SettingsCard
       title="GitHub"
-      searchTarget="integrations.github"
+      searchTarget="accounts.github"
       description="Connect this profile's GitHub account. F5's GitHub features, agents, and terminal gh and git commands use it."
       actions={connectionBadge(connection, github.signingIn)}
     >

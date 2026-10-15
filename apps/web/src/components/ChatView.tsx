@@ -1501,6 +1501,7 @@ export default function ChatView({
       settings.claudeBinaryPath,
       settings.claudeLaunchArgs,
       settings.claudeProjectSettings,
+      settings.claudeSubagentDefaults,
       settings.codexBinaryPath,
       settings.codexHomePath,
     ],
