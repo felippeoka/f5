@@ -289,6 +289,17 @@ describe("TerminalManager", () => {
     other.dispose();
   });
 
+  it("reclaims closed revision state and gives a reopened key a newer generation", async () => {
+    const { manager } = makeManager();
+    const first = await manager.open(openInput());
+    await manager.close({ threadId: first.threadId, terminalId: first.terminalId });
+    expect(manager.readSnapshot({ threadId: first.threadId })).toBeNull();
+    const reopened = await manager.open(openInput());
+    expect(reopened.epoch).toBe(first.epoch);
+    expect(reopened.generation).toBeGreaterThan(first.generation);
+    manager.dispose();
+  });
+
   it("spawns lazily and reuses running terminal per thread", async () => {
     const { manager, ptyAdapter } = makeManager();
     const [first, second] = await Promise.all([

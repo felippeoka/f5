@@ -300,6 +300,11 @@ const make = Effect.gen(function* () {
       RETURNING delivery_id AS "deliveryId"
     `;
           if (rows.length === 0) return false;
+          // ACP completion can be projected before sendTurn returns its receipt.
+          yield* sql`UPDATE provider_turn_deliveries SET reservation_released_at = ${new Date().toISOString()}
+            WHERE delivery_id = ${input.deliveryId} AND reservation_released_at IS NULL
+              AND EXISTS (SELECT 1 FROM projection_turns t WHERE t.thread_id = provider_turn_deliveries.thread_id
+                AND t.turn_id = ${input.providerTurnId} AND t.completed_at IS NOT NULL)`;
           yield* sql`UPDATE restart_continuations SET provider_turn_id = ${input.providerTurnId} WHERE continuation_id = ${input.deliveryId}`;
           return true;
         }),

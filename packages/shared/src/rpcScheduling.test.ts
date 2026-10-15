@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RpcAdmission, rpcLane } from "./rpcScheduling";
+import { RpcAdmission, rpcLane, isReadOnlyRpc } from "./rpcScheduling";
 
 describe("RPC admission", () => {
   it("reserves controls independently of eight occupied ordinary slots", () => {
@@ -41,4 +41,39 @@ describe("RPC admission", () => {
       rpcLane({ _tag: "orchestration.dispatchCommand", command: { type: "thread.turn.start" } }),
     ).toBe("ordinary");
   });
+});
+
+it("keeps ordinary thread reads out of the snapshot lane and admits queue steering", () => {
+  for (const method of [
+    "orchestration.getThreadDetails",
+    "orchestration.getThreadTailDetails",
+    "orchestration.getThreadHistoryPage",
+    "orchestration.getThreadCommandExecutions",
+    "orchestration.getThreadFileChanges",
+  ])
+    expect(rpcLane({ _tag: method })).toBe("ordinary");
+  const admission = new RpcAdmission();
+  for (let i = 0; i < 8; i++) admission.claim("ordinary", 1);
+  expect(admission.claim(rpcLane({ _tag: "nextTurnQueue.steer" }), 1)).not.toBeNull();
+});
+
+it("allows only explicitly audited reads during recovery", () => {
+  for (const method of [
+    "providerAccount.logout",
+    "providerAccount.loginStart",
+    "githubAccount.loginStart",
+    "githubAccount.loginCancel",
+    "nativeOperation.resolve",
+    "unknown.getAnything",
+  ])
+    expect(isReadOnlyRpc(method)).toBe(false);
+  for (const method of [
+    "terminal.snapshot",
+    "review.previewDiff",
+    "nextTurnQueue.summary",
+    "globalSearch.query",
+    "projects.cloneList",
+    "githubAccount.cliCandidates",
+  ])
+    expect(isReadOnlyRpc(method)).toBe(true);
 });

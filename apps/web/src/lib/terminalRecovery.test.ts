@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type { TerminalEvent, TerminalSessionSnapshot } from "@t3tools/contracts";
-import { TerminalRecovery } from "./terminalRecovery";
+import { TerminalRecovery, terminalSnapshotReader } from "./terminalRecovery";
 const snapshot = (revision = 0, generation = 1, epoch = "backend"): TerminalSessionSnapshot => ({
   epoch,
   generation,
@@ -112,5 +112,45 @@ it("does not install a response from before disconnection", async () => {
   resolve(snapshot());
   await sync;
   expect(install).not.toHaveBeenCalled();
+  recovery.dispose();
+});
+
+it("opens an offline-mounted viewport when synchronization finishes and never reopens it on reconnect", async () => {
+  vi.useFakeTimers();
+  const read = vi.fn(async () => null);
+  const open = vi.fn(async () => snapshot());
+  const recovery = new TerminalRecovery(terminalSnapshotReader(read, open), vi.fn(), vi.fn());
+  recovery.disconnect();
+  await recovery.sync();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(read).not.toHaveBeenCalled();
+  expect(open).not.toHaveBeenCalled();
+  await recovery.connect();
+  expect(open).toHaveBeenCalledTimes(1);
+  recovery.disconnect();
+  await recovery.connect();
+  expect(open).toHaveBeenCalledTimes(1);
+  recovery.dispose();
+});
+it("reports open failures, retries the open and cancels polling while disconnected", async () => {
+  vi.useFakeTimers();
+  const open = vi
+    .fn<() => Promise<TerminalSessionSnapshot>>()
+    .mockRejectedValueOnce(new Error("bad cwd"))
+    .mockResolvedValue(snapshot());
+  const error = vi.fn();
+  const recovery = new TerminalRecovery(
+    terminalSnapshotReader(async () => null, open),
+    vi.fn(),
+    vi.fn(),
+    error,
+  );
+  await recovery.sync();
+  expect(error).toHaveBeenCalledWith(expect.objectContaining({ message: "bad cwd" }));
+  recovery.disconnect();
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(open).toHaveBeenCalledTimes(1);
+  await recovery.connect();
+  expect(open).toHaveBeenCalledTimes(2);
   recovery.dispose();
 });

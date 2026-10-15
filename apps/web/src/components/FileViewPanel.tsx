@@ -392,6 +392,8 @@ export default function FileViewPanel({ mode, surface, onClose }: FileViewPanelP
         setSaveConflict(false);
       }
       const savedData = {
+        workspaceIdentity: fileQuery.data?.workspaceIdentity,
+        fileIdentity: fileQuery.data?.fileIdentity,
         relativePath: result.relativePath,
         contents: savedContents,
         byteLength: result.byteLength,

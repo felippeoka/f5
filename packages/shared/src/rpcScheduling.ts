@@ -16,13 +16,14 @@ export function rpcLane(body: { readonly _tag: string; readonly command?: unknow
     command === "thread.approval.respond" ||
     command === "thread.user-input.respond" ||
     command === "thread.turn.steer" ||
+    body._tag === "nextTurnQueue.steer" ||
     /(?:respondToRequest|respondToUserInput|respondToElicitation|elicitation.submit|automation.respond)$/i.test(
       body._tag,
     )
   )
     return "answer";
   if (
-    /^orchestration\.(?:getStartupSnapshot|getSnapshot|getThread|replayEvents)/.test(body._tag) ||
+    /^orchestration\.(?:getStartupSnapshot|getSnapshot|replayEvents)$/.test(body._tag) ||
     body._tag === "terminal.snapshot" ||
     body._tag === "server.probe"
   )
@@ -68,11 +69,98 @@ export class RpcAdmission {
   }
 }
 
-/** Used only for connectivity admission, never authorization. Unknown methods require reconciliation. */
+const READ_ONLY_METHODS = new Set([
+  "agentBridge.getState",
+  "agentBridge.getTask",
+  "agentBridge.getTaskActivities",
+  "agentBridge.getTasks",
+  "agents.getSnapshot",
+  "attachments.getUploads",
+  "chrome.listNativeHostTransactions",
+  "computer.access.list",
+  "computer.access.listRemembered",
+  "filesystem.browse",
+  "git.listBranches",
+  "git.status",
+  "githubAccount.cliCandidates",
+  "githubAccount.loginStatus",
+  "githubAccount.status",
+  "globalSearch.query",
+  "mcp.getCodexStatus",
+  "mcp.getCommonConfig",
+  "mcp.getEffectiveConfig",
+  "mcp.getLoginStatus",
+  "mcp.getOAuthStatus",
+  "mcp.getProjectConfig",
+  "mcp.getProviderStatus",
+  "mcp.getServerStatuses",
+  "nativeOperation.inspect",
+  "nativeOperation.list",
+  "nextTurnQueue.list",
+  "nextTurnQueue.summary",
+  "orchestration.getFullThreadDiff",
+  "orchestration.getRewindDrafts",
+  "orchestration.getSnapshot",
+  "orchestration.getStartupSnapshot",
+  "orchestration.getThreadCommandExecution",
+  "orchestration.getThreadCommandExecutions",
+  "orchestration.getThreadDetails",
+  "orchestration.getThreadFileChange",
+  "orchestration.getThreadFileChanges",
+  "orchestration.getThreadHistoryPage",
+  "orchestration.getThreadTailDetails",
+  "orchestration.getTurnDiff",
+  "prHub.getAdvisories",
+  "prHub.getCommentOperation",
+  "prHub.getDetail",
+  "prHub.getFiles",
+  "prHub.getOperation",
+  "prHub.getOverview",
+  "prHub.getReplyDraft",
+  "prHub.getReplyOperation",
+  "prHub.getReviewDraft",
+  "prHub.getReviewOperation",
+  "prHub.getReviewThreads",
+  "prHub.getStack",
+  "prHub.getThreadLinks",
+  "prHub.getThreadsForPr",
+  "prHub.getTimeline",
+  "prHub.getUnresolvedThreads",
+  "prHub.getViewedFiles",
+  "prHub.listAccountRouting",
+  "prHub.listAccounts",
+  "prHub.listLocalCheckoutCandidates",
+  "prHub.listPullRequests",
+  "prHub.listReviewerCandidates",
+  "prHub.peek",
+  "preview.list",
+  "preview.listLocalServers",
+  "profiles.list",
+  "projects.cloneList",
+  "projects.getCheckedInConfig",
+  "projects.list",
+  "projects.listDirectory",
+  "projects.listEntries",
+  "projects.readFile",
+  "projects.searchContents",
+  "projects.searchEntries",
+  "providerAccount.status",
+  "review.previewDiff",
+  "server.getClaudeTranscriptRepair",
+  "server.getConfig",
+  "server.getProjectSettings",
+  "server.getProviderInventory",
+  "server.probe",
+  "storage.getDiskSpace",
+  "storage.getUsage",
+  "terminal.snapshot",
+  "usage.getAccounts",
+  "usage.getSummary",
+  "workflowPlatform.inspectRun",
+  "workflowPlatform.listTemplates",
+]);
+
+/** Connectivity admission only. Unknown methods require reconciliation. */
 export function isReadOnlyRpc(method: string): boolean {
-  return (
-    /(?:^|\.)(?:get|list|read|search|inspect|probe|browse|status|diff|log|show|resolve)[A-Z.]?/.test(
-      method,
-    ) || method === "terminal.snapshot"
-  );
+  return READ_ONLY_METHODS.has(method);
 }

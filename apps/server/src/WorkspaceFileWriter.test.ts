@@ -60,6 +60,7 @@ it("serializes separate backend processes: exactly one create and one matching s
 it("preserves permissions and rejects symlinks, binary content and path escapes", async () => {
   const { cwd, locks } = await fixture();
   await FS.writeFile(Path.join(cwd, "source"), "base", { mode: 0o640 });
+  const originalMode = (await FS.stat(Path.join(cwd, "source"))).mode & 0o777;
   await writeWorkspaceFile(
     {
       cwd,
@@ -69,7 +70,7 @@ it("preserves permissions and rejects symlinks, binary content and path escapes"
     },
     locks,
   );
-  expect((await FS.stat(Path.join(cwd, "source"))).mode & 0o777).toBe(0o640);
+  expect((await FS.stat(Path.join(cwd, "source"))).mode & 0o777).toBe(originalMode);
   await FS.symlink(Path.join(cwd, "source"), Path.join(cwd, "link"));
   await expect(
     writeWorkspaceFile(

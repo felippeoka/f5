@@ -18,6 +18,7 @@ import {
 } from "../../observability/Metrics.ts";
 import { PersistenceSqlError } from "../../persistence/Errors.ts";
 
+import { DeliveryAttemptContext } from "../../provider/deliveryAttemptContext";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -46,6 +47,7 @@ let providerReadFails = false;
 let pendingBarrier = true;
 let reconciliationCount = 0;
 let acceptSend = false;
+let unavailableDispatchSnapshot = false;
 let methodNotFound = false;
 let reconciliationFails = false;
 let extraReplayDelivery: ProviderTurnDelivery | null = null;
@@ -88,6 +90,7 @@ function resetDelivery() {
   pendingBarrier = true;
   reconciliationCount = 0;
   acceptSend = false;
+  unavailableDispatchSnapshot = false;
   methodNotFound = false;
   reconciliationFails = false;
   extraReplayDelivery = null;
@@ -143,7 +146,18 @@ const reconcile = (target: ThreadId) =>
   });
 
 const repositoryLayer = Layer.succeed(ProviderTurnDeliveryRepository, {
-  recordDispatchIntent: () => Effect.succeed(true),
+  recordDispatchIntent: (input: {
+    preSendTurnIds: TurnId[];
+    historyEvidence: ProviderTurnDelivery["historyEvidence"];
+  }) =>
+    Effect.sync(() => {
+      state = {
+        ...state,
+        preSendTurnIds: input.preSendTurnIds,
+        historyEvidence: input.historyEvidence,
+      };
+      return true;
+    }),
   listCandidateIds: () =>
     Effect.sync(() => (state.state === "pending" ? [{ deliveryId, threadId }] : [])),
   listActionable: Effect.sync(() => (state.state === "pending" ? [state] : [])),
@@ -166,6 +180,7 @@ const repositoryLayer = Layer.succeed(ProviderTurnDeliveryRepository, {
         ...state,
         state: "sending",
         attempt: state.attempt + 1,
+        attemptId: "test-attempt",
         preSendTurnIds,
       };
       return state;
@@ -231,7 +246,13 @@ const testLayer = ProviderTurnDeliveryWorkerLive.pipe(
               activeAttemptsDuringDelivery = gauge.value;
             }),
           ),
-          Effect.andThen(Effect.suspend(deliverTurnStartOutcome)),
+          Effect.andThen(
+            Effect.gen(function* () {
+              const context = yield* DeliveryAttemptContext;
+              if (unavailableDispatchSnapshot && context) yield* context.prepared(null);
+              return yield* Effect.suspend(deliverTurnStartOutcome);
+            }),
+          ),
         ),
       recordTurnStartFailure: () =>
         Effect.sync(() => {
@@ -652,5 +673,19 @@ it.effect("Discard keeps a newer send's pending turn start and fails if abandon 
     const error = yield* worker.discard(threadId, deliveryId).pipe(Effect.flip);
     assert.match(error.message, /can no longer be discarded/u);
     assert.equal(pendingTurnStartDeletes, 0);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("retains the claimed baseline if the final dispatch read is unavailable", () =>
+  Effect.gen(function* () {
+    resetDelivery();
+    providerTurns = [{ id: TurnId.makeUnsafe("existing-turn"), items: [] }];
+    acceptSend = true;
+    unavailableDispatchSnapshot = true;
+    const worker = yield* ProviderTurnDeliveryWorker;
+    yield* worker.start;
+    yield* worker.drain;
+    assert.equal(state.state, "ambiguous");
+    assert.deepEqual(state.preSendTurnIds, [TurnId.makeUnsafe("existing-turn")]);
   }).pipe(Effect.provide(testLayer)),
 );

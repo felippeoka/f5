@@ -177,7 +177,7 @@ describe("ProviderCommandReactor", () => {
     }
     runtime = null;
     for (const stateDir of createdStateDirs) {
-      fs.rmSync(stateDir, { recursive: true, force: true });
+      fs.rmSync(stateDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
     createdStateDirs.clear();
   });

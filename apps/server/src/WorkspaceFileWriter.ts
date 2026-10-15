@@ -68,7 +68,11 @@ export async function writeWorkspaceFile(
       lock = await acquireInstanceLock(lockPath);
       break;
     } catch (error) {
-      if (!(error instanceof ProfileBusyError) || Date.now() >= deadline) throw error;
+      if (!(error instanceof ProfileBusyError)) throw error;
+      if (Date.now() >= deadline)
+        throw new Error("Timed out waiting for another F5 writer to finish saving this file.", {
+          cause: error,
+        });
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
   }
@@ -79,6 +83,7 @@ export async function writeWorkspaceFile(
       throw new Error("Saving symlinks or non-regular files is unsupported.");
     const currentBytes =
       current && current.size <= PROJECT_READ_FILE_MAX_SIZE ? await FS.readFile(destination) : null;
+    // A null hash means missing or too large to read safely, not necessarily absent.
     const currentHash = currentBytes ? hash(currentBytes) : null;
     const conflict = (): ProjectWriteFileResult => ({
       conflict: true,
@@ -100,7 +105,7 @@ export async function writeWorkspaceFile(
     if (bytes.length > PROJECT_READ_FILE_MAX_SIZE || bytes.includes(0))
       throw new Error("Saving truncated or unsupported file content is not allowed.");
     temporary = Path.join(canonicalParent, `.f5-write-${randomUUID()}.tmp`);
-    const handle = await FS.open(temporary, "wx", current ? current.mode & 0o777 : 0o600);
+    const handle = await FS.open(temporary, "wx", current ? current.mode & 0o777 : 0o666);
     try {
       await handle.writeFile(bytes);
       if (current) await handle.chmod(current.mode & 0o777);

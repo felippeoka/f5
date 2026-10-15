@@ -1,4 +1,4 @@
-import { TerminalRecovery } from "../lib/terminalRecovery";
+import { TerminalRecovery, terminalSnapshotReader } from "../lib/terminalRecovery";
 import { getWsConnectionState, subscribeWsConnectionState } from "../wsConnectionState";
 import { terminalClipboardAction, terminalRightClickPastes } from "../terminalClipboard";
 import { useProfileState } from "../profileState";
@@ -628,42 +628,55 @@ function TerminalViewport({
     window.addEventListener("mouseup", handleMouseUp);
     mount.addEventListener("pointerdown", handlePointerDown);
 
+    let lastRecoveryError: string | undefined;
     const recovery = new TerminalRecovery(
-      () => api.terminal.snapshot({ threadId, terminalId }),
+      terminalSnapshotReader(
+        () => api.terminal.snapshot({ threadId, terminalId }),
+        async () => {
+          const activeTerminal = terminalRef.current;
+          const activeFitAddon = fitAddonRef.current;
+          const state = getWsConnectionState();
+          if (
+            !activeTerminal ||
+            !activeFitAddon ||
+            state.phase !== "connected" ||
+            !state.synchronized
+          )
+            return null;
+          activeFitAddon.fit();
+          const snapshot = await api.terminal.open({
+            threadId,
+            terminalId,
+            cwd,
+            cols: activeTerminal.cols,
+            rows: activeTerminal.rows,
+            ...(runtimeEnv ? { env: runtimeEnv } : {}),
+          });
+          if (autoFocus && !disposed) window.requestAnimationFrame(() => activeTerminal.focus());
+          return snapshot;
+        },
+      ),
       (snapshot) => {
         const activeTerminal = terminalRef.current;
         if (!activeTerminal || disposed) return;
+        lastRecoveryError = undefined;
         hasHandledExitRef.current = snapshot.status === "exited";
         activeTerminal.write("\u001bc");
         if (snapshot.history) activeTerminal.write(snapshot.history);
       },
       (event) => applyTerminalEvent(event),
+      (error) => {
+        const message = error instanceof Error ? error.message : "Unable to open terminal";
+        if (!disposed && message !== lastRecoveryError) writeSystemMessage(terminal, message);
+        lastRecoveryError = message;
+      },
     );
-    const openTerminal = () =>
-      recovery.sync(async () => {
-        const activeTerminal = terminalRef.current;
-        const activeFitAddon = fitAddonRef.current;
-        if (!activeTerminal || !activeFitAddon) return null;
-        activeFitAddon.fit();
-        const state = getWsConnectionState();
-        if (state.phase !== "connected" || !state.synchronized)
-          return api.terminal.snapshot({ threadId, terminalId });
-        const snapshot = await api.terminal.open({
-          threadId,
-          terminalId,
-          cwd,
-          cols: activeTerminal.cols,
-          rows: activeTerminal.rows,
-          ...(runtimeEnv ? { env: runtimeEnv } : {}),
-        });
-        if (autoFocus && !disposed) window.requestAnimationFrame(() => activeTerminal.focus());
-        return snapshot;
-      });
-    const unsubscribeConnection = subscribeWsConnectionState(() => {
+    const updateConnection = () => {
       const state = getWsConnectionState();
-      if (state.phase !== "connected") recovery.disconnect();
-      else if (state.synchronized) void recovery.sync();
-    });
+      if (state.phase !== "connected" || !state.synchronized) recovery.disconnect();
+      else void recovery.connect();
+    };
+    const unsubscribeConnection = subscribeWsConnectionState(updateConnection);
 
     const applyTerminalEvent = (event: import("@t3tools/contracts").TerminalEvent) => {
       if (event.threadId !== threadId || event.terminalId !== terminalId) return;
@@ -744,7 +757,7 @@ function TerminalViewport({
         })
         .catch(() => undefined);
     }, 30);
-    void openTerminal();
+    updateConnection();
 
     return () => {
       disposed = true;

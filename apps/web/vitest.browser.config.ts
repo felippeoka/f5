@@ -26,6 +26,7 @@ export default mergeConfig(
         "src/components/RightPanelHost.browser.tsx",
         "src/hooks/useMigrateClientSettings.browser.ts",
         "src/components/FileViewPanel.browser.tsx",
+        "src/components/chat/ComposerSendControl.browser.tsx",
         "src/hooks/inputSafety.browser.tsx",
         "src/components/ProfileSwitcher.browser.tsx",
         "src/components/ChatView.browser.tsx",

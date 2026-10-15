@@ -107,10 +107,7 @@ const make = Effect.gen(function* () {
   // History alone does not correlate a dispatch: even one new turn may be
   // another client's turn or a steer. Only a durable acceptance receipt proves
   // acceptance. Legacy and incomplete baselines therefore remain ambiguous.
-  const findProvenProviderTurn = (
-    delivery: ProviderTurnDelivery,
-    _turns: ReadonlyArray<{ readonly id: TurnId }>,
-  ) =>
+  const findProvenProviderTurn = (delivery: ProviderTurnDelivery) =>
     Effect.succeed(
       delivery.acceptanceReceipt?.attemptId === delivery.attemptId
         ? (delivery.acceptanceReceipt?.turnId ?? null)
@@ -191,8 +188,9 @@ const make = Effect.gen(function* () {
                       .recordDispatchIntent({
                         deliveryId,
                         attemptId: claimed.attemptId!,
-                        preSendTurnIds: snapshot?.turns.map((turn) => turn.id) ?? [],
-                        historyEvidence: snapshot?.history ?? null,
+                        preSendTurnIds:
+                          snapshot?.turns.map((turn) => turn.id) ?? claimed.preSendTurnIds,
+                        historyEvidence: snapshot?.history ?? claimed.historyEvidence ?? null,
                       })
                       .pipe(
                         Effect.mapError(
@@ -461,7 +459,7 @@ const make = Effect.gen(function* () {
       sending,
       (delivery) =>
         provider.readThread(delivery.threadId).pipe(
-          Effect.flatMap((snapshot) => findProvenProviderTurn(delivery, snapshot.turns)),
+          Effect.flatMap(() => findProvenProviderTurn(delivery)),
           Effect.flatMap((newTurnId) => {
             return delivery.event.type !== "thread.turn-steer-requested" && newTurnId !== null
               ? markAccepted({
@@ -571,7 +569,13 @@ const make = Effect.gen(function* () {
               }),
             ),
           )
-        : Effect.void,
+        : event.type === "thread.session-set" ||
+            event.type === "thread.reverted" ||
+            event.type === "thread.turn-diff-completed"
+          ? enqueueActionable.pipe(
+              Effect.catchCause((cause) => Effect.logWarning("delivery wake failed", { cause })),
+            )
+          : Effect.void,
     ).pipe(Effect.forkScoped);
     yield* Stream.runForEach(Stream.fromPubSub(delayed), ([deliveryId, delayMs]) =>
       Effect.sleep(Duration.millis(delayMs)).pipe(
@@ -621,7 +625,7 @@ const make = Effect.gen(function* () {
         ),
       );
       if (!snapshot || delivery.event.type === "thread.turn-steer-requested") return delivery;
-      const newTurnId = yield* findProvenProviderTurn(delivery, snapshot.turns);
+      const newTurnId = yield* findProvenProviderTurn(delivery);
       if (newTurnId === null) return delivery;
       yield* markAccepted({
         deliveryId: delivery.deliveryId,

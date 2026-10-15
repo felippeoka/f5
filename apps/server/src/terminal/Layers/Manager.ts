@@ -258,6 +258,7 @@ interface TerminalManagerOptions {
 
 export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> {
   private readonly epoch = randomUUID();
+  private nextGeneration = 0;
   private readonly revisions = new Map<string, { generation: number; revision: number }>();
   private readonly sessions = new Map<string, TerminalSessionState>();
   private readonly accountConfig: ServerConfigShape | undefined;
@@ -510,6 +511,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       for (const session of threadSessions) {
         this.stopProcess(session);
         this.sessions.delete(toSessionKey(session.threadId, session.terminalId));
+        this.revisions.delete(toSessionKey(session.threadId, session.terminalId));
       }
       await Promise.all(
         threadSessions.map((session) =>
@@ -550,6 +552,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     this.killEscalationTimers.clear();
     this.pendingPersistHistory.clear();
     this.threadLocks.clear();
+    this.revisions.clear();
     this.persistQueues.clear();
   }
 
@@ -878,6 +881,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     for (const session of inactiveSessions.slice(0, toEvict)) {
       const key = toSessionKey(session.threadId, session.terminalId);
       this.sessions.delete(key);
+      this.revisions.delete(key);
       this.clearPersistTimer(session.threadId, session.terminalId);
       this.pendingPersistHistory.delete(key);
       this.persistQueues.delete(key);
@@ -1146,6 +1150,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     if (session) {
       this.stopProcess(session);
       this.sessions.delete(key);
+      this.revisions.delete(key);
     }
     this.updateSubprocessPollingState();
     await this.flushPersistQueue(threadId, terminalId);
@@ -1201,7 +1206,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     const key = toSessionKey(session.threadId, session.terminalId);
     let state = this.revisions.get(key);
     if (!state) {
-      state = { generation: 0, revision: 0 };
+      state = { generation: ++this.nextGeneration, revision: 0 };
       this.revisions.set(key, state);
     }
     return state;
@@ -1233,7 +1238,8 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       : never,
   ): void {
     const state = this.revision(event);
-    if (event.type === "started" || event.type === "restarted") state.generation++;
+    if (event.type === "started" || event.type === "restarted")
+      state.generation = ++this.nextGeneration;
     state.revision++;
     recordTerminalMetric(increment(terminalStateChangesTotal, { eventType: event.type }));
     const version = { epoch: this.epoch, ...state };

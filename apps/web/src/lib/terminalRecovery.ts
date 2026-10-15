@@ -5,6 +5,7 @@ export class TerminalRecovery {
   private version: Pick<TerminalSessionSnapshot, "epoch" | "generation" | "revision"> | null = null;
   private pending = false;
   private disposed = false;
+  private connected = true;
   private generation = 0;
   private events: TerminalEvent[] = [];
   private bytes = 0;
@@ -14,9 +15,10 @@ export class TerminalRecovery {
     private readonly read: () => Promise<TerminalSessionSnapshot | null>,
     private readonly install: (snapshot: TerminalSessionSnapshot) => void,
     private readonly apply: (event: TerminalEvent) => void,
+    private readonly onError: (error: unknown) => void = () => {},
   ) {}
   event(event: TerminalEvent): void {
-    if (this.disposed) return;
+    if (this.disposed || !this.connected) return;
     if (this.pending || !this.version) {
       if (this.overflow) return;
       const bytes = new TextEncoder().encode(JSON.stringify(event)).byteLength;
@@ -46,13 +48,13 @@ export class TerminalRecovery {
     this.version = event;
   }
   async sync(initial?: () => Promise<TerminalSessionSnapshot | null>): Promise<void> {
-    if (this.disposed || this.pending) return;
+    if (this.disposed || !this.connected || this.pending) return;
     this.pending = true;
     this.overflow = false;
     const generation = this.generation;
     try {
       const snapshot = await (initial ?? this.read)();
-      if (this.disposed) return;
+      if (this.disposed || !this.connected) return;
       if (generation !== this.generation) throw new Error("Terminal buffer overflow.");
       if (!snapshot) {
         this.version = null;
@@ -80,19 +82,29 @@ export class TerminalRecovery {
         }
       this.events = [];
       this.bytes = 0;
-    } catch {
+    } catch (error) {
       this.events = [];
       this.bytes = 0;
-      if (!this.disposed && !this.retry)
+      if (this.connected && !this.disposed) this.onError(error);
+      if (!this.disposed && this.connected && !this.retry)
         this.retry = setTimeout(() => {
           this.retry = undefined;
           void this.sync();
         }, 250);
     } finally {
       this.pending = false;
+      if (this.connected && generation !== this.generation && !this.disposed && !this.retry)
+        void this.sync();
     }
   }
+  connect(): Promise<void> {
+    this.connected = true;
+    return this.sync();
+  }
   disconnect(): void {
+    this.connected = false;
+    if (this.retry) clearTimeout(this.retry);
+    this.retry = undefined;
     this.generation++;
     this.version = null;
     this.events = [];
@@ -104,4 +116,20 @@ export class TerminalRecovery {
     if (this.retry) clearTimeout(this.retry);
     this.events = [];
   }
+}
+
+/** Open only an unestablished viewport. Reconnects to known sessions are read-only. */
+export function terminalSnapshotReader(
+  read: () => Promise<TerminalSessionSnapshot | null>,
+  open: () => Promise<TerminalSessionSnapshot | null>,
+): () => Promise<TerminalSessionSnapshot | null> {
+  let established = false;
+  return async () => {
+    const snapshot = await read();
+    if (snapshot) established = true;
+    if (established) return snapshot;
+    const opened = await open();
+    if (opened) established = true;
+    return opened;
+  };
 }

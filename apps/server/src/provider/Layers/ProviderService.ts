@@ -337,15 +337,15 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
     const nativeScope = yield* Effect.scope;
     const historyRuntimeId = randomUUID();
     const submissionTokens = new Map<ThreadId, symbol>();
-    const submissionCompletions = new Map<
-      symbol,
-      {
-        threadId: ThreadId;
-        turnId: TurnId | undefined;
-        terminalIds: Set<TurnId>;
-        done: Deferred.Deferred<void, import("../Errors").ProviderServiceError>;
-      }
-    >();
+    interface SubmissionCompletion {
+      threadId: ThreadId;
+      turnId: TurnId | undefined;
+      terminalIds: Set<TurnId>;
+      instanceId?: ProviderInstanceId;
+      generation?: number;
+      done: Deferred.Deferred<void, import("../Errors").ProviderServiceError>;
+    }
+    const submissionCompletions = new Map<symbol, SubmissionCompletion>();
     const analytics = yield* Effect.service(AnalyticsService);
     const canonicalEventLogger =
       options?.canonicalEventLogger ??
@@ -593,14 +593,44 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           }
           return;
         }
-        if (event.type === "turn.completed" && event.turnId) {
+        if ((event.type === "turn.completed" || event.type === "turn.aborted") && event.turnId) {
           for (const [id, completion] of submissionCompletions) {
-            if (completion.threadId !== event.threadId) continue;
+            if (
+              completion.threadId !== event.threadId ||
+              completion.instanceId !== item.source.instanceId ||
+              completion.generation !==
+                (yield* nativeGeneration(event.threadId).pipe(Effect.orElseSucceed(() => -1)))
+            )
+              continue;
             if (completion.turnId === event.turnId) {
               yield* Deferred.succeed(completion.done, undefined);
               submissionCompletions.delete(id);
-            } else if (completion.turnId === undefined && completion.terminalIds.size < 16)
-              completion.terminalIds.add(event.turnId);
+            } else if (completion.turnId === undefined) {
+              if (completion.terminalIds.size < 16) completion.terminalIds.add(event.turnId);
+              else {
+                yield* Deferred.fail(
+                  completion.done,
+                  toValidationError(
+                    "ProviderService.submitTurn",
+                    "Completion correlation buffer overflow; inspect provider history.",
+                  ),
+                );
+                submissionCompletions.delete(id);
+              }
+            }
+          }
+        }
+        if (event.type === "session.exited") {
+          for (const [id, completion] of submissionCompletions) {
+            if (
+              completion.threadId !== event.threadId ||
+              completion.instanceId !== item.source.instanceId ||
+              completion.generation !==
+                (yield* nativeGeneration(event.threadId).pipe(Effect.orElseSucceed(() => -1)))
+            )
+              continue;
+            yield* Deferred.succeed(completion.done, undefined);
+            submissionCompletions.delete(id);
           }
         }
         yield* persistResumeCursorFromRuntimeEvent(event);
@@ -1534,7 +1564,10 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         ),
       );
 
-    const sendTurn: ProviderServiceShape["sendTurn"] = (rawInput) =>
+    const sendTurn = (
+      rawInput: Parameters<ProviderServiceShape["sendTurn"]>[0],
+      onPrepared: (instanceId: ProviderInstanceId, generation: number) => void = () => {},
+    ) =>
       Effect.gen(function* () {
         if (isRecord(rawInput) && typeof rawInput.input === "string") {
           const inputLengthIssue = getProviderTurnInputLengthIssue(rawInput.input);
@@ -1674,6 +1707,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                   });
                 }
                 const generation = yield* nativeGeneration(input.threadId);
+                onPrepared(routed.instanceId, generation);
                 if (input.expectedTurnId === undefined) {
                   if (submissionTokens.has(input.threadId))
                     return yield* new ProviderTurnDeliveryError({
@@ -2069,7 +2103,6 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           schema: ProviderStopSessionInput,
           payload: rawInput,
         });
-        submissionTokens.delete(input.threadId);
         let metricProvider = "unknown";
         return yield* Effect.gen(function* () {
           const routed = yield* resolveRoutableSession({
@@ -2097,6 +2130,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               .stopSession(routed.threadId)
               .pipe(Effect.ensuring(releaseControls));
           else yield* releaseControls;
+          submissionTokens.delete(input.threadId);
           yield* directory.upsert({
             threadId: input.threadId,
             provider: routed.adapter.provider,
@@ -2117,7 +2151,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             },
           );
           for (const [id, completion] of submissionCompletions)
-            if (completion.threadId === input.threadId && completion.turnId !== undefined) {
+            if (completion.threadId === input.threadId) {
               yield* Deferred.succeed(completion.done, undefined);
               submissionCompletions.delete(id);
             }
@@ -2656,6 +2690,10 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             }),
           ),
         ).pipe(Effect.asVoid);
+        submissionTokens.clear();
+        for (const completion of submissionCompletions.values())
+          yield* Deferred.succeed(completion.done, undefined);
+        submissionCompletions.clear();
         yield* analytics.record("provider.sessions.stopped_all", {
           sessionCount: threadIds.length,
         });
@@ -2692,6 +2730,21 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
     yield* Effect.addFinalizer(() =>
       Effect.catch(runStopAll(), (cause) =>
         Effect.logWarning("failed to stop provider service", { cause }),
+      ).pipe(
+        Effect.ensuring(
+          Effect.gen(function* () {
+            submissionTokens.clear();
+            for (const completion of submissionCompletions.values())
+              yield* Deferred.fail(
+                completion.done,
+                toValidationError(
+                  "ProviderService.submitTurn",
+                  "Provider service shut down before completion.",
+                ),
+              );
+            submissionCompletions.clear();
+          }),
+        ),
       ),
     );
 
@@ -2703,16 +2756,21 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         >();
         const completion = yield* Deferred.make<void, import("../Errors").ProviderServiceError>();
         const id = Symbol("owned-submission");
-        const state = {
+        const state: SubmissionCompletion = {
           threadId: input.threadId,
-          turnId: undefined as TurnId | undefined,
+          turnId: undefined,
           terminalIds: new Set<TurnId>(),
           done: completion,
         };
         submissionCompletions.set(id, state);
         yield* Effect.forkIn(
           Effect.gen(function* () {
-            const result = yield* Effect.exit(sendTurn(input));
+            const result = yield* Effect.exit(
+              sendTurn(input, (instanceId, generation) => {
+                state.instanceId = instanceId;
+                state.generation = generation;
+              }),
+            );
             yield* Deferred.done(acceptance, result);
             if (result._tag === "Failure") {
               yield* Deferred.failCause(completion, result.cause);
@@ -2751,7 +2809,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             ? respondToStartingElicitation(input, starting.adapter)
             : withProviderThreadAccess(input.threadId, respondToElicitation(input));
         }),
-      stopSession,
+      stopSession: (input) => withProviderThreadAccess(input.threadId, stopSession(input)),
       listSessions,
       getCapabilities,
       getSessionCapabilities,

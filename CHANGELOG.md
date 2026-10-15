@@ -20,6 +20,8 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 
 ## [Unreleased]
 
+- Fix reliability review findings: persist delivery reservation release across rewind, preserve editor draft identity after saving, admit controls during resynchronization, retry overloaded reads safely, and start offline-mounted terminals once synchronized. Preserve normal umask permissions for new workspace exports.
+
 ### Reliability
 
 - Keep stop, approvals, user-input answers and supported steering responsive while a provider prompt is pending, and prevent late results from reviving a stopped generation.

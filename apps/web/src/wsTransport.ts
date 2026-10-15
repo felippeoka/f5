@@ -1,4 +1,4 @@
-import { isReadOnlyRpc } from "@t3tools/shared/rpcScheduling";
+import { isReadOnlyRpc, rpcLane } from "@t3tools/shared/rpcScheduling";
 import {
   getProtocolState,
   requireProtocolUpgrade,
@@ -239,13 +239,54 @@ export class WsTransport {
     params?: unknown,
     options?: RequestOptions,
   ): Promise<T> {
+    const socketGeneration = this.socketGeneration;
+    const startedAt = Date.now();
+    const timeoutMs = options?.timeoutMs === undefined ? REQUEST_TIMEOUT_MS : options.timeoutMs;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.requestOnce<T>(method, params, {
+          ...options,
+          timeoutMs: timeoutMs === null ? null : Math.max(1, timeoutMs - (Date.now() - startedAt)),
+        });
+      } catch (error) {
+        // Only retry an explicit pre-execution rejection of a read. Never replay
+        // mutations, disconnected work or a request accepted by the server.
+        if (
+          !(error instanceof WsRequestError) ||
+          error.code !== "RpcBusy" ||
+          !error.retryable ||
+          !isReadOnlyRpc(method) ||
+          attempt >= 4 ||
+          this.disposed ||
+          this.socketGeneration !== socketGeneration
+        )
+          throw error;
+        const delay = Math.max(error.retryAfterMs ?? 100, 100 * 2 ** attempt);
+        if (timeoutMs !== null && Date.now() - startedAt + delay >= timeoutMs) throw error;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        if (this.disposed || this.socketGeneration !== socketGeneration)
+          throw new Error(WS_CONNECTION_CLOSED_MESSAGE);
+      }
+    }
+  }
+
+  private async requestOnce<T>(
+    method: string,
+    params?: unknown,
+    options?: RequestOptions,
+  ): Promise<T> {
     if (getProtocolState().upgradeRequired) throw new Error(F5_UPGRADE_REQUIRED_MESSAGE);
     if (typeof method !== "string" || method.length === 0) {
       throw new Error("Request method is required");
     }
 
     const connection = getWsConnectionState();
-    if (!isReadOnlyRpc(method) && (connection.phase !== "connected" || !connection.synchronized)) {
+    const lane = rpcLane({ ...(params as { command?: unknown } | undefined), _tag: method });
+    const control = lane === "stop" || lane === "answer";
+    if (
+      !isReadOnlyRpc(method) &&
+      (connection.phase !== "connected" || (!connection.synchronized && !control))
+    ) {
       throw new WsRequestError(
         "Server changes are unavailable until reconnection and synchronization finish. Your draft is preserved.",
         "ConnectionNotReady",

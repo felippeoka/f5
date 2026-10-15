@@ -2937,3 +2937,79 @@ it.effect(
     );
   },
 );
+
+for (const terminalType of ["turn.aborted", "session.exited"] as const) {
+  it.effect(`settles owned completion on ${terminalType} without turn.completed`, () => {
+    const fake = makeFakeCodexAdapter();
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const threadId = asThreadId(`terminal-signal:${terminalType}`);
+      yield* service.startSession(threadId, {
+        threadId,
+        provider: "codex",
+        runtimeMode: "full-access",
+      });
+      const handle = yield* service.submitTurn!({ threadId, input: "hello" });
+      const accepted = yield* handle.acceptance;
+      fake.emit({
+        type: terminalType,
+        eventId: asEventId(`end:${terminalType}`),
+        provider: "codex",
+        threadId,
+        ...(terminalType === "turn.aborted" ? { turnId: accepted.turnId } : {}),
+        createdAt: new Date().toISOString(),
+        payload: {},
+      } as never);
+      yield* handle.completion.pipe(Effect.timeout("2 seconds"));
+    }).pipe(
+      Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]))),
+    );
+  });
+}
+
+it.effect(
+  "a failed stop preserves the unresolved submission reservation and its settlement",
+  () => {
+    const fake = makeFakeCodexAdapter();
+    const send = fake.sendTurn.getMockImplementation()!;
+    return Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>();
+      const finish = yield* Deferred.make<void>();
+      fake.sendTurn.mockImplementation((input) =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(entered, undefined);
+          yield* Deferred.await(finish);
+          return yield* send(input);
+        }),
+      );
+      const service = yield* ProviderService;
+      const threadId = asThreadId("stop-failure-reservation");
+      yield* service.startSession(threadId, {
+        threadId,
+        provider: "codex",
+        runtimeMode: "full-access",
+      });
+      const pending = yield* service
+        .sendTurn({ threadId, input: "pending" })
+        .pipe(Effect.forkScoped);
+      yield* Deferred.await(entered);
+      fake.stopSession.mockImplementation(() =>
+        Effect.fail(
+          new ProviderAdapterRequestError({
+            provider: "codex",
+            method: "stopSession",
+            detail: "stop failed",
+          }),
+        ),
+      );
+      const stop = yield* Effect.exit(service.stopSession({ threadId }));
+      assert.equal(stop._tag, "Failure");
+      const second = yield* service.sendTurn({ threadId, input: "must wait" }).pipe(Effect.flip);
+      assert.equal(second._tag, "ProviderTurnDeliveryError");
+      yield* Deferred.succeed(finish, undefined);
+      assert.ok((yield* Fiber.join(pending)).turnId);
+    }).pipe(
+      Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]))),
+    );
+  },
+);
