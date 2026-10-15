@@ -31,6 +31,7 @@ const MODEL_SLUG_SET_BY_PROVIDER: Record<ProviderKind, ReadonlySet<ModelSlug>> =
   opencode: new Set(MODEL_OPTIONS_BY_PROVIDER.opencode.map((option) => option.slug)),
   grok: new Set(MODEL_OPTIONS_BY_PROVIDER.grok.map((option) => option.slug)),
   antigravity: new Set(MODEL_OPTIONS_BY_PROVIDER.antigravity.map((option) => option.slug)),
+  muse: new Set(MODEL_OPTIONS_BY_PROVIDER.muse.map((option) => option.slug)),
 };
 
 const CLAUDE_FABLE_5_MODEL = "claude-fable-5";
@@ -217,6 +218,7 @@ function toBuiltInProviderKind(provider: ProviderKind | ProviderDriverKind): Pro
     case "opencode":
     case "grok":
     case "antigravity":
+    case "muse":
       return provider as ProviderKind;
     default:
       return "codex";

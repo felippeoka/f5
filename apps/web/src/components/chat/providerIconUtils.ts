@@ -5,7 +5,16 @@ import {
   type ProviderKind,
   type ServerProvider,
 } from "@t3tools/contracts";
-import { ClaudeAI, CursorIcon, Gemini, GrokIcon, Icon, OpenAI, OpenCodeIcon } from "../Icons";
+import {
+  ClaudeAI,
+  CursorIcon,
+  Gemini,
+  GrokIcon,
+  Icon,
+  MuseIcon,
+  OpenAI,
+  OpenCodeIcon,
+} from "../Icons";
 import { PROVIDER_OPTIONS, type ProviderPickerKind } from "../../session-logic";
 
 export type ModelEsque = {
@@ -23,6 +32,7 @@ export const PROVIDER_LABEL_BY_PROVIDER: Record<ProviderKind, string> = {
   opencode: "OpenCode",
   grok: "Grok",
   antigravity: "Antigravity",
+  muse: "Muse Code",
 };
 
 export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<string, Icon>> = {
@@ -32,6 +42,7 @@ export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<string, Icon>> = {
   [ProviderDriverKind.make("opencode")]: OpenCodeIcon,
   [ProviderDriverKind.make("grok")]: GrokIcon,
   [ProviderDriverKind.make("antigravity")]: Gemini,
+  [ProviderDriverKind.make("muse")]: MuseIcon,
 };
 
 export const PROVIDER_ICON_BY_PICKER_KIND: Record<ProviderPickerKind, Icon> = {
@@ -41,6 +52,7 @@ export const PROVIDER_ICON_BY_PICKER_KIND: Record<ProviderPickerKind, Icon> = {
   opencode: OpenCodeIcon,
   grok: GrokIcon,
   antigravity: Gemini,
+  muse: MuseIcon,
 };
 
 export const COMING_SOON_PROVIDER_OPTIONS = [

@@ -39,7 +39,8 @@ export type ComposerProvider =
   | "cursor"
   | "opencode"
   | "grok"
-  | "antigravity";
+  | "antigravity"
+  | "muse";
 
 /** Approvals and structured questions the agent is waiting on. */
 export interface ComposerPendingInteraction {

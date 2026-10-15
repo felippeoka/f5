@@ -99,6 +99,8 @@ function connectivityTimeoutMessage(provider: ProviderKind): string {
       return "Grok one-off prompt query timed out.";
     case "antigravity":
       return "Antigravity one-off prompt query timed out.";
+    case "muse":
+      return "Muse Code one-off prompt query timed out.";
   }
 }
 
@@ -246,6 +248,8 @@ function providerDisplayName(provider: ProviderKind): string {
       return "Grok";
     case "antigravity":
       return "Antigravity";
+    case "muse":
+      return "Muse Code";
   }
 }
 

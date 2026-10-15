@@ -461,6 +461,20 @@ export const OpenCodeIcon: Icon = (props) => (
   </svg>
 );
 
+/** Neutral monogram for Muse Code; F5 does not ship Meta's brand mark. */
+export const MuseIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="3" y="3" width="26" height="26" rx="7" stroke="currentColor" strokeWidth="2.5" />
+    <path
+      d="M9.5 22V10.5L16 18L22.5 10.5V22"
+      stroke="currentColor"
+      strokeWidth="2.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 export const GrokIcon: Icon = (props) => (
   <svg {...props} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path d="M7 7L25 25M25 7L7 25" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />

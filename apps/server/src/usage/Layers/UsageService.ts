@@ -438,7 +438,7 @@ const make = Effect.gen(function* () {
       const unavailable = yield* registry.listUnavailable;
       const shadows: Array<UsageAccount> = unavailable
         .filter((entry) =>
-          ["claudeAgent", "codex", "cursor", "grok", "opencode", "antigravity"].includes(
+          ["claudeAgent", "codex", "cursor", "grok", "opencode", "antigravity", "muse"].includes(
             entry.driver,
           ),
         )

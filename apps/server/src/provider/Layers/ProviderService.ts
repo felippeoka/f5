@@ -56,6 +56,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderSession,
   type McpReloadResult,
+  PROVIDER_DISPLAY_NAMES,
   TrimmedNonEmptyString,
 } from "@t3tools/contracts";
 import { describeMcpReloadFailure, MCP_RELOAD_RETRY_DELAYS_MS } from "../mcpReconcile.ts";
@@ -1101,12 +1102,14 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           const resolvedProvider = instanceInfo.driverKind as ProviderKind;
           metricProvider = resolvedProvider;
           if (
-            (resolvedProvider === "grok" || resolvedProvider === "antigravity") &&
+            (resolvedProvider === "grok" ||
+              resolvedProvider === "antigravity" ||
+              resolvedProvider === "muse") &&
             parsed.workflowExecutionProfile?.endsWith("readonly")
           ) {
             return yield* toValidationError(
               "ProviderService.startSession",
-              `${resolvedProvider === "grok" ? "Grok" : "Antigravity"} cannot enforce read-only workflow turns.`,
+              `${PROVIDER_DISPLAY_NAMES[resolvedProvider]} cannot enforce read-only workflow turns.`,
             );
           }
           if (parsed.provider !== undefined && parsed.provider !== resolvedProvider) {
@@ -1559,12 +1562,14 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           });
           metricProvider = routed.adapter.provider;
           if (
-            (routed.adapter.provider === "grok" || routed.adapter.provider === "antigravity") &&
+            (routed.adapter.provider === "grok" ||
+              routed.adapter.provider === "antigravity" ||
+              routed.adapter.provider === "muse") &&
             input.workflowExecutionProfile?.endsWith("readonly")
           ) {
             return yield* toValidationError(
               "ProviderService.sendTurn",
-              `${routed.adapter.provider === "grok" ? "Grok" : "Antigravity"} cannot enforce read-only workflow turns.`,
+              `${PROVIDER_DISPLAY_NAMES[routed.adapter.provider]} cannot enforce read-only workflow turns.`,
             );
           }
           metricModel = input.model;

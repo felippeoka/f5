@@ -43,14 +43,16 @@ export function providerRuntimeCapabilities(
     childTaskInspection: driver === "claudeAgent" || codexNative,
     childTaskStop: driver === "claudeAgent",
     fileCheckpointing: driver === "claudeAgent",
-    turnSteering: ["codex", "claudeAgent", "grok", "cursor", "antigravity"].includes(driver),
+    turnSteering: ["codex", "claudeAgent", "grok", "cursor", "antigravity", "muse"].includes(
+      driver,
+    ),
     conversationRollback: rollback,
     rollbackReadback: rollback,
     rollbackAffectsFiles: driver === "opencode",
     asyncQuestions: driver === "codex" && supportsCodexAsyncQuestions(version),
     maxImagesPerTurn: isKnownProviderKind(driver) ? providerMaxImages(driver) : 0,
-    // Claude reports models through SDK initialization; Codex through `model/list`.
-    reportedModels: driver === "claudeAgent" || driver === "codex",
+    // Claude reports models through SDK initialization; Codex and Muse through `model/list`.
+    reportedModels: driver === "claudeAgent" || driver === "codex" || driver === "muse",
     sessionCommandCatalog: driver === "claudeAgent" || driver === "codex" || driver === "grok",
     instanceInventory: driver === "claudeAgent" || driver === "codex",
     nativeSessionCleanup: driver === "claudeAgent",

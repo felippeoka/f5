@@ -137,6 +137,8 @@ function providerDisplayName(provider: ProviderKind): string {
       return "Grok";
     case "antigravity":
       return "Antigravity";
+    case "muse":
+      return "Muse Code";
   }
 }
 
@@ -148,6 +150,7 @@ function providerFromSessionName(value: string | null | undefined): ProviderKind
     case "opencode":
     case "grok":
     case "antigravity":
+    case "muse":
       return value;
     default:
       return undefined;

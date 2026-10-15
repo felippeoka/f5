@@ -144,6 +144,7 @@ export function useSettingsRouteState(options: UseSettingsRouteStateOptions = {}
     opencode: "",
     grok: "",
     antigravity: "",
+    muse: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>

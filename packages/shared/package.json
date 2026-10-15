@@ -36,6 +36,10 @@
       "types": "./src/codexProtocolManifest.ts",
       "import": "./src/codexProtocolManifest.ts"
     },
+    "./museProtocolManifest": {
+      "types": "./src/museProtocolManifest.ts",
+      "import": "./src/museProtocolManifest.ts"
+    },
     "./model": {
       "types": "./src/model.ts",
       "import": "./src/model.ts"
