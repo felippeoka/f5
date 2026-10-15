@@ -151,6 +151,52 @@ layer("Agent Bridge thread tools", (it) => {
     }),
   );
 
+  it.effect("skips providers that are not installed or not signed in", () =>
+    Effect.gen(function* () {
+      const { host, run } = yield* setup();
+      host.providers = [
+        {
+          ...provider("claude", "claudeAgent"),
+          status: "error",
+          auth: { status: "unauthenticated" },
+        },
+        { ...provider("grok", "grok"), installed: false, status: "error" },
+        provider("codex", "codex"),
+      ];
+      host.settings = {
+        ...DEFAULT_SERVER_SETTINGS,
+        textGenerationModelSelection: {
+          instanceId: ProviderInstanceId.make("claude"),
+          model: "model-a",
+        },
+      };
+      const providers = yield* run("list_providers", {});
+      assert.deepStrictEqual(
+        providers.ok &&
+          providers.value.providers.map((entry: { instanceId: string; available: boolean }) => [
+            entry.instanceId,
+            entry.available,
+          ]),
+        [
+          ["claude", false],
+          ["grok", false],
+          ["codex", true],
+        ],
+      );
+      const refused = yield* run("create_thread", {
+        projectId: "exposed",
+        prompt: "Hi",
+        providerInstanceId: "claude",
+      });
+      assert.isFalse(refused.ok);
+      assert.include(!refused.ok ? refused.error.message : "", "not ready");
+      // The default falls past the signed-out text-generation default.
+      const created = yield* run("create_thread", { projectId: "exposed", prompt: "Hi" });
+      assert.isTrue(created.ok);
+      assert.strictEqual(host.submissions[0]!.command.modelSelection?.instanceId, "codex");
+    }),
+  );
+
   it.effect("uses the checkout for non-git projects", () =>
     Effect.gen(function* () {
       const { host, run } = yield* setup();

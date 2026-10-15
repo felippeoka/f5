@@ -124,6 +124,22 @@ export function supportsSupervisedTurns(driver: string): boolean {
 
 const providerLabel = (provider: ServerProvider) => provider.displayName ?? provider.instanceId;
 
+/**
+ * Whether a turn sent now could start: the same rule as the model picker.
+ * `isProviderAvailable` alone only says the driver exists in this build; a
+ * CLI that is not installed or not signed in reports `installed: false` or
+ * status `error`.
+ */
+export function isProviderUsable(provider: ServerProvider): boolean {
+  return (
+    provider.enabled &&
+    provider.installed &&
+    isProviderAvailable(provider) &&
+    provider.status !== "error" &&
+    provider.status !== "disabled"
+  );
+}
+
 function visibleThread(
   snapshot: OrchestrationReadModel,
   caller: AgentBridgeCaller,
@@ -501,23 +517,31 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
     requested: { readonly instanceId?: string; readonly model?: string },
   ): Effect.Effect<{ provider: ServerProvider; model: string }, AgentBridgeToolError> =>
     Effect.gen(function* () {
-      const enabled = providers.filter((entry) => entry.enabled && isProviderAvailable(entry));
+      const usable = providers.filter(isProviderUsable);
       const textDefault = settings.textGenerationModelSelection;
       let provider: ServerProvider | undefined;
       if (requested.instanceId !== undefined) {
-        provider = enabled.find((entry) => entry.instanceId === requested.instanceId);
-        if (!provider) return yield* toolError("Provider not found or not enabled.");
+        const requestedProvider = providers.find(
+          (entry) => entry.enabled && entry.instanceId === requested.instanceId,
+        );
+        if (!requestedProvider) return yield* toolError("Provider not found or not enabled.");
+        if (!isProviderUsable(requestedProvider))
+          return yield* toolError(
+            `${providerLabel(requestedProvider)} is not ready in F5 (not installed, not signed in, or failing its health check).`,
+          );
+        provider = requestedProvider;
         if (!supportsSupervisedTurns(provider.driver))
           return yield* toolError(
             `${providerLabel(provider)} cannot run supervised turns, so the Agent Bridge cannot use it.`,
           );
       } else {
         provider =
-          enabled.find(
+          usable.find(
             (entry) =>
               entry.instanceId === textDefault.instanceId && supportsSupervisedTurns(entry.driver),
-          ) ?? enabled.find((entry) => supportsSupervisedTurns(entry.driver));
-        if (!provider) return yield* toolError("No enabled provider supports supervised turns.");
+          ) ?? usable.find((entry) => supportsSupervisedTurns(entry.driver));
+        if (!provider)
+          return yield* toolError("No ready provider in F5 supports supervised turns.");
       }
       if (requested.model !== undefined) {
         if (
@@ -727,7 +751,7 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
               instanceId: provider.instanceId,
               driver: provider.driver,
               displayName: providerLabel(provider),
-              available: isProviderAvailable(provider),
+              available: isProviderUsable(provider),
               supportsSupervised: supportsSupervisedTurns(provider.driver),
               models: provider.models.map((model) => ({ slug: model.slug, name: model.name })),
             })),
