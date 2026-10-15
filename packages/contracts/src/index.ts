@@ -38,6 +38,7 @@ export * from "./filesystem";
 export * from "./environment";
 export * from "./storage";
 export * from "./backgroundWork";
+export * from "./agentBridge";
 export * from "./checkedInProjectFile";
 export * from "./usage";
 

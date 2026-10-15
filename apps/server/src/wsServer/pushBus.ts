@@ -1,5 +1,6 @@
 import {
   AGENTS_WS_CHANNELS,
+  AGENT_BRIDGE_WS_CHANNELS,
   PR_HUB_WS_CHANNELS,
   WsPush,
   WS_CHANNELS,
@@ -190,6 +191,7 @@ export function makeWebSocketSendController(input: {
 // progress frames from crowding lossless orchestration/terminal events.
 const COALESCIBLE_BROADCAST_CHANNELS = new Set<WsPushChannel>([
   AGENTS_WS_CHANNELS.snapshotUpdated,
+  AGENT_BRIDGE_WS_CHANNELS.stateChanged,
   WS_CHANNELS.serverConfigUpdated,
   WS_CHANNELS.providerAdvisoriesUpdated,
   WS_CHANNELS.gitStatusInvalidated,

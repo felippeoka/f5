@@ -78,6 +78,27 @@ describe("profile account execution", () => {
     expect(env.HOME).toBe(env.USERPROFILE);
     expect(env.F5_PROFILE_ISOLATED).toBe("1");
   });
+  it("marks agent and terminal processes for the Agent Bridge recursion guard", () => {
+    for (const isDefault of [true, false]) {
+      for (const purpose of ["provider", "terminal"] as const)
+        expect(
+          buildAccountExecutionEnvironment({
+            purpose,
+            stateDir,
+            profile: { ...profile, isDefault },
+            baseEnv,
+          }).F5_AGENT_PROCESS,
+        ).toBe("1");
+      expect(
+        buildAccountExecutionEnvironment({
+          purpose: "git",
+          stateDir,
+          profile: { ...profile, isDefault },
+          baseEnv,
+        }).F5_AGENT_PROCESS,
+      ).toBeUndefined();
+    }
+  });
   it("lets deliberate instance API credentials win and preserves Default inheritance", () => {
     expect(
       buildAccountExecutionEnvironment({

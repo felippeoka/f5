@@ -68,7 +68,8 @@ it.layer(NodeServices.layer)("MspTransport", (it) => {
         const startedAt = Date.now();
         yield* Effect.promise(async () => handle.transport.close?.());
         const exit = yield* Effect.promise(() => handle.exited);
-        assert.isAtLeast(Date.now() - startedAt, 250);
+        // Windows has no SIGTERM to ignore: the first signal already terminates.
+        if (process.platform !== "win32") assert.isAtLeast(Date.now() - startedAt, 250);
         assert.notEqual(exit.code, 0);
         yield* Effect.promise(async () => {
           await handle.transport.write("{}\n").then(

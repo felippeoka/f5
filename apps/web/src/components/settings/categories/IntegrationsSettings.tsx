@@ -1,3 +1,4 @@
+import { AgentBridgeSettings } from "../AgentBridgeSettings";
 import { BrowserSettings } from "../BrowserSettings";
 import { GithubAccountPanel } from "../GithubAccountPanel";
 import { useMemo } from "react";
@@ -97,6 +98,7 @@ export function IntegrationsSettings() {
       </SettingsCard>
 
       <GithubAccountPanel />
+      <AgentBridgeSettings />
       <McpServersSettings
         selectedProject={selectedProjectSummary}
         hasProjects={hasProjects}

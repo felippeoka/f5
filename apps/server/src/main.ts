@@ -31,6 +31,9 @@ import {
 } from "./config";
 import { applyPendingRestore } from "./backupService.ts";
 import { fixPath, resolveBaseDir, resolveStateDir } from "./os-jank";
+import { agentBridgeLocalCredentialsPath } from "./agentBridge/localCredentials.ts";
+import { runAgentBridgeStdio } from "./agentBridge/stdioShim.ts";
+import { profileStateDir } from "@t3tools/shared/profilePaths";
 import { Open } from "./open";
 import * as SqlitePersistence from "./persistence/Layers/Sqlite";
 import { makeServerProviderLayer, makeServerRuntimeServicesLayer } from "./serverLayers";
@@ -655,7 +658,7 @@ const logWebSocketEventsFlag = Flag.boolean("log-websocket-events").pipe(
   Flag.optional,
 );
 
-export const t3Cli = Command.make("t3", {
+const t3Base = Command.make("t3", {
   mode: modeFlag,
   port: portFlag,
   host: hostFlag,
@@ -670,7 +673,61 @@ export const t3Cli = Command.make("t3", {
   authToken: authTokenFlag,
   autoBootstrapProjectFromCwd: autoBootstrapProjectFromCwdFlag,
   logWebSocketEvents: logWebSocketEventsFlag,
-}).pipe(
+});
+
+/**
+ * `t3 agent-bridge-stdio [--profile <id>] [--state-dir <dir>]`: a STDIO MCP
+ * server that forwards to this profile's local Agent Bridge listener. It reads
+ * only `local.json`; it never starts F5 or takes the profile lock.
+ */
+const agentBridgeStdioCommand = Command.make("agent-bridge-stdio", {}).pipe(
+  Command.withDescription("Connect an MCP client over STDIO to this profile's F5 Agent Bridge."),
+  Command.withHandler(() =>
+    Effect.gen(function* () {
+      const parent = yield* t3Base;
+      const path = yield* Path.Path;
+      const explicitStateDir =
+        optionStringToTrimmedUndefined(parent.stateDir) ??
+        trimToUndefined(process.env.F5_STATE_DIR) ??
+        trimToUndefined(process.env.T3CODE_STATE_DIR);
+      const resolvedStateDir =
+        explicitStateDir !== undefined ? yield* resolveStateDir(explicitStateDir) : undefined;
+      const baseDir =
+        resolvedStateDir !== undefined
+          ? path.dirname(resolvedStateDir)
+          : yield* resolveBaseDir(
+              optionStringToTrimmedUndefined(parent.t3Home) ??
+                trimToUndefined(process.env.F5_HOME) ??
+                trimToUndefined(process.env.T3CODE_HOME),
+            );
+      const defaultStateDir = resolvedStateDir ?? path.join(baseDir, "userdata");
+      const profileRef =
+        optionStringToTrimmedUndefined(parent.profile) ?? trimToUndefined(process.env.F5_PROFILE);
+      const read = yield* Effect.promise(() => new ProfileRegistryStore(defaultStateDir).read());
+      const records = read.ok ? read.registry.profiles : [fallbackDefaultProfile(defaultStateDir)];
+      const profile =
+        records.find((record) => record.slug === (profileRef ?? "default")) ??
+        records.find((record) => record.id === profileRef);
+      if (!profile) {
+        process.stderr.write(`Unknown F5 profile '${profileRef}'.\n`);
+        process.exitCode = 1;
+        return;
+      }
+      yield* Effect.promise(() =>
+        runAgentBridgeStdio({
+          credentialsPath: agentBridgeLocalCredentialsPath(
+            profileStateDir(defaultStateDir, profile),
+          ),
+          input: process.stdin,
+          output: process.stdout,
+        }),
+      );
+    }),
+  ),
+);
+
+export const t3Cli = t3Base.pipe(
   Command.withDescription("Run the F5 server."),
   Command.withHandler((input) => Effect.scoped(makeServerProgram(input))),
+  Command.withSubcommands([agentBridgeStdioCommand]),
 );

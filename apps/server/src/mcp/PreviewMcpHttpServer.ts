@@ -29,6 +29,19 @@ import {
   type PreviewAutomationBrokerShape,
 } from "./PreviewAutomationBroker.ts";
 import {
+  asObject,
+  isAllowedHostHeader,
+  isLoopbackAddress,
+  jsonRpcError,
+  jsonRpcSuccess,
+  readBearerToken,
+  readRequestBody,
+  writeEmpty,
+  writeJson,
+  type JsonRpcRequest,
+  type JsonRpcResponse,
+} from "./jsonRpcHttp.ts";
+import {
   callPreviewTool,
   chooseServerName,
   PREVIEW_TOOL_DEFINITIONS,
@@ -42,7 +55,6 @@ const MCP_ENDPOINT_PATH = "/mcp/preview";
 const PREVIEW_MCP_SERVER_NAME = "__f5_preview";
 const PREVIEW_MCP_ENV_PREFIX = "F5_PREVIEW_MCP_TOKEN_";
 const MCP_PROTOCOL_VERSION = "2024-11-05";
-const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
 
 interface PreviewMcpSessionScope {
   readonly threadId: ThreadId;
@@ -82,119 +94,12 @@ export class PreviewMcpHttpServerError extends Data.TaggedError("PreviewMcpHttpS
   readonly cause?: unknown;
 }> {}
 
-interface JsonRpcRequest {
-  readonly jsonrpc?: string;
-  readonly id?: string | number | null;
-  readonly method?: string;
-  readonly params?: unknown;
-}
-
-interface JsonRpcResponse {
-  readonly jsonrpc: "2.0";
-  readonly id: string | number | null;
-  readonly result?: unknown;
-  readonly error?: {
-    readonly code: number;
-    readonly message: string;
-    readonly data?: unknown;
-  };
-}
-
 const PREVIEW_MCP_TOOL_LIST = PREVIEW_TOOL_DEFINITIONS.map((tool) => ({
   name: tool.name,
   description: tool.description,
   inputSchema: previewToolInputJsonSchema(tool),
   annotations: { ...tool.annotations, title: tool.title },
 }));
-
-function isLoopbackAddress(address: string | undefined): boolean {
-  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
-}
-
-function readBearerToken(request: http.IncomingMessage): string | null {
-  const authorization = request.headers.authorization;
-  if (!authorization?.startsWith("Bearer ")) return null;
-  const token = authorization.slice("Bearer ".length).trim();
-  return token.length > 0 ? token : null;
-}
-
-function isAllowedHostHeader(host: string | undefined, port: number | null): boolean {
-  if (!host || port === null) return false;
-  const normalized = host.toLowerCase();
-  return (
-    normalized === `127.0.0.1:${port}` ||
-    normalized === `localhost:${port}` ||
-    normalized === `[::1]:${port}`
-  );
-}
-
-function jsonRpcSuccess(id: JsonRpcRequest["id"], result: unknown): JsonRpcResponse {
-  return { jsonrpc: "2.0", id: id ?? null, result };
-}
-
-function jsonRpcError(
-  id: JsonRpcRequest["id"],
-  code: number,
-  message: string,
-  data?: unknown,
-): JsonRpcResponse {
-  return {
-    jsonrpc: "2.0",
-    id: id ?? null,
-    error: {
-      code,
-      message,
-      ...(data !== undefined ? { data } : {}),
-    },
-  };
-}
-
-function writeJson(response: http.ServerResponse, statusCode: number, value: unknown): void {
-  const body = JSON.stringify(value);
-  response.writeHead(statusCode, {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-    "content-length": Buffer.byteLength(body),
-  });
-  response.end(body);
-}
-
-function writeEmpty(response: http.ServerResponse, statusCode: number): void {
-  response.writeHead(statusCode, {
-    "cache-control": "no-store",
-  });
-  response.end();
-}
-
-function readRequestBody(request: http.IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let byteLength = 0;
-    request.on("data", (chunk: Buffer) => {
-      byteLength += chunk.byteLength;
-      if (byteLength > MAX_REQUEST_BODY_BYTES) {
-        reject(new Error("MCP request body is too large."));
-        request.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    request.on("error", reject);
-    request.on("end", () => {
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-      } catch (error) {
-        reject(error);
-      }
-    });
-  });
-}
-
-function asObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
 
 function makeToolCallHandler(
   broker: PreviewAutomationBrokerShape,

@@ -1,4 +1,5 @@
 import { UsagePriceOverride } from "./usage";
+import { AgentBridgeSettings, AgentBridgeSettingsPatch } from "./agentBridge";
 import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
@@ -422,6 +423,7 @@ export const ServerSettings = Schema.Struct({
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(() => ({}))),
   prHub: PrHubSettings.pipe(Schema.withDecodingDefault(() => ({}))),
+  agentBridge: AgentBridgeSettings.pipe(Schema.withDecodingDefault(() => ({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -549,6 +551,7 @@ export const ServerSettingsPatch = Schema.Struct({
     }),
   ),
   prHub: Schema.optionalKey(PrHubSettingsPatch),
+  agentBridge: Schema.optionalKey(AgentBridgeSettingsPatch),
   providers: Schema.optionalKey(
     Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),

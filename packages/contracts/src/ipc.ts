@@ -17,6 +17,18 @@ import type {
   NativeForkInput,
 } from "./nativeOperation";
 import type { ThreadId } from "./baseSchemas";
+import type {
+  AgentBridgeCreateTaskInput,
+  AgentBridgeGetTaskActivitiesInput,
+  AgentBridgeGetTaskActivitiesResult,
+  AgentBridgeGetTasksInput,
+  AgentBridgeGetTasksResult,
+  AgentBridgeReplyToTaskInput,
+  AgentBridgeState,
+  AgentBridgeStateChanged,
+  AgentBridgeTaskControlInput,
+  BotTask,
+} from "./agentBridge";
 import type { DesktopComputerAutomationBridge } from "./computerAutomation";
 import type { PullRequestKey } from "./prHub";
 import type {
@@ -892,6 +904,21 @@ export interface NativeApi {
   };
   globalSearch: {
     query: (input: GlobalSearchQueryInput) => Promise<GlobalSearchQueryResult>;
+  };
+  agentBridge: {
+    getState: () => Promise<AgentBridgeState>;
+    /** Invalidation only: refetch state when it fires. */
+    onStateChanged: (callback: (payload: AgentBridgeStateChanged) => void) => () => void;
+    getTasks: (input: AgentBridgeGetTasksInput) => Promise<AgentBridgeGetTasksResult>;
+    getTask: (taskId: string) => Promise<BotTask>;
+    getTaskActivities: (
+      input: AgentBridgeGetTaskActivitiesInput,
+    ) => Promise<AgentBridgeGetTaskActivitiesResult>;
+    createTask: (input: AgentBridgeCreateTaskInput) => Promise<BotTask>;
+    replyToTask: (input: AgentBridgeReplyToTaskInput) => Promise<BotTask>;
+    pauseTask: (input: AgentBridgeTaskControlInput) => Promise<BotTask>;
+    resumeTask: (input: AgentBridgeTaskControlInput) => Promise<BotTask>;
+    cancelTask: (input: AgentBridgeTaskControlInput) => Promise<BotTask>;
   };
   agents: {
     getSnapshot: (input?: AgentsGetSnapshotInput) => Promise<AgentsSnapshot>;

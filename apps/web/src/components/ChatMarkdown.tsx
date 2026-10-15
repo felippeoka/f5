@@ -45,10 +45,18 @@ import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { SurfaceErrorBoundary } from "./ui/SurfaceErrorBoundary";
 
+/**
+ * `default` renders trusted assistant output. `external-bot` renders content an
+ * outside agent wrote: no raw HTML, images as text, no local-file links, no
+ * automatic PR or file previews, and only HTTPS links.
+ */
+export type ChatMarkdownPolicy = "default" | "external-bot";
+
 interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
   isStreaming?: boolean;
+  policy?: ChatMarkdownPolicy;
 }
 
 type MarkdownRenderMode = "settled" | "streaming-lite";
@@ -708,7 +716,49 @@ function useStreamingMarkdownState(
   };
 }
 
-function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
+/** The only links external-bot content may carry: absolute HTTPS URLs. */
+export function externalBotLinkHref(href: string | undefined): string | null {
+  if (!href) return null;
+  try {
+    const url = new URL(href);
+    return url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+const EXTERNAL_BOT_COMPONENTS: Components = {
+  img({ src, alt }) {
+    const label = alt?.trim() || "image";
+    return <span>{`[${label}${typeof src === "string" ? `: ${src}` : ""}]`}</span>;
+  },
+  a({ node: _node, href, children }) {
+    const safeHref = externalBotLinkHref(href);
+    if (!safeHref) return <span>{children}</span>;
+    return (
+      <a href={safeHref} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    );
+  },
+};
+
+const ExternalBotMarkdown = memo(function ExternalBotMarkdown(props: { text: string }) {
+  return (
+    <MarkdownContainer>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={EXTERNAL_BOT_COMPONENTS} skipHtml>
+        {props.text}
+      </ReactMarkdown>
+    </MarkdownContainer>
+  );
+});
+
+function ChatMarkdown({ text, cwd, isStreaming = false, policy = "default" }: ChatMarkdownProps) {
+  if (policy === "external-bot") return <ExternalBotMarkdown text={text} />;
+  return <TrustedChatMarkdown text={text} cwd={cwd} isStreaming={isStreaming} />;
+}
+
+function TrustedChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
   const streamingState = useStreamingMarkdownState(text, isStreaming);
 
   if (streamingState) {

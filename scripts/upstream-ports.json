@@ -496,7 +496,7 @@
       "disposition": "ported",
       "plannedWorkstream": "1d",
       "evidence": [
-        "apps/server/src/mcp/PreviewMcpHttpServer.ts:516",
+        "apps/server/src/mcp/previewMcpTools.ts:162",
         "apps/server/src/mcp/PreviewMcpHttpServer.test.ts:1"
       ],
       "f5Shas": [
