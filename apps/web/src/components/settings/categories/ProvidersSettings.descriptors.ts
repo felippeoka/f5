@@ -14,7 +14,7 @@ export const PROVIDERS_SETTINGS_DESCRIPTORS = [
     category: "providers",
     label: "Provider instances",
     description: "Manage installed provider runtimes and per-instance configuration.",
-    keywords: ["codex", "claude", "cursor", "opencode", "grok", "runtime"],
+    keywords: ["codex", "claude", "cursor", "opencode", "grok", "muse", "runtime"],
     targetSelector: '[data-settings-search-target="providers.instances"]',
   },
   {
