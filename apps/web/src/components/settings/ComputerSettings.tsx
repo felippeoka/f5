@@ -18,7 +18,9 @@ const BACKGROUND_UNAVAILABLE: Record<ComputerBackgroundUnavailableReason, string
 /** Background needs the F5 helper's negotiated capability; built-in backends stay foreground. */
 export function backgroundUnavailableReason(
   status: ComputerAutomationBackendStatus | null | undefined,
+  bridged = true,
 ): string | undefined {
+  if (!bridged) return "Choose background on the computer running F5.";
   if (!status) return "Checking…";
   if (!status.available) return BACKGROUND_UNAVAILABLE.permissions;
   if (!status.background) return BACKGROUND_UNAVAILABLE["peer-capability"];
@@ -39,6 +41,7 @@ export function ComputerSettings() {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const { bridge, status, setStatus, error, setError } = useComputerStatus();
+  const backgroundUnavailable = backgroundUnavailableReason(status, !!bridge);
   const run = (action: () => Promise<unknown>) => {
     setError("");
     void action().catch(() => setError("Could not update computer control."));
@@ -144,7 +147,7 @@ export function ComputerSettings() {
         title="Execution mode"
         description={computerExecutionModeDescription(
           settings.computerUseExecutionMode,
-          backgroundUnavailableReason(status),
+          backgroundUnavailable,
         )}
         control={
           <Select
@@ -167,7 +170,7 @@ export function ComputerSettings() {
                 value="background"
                 disabled={
                   settings.computerUseExecutionMode !== "background" &&
-                  backgroundUnavailableReason(status) !== undefined
+                  backgroundUnavailable !== undefined
                 }
               >
                 Background (alongside you)
