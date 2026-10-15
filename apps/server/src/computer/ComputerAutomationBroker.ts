@@ -331,6 +331,15 @@ export class ComputerAutomationBrokerRuntime {
         delete binding.holder;
       }
     }
+    // Ordinary release ends control: only states the user must act on outlive the lease.
+    for (const [threadId, execution] of this.executionStates)
+      if (
+        !this.mainHolders.some((holder) => holder.threadId === threadId) &&
+        execution.state !== "paused" &&
+        execution.state !== "recovery" &&
+        this.pendingTakeover?.threadId !== threadId
+      )
+        this.executionStates.delete(threadId);
     this.publishUse();
   }
   private invalidateObservations(threadId: string): void {
@@ -357,8 +366,7 @@ export class ComputerAutomationBrokerRuntime {
     for (const [threadId, execution] of this.executionStates)
       if (
         !holders.some((holder) => holder.threadId === threadId) &&
-        execution.state !== "pending-consent" &&
-        execution.state !== "waiting-idle"
+        (execution.state === "paused" || execution.state === "recovery")
       )
         holders.push({
           threadId,
@@ -424,7 +432,11 @@ export class ComputerAutomationBrokerRuntime {
    * cancel pending consent/takeover and execution, revoke host scopes and await their drain,
    * then apply the change and reopen. Electron rejects older revisions from then on.
    */
-  async policyTransition<A>(apply: () => Promise<A>): Promise<A> {
+  async policyTransition<A>(
+    apply: () => Promise<A>,
+    /** Projects whose threads the change affects; every thread when omitted. */
+    affectsProject?: (projectId: string | undefined) => boolean,
+  ): Promise<A> {
     if (this.admissionsClosed++ === 0)
       this.admissionsReopened = new Promise((resolve) => {
         this.reopenAdmissions = resolve;
@@ -432,7 +444,9 @@ export class ComputerAutomationBrokerRuntime {
     try {
       // revokeBinding bumps each revision synchronously before its first await.
       await Promise.all(
-        [...this.bindings].map(([threadId, binding]) => this.revokeBinding(threadId, binding)),
+        [...this.bindings]
+          .filter(([threadId]) => affectsProject?.(this.access.projectId(threadId)) ?? true)
+          .map(([threadId, binding]) => this.revokeBinding(threadId, binding)),
       );
       const result = await apply();
       await this.refreshPolicies();
@@ -1097,6 +1111,7 @@ export class ComputerAutomationBrokerRuntime {
     // earlier must not expose an active native host to another profile.
     automationEventSanitizer.clear(threadId);
     this.nativePaused.delete(threadId);
+    if (this.executionStates.delete(threadId)) this.publishUse();
     const grantVersion = this.access.version(threadId) + 1;
     this.host.send({
       type: "grantsChanged",

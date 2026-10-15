@@ -449,8 +449,10 @@ function initializeComputerSystem(): void {
     channel.publishLeases();
     if (syncKillChord()) return;
     // Without the emergency shortcut neither native control nor a takeover may proceed.
+    // Registration only fails on the first need, so a lone reservation is all there is to undo;
+    // other threads' observations keep running.
     lease.cancelTakeover();
-    controller.stop("paused");
+    if (lease.holders().length > 0) controller.stop("paused");
   });
   let lastComputerStatus = "";
   helper.onEvent((message) => {

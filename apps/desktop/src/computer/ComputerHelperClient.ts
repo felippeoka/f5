@@ -37,6 +37,8 @@ export interface ComputerHelper {
   capabilities?(): ReadonlyArray<string>;
   /** Resolves once every earlier mutation of that generation has finished in the helper. */
   drain?(executionGeneration: number, timeoutMs: number): Promise<void>;
+  /** The helper's current physical-input sequence and idle age, read synchronously by it. */
+  readiness?(): Promise<{ inputSequence: number; lastUserInputAgeMs: number }>;
 }
 export class ComputerHelperClient implements ComputerHelper {
   private child: ChildProcessWithoutNullStreams | null = null;
@@ -316,6 +318,20 @@ export class ComputerHelperClient implements ComputerHelper {
       if (!this.closing && !this.terminalFailure) void this.restartAfterExit(exited);
       throw new ComputerControlError({ _tag: "OutcomeUnknown" });
     }
+  }
+  async readiness(): Promise<{ inputSequence: number; lastUserInputAgeMs: number }> {
+    if (!this.child || !this.ready)
+      throw new ComputerControlError({ _tag: "Unavailable", reason: "helper-missing" });
+    const id = randomUUID();
+    const result = (await this.sendRequest(
+      id,
+      { type: "readiness", requestId: id },
+      1000,
+      false,
+    )) as { inputSequence?: unknown; lastUserInputAgeMs?: unknown } | null;
+    if (typeof result?.inputSequence !== "number" || typeof result.lastUserInputAgeMs !== "number")
+      throw new ComputerControlError({ _tag: "Execution", message: "Helper readiness invalid." });
+    return { inputSequence: result.inputSequence, lastUserInputAgeMs: result.lastUserInputAgeMs };
   }
   async suspend(executionGeneration?: number): Promise<void> {
     const child = this.child;

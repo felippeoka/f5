@@ -15,6 +15,8 @@ function setup(certified = false) {
     inputIdleMs: () => 10_000,
     isPaused: () => false,
     drainBackground: vi.fn(async () => () => {}),
+    takeoverReadiness: vi.fn(async () => ({ idleMs: 10_000 })),
+    nativeWorkConflicts: vi.fn(() => false),
   };
   const channel = new ComputerHostChannel(
     controller as unknown as ComputerController,

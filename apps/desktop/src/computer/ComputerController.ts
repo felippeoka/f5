@@ -6,6 +6,7 @@ import type {
   ComputerDisplay,
   ComputerExecutionState,
   ComputerLeaseHolder,
+  ComputerLeaseScope,
   ComputerActivity,
   ComputerPauseCause,
   ComputerScreenshot,
@@ -17,7 +18,12 @@ import {
   computerRequestPayload,
   isComputerMutation,
 } from "@t3tools/shared/computerControl";
-import { computerScopeAllows, computerScopeDelivery } from "@t3tools/shared/computerExecution";
+import {
+  COMPUTER_CHROME_APP_IDS,
+  computerScopeAllows,
+  computerScopeDelivery,
+  computerScopesConflict,
+} from "@t3tools/shared/computerExecution";
 import { computerModelToNative } from "@t3tools/shared/computerGeometry";
 import { COMPUTER_BACKGROUND_CAPABILITY } from "@t3tools/contracts";
 import { ComputerLeaseAuthority, sameComputerHolder } from "./ComputerLeaseAuthority";
@@ -104,6 +110,19 @@ export class ComputerController {
   private readonly quarantined = new Set<string>();
   /** Set while a takeover drains other threads' background work before arming. */
   private takeoverDraining = false;
+  /**
+   * Mutations the helper may still be executing. Releasing or cancelling a lease does not end
+   * them; they keep conflicting scopes excluded until the helper answers or a drain confirms.
+   */
+  private readonly nativeWork = new Set<{
+    key: string;
+    generation: number;
+    scope: ComputerLeaseScope;
+  }>();
+  /** Request IDs whose OS action the helper confirmed before any optional capture. */
+  private readonly confirmed = new Set<string>();
+  /** Input sequence the helper reported idle at, checked natively when a takeover resumes. */
+  private takeoverInputSequence: number | undefined;
   private frontmostAppId: string | undefined;
   private readonly appNames = new Map<string, string>();
   private readonly snapshots = new Map<
@@ -163,7 +182,12 @@ export class ComputerController {
       typeof message.executionGeneration === "number" ? message.executionGeneration : undefined;
     const tagged = generation !== undefined ? this.permitted.get(generation) : undefined;
     if (message.type === "killSwitch") this.stop("kill-switch");
-    else if (message.type === "physicalInput") {
+    else if (message.type === "actionConfirmed") {
+      if (typeof message.requestId === "string") {
+        this.confirmed.add(message.requestId);
+        if (this.confirmed.size > 256) this.confirmed.delete(this.confirmed.values().next().value!);
+      }
+    } else if (message.type === "physicalInput") {
       this.physicalInputAt = this.now();
       if (tagged) this.stopThread(tagged, "user-input");
       else if (generation === undefined)
@@ -187,6 +211,8 @@ export class ComputerController {
       this.frontmostAppId =
         typeof message.frontmostAppId === "string" ? message.frontmostAppId : undefined;
     } else if (message.type === "hello") {
+      // The previous helper process is gone, and with it any unresolved native work.
+      this.nativeWork.clear();
       // A replacement helper starts suspended and has no remembered authorization. Existing
       // holders are never re-resumed into it; only a newly granted lease resumes.
       for (const authorization of this.grants.values())
@@ -223,10 +249,13 @@ export class ComputerController {
         expiresInMs: 1000,
         scope: holder.scope,
       });
+      const expected = holder.scope.kind === "takeover" ? this.takeoverInputSequence : undefined;
+      if (holder.scope.kind === "takeover") this.takeoverInputSequence = undefined;
       this.helper.control({
         type: "resume",
         executionGeneration: holder.executionGeneration,
         scope: holder.scope,
+        ...(expected !== undefined ? { inputSequence: expected } : {}),
       });
     }
     // Only foreground holders own the screen; background work never draws an overlay.
@@ -243,6 +272,96 @@ export class ComputerController {
   }
   frontmost(): string | undefined {
     return this.frontmostAppId;
+  }
+  /**
+   * Native readiness for a takeover: the helper's own idle age and input sequence, read now
+   * rather than from the last heartbeat. The sequence is re-checked by the helper on resume.
+   */
+  async takeoverReadiness(): Promise<{ idleMs: number }> {
+    if (!this.helper.readiness) return { idleMs: this.inputIdleMs() };
+    const ready = await this.helper.readiness();
+    if (ready.lastUserInputAgeMs >= 0)
+      this.physicalInputAt = Math.max(this.physicalInputAt, this.now() - ready.lastUserInputAgeMs);
+    this.takeoverInputSequence = ready.inputSequence;
+    return { idleMs: ready.lastUserInputAgeMs < 0 ? Infinity : ready.lastUserInputAgeMs };
+  }
+  /** Whether unresolved native work still excludes `scope` (or Chrome control). */
+  nativeWorkConflicts(scope: ComputerLeaseScope | "chrome"): boolean {
+    for (const entry of this.nativeWork)
+      if (
+        scope === "chrome"
+          ? entry.scope.kind !== "app" || COMPUTER_CHROME_APP_IDS.includes(entry.scope.appId)
+          : computerScopesConflict(entry.scope, scope)
+      )
+        return true;
+    return false;
+  }
+  private trackNative(request: ComputerAutomationRequest, native: Promise<unknown>): void {
+    if (!isComputerMutation(request.op)) return;
+    const entry = {
+      key: this.key(request.authorization),
+      generation: request.authorization.executionGeneration,
+      scope: this.lease.find(request.authorization)?.scope ?? { kind: "foreground" as const },
+    };
+    this.nativeWork.add(entry);
+    const settle = () => {
+      this.nativeWork.delete(entry);
+    };
+    native.then(settle, (error: unknown) => {
+      // A timeout or lost reply is not completion: only a drain proves the helper finished.
+      if (computerError(error)._tag === "OutcomeUnknown" && this.capable() && this.helper.drain)
+        void this.helper
+          .drain(entry.generation, 5000)
+          .catch(() => undefined)
+          .finally(settle);
+      else settle();
+    });
+  }
+  private async awaitNative(
+    predicate: (entry: { key: string; generation: number }) => boolean,
+    timeoutMs: number,
+  ): Promise<boolean> {
+    const deadline = this.now() + timeoutMs;
+    const pending = () => [...this.nativeWork].some(predicate);
+    while (pending() && this.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    return !pending();
+  }
+  /** A mutation whose effect is unknown pauses its thread into recovery until local resume. */
+  private recordUnknown(request: ComputerAutomationRequest): void {
+    const key = this.key(request.authorization);
+    const appId = "appId" in request && request.appId ? request.appId : "*";
+    this.quarantined.add(`${key}\0${appId}`);
+    const holder = this.lease.holders().find((entry) => this.key(entry) === key);
+    if (holder) {
+      this.stopThread(holder, "outcome-unknown");
+      return;
+    }
+    const wasPaused = this.paused.has(key);
+    this.paused.add(key);
+    this.pauseCauses.set(key, "outcome-unknown");
+    const last = this.controlled.get(key);
+    if (last) {
+      if (!wasPaused) this.options.paused(last, "outcome-unknown");
+      this.publishState(last, "recovery", "outcome-unknown");
+    }
+  }
+  /** The OS action completed; only its follow-up screenshot was lost. */
+  private completedWithoutCapture(request: ComputerAutomationRequest): unknown {
+    return {
+      displayId: "unknown",
+      geometryGeneration: "unknown",
+      frontmostApp: null,
+      cursor: null,
+      actionCompleted: true,
+      screenshotError: "Interrupted",
+      ...(request.delivery === "background"
+        ? {
+            delivery: "background",
+            ...("appId" in request && request.appId ? { target: { appId: request.appId } } : {}),
+          }
+        : {}),
+    };
   }
   isPaused(profileId: string, threadId: string): boolean {
     return this.paused.has(this.key({ profileId, threadId }));
@@ -272,6 +391,9 @@ export class ComputerController {
     } else if (this.now() - this.physicalInputAt < 1500)
       // Non-latching: no lease exists yet, so recent input only refuses this acquisition.
       throw new ComputerControlError({ _tag: "TargetBlocked", kind: "user-active" });
+    // A released or cancelled holder may still be executing natively; wait for its drain.
+    if (this.nativeWorkConflicts(holder.scope))
+      throw new ComputerControlError({ _tag: "TargetBlocked", kind: "foreground-busy" });
     const acquired = this.lease.acquire(holder);
     // A lease listener may reject control if the emergency shortcut cannot register.
     if (
@@ -581,16 +703,16 @@ export class ComputerController {
         });
       }
       job.phase = "sent";
-      const result = await Promise.race([
-        this.helper.request(request, {
-          f5Pids: this.options.f5Pids(),
-          f5BundlePath: this.options.f5BundlePath,
-          overlayWindowIds: this.overlay.windowIds(),
-        }),
-        job.cancellation,
-      ]);
+      const native = this.helper.request(request, {
+        f5Pids: this.options.f5Pids(),
+        f5BundlePath: this.options.f5BundlePath,
+        overlayWindowIds: this.overlay.windowIds(),
+      });
+      this.trackNative(request, native);
+      const result = await Promise.race([native, job.cancellation]);
       if (job.cancelled) return;
       job.phase = "terminal";
+      this.confirmed.delete(request.requestId);
       const limit =
         request.op === "inspect"
           ? 256 * 1024
@@ -661,8 +783,16 @@ export class ComputerController {
       }
       job.resolve(result);
     } catch (error) {
+      const sent = job.phase === "sent";
       job.phase = "terminal";
+      const unknown = mutation && sent && computerError(error)._tag === "OutcomeUnknown";
+      // A confirmed action keeps its success even when its reply was lost afterwards.
+      if (unknown && this.confirmed.delete(request.requestId)) {
+        job.resolve(this.completedWithoutCapture(request));
+        return;
+      }
       job.reject(error);
+      if (unknown && !job.cancelled) this.recordUnknown(request);
       if (mutation && !job.cancelled) {
         this.options.activity(request.authorization.profileId, {
           threadId: request.authorization.threadId,
@@ -679,27 +809,26 @@ export class ComputerController {
   private backgroundFailure(request: ComputerAutomationRequest, cause: unknown): void {
     const error = computerError(cause);
     const holder = this.lease.find(request.authorization);
-    if (error._tag === "OutcomeUnknown" && holder?.scope.kind === "app") {
-      this.quarantined.add(`${this.key(holder)}\0${holder.scope.appId}`);
-      this.stopThread(holder, "outcome-unknown");
-    } else if (
-      holder &&
-      error._tag === "ForegroundRequired" &&
-      error.reason === "activation-side-effect"
-    )
+    // OutcomeUnknown is recorded by run() for every delivery.
+    if (holder && error._tag === "ForegroundRequired" && error.reason === "activation-side-effect")
       this.stopThread(holder, "activation");
   }
   private cancelWhere(predicate: (job: Job) => boolean, error: ComputerControlError): void {
+    const unknown: ComputerAutomationRequest[] = [];
     const interrupt = (job: Job) => {
       if (job.cancelled) return;
       job.cancelled = true;
       job.cancel();
-      // A request the helper may already have performed is unknown, never "interrupted".
-      job.reject(
-        job.phase === "sent" && isComputerMutation(job.request.op)
-          ? new ComputerControlError({ _tag: "OutcomeUnknown" })
-          : error,
-      );
+      const sentMutation = job.phase === "sent" && isComputerMutation(job.request.op);
+      // The helper confirmed the OS action; only the optional capture is being abandoned.
+      if (sentMutation && this.confirmed.delete(job.request.requestId))
+        job.resolve(this.completedWithoutCapture(job.request));
+      else if (sentMutation) {
+        // A request the helper may already have performed is unknown, never "interrupted",
+        // and its thread enters recovery like any other unknown outcome.
+        job.reject(new ComputerControlError({ _tag: "OutcomeUnknown" }));
+        unknown.push(job.request);
+      } else job.reject(error);
       if (isComputerMutation(job.request.op))
         this.options.activity(job.request.authorization.profileId, {
           threadId: job.request.authorization.threadId,
@@ -732,6 +861,7 @@ export class ComputerController {
         this.helper.control({ type: "cancel", requestId: job.request.requestId });
         interrupt(job);
       }
+    for (const request of unknown) this.recordUnknown(request);
   }
   cancel(requestId: string, profileId: string): void {
     this.cancelWhere(
@@ -765,7 +895,9 @@ export class ComputerController {
         );
       while (pending().length && this.now() < deadline)
         await new Promise((resolve) => setTimeout(resolve, 20));
-      if (pending().length) {
+      // Cancelled or released work the helper has not finished also blocks the takeover.
+      const drained = await this.awaitNative(() => true, Math.max(0, deadline - this.now()));
+      if (pending().length || !drained) {
         release();
         throw new ComputerControlError({ _tag: "TargetBlocked", kind: "foreground-busy" });
       }
@@ -790,8 +922,19 @@ export class ComputerController {
     for (const holder of stale) {
       this.lease.release(holder);
       this.options.holderStopped?.(holder);
-      if (this.capable()) await this.helper.drain?.(holder.executionGeneration, 5000);
     }
+    // The backend may already have released these holders; drain by the work itself, so the
+    // transition completes only once the helper has finished this thread's mutations.
+    const generations = new Set([
+      ...stale.map((holder) => holder.executionGeneration),
+      ...[...this.nativeWork].filter((entry) => entry.key === key).map((entry) => entry.generation),
+    ]);
+    if (this.capable())
+      await Promise.all(
+        [...generations].map((generation) => this.helper.drain?.(generation, 5000)),
+      );
+    if (!(await this.awaitNative((entry) => entry.key === key, 5500)))
+      throw new ComputerControlError({ _tag: "OutcomeUnknown" });
   }
   disconnect(profileId: string): void {
     this.cancelWhere(
@@ -963,6 +1106,8 @@ export class ComputerController {
     this.snapshots.clear();
     this.appNames.clear();
     this.permitted.clear();
+    this.nativeWork.clear();
+    this.confirmed.clear();
     this.recentlyStopped = [];
   }
 }

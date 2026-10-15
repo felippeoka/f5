@@ -2,6 +2,7 @@ import {
   agentComputerUsePush,
   ComputerAutomationBroker,
 } from "./computer/ComputerAutomationBroker";
+import { computerPolicyChange } from "./computer/computerPolicyChange";
 import {
   restoreChromeSessionSetup,
   listChromeSessionSetups,
@@ -4957,20 +4958,22 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         // Computer policy changes go through the broker's admission barrier before they persist:
         // admissions close, revisions bump, host scopes drain, then the change applies. On a
         // persistence failure the barrier reloads policies and reopens under a fresh revision.
-        const computerPolicy =
-          Option.isSome(computerAutomationBroker) &&
-          (body.enableAgentComputerUse !== undefined ||
-            body.computerUseExecutionMode !== undefined ||
-            body.computerUseBackend !== undefined ||
-            body.enableAgentBrowserAccess !== undefined ||
-            body.projectSettingsOverrides !== undefined);
-        const guarded = computerPolicy
-          ? Effect.promise(() =>
-              computerAutomationBroker.value.policyTransition(() =>
-                Effect.runPromise(Effect.exit(update)),
-              ),
-            ).pipe(Effect.flatMap((exit) => exit))
-          : update;
+        // Only patches that change effective computer policy pass the barrier, and a project
+        // override change interrupts only that project's threads.
+        const change = Option.isSome(computerAutomationBroker)
+          ? computerPolicyChange(yield* serverSettings.getSettings, body)
+          : null;
+        const guarded =
+          change && Option.isSome(computerAutomationBroker)
+            ? Effect.promise(() =>
+                computerAutomationBroker.value.policyTransition(
+                  () => Effect.runPromise(Effect.exit(update)),
+                  change.global
+                    ? undefined
+                    : (projectId) => projectId !== undefined && change.projects.has(projectId),
+                ),
+              ).pipe(Effect.flatMap((exit) => exit))
+            : update;
         return yield* guarded.pipe(
           Effect.map(redactServerSettingsForClient),
           Effect.mapError(

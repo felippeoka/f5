@@ -1136,6 +1136,20 @@ func applicationActivated(_ app: NSRunningApplication) {
   }
 }
 /// Background typing: accessibility text insertion into the target's focused element only.
+/// AX errors returned before the target accepted the write; anything else is ambiguous.
+func computerAXWriteRejected(_ error: AXError) -> Bool {
+  [.attributeUnsupported, .illegalArgument, .notImplemented, .apiDisabled, .invalidUIElement]
+    .contains(error)
+}
+/// The OS action is done; an optional screenshot follows. Lets Electron keep a known success
+/// even if a stop or activation incident arrives during capture.
+func confirmAction(_ request: [String: Any]) {
+  let payload: [String: Any] = [
+    "type": "actionConfirmed", "requestId": string(request, "requestId"),
+    "executionGeneration": integer(authorization(request), "executionGeneration"),
+  ]
+  telemetryQueue.async { emit(payload) }
+}
 func backgroundType(_ request: [String: Any], _ host: [String: Any]) throws -> (
   NSRunningApplication, CGRect, [String: Any]
 ) {
@@ -1169,7 +1183,9 @@ func backgroundType(_ request: [String: Any], _ host: [String: Any]) throws -> (
   var readable = before != nil
   var start = 0
   while start < characters.count {
-    try checkPermit(request)
+    // Once any chunk was inserted, a stop is no longer a clean interruption: the text is
+    // partially typed and a retry would duplicate it.
+    do { try checkPermit(request) } catch { throw start == 0 ? error : Failure("OutcomeUnknown") }
     guard let currentElement = axElement(attribute(root, kAXFocusedUIElementAttribute)),
       let currentWindow = axElement(attribute(root, kAXFocusedWindowAttribute)),
       CFEqual(currentElement, element), CFEqual(currentWindow, window),
@@ -1181,7 +1197,10 @@ func backgroundType(_ request: [String: Any], _ host: [String: Any]) throws -> (
       element, kAXSelectedTextAttribute as CFString, String(characters[start..<end]) as CFString)
     try endBackgroundAction(dispatch, succeeded: result == .success)
     guard result == .success else {
-      throw start == 0 ? Failure("ForegroundRequired", "reason", "typing-unsupported")
+      // Only errors that establish the write never applied are safe to retry in the
+      // foreground; cannotComplete and generic failures may already have inserted text.
+      throw start == 0 && computerAXWriteRejected(result)
+        ? Failure("ForegroundRequired", "reason", "typing-unsupported")
         : Failure("OutcomeUnknown")
     }
     if start == 0 {
@@ -1550,6 +1569,7 @@ func backgroundMutate(_ request: [String: Any], _ host: [String: Any]) async thr
       "geometryGeneration": displays().first?.generation ?? "unknown",
     ]
   }
+  confirmAction(request)
   refreshWindowCache()
   var result: [String: Any] = [
     "frontmostApp": NSNull(), "cursor": NSNull(), "actionCompleted": true,
@@ -1721,6 +1741,7 @@ func mutate(_ request: [String: Any], _ host: [String: Any]) async throws -> [St
   } else {
     throw Failure("UnsupportedAction")
   }
+  confirmAction(request)
   try await Task.sleep(nanoseconds: 300_000_000)
   var result: [String: Any] = [
     "frontmostApp": NSWorkspace.shared.frontmostApplication.flatMap(appRecord) ?? NSNull(),
@@ -1922,17 +1943,44 @@ DispatchQueue.global(qos: .userInteractive).async {
       case "resume":
         let scope = message["scope"] != nil ? ComputerExecutionScope(message["scope"]) : nil
         if case .app = scope { refreshWindowCache() }
-        permits.resume(generation, scope: scope)
+        // A takeover arms against the input sequence Electron observed when the user was idle.
+        // Any physical input since then wins: the generation stays suspended and stops.
+        if let expected = message["inputSequence"] as? Int,
+          locked({ inputSequence }) != expected
+        {
+          interrupt(generation, ["type": "physicalInput", "cause": "readiness"])
+        } else {
+          permits.resume(generation, scope: scope)
+        }
+      case "readiness":
+        if let id = message["requestId"] {
+          let (age, sequence) = locked {
+            (
+              lastInputUptime > 0
+                ? Int((ProcessInfo.processInfo.systemUptime - lastInputUptime) * 1000) : -1,
+              inputSequence
+            )
+          }
+          emit([
+            "type": "response", "requestId": id,
+            "result": ["inputSequence": sequence, "lastUserInputAgeMs": age],
+          ])
+        }
       case "suspend":
         if message["executionGeneration"] != nil {
           permits.suspend(generation)
-          releaseQueue.async { releaseHeldInput(where: { $0.generation == generation }) }
+          // Release this generation's input here rather than behind other release work, so
+          // one thread's 50 ms acknowledgment never waits on another thread.
+          releaseHeldInput(where: { $0.generation == generation })
+          if let id = message["requestId"] {
+            emit(["type": "response", "requestId": id, "result": [:]])
+          }
         } else {
           suspend()
-        }
-        if let id = message["requestId"] {
-          // Acknowledge only after local suspension and held-input release.
-          releaseQueue.async { emit(["type": "response", "requestId": id, "result": [:]]) }
+          if let id = message["requestId"] {
+            // Acknowledge only after local suspension and held-input release.
+            releaseQueue.async { emit(["type": "response", "requestId": id, "result": [:]]) }
+          }
         }
       case "retire":
         permits.retire(generation)

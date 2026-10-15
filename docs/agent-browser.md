@@ -368,19 +368,33 @@ false` means confirm with inspect or a screenshot. Secure text entry waits
 
 `computer_request_foreground {app, reason}` asks for an explicit takeover of one app. Electron
 reserves the takeover, shows a native dialog quoting the reason, waits until the user's input
-has been idle for 1.5 s (30 s limit), drains every background holder, rechecks readiness and
-then arms the lease. Foreground steps on that app reuse it until the turn ends, the agent
+has been idle for 1.5 s (30 s limit), drains every background holder, then asks the helper
+for its current idle age and input sequence and arms the lease. The helper resumes the armed
+generation only if its input sequence is unchanged; any input in between stops it. The approval
+must name the reservation's exact thread, session, turn and app, or no receipt is minted.
+Foreground steps on that app reuse it until the turn ends, the agent
 passes `executionMode: "background"`, or a stop/policy event revokes it. While a takeover is
 armed, other threads get `TargetBlocked foreground-busy`; acting in another app reports
 `TargetBlocked other-app`. If the user is using the target app, background actions report
 `TargetBlocked user-active` without latching a pause.
 
-Changing computer-relevant settings runs a policy admission barrier: the server closes
-admissions, bumps each binding's policy revision, cancels pending consent/takeovers and
+A settings change that alters effective computer policy (computer use, execution mode,
+backend, browser access, or those per-project overrides) runs a policy admission barrier: the
+server closes admissions, bumps the affected bindings' policy revision (every thread for global
+changes, only that project's threads for overrides), cancels pending consent/takeovers and
 execution, sends `observationInvalidate` and awaits its drain, applies the change and reopens.
-Electron rejects older revisions afterwards and the session approval must be granted again.
+Unrelated edits never pass the barrier. Electron rejects older revisions afterwards and the
+session approval must be granted again. Background mode forces the F5 native backend.
+
 Interruptions before dispatch report `Interrupted`; after dispatch, `OutcomeUnknown`, which
-quarantines the thread until the user resumes locally. The banner and live card show every
+puts the thread into recovery until the user resumes locally. This covers cancellation,
+timeouts and helper loss alike, and partially typed text. A dispatched mutation keeps
+excluding conflicting scopes (including Chrome) after its lease is released, until the helper
+answers or a drain confirms. When the helper confirmed the OS action before an optional
+screenshot, a later stop keeps `actionCompleted: true` and reports only `screenshotError`.
+Only AX errors that prove nothing was written fall back to `ForegroundRequired
+typing-unsupported`. Screenshots finishing after an invalidation are discarded and
+app-scoped captures never authorize coordinates. The banner and live card show every
 holder with its delivery, app, execution state (`active`, `waiting-secure-input`, `paused`,
 `recovery`, pending takeover) and pause cause; background-only control uses a quieter style.
 
@@ -2086,15 +2100,20 @@ For background inspection without changing focus or starting a provider session:
 bun apps/desktop/src/computer/rehearseInspectMacos.ts --helper apps/desktop/dist-native/mac-arm64/f5-computer-helper --output /tmp/f5-background-inspection.json
 ```
 
-For the Phase 0 background-delivery spike (accessibility press, setValue and app-filtered
-capture on a background fixture, checking the frontmost app never changes), build the helper
-with `swift build -Xswiftc -DF5_BACKGROUND_AX` and run:
+For the Phase 0 background-delivery spike (accessibility press, setValue, selected-text
+typing and app-filtered capture on a background fixture, each with verified read-back, and
+checking the frontmost app never changes), build the helper with
+`swift build -Xswiftc -DF5_BACKGROUND_AX` and run:
 
 ```sh
-bun apps/desktop/src/computer/rehearseBackgroundMacos.ts --helper <background-enabled helper>
+bun apps/desktop/src/computer/rehearseBackgroundMacos.ts --helper <background-enabled helper> \
+  --real-app com.apple.TextEdit --real-app com.apple.Notes
 ```
 
-It refuses to overwrite an existing receipt and fails when the helper lacks `background-ax-v1`.
+Each `--real-app` must be a running app from `COMPUTER_BACKGROUND_POLICY.certified`; it is
+probed read-only (inspect and app-scoped capture). Real-app press, setValue and typing stay a
+manual certification step, so this report alone cannot open the preview gate. The script
+refuses to overwrite an existing receipt and fails when the helper lacks `background-ax-v1`.
 
 The [current read-only preflight](computer-certification/2026-10-12-macos-gate-preflight-856ae44523.json)
 confirms development permissions on one Retina display. Signing remains deferred;

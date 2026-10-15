@@ -24,6 +24,17 @@ export function primaryComputerHolder(
   return leases.holders.find((holder) => holder.delivery === "foreground") ?? leases.holders[0];
 }
 
+/** Threads the banner text speaks for: every active background agent when it summarizes them. */
+export function computerUseBannerTargets(
+  leases: typeof AgentComputerUseChanged.Type,
+): ReadonlyArray<AgentComputerUseHolder["threadId"]> {
+  const holder = primaryComputerHolder(leases);
+  if (!holder) return [];
+  if (holder.delivery === "foreground" || holder.state !== "active") return [holder.threadId];
+  return leases.holders
+    .filter((entry) => entry.delivery === "background")
+    .map((entry) => entry.threadId);
+}
 export function computerUseBannerText(
   leases: typeof AgentComputerUseChanged.Type,
   pausedLocally: boolean,
@@ -60,9 +71,9 @@ export function computerUseBannerText(
       ? `An agent is controlling ${app} in the foreground`
       : "An agent is controlling this computer";
   const background = leases.holders.filter((entry) => entry.delivery === "background");
-  return background.length > 1
-    ? `${background.length} agents are working in the background`
-    : `An agent is working in ${app ?? "an app"} in the background`;
+  if (background.length <= 1) return `An agent is working in ${app ?? "an app"} in the background`;
+  const apps = [...new Set(background.flatMap((entry) => (entry.appName ? [entry.appName] : [])))];
+  return `${background.length} agents are working in the background${apps.length ? ` in ${apps.join(", ")}` : ""}`;
 }
 
 export function ComputerUseBanner() {
@@ -86,6 +97,9 @@ export function ComputerUseBanner() {
     holder.state === "active" &&
     !paused;
   const backend = holder?.backend;
+  // A summary of several background agents controls all of them; otherwise just the one shown.
+  const summarized = leases.pendingTakeover ? [] : computerUseBannerTargets(leases);
+  const targets = summarized.length > 1 ? summarized : threadId ? [threadId] : [];
   return (
     <div
       role="status"
@@ -116,18 +130,23 @@ export function ComputerUseBanner() {
             size="xs"
             variant="ghost"
             title="Stop shortcut: ⌃⌘Esc on macOS; Ctrl+Alt+Shift+F12 on Windows"
-            onClick={() => void pauseComputerThread(threadId, !paused).catch(() => undefined)}
+            onClick={() => {
+              for (const target of targets)
+                void pauseComputerThread(target, !paused).catch(() => undefined);
+            }}
           >
-            {paused ? "Resume" : "Pause"}
+            {paused ? "Resume" : targets.length > 1 ? "Pause all" : "Pause"}
           </Button>
           <Button
             size="xs"
             variant="destructive"
             title={backend === "native" ? "Stop computer input" : "Stops after the current action"}
-            onClick={() => void stopComputerTurn(threadId).catch(() => undefined)}
+            onClick={() => {
+              for (const target of targets) void stopComputerTurn(target).catch(() => undefined);
+            }}
           >
             <SquareIcon />
-            Stop
+            {targets.length > 1 ? "Stop all" : "Stop"}
           </Button>
         </>
       ) : (

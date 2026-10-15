@@ -1,4 +1,8 @@
-import type { ComputerAutomationError, ComputerLeaseHolder } from "@t3tools/contracts";
+import type {
+  ComputerAccessRequested,
+  ComputerAutomationError,
+  ComputerLeaseHolder,
+} from "@t3tools/contracts";
 import { ComputerControlError, computerError } from "@t3tools/shared/computerControl";
 import type { ComputerController } from "./ComputerController";
 import type { ComputerExecutionAuthority } from "./ComputerExecutionAuthority";
@@ -97,16 +101,29 @@ export class ComputerTakeoverCoordinator {
     );
     this.options.state(profileId, holder, "pending-consent");
   }
-  /** Called from main's consent path only, after the native dialog. */
-  answered(profileId: string, approvalRequestId: string, allowed: boolean): void {
+  /**
+   * Called from main's consent path only, after the native dialog. The dialog the user answered
+   * must describe exactly this reservation: same thread, session, turn and app. A mismatched
+   * pair never mints a receipt.
+   */
+  answered(profileId: string, approval: ComputerAccessRequested, allowed: boolean): void {
     const takeover = [...this.takeovers.values()].find(
       (entry) =>
         entry.profileId === profileId &&
-        entry.approvalRequestId === approvalRequestId &&
+        entry.approvalRequestId === approval.requestId &&
         entry.phase === "consent",
     );
     if (!takeover) return;
-    if (!allowed) {
+    const scope = takeover.holder.scope as { appId: string };
+    const matches =
+      approval.kind === "foreground-takeover" &&
+      approval.threadId === takeover.holder.threadId &&
+      approval.takeover?.threadId === takeover.holder.threadId &&
+      approval.takeover.turnId === takeover.holder.turnId &&
+      approval.takeover.appId === scope.appId &&
+      (approval.sessionGeneration === undefined ||
+        approval.sessionGeneration === takeover.holder.sessionGeneration);
+    if (!allowed || !matches) {
       this.fail(takeover, new ComputerControlError({ _tag: "NotGranted", needed: "click" }));
       return;
     }
@@ -141,8 +158,12 @@ export class ComputerTakeoverCoordinator {
         this.controller.isPaused(takeover.profileId, takeover.holder.threadId)
       )
         throw new ComputerControlError({ _tag: "Interrupted", cause: "paused" });
-      // Readiness exchange: the user may have resumed input while others drained.
-      if (this.controller.inputIdleMs() < TAKEOVER_IDLE_MS) {
+      // Native readiness exchange: the helper's current idle age, not cached telemetry. The
+      // helper re-checks the input sequence it reported when the armed generation resumes.
+      const { idleMs } = await this.controller.takeoverReadiness();
+      if (!this.takeovers.has(takeover.requestId))
+        throw new ComputerControlError({ _tag: "Interrupted", cause: "paused" });
+      if (idleMs < TAKEOVER_IDLE_MS) {
         release();
         release = undefined;
         this.waitIdle(takeover, started);
@@ -182,6 +203,7 @@ export class ComputerTakeoverCoordinator {
       );
   }
   cancelThread(profileId: string, threadId?: string): void {
+    // Snapshot: fail() deletes from the map while we iterate.
     for (const takeover of [...this.takeovers.values()])
       if (takeover.profileId === profileId && (!threadId || takeover.holder.threadId === threadId))
         this.fail(takeover, new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" }));

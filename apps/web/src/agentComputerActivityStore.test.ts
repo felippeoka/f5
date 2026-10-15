@@ -1,7 +1,7 @@
 import { ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isAgentComputerActive, useAgentComputerActivityStore } from "./agentComputerActivityStore";
-import { computerUseBannerText } from "./components/ComputerUseBanner";
+import { computerUseBannerTargets, computerUseBannerText } from "./components/ComputerUseBanner";
 const threadId = ThreadId.makeUnsafe("computer-thread");
 beforeEach(() =>
   useAgentComputerActivityStore.setState({
@@ -187,10 +187,20 @@ describe("computer use banner text", () => {
     );
     expect(
       computerUseBannerText(
-        { holders: [holder, { ...holder, threadId: ThreadId.makeUnsafe("b") }] },
+        {
+          holders: [
+            holder,
+            { ...holder, threadId: ThreadId.makeUnsafe("b"), appId: "n", appName: "Notes" },
+          ],
+        },
         false,
       ),
-    ).toBe("2 agents are working in the background");
+    ).toBe("2 agents are working in the background in TextEdit, Notes");
+    expect(
+      computerUseBannerTargets({
+        holders: [holder, { ...holder, threadId: ThreadId.makeUnsafe("b") }],
+      }),
+    ).toEqual([threadId, "b"]);
   });
   it("prefers foreground control, pending takeover and explains pauses", () => {
     expect(

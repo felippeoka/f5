@@ -265,6 +265,91 @@ describe("background computer control", () => {
       h.controller.close();
     }
   });
+  it("puts a cancelled dispatched mutation into recovery and keeps its app excluded until the helper answers", async () => {
+    const h = make();
+    let answer: (value: unknown) => void = () => {};
+    h.request.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    try {
+      const a = h.controller.acquire(holderFor("a", "com.apple.calculator"));
+      const pending = h.controller.invoke(envelope("slow", a));
+      await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(1));
+      h.controller.cancel("slow", "p");
+      await expect(pending).rejects.toMatchObject({ error: { _tag: "OutcomeUnknown" } });
+      expect(h.controller.resumeTarget("p", "a")).toMatchObject({
+        pauseCause: "outcome-unknown",
+        recovery: true,
+      });
+      expect(h.lease.holders()).toEqual([]);
+      // Released, but the helper may still be acting in that app.
+      expect(() => h.controller.acquire(holderFor("b", "com.apple.calculator"))).toThrow(
+        /foreground-busy/,
+      );
+      // Unrelated apps are unaffected.
+      expect(h.controller.acquire(holderFor("b", "com.apple.TextEdit")).threadId).toBe("b");
+      answer({ ok: true });
+      await vi.waitFor(() =>
+        expect(
+          h.controller.nativeWorkConflicts({ kind: "app", appId: "com.apple.calculator" }),
+        ).toBe(false),
+      );
+    } finally {
+      h.controller.close();
+    }
+  });
+  it("keeps a confirmed action's success when it is cancelled during its screenshot", async () => {
+    const h = make();
+    h.request.mockImplementationOnce(() => new Promise(() => {}));
+    try {
+      const a = h.controller.acquire(holderFor("a", "com.apple.calculator"));
+      const pending = h.controller.invoke(envelope("confirmed", a, { screenshot: true }));
+      await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(1));
+      h.event({ type: "actionConfirmed", requestId: "confirmed", executionGeneration: 1 });
+      h.controller.cancel("confirmed", "p");
+      await expect(pending).resolves.toMatchObject({
+        actionCompleted: true,
+        screenshotError: "Interrupted",
+      });
+      expect(h.controller.resumeTarget("p", "a").recovery).toBe(false);
+    } finally {
+      h.controller.close();
+    }
+  });
+  it("drains a thread's native work on invalidation even after its lease was released", async () => {
+    const h = make();
+    let answer: (value: unknown) => void = () => {};
+    h.request.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    try {
+      const a = h.controller.acquire(holderFor("a", "com.apple.calculator"));
+      void h.controller.invoke(envelope("inflight", a)).catch(() => undefined);
+      await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(1));
+      // The backend releases first, as cancellation and policy transitions do.
+      h.lease.release(a);
+      let done = false;
+      const invalidated = h.controller.invalidateThread("p", "a", 1).then(() => {
+        done = true;
+      });
+      await vi.waitFor(() =>
+        expect(h.helper.drain).toHaveBeenCalledWith(a.executionGeneration, 5000),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(done).toBe(false);
+      answer({ ok: true });
+      await invalidated;
+      expect(done).toBe(true);
+    } finally {
+      h.controller.close();
+    }
+  });
   it("fails other threads' background mutations fast while a takeover is armed", async () => {
     const h = make();
     try {

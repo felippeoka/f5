@@ -12,6 +12,7 @@ import {
   type ComputerAutomationRequest,
   type ComputerLeaseScope,
 } from "@t3tools/contracts";
+import { COMPUTER_BACKGROUND_POLICY } from "@t3tools/shared/computerApps";
 import { ComputerControlError } from "@t3tools/shared/computerControl";
 import { ComputerHelperClient } from "./ComputerHelperClient";
 import { createRehearsalFixture } from "./rehearsalFixture";
@@ -27,6 +28,13 @@ const argument = (key: string) => {
   return index >= 0 ? args[index + 1] : undefined;
 };
 const helperPath = argument("--helper");
+// Repeatable `--real-app <bundle id>`; only certified background apps are accepted.
+const realApps = args.flatMap((value, index) => (args[index - 1] === "--real-app" ? [value] : []));
+for (const realApp of realApps)
+  if (!COMPUTER_BACKGROUND_POLICY.certified.includes(realApp)) {
+    process.stderr.write(`Not a certified background app: ${realApp}\n`);
+    process.exit(1);
+  }
 const repositoryRoot = resolve(import.meta.dirname, "../../../..");
 const output =
   argument("--output") ??
@@ -37,7 +45,7 @@ const output =
   );
 if (process.platform !== "darwin" || !helperPath) {
   process.stderr.write(
-    "Usage: bun apps/desktop/src/computer/rehearseBackgroundMacos.ts --helper <background-enabled dev helper> [--output <new report.json>]\n",
+    "Usage: bun apps/desktop/src/computer/rehearseBackgroundMacos.ts --helper <background-enabled dev helper> [--real-app <certified bundle id>]... [--output <new report.json>]\n",
   );
   process.exit(1);
 }
@@ -203,10 +211,17 @@ try {
         },
         (value) => {
           const verification = (value as { verification?: { verified?: unknown } }).verification;
+          if (verification?.verified !== true) failure = true;
           return { verified: verification?.verified === true };
         },
       );
     else failure = true;
+    // Selected-text insertion into the fixture's focused field: the path computer_type uses.
+    await run("type", { op: "type", appId, text: " typed" }, (value) => {
+      const verification = (value as { verification?: { verified?: unknown } }).verification;
+      if (verification?.verified !== true) failure = true;
+      return { verified: verification?.verified === true };
+    });
     await run("screenshot", { op: "screenshot", appId }, (value) => {
       const shot = value as { captureScope?: unknown; data?: unknown };
       if (shot.captureScope !== "app") failure = true;
@@ -224,6 +239,59 @@ try {
       observed: frontmost.size,
     });
     if (activated) failure = true;
+    // Real certified apps, read-only: never mutate the user's documents from a script. Each
+    // must already be running; inspect and app-scoped capture must not change the frontmost app.
+    for (const realApp of realApps) {
+      const realAuthorization = {
+        ...authorization,
+        grantVersion: authorization.grantVersion + 1 + realApps.indexOf(realApp),
+        grants: [
+          ...authorization.grants,
+          { appId: realApp, tier: "view" as const, allowTyping: false },
+        ],
+      };
+      helper.control({ type: "grantsChanged", authorization: realAuthorization });
+      const frontBefore = [...frontmost].at(-1);
+      for (const op of ["inspect", "screenshot"] as const) {
+        const start = performance.now();
+        try {
+          const value = await helper.request(
+            {
+              op,
+              appId: realApp,
+              ...(op === "inspect" ? { maxNodes: 200 } : {}),
+              requestId: randomUUID(),
+              payloadHash: "spike",
+              authorization: realAuthorization,
+              deadlineAtMs: Date.now() + 30_000,
+              agent: { provider: "codex", threadTitle: "Background delivery spike" },
+            } as ComputerAutomationRequest,
+            context,
+          );
+          const shot = value as { captureScope?: unknown; nodes?: unknown[] };
+          if (op === "screenshot" && shot.captureScope !== "app") failure = true;
+          checks.push({
+            step: `real-app-${op}`,
+            app: realApp,
+            elapsedMs: Math.round(performance.now() - start),
+            outcome: "ok",
+            ...(op === "inspect" ? { nodes: shot.nodes?.length ?? 0 } : {}),
+          });
+        } catch (error) {
+          failure = true;
+          checks.push({
+            step: `real-app-${op}`,
+            app: realApp,
+            elapsedMs: Math.round(performance.now() - start),
+            outcome: error instanceof ComputerControlError ? error.error._tag : "spike-failure",
+          });
+        }
+      }
+      await settle(600);
+      const unchanged = !frontmost.has(realApp) || frontBefore === realApp;
+      checks.push({ step: "real-app-frontmost", app: realApp, unchanged });
+      if (!unchanged) failure = true;
+    }
   } finally {
     clearInterval(renew);
     helper.control({ type: "retire", executionGeneration });
@@ -259,8 +327,10 @@ try {
         checks,
         limitations: [
           "Scripted grant and app-scoped permit for the synthetic fixture only; no F5 consent, session receipt or provider transport proof",
-          "No real-app delivery, pointer-position measurement, takeover, installed-build TCC attribution or release certification",
+          "Real apps are probed read-only (inspect and app-scoped capture); real-app press, setValue and typing stay a manual certification step",
+          "No pointer-position measurement, takeover, installed-build TCC attribution or release certification",
         ],
+        realApps,
       },
       null,
       2,

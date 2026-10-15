@@ -266,6 +266,9 @@ export class ComputerHostChannel {
             const status = this.status();
             if (!status.available)
               throw new ComputerControlError({ _tag: "Unavailable", reason: status.reason });
+            // Released native holders may still be executing; Chrome waits for their drain.
+            if (this.controller.nativeWorkConflicts("chrome"))
+              throw new ComputerControlError({ _tag: "Busy", holder: "same-profile" });
             this.chrome.acquire(message.holder, this.controller.lease.chromeConflict(profileId));
             this.send(profileId, { type: "response", requestId: message.requestId, result: true });
           } catch (error) {
@@ -446,6 +449,9 @@ export class ComputerHostChannel {
       !backend.pendingAccess.delete(answer.requestId)
     )
       throw new Error("This request expired or belongs to another backend.");
+    // Only this method mints session receipts; never forward one from the answer's source.
+    const { sessionReceipt: _untrusted, ...base } = answer;
+    answer = base;
     let forwarded: ComputerAccessAnswer = answer;
     if (request.kind === "apps") forwarded = this.grants.issue(profileId, request, answer);
     else if (
@@ -466,11 +472,7 @@ export class ComputerHostChannel {
         }),
       };
     else if (request.kind === "foreground-takeover")
-      this.takeovers.answered(
-        profileId,
-        request.requestId,
-        answer.allowForegroundTakeover === true,
-      );
+      this.takeovers.answered(profileId, request, answer.allowForegroundTakeover === true);
     this.send(profileId, { type: "accessAnswer", answer: forwarded });
   }
   incarnation(profileId: string): string | undefined {

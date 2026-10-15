@@ -108,17 +108,29 @@ export function ComputerSettings() {
         : null}
       <SettingsRow
         title="Backend"
-        description="Claude and Codex use F5 computer control while their built-in consent, veto, and profile isolation gates are awaiting certification."
+        description={
+          settings.computerUseExecutionMode === "background"
+            ? "Background execution uses F5 computer control only; switch to foreground to choose another backend."
+            : "Claude and Codex use F5 computer control while their built-in consent, veto, and profile isolation gates are awaiting certification."
+        }
         control={
           <Select
-            value={settings.computerUseBackend}
+            disabled={settings.computerUseExecutionMode === "background"}
+            value={
+              settings.computerUseExecutionMode === "background"
+                ? "f5"
+                : settings.computerUseBackend
+            }
             onValueChange={(value) => {
               if (value === "auto" || value === "f5") updateSettings({ computerUseBackend: value });
             }}
           >
             <SelectTrigger className="w-64" aria-label="Computer backend">
               <SelectValue>
-                {settings.computerUseBackend === "f5" ? "F5 only" : "Automatic"}
+                {settings.computerUseBackend === "f5" ||
+                settings.computerUseExecutionMode === "background"
+                  ? "F5 only"
+                  : "Automatic"}
               </SelectValue>
             </SelectTrigger>
             <SelectPopup>

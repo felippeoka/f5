@@ -192,6 +192,52 @@ describe("shared computer tool catalog", () => {
     });
     expect(h.invoke.mock.calls.filter(([, , input]) => input.op === "resolveApps")).toHaveLength(1);
   });
+  it("never treats an app-scoped capture as display evidence, even in foreground mode", async () => {
+    const h = setup();
+    h.invoke.mockImplementation(async (_thread, _session, input) =>
+      input.op === "screenshot"
+        ? {
+            displayId: "d",
+            geometryGeneration: "g",
+            modelSize: display.modelSize,
+            mimeType: "image/jpeg",
+            data: "aGVsbG8=",
+            hiddenContent: true,
+            captureScope: "app",
+          }
+        : [{ appId: "one", name: "Fixture" }],
+    );
+    await callComputerTool(h.context, "computer_screenshot", { app: "Fixture" });
+    expect((await callComputerTool(h.context, "computer_click", { x: 3, y: 4 })).isError).toBe(
+      true,
+    );
+  });
+  it("discards a screenshot that completes after an invalidation", async () => {
+    const h = setup();
+    let finish: (value: unknown) => void = () => {};
+    h.invoke.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = callComputerTool(h.context, "computer_screenshot", {});
+    await vi.waitFor(() => expect(h.invoke).toHaveBeenCalledTimes(1));
+    // A takeover, pause or policy revision lands while the capture is in flight.
+    h.context.geometry.clear();
+    finish({
+      displayId: "d",
+      geometryGeneration: "g",
+      modelSize: display.modelSize,
+      mimeType: "image/jpeg",
+      data: "aGVsbG8=",
+      hiddenContent: true,
+    });
+    await pending;
+    expect((await callComputerTool(h.context, "computer_click", { x: 3, y: 4 })).isError).toBe(
+      true,
+    );
+  });
   it("requires an app for background observations and routes foreground requests", async () => {
     const h = setup([display], "background");
     const missing = await callComputerTool(h.context, "computer_screenshot", {});

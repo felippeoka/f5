@@ -118,13 +118,20 @@ describe("main computer controller", () => {
       await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(1));
       h.controller.stop();
       await interrupted;
+      // The unknown outcome enters recovery: only a local resume clears it.
+      expect(h.controller.resumeTarget("p", "t")).toMatchObject({
+        pauseCause: "outcome-unknown",
+        recovery: true,
+      });
       h.controller.setPaused("p", "t", false);
-      const next = h.controller.acquire(holder);
+      // The helper has not answered: the released lease must not hand control to anyone.
+      expect(() => h.controller.acquire(holder)).toThrow(/foreground-busy/);
+      finish({ ok: true });
+      await vi.waitFor(() => expect(() => h.controller.acquire(holder)).not.toThrow());
+      const next = h.lease.holders().find((entry) => entry.threadId === holder.threadId)!;
       await h.controller.invoke(
         envelope("next-helper", { ...auth, executionGeneration: next.executionGeneration }),
       );
-      finish({ ok: true });
-      await Promise.resolve();
       expect(h.request).toHaveBeenCalledTimes(2);
       expect(
         h.activity.mock.calls.filter(([, action]) => action.status === "completed"),
