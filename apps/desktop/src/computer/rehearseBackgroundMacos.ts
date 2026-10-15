@@ -20,8 +20,8 @@ import { rehearsalExecutionCode } from "./rehearsalResponses";
 
 // Phase 0 background-delivery spike: one background synthetic app, a fixture-only grant and
 // an app-scoped permit. Measures whether accessibility press, setValue and app-filtered
-// capture reach the fixture without changing the frontmost app. Needs a helper built with
-// -DF5_BACKGROUND_AX; records metadata only, never screenshots, text or element names.
+// capture reach the fixture without changing the frontmost app. Records metadata only, never
+// screenshots, text or element names.
 const args = process.argv.slice(2);
 const argument = (key: string) => {
   const index = args.indexOf(key);

@@ -466,6 +466,9 @@ const program = Effect.gen(function* () {
           ],
         });
 
+        if (process.env.T3_ACP_WAIT_AFTER_PERMISSION === "1") {
+          while (!cancelledSessions.has(requestedSessionId)) yield* Effect.sleep("10 millis");
+        }
         const cancelled =
           cancelledSessions.delete(requestedSessionId) ||
           permission.outcome.outcome === "cancelled";

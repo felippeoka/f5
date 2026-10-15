@@ -1,6 +1,7 @@
+import { noteWsConnectionOpened, noteWsSynchronized } from "../wsConnectionState";
 import "../index.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 import type { ReactNode } from "react";
 import FileViewPanel from "./FileViewPanel";
@@ -40,6 +41,10 @@ vi.mock("./DiffPanelShell", () => ({
   DiffPanelLoadingState: () => <div>Loading</div>,
 }));
 vi.mock("@pierre/diffs/react", () => ({ File: () => <div>Rendered file</div> }));
+beforeEach(() => {
+  noteWsConnectionOpened();
+  noteWsSynchronized();
+});
 afterEach(() => {
   vi.clearAllMocks();
   route.fileViewPath = "app.ts";
@@ -92,7 +97,10 @@ it("preserves the draft base and blocks saves when a refetch arrives during edit
     await screen.getByRole("textbox").fill("merged edit");
     await screen.getByRole("button", { name: "Save file", exact: true }).click();
     expect(api.writeFile).toHaveBeenCalledWith(
-      expect.objectContaining({ contents: "merged edit", expectedContentSha256: "agent-hash" }),
+      expect.objectContaining({
+        contents: "merged edit",
+        condition: { type: "match", contentSha256: "agent-hash" },
+      }),
     );
   } finally {
     await screen.unmount();
@@ -148,6 +156,68 @@ it("ignores a save response from an earlier visit to the same file", async () =>
           )?.contentSha256,
       )
       .not.toBe("obsolete-response");
+  } finally {
+    await screen.unmount();
+    client.clear();
+  }
+});
+
+it("keeps canonical draft identity after save and recovers edits typed afterward", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  route.fileViewPath = "stable-key.ts";
+  const key = providerQueryKeys.fileContent({ cwd: "/repo", relativePath: route.fileViewPath });
+  const original = {
+    relativePath: route.fileViewPath,
+    workspaceIdentity: "/canonical/repo",
+    fileIdentity: "/canonical/repo/stable-key.ts",
+    contents: "base",
+    byteLength: 4,
+    truncated: false,
+    contentSha256: "base-hash",
+  };
+  api.readFile.mockResolvedValue(original);
+  api.writeFile.mockResolvedValue({
+    relativePath: route.fileViewPath,
+    byteLength: 5,
+    contentSha256: "saved-hash",
+  });
+  client.setQueryData(key, original);
+  const view = () => (
+    <QueryClientProvider client={client}>
+      <FileViewPanel mode="sheet" />
+    </QueryClientProvider>
+  );
+  let screen = await render(view());
+  try {
+    await screen.getByRole("button", { name: "Edit file", exact: true }).click();
+    await screen.getByRole("textbox").fill("saved");
+    await screen.getByRole("button", { name: "Save file", exact: true }).click();
+    await expect
+      .poll(() => client.getQueryData(key))
+      .toEqual(
+        expect.objectContaining({
+          ...original,
+          contents: "saved",
+          byteLength: 5,
+          contentSha256: "saved-hash",
+        }),
+      );
+    await screen.getByRole("textbox").fill("recover after save");
+    await expect
+      .poll(async () => {
+        const { editorDrafts, editorFileKey } = await import("../editorDrafts");
+        return (
+          await editorDrafts.list(
+            editorFileKey("default", original.workspaceIdentity, original.fileIdentity),
+          )
+        ).some((draft) => draft.text === "recover after save");
+      })
+      .toBe(true);
+    await screen.unmount();
+    api.readFile.mockResolvedValue({ ...original, contents: "saved", contentSha256: "saved-hash" });
+    screen = await render(view());
+    await screen.getByRole("button", { name: "Recover", exact: true }).click();
+    await expect.element(screen.getByRole("textbox")).toHaveValue("recover after save");
   } finally {
     await screen.unmount();
     client.clear();

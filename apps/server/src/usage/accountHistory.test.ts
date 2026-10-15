@@ -4,7 +4,7 @@ import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { UsageAccountHistoryRepositoryLive } from "../persistence/Layers/UsageAccountHistory.ts";
-import Migration0115 from "../persistence/Migrations/115_UsageAccountHistory.ts";
+import Migration0116 from "../persistence/Migrations/116_UsageAccountHistory.ts";
 import * as SqliteClient from "../persistence/NodeSqliteClient.ts";
 import { UsageAccountHistoryRepository } from "../persistence/Services/UsageAccountHistory.ts";
 import { makeAccountHistoryRecorder } from "./accountHistory.ts";
@@ -71,7 +71,7 @@ const freshClaude = account("claude:a", [emptyAccountSection("claude-usage")]);
 it.layer(SqliteClient.layerMemory())("account history recorder", (it) => {
   it.effect("persists snapshots and samples, reloads after restart, and hydrates safely", () =>
     Effect.gen(function* () {
-      yield* Migration0115;
+      yield* Migration0116;
       const repository = yield* UsageAccountHistoryRepository;
       const first = yield* makeAccountHistoryRecorder;
       yield* first.observe(
@@ -133,7 +133,7 @@ it.layer(SqliteClient.layerMemory())("account history recorder", (it) => {
   it.effect("retries a failed write on the next observation", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* Migration0115;
+      yield* Migration0116;
       yield* sql`DELETE FROM usage_account_snapshots`;
       yield* sql`DELETE FROM usage_quota_samples`;
       const repository = yield* UsageAccountHistoryRepository;

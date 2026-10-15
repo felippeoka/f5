@@ -26,6 +26,7 @@ describe("wsConnectionState", () => {
     noteWsConnectionAttempt();
 
     expect(getWsConnectionState()).toEqual({
+      synchronized: false,
       phase: "connecting",
       attemptCount: 1,
       connectedAt: null,
@@ -64,6 +65,7 @@ describe("wsConnectionState", () => {
     noteWsConnectionClosed();
 
     expect(getWsConnectionState()).toEqual({
+      synchronized: false,
       phase: "disconnected",
       attemptCount: 1,
       connectedAt: null,

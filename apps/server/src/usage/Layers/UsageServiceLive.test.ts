@@ -18,7 +18,7 @@ import Migration0005 from "../../persistence/Migrations/005_Projections.ts";
 import Migration0068 from "../../persistence/Migrations/068_UsageFacts.ts";
 import Migration0071 from "../../persistence/Migrations/071_UsageEventTimeIndex.ts";
 import Migration0073 from "../../persistence/Migrations/073_UsageFactRecordedAt.ts";
-import Migration0115 from "../../persistence/Migrations/115_UsageAccountHistory.ts";
+import Migration0116 from "../../persistence/Migrations/116_UsageAccountHistory.ts";
 import { UsageFactRepository } from "../../persistence/Services/UsageFacts.ts";
 import * as SqliteClient from "../../persistence/NodeSqliteClient.ts";
 import type { ProviderInstance } from "../../provider/ProviderDriver.ts";
@@ -91,7 +91,7 @@ const serviceLayer = UsageServiceLive.pipe(
 it.layer(SqliteClient.layerMemory())("UsageService account history", (it) => {
   it.effect("persists live snapshots and hydrates them after a restart", () =>
     Effect.gen(function* () {
-      yield* Migration0115;
+      yield* Migration0116;
       yield* Effect.gen(function* () {
         const usage = yield* UsageService;
         const result = yield* usage.refreshAccount(instanceId);
@@ -149,7 +149,7 @@ it.layer(SqliteClient.layerMemory())("UsageService summaries", (it) => {
       yield* Migration0068;
       yield* Migration0071;
       yield* Migration0073;
-      yield* Migration0115;
+      yield* Migration0116;
       const sql = yield* SqlClient.SqlClient;
       yield* sql`
         UPDATE projection_usage_metadata

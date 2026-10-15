@@ -127,6 +127,7 @@ interface PendingUserInput {
 }
 
 interface GrokSessionContext {
+  readonly historySessionOrigin: "fresh" | "resumed";
   readonly threadId: ThreadId;
   readonly acpSessionId: string;
   session: ProviderSession;
@@ -833,6 +834,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
 
           const ctx: GrokSessionContext = {
             threadId: input.threadId,
+            historySessionOrigin: "sessionId" in started.sessionSetupResult ? "fresh" : "resumed",
             acpSessionId: started.sessionId,
             session,
             scope: sessionScope,
@@ -1357,7 +1359,18 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
     const readThread: GrokAdapterShape["readThread"] = (threadId) =>
       Effect.gen(function* () {
         const ctx = yield* requireSession(threadId);
-        return { threadId, turns: ctx.turns };
+        return {
+          threadId,
+          turns: ctx.turns.map((turn) => ({ ...turn, items: [...turn.items] })),
+          history: {
+            sessionOrigin: ctx.historySessionOrigin,
+            identity: JSON.stringify(ctx.session.resumeCursor ?? null),
+            provenance: "runtime-local" as const,
+            coverage: "partial" as const,
+            boundary: null,
+            runtimeId: null,
+          },
+        };
       });
 
     const rollbackThread: GrokAdapterShape["rollbackThread"] = (threadId, numTurns) =>
@@ -1410,6 +1423,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
     return {
       provider: PROVIDER,
       capabilities: {
+        turnCompletionOnReturn: true,
         sessionModelSwitch: "in-session",
         runtimeCapabilities: providerRuntimeCapabilities(PROVIDER),
       },

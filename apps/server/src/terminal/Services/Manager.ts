@@ -72,6 +72,10 @@ export const terminalOwnerKey = (owner: TerminalOwner) =>
   owner.kind === "thread" ? `thread:${owner.threadId}` : `account:${owner.instanceId}`;
 
 export interface TerminalManagerShape {
+  readonly snapshot: (
+    input: import("@t3tools/contracts").TerminalSnapshotInput,
+  ) => Effect.Effect<TerminalSessionSnapshot | null, TerminalError>;
+
   /** Internal account PTYs never enter thread history or logging queues. */
   readonly createAccountProcess?: (
     input: import("./PTY").PtySpawnInput,

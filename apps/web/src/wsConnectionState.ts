@@ -4,6 +4,7 @@ export type WsConnectionPhase = "connecting" | "connected" | "reconnecting" | "d
 
 export interface WsConnectionState {
   readonly phase: WsConnectionPhase;
+  readonly synchronized: boolean;
   readonly attemptCount: number;
   readonly connectedAt: string | null;
   readonly disconnectedAt: string | null;
@@ -15,6 +16,7 @@ type WsReconnectHandler = () => Promise<void> | void;
 
 const INITIAL_WS_CONNECTION_STATE: WsConnectionState = Object.freeze({
   phase: "connecting" as const,
+  synchronized: false,
   attemptCount: 0,
   connectedAt: null,
   disconnectedAt: null,
@@ -36,7 +38,7 @@ function emitChange(): void {
   }
 }
 
-function subscribe(listener: () => void): () => void {
+export function subscribeWsConnectionState(listener: () => void): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
@@ -45,6 +47,7 @@ function subscribe(listener: () => void): () => void {
 
 function hasStateChanged(nextState: WsConnectionState): boolean {
   return (
+    nextState.synchronized !== currentState.synchronized ||
     nextState.phase !== currentState.phase ||
     nextState.attemptCount !== currentState.attemptCount ||
     nextState.connectedAt !== currentState.connectedAt ||
@@ -69,7 +72,11 @@ export function getWsConnectionState(): WsConnectionState {
 }
 
 export function useWsConnectionState(): WsConnectionState {
-  return useSyncExternalStore(subscribe, getWsConnectionState, getWsConnectionState);
+  return useSyncExternalStore(
+    subscribeWsConnectionState,
+    getWsConnectionState,
+    getWsConnectionState,
+  );
 }
 
 export function reconnectWsTransport(): Promise<void> {
@@ -105,6 +112,7 @@ export function noteWsConnectionOpened(): void {
   setWsConnectionState((state) => ({
     ...state,
     phase: "connected",
+    synchronized: false,
     connectedAt: isoNow(),
     disconnectedAt: null,
     lastError: null,
@@ -116,6 +124,7 @@ export function noteWsConnectionClosed(): void {
   setWsConnectionState((state) => ({
     ...state,
     phase: state.connectedAt === null ? "disconnected" : "reconnecting",
+    synchronized: false,
     disconnectedAt: state.disconnectedAt ?? isoNow(),
   }));
 }
@@ -141,4 +150,17 @@ export function resetWsConnectionStateForTests(): void {
 
 export function isWsInteractionBlocked(phase: WsConnectionPhase): boolean {
   return phase === "disconnected" || phase === "reconnecting";
+}
+
+export function noteWsSynchronized(): void {
+  setWsConnectionState((state) =>
+    state.phase === "connected" ? { ...state, synchronized: true } : state,
+  );
+}
+export function noteWsResynchronizing(): void {
+  setWsConnectionState((state) => ({ ...state, synchronized: false }));
+}
+export function useServerMutationsAvailable(): boolean {
+  const state = useWsConnectionState();
+  return state.phase === "connected" && state.synchronized;
 }

@@ -211,20 +211,20 @@ describe("WebSocketConnectionSurface", () => {
     const mounted = await mountSurface();
     try {
       await vi.waitFor(() => {
-        expect(document.body.textContent).not.toContain("Connection to");
+        expect(document.body.textContent).not.toContain("Connection lost.");
       });
 
       noteWsConnectionOpened();
 
       await vi.waitFor(() => {
-        expect(document.body.textContent).not.toContain("Connection to");
+        expect(document.body.textContent).not.toContain("Connection lost.");
       });
     } finally {
       await mounted.cleanup();
     }
   });
 
-  it("shows the overlay for disconnected and reconnecting states without unmounting children", async () => {
+  it("keeps local reading and drafting interactive while disconnected", async () => {
     enableFlag(WEB_LOCAL_FLAG_KEYS.wsDisconnectSurfaceEnabled);
     noteWsConnectionAttempt();
     noteWsConnectionOpened();
@@ -233,7 +233,7 @@ describe("WebSocketConnectionSurface", () => {
     const mounted = await mountSurface(<div>Persistent child</div>);
     try {
       await vi.waitFor(() => {
-        expect(document.body.textContent).toContain("Reconnecting to");
+        expect(document.body.textContent).toContain("Reconnecting…");
         expect(document.body.textContent).toContain("Persistent child");
       });
 
@@ -244,7 +244,7 @@ describe("WebSocketConnectionSurface", () => {
       noteWsConnectionClosed();
 
       await vi.waitFor(() => {
-        expect(document.body.textContent).toContain("Connection to");
+        expect(document.body.textContent).toContain("Connection lost.");
         expect(document.body.textContent).toContain("Persistent child");
       });
     } finally {
@@ -259,7 +259,7 @@ describe("WebSocketConnectionSurface", () => {
     const mounted = await mountSurface();
     try {
       await vi.waitFor(() => {
-        expect(document.body.textContent).not.toContain("Connection to");
+        expect(document.body.textContent).not.toContain("Connection lost.");
       });
     } finally {
       await mounted.cleanup();

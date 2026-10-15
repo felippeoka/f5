@@ -414,11 +414,21 @@ class MockTerminalManager implements TerminalManagerShape {
     return this.listeners.size;
   }
 
+  readonly snapshot: TerminalManagerShape["snapshot"] = (input) =>
+    Effect.sync(
+      () =>
+        this.sessions.get(this.key(input.threadId, input.terminalId ?? DEFAULT_TERMINAL_ID)) ??
+        null,
+    );
+
   readonly open: TerminalManagerShape["open"] = (input: TerminalOpenInput) =>
     Effect.sync(() => {
       const now = new Date().toISOString();
       const terminalId = input.terminalId ?? DEFAULT_TERMINAL_ID;
       const snapshot: TerminalSessionSnapshot = {
+        epoch: "test",
+        generation: 1,
+        revision: 1,
         threadId: input.threadId,
         terminalId,
         cwd: input.cwd,
@@ -433,6 +443,9 @@ class MockTerminalManager implements TerminalManagerShape {
       queueMicrotask(() => {
         this.emitEvent({
           type: "started",
+          epoch: "test",
+          generation: 1,
+          revision: 1,
           threadId: input.threadId,
           terminalId,
           createdAt: now,
@@ -452,6 +465,9 @@ class MockTerminalManager implements TerminalManagerShape {
       queueMicrotask(() => {
         this.emitEvent({
           type: "output",
+          epoch: "test",
+          generation: 1,
+          revision: 1,
           threadId: input.threadId,
           terminalId,
           createdAt: new Date().toISOString(),
@@ -468,6 +484,9 @@ class MockTerminalManager implements TerminalManagerShape {
       queueMicrotask(() => {
         this.emitEvent({
           type: "cleared",
+          epoch: "test",
+          generation: 1,
+          revision: 1,
           threadId: input.threadId,
           terminalId,
           createdAt: new Date().toISOString(),
@@ -480,6 +499,9 @@ class MockTerminalManager implements TerminalManagerShape {
       const now = new Date().toISOString();
       const terminalId = input.terminalId ?? DEFAULT_TERMINAL_ID;
       const snapshot: TerminalSessionSnapshot = {
+        epoch: "test",
+        generation: 1,
+        revision: 1,
         threadId: input.threadId,
         terminalId,
         cwd: input.cwd,
@@ -494,6 +516,9 @@ class MockTerminalManager implements TerminalManagerShape {
       queueMicrotask(() => {
         this.emitEvent({
           type: "restarted",
+          epoch: "test",
+          generation: 1,
+          revision: 1,
           threadId: input.threadId,
           terminalId,
           createdAt: now,
@@ -5156,6 +5181,9 @@ describe("WebSocket Server", () => {
     expect(close.error).toBeUndefined();
 
     const manualEvent: TerminalEvent = {
+      epoch: "test",
+      generation: 1,
+      revision: 1,
       type: "output",
       threadId: "thread-1",
       terminalId: DEFAULT_TERMINAL_ID,
@@ -5504,6 +5532,7 @@ describe("WebSocket Server", () => {
     const response = await sendRequest(ws, WS_METHODS.projectsWriteFile, {
       cwd: workspace,
       relativePath: "plans/effect-rpc.md",
+      condition: { type: "create" },
       contents: "# Plan\n\n- step 1\n",
     });
 
@@ -5534,11 +5563,11 @@ describe("WebSocket Server", () => {
       cwd: workspace,
       relativePath: "plans/effect-rpc.md",
       contents: "next\n",
-      expectedContentSha256: sha256Hex("stale\n"),
+      condition: { type: "match", contentSha256: sha256Hex("stale\n") },
     });
 
-    expect(response.result).toBeUndefined();
-    expect(response.error?.message).toContain("Workspace file changed before save");
+    expect(response.result).toMatchObject({ conflict: true });
+    expect(response.error).toBeUndefined();
     expect(fs.readFileSync(path.join(workspace, "plans", "effect-rpc.md"), "utf8")).toBe(
       "original\n",
     );
@@ -5562,11 +5591,11 @@ describe("WebSocket Server", () => {
       cwd: workspace,
       relativePath: "large.txt",
       contents: "next\n",
-      expectedContentSha256: sha256Hex("stale\n"),
+      condition: { type: "match", contentSha256: sha256Hex("stale\n") },
     });
 
-    expect(response.result).toBeUndefined();
-    expect(response.error?.message).toContain("Workspace file changed before save");
+    expect(response.result).toMatchObject({ conflict: true });
+    expect(response.error).toBeUndefined();
     expect(fs.statSync(path.join(workspace, "large.txt")).size).toBe(
       PROJECT_READ_FILE_MAX_SIZE + 1,
     );
@@ -5585,6 +5614,7 @@ describe("WebSocket Server", () => {
     const response = await sendRequest(ws, WS_METHODS.projectsWriteFile, {
       cwd: workspace,
       relativePath: "../escape.md",
+      condition: { type: "create" },
       contents: "# no\n",
     });
 
@@ -5610,6 +5640,7 @@ describe("WebSocket Server", () => {
     const response = await sendRequest(ws, WS_METHODS.projectsWriteFile, {
       cwd: workspace,
       relativePath: "outside-link/escape.md",
+      condition: { type: "create" },
       contents: "# no\n",
     });
 
@@ -5643,6 +5674,8 @@ describe("WebSocket Server", () => {
 
     expect(response.error).toBeUndefined();
     expect(response.result).toEqual({
+      workspaceIdentity: fs.realpathSync(workspace),
+      fileIdentity: fs.realpathSync(path.join(workspace, "plans", "effect-rpc.md")),
       relativePath: "plans/effect-rpc.md",
       contents: "# Plan\n\n- step 1\n",
       byteLength: Buffer.byteLength("# Plan\n\n- step 1\n"),
@@ -5791,6 +5824,8 @@ describe("WebSocket Server", () => {
 
     expect(response.error).toBeUndefined();
     expect(response.result).toEqual({
+      workspaceIdentity: fs.realpathSync(workspace),
+      fileIdentity: fs.realpathSync(path.join(workspace, "large.txt")),
       relativePath: "large.txt",
       contents: "a".repeat(PROJECT_READ_FILE_MAX_SIZE),
       byteLength: PROJECT_READ_FILE_MAX_SIZE + 1,

@@ -470,6 +470,7 @@ export function createWsNativeApi(): NativeApi {
       },
     },
     terminal: {
+      snapshot: (input) => transport.request(WS_METHODS.terminalSnapshot, input),
       open: (input) => transport.request(WS_METHODS.terminalOpen, input),
       write: (input) => transport.request(WS_METHODS.terminalWrite, input),
       resize: (input) => transport.request(WS_METHODS.terminalResize, input),

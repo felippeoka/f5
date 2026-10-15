@@ -1,3 +1,4 @@
+import { noteWsSynchronized, noteWsResynchronizing } from "../wsConnectionState";
 import { useComposerMentionHistoryStore } from "../composerMentionHistoryStore";
 import { usePreviewArtifactRetentionSync } from "../hooks/usePreviewArtifactRetentionSync";
 import { useMigrateClientSettings } from "../hooks/useMigrateClientSettings";
@@ -431,6 +432,9 @@ function EventRouter() {
     let syncing = false;
     let pendingSnapshot = false;
     let bufferedEvents: OrchestrationEvent[] = [];
+    let bufferedBytes = 0;
+    let snapshotGeneration = 0;
+    let snapshotInvalidated = false;
     let snapshotRetryAttempt = 0;
     let snapshotRetryTimeoutId: number | null = null;
     let nextWelcomeRecoveryId = 0;
@@ -811,7 +815,19 @@ function EventRouter() {
       if (event.sequence <= latestSequence) {
         return;
       }
+      if (snapshotInvalidated) return;
+      const bytes = new TextEncoder().encode(JSON.stringify(event)).byteLength;
+      if (bufferedEvents.length >= 2_000 || bufferedBytes + bytes > 32 * 1024 * 1024) {
+        snapshotInvalidated = true;
+        snapshotGeneration++;
+        bufferedEvents = [];
+        bufferedBytes = 0;
+        pendingSnapshot = true;
+        noteWsResynchronizing();
+        return;
+      }
       bufferedEvents.push(event);
+      bufferedBytes += bytes;
     };
 
     const drainBufferedEvents = (): boolean => {
@@ -825,12 +841,14 @@ function EventRouter() {
         (left, right) => left.sequence - right.sequence,
       );
       bufferedEvents = [];
+      bufferedBytes = 0;
       for (const event of nextEvents) {
         if (event.sequence <= latestSequence) {
           continue;
         }
         if (event.sequence !== latestSequence + 1) {
-          bufferedEvents = nextEvents.filter((entry) => entry.sequence > latestSequence);
+          for (const remaining of nextEvents)
+            if (remaining.sequence > latestSequence) bufferEvent(remaining);
           return false;
         }
         applyEventToStore(event);
@@ -901,10 +919,13 @@ function EventRouter() {
       // Taken before the request so a `getRewindDrafts` read that starts
       // later wins, even if this snapshot response lands after it.
       const rewindDraftReadTicket = nextRewindDraftReadTicket();
+      const generation = snapshotGeneration;
       const startupResult = await api.orchestration.getStartupSnapshot(
         startupDetailThreadId ? { detailThreadId: startupDetailThreadId } : undefined,
       );
       if (disposed) return;
+      if (generation !== snapshotGeneration)
+        throw new Error("Snapshot recovery buffer overflowed; refetch required.");
       const snapshot = startupResult.snapshot;
       const bundledThreadTailDetails = startupResult.threadTailDetails;
       const snapshotIsProvisional =
@@ -1009,6 +1030,7 @@ function EventRouter() {
         scheduleSnapshotRetry();
       } else {
         clearSnapshotRetry();
+        noteWsSynchronized();
       }
       const recoveredBootstrapThreadId = await completeWelcomeRecovery();
       const onboardingLiteState = deriveOnboardingLiteState({
@@ -1076,6 +1098,8 @@ function EventRouter() {
       // snapshot merge sees the latest locally-applied sequence.
       flushPending();
       syncing = true;
+      noteWsResynchronizing();
+      snapshotInvalidated = false;
       pendingSnapshot = false;
       try {
         await flushSnapshotSync();
@@ -1155,6 +1179,8 @@ function EventRouter() {
       applyTerminalEvent(event);
     });
     const unsubWelcome = onServerWelcome((payload) => {
+      snapshotGeneration++;
+      noteWsResynchronizing();
       if (!acceptProfileWelcome(payload)) return;
       pendingWelcomeRecovery = { id: ++nextWelcomeRecoveryId, payload };
       pendingCommandExecutionDetailInvalidation = true;

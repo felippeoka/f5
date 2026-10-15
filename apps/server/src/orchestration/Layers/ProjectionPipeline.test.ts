@@ -30,6 +30,8 @@ import {
   ORCHESTRATION_PROJECTOR_NAMES,
   OrchestrationProjectionPipelineLive,
 } from "./ProjectionPipeline.ts";
+import { ProviderTurnDeliveryRepositoryLive } from "./ProviderTurnDeliveryRepository.ts";
+import { ProviderTurnDeliveryRepository } from "../Services/ProviderTurnDeliveryRepository.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
@@ -3563,3 +3565,55 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
     }),
   );
 });
+
+it.effect("keeps delivery reservations released after rewind and admits the following turn", () =>
+  Effect.gen(function* () {
+    const pipeline = yield* OrchestrationProjectionPipeline;
+    const repository = yield* ProviderTurnDeliveryRepository;
+    const sql = yield* SqlClient.SqlClient;
+    const threadId = ThreadId.makeUnsafe("reservation-rewind");
+    const at = "2026-10-15T00:00:00.000Z";
+    const event = {
+      type: "thread.turn-start-requested",
+      sequence: 1,
+      eventId: EventId.makeUnsafe("reservation-first"),
+      aggregateKind: "thread",
+      aggregateId: threadId,
+      occurredAt: at,
+      commandId: CommandId.makeUnsafe("reservation-first"),
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+      payload: { threadId, messageId: MessageId.makeUnsafe("reservation-message"), createdAt: at },
+    };
+    yield* sql`INSERT INTO provider_turn_deliveries(delivery_id, thread_id, command_id, message_id, state, provider_turn_id, event_json, created_at, updated_at)
+      VALUES ('reservation-first', ${threadId}, 'reservation-first', 'reservation-message', 'accepted', 'reservation-native', ${JSON.stringify(event)}, ${at}, ${at})`;
+    const next = {
+      ...event,
+      eventId: EventId.makeUnsafe("reservation-next"),
+      commandId: CommandId.makeUnsafe("reservation-next"),
+    };
+    yield* sql`INSERT INTO provider_turn_deliveries(delivery_id, thread_id, command_id, message_id, state, event_json, created_at, updated_at)
+      VALUES ('reservation-next', ${threadId}, 'reservation-next', 'reservation-next-message', 'pending', ${JSON.stringify(next)}, ${at}, ${at})`;
+    assert.equal(yield* repository.claim(next.commandId, []), null);
+    yield* pipeline.projectEvent({
+      ...event,
+      sequence: 2,
+      type: "thread.reverted",
+      commandId: null,
+      payload: { threadId, turnCount: 0 },
+    } as never);
+    const release =
+      yield* sql`SELECT reservation_released_at FROM provider_turn_deliveries WHERE delivery_id = 'reservation-first'`;
+    assert.ok(release[0]?.reservation_released_at);
+    // Rebuilding/deleting the mutable turn projection cannot resurrect ownership.
+    yield* sql`DELETE FROM projection_turns WHERE thread_id = ${threadId}`;
+    assert.equal((yield* repository.claim(next.commandId, []))?.state, "sending");
+  }).pipe(
+    Effect.provide(
+      ProviderTurnDeliveryRepositoryLive.pipe(
+        Layer.provideMerge(makeProjectionPipelineTestLayer(process.cwd())),
+      ),
+    ),
+  ),
+);

@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { Effect, Exit } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import Migration0115 from "../Migrations/115_UsageAccountHistory.ts";
+import Migration0116 from "../Migrations/116_UsageAccountHistory.ts";
 import * as SqliteClient from "../NodeSqliteClient.ts";
 import { UsageAccountHistoryRepository } from "../Services/UsageAccountHistory.ts";
 import { UsageAccountHistoryRepositoryLive } from "./UsageAccountHistory.ts";
@@ -14,12 +14,12 @@ const sample = (sampledAt: string, usedPercent: number) => ({
   resetsAt: "2026-10-15T15:00:00.000Z",
 });
 
-it.layer(SqliteClient.layerMemory())("115_UsageAccountHistory", (it) => {
+it.layer(SqliteClient.layerMemory())("116_UsageAccountHistory", (it) => {
   it.effect("creates the tables and index idempotently", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* Migration0115;
-      yield* Migration0115;
+      yield* Migration0116;
+      yield* Migration0116;
       const objects = yield* sql<{ readonly name: string }>`
         SELECT name FROM sqlite_master
         WHERE name IN ('usage_account_snapshots', 'usage_quota_samples', 'usage_quota_samples_sampled_idx')
@@ -36,7 +36,7 @@ it.layer(SqliteClient.layerMemory())("115_UsageAccountHistory", (it) => {
 it.layer(SqliteClient.layerMemory())("UsageAccountHistoryRepository", (it) => {
   it.effect("keeps the newest snapshot, resets on identity change, and prunes", () =>
     Effect.gen(function* () {
-      yield* Migration0115;
+      yield* Migration0116;
       const repository = yield* UsageAccountHistoryRepository;
       yield* repository.recordObservation({
         accountKey: "claude:a",
@@ -126,7 +126,7 @@ it.layer(SqliteClient.layerMemory())("UsageAccountHistoryRepository", (it) => {
   it.effect("rolls back the whole observation when a write fails", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* Migration0115;
+      yield* Migration0116;
       yield* sql`DELETE FROM usage_account_snapshots`;
       yield* sql`DELETE FROM usage_quota_samples`;
       yield* sql`
