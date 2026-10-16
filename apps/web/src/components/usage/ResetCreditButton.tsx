@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ProviderInstanceId } from "@t3tools/contracts";
 import { ensureNativeApi } from "../../nativeApi";
-import { usageQueryKeys } from "../../lib/usageReactQuery";
+import { invalidateUsageAccounts } from "../../lib/usageReactQuery";
 import { Button } from "../ui/button";
 import {
   AlertDialog,
@@ -45,7 +45,7 @@ export function ResetCreditButton(props: {
             : "This account has no exhausted window to reset.",
         );
       else setOpen(false);
-      await client.invalidateQueries({ queryKey: usageQueryKeys.accounts });
+      await invalidateUsageAccounts(client);
     } catch (error) {
       setError(
         error instanceof Error

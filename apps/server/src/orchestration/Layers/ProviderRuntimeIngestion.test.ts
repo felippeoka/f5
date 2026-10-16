@@ -335,6 +335,7 @@ describe("ProviderRuntimeIngestion", () => {
               consumeResetCredit: () => Effect.die("unused"),
               getAccounts: () => Effect.succeed([]),
               getSummary: () => Effect.die("unused"),
+              getQuotaHistory: Effect.die("unused"),
             })
           : Layer.empty,
       ),
@@ -1406,9 +1407,14 @@ describe("ProviderRuntimeIngestion", () => {
     const rangeStart = new Date(start);
     rangeStart.setUTCMinutes(0, 0, 0);
     const rows = await Effect.runPromise(
-      harness.usageFactRepository.summarizeHourly({
-        startedAt: rangeStart.toISOString(),
-        endedAt: new Date(rangeStart.getTime() + 3_600_000).toISOString(),
+      harness.usageFactRepository.summarizeBuckets({
+        buckets: [
+          {
+            key: "range",
+            startAt: rangeStart.toISOString(),
+            endAt: new Date(rangeStart.getTime() + 3_600_000).toISOString(),
+          },
+        ],
       }),
     );
     expect(rows).toHaveLength(1);
@@ -1448,9 +1454,10 @@ describe("ProviderRuntimeIngestion", () => {
 
     await harness.drain();
     const rows = await Effect.runPromise(
-      harness.usageFactRepository.summarizeHourly({
-        startedAt: rangeStart.toISOString(),
-        endedAt: rangeEnd.toISOString(),
+      harness.usageFactRepository.summarizeBuckets({
+        buckets: [
+          { key: "range", startAt: rangeStart.toISOString(), endAt: rangeEnd.toISOString() },
+        ],
       }),
     );
 
@@ -1506,9 +1513,10 @@ describe("ProviderRuntimeIngestion", () => {
 
     await harness.drain();
     const rows = await Effect.runPromise(
-      harness.usageFactRepository.summarizeHourly({
-        startedAt: rangeStart.toISOString(),
-        endedAt: rangeEnd.toISOString(),
+      harness.usageFactRepository.summarizeBuckets({
+        buckets: [
+          { key: "range", startAt: rangeStart.toISOString(), endAt: rangeEnd.toISOString() },
+        ],
       }),
     );
     const readModel = await Effect.runPromise(harness.engine.getReadModel());

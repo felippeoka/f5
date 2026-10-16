@@ -10,6 +10,7 @@ import type {
   AccountUsageSection,
 } from "@t3tools/contracts";
 import { makeAccountUsageCapability, emptyAccountSection } from "./Layers/AccountUsageService.ts";
+import { accountUsageIdentity } from "./accountUsage.ts";
 import { asRecord, asNonNegativeNumber, asTrimmedString, resetDate } from "./accountUsageJson.ts";
 
 export function normalizeProviderLimits(
@@ -429,5 +430,66 @@ export function makeProviderLimits(input: {
       sections: [emptyAccountSection("provider-limits")],
     },
     read,
+    { identity: providerLimitsIdentity(input) },
   );
+}
+
+/** Environment variables that `read` uses to select an account or endpoint. */
+const IDENTITY_ENV_KEYS = [
+  "XDG_DATA_HOME",
+  "XDG_CONFIG_HOME",
+  "APPDATA",
+  "OPENCODE_API_KEY",
+  "CURSOR_AUTH_TOKEN",
+  "CURSOR_API_KEY",
+  "CURSOR_API_ENDPOINT",
+  "AGENT_CLI_CREDENTIAL_STORE",
+  "GROK_AUTH",
+  "GROK_HOME",
+  "XAI_API_KEY",
+] as const;
+
+/** The OpenCode Go credential `read` selects, ignoring other providers' tokens in the blob. */
+function opencodeGoCredential(content: string | undefined): string | null {
+  if (!content) return null;
+  try {
+    const credential = asRecord(asRecord(JSON.parse(content))?.["opencode-go"]);
+    return credential?.type === "api" ? (asTrimmedString(credential.key) ?? null) : null;
+  } catch {
+    return "invalid";
+  }
+}
+
+/**
+ * Persisted-history identity from the inputs the reader uses to pick an
+ * account. Where a stable account identifier exists it stands in for the
+ * secret (the CLIProxy account ID, not the hub management key; the selected
+ * OpenCode Go key, not refreshable tokens elsewhere in the auth blob).
+ * Otherwise the credential itself is an input: a rotated API key cannot be
+ * told apart from a different account, so it starts new history rather than
+ * risk mixing two accounts. The recorder stores only a keyed HMAC of this.
+ */
+export function providerLimitsIdentity(input: {
+  readonly provider: ProviderKind;
+  readonly environment: NodeJS.ProcessEnv;
+  readonly serverUrl?: string;
+  readonly apiEndpoint?: string;
+}): string {
+  const env = input.environment;
+  return accountUsageIdentity(input.provider, [
+    env.HOME || env.USERPROFILE || os.homedir(),
+    input.serverUrl,
+    input.apiEndpoint,
+    `OPENCODE_AUTH_CONTENT=${opencodeGoCredential(env.OPENCODE_AUTH_CONTENT) ?? ""}`,
+    ...IDENTITY_ENV_KEYS.map((key) => `${key}=${env[key] ?? ""}`),
+    ...Object.keys(env)
+      .filter(
+        (key) =>
+          (key.startsWith("F5_CLIPROXY_") && key !== "F5_CLIPROXY_API_KEY") ||
+          key === "F5_ANTIGRAVITY_PROJECT" ||
+          (key.startsWith("GROK_") && key !== "GROK_AUTH" && key !== "GROK_HOME"),
+      )
+      .sort()
+      .map((key) => `${key}=${env[key] ?? ""}`),
+  ]);
 }

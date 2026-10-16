@@ -318,8 +318,24 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
             ),
           );
         }).pipe(Effect.scoped);
+      // Shared by reset-credit idempotency and persisted account history.
+      const resetCreditIdentity = `codex-home:${createHash("sha256")
+        .update(
+          (() => {
+            const home =
+              effectiveConfig.homePath.trim() ||
+              processEnvironment.CODEX_HOME ||
+              homeLayout.sharedHomePath;
+            try {
+              return realpathSync(home);
+            } catch {
+              return home;
+            }
+          })(),
+        )
+        .digest("hex")}`;
       const accountUsage = yield* makeCodexAccountUsage(
-        { instanceId, displayName: displayName ?? "Codex", enabled },
+        { instanceId, displayName: displayName ?? "Codex", enabled, identity: resetCreditIdentity },
         {
           cwd: serverConfig.cwd,
           processEnvironment,
@@ -455,21 +471,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         snapshot,
         adapter: protectProfileAdapter(adapter, serverConfig, effectiveConfig),
         textGeneration,
-        resetCreditIdentity: `codex-home:${createHash("sha256")
-          .update(
-            (() => {
-              const home =
-                effectiveConfig.homePath.trim() ||
-                processEnvironment.CODEX_HOME ||
-                homeLayout.sharedHomePath;
-              try {
-                return realpathSync(home);
-              } catch {
-                return home;
-              }
-            })(),
-          )
-          .digest("hex")}`,
+        resetCreditIdentity,
         consumeResetCredit,
         accountUsage,
         inventory: ({ projectRoot }) =>

@@ -3,7 +3,16 @@ import { TestClock } from "effect/testing";
 import { Effect, Deferred, Ref, Scope, Exit, Fiber, Clock } from "effect";
 import * as Semaphore from "effect/Semaphore";
 import type { UsageAccount, AccountUsageSection } from "@t3tools/contracts";
-import { makeAccountUsageCapability, emptyAccountSection } from "./AccountUsageService.ts";
+import {
+  makeAccountUsageCapability as makeCapability,
+  emptyAccountSection,
+} from "./AccountUsageService.ts";
+
+const makeAccountUsageCapability = <E>(
+  account: UsageAccount,
+  read: Effect.Effect<ReadonlyArray<AccountUsageSection>, E>,
+  options: { readonly readerOwnsTimeout?: boolean } = {},
+) => makeCapability(account, read, { identity: `test:${account.key}`, ...options });
 
 const initial = (key = "claude:test", enabled = true): UsageAccount => ({
   key,

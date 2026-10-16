@@ -51,3 +51,38 @@ effectIt.layer(SqliteClient.layerMemory())("migration upgrades", (it) => {
     }),
   );
 });
+
+effectIt.layer(SqliteClient.layerMemory())("usage account history upgrade", (it) => {
+  it.effect("creates usage history tables on a database already at 115", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const throughDeliveryEvidence = Object.fromEntries(
+        Object.entries(MIGRATIONS).filter(([key]) => Number.parseInt(key, 10) <= 115),
+      );
+      yield* Migrator.make({})({ loader: Migrator.fromRecord(throughDeliveryEvidence) });
+      const tables = () => sql<{ readonly name: string }>`
+        SELECT name FROM sqlite_master
+        WHERE name IN (
+          'usage_account_snapshots', 'usage_quota_samples', 'usage_quota_samples_sampled_idx'
+        )
+        ORDER BY name
+      `;
+      expect(yield* tables()).toEqual([]);
+      expect(yield* sql`SELECT name FROM effect_sql_migrations WHERE migration_id = 115`).toEqual([
+        { name: "DeliveryHistoryEvidence" },
+      ]);
+
+      yield* runMigrations;
+      yield* runMigrations;
+
+      expect((yield* tables()).map((row) => row.name)).toEqual([
+        "usage_account_snapshots",
+        "usage_quota_samples",
+        "usage_quota_samples_sampled_idx",
+      ]);
+      expect(yield* sql`SELECT name FROM effect_sql_migrations WHERE migration_id = 116`).toEqual([
+        { name: "UsageAccountHistory" },
+      ]);
+    }),
+  );
+});

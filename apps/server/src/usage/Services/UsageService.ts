@@ -5,6 +5,7 @@ import type {
   UsageAccounts,
   UsageGetSummaryInput,
   UsageSummary,
+  UsageQuotaHistory,
   ProviderInstanceId,
   UsageAccount,
 } from "@t3tools/contracts";
@@ -33,6 +34,7 @@ export interface UsageServiceShape {
   readonly getSummary: (
     input: UsageGetSummaryInput,
   ) => Effect.Effect<UsageSummary, ProjectionRepositoryError | UsageQueryError>;
+  readonly getQuotaHistory: Effect.Effect<UsageQuotaHistory, UsageQueryError>;
 }
 
 export class UsageService extends ServiceMap.Service<UsageService, UsageServiceShape>()(

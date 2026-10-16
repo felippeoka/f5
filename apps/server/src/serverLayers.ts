@@ -361,7 +361,8 @@ export function makeServerOrchestrationRuntimeLayer() {
   const threadBackgroundWorkLayer = ThreadBackgroundWorkLive.pipe(
     Layer.provideMerge(providerSessionDirectoryLayer),
   );
-  const usageServiceLayer = UsageServiceLive;
+  // The secret store keys persisted account identities across restarts.
+  const usageServiceLayer = UsageServiceLive.pipe(Layer.provide(ServerSecretStoreLive));
   const { gitLayer, checkpointDiffQueryLayer } = makeServerGitLayers();
   const orchestrationLayer = OrchestrationEngineLive.pipe(
     Layer.provide(NextTurnQueueStoreLive),

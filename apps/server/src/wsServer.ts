@@ -3700,6 +3700,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         );
       }
 
+      case USAGE_WS_METHODS.getQuotaHistory: {
+        const { usageService } = yield* awaitOrchestrationRuntimeForRoute;
+        return yield* usageService.getQuotaHistory.pipe(
+          Effect.mapError((error) => new RouteRequestError({ message: error.message })),
+        );
+      }
+
       case ORCHESTRATION_WS_METHODS.getSnapshot: {
         const { orchestrationEngine } = yield* awaitOrchestrationRuntimeForRoute;
         return yield* orchestrationEngine.getReadModel();

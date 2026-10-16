@@ -1,10 +1,32 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import type { ProviderKind, UsagePriceOverride } from "@t3tools/contracts";
+import { useEffect, useRef, useState } from "react";
+import {
+  KNOWN_PROVIDER_KINDS,
+  PROVIDER_DISPLAY_NAMES,
+  type ProviderKind,
+  type UsagePriceOverride,
+} from "@t3tools/contracts";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
+import { refreshUsageSummaries } from "../../lib/usageReactQuery";
 import { Button } from "../ui/button";
 
-export function UsagePriceEditor() {
+export interface UsagePriceDraft {
+  readonly provider: ProviderKind;
+  readonly model: string;
+  /** Changes on every request so repeated clicks re-open the editor. */
+  readonly nonce: number;
+}
+
+function priceRates(price: UsagePriceOverride): Array<string> {
+  return [
+    String(price.inputUsdPerMillion),
+    String(price.outputUsdPerMillion),
+    price.cacheReadUsdPerMillion === null ? "" : String(price.cacheReadUsdPerMillion),
+    price.cacheWriteUsdPerMillion === null ? "" : String(price.cacheWriteUsdPerMillion),
+  ];
+}
+
+export function UsagePriceEditor({ draft }: { draft?: UsagePriceDraft | null }) {
   const client = useQueryClient();
   const prices = useSettings((settings) => settings.usagePriceOverrides);
   const { updateSettings } = useUpdateSettings();
@@ -13,12 +35,38 @@ export function UsagePriceEditor() {
   const [rates, setRates] = useState(["", "", "", ""]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [open, setOpen] = useState(false);
+  const inputPriceRef = useRef<HTMLInputElement | null>(null);
+  const [focusRequest, setFocusRequest] = useState<number | null>(null);
+  useEffect(() => {
+    if (!draft) return;
+    setProvider(draft.provider);
+    setModel(draft.model);
+    // An existing override can still leave turns unpriced (missing token
+    // counts); start from it rather than blank rates.
+    const existing = prices.find(
+      (price) => price.provider === draft.provider && price.model === draft.model,
+    );
+    setRates(existing ? priceRates(existing) : ["", "", "", ""]);
+    setError(null);
+    setOpen(true);
+    setFocusRequest(draft.nonce);
+    // Only a new draft (nonce) prefills; later price edits must not reset the form.
+  }, [draft]);
+  // Focus only after the details element has rendered open.
+  useEffect(() => {
+    if (!open || focusRequest === null) return;
+    const input = inputPriceRef.current;
+    input?.scrollIntoView?.({ block: "nearest" });
+    input?.focus();
+    setFocusRequest(null);
+  }, [open, focusRequest]);
   const save = async (next: readonly UsagePriceOverride[]) => {
     setSaving(true);
     setError(null);
     try {
       await updateSettings({ usagePriceOverrides: [...next] });
-      await client.invalidateQueries({ queryKey: ["usage", "summary"] });
+      await refreshUsageSummaries(client);
     } catch {
       setError("Could not save usage prices.");
     } finally {
@@ -26,7 +74,11 @@ export function UsagePriceEditor() {
     }
   };
   return (
-    <details className="rounded-xl border p-3">
+    <details
+      className="rounded-xl border p-3"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary className="cursor-pointer text-sm font-medium">Usage prices</summary>
       <p className="my-2 text-xs text-muted-foreground">
         USD per million tokens. Overrides apply only when the provider omits cost. Blank cache rates
@@ -38,8 +90,8 @@ export function UsagePriceEditor() {
           className="flex items-center justify-between gap-2 py-1 text-xs"
         >
           <span>
-            {price.provider} · {price.model}: input ${price.inputUsdPerMillion}, output $
-            {price.outputUsdPerMillion}
+            {PROVIDER_DISPLAY_NAMES[price.provider]} · {price.model}: input $
+            {price.inputUsdPerMillion}, output ${price.outputUsdPerMillion}
           </span>
           <Button
             size="sm"
@@ -48,12 +100,7 @@ export function UsagePriceEditor() {
             onClick={() => {
               setProvider(price.provider);
               setModel(price.model);
-              setRates([
-                String(price.inputUsdPerMillion),
-                String(price.outputUsdPerMillion),
-                price.cacheReadUsdPerMillion === null ? "" : String(price.cacheReadUsdPerMillion),
-                price.cacheWriteUsdPerMillion === null ? "" : String(price.cacheWriteUsdPerMillion),
-              ]);
+              setRates(priceRates(price));
             }}
           >
             Edit
@@ -103,11 +150,11 @@ export function UsagePriceEditor() {
             value={provider}
             onChange={(event) => setProvider(event.target.value as ProviderKind)}
           >
-            {["codex", "claudeAgent", "cursor", "grok", "opencode", "antigravity", "muse"].map(
-              (kind) => (
-                <option key={kind}>{kind}</option>
-              ),
-            )}
+            {KNOWN_PROVIDER_KINDS.map((kind) => (
+              <option key={kind} value={kind}>
+                {PROVIDER_DISPLAY_NAMES[kind]}
+              </option>
+            ))}
           </select>
         </label>
         <label className="text-xs">
@@ -123,6 +170,7 @@ export function UsagePriceEditor() {
             <label key={label} className="text-xs">
               {label}
               <input
+                ref={index === 0 ? inputPriceRef : undefined}
                 className="block w-full rounded border p-2"
                 type="number"
                 min="0"
