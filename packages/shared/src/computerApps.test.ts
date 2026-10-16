@@ -60,6 +60,8 @@ describe("computer app catalog", () => {
   it("blocks F5 channels and dev Electron across independent instances", () => {
     expect(appTier("com.github.Electron", "darwin", { f5Pids: [4], pid: 4 })).toBe("blocked");
     expect(appTier("com.github.Electron", "darwin", { f5Pids: [4], pid: 5 })).toBe("blocked");
+    expect(appTier("io.github.lopesfelipe.f5", "darwin")).toBe("blocked");
+    expect(appTier("io.github.lopesfelipe.f5.dev", "darwin")).toBe("blocked");
     expect(appTier("com.t3tools.t3code", "darwin")).toBe("blocked");
     expect(appTier("com.t3tools.t3code.beta", "darwin")).toBe("blocked");
     expect(appTier("C:\\Apps\\F5 (Alpha).exe", "win32")).toBe("blocked");

@@ -1,3 +1,5 @@
+import { ProviderDriverKind } from "@t3tools/contracts";
+import { getWorkflowModelCapabilities } from "../../providerModels";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ModelSlug,
@@ -292,6 +294,11 @@ export function WorkflowImplementDialog(props: {
         provider,
         selection,
         modelOptions,
+        getWorkflowModelCapabilities(
+          serverConfigQuery.data?.providers ?? [],
+          ProviderDriverKind.make(provider),
+          selection,
+        ),
       );
       const providerOptions = resolveProviderOptionsForDispatch({
         settings,
@@ -328,6 +335,7 @@ export function WorkflowImplementDialog(props: {
         </DialogHeader>
         <DialogPanel className="flex flex-col gap-4">
           <SlotRow
+            providers={serverConfigQuery.data?.providers}
             label="Implementation model"
             provider={provider}
             model={selection}
@@ -344,7 +352,16 @@ export function WorkflowImplementDialog(props: {
               recordModelSelection(
                 provider,
                 selection,
-                normalizeWorkflowSlotModelOptions(provider, selection, nextModelOptions),
+                normalizeWorkflowSlotModelOptions(
+                  provider,
+                  selection,
+                  nextModelOptions,
+                  getWorkflowModelCapabilities(
+                    serverConfigQuery.data?.providers ?? [],
+                    ProviderDriverKind.make(provider),
+                    selection,
+                  ),
+                ),
               );
             }}
           />

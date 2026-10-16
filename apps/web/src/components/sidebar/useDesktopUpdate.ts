@@ -1,8 +1,9 @@
-import type { DesktopUpdateState } from "@t3tools/contracts";
+import type { DesktopUpdateChannel, DesktopUpdateState } from "@t3tools/contracts";
 import { useCallback, useEffect, useState } from "react";
 
 import { isElectron } from "../../env";
 import {
+  resolveAboutUpdateAction,
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
   getDesktopUpdateButtonTooltip,
@@ -82,66 +83,76 @@ export function useDesktopUpdate() {
           ? "text-destructive-foreground motion-safe:animate-pulse"
           : "text-warning-foreground motion-safe:animate-pulse";
 
+  const [channelPending, setChannelPending] = useState(false);
+  const runAction = useCallback(
+    async (action: "check" | "download" | "install" | "none" | "busy") => {
+      const bridge = window.desktopBridge;
+      if (!bridge || action === "none" || action === "busy") return;
+      try {
+        const result =
+          action === "check"
+            ? await bridge.checkForUpdates?.()
+            : action === "download"
+              ? await bridge.downloadUpdate()
+              : await bridge.installUpdate();
+        if (!result) return;
+        if (action === "download" && result.completed)
+          toastManager.add({
+            type: "success",
+            title: "Update downloaded",
+            description: "Restart the app from the update button to install it.",
+          });
+        const actionError = getDesktopUpdateActionError(result);
+        if (shouldToastDesktopUpdateActionResult(result) && actionError)
+          toastManager.add({
+            type: "error",
+            title: `Could not ${action} update`,
+            description: actionError,
+          });
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: `Could not ${action} update`,
+          description: error instanceof Error ? error.message : "An unexpected error occurred.",
+        });
+      }
+    },
+    [],
+  );
   const handleButtonClick = useCallback(() => {
+    if (!buttonDisabled) void runAction(buttonAction);
+  }, [buttonDisabled, buttonAction, runAction]);
+  const handleAboutAction = useCallback(() => {
+    if (desktopUpdateState) void runAction(resolveAboutUpdateAction(desktopUpdateState));
+  }, [desktopUpdateState, runAction]);
+  const setChannel = useCallback(async (channel: DesktopUpdateChannel) => {
     const bridge = window.desktopBridge;
-    if (!bridge || !desktopUpdateState) return;
-    if (buttonDisabled || buttonAction === "none") return;
-
-    if (buttonAction === "download") {
-      void bridge
-        .downloadUpdate()
-        .then((result) => {
-          if (result.completed) {
-            toastManager.add({
-              type: "success",
-              title: "Update downloaded",
-              description: "Restart the app from the update button to install it.",
-            });
-          }
-          if (!shouldToastDesktopUpdateActionResult(result)) return;
-          const actionError = getDesktopUpdateActionError(result);
-          if (!actionError) return;
-          toastManager.add({
-            type: "error",
-            title: "Could not download update",
-            description: actionError,
-          });
-        })
-        .catch((error) => {
-          toastManager.add({
-            type: "error",
-            title: "Could not start update download",
-            description: error instanceof Error ? error.message : "An unexpected error occurred.",
-          });
+    if (typeof bridge?.setUpdateChannel !== "function") return;
+    setChannelPending(true);
+    try {
+      const result = await bridge.setUpdateChannel(channel);
+      if (!result.accepted || !result.completed)
+        toastManager.add({
+          type: "error",
+          title: "Could not change update channel",
+          description: result.state.message ?? "Try again.",
         });
-      return;
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not change update channel",
+        description: String(error),
+      });
+    } finally {
+      setChannelPending(false);
     }
-
-    if (buttonAction === "install") {
-      void bridge
-        .installUpdate()
-        .then((result) => {
-          if (!shouldToastDesktopUpdateActionResult(result)) return;
-          const actionError = getDesktopUpdateActionError(result);
-          if (!actionError) return;
-          toastManager.add({
-            type: "error",
-            title: "Could not install update",
-            description: actionError,
-          });
-        })
-        .catch((error) => {
-          toastManager.add({
-            type: "error",
-            title: "Could not install update",
-            description: error instanceof Error ? error.message : "An unexpected error occurred.",
-          });
-        });
-    }
-  }, [buttonAction, buttonDisabled, desktopUpdateState]);
+  }, []);
 
   return {
     state: desktopUpdateState,
+    channelPending,
+    setChannel,
+    handleAboutAction,
     showButton,
     tooltip,
     releaseNotes,

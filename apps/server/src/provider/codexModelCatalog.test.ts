@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { CodexControlClient } from "../codex/CodexControlClient";
+import { readCodexModelPages } from "../codex/readCodexModelPages";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildCodexTurnStartParams, readCodexAccountSnapshot } from "../codexAppServerManager.ts";
 import {
+  probeCodexInstanceCatalog,
   parseCodexInstanceSkills,
   parseCodexModelList,
   readCodexReportedModelCapabilities,
@@ -29,7 +32,8 @@ const MODEL_LIST = {
 
 describe("parseCodexModelList", () => {
   it("drops hidden models and keeps reported capabilities", () => {
-    const models = parseCodexModelList(MODEL_LIST.data);
+    const { models, presentSlugs } = parseCodexModelList(MODEL_LIST.data);
+    expect(presentSlugs).toEqual(["gpt-cli-only", "gpt-hidden"]);
     expect(models.map((model) => model.slug)).toEqual(["gpt-cli-only"]);
     expect(models[0]?.name).toBe("CLI Only");
     expect(models[0]?.capabilities.source).toBe("reported");
@@ -116,4 +120,52 @@ describe("parseCodexInstanceSkills", () => {
       ]).map((skill) => skill.name),
     ).toEqual(["mine"]);
   });
+});
+
+it("translates the reported priority tier at turn start", () => {
+  const reportedModelCapabilities = readCodexReportedModelCapabilities({
+    data: [{ model: "gpt-new", serviceTiers: [{ id: "priority" }] }],
+  });
+  const params = buildCodexTurnStartParams(
+    { threadId: "thread-1", input: "hello", model: "gpt-new", serviceTier: "fast" } as never,
+    {
+      providerThreadId: "provider-thread-1",
+      account: readCodexAccountSnapshot({ type: "apiKey" }),
+      reportedModelCapabilities,
+    },
+  );
+  expect(params.serviceTier).toBe("priority");
+});
+
+it("keeps useful discovery pages and distinguishes failed skills from empty skills", async () => {
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce({
+      data: [{ model: "gpt-fresh", supportedReasoningEfforts: [], serviceTiers: [] }],
+      nextCursor: "more",
+    })
+    .mockRejectedValueOnce(new Error("offline"));
+  const closeAndWait = vi.fn(async () => {});
+  const fake = {
+    listModelPages: () => readCodexModelPages(request),
+    listSkills: vi.fn().mockRejectedValue(new Error("offline")),
+    closeAndWait,
+  };
+  const create = vi
+    .spyOn(CodexControlClient, "create")
+    .mockResolvedValue(fake as unknown as CodexControlClient);
+  try {
+    const partial = await probeCodexInstanceCatalog({ cwd: process.cwd() });
+    expect(partial.complete).toBe(false);
+    expect(partial.models[0]?.slug).toBe("gpt-fresh");
+    expect(partial.models[0]?.capabilities.supportsEffort).toBe(false);
+    expect(partial.skills).toBeUndefined();
+    expect(closeAndWait).toHaveBeenCalledTimes(1);
+    request.mockReset().mockResolvedValue({ data: [{ model: "gpt-fresh" }], nextCursor: null });
+    fake.listSkills.mockResolvedValue([]);
+    const empty = await probeCodexInstanceCatalog({ cwd: process.cwd() });
+    expect(empty.skills).toEqual([]);
+  } finally {
+    create.mockRestore();
+  }
 });

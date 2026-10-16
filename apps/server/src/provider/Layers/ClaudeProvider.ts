@@ -3,6 +3,7 @@ import { customModelSlug } from "@t3tools/shared/customModels";
 import { parseClaudeAuthStatusFromOutput, AUTH_TIMEOUT_MS } from "./ProviderHealth";
 import { toTitleCaseWords, claudeSubscriptionLabel } from "../claudeSubscription.ts";
 import {
+  MODEL_OPTIONS_BY_PROVIDER,
   type ClaudeSettings,
   type ClaudeBuiltInModelSlug,
   type ModelCapabilities,
@@ -11,9 +12,10 @@ import {
   type ServerProviderModel,
   type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
-import { Effect, Option, Path, Result } from "effect";
+import { Clock, Effect, Option, Path, Result } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import {
+  formatModelDisplayName,
   createClaudeModelCapabilities,
   createModelCapabilities,
   createReportedClaudeModelCapabilities,
@@ -60,76 +62,15 @@ const CLAUDE_PRESENTATION = {
   displayName: "Claude",
   showInteractionModeToggle: true,
 } as const;
-const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel & { slug: ClaudeBuiltInModelSlug }> = [
-  {
-    slug: "claude-opus-5-5",
-    name: "Claude Opus 5.5",
-    isCustom: false,
-    capabilities: createClaudeModelCapabilities("claude-opus-5-5"),
-  },
-  {
-    slug: "claude-opus-5",
-    name: "Claude Opus 5",
-    isCustom: false,
-    capabilities: createClaudeModelCapabilities("claude-opus-5"),
-  },
-  {
-    slug: "claude-fable-5-1",
-    name: "Claude Fable 5.1",
-    isCustom: false,
-    capabilities: createClaudeModelCapabilities("claude-fable-5-1"),
-  },
-  {
-    slug: "claude-fable-5",
-    name: "Claude Fable 5",
-    isCustom: false,
-    capabilities: createClaudeModelCapabilities("claude-fable-5"),
-  },
-  {
-    slug: "claude-sonnet-5",
-    name: "Claude Sonnet 5",
-    isCustom: false,
-    capabilities: createClaudeModelCapabilities("claude-sonnet-5"),
-  },
-  {
-    slug: "claude-opus-4-8",
-    name: "Claude Opus 4.8",
-    isCustom: false,
-    capabilities: createClaudeModelCapabilities("claude-opus-4-8"),
-  },
-  {
-    slug: "claude-opus-4-7",
-    name: "Claude Opus 4.7",
-    isCustom: false,
-    capabilities: createClaudeModelCapabilities("claude-opus-4-7"),
-  },
-  {
-    slug: "claude-opus-4-6",
-    name: "Claude Opus 4.6",
-    isCustom: false,
-    capabilities: createClaudeModelCapabilities("claude-opus-4-6"),
-  },
-  {
-    slug: "claude-opus-4-5",
-    name: "Claude Opus 4.5",
-    isCustom: false,
-    capabilities: createClaudeModelCapabilities("claude-opus-4-5"),
-  },
-  {
-    slug: "claude-sonnet-4-6",
-    name: "Claude Sonnet 4.6",
-    isCustom: false,
-    capabilities: createClaudeModelCapabilities("claude-sonnet-4-6"),
-  },
-  {
-    slug: "claude-haiku-4-5",
-    name: "Claude Haiku 4.5",
-    isCustom: false,
-    capabilities: createClaudeModelCapabilities("claude-haiku-4-5"),
-  },
-];
+const BUILT_IN_MODELS = MODEL_OPTIONS_BY_PROVIDER.claudeAgent.map((model) => ({
+  ...model,
+  isCustom: false,
+  capabilities: createClaudeModelCapabilities(model.slug),
+}));
 
 export const VERSION_GATED_CLAUDE_MODELS = [
+  { slug: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", minVersion: "2.1.299" },
+  { slug: "claude-haiku-5-5", name: "Claude Haiku 5.5", minVersion: "2.1.299" },
   { slug: "claude-opus-5-5", name: "Claude Opus 5.5", minVersion: "2.1.280" },
   { slug: "claude-fable-5-1", name: "Claude Fable 5.1", minVersion: "2.1.257" },
   { slug: "claude-opus-5", name: "Claude Opus 5", minVersion: "2.1.220" },
@@ -147,7 +88,7 @@ function isClaudeModelSupportedAtVersion(minVersion: string, version: string): b
   return compareCliVersions(version, minVersion) >= 0;
 }
 
-function getBuiltInClaudeModelsForVersion(
+export function getBuiltInClaudeModelsForVersion(
   version: string | null | undefined,
 ): ReadonlyArray<ServerProviderModel> {
   if (!version) {
@@ -160,7 +101,7 @@ function getBuiltInClaudeModelsForVersion(
   );
   return unsupported.size === 0
     ? BUILT_IN_MODELS
-    : BUILT_IN_MODELS.filter((model) => !unsupported.has(model.slug));
+    : BUILT_IN_MODELS.map((model) => ({ ...model, isUnlisted: unsupported.has(model.slug) }));
 }
 
 function formatClaudeUpgradeMessage(version: string | null): string | undefined {
@@ -302,6 +243,7 @@ function nonEmptyProbeString(value: string): string | undefined {
 }
 
 export type ClaudeCapabilitiesProbe = {
+  readonly modelCatalogFetchedAt?: string;
   readonly email: string | undefined;
   readonly subscriptionType: string | undefined;
   readonly tokenSource: string | undefined;
@@ -326,14 +268,19 @@ export function parseClaudeInitializationModels(
 ): ReadonlyArray<ClaudeReportedModel> {
   const bySlug = new Map<string, ClaudeReportedModel>();
   for (const model of models ?? []) {
-    const raw = nonEmptyProbeString(model.resolvedModel ?? "") ?? nonEmptyProbeString(model.value);
-    const slug = raw
+    const raw = [model.resolvedModel, model.value]
+      .map((value) => nonEmptyProbeString(value ?? ""))
+      .find((value) => value?.startsWith("claude-"));
+    const slug = raw?.startsWith("claude-")
       ? normalizeModelSlug(raw.replace(/\[(?:1m|200k)\]$/i, ""), "claudeAgent")
       : null;
     if (!slug || !slug.startsWith("claude-") || bySlug.has(slug)) continue;
     bySlug.set(slug, {
       slug,
-      name: nonEmptyProbeString(model.displayName) ?? slug,
+      name:
+        formatModelDisplayName("claudeAgent", slug) ??
+        nonEmptyProbeString(model.displayName) ??
+        slug,
       capabilities: createReportedClaudeModelCapabilities({
         value: slug,
         ...(model.supportsEffort !== undefined ? { supportsEffort: model.supportsEffort } : {}),
@@ -535,7 +482,16 @@ const probeClaudeCapabilities = (
     options,
   ).pipe(
     Effect.result,
-    Effect.map((result) => (Result.isSuccess(result) ? result.success : undefined)),
+    Effect.flatMap((result) =>
+      Result.isSuccess(result)
+        ? Clock.currentTimeMillis.pipe(
+            Effect.map((now) => ({
+              ...result.success,
+              modelCatalogFetchedAt: new Date(now).toISOString(),
+            })),
+          )
+        : Effect.succeed(undefined),
+    ),
   );
 
 export const probeClaudeAccountUsage = (
@@ -556,7 +512,10 @@ export const probeClaudeAccountUsage = (
           try: () => q.initializationResult(),
           catch: (error) => new AccountUsageReadError(accountUsageErrorCode(error)),
         });
-        const capabilities = claudeCapabilitiesFromInitialization(init);
+        const capabilities = {
+          ...claudeCapabilitiesFromInitialization(init),
+          modelCatalogFetchedAt: new Date(yield* Clock.currentTimeMillis).toISOString(),
+        };
         if (options.onCapabilities) yield* options.onCapabilities(capabilities);
         const read = q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
         if (typeof read !== "function")
@@ -620,6 +579,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       presentation: CLAUDE_PRESENTATION,
       enabled: false,
       checkedAt,
+      modelCatalog: { status: "failed" },
       models: unknownVersionModels,
       probe: {
         installed: false,
@@ -642,6 +602,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       presentation: CLAUDE_PRESENTATION,
       enabled: claudeSettings.enabled,
       checkedAt,
+      modelCatalog: { status: "failed" },
       models: unknownVersionModels,
       probe: {
         installed: !isCommandMissingCause(error),
@@ -660,6 +621,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       presentation: CLAUDE_PRESENTATION,
       enabled: claudeSettings.enabled,
       checkedAt,
+      modelCatalog: { status: "failed" },
       models: unknownVersionModels,
       probe: {
         installed: true,
@@ -684,6 +646,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       presentation: CLAUDE_PRESENTATION,
       enabled: claudeSettings.enabled,
       checkedAt,
+      modelCatalog: { status: "failed" },
       models: modelsForParsedVersion,
       probe: {
         installed: true,
@@ -721,6 +684,9 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       presentation: CLAUDE_PRESENTATION,
       enabled: claudeSettings.enabled,
       checkedAt,
+      modelCatalog: capabilities
+        ? { status: "menu", lastSuccessAt: capabilities.modelCatalogFetchedAt ?? checkedAt }
+        : { status: "failed" },
       models: reportedModels,
       slashCommands: dedupedSlashCommands,
       probe: {
@@ -741,6 +707,9 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     presentation: CLAUDE_PRESENTATION,
     enabled: claudeSettings.enabled,
     checkedAt,
+    modelCatalog: capabilities
+      ? { status: "menu", lastSuccessAt: capabilities.modelCatalogFetchedAt ?? checkedAt }
+      : { status: "failed" },
     models: reportedModels,
     slashCommands: dedupedSlashCommands,
     probe: {

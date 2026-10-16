@@ -116,3 +116,55 @@ describe("ProviderInstanceModelPicker", () => {
     expect(page.getByRole("button", { name: "Cursor", exact: true }).query()).toBeNull();
   });
 });
+
+it("keeps selected and fan-out unlisted models visible and reacts while open", async () => {
+  const onToggleModel = vi.fn();
+  const models = new Map([
+    [
+      CODEX_ID,
+      [
+        { slug: "listed", name: "Listed Model" },
+        { slug: "retired", name: "Retired Model", isUnlisted: true },
+        { slug: "fanout", name: "Fanout Model", isUnlisted: true },
+      ],
+    ],
+  ]);
+  const picker = (
+    model: string,
+    selectedModels: ReadonlyArray<{ instanceId: ProviderInstanceId; model: string }> = [],
+  ) => (
+    <TooltipProvider delay={0}>
+      <ProviderInstanceModelPicker
+        open
+        instanceId={CODEX_ID}
+        model={model}
+        lockedInstanceId={CODEX_ID}
+        providers={PROVIDERS}
+        modelOptionsByInstance={new Map(models)}
+        selectedModels={selectedModels}
+        onToggleModel={onToggleModel}
+        onInstanceModelChange={() => {}}
+      />
+    </TooltipProvider>
+  );
+  active = await render(picker("listed"));
+  await expect
+    .element(
+      page.getByRole("group", { name: /models$/ }).getByText("Listed Model", { exact: true }),
+    )
+    .toBeVisible();
+  await expect.element(page.getByText("Retired Model", { exact: true })).not.toBeInTheDocument();
+  await active.rerender(picker("retired", [{ instanceId: CODEX_ID, model: "fanout" }]));
+  await expect.element(page.getByText("Retired Model", { exact: true }).last()).toBeVisible();
+  await expect.element(page.getByText("Fanout Model", { exact: true })).toBeVisible();
+  await page.getByText("Fanout Model", { exact: true }).click({ modifiers: ["Shift"] });
+  expect(onToggleModel).toHaveBeenCalledWith(CODEX_ID, "codex", "fanout");
+  await active.rerender(picker("listed"));
+  await expect.element(page.getByText("Fanout Model", { exact: true })).not.toBeInTheDocument();
+  models.set(CODEX_ID, [
+    { slug: "listed", name: "Listed Model" },
+    { slug: "retired", name: "Retired Model", isUnlisted: false },
+  ]);
+  await active.rerender(picker("listed"));
+  await expect.element(page.getByText("Retired Model", { exact: true })).toBeVisible();
+});

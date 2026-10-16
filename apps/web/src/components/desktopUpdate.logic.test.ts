@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
 
 import {
+  getDesktopUpdateStatusSummary,
+  resolveAboutUpdateAction,
+  isAboutUpdateActionDisabled,
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
   getDesktopUpdateButtonTooltip,
@@ -15,6 +18,7 @@ import {
 } from "./desktopUpdate.logic";
 
 const baseState: DesktopUpdateState = {
+  channel: "stable",
   enabled: true,
   status: "idle",
   currentVersion: "1.0.0",
@@ -78,7 +82,7 @@ describe("desktop update button state", () => {
     expect(getDesktopUpdateButtonTooltip(state)).toContain("Click to retry");
   });
 
-  it("hides the button for non-actionable check errors", () => {
+  it("shows Retry for check errors", () => {
     const state: DesktopUpdateState = {
       ...baseState,
       status: "error",
@@ -86,8 +90,8 @@ describe("desktop update button state", () => {
       errorContext: "check",
       canRetry: true,
     };
-    expect(shouldShowDesktopUpdateButton(state)).toBe(false);
-    expect(resolveDesktopUpdateButtonAction(state)).toBe("none");
+    expect(shouldShowDesktopUpdateButton(state)).toBe(true);
+    expect(resolveDesktopUpdateButtonAction(state)).toBe("check");
   });
 
   it("disables the button while downloading", () => {
@@ -215,4 +219,64 @@ describe("desktop update UI helpers", () => {
 
     expect(getArm64IntelBuildWarningDescription(state)).toContain("Download the available update");
   });
+});
+
+describe("About update summaries", () => {
+  it.each([
+    ["disabled", "Disabled"],
+    ["idle", "Not checked yet"],
+    ["checking", "Checking for updates…"],
+    ["up-to-date", "F5 is up to date · checked just now"],
+    ["available", "Version 2.0.0 is available"],
+    ["downloading", "Downloading 2.0.0… 50%"],
+    ["downloaded", "Version 2.0.0 is ready to install"],
+    ["error", "Disabled"],
+  ] as const)("summarizes %s", (status, expected) => {
+    expect(
+      getDesktopUpdateStatusSummary(
+        {
+          ...baseState,
+          status,
+          availableVersion: "2.0.0",
+          downloadedVersion: "2.0.0",
+          downloadPercent: 50,
+          message: "Disabled",
+          checkedAt: "2026-10-16T00:00:00Z",
+        },
+        Date.parse("2026-10-16T00:00:01Z"),
+      ),
+    ).toBe(expected);
+  });
+  it.each([
+    ["disabled", "none"],
+    ["idle", "check"],
+    ["checking", "busy"],
+    ["up-to-date", "check"],
+    ["available", "download"],
+    ["downloading", "busy"],
+    ["downloaded", "install"],
+    ["error", "check"],
+  ] as const)("maps %s to %s", (status, action) => {
+    const state = { ...baseState, status };
+    expect(resolveAboutUpdateAction(state)).toBe(action);
+    expect(isAboutUpdateActionDisabled(state)).toBe(action === "none" || action === "busy");
+  });
+});
+it("keeps background check failures out of the sidebar and avoids duplicate punctuation", () => {
+  const state = {
+    ...baseState,
+    status: "error" as const,
+    canRetry: false,
+    errorContext: "check" as const,
+    message: "Update information is unavailable. Try again later.",
+  };
+  expect(shouldShowDesktopUpdateButton(state)).toBe(false);
+  expect(resolveAboutUpdateAction(state)).toBe("check");
+  expect(getDesktopUpdateButtonTooltip({ ...state, canRetry: true })).not.toContain("..");
+});
+it("shows a disabled preparation action while Squirrel stages the update", () => {
+  const state = { ...baseState, status: "preparing" as const };
+  expect(getDesktopUpdateStatusSummary(state)).toBe("Preparing update…");
+  expect(resolveAboutUpdateAction(state)).toBe("busy");
+  expect(isAboutUpdateActionDisabled(state)).toBe(true);
 });

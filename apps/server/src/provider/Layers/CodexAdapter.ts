@@ -1,3 +1,4 @@
+import type { ModelCapabilities } from "@t3tools/contracts";
 import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
 import { makeAutomationRuntimeEventPreparer } from "../prepareAutomationRuntimeEvent";
 import type { ComputerAutomationBrokerRuntime } from "../../computer/ComputerAutomationBroker";
@@ -133,6 +134,7 @@ export function resolveCodexSelectionOptions(input: {
 }
 
 export interface CodexAdapterLiveOptions {
+  readonly getEffectiveModelCapabilities?: () => ReadonlyMap<string, ModelCapabilities>;
   readonly manager?: CodexAppServerManager;
   readonly makeManager?: (services?: ServiceMap.ServiceMap<never>) => CodexAppServerManager;
   readonly nativeEventLogPath?: string;
@@ -2603,6 +2605,9 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           ...(providerOptions !== undefined ? { providerOptions } : {}),
           ...(options?.processEnvironment !== undefined
             ? { processEnvironment: options.processEnvironment }
+            : {}),
+          ...(options?.getEffectiveModelCapabilities
+            ? { effectiveModelCapabilities: options.getEffectiveModelCapabilities() }
             : {}),
           runtimeMode: input.runtimeMode,
           ...(input.model !== undefined ? { model: input.model } : {}),

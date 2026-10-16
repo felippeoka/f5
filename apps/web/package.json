@@ -7,7 +7,6 @@
     "dev": "node node_modules/vite/bin/vite.js",
     "build": "node node_modules/vite/bin/vite.js build && bun ../../scripts/check-web-bundle-budget.ts",
     "check:bundle-budget": "bun ../../scripts/check-web-bundle-budget.ts",
-    "prepare": "node node_modules/@effect/language-service/cli.js patch",
     "preview": "node node_modules/vite/bin/vite.js preview",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
     "test": "node node_modules/vitest/vitest.mjs run --passWithNoTests",

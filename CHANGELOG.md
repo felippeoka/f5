@@ -1,6 +1,17 @@
 # Changelog
 
-## Profiles
+All notable changes to F5 are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for the published CLI (`t3`) and the desktop app.
+
+## [Unreleased]
+
+### Installation
+
+- Production desktop updates now use only the public baked GitHub feed; ambient `GH_TOKEN` and `T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN` private-feed overrides are no longer supported.
+
+- F5 now uses its own app identity and imports existing F5 (Alpha) settings once. Screen Recording and Accessibility must be granted again.
+- Preview-browser sign-ins may need to be redone because the Chromium cookie key is bound to the old app identity. Backend data under `~/.f5` is unchanged.
+
+### Profiles
 
 - Read Codex account usage through each configured provider instance's home and environment instead of the machine-wide legacy configuration.
 
@@ -16,9 +27,7 @@
 - MCP CLI login times out after nine minutes to leave teardown time within the shared ten-minute OAuth lease.
 - Fix Claude instance environments, Windows home overrides, instance model-catalog credentials, configured worktree roots, and explicit-state-dir backup settings/secrets.
 
-All notable changes to F5 are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for the published CLI (`t3`) and the desktop app.
-
-## [Unreleased]
+### Server performance and storage
 
 - Coalesce Codex streaming assistant and reasoning deltas with ordered, idempotent batches and full-text completion recovery.
 - Export backups through an owned maintenance process while normal writes continue; protect snapshot attachments from cleanup. Add opt-in daily backups retaining seven successful archives, with credentials excluded. Preserve attachment ownership when restoring into a different state directory.

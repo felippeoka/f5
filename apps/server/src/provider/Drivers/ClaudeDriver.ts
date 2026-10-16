@@ -44,7 +44,11 @@ import {
   deleteClaudeSessionTranscript,
   resolveClaudeTranscriptCleanupDir,
 } from "../claudeSessionCleanup.ts";
-import { checkClaudeProviderStatus, makePendingClaudeProvider } from "../Layers/ClaudeProvider.ts";
+import {
+  getClaudeModelCapabilities,
+  checkClaudeProviderStatus,
+  makePendingClaudeProvider,
+} from "../Layers/ClaudeProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
@@ -199,7 +203,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         },
         processEnvironment: claudeProcessEnvironment,
       });
-      const textGeneration = yield* makeClaudeTextGeneration(effectiveConfig, processEnv);
+      const textGeneration = yield* makeClaudeTextGeneration(effectiveConfig, processEnv, (model) =>
+        Ref.get(probedModels).pipe(
+          Effect.map(
+            (models) =>
+              models.find((row) => row.slug === model)?.capabilities ??
+              getClaudeModelCapabilities(model),
+          ),
+        ),
+      );
 
       // Per-instance capabilities cache: keyed on binary + resolved HOME so
       // account-specific probes never share auth metadata across instances.
@@ -245,7 +257,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         processEnv,
       ).pipe(
         Effect.map(stampIdentity),
-        Effect.tap((provider) => Ref.set(probedModels, provider.models)),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(Path.Path, path),
       );
@@ -294,6 +305,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         textGeneration,
         accountUsage,
         invalidateAccountStatus: probes.invalidate,
+        updateModelCatalog: (models) => Ref.set(probedModels, models),
         inventory: ({ projectRoot }) => {
           const configDir = resolveClaudeConfigDir(claudeProcessEnvironment, serverCwd);
           return Effect.tryPromise({

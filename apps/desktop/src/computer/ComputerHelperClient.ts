@@ -43,6 +43,8 @@ export interface ComputerHelper {
 export class ComputerHelperClient implements ComputerHelper {
   private child: ChildProcessWithoutNullStreams | null = null;
   private state: ComputerAutomationBackendStatus = { available: false, reason: "helper-missing" };
+  /** Last status the current helper pushed; local failures never overwrite it. */
+  private helperState: ComputerAutomationBackendStatus | undefined;
   private readonly pending = new Map<string, Pending>();
   private readonly listeners = new Set<(message: Record<string, unknown>) => void>();
   private lastHeartbeat = 0;
@@ -60,8 +62,13 @@ export class ComputerHelperClient implements ComputerHelper {
     private readonly executable: string,
     private readonly now: () => number = Date.now,
   ) {
+    let lastTick = this.now();
     this.monitorTimer = setInterval(() => {
-      if (this.ready && this.now() - this.lastHeartbeat > 750)
+      const now = this.now();
+      // A late tick means this event loop stalled, not the helper: let queued heartbeats land.
+      const stalled = now - lastTick > 500;
+      lastTick = now;
+      if (!stalled && this.ready && now - this.lastHeartbeat > 750)
         this.fail({ available: false, reason: "monitor-unhealthy" });
     }, 250);
     this.monitorTimer.unref();
@@ -97,6 +104,7 @@ export class ComputerHelperClient implements ComputerHelper {
     this.childExited = new Promise<void>((done) => child.once("exit", () => done()));
     this.ready = false;
     this.terminalFailure = false;
+    this.helperState = undefined;
     this.state = {
       available: false,
       reason: "helper-missing",
@@ -187,6 +195,7 @@ export class ComputerHelperClient implements ComputerHelper {
       this.control({ type: "permissions" });
     } else if (message.type === "status") {
       this.state = Schema.decodeUnknownSync(BackendStatusSchema)(message.status);
+      this.helperState = this.state;
       if (!this.state.available && ["other-instance", "os-too-old"].includes(this.state.reason))
         this.terminalFailure = true;
     } else if (message.type === "heartbeat") {
@@ -196,6 +205,18 @@ export class ComputerHelperClient implements ComputerHelper {
         (this.state.available || this.state.reason === "monitor-unhealthy")
       )
         this.fail({ available: false, reason: "monitor-unhealthy" });
+      else if (
+        message.monitorHealthy === true &&
+        !this.state.available &&
+        this.state.reason === "monitor-unhealthy" &&
+        this.helperState?.available
+      ) {
+        // The helper deduplicates status pushes, so a locally detected heartbeat gap never
+        // gets an "available" push to clear it. Healthy heartbeats restore the helper's last
+        // status; held work stays suspended until the user resumes it.
+        this.state = this.helperState;
+        for (const listener of this.listeners) listener({ type: "status", status: this.state });
+      }
     } else if (message.type === "response" && typeof message.requestId === "string") {
       const pending = this.pending.get(message.requestId);
       if (!pending) return;

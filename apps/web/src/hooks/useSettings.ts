@@ -6,9 +6,15 @@ import {
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   type ProjectSettingsResult,
   type ServerSettingsPatch,
+  type ThreadEnvMode,
   type UnifiedSettings,
   type ProjectId,
 } from "@t3tools/contracts";
+import {
+  pendingLegacyThreadEnvMode,
+  readLegacyClientSetting,
+  subscribePendingClientSettings,
+} from "./useMigrateClientSettings";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 
 import {
@@ -61,6 +67,7 @@ interface SettingsSources {
   readonly appSettings: AppSettings;
   readonly serverSettings: ServerSettings | undefined;
   readonly projectSettings: ProjectSettingsResult | undefined;
+  readonly pendingThreadEnvMode: ThreadEnvMode | undefined;
 }
 
 function mergeSettingsSources(sources: SettingsSources): UnifiedWebSettings {
@@ -70,6 +77,15 @@ function mergeSettingsSources(sources: SettingsSources): UnifiedWebSettings {
       Object.assign(merged, { [key]: sources.projectSettings.settings[key] });
     }
   }
+  // Show the default new threads actually get while its migration is pending.
+  const pending =
+    sources.serverSettings &&
+    pendingLegacyThreadEnvMode(
+      sources.projectSettings?.settings ?? sources.serverSettings,
+      sources.projectSettings?.sources.defaultThreadEnvMode ?? "global",
+      sources.pendingThreadEnvMode,
+    );
+  if (pending) Object.assign(merged, { defaultThreadEnvMode: pending });
   return merged;
 }
 
@@ -100,12 +116,14 @@ export function useSettings<T = UnifiedWebSettings>(
     (listener: () => void) => {
       const configQueryHash = hashKey(serverQueryKeys.config());
       const unsubscribeAppSettings = subscribeAppSettings(listener);
+      const unsubscribePending = subscribePendingClientSettings(listener);
       const unsubscribeQueries = queryClient.getQueryCache().subscribe((event) => {
         const queryHash = event.query.queryHash;
         if (queryHash === configQueryHash || queryHash === projectQueryHash) listener();
       });
       return () => {
         unsubscribeAppSettings();
+        unsubscribePending();
         unsubscribeQueries();
       };
     },
@@ -127,12 +145,14 @@ export function useSettings<T = UnifiedWebSettings>(
         projectSettings: projectId
           ? queryClient.getQueryData(projectSettingsQueryOptions(projectId).queryKey)
           : undefined,
+        pendingThreadEnvMode: readLegacyClientSetting(),
       };
       if (
         !previous ||
         previous.sources.appSettings !== sources.appSettings ||
         previous.sources.serverSettings !== sources.serverSettings ||
-        previous.sources.projectSettings !== sources.projectSettings
+        previous.sources.projectSettings !== sources.projectSettings ||
+        previous.sources.pendingThreadEnvMode !== sources.pendingThreadEnvMode
       ) {
         previous = { sources, merged: mergeSettingsSources(sources) };
       }

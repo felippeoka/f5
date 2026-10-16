@@ -839,3 +839,18 @@ including native restore in non-Git projects: Claude's edit-tool backups can ove
 another conversation's edits. Deleted threads do not claim the workspace. In Git
 projects a worktree is required for restore; native change preview remains available
 in all projects. Fork controls are hidden for non-Git projects.
+
+### Model discovery and compatibility
+
+Sonnet 5.5 and Haiku 5.5 require Claude Code 2.1.299 or newer. Version-gated
+built-ins remain resolvable for existing threads, but are hidden from new
+selections on older executables. An unknown CLI version keeps all built-ins
+listed, and an executable report can explicitly make a gated model available.
+
+Claude initialization reports a menu, rather than a complete model catalog.
+Absence from that menu never hides a built-in model. F5 accepts fully qualified
+`claude-*` IDs from `resolvedModel` or `value`; bare family aliases without
+a resolved ID are skipped so capabilities cannot attach to the wrong release.
+Reported capabilities flow through the registry to pickers, workflow controls,
+interactive launch, and auxiliary text generation. Catalog retention never
+retains account email, subscription, or token-source identity.

@@ -1,3 +1,4 @@
+import { pickPreferredModel } from "./providerModels";
 import {
   customModelSlug,
   normalizeCustomModels,
@@ -76,10 +77,12 @@ export interface AppModelOption {
   shortName?: string;
   subProvider?: string;
   isCustom: boolean;
+  isUnlisted?: boolean;
 }
 
 function toAppModelOption(model: ServerProvider["models"][number]): AppModelOption {
   const option: AppModelOption = {
+    ...(model.isUnlisted !== undefined ? { isUnlisted: model.isUnlisted } : {}),
     slug: model.slug,
     name: model.name,
     isCustom: model.isCustom,
@@ -243,8 +246,8 @@ export function resolveAppModelSelectionForInstance(
   const options = getAppModelOptionsForInstance(settings, entry);
   return (
     resolveSelectableModel(entry.driverKind, selectedModel, options) ??
-    options[0]?.slug ??
-    entry.models[0]?.slug ??
+    pickPreferredModel(options)?.slug ??
+    pickPreferredModel(entry.models)?.slug ??
     null
   );
 }
@@ -287,7 +290,7 @@ export function resolveAppModelSelectionState(
     const selectedModel = selectedEntry ? selection.model : null;
     const model =
       resolveAppModelSelectionForInstance(entry.instanceId, settings, providers, selectedModel) ??
-      entry.models[0]?.slug ??
+      pickPreferredModel(entry.models)?.slug ??
       DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_DRIVER[entry.driverKind];
     if (!model) {
       return createModelSelection(entry.instanceId, "", []);

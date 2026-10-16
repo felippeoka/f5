@@ -30,6 +30,8 @@ const repo = (count?: number) => {
   directories.push(r.directory);
   return r;
 };
+// Each fixture repository spawns many git processes, which is slow on Windows.
+const gitFixtureTimeout = { timeout: process.platform === "win32" ? 30_000 : 5_000 };
 function fixtureHistory() {
   let main = sha(600);
   return vi.fn((args: ReadonlyArray<string>) => {
@@ -47,7 +49,7 @@ function fixtureHistory() {
     throw new Error(`unexpected git: ${args}`);
   });
 }
-describe("pinned refresh", () => {
+describe("pinned refresh", gitFixtureTimeout, () => {
   it("anchors selection once even when the remote advances", () => {
     const git = fixtureHistory();
     expect(selectRefreshHead(git)).toBe(sha(600));
@@ -121,7 +123,7 @@ describe("pinned refresh", () => {
     ).toThrow("overlaps");
   });
 });
-describe("coverage and decisions", () => {
+describe("coverage and decisions", gitFixtureTimeout, () => {
   it("validates sorted records and contiguous intervals", () => {
     expect(validateLedger(fixtureLedger(), ROOT)).toEqual([]);
   });
@@ -344,7 +346,7 @@ describe("classification within existing history", () => {
     ).toThrow("concrete reason");
   });
 });
-describe("read-only CLI", () => {
+describe("read-only CLI", gitFixtureTimeout, () => {
   it("ignores obsolete manifests, journals, malformed locks and temp files", () => {
     const r = repo();
     const before = readFileSync(r.file, "utf8");

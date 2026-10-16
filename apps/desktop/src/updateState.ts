@@ -34,6 +34,8 @@ export function getAutoUpdateDisabledReason(args: {
   platform: NodeJS.Platform;
   appImage?: string | undefined;
   disabledByEnv: boolean;
+  hasUpdateFeed?: boolean;
+  runningFromReadOnlyLocation?: boolean;
 }): string | null {
   if (args.isDevelopment || !args.isPackaged) {
     return "Automatic updates are only available in packaged production builds.";
@@ -41,6 +43,10 @@ export function getAutoUpdateDisabledReason(args: {
   if (args.disabledByEnv) {
     return "Automatic updates are disabled by the T3CODE_DISABLE_AUTO_UPDATE setting.";
   }
+  if (args.runningFromReadOnlyLocation)
+    return "Move F5 to the Applications folder to enable updates.";
+  if (args.hasUpdateFeed === false)
+    return "This build has no update feed. Install F5 from GitHub Releases to receive updates.";
   if (args.platform === "linux" && !args.appImage) {
     return "Automatic updates on Linux require running the AppImage build.";
   }

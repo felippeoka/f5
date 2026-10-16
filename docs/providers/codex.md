@@ -583,3 +583,28 @@ Recovery of a missing native-compacted rollout marks the replacement cursor's co
 as pending. Its recovered summary is delivered in the first `turn/start` developer
 instructions even when the replacement thread is resumed, and the marker is cleared
 only after that request succeeds.
+
+### Reported model catalogs
+
+F5 requests all pages of `model/list` with `includeHidden: true`. Hidden rows
+supply launch metadata without becoming new picker options. Only a catalog
+ending in a null cursor is complete; paging anomalies and compatibility retries
+produce partial catalogs. A complete catalog marks absent built-in models
+`isUnlisted` and removes absent discovered models. Selected unlisted models
+remain available in pickers so existing threads keep their model.
+
+Catalogs refresh in the background after an hour. The provider refresh action
+invalidates the catalog and failure backoff and probes immediately, with an
+eight-second deadline. Failed probes back off for thirty minutes. The registry
+retains reported models and capabilities for up to 24 hours from the last
+successful catalog, or the first partial catalog when there has been no success.
+Failures and partial responses never extend this lease. CLI version and
+configuration changes invalidate retention.
+
+The UI stores fast mode as `fast`; launch maps it to the executable's `fast`
+or `priority` service tier, preferring `fast`. Reported effort restrictions,
+including empty lists, take precedence over static defaults.
+
+Auxiliary text generation uses the first available lightweight fallback when a
+default auxiliary model is unlisted. Explicit non-default models remain unchanged.
+Failed or partial discovery does not trigger model substitution.
