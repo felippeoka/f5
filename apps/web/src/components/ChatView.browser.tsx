@@ -4725,6 +4725,35 @@ describe("ChatView timeline (full app)", () => {
     }
   });
 
+  it("sends an explicit Codex effort for an untouched draft", async () => {
+    // The draft stores no effort; the turn must still name the shown one so a
+    // session reporting another default cannot substitute it.
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "explicit effort");
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-explicit-effort" as MessageId,
+        targetText: "explicit effort target",
+      }),
+    });
+    try {
+      (await waitForSendButton()).click();
+      await vi.waitFor(() =>
+        expect(getDispatchCommandRequests("thread.turn.start")).toHaveLength(1),
+      );
+      const command = getSubmittedTurnCommand(
+        getDispatchCommandRequests("thread.turn.start")[0]!,
+      ) as { modelSelection?: { instanceId?: string; options?: unknown } } | undefined;
+      expect(command?.modelSelection?.instanceId).toBe("codex");
+      expect(command?.modelSelection?.options).toContainEqual({
+        id: "reasoningEffort",
+        value: "high",
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("sends literal handles and quoted paths without workspace authorization", async () => {
     const prompt = 'Use @creditornot/wolt-auth and @scope/package with @"src/main.ts" please ';
     useComposerDraftStore.getState().setPrompt(THREAD_ID, prompt);

@@ -1,6 +1,9 @@
 import type { ModelCapabilities } from "@t3tools/contracts";
 import { ProviderDriverKind } from "@t3tools/contracts";
-import { normalizeClaudeModelOptions, normalizeCodexModelOptions } from "@t3tools/shared/model";
+import {
+  normalizeClaudeModelOptions,
+  resolveCodexDispatchModelOptions,
+} from "@t3tools/shared/model";
 import { getWorkflowModelCapabilities } from "../../providerModels";
 import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from "../ui/select";
 import {
@@ -128,7 +131,9 @@ export function normalizeWorkflowSlotModelOptions(
   capabilities?: ModelCapabilities | null,
 ): ProviderModelOptions | undefined {
   if (provider === "codex") {
-    const codex = normalizeCodexModelOptions(model, modelOptions?.codex, capabilities);
+    // Saved slots carry the effort the picker showed, default included, so the
+    // server never fills in a default the user did not see.
+    const codex = resolveCodexDispatchModelOptions(model, modelOptions?.codex, capabilities);
     return codex ? { codex } : undefined;
   }
   if (provider === "claudeAgent") {

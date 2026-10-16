@@ -756,12 +756,41 @@ describe("WorkflowCreateDialog", () => {
     }
   });
 
-  it("omits workflow codex effort equal to the default", () => {
+  it("keeps workflow codex effort explicit when it equals the default", () => {
+    // Codex may report a different default than the client knows, so the
+    // shown effort is saved instead of being left for the server to fill.
     expect(
       normalizeWorkflowSlotModelOptions("codex", "gpt-5-codex", {
         codex: { reasoningEffort: "high" },
       }),
-    ).toBeUndefined();
+    ).toEqual({ codex: { reasoningEffort: "high" } });
+  });
+
+  it("saves the effort the Codex picker showed when none was picked", () => {
+    const reported = createReportedCodexModelCapabilities({
+      model: "gpt-6.1-sol",
+      supportedReasoningEfforts: [
+        { reasoningEffort: "max" },
+        { reasoningEffort: "high" },
+        { reasoningEffort: "low" },
+      ],
+      defaultReasoningEffort: "low",
+      serviceTiers: [],
+    });
+    expect(normalizeWorkflowSlotModelOptions("codex", "gpt-6.1-sol", undefined, reported)).toEqual({
+      codex: { reasoningEffort: "low" },
+    });
+    expect(normalizeWorkflowSlotModelOptions("codex", "gpt-6.1-sol", undefined)).toEqual({
+      codex: { reasoningEffort: "high" },
+    });
+    expect(
+      normalizeWorkflowSlotModelOptions(
+        "codex",
+        "gpt-6.1-sol",
+        { codex: { reasoningEffort: "ultra" } },
+        reported,
+      ),
+    ).toEqual({ codex: { reasoningEffort: "max" } });
   });
 
   it("clamps unsupported Astra workflow reasoning before submission", () => {
@@ -1588,13 +1617,38 @@ describe("reported workflow capabilities", () => {
   );
 });
 
-it("uses the reported default for an unsupported stored effort and shows fast-only controls", async () => {
+it("saves a Codex pick of the built-in default when no capabilities were reported", async () => {
+  // The client's probe returned nothing, but the session will report Low as
+  // Sol's default; dropping "high" here would run the slot at Low.
+  const changes = vi.fn();
+  const host = document.createElement("div");
+  document.body.append(host);
+  const screen = await render(
+    <WorkflowReasoningPicker
+      provider="codex"
+      model="gpt-6.1-sol"
+      modelOptions={{ codex: { reasoningEffort: "medium" } }}
+      onChange={changes}
+    />,
+    { container: host },
+  );
+  try {
+    await page.getByRole("button", { name: "Medium", exact: true }).click();
+    await page.getByRole("menuitemradio", { name: /^High/ }).click();
+    expect(changes).toHaveBeenLastCalledWith({ codex: { reasoningEffort: "high" } });
+  } finally {
+    await screen.unmount();
+    host.remove();
+  }
+});
+
+it("walks an unsupported stored effort down, not to the default, and shows fast-only controls", async () => {
   const host = document.createElement("div");
   document.body.append(host);
   const props = {
     provider: "codex" as const,
     model: "gpt-future",
-    modelOptions: { codex: { reasoningEffort: "high" as const } },
+    modelOptions: { codex: { reasoningEffort: "ultra" as const } },
     onChange: () => {},
   };
   const screen = await render(
@@ -1602,14 +1656,19 @@ it("uses the reported default for an unsupported stored effort and shows fast-on
       {...props}
       capabilities={createReportedCodexModelCapabilities({
         model: props.model,
-        supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
-        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: [
+          { reasoningEffort: "max" },
+          { reasoningEffort: "high" },
+          { reasoningEffort: "low" },
+        ],
+        defaultReasoningEffort: "low",
       })}
     />,
     { container: host },
   );
   try {
-    await expect.element(page.getByRole("button", { name: "Medium", exact: true })).toBeVisible();
+    // turn/start lowers Ultra to Max; Low (the default) would misstate the run.
+    await expect.element(page.getByRole("button", { name: "Max", exact: true })).toBeVisible();
     await screen.rerender(
       <WorkflowReasoningPicker
         {...props}
