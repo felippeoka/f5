@@ -1907,19 +1907,28 @@ describe("Thread sidebar", () => {
   });
 
   it("preserves branch inheritance when the default environment is a worktree", async () => {
-    seedAppSettings({ defaultThreadEnvMode: "worktree" });
     const mounted = await mountApp({
       width: 1_400,
       initialEntries: [`/${THREAD_ID}`],
       configureFixture: (nextFixture) => {
+        // The default workspace is a server setting; the legacy browser key only
+        // migrates once the startup sync gate opens, which can lag the shortcut.
         nextFixture.serverConfig = {
           ...nextFixture.serverConfig,
           keybindings: createSidebarShortcutBindings(),
+          settings: {
+            ...(nextFixture.serverConfig.settings ?? DEFAULT_SERVER_SETTINGS),
+            defaultThreadEnvMode: "worktree",
+          },
         };
       },
     });
 
     try {
+      await waitForElement(
+        () => queryProjectButton("Project"),
+        "Project button should render before triggering chat.new.",
+      );
       await dispatchShortcut({ key: "n" });
       await waitForPath(
         mounted.router,
