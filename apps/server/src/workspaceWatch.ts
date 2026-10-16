@@ -221,12 +221,14 @@ export class WorkspaceWatchRegistry<S> {
 
       const byCwd = this.keysBySubscriber.get(subscriber) ?? new Map<string, Set<string>>();
       const previousKeys = byCwd.get(input.cwd) ?? new Set<string>();
+      const recreated: Array<Promise<void>> = [];
       for (const [key, { relativePath, kind, absolutePath }] of nextPaths) {
         let entry = this.entries.get(key);
         if (!entry) {
           // Another subscriber released the last reference while this call awaited.
           entry = this.createEntry(key, kind, absolutePath, root);
           this.entries.set(key, entry);
+          recreated.push(entry.ready);
         }
         if (root.length > entry.root.length) entry.root = root;
         const registrations = entry.registrations.get(subscriber) ?? new Map<string, string>();
@@ -244,6 +246,9 @@ export class WorkspaceWatchRegistry<S> {
         byCwd.delete(input.cwd);
         if (byCwd.size === 0) this.keysBySubscriber.delete(subscriber);
       }
+      // Registered above, so a release while this waits still closes them. Waiting
+      // keeps the baseline stat ahead of edits the caller makes after resolving.
+      await Promise.all(recreated);
 
       return {
         watched: nextKeys.size,
