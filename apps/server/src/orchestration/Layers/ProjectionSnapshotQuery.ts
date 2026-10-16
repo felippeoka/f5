@@ -1,3 +1,8 @@
+import {
+  PlanningWorkflowSummary,
+  CodeReviewWorkflowSummary,
+  InvestigationWorkflowSummary,
+} from "@t3tools/contracts";
 import { ThreadTitleState } from "@t3tools/contracts";
 import { RewindDraft, PendingUserInput } from "@t3tools/contracts";
 import {
@@ -257,9 +262,9 @@ function compareThreadsByActivity(
 function sortProjectsByVisibleThreadActivity(
   projects: ReadonlyArray<OrchestrationProject>,
   threads: ReadonlyArray<OrchestrationThread>,
-  planningWorkflows: ReadonlyArray<PlanningWorkflow>,
-  codeReviewWorkflows: ReadonlyArray<CodeReviewWorkflow>,
-  investigationWorkflows: ReadonlyArray<InvestigationWorkflow>,
+  planningWorkflows: ReadonlyArray<PlanningWorkflowSummary>,
+  codeReviewWorkflows: ReadonlyArray<CodeReviewWorkflowSummary>,
+  investigationWorkflows: ReadonlyArray<InvestigationWorkflowSummary>,
 ): OrchestrationProject[] {
   const hiddenWorkflowThreadIds = archivedWorkflowThreadIds(
     planningWorkflows,
@@ -2227,7 +2232,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         kind: "query",
         scope: params.scope,
         name: "listPlanningWorkflows",
-        effect: listPlanningWorkflowRows(undefined).pipe(
+        effect: (params.scope === "getStartupSnapshot"
+          ? Effect.succeed([])
+          : listPlanningWorkflowRows(undefined)
+        ).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
               `ProjectionSnapshotQuery.${params.scope}:listPlanningWorkflows:query`,
@@ -2240,7 +2248,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         kind: "query",
         scope: params.scope,
         name: "listCodeReviewWorkflows",
-        effect: listCodeReviewWorkflowRows(undefined).pipe(
+        effect: (params.scope === "getStartupSnapshot"
+          ? Effect.succeed([])
+          : listCodeReviewWorkflowRows(undefined)
+        ).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
               `ProjectionSnapshotQuery.${params.scope}:listCodeReviewWorkflows:query`,
@@ -2253,7 +2264,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         kind: "query",
         scope: params.scope,
         name: "listInvestigationWorkflows",
-        effect: listInvestigationWorkflowRows(undefined).pipe(
+        effect: (params.scope === "getStartupSnapshot"
+          ? Effect.succeed([])
+          : listInvestigationWorkflowRows(undefined)
+        ).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
               `ProjectionSnapshotQuery.${params.scope}:listInvestigationWorkflows:query`,
@@ -2691,7 +2705,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       scope: "getStartupSnapshot",
       name: "total",
       effect: Effect.gen(function* () {
-        const snapshot = yield* readSnapshotQueries({
+        const baseSnapshot = yield* readSnapshotQueries({
           scope: "getStartupSnapshot",
           historyLoadMode: "full",
           includeMessages: false,
@@ -2699,6 +2713,45 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           includeActivities: false,
           includeDetailFields: false,
         });
+
+        const planningWorkflows = yield* SqlSchema.findAll({
+          Request: Schema.Void,
+          Result: Schema.Struct({ summary: Schema.fromJsonString(PlanningWorkflowSummary) }),
+          execute: () =>
+            sql`SELECT summary_json AS summary FROM projection_planning_workflows WHERE deleted_at IS NULL ORDER BY updated_at DESC, workflow_id DESC`,
+        })(undefined);
+        const codeReviewWorkflows = yield* SqlSchema.findAll({
+          Request: Schema.Void,
+          Result: Schema.Struct({ summary: Schema.fromJsonString(CodeReviewWorkflowSummary) }),
+          execute: () =>
+            sql`SELECT summary_json AS summary FROM projection_code_review_workflows WHERE deleted_at IS NULL ORDER BY updated_at DESC, workflow_id DESC`,
+        })(undefined);
+        const investigationWorkflows = yield* SqlSchema.findAll({
+          Request: Schema.Void,
+          Result: Schema.Struct({ summary: Schema.fromJsonString(InvestigationWorkflowSummary) }),
+          execute: () =>
+            sql`SELECT summary_json AS summary FROM projection_investigation_workflows WHERE deleted_at IS NULL ORDER BY updated_at DESC, workflow_id DESC`,
+        })(undefined);
+        const snapshot = {
+          ...baseSnapshot,
+          planningWorkflows: planningWorkflows.map((row) => row.summary),
+          codeReviewWorkflows: codeReviewWorkflows.map((row) => row.summary),
+          investigationWorkflows: investigationWorkflows.map((row) => row.summary),
+        };
+
+        snapshot.projects = sortProjectsByVisibleThreadActivity(
+          snapshot.projects,
+          snapshot.threads,
+          snapshot.planningWorkflows,
+          snapshot.codeReviewWorkflows,
+          snapshot.investigationWorkflows,
+        );
+        snapshot.updatedAt = [
+          snapshot.updatedAt,
+          ...snapshot.planningWorkflows.map((run) => run.updatedAt),
+          ...snapshot.codeReviewWorkflows.map((run) => run.updatedAt),
+          ...snapshot.investigationWorkflows.map((run) => run.updatedAt),
+        ].reduce((latest, at) => (Date.parse(at) > Date.parse(latest) ? at : latest));
 
         const detailThreadId = input?.detailThreadId;
         if (!detailThreadId) {

@@ -1,3 +1,4 @@
+import { summarizeInvestigationWorkflow } from "@t3tools/shared/workflowSummary";
 import {
   ApprovalRequestId,
   CheckpointRef,
@@ -123,7 +124,7 @@ function makeInvestigationWorkflow(now = "2026-04-01T09:05:00.000Z") {
     updatedAt: now,
     archivedAt: null,
     deletedAt: null,
-  } satisfies AppState["investigationWorkflows"][number];
+  } satisfies import("@t3tools/contracts").InvestigationWorkflow;
 }
 
 function makeState(overrides: Partial<AppState> = {}): AppState {
@@ -993,7 +994,7 @@ describe("applyDomainEvent", () => {
       id: "workflow-1",
       projectId: ProjectId.makeUnsafe("project-2"),
       updatedAt: "2026-04-01T09:10:00.000Z",
-    } as unknown as AppState["planningWorkflows"][number];
+    } as unknown as import("@t3tools/contracts").PlanningWorkflow;
     const created = applyDomainEvent(
       makeState({ projects: [], threads: [] }),
       makeEvent("project.created", {
@@ -1054,7 +1055,7 @@ describe("applyDomainEvent", () => {
       ),
     );
 
-    expect(next.investigationWorkflows).toEqual([workflow]);
+    expect(next.investigationWorkflows).toEqual([summarizeInvestigationWorkflow(workflow)]);
   });
 
   it("applies revert by pruning reverted-turn data and clearing tasks", () => {

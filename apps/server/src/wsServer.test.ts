@@ -6389,6 +6389,9 @@ describe("WebSocket Server", () => {
       cwd: "/test",
       authToken: "secret-token",
       stateDir,
+      persistenceLayer: makeSqlitePersistenceLive(path.join(stateDir, "state.sqlite")).pipe(
+        Layer.provide(NodeServices.layer),
+      ),
     });
     const addr = server.address();
     const port = typeof addr === "object" && addr !== null ? addr.port : 0;
@@ -6575,7 +6578,13 @@ describe("WebSocket Server", () => {
 
   it("prepares a complete backup before committing the download response", async () => {
     const stateDir = makeTempDir("t3code-state-backup-export-");
-    server = await createTestServer({ cwd: "/test", stateDir });
+    server = await createTestServer({
+      cwd: "/test",
+      stateDir,
+      persistenceLayer: makeSqlitePersistenceLive(path.join(stateDir, "state.sqlite")).pipe(
+        Layer.provide(NodeServices.layer),
+      ),
+    });
     const addr = server.address();
     const port = typeof addr === "object" && addr !== null ? addr.port : 0;
 

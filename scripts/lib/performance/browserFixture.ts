@@ -231,6 +231,17 @@ export function createBrowserFixture(protocolVersion = 1) {
             maxItems: 20,
             quarantinedCount: 0,
           };
+        case "storage.getDiskSpace":
+          return {
+            level: "ok",
+            checkedAt: time,
+            lowThresholdBytes: 0,
+            criticalThresholdBytes: 0,
+            volumes: [],
+            reclaimable: [],
+          };
+        case "nativeOperation.list":
+          return [];
         case "prHub.getThreadLinks":
           return [];
         case "orchestration.getRewindDrafts":

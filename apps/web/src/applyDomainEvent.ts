@@ -1,10 +1,15 @@
+import {
+  summarizePlanningWorkflow,
+  summarizeCodeReviewWorkflow,
+  summarizeInvestigationWorkflow,
+} from "@t3tools/shared/workflowSummary";
 import { revertTaskToolState } from "@t3tools/shared/claudeTaskToolProjection";
 import { projectPendingUserInputs } from "@t3tools/shared/pendingUserInputs";
 import { REASONING_STATUS_ACTIVITY_KIND } from "@t3tools/shared/orchestrationActivityPayload";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   type OrchestrationEvent,
-  type PlanningWorkflow,
+  type PlanningWorkflowSummary as PlanningWorkflow,
   type ProjectMemory,
 } from "@t3tools/contracts";
 import {
@@ -718,7 +723,7 @@ export function applyDomainEvent(state: AppState, event: OrchestrationEvent): Ap
     case "project.workflow-upserted": {
       const planningWorkflows = upsertPlanningWorkflow(
         state.planningWorkflows,
-        event.payload.workflow,
+        summarizePlanningWorkflow(event.payload.workflow),
       );
       return planningWorkflows === state.planningWorkflows
         ? state
@@ -736,7 +741,7 @@ export function applyDomainEvent(state: AppState, event: OrchestrationEvent): Ap
     case "project.code-review-workflow-upserted": {
       const codeReviewWorkflows = upsertCodeReviewWorkflow(
         state.codeReviewWorkflows,
-        event.payload.workflow,
+        summarizeCodeReviewWorkflow(event.payload.workflow),
       );
       return codeReviewWorkflows === state.codeReviewWorkflows
         ? state
@@ -756,7 +761,7 @@ export function applyDomainEvent(state: AppState, event: OrchestrationEvent): Ap
     case "project.debug-workflow-upserted": {
       const investigationWorkflows = upsertInvestigationWorkflow(
         state.investigationWorkflows,
-        event.payload.workflow,
+        summarizeInvestigationWorkflow(event.payload.workflow),
       );
       return investigationWorkflows === state.investigationWorkflows
         ? state

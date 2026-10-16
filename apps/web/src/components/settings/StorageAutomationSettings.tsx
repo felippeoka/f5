@@ -50,9 +50,25 @@ function errorMessage(error: unknown): string {
 }
 
 export function StorageAutomationSettings() {
+  const scheduledBackupsEnabled = useSettings((settings) => settings.scheduledBackupsEnabled);
   const storageCleanup = useSettings((settings) => settings.storageCleanup);
   const autoPullDefaultBranch = useSettings((settings) => settings.autoPullDefaultBranch);
   const queryClient = useQueryClient();
+  const saveScheduledBackups = (enabled: boolean) =>
+    void ensureNativeApi()
+      .server.updateSettings({ scheduledBackupsEnabled: enabled })
+      .then((settings) =>
+        queryClient.setQueryData(serverQueryKeys.config(), (existing) =>
+          existing ? { ...existing, settings } : existing,
+        ),
+      )
+      .catch((error: unknown) =>
+        toastManager.add({
+          type: "error",
+          title: "Could not save scheduled backups",
+          description: errorMessage(error),
+        }),
+      );
 
   // Send only the changed fields; the server deep-merges them. Spreading the
   // rendered `storageCleanup` would let a second quick edit revert the first.
@@ -112,6 +128,20 @@ export function StorageAutomationSettings() {
         />
       </label>
 
+      <label className="flex items-center justify-between gap-4 py-2 text-sm">
+        <span>
+          Daily backups
+          <span className="block text-xs text-muted-foreground">
+            Retain seven successful archives in this profile’s backups folder. Credentials are
+            excluded. Runs while F5 is open.
+          </span>
+        </span>
+        <Switch
+          aria-label="Daily backups"
+          checked={scheduledBackupsEnabled}
+          onCheckedChange={saveScheduledBackups}
+        />
+      </label>
       <fieldset disabled={rulesDisabled} className="space-y-1 disabled:opacity-60">
         <legend className="text-xs font-medium text-muted-foreground">
           Remove a worktree when any rule matches (projects can override these)

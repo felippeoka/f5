@@ -1,3 +1,8 @@
+import {
+  ProjectSkillSyncService,
+  type ProjectSkillSyncServiceShape,
+} from "./orchestration/Services/ProjectSkillSyncService.ts";
+import { startScheduledBackups } from "./storage/scheduledBackups.ts";
 import { rpcBusyTotal } from "./observability/Metrics";
 import { rpcLane, RpcAdmission } from "@t3tools/shared/rpcScheduling";
 import { writeWorkspaceFile } from "./WorkspaceFileWriter";
@@ -854,6 +859,7 @@ function formatServerLifecycleRouteFailure(error: ServerLifecycleError): string 
 const ORCHESTRATION_RUNTIME_ROUTE_WAIT_MS = 55_000;
 
 interface OrchestrationRuntimeServices {
+  readonly projectSkillSyncService: ProjectSkillSyncServiceShape;
   readonly threadBackgroundWork: ThreadBackgroundWorkShape;
   readonly usageService: UsageServiceShape;
   readonly orchestrationEngine: OrchestrationEngineShape;
@@ -953,6 +959,8 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         }),
     ),
   );
+
+  yield* startScheduledBackups(backupService);
 
   const clients = yield* Ref.make(new Set<WebSocket>());
   const logger = createLogger("ws");
@@ -2509,6 +2517,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         orchestrationRuntimeServices,
         StorageCleanupWorker,
       );
+      const projectSkillSyncService = ServiceMap.get(
+        orchestrationRuntimeServices,
+        ProjectSkillSyncService,
+      );
       const defaultBranchAutoPull = ServiceMap.get(
         orchestrationRuntimeServices,
         DefaultBranchAutoPull,
@@ -2635,6 +2647,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         nextTurnQueueDispatcher,
         worktreeSetup,
         storageCleanupWorker,
+        projectSkillSyncService,
         defaultBranchAutoPull,
       }).pipe(Effect.orDie);
 
@@ -5314,7 +5327,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const global = yield* serverSettings.getSettings.pipe(
           Effect.map(redactServerSettingsForClient),
         );
-        return yield* readProjectSettings(global, project);
+        const { projectSkillSyncService } = yield* awaitOrchestrationRuntimeForRoute;
+        return {
+          ...(yield* readProjectSettings(global, project)),
+          skillScanWarnings: yield* projectSkillSyncService.getWarnings(projectId),
+        };
       }
       case WS_METHODS.serverMigrateClientSetting:
         return yield* serverSettings.migrateClientSetting(request.body);
@@ -6021,7 +6038,34 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const { orchestrationEngine } = yield* awaitOrchestrationRuntimeForRoute;
         const snapshot = yield* orchestrationEngine.getReadModel();
         return yield* Effect.try({
-          try: () => ({ inspection: inspectWorkflowPlatformRun(body, snapshot) }),
+          try: () => ({
+            inspection: inspectWorkflowPlatformRun(body, snapshot),
+            ...(body.includeWorkflow
+              ? {
+                  workflowDetails:
+                    body.runKind === "planning"
+                      ? {
+                          runKind: "planning" as const,
+                          workflow: snapshot.planningWorkflows.find(
+                            (workflow) => workflow.id === body.workflowId,
+                          )!,
+                        }
+                      : body.runKind === "codeReview"
+                        ? {
+                            runKind: "codeReview" as const,
+                            workflow: snapshot.codeReviewWorkflows.find(
+                              (workflow) => workflow.id === body.workflowId,
+                            )!,
+                          }
+                        : {
+                            runKind: "investigation" as const,
+                            workflow: snapshot.investigationWorkflows.find(
+                              (workflow) => workflow.id === body.workflowId,
+                            )!,
+                          },
+                }
+              : {}),
+          }),
           catch: (cause) =>
             new RouteRequestError({ message: `Failed to inspect workflow run: ${String(cause)}` }),
         });

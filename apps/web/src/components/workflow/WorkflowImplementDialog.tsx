@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ModelSlug,
-  PlanningWorkflow,
+  PlanningWorkflowSummary as PlanningWorkflow,
   ProviderKind,
   ProviderModelOptions,
   RuntimeMode,

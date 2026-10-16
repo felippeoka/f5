@@ -19,7 +19,10 @@ export async function openRuntimeSqliteDatabase(
 ): Promise<RuntimeSqliteDatabase> {
   if (process.versions.bun !== undefined) {
     const { Database } = await import("bun:sqlite");
-    return new Database(path, { readonly: options.readOnly }) as unknown as RuntimeSqliteDatabase;
+    return new Database(path, {
+      readonly: options.readOnly,
+      readwrite: !options.readOnly,
+    }) as unknown as RuntimeSqliteDatabase;
   }
   const { DatabaseSync } = await import("node:sqlite");
   return new DatabaseSync(path, { readOnly: options.readOnly }) as unknown as RuntimeSqliteDatabase;
