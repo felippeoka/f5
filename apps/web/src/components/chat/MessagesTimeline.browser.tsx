@@ -3366,21 +3366,41 @@ describe("MessagesTimeline working ribbon", () => {
     }
   });
 
-  it("tears down its loop and observers on release", async () => {
-    const tickFrames = new Map<number, number>();
+  function trackRibbonFrames() {
+    const pendingFrames = new Set<number>();
+    let tickCount = 0;
+    let maxPendingFrames = 0;
     const originalRequestAnimationFrame = window.requestAnimationFrame.bind(window);
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) =>
-      originalRequestAnimationFrame((now) => {
-        if (callback.name === "tick") tickFrames.set(now, (tickFrames.get(now) ?? 0) + 1);
+    const originalCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      if (callback.name !== "tick") return originalRequestAnimationFrame(callback);
+      const frame = originalRequestAnimationFrame((now) => {
+        pendingFrames.delete(frame);
+        tickCount += 1;
         callback(now);
-      }),
-    );
-    const cancelSpy = vi.spyOn(window, "cancelAnimationFrame");
+      });
+      pendingFrames.add(frame);
+      maxPendingFrames = Math.max(maxPendingFrames, pendingFrames.size);
+      return frame;
+    });
+    const cancelSpy = vi.spyOn(window, "cancelAnimationFrame").mockImplementation((frame) => {
+      pendingFrames.delete(frame);
+      originalCancelAnimationFrame(frame);
+    });
+    return {
+      tickCount: () => tickCount,
+      pendingCount: () => pendingFrames.size,
+      maxPendingCount: () => maxPendingFrames,
+      cancelSpy,
+    };
+  }
+
+  it("tears down its loop and observers on release", async () => {
+    const { tickCount, pendingCount, cancelSpy } = trackRibbonFrames();
     const resizeDisconnectSpy = vi.spyOn(ResizeObserver.prototype, "disconnect");
     const mutationDisconnectSpy = vi.spyOn(MutationObserver.prototype, "disconnect");
     const mounted = await mountWorkingTimeline();
     const { host } = mounted;
-    const tickCount = () => [...tickFrames.values()].reduce((total, count) => total + count, 0);
     try {
       await grab(host);
       await vi.waitFor(() => {
@@ -3397,6 +3417,7 @@ describe("MessagesTimeline working ribbon", () => {
       expect(cancelSpy).toHaveBeenCalled();
       expect(resizeDisconnectSpy).toHaveBeenCalled();
       expect(mutationDisconnectSpy).toHaveBeenCalled();
+      expect(pendingCount()).toBe(0);
       const ticksAtRelease = tickCount();
       await nextFrames(5);
       expect(tickCount()).toBe(ticksAtRelease);
@@ -3406,21 +3427,16 @@ describe("MessagesTimeline working ribbon", () => {
   });
 
   it("runs a single loop under Strict Mode", async () => {
-    const tickFrames = new Map<number, number>();
-    const originalRequestAnimationFrame = window.requestAnimationFrame.bind(window);
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) =>
-      originalRequestAnimationFrame((now) => {
-        if (callback.name === "tick") tickFrames.set(now, (tickFrames.get(now) ?? 0) + 1);
-        callback(now);
-      }),
-    );
+    const { tickCount, pendingCount, maxPendingCount } = trackRibbonFrames();
     const mounted = await mountWorkingTimeline({ strict: true });
     const { host } = mounted;
     try {
       await grab(host);
       await nextFrames(8);
-      expect(tickFrames.size).toBeGreaterThan(3);
-      expect(Math.max(...tickFrames.values())).toBe(1);
+      expect(tickCount()).toBeGreaterThan(3);
+      // Count outstanding requests, independent of browser frame timestamps.
+      expect(maxPendingCount()).toBe(1);
+      expect(pendingCount()).toBe(1);
       expect(document.activeElement).toBe(stage(host));
       expect(mounted.focusLost).not.toHaveBeenCalled();
     } finally {
