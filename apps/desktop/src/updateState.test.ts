@@ -9,6 +9,7 @@ import {
 } from "./updateState";
 
 const baseState: DesktopUpdateState = {
+  channel: "stable",
   enabled: true,
   status: "idle",
   currentVersion: "1.0.0",
@@ -142,4 +143,26 @@ describe("getCanRetryAfterDownloadFailure", () => {
       }),
     ).toBe(false);
   });
+});
+
+it("explains missing feeds and read-only locations with location taking precedence", () => {
+  const args = {
+    isDevelopment: false,
+    isPackaged: true,
+    platform: "darwin" as const,
+    disabledByEnv: false,
+  };
+  expect(getAutoUpdateDisabledReason({ ...args, hasUpdateFeed: false })).toContain(
+    "no update feed",
+  );
+  expect(
+    getAutoUpdateDisabledReason({
+      ...args,
+      hasUpdateFeed: false,
+      runningFromReadOnlyLocation: true,
+    }),
+  ).toContain("Applications folder");
+  expect(
+    getAutoUpdateDisabledReason({ ...args, isDevelopment: true, hasUpdateFeed: false }),
+  ).toContain("production builds");
 });

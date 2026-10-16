@@ -1,6 +1,7 @@
+import { formatRelativeTimeLabel } from "../lib/relativeTime";
 import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
 
-export type DesktopUpdateButtonAction = "download" | "install" | "none";
+export type DesktopUpdateButtonAction = "check" | "download" | "install" | "none";
 
 export function resolveDesktopUpdateButtonAction(
   state: DesktopUpdateState,
@@ -19,6 +20,7 @@ export function resolveDesktopUpdateButtonAction(
       return "download";
     }
   }
+  if (state.status === "error" && state.canRetry) return "check";
   return "none";
 }
 
@@ -26,7 +28,7 @@ export function shouldShowDesktopUpdateButton(state: DesktopUpdateState | null):
   if (!state || !state.enabled) {
     return false;
   }
-  if (state.status === "downloading") {
+  if (state.status === "downloading" || state.status === "preparing") {
     return true;
   }
   return resolveDesktopUpdateButtonAction(state) !== "none";
@@ -37,7 +39,7 @@ export function shouldShowArm64IntelBuildWarning(state: DesktopUpdateState | nul
 }
 
 export function isDesktopUpdateButtonDisabled(state: DesktopUpdateState | null): boolean {
-  return state?.status === "downloading";
+  return state?.status === "downloading" || state?.status === "preparing";
 }
 
 export function getArm64IntelBuildWarningDescription(state: DesktopUpdateState): string {
@@ -59,6 +61,7 @@ export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string
   if (state.status === "available") {
     return `Update ${state.availableVersion ?? "available"} ready to download`;
   }
+  if (state.status === "preparing") return "Preparing update…";
   if (state.status === "downloading") {
     const progress =
       typeof state.downloadPercent === "number" ? ` (${Math.floor(state.downloadPercent)}%)` : "";
@@ -74,7 +77,7 @@ export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string
     if (state.errorContext === "install" && state.downloadedVersion) {
       return `Install failed for ${state.downloadedVersion}. Click to retry.`;
     }
-    return state.message ?? "Update failed";
+    return `${(state.message ?? "Update check failed").replace(/[.!?\s]+$/, "")}. Click to retry.`;
   }
   return "Update available";
 }
@@ -99,4 +102,43 @@ export function shouldToastDesktopUpdateActionResult(result: DesktopUpdateAction
 export function shouldHighlightDesktopUpdateError(state: DesktopUpdateState | null): boolean {
   if (!state || state.status !== "error") return false;
   return state.errorContext === "download" || state.errorContext === "install";
+}
+
+export function getDesktopUpdateStatusSummary(
+  state: DesktopUpdateState,
+  nowMs = Date.now(),
+): string {
+  switch (state.status) {
+    case "disabled":
+      return state.message ?? "Updates are disabled.";
+    case "idle":
+      return "Not checked yet";
+    case "checking":
+      return "Checking for updates…";
+    case "up-to-date":
+      return `F5 is up to date${state.checkedAt ? ` · checked ${formatRelativeTimeLabel(state.checkedAt, nowMs)}` : ""}`;
+    case "available":
+      return `Version ${state.availableVersion} is available`;
+    case "downloading":
+      return `Downloading ${state.availableVersion}… ${Math.floor(state.downloadPercent ?? 0)}%`;
+    case "preparing":
+      return "Preparing update…";
+    case "downloaded":
+      return `Version ${state.downloadedVersion} is ready to install`;
+    case "error":
+      return state.message ?? "Update check failed.";
+  }
+}
+export function resolveAboutUpdateAction(
+  state: DesktopUpdateState,
+): "check" | "download" | "install" | "busy" | "none" {
+  if (state.status === "disabled") return "none";
+  if (state.status === "checking" || state.status === "downloading" || state.status === "preparing")
+    return "busy";
+  const action = resolveDesktopUpdateButtonAction(state);
+  return action === "none" ? "check" : action;
+}
+export function isAboutUpdateActionDisabled(state: DesktopUpdateState): boolean {
+  const action = resolveAboutUpdateAction(state);
+  return action === "busy" || action === "none";
 }

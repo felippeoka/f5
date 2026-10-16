@@ -16,7 +16,7 @@
   "dependencies": {
     "effect": "catalog:",
     "electron": "40.6.0",
-    "electron-updater": "^6.6.2"
+    "electron-updater": "6.8.3"
   },
   "devDependencies": {
     "@t3tools/contracts": "workspace:*",
@@ -27,5 +27,5 @@
     "vitest": "catalog:",
     "wait-on": "^8.0.2"
   },
-  "productName": "F5 (Alpha)"
+  "productName": "F5"
 }

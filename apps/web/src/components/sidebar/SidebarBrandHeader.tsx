@@ -137,7 +137,7 @@ export function SidebarArm64Warning({ update }: { update: DesktopUpdateControlle
         <TriangleAlertIcon />
         <AlertTitle>Intel build on Apple Silicon</AlertTitle>
         <AlertDescription>{update.arm64IntelBuildWarningDescription}</AlertDescription>
-        {update.buttonAction !== "none" ? (
+        {update.buttonAction === "download" || update.buttonAction === "install" ? (
           <AlertAction>
             <Button
               size="xs"

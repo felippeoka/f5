@@ -24,6 +24,7 @@ final class AuthorizationTests: XCTestCase {
   }
   func testCatalogProtectsEveryF5ChannelAndCommandApps() {
     for id in [
+      "io.github.lopesfelipe.f5", "io.github.lopesfelipe.f5.dev",
       "com.t3tools.t3code", "com.t3tools.t3code.beta", "com.github.Electron",
       "com.apple.SecurityAgent",
     ] {

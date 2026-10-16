@@ -76,9 +76,17 @@ flowchart LR
 
 Why it matters: reviewers disagree in useful ways; the consolidation pass dedupes findings, resolves contradictions, and ranks what's worth your attention.
 
-## Install & run
+## Download
 
-### Desktop app from source (recommended)
+[Download F5](https://github.com/lopes-felipe/f5/releases/latest) for macOS, Windows or Linux. No Node or Bun runtime is needed.
+
+- macOS: open the DMG, drag F5 to Applications, and grant Screen Recording and Accessibility when prompted.
+- Windows: run the per-user x64 installer, then open F5 from the Start menu.
+- Linux: make the x64 AppImage executable and open it from a writable folder.
+
+See [installation and preview upgrade instructions](docs/install.md). Check for updates in Settings → About.
+
+## Building from source
 
 ```bash
 bun install --frozen-lockfile
@@ -100,20 +108,6 @@ bun run start:desktop
 
 `start:desktop` rebuilds the app. Desktop builds check for missing dependencies
 before starting and print the install command if the local installation is incomplete.
-
-### From npm (web UI)
-
-No install needed:
-
-```bash
-npx t3
-```
-
-This runs the bundled WebSocket server and opens the web UI in your browser. The published package is named `t3` for backwards compatibility — see [Relationship to upstream](#relationship-to-upstream).
-
-### Download
-
-Work in progress
 
 ## Prerequisites
 

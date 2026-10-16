@@ -951,6 +951,7 @@ function installDesktopBridgeMock(
   > = {},
 ): void {
   const idleUpdateState = {
+    channel: "stable" as const,
     enabled: false,
     status: "idle" as const,
     currentVersion: "0.0.0",

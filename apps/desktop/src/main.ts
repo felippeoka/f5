@@ -1,3 +1,13 @@
+import { offerApplicationsMove, createBootstrapGate } from "./startupInstallation";
+import { createUpdatePoller } from "./updatePoller";
+import { getUpdateErrorMessage } from "./updateErrors";
+import { recoverUpdateSession, restoreUpdateWindows } from "./updateRecovery";
+import { createUpdaterInstallerAdapter } from "./updateInstallerAdapter";
+import { createUpdateInstaller } from "./updateInstall";
+import { assertUpdateCaller } from "./updateIpc";
+import { createUpdateController } from "./updateController";
+import { initializeUpdatePreferences, writeUpdatePreferences } from "./updateChannel";
+import { migrateUserData } from "./userDataMigration";
 import { isolatedBackendCommand } from "./backendComputerIsolation";
 import { profilePreviewPartition } from "./profileRuntime";
 import { CaptureShortcut } from "./snapShot/CaptureShortcut";
@@ -123,15 +133,9 @@ import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./
 import { readDesktopImageActionBytes, saveDesktopImageDownload } from "./imageActions";
 import {
   createInitialDesktopUpdateState,
-  reduceDesktopUpdateStateOnCheckFailure,
-  reduceDesktopUpdateStateOnCheckStart,
   reduceDesktopUpdateStateOnDownloadComplete,
-  reduceDesktopUpdateStateOnDownloadFailure,
   reduceDesktopUpdateStateOnDownloadProgress,
-  reduceDesktopUpdateStateOnDownloadStart,
   reduceDesktopUpdateStateOnInstallFailure,
-  reduceDesktopUpdateStateOnNoUpdate,
-  reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
 import { normalizeDesktopUpdateReleaseNotes } from "./updateReleaseNotes";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
@@ -162,6 +166,8 @@ const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
+const UPDATE_CHECK_CHANNEL = "desktop:update-check";
+const UPDATE_SET_CHANNEL_CHANNEL = "desktop:update-set-channel";
 const PREVIEW_RECORDING_FRAME_CHANNEL = "desktop-preview:recording-frame";
 const PREVIEW_STATE_CHANNEL = "desktop-preview:state";
 const lastPreviewStateEmissionByTabId = new Map<
@@ -178,10 +184,12 @@ const STATE_DIR = STATE_DIR_CONFIG.stateDir;
 const DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
-const APP_DISPLAY_NAME = isDevelopment ? "F5 (Dev)" : "F5 (Alpha)";
-const APP_USER_MODEL_ID = "com.t3tools.t3code";
-const USER_DATA_DIR_NAME = isDevelopment ? "t3code-dev" : "t3code";
-const LEGACY_USER_DATA_DIR_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+const APP_DISPLAY_NAME = isDevelopment ? "F5 (Dev)" : "F5";
+const APP_USER_MODEL_ID = "io.github.lopesfelipe.f5";
+const USER_DATA_DIR_NAME = isDevelopment ? "f5-dev" : "f5";
+const LEGACY_USER_DATA_DIR_NAMES = isDevelopment
+  ? ["T3 Code (Dev)", "t3code-dev"]
+  : ["T3 Code (Alpha)", "t3code"];
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
 const LOG_DIR = Path.join(STATE_DIR, "logs");
@@ -190,8 +198,7 @@ const LOG_FILE_MAX_FILES = 10;
 const APP_RUN_ID = Crypto.randomBytes(6).toString("hex");
 const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
-const DESKTOP_UPDATE_CHANNEL = "latest";
-const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
+
 const PREVIEW_WEBVIEW_PREFERENCES = "contextIsolation=true,sandbox=true,nodeIntegration=false";
 const PREVIEW_DEFAULT_ZOOM_FACTOR = 1;
 const PREVIEW_CAPTURE_MAX_EDGE_PX = 1600;
@@ -2154,16 +2161,12 @@ function getDestructiveMenuIcon(): Electron.NativeImage | undefined {
     return undefined;
   }
 }
-let updatePollTimer: ReturnType<typeof setInterval> | null = null;
-let updateStartupTimer: ReturnType<typeof setTimeout> | null = null;
-let updateCheckInFlight = false;
-let updateDownloadInFlight = false;
 let updaterConfigured = false;
 let updateState: DesktopUpdateState = initialUpdateState();
 
 function resolveUpdaterErrorContext(): DesktopUpdateErrorContext {
-  if (updateDownloadInFlight) return "download";
-  if (updateCheckInFlight) return "check";
+  if (updateState.status === "downloading") return "download";
+  if (updateState.status === "checking") return "check";
   return updateState.errorContext;
 }
 
@@ -2184,28 +2187,6 @@ function resolveAppRoot(): string {
     return ROOT_DIR;
   }
   return app.getAppPath();
-}
-
-/** Read the baked-in app-update.yml config (if applicable). */
-function readAppUpdateYml(): Record<string, string> | null {
-  try {
-    // electron-updater reads from process.resourcesPath in packaged builds,
-    // or dev-app-update.yml via app.getAppPath() in dev.
-    const ymlPath = app.isPackaged
-      ? Path.join(process.resourcesPath, "app-update.yml")
-      : Path.join(app.getAppPath(), "dev-app-update.yml");
-    const raw = FS.readFileSync(ymlPath, "utf-8");
-    // The YAML is simple key-value pairs — avoid pulling in a YAML parser by
-    // doing a line-based parse (fields: provider, owner, repo, releaseType, …).
-    const entries: Record<string, string> = {};
-    for (const line of raw.split("\n")) {
-      const match = line.match(/^(\w+):\s*(.+)$/);
-      if (match?.[1] && match[2]) entries[match[1]] = match[2].trim();
-    }
-    return entries.provider ? entries : null;
-  } catch {
-    return null;
-  }
 }
 
 function normalizeCommitHash(value: unknown): string | null {
@@ -2396,13 +2377,7 @@ function dispatchMenuAction(action: string): void {
 }
 
 function handleCheckForUpdatesMenuClick(): void {
-  const disabledReason = getAutoUpdateDisabledReason({
-    isDevelopment,
-    isPackaged: app.isPackaged,
-    platform: process.platform,
-    appImage: process.env.APPIMAGE,
-    disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
-  });
+  const disabledReason = updateState.enabled ? null : updateState.message;
   if (disabledReason) {
     console.info("[desktop-updater] Manual update check requested, but updates are disabled.");
     void dialog.showMessageBox({
@@ -2588,18 +2563,7 @@ function resolveIconPath(ext: "ico" | "icns" | "png"): string | null {
   return resolveResourcePath(`icon.${ext}`);
 }
 
-/**
- * Resolve the Electron userData directory path.
- *
- * Electron derives the default userData path from `productName` in
- * package.json, which currently produces directories with spaces and
- * parentheses (e.g. `~/.config/T3 Code (Alpha)` on Linux). This is
- * unfriendly for shell usage and violates Linux naming conventions.
- *
- * We override it to a clean lowercase name (`t3code`). If the legacy
- * directory already exists we keep using it so existing users don't
- * lose their Chromium profile data (localStorage, cookies, sessions).
- */
+/** Copy legacy Chromium data once, keeping the t3 renderer origin and backend state intact. */
 function resolveUserDataPath(): string {
   const appDataBase =
     process.platform === "win32"
@@ -2608,12 +2572,20 @@ function resolveUserDataPath(): string {
         ? Path.join(OS.homedir(), "Library", "Application Support")
         : process.env.XDG_CONFIG_HOME || Path.join(OS.homedir(), ".config");
 
-  const legacyPath = Path.join(appDataBase, LEGACY_USER_DATA_DIR_NAME);
-  if (FS.existsSync(legacyPath)) {
-    return legacyPath;
+  const result = migrateUserData({
+    appDataBase,
+    targetName: USER_DATA_DIR_NAME,
+    legacyNames: LEGACY_USER_DATA_DIR_NAMES,
+    skipImport: process.env.F5_SKIP_USERDATA_IMPORT === "1",
+    platform: process.platform,
+    hostname: OS.hostname(),
+  });
+  if (result.kind === "blocked") {
+    dialog.showErrorBox(result.title, result.message);
+    app.exit(1);
+    throw new Error(result.message);
   }
-
-  return Path.join(appDataBase, USER_DATA_DIR_NAME);
+  return result.path;
 }
 
 function configureAppIdentity(): void {
@@ -2637,15 +2609,13 @@ function configureAppIdentity(): void {
   }
 }
 
+const updatePoller = createUpdatePoller(
+  checkForUpdates,
+  AUTO_UPDATE_STARTUP_DELAY_MS,
+  AUTO_UPDATE_POLL_INTERVAL_MS,
+);
 function clearUpdatePollTimer(): void {
-  if (updateStartupTimer) {
-    clearTimeout(updateStartupTimer);
-    updateStartupTimer = null;
-  }
-  if (updatePollTimer) {
-    clearInterval(updatePollTimer);
-    updatePollTimer = null;
-  }
+  updatePoller.stop();
 }
 
 function emitUpdateState(): void {
@@ -2660,139 +2630,172 @@ function setUpdateState(patch: Partial<DesktopUpdateState>): void {
   emitUpdateState();
 }
 
-function shouldEnableAutoUpdates(): boolean {
-  return (
-    getAutoUpdateDisabledReason({
-      isDevelopment,
-      isPackaged: app.isPackaged,
-      platform: process.platform,
-      appImage: process.env.APPIMAGE,
-      disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
-    }) === null
-  );
-}
-
+let updateController: ReturnType<typeof createUpdateController> | null = null;
 async function checkForUpdates(reason: string): Promise<void> {
-  if (isQuitting || !updaterConfigured || updateCheckInFlight) return;
-  if (updateState.status === "downloading" || updateState.status === "downloaded") {
-    console.info(
-      `[desktop-updater] Skipping update check (${reason}) while status=${updateState.status}.`,
-    );
-    return;
-  }
-  updateCheckInFlight = true;
-  setUpdateState(reduceDesktopUpdateStateOnCheckStart(updateState, new Date().toISOString()));
-  console.info(`[desktop-updater] Checking for updates (${reason})...`);
-
-  try {
-    await autoUpdater.checkForUpdates();
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    setUpdateState(
-      reduceDesktopUpdateStateOnCheckFailure(updateState, message, new Date().toISOString()),
-    );
-    console.error(`[desktop-updater] Failed to check for updates: ${message}`);
-  } finally {
-    updateCheckInFlight = false;
-  }
+  if (!isQuitting) await updateController?.requestCheck(reason);
+}
+async function downloadAvailableUpdate() {
+  return updateController?.download() ?? { accepted: false, completed: false };
 }
 
-async function downloadAvailableUpdate(): Promise<{ accepted: boolean; completed: boolean }> {
-  if (!updaterConfigured || updateDownloadInFlight || updateState.status !== "available") {
-    return { accepted: false, completed: false };
-  }
-  updateDownloadInFlight = true;
-  setUpdateState(reduceDesktopUpdateStateOnDownloadStart(updateState));
-  autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(desktopRuntimeInfo);
-  console.info("[desktop-updater] Downloading update...");
-
-  try {
-    await autoUpdater.downloadUpdate();
-    return { accepted: true, completed: true };
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    setUpdateState(reduceDesktopUpdateStateOnDownloadFailure(updateState, message));
-    console.error(`[desktop-updater] Failed to download update: ${message}`);
-    return { accepted: true, completed: false };
-  } finally {
-    updateDownloadInFlight = false;
-  }
+let runningBeforeInstall: BackendRuntime[] = [];
+let windowsBeforeInstall: {
+  window: BrowserWindow;
+  runtime: BackendRuntime;
+  threadId: string | null;
+  bounds: Electron.Rectangle;
+}[] = [];
+let installCleanupStarted = false;
+function restoreInstallWindows(): void {
+  restoreUpdateWindows(windowsBeforeInstall, (threadId, runtime) => {
+    const restored = createWindow(threadId, runtime);
+    mainWindow ??= restored;
+    return restored;
+  });
 }
-
-async function installDownloadedUpdate(): Promise<{ accepted: boolean; completed: boolean }> {
-  if (isQuitting || !updaterConfigured || updateState.status !== "downloaded") {
-    return { accepted: false, completed: false };
-  }
-
-  // Cleanup marks every runtime stopped; retain the pre-install set so recovery
-  // cannot revive profiles the user stopped or exceed the active-profile limit.
-  const runningBeforeInstall = [...backends.values()].filter((runtime) => !runtime.stopped);
-  isQuitting = true;
-  try {
+const updaterInstallerAdapter = createUpdaterInstallerAdapter(autoUpdater, process.platform);
+const updateInstaller = createUpdateInstaller({
+  stage: () => updaterInstallerAdapter.stage(),
+  onStageStart: () => setUpdateState({ status: "preparing", message: null }),
+  onCancel: () => setUpdateState({ status: "downloaded" }),
+  resetAttempt: () => updaterInstallerAdapter.resetAttempt(),
+  watchdogEnabled: updaterInstallerAdapter.watchdogEnabled,
+  canInstall: () => !isQuitting && updaterConfigured && updateState.status === "downloaded",
+  confirm: async () => {
+    runningBeforeInstall = [];
+    windowsBeforeInstall = [];
+    installCleanupStarted = false;
+    const choice = await dialog.showMessageBox({
+      type: "warning",
+      message: "Restart F5 to install the update?",
+      detail: "All windows will close and running agent work will be interrupted.",
+      buttons: ["Restart to update", "Cancel"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    return choice.response === 0;
+  },
+  prepare: async () => {
+    runningBeforeInstall = [...backends.values()].filter((runtime) => !runtime.stopped);
+    windowsBeforeInstall = BrowserWindow.getAllWindows()
+      .filter((window) => profileByWebContentsId.has(window.webContents.id))
+      .map((window) => {
+        let threadId: string | null = null;
+        try {
+          threadId = normalizeThreadIdForDesktopWindow(
+            decodeURIComponent(new URL(window.webContents.getURL()).hash.slice(2)),
+          );
+        } catch {
+          /* A window may still be loading. */
+        }
+        return {
+          window,
+          runtime: runtimeForRenderer(window.webContents.id),
+          threadId,
+          bounds: window.getBounds(),
+        };
+      });
+    isQuitting = true;
     if (!(await closeWindowsForQuit(BrowserWindow.getAllWindows()))) {
       cancelQuit();
-      return { accepted: true, completed: false };
+      restoreInstallWindows();
+      return false;
     }
+    installCleanupStarted = true;
     await cleanupBeforeExit();
     shutdownComplete = true;
-    // NSIS can relaunch explicitly after the parent has drained all profile backends.
-    if (process.platform === "win32") autoUpdater.quitAndInstall(false, true);
-    else autoUpdater.quitAndInstall();
     restoreStdIoCapture?.();
-    return { accepted: true, completed: true };
-  } catch (error: unknown) {
-    const message = formatErrorMessage(error);
+    return true;
+  },
+  install: () => updaterInstallerAdapter.install(),
+  recover: async (message) => {
     cancelQuit();
-    await previewRuntime.initialize();
-    for (const runtime of runningBeforeInstall) {
-      runtime.stopped = false;
-      startBackend(runtime);
+    try {
+      const errors = await recoverUpdateSession<BackendRuntime>({
+        cleanupStarted: installCleanupStarted,
+        initializePreview: () => previewRuntime.initialize(),
+        initializeComputer: initializeComputerSystem,
+        runningBeforeInstall,
+        startBackend,
+        restoreWindows: restoreInstallWindows,
+        resumeUpdates: () => {
+          if (updaterConfigured) updatePoller.start();
+        },
+      });
+      for (const error of errors) console.error("[desktop-updater] Session recovery failed", error);
+      if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow();
+    } catch (error) {
+      console.error("[desktop-updater] Recovery failed", error);
+    } finally {
+      installStdIoCapture();
+      setUpdateState(
+        reduceDesktopUpdateStateOnInstallFailure(
+          updateState,
+          getUpdateErrorMessage(message, "install"),
+        ),
+      );
     }
-    if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow();
-    setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, message));
-    console.error(`[desktop-updater] Failed to install update: ${message}`);
-    return { accepted: true, completed: false };
-  }
+  },
+});
+async function installDownloadedUpdate() {
+  return updateInstaller.request();
 }
 
 function configureAutoUpdater(): void {
-  const enabled = shouldEnableAutoUpdates();
+  const preferencesPath = Path.join(app.getPath("userData"), "update-preferences.json");
+  const channel = initializeUpdatePreferences(preferencesPath, app.getVersion());
+  const disabledReason = getAutoUpdateDisabledReason({
+    isDevelopment,
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    appImage: process.env.APPIMAGE,
+    disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
+    hasUpdateFeed: FS.existsSync(Path.join(process.resourcesPath, "app-update.yml")),
+    runningFromReadOnlyLocation:
+      process.platform === "darwin" &&
+      (process.execPath.startsWith("/Volumes/") || process.execPath.includes("/AppTranslocation/")),
+  });
+  const enabled = disabledReason === null;
   setUpdateState({
     ...createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo),
     enabled,
     status: enabled ? "idle" : "disabled",
+    channel,
+    message: disabledReason,
   });
-  if (!enabled) {
-    return;
-  }
-  updaterConfigured = true;
-
-  const githubToken =
-    process.env.T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || "";
-  if (githubToken) {
-    // When a token is provided, re-configure the feed with `private: true` so
-    // electron-updater uses the GitHub API (api.github.com) instead of the
-    // public Atom feed (github.com/…/releases.atom) which rejects Bearer auth.
-    const appUpdateYml = readAppUpdateYml();
-    if (appUpdateYml?.provider === "github") {
-      autoUpdater.setFeedURL({
-        ...appUpdateYml,
-        provider: "github" as const,
-        private: true,
-        token: githubToken,
-      });
-    }
-  }
-
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
-  // Keep alpha branding, but force all installs onto the stable update track.
-  autoUpdater.channel = DESKTOP_UPDATE_CHANNEL;
-  autoUpdater.allowPrerelease = DESKTOP_UPDATE_ALLOW_PRERELEASE;
-  autoUpdater.allowDowngrade = false;
+  let lastLoggedDownloadMilestone = -1;
+  updateController = createUpdateController({
+    getState: () => updateState,
+    emit: (state) => setUpdateState(state),
+    writePreferences: (value) => writeUpdatePreferences(preferencesPath, value),
+    port: {
+      applySettings: (settings) => {
+        autoUpdater.channel = settings.channel;
+        autoUpdater.allowPrerelease = settings.allowPrerelease;
+        autoUpdater.allowDowngrade = false;
+      },
+      check: async () => {
+        const result = await autoUpdater.checkForUpdates();
+        return result?.isUpdateAvailable
+          ? {
+              version: result.updateInfo.version,
+              releaseNotes: normalizeDesktopUpdateReleaseNotes(result.updateInfo.releaseNotes),
+            }
+          : null;
+      },
+      download: () => {
+        lastLoggedDownloadMilestone = -1;
+        return autoUpdater.downloadUpdate();
+      },
+    },
+  });
+  updateController.applyChannel(channel);
+  if (!enabled) return;
+  updaterConfigured = true;
   autoUpdater.fullChangelog = true;
   autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(desktopRuntimeInfo);
-  let lastLoggedDownloadMilestone = -1;
 
   if (isArm64HostRunningIntelBuild(desktopRuntimeInfo)) {
     console.info(
@@ -2803,26 +2806,13 @@ function configureAutoUpdater(): void {
   autoUpdater.on("checking-for-update", () => {
     console.info("[desktop-updater] Looking for updates...");
   });
-  autoUpdater.on("update-available", (info) => {
-    setUpdateState(
-      reduceDesktopUpdateStateOnUpdateAvailable(
-        updateState,
-        info.version,
-        new Date().toISOString(),
-        normalizeDesktopUpdateReleaseNotes(info.releaseNotes),
-      ),
-    );
-    lastLoggedDownloadMilestone = -1;
-    console.info(`[desktop-updater] Update available: ${info.version}`);
-  });
-  autoUpdater.on("update-not-available", () => {
-    setUpdateState(reduceDesktopUpdateStateOnNoUpdate(updateState, new Date().toISOString()));
-    lastLoggedDownloadMilestone = -1;
-    console.info("[desktop-updater] No updates available.");
-  });
   autoUpdater.on("error", (error) => {
-    const message = formatErrorMessage(error);
-    if (!updateCheckInFlight && !updateDownloadInFlight) {
+    const message = getUpdateErrorMessage(error, resolveUpdaterErrorContext() ?? "check");
+    if (updateInstaller.pending) {
+      void updateInstaller.onError(message);
+      return;
+    }
+    if (updateState.status !== "checking" && updateState.status !== "downloading") {
       setUpdateState({
         status: "error",
         message,
@@ -2859,18 +2849,7 @@ function configureAutoUpdater(): void {
     console.info(`[desktop-updater] Update downloaded: ${info.version}`);
   });
 
-  clearUpdatePollTimer();
-
-  updateStartupTimer = setTimeout(() => {
-    updateStartupTimer = null;
-    void checkForUpdates("startup");
-  }, AUTO_UPDATE_STARTUP_DELAY_MS);
-  updateStartupTimer.unref();
-
-  updatePollTimer = setInterval(() => {
-    void checkForUpdates("poll");
-  }, AUTO_UPDATE_POLL_INTERVAL_MS);
-  updatePollTimer.unref();
+  updatePoller.start(true);
 }
 function backendEnv(runtime: BackendRuntime = defaultBackend): NodeJS.ProcessEnv {
   return buildDesktopBackendEnv(process.env, {
@@ -3142,7 +3121,7 @@ async function stopBackendAndWaitForExit(
   if (runtime.backendProcess === backendChild) runtime.backendProcess = null;
 }
 
-let bootstrapReady: Promise<void> = Promise.resolve();
+const bootstrapGate = createBootstrapGate();
 let lastOpenedProfileId = defaultBackend.profile.id;
 
 async function ensureBackendRunning(runtime: BackendRuntime): Promise<void> {
@@ -3185,7 +3164,7 @@ async function ensureBackendRunning(runtime: BackendRuntime): Promise<void> {
 
 const openProfile = singleProfileOpen(async (id) => {
   try {
-    await bootstrapReady;
+    await bootstrapGate.wait();
     if (isQuitting) return false;
     return await openProfileOnce(id);
   } catch (cause) {
@@ -3416,11 +3395,40 @@ function registerIpcHandlers(): void {
     }
   });
 
+  const assertUpdateSender = (event: Electron.IpcMainInvokeEvent) =>
+    assertUpdateCaller(event, runtimeForRenderer);
   ipcMain.removeHandler(UPDATE_GET_STATE_CHANNEL);
-  ipcMain.handle(UPDATE_GET_STATE_CHANNEL, async () => updateState);
+  ipcMain.handle(UPDATE_GET_STATE_CHANNEL, async (event) => {
+    assertUpdateSender(event);
+    return updateState;
+  });
 
+  ipcMain.removeHandler(UPDATE_CHECK_CHANNEL);
+  ipcMain.handle(UPDATE_CHECK_CHANNEL, async (event) => {
+    assertUpdateSender(event);
+    return (
+      updateController?.requestCheck("about") ?? {
+        accepted: false,
+        completed: false,
+        state: updateState,
+      }
+    );
+  });
+  ipcMain.removeHandler(UPDATE_SET_CHANNEL_CHANNEL);
+  ipcMain.handle(UPDATE_SET_CHANNEL_CHANNEL, async (event, channel: unknown) => {
+    assertUpdateSender(event);
+    if (channel !== "stable" && channel !== "beta") throw new Error("Invalid update channel");
+    return (
+      updateController?.setChannel(channel) ?? {
+        accepted: false,
+        completed: false,
+        state: updateState,
+      }
+    );
+  });
   ipcMain.removeHandler(UPDATE_DOWNLOAD_CHANNEL);
-  ipcMain.handle(UPDATE_DOWNLOAD_CHANNEL, async () => {
+  ipcMain.handle(UPDATE_DOWNLOAD_CHANNEL, async (event) => {
+    assertUpdateSender(event);
     const result = await downloadAvailableUpdate();
     return {
       accepted: result.accepted,
@@ -3430,7 +3438,8 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(UPDATE_INSTALL_CHANNEL);
-  ipcMain.handle(UPDATE_INSTALL_CHANNEL, async () => {
+  ipcMain.handle(UPDATE_INSTALL_CHANNEL, async (event) => {
+    assertUpdateSender(event);
     if (isQuitting) {
       return {
         accepted: false,
@@ -4023,13 +4032,34 @@ app.on("will-quit", (event) => {
 
 app
   .whenReady()
-  .then(() => {
+  .then(async () => {
     writeDesktopLogHeader("app ready");
     configureAppIdentity();
+    if (
+      app.isPackaged &&
+      process.platform === "darwin" &&
+      (process.execPath.startsWith("/Volumes/") || process.execPath.includes("/AppTranslocation/"))
+    ) {
+      const moved = await offerApplicationsMove({
+        prompt: async () =>
+          (
+            await dialog.showMessageBox({
+              type: "question",
+              message: "Move F5 to Applications?",
+              buttons: ["Move to Applications", "Not Now"],
+              defaultId: 0,
+              cancelId: 1,
+            })
+          ).response === 0,
+        move: () => app.moveToApplicationsFolder(),
+        report: (error) => console.error("[desktop] Could not move F5 to Applications", error),
+      });
+      if (moved) return; // Electron relaunches the moved application itself.
+    }
     configureApplicationMenu();
     registerDesktopProtocol();
     configureAutoUpdater();
-    bootstrapReady = bootstrap();
+    const bootstrapReady = bootstrapGate.start(bootstrap);
     void bootstrapReady.catch((error) => {
       handleFatalStartupError("bootstrap", error);
     });
