@@ -2346,6 +2346,10 @@ describe("ChatView timeline (full app)", () => {
         wheel();
         await vi.waitFor(() => expect(form.dataset.composerCollapsed).toBe("true"));
         await waitForComposerTransitions(form);
+        // Hold time before expanding; on a slow runner the transition can finish
+        // while the collapsed state is polled, leaving nothing to seek.
+        await cdp().send("Animation.enable");
+        await cdp().send("Animation.setPlaybackRate", { playbackRate: 0 });
         editor.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
         await vi.waitFor(() => expect(form.dataset.composerCollapsed).toBe("false"));
         await seekComposerTransitions(form, 0.05);
@@ -2357,11 +2361,13 @@ describe("ChatView timeline (full app)", () => {
         expect(getComputedStyle(editor).overflowY).toBe("hidden");
         await seekComposerTransitions(form, 0.5);
         expect(editor.getBoundingClientRect().height).toBeGreaterThan(early);
+        await cdp().send("Animation.setPlaybackRate", { playbackRate: 1 });
         await waitForComposerTransitions(form);
         expect(Math.abs(editor.getBoundingClientRect().height - 200)).toBeLessThanOrEqual(1);
         expect(form.hasAttribute("data-composer-resizing")).toBe(false);
         expect(getComputedStyle(editor).overflowY).toBe("auto");
       } finally {
+        await cdp().send("Animation.setPlaybackRate", { playbackRate: 1 });
         await mounted.cleanup();
       }
     });

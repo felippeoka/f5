@@ -1908,6 +1908,8 @@ describe("Thread sidebar", () => {
   });
 
   it("preserves branch inheritance when the default environment is a worktree", async () => {
+    // A legacy browser value: its migration can still be waiting on the startup
+    // sync gate when the shortcut runs, so the pending value must apply.
     seedAppSettings({ defaultThreadEnvMode: "worktree" });
     const mounted = await mountApp({
       width: 1_400,
@@ -1921,6 +1923,10 @@ describe("Thread sidebar", () => {
     });
 
     try {
+      await waitForElement(
+        () => queryProjectButton("Project"),
+        "Project button should render before triggering chat.new.",
+      );
       await dispatchShortcut({ key: "n" });
       await waitForPath(
         mounted.router,

@@ -18,7 +18,12 @@ import {
   ComboboxTrigger,
   ComboboxEmpty,
 } from "../ui/combobox";
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useState, useSyncExternalStore, type ReactNode } from "react";
+import {
+  pendingLegacyThreadEnvMode,
+  readLegacyClientSetting,
+  subscribePendingClientSettings,
+} from "../../hooks/useMigrateClientSettings";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRightIcon, ChevronsUpDownIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -182,6 +187,10 @@ export function ProjectScopeProvider({
 }) {
   const client = useQueryClient();
   const query = useQuery(projectSettingsQueryOptions(projectId));
+  const pendingThreadEnvMode = useSyncExternalStore(
+    subscribePendingClientSettings,
+    readLegacyClientSetting,
+  );
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
   const retry = () => void query.refetch();
@@ -201,7 +210,16 @@ export function ProjectScopeProvider({
   };
   let value: ProjectScopeValue | null = null;
   if (query.data) {
-    const { settings, overrides, sources } = query.data;
+    const { overrides, sources } = query.data;
+    // Show the global default new threads actually get while its migration is pending.
+    const pending = pendingLegacyThreadEnvMode(
+      query.data.settings,
+      sources.defaultThreadEnvMode,
+      pendingThreadEnvMode,
+    );
+    const settings = pending
+      ? { ...query.data.settings, defaultThreadEnvMode: pending }
+      : query.data.settings;
     const set = <K extends ProjectScopedServerSettingKey>(
       key: K,
       next: ProjectSettingsOverrides[K],
