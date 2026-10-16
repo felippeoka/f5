@@ -376,7 +376,12 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
             : {}),
         },
       );
-      const textGeneration = yield* makeCodexTextGeneration(effectiveConfig, processEnvironment);
+      const textGeneration = yield* makeCodexTextGeneration(
+        effectiveConfig,
+        processEnvironment,
+        (model) =>
+          Effect.sync(() => effectiveModels.find((row) => row.slug === model)?.capabilities),
+      );
       const catalogCache = yield* makeCodexCatalogCache(() =>
         Effect.tryPromise({
           try: (signal) =>

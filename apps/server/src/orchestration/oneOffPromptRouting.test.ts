@@ -15,3 +15,22 @@ it("keeps the static guard on the inferred route", () => {
     DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
   );
 });
+
+it("rejects a clearly mismatched provider while keeping unfamiliar custom slugs", () => {
+  expect(
+    resolveOneOffPromptRoute({ model: "gpt-6-sol", sessionProviderName: "claudeAgent" }),
+  ).toEqual({
+    provider: "claudeAgent",
+    model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.claudeAgent,
+  });
+  expect(
+    resolveOneOffPromptRoute({ model: "claude-opus-6", sessionProviderName: "codex" }),
+  ).toEqual({
+    provider: "codex",
+    model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
+  });
+  expect(
+    resolveOneOffPromptRoute({ model: "my-custom-model", sessionProviderName: "claudeAgent" })
+      .model,
+  ).toBe("my-custom-model");
+});

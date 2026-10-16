@@ -39,8 +39,9 @@ export function resolveOneOffPromptRoute(input: {
       ? {
           provider: sessionProvider,
           model:
-            normalizeModelSlug(input.model, sessionProvider) ??
-            DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[sessionProvider],
+            (inferProviderForModel(input.model, sessionProvider) === sessionProvider
+              ? normalizeModelSlug(input.model, sessionProvider)
+              : null) ?? DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[sessionProvider],
         }
       : {
           provider: "codex",

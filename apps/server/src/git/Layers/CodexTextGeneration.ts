@@ -6,6 +6,7 @@ import { resolveInvocationEffect } from "../../spawn/resolveCommand.ts";
 
 import {
   type CodexSettings,
+  type ModelCapabilities,
   DEFAULT_GIT_TEXT_GENERATION_MODEL,
   type ModelSelection,
 } from "@t3tools/contracts";
@@ -14,6 +15,8 @@ import { parseLaunchArgv } from "@t3tools/shared/cliArgs";
 import {
   getModelSelectionStringOptionValue,
   resolveCodexReasoningEffortForModel,
+  resolveModelCapabilities,
+  resolveSupportedEffort,
 } from "@t3tools/shared/model";
 import { formatAttachmentMetadata } from "@t3tools/shared/attachmentMetadata";
 
@@ -50,13 +53,17 @@ export function resolveCodexTextGenerationReasoningEffort(
   model: string,
   modelSelection: ModelSelection | undefined,
   reasoningEffort?: string,
-): string {
-  return resolveCodexReasoningEffortForModel(
-    model,
+  reported?: ModelCapabilities | null,
+): string | undefined {
+  const requested =
     reasoningEffort ??
-      getModelSelectionStringOptionValue(modelSelection, "reasoningEffort") ??
-      DEFAULT_CODEX_REASONING_EFFORT,
-  );
+    getModelSelectionStringOptionValue(modelSelection, "reasoningEffort") ??
+    DEFAULT_CODEX_REASONING_EFFORT;
+  if (reported?.source === "reported") {
+    const capabilities = resolveModelCapabilities("codex", model, reported);
+    return resolveSupportedEffort(capabilities, requested) ?? capabilities.defaultEffort;
+  }
+  return resolveCodexReasoningEffortForModel(model, requested);
 }
 
 function toCodexOutputJsonSchema(schema: Schema.Top): unknown {
@@ -136,6 +143,7 @@ function sanitizePrTitle(raw: string): string {
 export const makeCodexTextGeneration = (
   codexSettings?: Pick<CodexSettings, "binaryPath" | "homePath" | "launchArgs">,
   processEnvironment: NodeJS.ProcessEnv = process.env,
+  resolveCapabilities?: (model: string) => Effect.Effect<ModelCapabilities | null | undefined>,
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -253,6 +261,7 @@ export const makeCodexTextGeneration = (
           selectedModel,
           modelSelection,
           reasoningEffort,
+          resolveCapabilities ? yield* resolveCapabilities(selectedModel) : undefined,
         );
         const schemaPath = yield* writeTempFile(
           operation,
@@ -309,8 +318,9 @@ export const makeCodexTextGeneration = (
               "read-only",
               "--model",
               selectedModel,
-              "--config",
-              `model_reasoning_effort="${selectedReasoningEffort}"`,
+              ...(selectedReasoningEffort
+                ? ["--config", `model_reasoning_effort="${selectedReasoningEffort}"`]
+                : []),
               "--output-schema",
               schemaPath,
               "--output-last-message",

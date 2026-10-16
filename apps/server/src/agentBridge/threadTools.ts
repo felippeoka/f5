@@ -1,4 +1,4 @@
-import { pickPreferredModel } from "@t3tools/shared/model";
+import { isListedModel, pickPreferredModel } from "@t3tools/shared/model";
 /**
  * Agent Bridge thread tools: read exposed projects, threads, and diffs, and
  * create threads or queue turns. Every bridge turn runs supervised
@@ -634,7 +634,7 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
       if (requested.model !== undefined) {
         if (
           provider.models.length > 0 &&
-          !provider.models.some((model) => model.slug === requested.model)
+          !provider.models.some((model) => model.slug === requested.model && isListedModel(model))
         )
           return yield* toolError(`Unknown model for ${providerLabel(provider)}.`);
         return { provider, model: requested.model };
@@ -879,7 +879,9 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
               displayName: providerLabel(provider),
               available: isProviderUsable(provider),
               supportsSupervised: supportsSupervisedTurns(provider.driver),
-              models: provider.models.map((model) => ({ slug: model.slug, name: model.name })),
+              models: provider.models
+                .filter(isListedModel)
+                .map((model) => ({ slug: model.slug, name: model.name })),
             })),
         })),
       ),

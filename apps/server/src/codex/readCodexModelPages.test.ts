@@ -64,3 +64,16 @@ it("does not retry timeouts as compatibility errors", async () => {
   await expect(readCodexModelPages(request)).rejects.toThrow("timeout");
   expect(request).toHaveBeenCalledTimes(1);
 });
+
+it.each([undefined, ""])(
+  "does not infer completeness from an absent or empty cursor: %j",
+  async (nextCursor) => {
+    const result = await readCodexModelPages(async () => ({
+      data: [{ model: "visible" }],
+      ...(nextCursor !== undefined ? { nextCursor } : {}),
+    }));
+    expect(result.complete).toBe(false);
+    expect(result.entries).toHaveLength(1);
+    expect(result.anomaly).toContain("cursor");
+  },
+);

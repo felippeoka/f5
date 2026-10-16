@@ -181,3 +181,19 @@ it.effect("uses merged registry models without waiting on a raw provider probe",
     expect(usedModel).toBe("gpt-5.6-luna");
   }),
 );
+
+it.each(["failed", "partial"] as const)(
+  "still honors Claude version gates after a %s probe",
+  (status) => {
+    const selection = createModelSelection(
+      ProviderInstanceId.make("claudeAgent"),
+      "claude-haiku-5-5",
+    );
+    const snapshot = {
+      driver: "claudeAgent",
+      modelCatalog: { status },
+      models: [{ slug: "claude-haiku-5-5", isUnlisted: true }, { slug: "claude-haiku-4-5" }],
+    } as unknown as import("@t3tools/contracts").ServerProvider;
+    expect(resolveAuxiliaryTextModel(selection, snapshot).model).toBe("claude-haiku-4-5");
+  },
+);

@@ -17,7 +17,7 @@ export function resolveModelChipName(provider: ProviderKind, model: string): str
   const option =
     options.find((candidate) => candidate.slug === model) ??
     options.find((candidate) => candidate.slug === normalized);
-  return option?.isCustom
+  return option?.isCustom && option.name === option.slug
     ? (formatModelDisplayName(provider, normalized ?? model) ?? getTriggerDisplayModelName(option))
     : option
       ? getTriggerDisplayModelName(option)

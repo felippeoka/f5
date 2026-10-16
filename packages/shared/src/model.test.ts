@@ -664,3 +664,21 @@ describe("runtime model currency", () => {
     expect(estimateModelContextWindowTokens("claude-future-9", "claudeAgent")).toBe(200_000);
   });
 });
+
+it("keeps ultrathink synthetic only when reported max is available", () => {
+  const model = "claude-sonnet-4-6";
+  const absent = createReportedClaudeModelCapabilities({ value: model });
+  expect(resolveModelCapabilities("claudeAgent", model, absent).effortOptions).toContain(
+    "ultrathink",
+  );
+  const reported = createReportedClaudeModelCapabilities({
+    value: model,
+    supportedEffortLevels: ["low", "medium", "high"],
+  });
+  expect(resolveModelCapabilities("claudeAgent", model, reported).effortOptions).toEqual([
+    "low",
+    "medium",
+    "high",
+  ]);
+  expect(normalizeClaudeModelOptions(model, { effort: "ultrathink" }, reported)).toBeUndefined();
+});

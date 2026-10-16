@@ -232,9 +232,14 @@ export function resolveAuxiliaryTextModel(
   snapshot: ServerProvider,
 ): ModelSelection {
   if (!AUXILIARY_DEFAULT_MODELS.has(selection.model)) return selection;
-  if (snapshot.modelCatalog?.status === "failed" || snapshot.modelCatalog?.status === "partial")
-    return selection;
   const selected = snapshot.models.find((model) => model.slug === selection.model);
+  // A Claude version gate remains authoritative even if initialization fails.
+  // Failed/partial Codex discovery cannot establish current availability.
+  if (
+    (snapshot.modelCatalog?.status === "failed" || snapshot.modelCatalog?.status === "partial") &&
+    !(snapshot.driver === "claudeAgent" && selected?.isUnlisted === true)
+  )
+    return selection;
   if (selected?.isUnlisted !== true && (selected || snapshot.modelCatalog?.status !== "complete"))
     return selection;
   const listed = snapshot.models.filter((model) => model.isCustom || !model.isUnlisted);
