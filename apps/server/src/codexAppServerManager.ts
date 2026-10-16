@@ -25,7 +25,6 @@ import readline from "node:readline";
 
 import {
   ApprovalRequestId,
-  CODEX_REASONING_EFFORT_OPTIONS,
   type CodexMcpServerEntry,
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_RUNTIME_MODE,
@@ -51,9 +50,8 @@ import { isIgnorableCodexProcessStderrMessage } from "@t3tools/shared/codexStder
 import { codexServerRequestDisposition } from "@t3tools/shared/codexProtocolManifest";
 import {
   normalizeModelSlug,
-  resolveCodexReasoningEffortForModel,
+  resolveCodexEffectiveReasoningEffort,
   resolveModelCapabilities,
-  resolveReasoningEffortForProvider,
 } from "@t3tools/shared/model";
 import { readCodexModelPages } from "./codex/readCodexModelPages.ts";
 import { readCodexReportedModelCapabilities } from "./provider/codexModelCatalog.ts";
@@ -727,26 +725,6 @@ export function normalizeCodexModelSlug(
   return normalized;
 }
 
-/**
- * Same downgrade rule as `resolveCodexReasoningEffortForModel` (walk towards
- * lower efforts until one is supported), over the reported effort list.
- */
-function resolveReportedCodexEffort(
-  model: string,
-  effort: string | undefined,
-  reported: ModelCapabilities,
-): string | undefined {
-  const capabilities = resolveModelCapabilities("codex", model, reported);
-  const requested = resolveReasoningEffortForProvider("codex", effort);
-  if (requested) {
-    const start = CODEX_REASONING_EFFORT_OPTIONS.indexOf(requested);
-    for (const candidate of CODEX_REASONING_EFFORT_OPTIONS.slice(start)) {
-      if (capabilities.effortOptions.includes(candidate)) return candidate;
-    }
-  }
-  return capabilities.defaultEffort;
-}
-
 export function resolveCodexServiceTier(
   requested: string | null | undefined,
   capabilities?: ModelCapabilities,
@@ -840,12 +818,15 @@ export function buildCodexTurnStartParams(
     turnStartParams.serviceTier =
       resolveCodexServiceTier(input.serviceTier, reportedCapabilities) ?? null;
   }
-  // An absent effort means the model default (the composer strips it when it
-  // equals the default), so the resolvers always run instead of letting the
-  // collaboration mode fall back to a fixed effort.
-  const resolvedEffort = reportedCapabilities
-    ? resolveReportedCodexEffort(effortModel, input.effort, reportedCapabilities)
-    : resolveCodexReasoningEffortForModel(effortModel, input.effort);
+  // The web client sends an explicit effort, but other callers and persisted
+  // state may omit it (meaning the model default), so the resolver always runs
+  // instead of letting the collaboration mode fall back to a fixed effort. It is
+  // the same resolver the pickers use, so what they show is what runs.
+  const resolvedEffort = resolveCodexEffectiveReasoningEffort(
+    effortModel,
+    input.effort,
+    reportedCapabilities,
+  );
   if (resolvedEffort) {
     turnStartParams.effort = resolvedEffort;
   }

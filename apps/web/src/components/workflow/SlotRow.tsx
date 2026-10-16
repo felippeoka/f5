@@ -6,7 +6,6 @@ import {
 } from "../../providerModelOptions";
 import type {
   ModelCapabilities,
-  CodexReasoningEffort,
   ServerProvider,
   ModelSlug,
   ProviderKind,
@@ -14,9 +13,9 @@ import type {
 } from "@t3tools/contracts";
 import {
   resolveModelCapabilities,
-  resolveCodexReasoningEffortForModel,
+  resolveCodexDispatchModelOptions,
+  resolveCodexEffectiveReasoningEffort,
   normalizeClaudeModelOptions,
-  normalizeCodexModelOptions,
 } from "@t3tools/shared/model";
 import { ChevronDownIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -51,11 +50,16 @@ export function WorkflowReasoningPicker(props: {
   const selected = (id: string) => selections.find((selection) => selection.id === id)?.value;
   const effortId = props.provider === "codex" ? "reasoningEffort" : "effort";
   const requestedEffort = selected(effortId);
+  // Codex shows the effort `turn/start` will run at (an unsupported pick walks down).
   const effort =
-    typeof requestedEffort === "string" && efforts.some((effort) => effort === requestedEffort)
-      ? requestedEffort
-      : props.provider === "codex" && requestedEffort && props.capabilities?.source !== "reported"
-        ? resolveCodexReasoningEffortForModel(props.model, requestedEffort as CodexReasoningEffort)
+    props.provider === "codex"
+      ? resolveCodexEffectiveReasoningEffort(
+          props.model,
+          typeof requestedEffort === "string" ? requestedEffort : undefined,
+          props.capabilities,
+        )
+      : typeof requestedEffort === "string" && efforts.some((effort) => effort === requestedEffort)
+        ? requestedEffort
         : (caps.defaultEffort ?? efforts[0]);
   const controls = [
     ...(efforts.length
@@ -149,9 +153,11 @@ export function WorkflowReasoningPicker(props: {
                         : value,
                   },
                 ]);
+                // Codex picks stay explicit: an omitted effort means the default
+                // the session reports, which the client may not have seen.
                 const normalized =
                   props.provider === "codex"
-                    ? normalizeCodexModelOptions(props.model, next?.codex, props.capabilities)
+                    ? resolveCodexDispatchModelOptions(props.model, next?.codex, props.capabilities)
                     : normalizeClaudeModelOptions(
                         props.model,
                         next?.claudeAgent,

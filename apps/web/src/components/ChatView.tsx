@@ -81,8 +81,8 @@ import {
   createModelSelection,
   getDefaultModel,
   inferProviderForModel,
-  normalizeCodexModelOptions,
   normalizeModelSlug,
+  resolveCodexDispatchModelOptions,
   resolveSelectableModel,
 } from "@t3tools/shared/model";
 import {
@@ -1456,7 +1456,8 @@ export default function ChatView({
   const selectedModelOptionsForDispatch = useMemo(() => {
     if (selectedProvider === "codex") {
       // Same reported capabilities the picker offered, so the sent effort matches.
-      const codexOptions = normalizeCodexModelOptions(
+      // The effort stays explicit: the session may report a different default.
+      const codexOptions = resolveCodexDispatchModelOptions(
         selectedModel,
         draftModelOptions?.codex,
         getProviderModelCapabilities(
