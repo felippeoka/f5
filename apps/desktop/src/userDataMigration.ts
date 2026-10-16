@@ -15,6 +15,9 @@ const excluded = new Set([
   "DawnGraphiteCache",
   "DawnWebGPUCache",
   "Crashpad",
+  "CacheStorage",
+  "ScriptCache",
+  "blob_storage",
 ]);
 export type UserDataMigrationResult =
   | { kind: "ready"; path: string; migratedFrom: string | null }
@@ -57,7 +60,12 @@ export function migrateUserData(options: {
   const lock = `${target}.migration.lock`;
   const now = options.now ?? Date.now;
   const bootTimeMs = now() - (options.uptimeSeconds ?? uptime)() * 1000;
-  const targetHasData = () => FS.existsSync(target) && FS.readdirSync(target).length > 0;
+  const osMetadata = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
+  const targetHasData = () =>
+    FS.existsSync(target) &&
+    FS.readdirSync(target, { withFileTypes: true }).some(
+      (entry) => !osMetadata.has(entry.name) || !entry.isFile(),
+    );
   let owned = false;
   let candidate: string | undefined;
   let temp: string | undefined;
@@ -143,7 +151,10 @@ export function migrateUserData(options: {
     if (targetHasData()) return ready(null);
     // Electron may create an empty F5 directory (the same as f5 on macOS and
     // Windows) before setPath. Never use a missing marker to overwrite real data.
-    if (FS.existsSync(target)) FS.rmdirSync(target);
+    if (FS.existsSync(target)) {
+      for (const name of FS.readdirSync(target)) FS.unlinkSync(join(target, name));
+      FS.rmdirSync(target);
+    }
     for (const name of FS.readdirSync(options.appDataBase)) {
       if (name.startsWith(`${options.targetName}.migrating-`))
         FS.rmSync(join(options.appDataBase, name), { recursive: true, force: true });

@@ -262,3 +262,21 @@ describe("About update summaries", () => {
     expect(isAboutUpdateActionDisabled(state)).toBe(action === "none" || action === "busy");
   });
 });
+it("keeps background check failures out of the sidebar and avoids duplicate punctuation", () => {
+  const state = {
+    ...baseState,
+    status: "error" as const,
+    canRetry: false,
+    errorContext: "check" as const,
+    message: "Update information is unavailable. Try again later.",
+  };
+  expect(shouldShowDesktopUpdateButton(state)).toBe(false);
+  expect(resolveAboutUpdateAction(state)).toBe("check");
+  expect(getDesktopUpdateButtonTooltip({ ...state, canRetry: true })).not.toContain("..");
+});
+it("shows a disabled preparation action while Squirrel stages the update", () => {
+  const state = { ...baseState, status: "preparing" as const };
+  expect(getDesktopUpdateStatusSummary(state)).toBe("Preparing update…");
+  expect(resolveAboutUpdateAction(state)).toBe("busy");
+  expect(isAboutUpdateActionDisabled(state)).toBe(true);
+});

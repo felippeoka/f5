@@ -142,3 +142,15 @@ it("drains a timed-out native check before checking the next channel", async () 
   expect(f.state.availableVersion).toBeNull();
   expect(f.state.status).toBe("up-to-date");
 });
+it("keeps background check failures quiet but permits manual check retries", async () => {
+  const f = fixture(
+    vi.fn(async () => {
+      throw new Error("404 https://feed/private headers stack");
+    }),
+  );
+  await f.controller.requestCheck("poll");
+  expect(f.state.canRetry).toBe(false);
+  expect(f.state.message).toBe("Update information is unavailable. Try again later.");
+  await f.controller.requestCheck("menu");
+  expect(f.state.canRetry).toBe(true);
+});

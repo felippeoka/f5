@@ -31,10 +31,10 @@ Releases across both channels must increase globally. If a higher beta is alread
 
 - Dry run on main produces signed/notarized desktops and five CLI archives, passes assembly, and creates no release.
 - Publish beta.1 after inspecting its exact asset set. Install without source, Node or Bun on each OS. macOS passes `codesign --verify --deep --strict`, `xcrun stapler validate`, and `spctl -a -vvv -t execute` with `Notarized Developer ID`.
-- Test import with F5 (Alpha) running: launch blocks until it quits; retry imports without changing legacy data. Regrant Screen Recording and Accessibility. Preview sign-ins may need to be repeated because cookie encryption used the old identity.
+- Test import with F5 (Alpha) running: launch blocks until it quits; retry imports without changing legacy data. Regrant Screen Recording and Accessibility. On macOS and Linux, record whether legacy preview sign-ins survive; reauthentication may be required because the old Safe Storage key is not migrated. Verify a newly established F5 preview sign-in survives beta.1 → beta.2. On Windows, verify the copied `Local State` preserves profile decryption.
 - Run alongside upstream T3 Code on macOS/Windows; verify separate storage and independent single-instance locks. F5 must block computer use against itself (including dev).
 - Missing Git/provider CLI leaves F5 open with diagnostics.
-- Publish beta.2; check, download, restart on mac arm64/x64, Windows, and AppImage. Test confirmation cancel, window-close veto, offline check, and interrupted download. On a slow Mac, allow Squirrel staging to take more than 60 seconds: windows and agents must stay running until staging completes, with no watchdog recovery or duplicate quit. macOS native staging/handoff is uncancellable and has no timer-based recovery; native errors still allow retry. Windows and Linux retain the 60-second watchdog.
+- Publish beta.2; check, download, restart on mac arm64/x64, Windows, and AppImage. Test confirmation cancel, window-close veto, offline check, and interrupted download. On a slow Mac, allow Squirrel staging to take more than 60 seconds: windows and agents must stay running until staging completes, with no watchdog recovery or duplicate quit. Squirrel staging has a five-minute timeout before shutdown and shows “Preparing update…”; after a timeout the downloaded payload remains retryable, and a late staging completion does not quit F5. The native handoff after staging remains uncancellable and has no timer-based recovery; native errors still allow retry. Windows and Linux retain the 60-second watchdog.
 - Launch from a mounted DMG: Move to Applications works; Not Now leaves updates disabled with an explanation in About.
 - Publish stable; beta installs update and retain beta preferences. Stable installs never see betas. Turning beta off never downgrades.
 - Verify `f5 install` and `f5 update` with the stable CLI manifest.
@@ -42,3 +42,9 @@ Releases across both channels must increase globally. If a higher beta is alread
 - Confirm the global monotonicity check rejects a lower stable release when a higher beta exists. Automated provider tests also document that unsupported feed order.
 
 Apple credentials, the release environment, and tag ruleset are prerequisites for publication. Local tests cannot substitute for the signed multi-OS rehearsal.
+
+## Signing hardening and remaining backend limitation
+
+Signed macOS builds use JIT plus Apple Events only for the main application, JIT only for Electron child processes, and an empty entitlement set for the Swift computer helper. Library validation and unsigned executable memory exemptions are removed. Packaging disables `NODE_OPTIONS` and CLI inspector fuses and enables ASAR integrity validation on macOS/Windows with ASAR-only application loading.
+
+`RunAsNode` remains enabled because the backend currently re-executes the bundled Electron binary through the macOS GUI-denial sandbox and uses Node IPC. These fuse changes do **not** eliminate the risk of another local process launching that signed binary with arbitrary Node code. Before treating the first signed release as hardened against that threat, migrate the backend to a separately signed minimal Node helper or a utility process with equivalent kernel GUI isolation, preserve the computer-host IPC authentication, disable `RunAsNode`, and rehearse backend/session restarts and native modules. Do not substitute an unsandboxed utility process merely to disable a fuse. This architectural follow-up is not implemented by this PR.

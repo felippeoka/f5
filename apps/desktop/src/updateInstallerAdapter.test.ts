@@ -12,7 +12,7 @@ const { BaseUpdater } = require("electron-updater/out/BaseUpdater") as {
 class NativeBaseUpdater extends BaseUpdater {
   calls = 0;
   constructor() {
-    super(null, { version: "0.1.0" } as never);
+    super(null, { version: "0.1.0", quit: vi.fn() } as never);
     this.logger = null;
     this.downloadedUpdateHelper = { file: "installer", downloadedFileInfo: {} } as never;
   }
@@ -87,7 +87,7 @@ it.each([false, true])(
       const { MacUpdater } = require("electron-updater/out/MacUpdater") as {
         MacUpdater: typeof MacType;
       };
-      const updater = new MacUpdater(undefined, { version: "0.1.0" } as never);
+      const updater = new MacUpdater(undefined, { version: "0.1.0", quit: vi.fn() } as never);
       updater.logger = null;
       const adapter = createUpdaterInstallerAdapter(updater, "darwin");
       const prepare = vi.fn(async () => true);
@@ -133,3 +133,104 @@ it.each([false, true])(
     }
   },
 );
+it.each([false, true])(
+  "drives real NsisUpdater.quitAndInstall with asynchronous spawn (failure: %s)",
+  async (fails) => {
+    vi.useFakeTimers();
+    const electronPath = require.resolve("electron");
+    const previous = require.cache[electronPath];
+    const events = new EventEmitter();
+    require.cache[electronPath] = { exports: { autoUpdater: events } } as NodeModule;
+    try {
+      const { NsisUpdater } = require("electron-updater/out/NsisUpdater") as {
+        NsisUpdater: typeof import("electron-updater/out/NsisUpdater").NsisUpdater;
+      };
+      let resolveSpawn!: (value: boolean) => void;
+      let rejectSpawn!: (error: Error) => void;
+      const spawn = new Promise<boolean>((resolve, reject) => {
+        resolveSpawn = resolve;
+        rejectSpawn = reject;
+      });
+      const quit = vi.fn();
+      class NativeNsis extends NsisUpdater {
+        constructor() {
+          super(undefined, { version: "0.1.0", quit } as never);
+          this.logger = null;
+          this.downloadedUpdateHelper = { file: "installer.exe", downloadedFileInfo: {} } as never;
+        }
+        protected override spawnLog(): Promise<boolean> {
+          return spawn;
+        }
+      }
+      const updater = new NativeNsis();
+      const adapter = createUpdaterInstallerAdapter(updater, "win32");
+      const recover = vi.fn(async () => {});
+      const installer = createUpdateInstaller({
+        canInstall: () => true,
+        confirm: async () => true,
+        prepare: async () => true,
+        install: adapter.install,
+        resetAttempt: adapter.resetAttempt,
+        recover,
+        watchdogEnabled: false,
+      });
+      updater.on("error", (error: Error) => {
+        void installer.onError(error.message);
+      });
+      const request = installer.request();
+      await vi.advanceTimersByTimeAsync(1);
+      // The real BaseUpdater callback already requested quit, but the launch is unresolved.
+      expect(quit).not.toHaveBeenCalled();
+      if (fails) rejectSpawn(Object.assign(new Error("spawn failed"), { code: "EACCES" }));
+      else resolveSpawn(true);
+      expect((await request).completed).toBe(!fails);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(quit).toHaveBeenCalledTimes(fails ? 0 : 1);
+      expect(recover).toHaveBeenCalledTimes(fails ? 1 : 0);
+    } finally {
+      if (previous) require.cache[electronPath] = previous;
+      else delete require.cache[electronPath];
+      vi.useRealTimers();
+    }
+  },
+);
+it("times out macOS staging without a delayed quit and permits another attempt", async () => {
+  vi.useFakeTimers();
+  const native = Object.assign(new EventEmitter(), {
+    checkForUpdates: vi.fn(),
+    quitAndInstall: vi.fn(),
+  });
+  const electronPath = require.resolve("electron");
+  const previous = require.cache[electronPath];
+  require.cache[electronPath] = { exports: { autoUpdater: native } } as NodeModule;
+  try {
+    const { MacUpdater } = require("electron-updater/out/MacUpdater") as {
+      MacUpdater: typeof MacType;
+    };
+    const updater = new MacUpdater(undefined, { version: "0.1.0" } as never);
+    updater.logger = null;
+    const adapter = createUpdaterInstallerAdapter(updater, "darwin", { stagingTimeoutMs: 500 });
+    const recover = vi.fn(async () => {});
+    const installer = createUpdateInstaller({
+      canInstall: () => true,
+      confirm: async () => true,
+      stage: adapter.stage,
+      prepare: async () => true,
+      install: adapter.install,
+      recover,
+      watchdogEnabled: false,
+    });
+    const request = installer.request();
+    await vi.advanceTimersByTimeAsync(501);
+    expect((await request).completed).toBe(false);
+    expect(installer.pending).toBe(false);
+    native.emit("update-downloaded");
+    expect(native.quitAndInstall).not.toHaveBeenCalled();
+    expect((await installer.request()).completed).toBe(true);
+    expect(native.quitAndInstall).toHaveBeenCalledTimes(1);
+  } finally {
+    if (previous) require.cache[electronPath] = previous;
+    else delete require.cache[electronPath];
+    vi.useRealTimers();
+  }
+});

@@ -127,3 +127,24 @@ it("imports into a directory Electron pre-created empty", () => {
   expect(migrateUserData(options).kind).toBe("ready");
   expect(fs.readFileSync(join(target, "settings"), "utf8")).toBe("original");
 });
+it("imports when the pre-created target holds only OS metadata", () => {
+  const { options, target } = fixture();
+  fs.mkdirSync(target);
+  fs.writeFileSync(join(target, ".DS_Store"), "finder");
+  expect(migrateUserData(options).kind).toBe("ready");
+  expect(fs.readFileSync(join(target, "settings"), "utf8")).toBe("original");
+});
+it("excludes partition service-worker caches and blobs from copying and disk sizing", () => {
+  const { options, legacy, target } = fixture();
+  for (const path of [
+    "Partitions/x/Service Worker/CacheStorage",
+    "Partitions/x/Service Worker/ScriptCache",
+    "Partitions/x/blob_storage",
+  ]) {
+    fs.mkdirSync(join(legacy, path), { recursive: true });
+    fs.writeFileSync(join(legacy, path, "cached"), Buffer.alloc(1024));
+  }
+  expect(migrateUserData(options).kind).toBe("ready");
+  expect(fs.existsSync(join(target, "Partitions/x/blob_storage"))).toBe(false);
+  expect(fs.existsSync(join(target, "Partitions/x/Service Worker/CacheStorage"))).toBe(false);
+});

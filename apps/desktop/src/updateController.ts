@@ -1,3 +1,4 @@
+import { getUpdateErrorMessage } from "./updateErrors";
 import type {
   DesktopUpdateActionResult,
   DesktopUpdateChannel,
@@ -30,6 +31,7 @@ export function createUpdateController(options: {
   timeoutMs?: number;
 }) {
   let queue: Promise<unknown> = Promise.resolve();
+  let pendingManual = false;
   let pendingCheck: Promise<DesktopUpdateActionResult> | null = null;
   // electron-updater coalesces native checks internally. After a timeout, drain that
   // request before starting another, so a channel change cannot reuse its result.
@@ -49,9 +51,14 @@ export function createUpdateController(options: {
       ...electronUpdaterChannelSettings(channel),
       allowDowngrade: false,
     });
-  async function check(): Promise<DesktopUpdateActionResult> {
+  async function check(isManual: () => boolean = () => true): Promise<DesktopUpdateActionResult> {
     const state = options.getState();
-    if (!state.enabled || state.status === "downloaded" || state.status === "downloading")
+    if (
+      !state.enabled ||
+      state.status === "downloaded" ||
+      state.status === "downloading" ||
+      state.status === "preparing"
+    )
       return result(false);
     options.emit(reduceDesktopUpdateStateOnCheckStart(state));
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -95,8 +102,9 @@ export function createUpdateController(options: {
       options.emit(
         reduceDesktopUpdateStateOnCheckFailure(
           options.getState(),
-          error instanceof Error ? error.message : String(error),
+          getUpdateErrorMessage(error, "check"),
           new Date().toISOString(),
+          isManual(),
         ),
       );
     } finally {
@@ -106,10 +114,12 @@ export function createUpdateController(options: {
   }
   return {
     applyChannel,
-    requestCheck(_reason: string) {
+    requestCheck(reason: string) {
+      pendingManual ||= !["startup", "poll"].includes(reason);
       if (!pendingCheck)
-        pendingCheck = enqueue(check).finally(() => {
+        pendingCheck = enqueue(() => check(() => pendingManual)).finally(() => {
           pendingCheck = null;
+          pendingManual = false;
         });
       return pendingCheck;
     },
@@ -124,7 +134,7 @@ export function createUpdateController(options: {
           options.emit(
             reduceDesktopUpdateStateOnDownloadFailure(
               options.getState(),
-              error instanceof Error ? error.message : String(error),
+              getUpdateErrorMessage(error, "download"),
             ),
           );
           return { ...result(true), completed: false };
@@ -132,7 +142,8 @@ export function createUpdateController(options: {
       });
     },
     setChannel(channel: DesktopUpdateChannel) {
-      if (options.getState().status === "downloading") return Promise.resolve(result(false));
+      if (["downloading", "preparing"].includes(options.getState().status))
+        return Promise.resolve(result(false));
       return enqueue(async () => {
         if (channel !== "stable" && channel !== "beta") throw new Error("Invalid update channel");
         options.writePreferences(channel);

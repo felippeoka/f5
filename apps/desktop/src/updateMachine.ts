@@ -42,6 +42,7 @@ export function reduceDesktopUpdateStateOnCheckFailure(
   state: DesktopUpdateState,
   message: string,
   checkedAt: string,
+  canRetry = true,
 ): DesktopUpdateState {
   return {
     ...state,
@@ -50,7 +51,7 @@ export function reduceDesktopUpdateStateOnCheckFailure(
     checkedAt,
     downloadPercent: null,
     errorContext: "check",
-    canRetry: true,
+    canRetry,
   };
 }
 

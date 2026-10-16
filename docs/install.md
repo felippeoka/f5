@@ -16,13 +16,13 @@ Download the x64 AppImage, make it executable (`chmod +x F5-*.AppImage`), and op
 
 ## Upgrade from F5 (Alpha)
 
-The unsigned `v0.0.11-computer-use-preview.1` preview does not support an in-place update. Quit F5 (Alpha) and T3 Code, delete `F5 (Alpha).app` on macOS, then install and launch F5. The first launch copies Chromium settings from `T3 Code (Alpha)` (or `t3code` if absent) into the new `f5` directory. The legacy directory is preserved. Backend data under `~/.f5` is untouched.
+The unsigned `v0.0.11-computer-use-preview.1` preview does not support an in-place update. Quit F5 (Alpha) and T3 Code, delete `F5 (Alpha).app` on macOS, then install and launch F5. The first launch copies Chromium settings from `T3 Code (Alpha)` (or `t3code` if absent) into the new `f5` directory. The legacy directory is preserved. CacheStorage, service-worker script caches, and blob caches are excluded from the copy and disk-space estimate. A large first import still runs before Chromium starts and can take time; wait for it to finish. Backend data under `~/.f5` is untouched.
 
 On Windows, the new app identity installs alongside F5 (Alpha). Quit the old application, install and launch F5 to import settings, and verify your data before uninstalling F5 (Alpha) from Settings → Apps → Installed apps. Keep the legacy settings directory until the import is verified. Always use the new F5 Start-menu entry afterward.
 
-Screen Recording and Accessibility must be granted again. Preview-browser sign-ins may need to be redone because the Chromium cookie key is bound to the old app identity. F5 and upstream T3 Code can run independently after import.
+Screen Recording and Accessibility must be granted again. On macOS and Linux, preview-browser sign-ins may need to be redone: Chromium Safe Storage uses the application name in Keychain/libsecret, and F5 does not copy that secret across identities. The profile copy preserves localStorage and IndexedDB but does not promise decryptable cookies. Windows also copies `Local State`, which contains its encrypted profile key. F5 and upstream T3 Code can run independently after import.
 
-An existing nonempty `f5` Chromium profile is preserved even if it has no migration marker. An empty folder pre-created by Electron is eligible for import; F5 never replaces a populated profile solely because a marker is missing.
+An existing nonempty `f5` Chromium profile is preserved even if it has no migration marker. An empty folder (or one containing only `.DS_Store`, `Thumbs.db`, or `desktop.ini`) pre-created by Electron is eligible for import; F5 never replaces a populated profile solely because a marker is missing.
 
 If import fails, quit the legacy app and retry. Make sure there is enough disk space for another copy plus 64 MiB. Support escape hatch: launch once with `F5_SKIP_USERDATA_IMPORT=1` to create an empty F5 Chromium profile. This writes a `skipped` marker and does not remove backend data or legacy settings.
 

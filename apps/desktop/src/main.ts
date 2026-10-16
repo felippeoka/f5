@@ -1,3 +1,6 @@
+import { offerApplicationsMove, createBootstrapGate } from "./startupInstallation";
+import { createUpdatePoller } from "./updatePoller";
+import { getUpdateErrorMessage } from "./updateErrors";
 import { recoverUpdateSession, restoreUpdateWindows } from "./updateRecovery";
 import { createUpdaterInstallerAdapter } from "./updateInstallerAdapter";
 import { createUpdateInstaller } from "./updateInstall";
@@ -2158,8 +2161,6 @@ function getDestructiveMenuIcon(): Electron.NativeImage | undefined {
     return undefined;
   }
 }
-let updatePollTimer: ReturnType<typeof setInterval> | null = null;
-let updateStartupTimer: ReturnType<typeof setTimeout> | null = null;
 let updaterConfigured = false;
 let updateState: DesktopUpdateState = initialUpdateState();
 
@@ -2376,13 +2377,7 @@ function dispatchMenuAction(action: string): void {
 }
 
 function handleCheckForUpdatesMenuClick(): void {
-  const disabledReason = getAutoUpdateDisabledReason({
-    isDevelopment,
-    isPackaged: app.isPackaged,
-    platform: process.platform,
-    appImage: process.env.APPIMAGE,
-    disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
-  });
+  const disabledReason = updateState.enabled ? null : updateState.message;
   if (disabledReason) {
     console.info("[desktop-updater] Manual update check requested, but updates are disabled.");
     void dialog.showMessageBox({
@@ -2614,15 +2609,13 @@ function configureAppIdentity(): void {
   }
 }
 
+const updatePoller = createUpdatePoller(
+  checkForUpdates,
+  AUTO_UPDATE_STARTUP_DELAY_MS,
+  AUTO_UPDATE_POLL_INTERVAL_MS,
+);
 function clearUpdatePollTimer(): void {
-  if (updateStartupTimer) {
-    clearTimeout(updateStartupTimer);
-    updateStartupTimer = null;
-  }
-  if (updatePollTimer) {
-    clearInterval(updatePollTimer);
-    updatePollTimer = null;
-  }
+  updatePoller.stop();
 }
 
 function emitUpdateState(): void {
@@ -2663,6 +2656,8 @@ function restoreInstallWindows(): void {
 const updaterInstallerAdapter = createUpdaterInstallerAdapter(autoUpdater, process.platform);
 const updateInstaller = createUpdateInstaller({
   stage: () => updaterInstallerAdapter.stage(),
+  onStageStart: () => setUpdateState({ status: "preparing", message: null }),
+  onCancel: () => setUpdateState({ status: "downloaded" }),
   resetAttempt: () => updaterInstallerAdapter.resetAttempt(),
   watchdogEnabled: updaterInstallerAdapter.watchdogEnabled,
   canInstall: () => !isQuitting && updaterConfigured && updateState.status === "downloaded",
@@ -2709,6 +2704,7 @@ const updateInstaller = createUpdateInstaller({
     installCleanupStarted = true;
     await cleanupBeforeExit();
     shutdownComplete = true;
+    restoreStdIoCapture?.();
     return true;
   },
   install: () => updaterInstallerAdapter.install(),
@@ -2722,13 +2718,22 @@ const updateInstaller = createUpdateInstaller({
         runningBeforeInstall,
         startBackend,
         restoreWindows: restoreInstallWindows,
+        resumeUpdates: () => {
+          if (updaterConfigured) updatePoller.start();
+        },
       });
       for (const error of errors) console.error("[desktop-updater] Session recovery failed", error);
       if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow();
     } catch (error) {
       console.error("[desktop-updater] Recovery failed", error);
     } finally {
-      setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, message));
+      installStdIoCapture();
+      setUpdateState(
+        reduceDesktopUpdateStateOnInstallFailure(
+          updateState,
+          getUpdateErrorMessage(message, "install"),
+        ),
+      );
     }
   },
 });
@@ -2802,7 +2807,7 @@ function configureAutoUpdater(): void {
     console.info("[desktop-updater] Looking for updates...");
   });
   autoUpdater.on("error", (error) => {
-    const message = formatErrorMessage(error);
+    const message = getUpdateErrorMessage(error, resolveUpdaterErrorContext() ?? "check");
     if (updateInstaller.pending) {
       void updateInstaller.onError(message);
       return;
@@ -2844,18 +2849,7 @@ function configureAutoUpdater(): void {
     console.info(`[desktop-updater] Update downloaded: ${info.version}`);
   });
 
-  clearUpdatePollTimer();
-
-  updateStartupTimer = setTimeout(() => {
-    updateStartupTimer = null;
-    void checkForUpdates("startup");
-  }, AUTO_UPDATE_STARTUP_DELAY_MS);
-  updateStartupTimer.unref();
-
-  updatePollTimer = setInterval(() => {
-    void checkForUpdates("poll");
-  }, AUTO_UPDATE_POLL_INTERVAL_MS);
-  updatePollTimer.unref();
+  updatePoller.start(true);
 }
 function backendEnv(runtime: BackendRuntime = defaultBackend): NodeJS.ProcessEnv {
   return buildDesktopBackendEnv(process.env, {
@@ -3127,7 +3121,7 @@ async function stopBackendAndWaitForExit(
   if (runtime.backendProcess === backendChild) runtime.backendProcess = null;
 }
 
-let bootstrapReady: Promise<void> = Promise.resolve();
+const bootstrapGate = createBootstrapGate();
 let lastOpenedProfileId = defaultBackend.profile.id;
 
 async function ensureBackendRunning(runtime: BackendRuntime): Promise<void> {
@@ -3170,7 +3164,7 @@ async function ensureBackendRunning(runtime: BackendRuntime): Promise<void> {
 
 const openProfile = singleProfileOpen(async (id) => {
   try {
-    await bootstrapReady;
+    await bootstrapGate.wait();
     if (isQuitting) return false;
     return await openProfileOnce(id);
   } catch (cause) {
@@ -4041,27 +4035,31 @@ app
   .then(async () => {
     writeDesktopLogHeader("app ready");
     configureAppIdentity();
-    configureApplicationMenu();
-    registerDesktopProtocol();
     if (
       app.isPackaged &&
       process.platform === "darwin" &&
       (process.execPath.startsWith("/Volumes/") || process.execPath.includes("/AppTranslocation/"))
     ) {
-      const choice = await dialog.showMessageBox({
-        type: "question",
-        message: "Move F5 to Applications?",
-        buttons: ["Move to Applications", "Not Now"],
-        defaultId: 0,
-        cancelId: 1,
+      const moved = await offerApplicationsMove({
+        prompt: async () =>
+          (
+            await dialog.showMessageBox({
+              type: "question",
+              message: "Move F5 to Applications?",
+              buttons: ["Move to Applications", "Not Now"],
+              defaultId: 0,
+              cancelId: 1,
+            })
+          ).response === 0,
+        move: () => app.moveToApplicationsFolder(),
+        report: (error) => console.error("[desktop] Could not move F5 to Applications", error),
       });
-      if (choice.response === 0 && app.moveToApplicationsFolder()) {
-        // Electron relaunches the moved application itself.
-        return;
-      }
+      if (moved) return; // Electron relaunches the moved application itself.
     }
+    configureApplicationMenu();
+    registerDesktopProtocol();
     configureAutoUpdater();
-    bootstrapReady = bootstrap();
+    const bootstrapReady = bootstrapGate.start(bootstrap);
     void bootstrapReady.catch((error) => {
       handleFatalStartupError("bootstrap", error);
     });

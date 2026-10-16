@@ -3,8 +3,10 @@ export function createUpdateInstaller(options: {
   canInstall(): boolean;
   confirm(): Promise<boolean>;
   stage?(): Promise<void>;
+  onStageStart?(): void;
+  onCancel?(): void;
   prepare(): Promise<boolean>;
-  install(): void;
+  install(): void | Promise<void>;
   resetAttempt?(): void;
   recover(message: string): Promise<void>;
   watchdogEnabled?: boolean;
@@ -47,11 +49,14 @@ export function createUpdateInstaller(options: {
       try {
         if (!(await options.confirm())) {
           phase = "idle";
+          options.onCancel?.();
           return { accepted: false, completed: false };
         }
+        options.onStageStart?.();
         await options.stage?.();
         if (!(await options.prepare())) {
           phase = "idle";
+          options.onCancel?.();
           return { accepted: false, completed: false };
         }
         phase = "installing";
@@ -61,7 +66,7 @@ export function createUpdateInstaller(options: {
           }, options.timeoutMs ?? 60_000);
           timer.unref?.();
         }
-        options.install();
+        await options.install();
         // An updater can emit an error synchronously without throwing.
         if (recovery) {
           await recovery;

@@ -6,6 +6,8 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 
 ### Installation
 
+- Production desktop updates now use only the public baked GitHub feed; ambient `GH_TOKEN` and `T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN` private-feed overrides are no longer supported.
+
 - F5 now uses its own app identity and imports existing F5 (Alpha) settings once. Screen Recording and Accessibility must be granted again.
 - Preview-browser sign-ins may need to be redone because the Chromium cookie key is bound to the old app identity. Backend data under `~/.f5` is unchanged.
 

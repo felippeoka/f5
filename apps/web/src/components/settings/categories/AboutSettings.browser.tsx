@@ -109,3 +109,10 @@ it.each(["confirmation cancel", "window veto"])("does not toast an error for %s"
   await vi.waitFor(() => expect(install).toHaveBeenCalledTimes(1));
   expect(mocks.toast).not.toHaveBeenCalled();
 });
+it("shows preparation progress and disables install and channel actions", async () => {
+  const f = bridge();
+  const screen = await render(<AboutSettings />);
+  f.emit({ ...initial, status: "preparing", downloadedVersion: "0.2.0" });
+  await expect.element(screen.getByRole("button", { name: "Preparing update…" })).toBeDisabled();
+  await expect.element(screen.getByRole("switch", { name: "Beta updates" })).toBeDisabled();
+});

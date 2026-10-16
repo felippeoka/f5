@@ -24,6 +24,7 @@ export async function recoverUpdateSession<Runtime extends { stopped: boolean }>
   runningBeforeInstall: readonly Runtime[];
   startBackend(runtime: Runtime): void;
   restoreWindows(): void;
+  resumeUpdates?(): void;
 }): Promise<unknown[]> {
   const errors: unknown[] = [];
   const attempt = async (run: () => unknown) => {
@@ -42,5 +43,6 @@ export async function recoverUpdateSession<Runtime extends { stopped: boolean }>
     await attempt(() => options.startBackend(runtime));
   }
   await attempt(options.restoreWindows);
+  if (options.resumeUpdates) await attempt(options.resumeUpdates);
   return errors;
 }

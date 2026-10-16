@@ -487,6 +487,13 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
 ) {
   const buildConfig: Record<string, unknown> = {
     appId: "io.github.lopesfelipe.f5",
+    electronFuses: {
+      runAsNode: true, // Required by the sandboxed backend until it has a dedicated executable.
+      enableNodeOptionsEnvironmentVariable: false,
+      enableNodeCliInspectArguments: false,
+      enableEmbeddedAsarIntegrityValidation: platform !== "linux",
+      onlyLoadAppFromAsar: true,
+    },
     productName,
     artifactName: "F5-${version}-${arch}.${ext}",
     asarUnpack: DESKTOP_ASAR_UNPACK,
@@ -534,7 +541,8 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
             gatekeeperAssess: false,
             notarize: true,
             entitlements: "apps/desktop/resources/entitlements.mac.plist",
-            entitlementsInherit: "apps/desktop/resources/entitlements.mac.plist",
+            entitlementsInherit: "apps/desktop/resources/entitlements.electron-inherit.plist",
+            sign: join(import.meta.dirname, "sign-mac.cjs"),
           }
         : {}),
       binaries: ["Contents/Resources/native/f5-computer-helper"],

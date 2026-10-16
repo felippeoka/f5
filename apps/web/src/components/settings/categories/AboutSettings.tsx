@@ -60,15 +60,17 @@ export function AboutSettings() {
             disabled={isAboutUpdateActionDisabled(state)}
             onClick={updates.handleAboutAction}
           >
-            {state.status === "checking"
-              ? "Checking…"
-              : state.status === "downloading"
-                ? "Downloading…"
-                : action === "download"
-                  ? "Download update"
-                  : action === "install"
-                    ? "Restart to update"
-                    : "Check for updates"}
+            {state.status === "preparing"
+              ? "Preparing update…"
+              : state.status === "checking"
+                ? "Checking…"
+                : state.status === "downloading"
+                  ? "Downloading…"
+                  : action === "download"
+                    ? "Download update"
+                    : action === "install"
+                      ? "Restart to update"
+                      : "Check for updates"}
           </Button>
         </div>
       ) : null}
@@ -90,6 +92,7 @@ export function AboutSettings() {
             disabled={
               updates.channelPending ||
               state.status === "checking" ||
+              state.status === "preparing" ||
               state.status === "downloading"
             }
             onCheckedChange={(checked) => {
