@@ -556,6 +556,10 @@ export const AppSettingsSchema = Schema.Struct({
   customGrokModels: Schema.Array(Schema.String).pipe(
     Schema.withConstructorDefault(() => Option.some([])),
   ),
+  /** Sub-agent defaults for every project without its own `claudeProjectSettings` entry. */
+  claudeSubagentDefaults: ClaudeProjectSettingsSchema.pipe(
+    Schema.withConstructorDefault(() => Option.some(ClaudeProjectSettingsSchema.makeUnsafe({}))),
+  ),
   claudeProjectSettings: Schema.Record(Schema.String, ClaudeProjectSettingsSchema).pipe(
     Schema.withConstructorDefault(() => Option.some({})),
   ),
@@ -1096,17 +1100,27 @@ export function getSlashModelOptions(
   });
 }
 
+/** The global sub-agent defaults, normalized. */
+export function getClaudeSubagentDefaults(
+  settings: Partial<Pick<AppSettings, "claudeSubagentDefaults">>,
+): ClaudeProjectSettings {
+  const defaults = settings.claudeSubagentDefaults;
+  if (!defaults) return DEFAULT_CLAUDE_PROJECT_SETTINGS;
+  return {
+    subagentsEnabled: defaults.subagentsEnabled !== false,
+    subagentModel: normalizeClaudeSubagentModel(defaults.subagentModel),
+  };
+}
+
+/** A project's own sub-agent settings, falling back to the global defaults. */
 export function getClaudeProjectSettings(
-  settings: Pick<AppSettings, "claudeProjectSettings">,
+  settings: Pick<AppSettings, "claudeProjectSettings"> &
+    Partial<Pick<AppSettings, "claudeSubagentDefaults">>,
   projectId: string | null | undefined,
 ): ClaudeProjectSettings {
-  if (!projectId) {
-    return DEFAULT_CLAUDE_PROJECT_SETTINGS;
-  }
-
-  const projectSettings = settings.claudeProjectSettings[projectId];
+  const projectSettings = projectId ? settings.claudeProjectSettings[projectId] : undefined;
   if (!projectSettings) {
-    return DEFAULT_CLAUDE_PROJECT_SETTINGS;
+    return getClaudeSubagentDefaults(settings);
   }
 
   return {

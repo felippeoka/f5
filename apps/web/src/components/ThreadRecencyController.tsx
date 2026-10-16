@@ -2,6 +2,7 @@ import { isDocumentWorkflow } from "@t3tools/shared/documentWorkflow";
 import {
   DEFAULT_NEW_THREAD_TITLE,
   ThreadId,
+  type ProjectId,
   type ResolvedKeybindingRule,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
@@ -120,6 +121,8 @@ export default function ThreadRecencyController() {
   const currentRouteTargetKind = currentRouteTarget?.kind ?? null;
   const currentRouteSettingsCategory =
     currentRouteTarget?.kind === "settings" ? currentRouteTarget.category : null;
+  const currentRouteSettingsProject =
+    currentRouteTarget?.kind === "settings" ? (currentRouteTarget.project ?? null) : null;
   const currentTargetKey = currentRouteTarget?.key ?? null;
   const currentRouteThreadId =
     currentRouteTarget?.kind === "thread" ? currentRouteTarget.threadId : null;
@@ -182,6 +185,8 @@ export default function ThreadRecencyController() {
   const currentRouteThreadIdRef = useRef<ThreadId | null>(currentRouteThreadId);
   const previousTargetKeyRef = useRef<TabTargetKey | null>(null);
   const lastVisitedSettingsCategoryRef = useRef(lastVisitedSettingsCategory);
+  // Restored with the category so returning to settings keeps the project scope.
+  const lastVisitedSettingsProjectRef = useRef<ProjectId | null>(null);
   const cancelledRef = useRef(false);
 
   useEffect(() => {
@@ -215,6 +220,9 @@ export default function ThreadRecencyController() {
             to: "/settings",
             search: {
               category: lastVisitedSettingsCategoryRef.current,
+              ...(lastVisitedSettingsProjectRef.current
+                ? { project: lastVisitedSettingsProjectRef.current }
+                : {}),
             },
           });
           return;
@@ -286,6 +294,7 @@ export default function ThreadRecencyController() {
 
     if (currentRouteTargetKind === "settings" && currentRouteSettingsCategory) {
       lastVisitedSettingsCategoryRef.current = currentRouteSettingsCategory;
+      lastVisitedSettingsProjectRef.current = currentRouteSettingsProject;
       setLastVisitedSettingsCategory((current) =>
         current === currentRouteSettingsCategory ? current : currentRouteSettingsCategory,
       );
@@ -312,6 +321,7 @@ export default function ThreadRecencyController() {
     previousTargetKeyRef.current = currentTargetKey;
   }, [
     currentRouteSettingsCategory,
+    currentRouteSettingsProject,
     currentRouteThreadId,
     currentRouteTargetKind,
     currentTargetKey,

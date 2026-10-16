@@ -6,7 +6,9 @@ import type {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon } from "lucide-react";
 
-import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
+import { Link } from "@tanstack/react-router";
+
+import { useSettings } from "../../hooks/useSettings";
 import { serverQueryKeys } from "../../lib/serverReactQuery";
 import { ensureNativeApi } from "../../nativeApi";
 import { Button } from "../ui/button";
@@ -50,17 +52,8 @@ function errorMessage(error: unknown): string {
 export function StorageAutomationSettings() {
   const storageCleanup = useSettings((settings) => settings.storageCleanup);
   const autoPullDefaultBranch = useSettings((settings) => settings.autoPullDefaultBranch);
-  const { updateSettings } = useUpdateSettings();
   const queryClient = useQueryClient();
 
-  const save = (patch: Parameters<typeof updateSettings>[0]) =>
-    void updateSettings(patch).catch((error: unknown) =>
-      toastManager.add({
-        type: "error",
-        title: "Could not save storage automation",
-        description: errorMessage(error),
-      }),
-    );
   // Send only the changed fields; the server deep-merges them. Spreading the
   // rendered `storageCleanup` would let a second quick edit revert the first.
   const saveCleanup = (next: NonNullable<ServerSettingsPatch["storageCleanup"]>) =>
@@ -212,25 +205,19 @@ export function StorageAutomationSettings() {
         />
       </label>
 
-      <label
-        className="flex items-center justify-between gap-4 border-t border-border pt-4 text-sm"
-        data-settings-search-target="storage.auto-pull"
-      >
-        <span>
-          Auto-pull default branches
-          <span className="block text-xs text-muted-foreground">
-            Every 15 minutes, fast-forwards a project root that has its default branch checked out,
-            a clean tree and no agent working in it. Never merges or rebases.
-          </span>
-        </span>
-        <Switch
-          aria-label="Auto-pull default branches"
-          checked={autoPullDefaultBranch}
-          onCheckedChange={(value) => save({ autoPullDefaultBranch: value })}
-        />
-      </label>
+      <p className="border-t border-border pt-4 text-xs text-muted-foreground">
+        Auto-pull of default branches is set in{" "}
+        <Link
+          to="/settings"
+          search={{ category: "git", item: "git.auto-pull" }}
+          className="underline underline-offset-2 hover:text-foreground"
+        >
+          Git &amp; GitHub
+        </Link>
+        . Its pulls appear in the preview and activity below.
+      </p>
 
-      <div className="flex items-center gap-2 border-t border-border pt-4">
+      <div className="flex items-center gap-2">
         <Button
           size="sm"
           variant="outline"

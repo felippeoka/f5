@@ -91,11 +91,7 @@ export function BrowserSettings() {
           {error}
         </p>
       ) : null}
-      <SettingsCard
-        title="Browser"
-        searchTarget="integrations.browser"
-        description="Where links open, and what agents may do in the F5 preview."
-      >
+      <SettingsCard title="Links" description="Where links you click in F5 open.">
         <SettingsRow
           title="Open links in"
           control={
@@ -118,6 +114,12 @@ export function BrowserSettings() {
             </Select>
           }
         />
+      </SettingsCard>
+
+      <SettingsCard
+        title="Agent access"
+        description="What agents may do in the F5 preview and other browsers. Projects can override these."
+      >
         <SettingsRow
           title="Agent browser access"
           description="Let agents open, read, and drive pages in the F5 preview."
@@ -129,7 +131,10 @@ export function BrowserSettings() {
             />
           }
         />
-        <div className="space-y-2 border-b border-border py-3 last:border-b-0">
+        <div
+          className="space-y-2 border-b border-border py-3 last:border-b-0"
+          data-settings-search-target="browser.allowed-sites"
+        >
           <div>
             <p className="text-sm font-medium text-foreground">Allowed external sites</p>
             <p className="text-ui text-muted-foreground">
@@ -145,6 +150,7 @@ export function BrowserSettings() {
         {/* Not certified yet (docs/agent-browser.md): they can only be switched off. */}
         <SettingsRow
           title="Claude in Chrome"
+          searchTarget="browser.chrome"
           description="Let Claude use Google Chrome through its extension. Not available in F5 yet."
           control={
             <Switch
@@ -155,13 +161,21 @@ export function BrowserSettings() {
             />
           }
         />
-        <ComputerSettings />
         <ChromeSetupSettings />
+      </SettingsCard>
+
+      <SettingsCard
+        title="Computer use"
+        searchTarget="browser.computer-use"
+        description="Let agents see and control the desktop apps you approve. Projects can override whether it is on."
+      >
+        <ComputerSettings />
       </SettingsCard>
 
       {preview?.profiles ? (
         <SettingsCard
           title="Browser profiles"
+          searchTarget="browser.profiles"
           description="Choose a profile for new preview tabs. Existing tabs keep their profile."
         >
           {profiles.map((profile) => (
@@ -318,6 +332,7 @@ export function BrowserSettings() {
       {preview?.browserImport ? (
         <SettingsCard
           title="Import browser cookies"
+          searchTarget="browser.cookie-import"
           description="Close the source browser first. Import creates a new profile; existing profiles are untouched."
           actions={
             <Button size="xs" variant="ghost" onClick={() => run(refresh)}>
@@ -420,6 +435,7 @@ export function BrowserSettings() {
       {snapShot && permissions?.supported ? (
         <SettingsCard
           title="SnapShot"
+          searchTarget="browser.snapshot"
           description="Capture the frontmost other window and its accessibility text into your current composer."
         >
           <SettingsRow

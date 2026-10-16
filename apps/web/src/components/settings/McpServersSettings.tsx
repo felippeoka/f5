@@ -1427,7 +1427,7 @@ export function McpServersSettings(props: {
   return (
     <section
       className="rounded-xl border border-border bg-card p-5"
-      data-settings-search-target="integrations.mcp"
+      data-settings-search-target="tools.mcp"
     >
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
@@ -1549,14 +1549,14 @@ export function McpServersSettings(props: {
               </select>
             </label>
           )}
-          {props.hasProjects ? (
+          {selectedProject ? (
             <div className="space-y-2">
-              <span className="text-xs font-medium text-foreground">Selected project</span>
+              <span className="text-xs font-medium text-foreground">Project</span>
               <div className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground">
-                {selectedProject?.name ?? "No project selected"}
+                {selectedProject.name}
               </div>
             </div>
-          ) : (
+          ) : props.hasProjects ? null : (
             <p className="rounded-lg border border-dashed border-border bg-background px-3 py-2 text-xs text-muted-foreground">
               No projects yet. You can still edit common MCP configuration now.
             </p>
@@ -1570,7 +1570,8 @@ export function McpServersSettings(props: {
 
         {selectedProject === null ? (
           <p className="rounded-lg border border-dashed border-border bg-background px-3 py-2 text-xs text-muted-foreground">
-            Select a project to inspect provider-specific live status and the effective merged JSON.
+            Switch the settings scope to a project to edit its servers and inspect provider-specific
+            live status and the effective merged JSON.
           </p>
         ) : null}
 

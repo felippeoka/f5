@@ -31,7 +31,7 @@ export function useProjectBreadcrumbActions(input: {
     if (!input.project) return;
     void navigate({
       to: "/settings",
-      search: { category: "projects", projectId: input.project.id },
+      search: { category: "project", project: input.project.id },
     });
   }, [input.project, navigate]);
 

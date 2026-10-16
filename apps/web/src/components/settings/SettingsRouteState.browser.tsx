@@ -1,17 +1,25 @@
 import "../../index.css";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import type { NativeApi, ProjectId, ServerConfig, ServerProvider } from "@t3tools/contracts";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
 import { parsePersistedAppSettings } from "../../appSettings";
 import { useStore } from "../../store";
+import { TestRouterContext } from "../../test/routerContext";
 import { createTestServerProvider } from "../../testServerProvider";
+import {
+  ProjectScopeGate,
+  ProjectScopeProvider,
+  ProjectThreadsOverrides,
+} from "./ProjectSettingsScope";
 import { SettingsRouteContext } from "./SettingsRouteContext";
 import { useSettingsRouteState } from "./useSettingsRouteState";
-import { ProjectsSettings } from "./categories/ProjectsSettings";
+import { ProjectSettings } from "./categories/ProjectSettings";
 
 const { nativeApiRef } = vi.hoisted(() => ({
   nativeApiRef: {
@@ -104,6 +112,9 @@ function createNativeApiMock(providers?: ReadonlyArray<ServerProvider>) {
   nativeApiRef.current = {
     server: {
       getConfig: vi.fn(async () => serverConfig),
+      getProjectSettings: vi.fn(async ({ projectId }: { projectId: ProjectId }) =>
+        resolveProjectSettings({ projectId, global: DEFAULT_SERVER_SETTINGS }),
+      ),
     },
     orchestration: {
       getSnapshot: vi.fn(async () => ({
@@ -160,40 +171,21 @@ function createNativeApiMock(providers?: ReadonlyArray<ServerProvider>) {
   } as unknown as NativeApi;
 }
 
-function SettingsRouteStateHarness() {
-  const routeState = useSettingsRouteState();
+// Mirrors the project scope of the settings route: the Project page plus the
+// project Threads overrides, for the project picked in the header.
+function SettingsRouteStateHarness({ projectId }: { readonly projectId: ProjectId }) {
+  const routeState = useSettingsRouteState({ projectId });
 
   return (
     <SettingsRouteContext.Provider value={routeState}>
-      <ProjectsSettings />
+      <ProjectScopeProvider key={projectId} projectId={projectId}>
+        <ProjectSettings />
+        <ProjectScopeGate>
+          <ProjectThreadsOverrides />
+        </ProjectScopeGate>
+      </ProjectScopeProvider>
     </SettingsRouteContext.Provider>
   );
-}
-
-async function selectSettingsProject(projectName: string) {
-  const trigger = document.querySelector<HTMLElement>('[aria-label="Settings project"]');
-  if (!trigger) {
-    throw new Error("Missing settings project picker.");
-  }
-
-  trigger.scrollIntoView({ block: "center" });
-  trigger.click();
-
-  await vi.waitFor(() => {
-    const option = Array.from(
-      document.querySelectorAll<HTMLElement>('[data-slot="select-item"]'),
-    ).find((candidate) => candidate.textContent?.trim() === projectName);
-    expect(option, `Missing settings project option: ${projectName}`).toBeTruthy();
-  });
-
-  await page.getByRole("option", { name: projectName }).click();
-
-  await vi.waitFor(() => {
-    expect(document.querySelector("[data-base-ui-inert]")).toBeNull();
-    expect(
-      document.querySelector<HTMLElement>('[aria-label="Settings project"]')?.textContent,
-    ).toContain(projectName);
-  });
 }
 
 async function renderHarness(options?: {
@@ -212,17 +204,20 @@ async function renderHarness(options?: {
     },
   });
 
-  const screen = await render(
+  const harness = (projectId: ProjectId) => (
     <QueryClientProvider client={queryClient}>
-      <SettingsRouteStateHarness />
-    </QueryClientProvider>,
+      <TestRouterContext>
+        <SettingsRouteStateHarness projectId={projectId} />
+      </TestRouterContext>
+    </QueryClientProvider>
   );
+  const screen = await render(harness(PROJECT_ONE));
 
   await vi.waitFor(() => {
     expect(document.body.textContent).toContain("Project memory");
   });
 
-  return { screen, queryClient };
+  return { screen, queryClient, selectProject: (id: ProjectId) => screen.rerender(harness(id)) };
 }
 
 describe("useSettingsRouteState", () => {
@@ -256,24 +251,78 @@ describe("useSettingsRouteState", () => {
     }
   });
 
-  it("dispatches local workspace and manual icon overrides", async () => {
+  it("keeps icon and memory usable when project settings fail to load", async () => {
+    createNativeApiMock();
+    vi.mocked(nativeApiRef.current!.server.getProjectSettings).mockRejectedValue(
+      new Error("offline"),
+    );
+    seedProjects();
+    seedAppSettings();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const screen = await render(
+      <QueryClientProvider client={queryClient}>
+        <TestRouterContext>
+          <SettingsRouteStateHarness projectId={PROJECT_ONE} />
+        </TestRouterContext>
+      </QueryClientProvider>,
+    );
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.body.textContent).toContain("Could not load project settings.");
+        expect(document.body.textContent).toContain("Build rule");
+        expect(document.querySelector('[aria-label="Project icon source"]')).not.toBeNull();
+      });
+    } finally {
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
+
+  it("inherits global Claude sub-agent defaults until the project overrides them", async () => {
+    const { screen, queryClient } = await renderHarness({
+      settings: { claudeSubagentDefaults: { subagentsEnabled: true } },
+    });
+    const subagentCard = () =>
+      Array.from(document.querySelectorAll<HTMLElement>("section, [data-slot]")).find((node) =>
+        node.textContent?.startsWith("Claude sub-agents"),
+      );
+    const toggle = () =>
+      document.querySelector<HTMLElement>('[aria-label="Enable Claude sub-agents"]');
+
+    try {
+      await vi.waitFor(() => {
+        expect(toggle()?.getAttribute("aria-checked")).toBe("true");
+        expect(subagentCard()?.textContent).toContain("From global");
+      });
+
+      toggle()!.click();
+      await vi.waitFor(() => {
+        expect(toggle()?.getAttribute("aria-checked")).toBe("false");
+        expect(subagentCard()?.textContent).toContain("Project override");
+        expect(
+          JSON.parse(localStorage.getItem(APP_SETTINGS_STORAGE_KEY)!).claudeProjectSettings[
+            PROJECT_ONE
+          ],
+        ).toMatchObject({ subagentsEnabled: false });
+      });
+
+      await page.getByRole("button", { name: "Reset all project overrides" }).click();
+      await vi.waitFor(() => {
+        expect(toggle()?.getAttribute("aria-checked")).toBe("true");
+        expect(subagentCard()?.textContent).toContain("From global");
+      });
+    } finally {
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
+
+  it("dispatches manual icon overrides", async () => {
     const { screen, queryClient } = await renderHarness();
     const dispatchCommand = vi.mocked(nativeApiRef.current!.orchestration.dispatchCommand);
 
     try {
-      document.querySelector<HTMLElement>('[aria-label="Project default workspace mode"]')?.click();
-      await page.getByRole("option", { name: "Worktree", exact: true }).click();
-
-      await vi.waitFor(() => {
-        expect(dispatchCommand).toHaveBeenCalledWith(
-          expect.objectContaining({
-            type: "project.meta.update",
-            projectId: PROJECT_ONE,
-            defaultEnvMode: "worktree",
-          }),
-        );
-      });
-
       document.querySelector<HTMLElement>('[aria-label="Project icon source"]')?.click();
       await page.getByRole("option", { name: "Emoji", exact: true }).click();
 
@@ -292,8 +341,8 @@ describe("useSettingsRouteState", () => {
     }
   });
 
-  it("clears project memory edit state when the selected project changes via the shared picker", async () => {
-    const { screen, queryClient } = await renderHarness();
+  it("clears project memory edit state when the scoped project changes", async () => {
+    const { screen, queryClient, selectProject } = await renderHarness();
 
     try {
       await page.getByRole("button", { name: "Edit" }).click();
@@ -302,13 +351,12 @@ describe("useSettingsRouteState", () => {
         expect(document.body.textContent).toContain("Save changes");
       });
 
-      await selectSettingsProject("Project Two");
+      await selectProject(PROJECT_TWO);
 
       await vi.waitFor(() => {
+        expect(document.body.textContent).toContain("Project memory");
         expect(document.body.textContent).not.toContain("Save changes");
-        expect(
-          document.querySelector<HTMLElement>('[aria-label="Settings project"]')?.textContent,
-        ).toContain("Project Two");
+        expect(document.body.textContent).not.toContain("Build rule");
       });
     } finally {
       queryClient.clear();

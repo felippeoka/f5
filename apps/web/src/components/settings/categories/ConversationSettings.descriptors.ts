@@ -1,20 +1,27 @@
 import type { SettingsItemDescriptor } from "../settingsSearch";
 
-export const DISPLAY_SETTINGS_DESCRIPTORS = (
+const CONVERSATION_CONTROL_DESCRIPTORS = (
   [
     [
-      "diff-default",
-      "Default diff file state",
-      "Expand, collapse, or automatically size diff files.",
-      "Default diff file state",
-      ["diff", "expanded", "collapsed"],
+      "send-shortcut",
+      "Send shortcut",
+      "Send with Enter or Command/Ctrl+Enter, including multiline prompts.",
+      "Send shortcut",
+      ["composer", "keyboard", "multiline"],
     ],
     [
-      "diff-colors",
-      "Diff colors",
-      "Choose red and green or blue and orange diff colors.",
-      "Diff colors",
-      ["diff", "accessibility", "palette"],
+      "composer-editor",
+      "Rich text editor",
+      "Choose styled Markdown or plain text in the composer.",
+      "Rich text editor",
+      ["composer", "markdown", "plain text"],
+    ],
+    [
+      "composer-collapse",
+      "Collapse composer while scrolling",
+      "Keep the composer expanded or let timeline scrolling collapse it.",
+      "Collapse composer while scrolling",
+      ["composer", "scroll", "resting", "collapse"],
     ],
     [
       "streaming",
@@ -24,11 +31,11 @@ export const DISPLAY_SETTINGS_DESCRIPTORS = (
       ["tokens", "response"],
     ],
     [
-      "file-links",
-      "Open file links in code panel",
-      "Open file links inside F5 instead of an external editor.",
-      "Open file links in code panel",
-      ["files", "editor", "preview"],
+      "remote-images",
+      "Load remote images in chat",
+      "Allow HTTPS images from external websites.",
+      "Load remote images in chat",
+      ["images", "privacy", "markdown"],
     ],
     [
       "word-wrap",
@@ -38,11 +45,11 @@ export const DISPLAY_SETTINGS_DESCRIPTORS = (
       ["diff", "code", "table", "line wrap"],
     ],
     [
-      "file-tree-limit",
-      "File tree entry limit",
-      "Set the maximum number of entries loaded in the Files panel.",
-      "File tree entry limit",
-      ["files", "explorer", "performance"],
+      "diff-default",
+      "Default diff file state",
+      "Expand, collapse, or automatically size diff files.",
+      "Default diff file state",
+      ["diff", "expanded", "collapsed"],
     ],
     [
       "work-log-detail",
@@ -101,6 +108,13 @@ export const DISPLAY_SETTINGS_DESCRIPTORS = (
       ["thinking", "analysis"],
     ],
     [
+      "collapse-work-logs",
+      "Collapse finished work logs",
+      "Fold a finished turn's tool calls into a one-line summary.",
+      "Collapse finished work logs",
+      ["activity", "tools", "summary"],
+    ],
+    [
       "inline-diffs",
       "Show file diffs inline",
       "Display complete diffs for file changes in chat.",
@@ -121,19 +135,26 @@ export const DISPLAY_SETTINGS_DESCRIPTORS = (
       "Show provider metadata",
       ["model", "session", "version"],
     ],
-    [
-      "sidebar-preview",
-      "Sidebar thread preview count",
-      "Set how many threads appear before Show more.",
-      "Sidebar thread preview count",
-      ["sidebar", "threads", "limit"],
-    ],
   ] as const
-).map(([id, label, description, ariaLabel, keywords]) => ({
-  id: `display.${id}`,
-  category: "display" as const,
-  label,
-  description,
-  keywords,
-  targetSelector: `[aria-label="${ariaLabel}"]`,
-})) satisfies ReadonlyArray<SettingsItemDescriptor>;
+).map(
+  ([id, label, description, ariaLabel, keywords]): SettingsItemDescriptor => ({
+    id: `conversation.${id}`,
+    category: "conversation",
+    label,
+    description,
+    keywords,
+    targetSelector: `[aria-label="${ariaLabel}"]`,
+  }),
+);
+
+export const CONVERSATION_SETTINGS_DESCRIPTORS = [
+  ...CONVERSATION_CONTROL_DESCRIPTORS,
+  {
+    id: "conversation.display-density",
+    category: "conversation",
+    label: "Display density",
+    description: "Pick a minimal, balanced, or detailed preset for thread activity.",
+    keywords: ["preset", "verbosity", "detail", "minimal", "detailed"],
+    targetSelector: '[data-settings-search-target="conversation.display-density"]',
+  },
+] satisfies ReadonlyArray<SettingsItemDescriptor>;

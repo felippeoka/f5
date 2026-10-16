@@ -349,7 +349,10 @@ export function PullRequestsView({ focusedPrKey }: { focusedPrKey: string | null
                   size="sm"
                   variant="link"
                   onClick={() =>
-                    void navigate({ to: "/settings", search: { category: "integrations" } })
+                    void navigate({
+                      to: "/settings",
+                      search: { category: "accounts", item: "accounts.github" },
+                    })
                   }
                 >
                   Open GitHub settings

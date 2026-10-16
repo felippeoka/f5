@@ -18,6 +18,14 @@ export const APPEARANCE_SETTINGS_DESCRIPTORS = [
     targetSelector: '[aria-label="Color theme library"]',
   },
   {
+    id: "appearance.diff-colors",
+    category: "appearance",
+    label: "Diff colors",
+    description: "Choose red and green or blue and orange diff colors.",
+    keywords: ["diff", "accessibility", "palette", "color blind"],
+    targetSelector: '[aria-label="Diff colors"]',
+  },
+  {
     id: "appearance.chat-width",
     category: "appearance",
     label: "Conversation width",

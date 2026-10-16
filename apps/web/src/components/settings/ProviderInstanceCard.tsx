@@ -6,7 +6,7 @@ import {
   normalizeCustomModels,
   readCustomModels,
 } from "@t3tools/shared/customModels";
-import { ProviderAccountPanel } from "./ProviderAccountPanel";
+import { Link } from "@tanstack/react-router";
 
 import {
   ArrowUpCircleIcon,
@@ -940,7 +940,29 @@ export function ProviderInstanceCard({
             {(driverKind === "codex" ||
               driverKind === "claudeAgent" ||
               driverKind === "antigravity") && (
-              <ProviderAccountPanel instanceId={instanceId} driver={instance.driver} />
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2">
+                <p className="min-w-0 text-xs text-muted-foreground">
+                  {liveProvider?.auth.status === "authenticated"
+                    ? `Signed in${authEmail?.trim() ? ` as ${authEmail.trim()}` : ""}.`
+                    : liveProvider?.auth.status === "unauthenticated"
+                      ? "Not signed in."
+                      : "Sign-in status unknown."}{" "}
+                  Sign in and out from Profiles &amp; Accounts.
+                </p>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  className="shrink-0"
+                  render={
+                    <Link
+                      to="/settings"
+                      search={{ category: "accounts", item: "accounts.providers" }}
+                    />
+                  }
+                >
+                  Manage in Accounts
+                </Button>
+              </div>
             )}
             {providerRuntimeCapabilities(String(instance.driver)).instanceInventory && (
               <ProviderInventorySection instanceId={instanceId} />
