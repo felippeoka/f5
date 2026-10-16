@@ -1,161 +1,44 @@
-# Release Checklist
+# Releasing F5
 
-This document covers how to run desktop releases from one tag, first without signing, then with signing.
+Every release includes macOS arm64/x64 DMG + ZIP, Windows x64 NSIS, Linux x64 AppImage, and all five CLI archives (darwin-arm64, linux-x64/arm64, win32-x64/arm64). Never publish desktop-only: `f5 install` and `f5 update` use the stable release's `f5-cli-release.json`.
 
-## What the workflow does
+## One-time maintainer setup
 
-- Trigger: push tag matching `v*.*.*`.
-- Runs quality gates first: lint, typecheck, test.
-- Builds four artifacts in parallel:
-  - macOS `arm64` DMG
-  - macOS `x64` DMG
-  - Linux `x64` AppImage
-  - Windows `x64` NSIS installer
-- Publishes one GitHub Release with all produced files.
-  - Versions with a suffix after `X.Y.Z` (for example `1.2.3-alpha.1`) are published as GitHub prereleases.
-  - Only plain `X.Y.Z` releases are marked as the repository's latest release.
-- Includes Electron auto-update metadata (for example `latest*.yml` and `*.blockmap`) in release assets.
-- Publishes the CLI package (`apps/server`, npm package `t3`) with OIDC trusted publishing.
-- Signing is optional and auto-detected per platform from secrets.
+Create the `release` environment, allow deployment refs `v*` and `main`, and require reviewer `lopes-felipe`. Store Developer ID Application `.p12` credentials as `CSC_LINK` (base64 or certificate URL) and `CSC_KEY_PASSWORD`. Store the App Store Connect `.p8` key contents as `APPLE_API_KEY`, plus `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`. Signed macOS builds fail closed when any credential is absent. The workflow writes the key into the runner's temporary directory.
 
-## Desktop auto-update notes
+Optional Windows signing secrets: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TRUSTED_SIGNING_PUBLISHER_NAME`, `AZURE_TRUSTED_SIGNING_ENDPOINT`, `AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME`, `AZURE_TRUSTED_SIGNING_ACCOUNT_NAME`. Once available, set repository variable `F5_WINDOWS_SIGNING_REQUIRED=true`; missing credentials then fail builds. Otherwise Windows artifacts are explicitly unsigned.
 
-- Runtime updater: `electron-updater` in `apps/desktop/src/main.ts`.
-- Update UX:
-  - Background checks run on startup delay + interval.
-  - No automatic download or install.
-  - The desktop UI shows a rocket update button when an update is available; click once to download, click again after download to restart/install.
-- Provider: GitHub Releases (`provider: github`) configured at build time.
-- Release notes are normalized to bounded plain text in the desktop process and shown from the
-  update control. Remote updater content is never rendered as HTML.
-- Repository slug source:
-  - `T3CODE_DESKTOP_UPDATE_REPOSITORY` (format `owner/repo`), if set.
-  - otherwise `GITHUB_REPOSITORY` from GitHub Actions.
-- Temporary private-repo auth workaround:
-  - set `T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN` (or `GH_TOKEN`) in the desktop app runtime environment.
-  - the app forwards it as an `Authorization: Bearer <token>` request header for updater HTTP calls.
-- Required release assets for updater:
-  - platform installers (`.exe`, `.dmg`, `.AppImage`, plus macOS `.zip` for Squirrel.Mac update payloads)
-  - `latest*.yml` metadata
-  - `*.blockmap` files (used for differential downloads)
-- macOS metadata note:
-  - `electron-updater` reads `latest-mac.yml` for both Intel and Apple Silicon.
-  - The workflow merges the per-arch mac manifests into one `latest-mac.yml` before publishing the GitHub Release.
+Apply a tag ruleset restricting create/update/delete of `refs/tags/v*` to admins and enable GitHub release immutability. These repository settings require maintainer setup. Prevent upstream tags entering origin: `git config remote.upstream.tagOpt --no-tags`. Never push all upstream tags.
 
-### Test auto-updates locally
+## Prepare and publish
 
-Development builds read an uncommitted `dev-app-update.yml` from `app.getAppPath()`. Copy the
-fields from a generated `app-update.yml`, point them at a disposable release feed, and start the
-desktop app normally. Do not commit this file because it may contain private feed details. The
-`T3CODE_DISABLE_AUTO_UPDATE=1` environment variable disables the updater while testing unrelated
-desktop work. Reducer and release-note normalization tests cover the state transitions without a
-live release feed.
+First public release: `v0.1.0`, rehearsed as `v0.1.0-beta.1` then `v0.1.0-beta.2`.
 
-## 0) npm OIDC trusted publishing setup (CLI)
+1. Run `node scripts/prepare-release.ts 0.1.0-beta.1` (or a higher version). It updates four manifests and the lockfile. Stable preparation moves Unreleased into a dated section; beta preparation leaves it untouched. Follow the printed commands to open a release PR.
+2. Merge and wait for a successful **CI push** run on main at the exact release SHA.
+3. Run `git tag vX.Y.Z <sha>` and `git push origin vX.Y.Z` (use `-beta.N` for beta). Only stable and beta.N tags are accepted. The version must exceed every published stable/beta version.
+4. Approve the release environment. The workflow builds, signs, notarizes, checks all hashes/manifests, and creates a **draft**. Updaters cannot see drafts. `workflow_dispatch` with `dry_run=true` on main rehearses builds with a unique dryrun version and creates no release.
+5. Smoke-test one installer per OS and both macOS architectures using the checklist below. Inspect `release-bundle`, staged dependency lock artifacts, and the draft's asset names and sizes. Changelog text is the release body; YAML never contains releaseNotes.
+6. Publish: `gh release edit <tag> --draft=false`, adding `--latest` for stable. Beta releases remain prereleases.
 
-The workflow publishes the CLI with `bun publish` from `apps/server` after bumping
-the package version to the release tag version.
+Published releases are immutable. Fix regressions with a higher patch release; never overwrite assets or enable downgrades. Existing drafts are preserved on retry for inspection. After verifying that an existing release is still a draft and saving anything needed for investigation, the maintainer can remove only that draft with `gh release delete <tag> --yes` (without `--cleanup-tag`), then rerun publication. The tag is retained. Agents do not perform this destructive operation under this repository's Git/GitHub policy.
 
-Checklist:
+Beta uses electron-updater 6.8.3's first stable-or-beta release in Atom feed order. Other suffixes are skipped. Stable users resolve `/releases/latest`.
 
-1. Confirm npm org/user owns package `t3` (or rename package first if needed).
-2. In npm package settings, configure Trusted Publisher:
-   - Provider: GitHub Actions
-   - Repository: this repo
-   - Workflow file: `.github/workflows/release.yml`
-   - Environment (if used): match your npm trusted publishing config
-3. Ensure npm account and org policies allow trusted publishing for the package.
-4. Create release tag `vX.Y.Z` and push; workflow will:
-   - set `apps/server/package.json` version to `X.Y.Z`
-   - build web + server
-   - run `bun publish --access public`
+Releases across both channels must increase globally. If a higher beta is already published, choose a stable hotfix version above that beta; a lower stable hotfix is rejected. When a beta branch is still maintained, include stable fixes in its next beta. The provider feed-order test documents why a lower stable release would otherwise hide a higher beta; that publication pattern is not permitted by this policy.
 
-## 1) Dry-run release without signing
+## Release checklist (record results in the PR)
 
-Use this first to validate the release pipeline.
+- Dry run on main produces signed/notarized desktops and five CLI archives, passes assembly, and creates no release.
+- Publish beta.1 after inspecting its exact asset set. Install without source, Node or Bun on each OS. macOS passes `codesign --verify --deep --strict`, `xcrun stapler validate`, and `spctl -a -vvv -t execute` with `Notarized Developer ID`.
+- Test import with F5 (Alpha) running: launch blocks until it quits; retry imports without changing legacy data. Regrant Screen Recording and Accessibility. Preview sign-ins may need to be repeated because cookie encryption used the old identity.
+- Run alongside upstream T3 Code on macOS/Windows; verify separate storage and independent single-instance locks. F5 must block computer use against itself (including dev).
+- Missing Git/provider CLI leaves F5 open with diagnostics.
+- Publish beta.2; check, download, restart on mac arm64/x64, Windows, and AppImage. Test confirmation cancel, window-close veto, offline check, and interrupted download. On a slow Mac, allow Squirrel staging to take more than 60 seconds: windows and agents must stay running until staging completes, with no watchdog recovery or duplicate quit. macOS native staging/handoff is uncancellable and has no timer-based recovery; native errors still allow retry. Windows and Linux retain the 60-second watchdog.
+- Launch from a mounted DMG: Move to Applications works; Not Now leaves updates disabled with an explanation in About.
+- Publish stable; beta installs update and retain beta preferences. Stable installs never see betas. Turning beta off never downgrades.
+- Verify `f5 install` and `f5 update` with the stable CLI manifest.
+- After stable publication, fetch `https://github.com/lopes-felipe/f5/releases/latest/download/latest-mac.yml`, `/f5-cli-release.json`, and one installer under the same base URL; each must return 200 and the expected version.
+- Confirm the global monotonicity check rejects a lower stable release when a higher beta exists. Automated provider tests also document that unsupported feed order.
 
-1. Confirm no signing secrets are required for this test.
-2. Create a test tag:
-   - `git tag v0.0.0-test.1`
-   - `git push origin v0.0.0-test.1`
-3. Wait for `.github/workflows/release.yml` to finish.
-4. Verify the GitHub Release contains all platform artifacts.
-5. Download each artifact and sanity-check installation on each OS.
-
-## 2) Apple signing + notarization setup (macOS)
-
-Required secrets used by the workflow:
-
-- `CSC_LINK`
-- `CSC_KEY_PASSWORD`
-- `APPLE_API_KEY`
-- `APPLE_API_KEY_ID`
-- `APPLE_API_ISSUER`
-
-Checklist:
-
-1. Apple Developer account access:
-   - Team has rights to create Developer ID certificates.
-2. Create `Developer ID Application` certificate.
-3. Export certificate + private key as `.p12` from Keychain.
-4. Base64-encode the `.p12` and store as `CSC_LINK`.
-5. Store the `.p12` export password as `CSC_KEY_PASSWORD`.
-6. In App Store Connect, create an API key (Team key).
-7. Add API key values:
-   - `APPLE_API_KEY`: contents of the downloaded `.p8`
-   - `APPLE_API_KEY_ID`: Key ID
-   - `APPLE_API_ISSUER`: Issuer ID
-8. Re-run a tag release and confirm macOS artifacts are signed/notarized.
-
-Notes:
-
-- `APPLE_API_KEY` is stored as raw key text in secrets.
-- The workflow writes it to a temporary `AuthKey_<id>.p8` file at runtime.
-
-## 3) Azure Trusted Signing setup (Windows)
-
-Required secrets used by the workflow:
-
-- `AZURE_TENANT_ID`
-- `AZURE_CLIENT_ID`
-- `AZURE_CLIENT_SECRET`
-- `AZURE_TRUSTED_SIGNING_ENDPOINT`
-- `AZURE_TRUSTED_SIGNING_ACCOUNT_NAME`
-- `AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME`
-- `AZURE_TRUSTED_SIGNING_PUBLISHER_NAME`
-
-Checklist:
-
-1. Create Azure Trusted Signing account and certificate profile.
-2. Record ATS values:
-   - Endpoint
-   - Account name
-   - Certificate profile name
-   - Publisher name
-3. Create/choose an Entra app registration (service principal).
-4. Grant service principal permissions required by Trusted Signing.
-5. Create a client secret for the service principal.
-6. Add Azure secrets listed above in GitHub Actions secrets.
-7. Re-run a tag release and confirm Windows installer is signed.
-
-## 4) Ongoing release checklist
-
-1. Ensure `main` is green in CI.
-2. Bump app version as needed.
-3. Create release tag: `vX.Y.Z`.
-4. Push tag.
-5. Verify workflow steps:
-   - preflight passes
-   - all matrix builds pass
-   - release job uploads expected files
-6. Smoke test downloaded artifacts.
-
-## 5) Troubleshooting
-
-- macOS build unsigned when expected signed:
-  - Check all Apple secrets are populated and non-empty.
-- Windows build unsigned when expected signed:
-  - Check all Azure ATS and auth secrets are populated and non-empty.
-- Build fails with signing error:
-  - Retry with secrets removed to confirm unsigned path still works.
-  - Re-check certificate/profile names and tenant/client credentials.
+Apple credentials, the release environment, and tag ruleset are prerequisites for publication. Local tests cannot substitute for the signed multi-OS rehearsal.

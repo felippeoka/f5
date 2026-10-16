@@ -80,7 +80,7 @@ export function normalizeDesktopUpdateReleaseNotes(value: unknown): string | nul
     .replaceAll(">", "›")
     .split("\n")
     .map((line) => line.trim().replace(/\s+/g, " "))
-    .filter(Boolean)
+    .filter((line) => line.length > 0 && line !== "Installation and upgrade instructions")
     .join("\n")
     .trim();
 

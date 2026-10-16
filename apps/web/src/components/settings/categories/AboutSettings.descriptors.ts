@@ -2,6 +2,22 @@ import type { SettingsItemDescriptor } from "../settingsSearch";
 
 export const ABOUT_SETTINGS_DESCRIPTORS = [
   {
+    id: "about.updates",
+    category: "about",
+    label: "Updates",
+    description: "Check, download and install F5 updates.",
+    keywords: ["update", "restart", "release"],
+    targetSelector: '[data-settings-search-target="about.updates"]',
+  },
+  {
+    id: "about.betaUpdates",
+    category: "about",
+    label: "Beta updates",
+    description: "Receive pre-release builds.",
+    keywords: ["beta", "channel", "prerelease"],
+    targetSelector: '[data-settings-search-target="about.betaUpdates"]',
+  },
+  {
     id: "about.version",
     category: "about",
     label: "Application version",

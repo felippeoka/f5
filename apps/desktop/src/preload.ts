@@ -15,6 +15,8 @@ const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
+const UPDATE_CHECK_CHANNEL = "desktop:update-check";
+const UPDATE_SET_CHANNEL_CHANNEL = "desktop:update-set-channel";
 const PREVIEW_GET_CONFIG_CHANNEL = "desktop-preview:get-config";
 const PREVIEW_CREATE_TAB_CHANNEL = "desktop-preview:create-tab";
 const PREVIEW_CLOSE_TAB_CHANNEL = "desktop-preview:close-tab";
@@ -134,6 +136,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.removeListener(MENU_ACTION_CHANNEL, wrappedListener);
     };
   },
+  checkForUpdates: () => ipcRenderer.invoke(UPDATE_CHECK_CHANNEL),
+  setUpdateChannel: (channel) => ipcRenderer.invoke(UPDATE_SET_CHANNEL_CHANNEL, channel),
   getUpdateState: () => ipcRenderer.invoke(UPDATE_GET_STATE_CHANNEL),
   downloadUpdate: () => ipcRenderer.invoke(UPDATE_DOWNLOAD_CHANNEL),
   installUpdate: () => ipcRenderer.invoke(UPDATE_INSTALL_CHANNEL),

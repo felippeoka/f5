@@ -406,6 +406,8 @@ export interface ContextMenuItem<T extends string = string> {
   destructive?: boolean;
 }
 
+export type DesktopUpdateChannel = "stable" | "beta";
+
 export type DesktopUpdateStatus =
   | "disabled"
   | "idle"
@@ -500,6 +502,7 @@ export interface DesktopRuntimeInfo {
 }
 
 export interface DesktopUpdateState {
+  channel: DesktopUpdateChannel;
   enabled: boolean;
   status: DesktopUpdateStatus;
   currentVersion: string;
@@ -559,6 +562,8 @@ export interface DesktopBridge {
   openExternal: (url: string) => Promise<boolean>;
   openThreadInNewWindow?: (threadId: string) => Promise<boolean>;
   onMenuAction: (listener: (action: string) => void) => () => void;
+  checkForUpdates?: () => Promise<DesktopUpdateActionResult>;
+  setUpdateChannel?: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateActionResult>;
   getUpdateState: () => Promise<DesktopUpdateState>;
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;

@@ -6,6 +6,7 @@ export const COMPUTER_APP_TIERS = {
   darwin: {
     blocked: [
       "com.t3tools.t3code*",
+      "io.github.lopesfelipe.f5*",
       "com.github.Electron",
       "com.apple.SecurityAgent",
       "com.apple.loginwindow",

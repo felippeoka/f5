@@ -1,13 +1,15 @@
 #!/usr/bin/env node
+import { withoutSigningCredentials } from "./lib/signing-environment.ts";
 
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync as requireReadLock } from "node:fs";
 import { join } from "node:path";
 
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
+import { verifyStagedLockfile } from "./verify-staged-lockfile.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
@@ -456,6 +458,7 @@ function resolveGitHubPublishConfig():
       readonly owner: string;
       readonly repo: string;
       readonly releaseType: "release";
+      readonly channel: string;
     }
   | undefined {
   const rawRepo =
@@ -472,6 +475,7 @@ function resolveGitHubPublishConfig():
     owner,
     repo,
     releaseType: "release",
+    channel: process.env.T3CODE_DESKTOP_UPDATE_CHANNEL || "latest",
   };
 }
 
@@ -482,9 +486,9 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   signed: boolean,
 ) {
   const buildConfig: Record<string, unknown> = {
-    appId: "com.t3tools.t3code",
+    appId: "io.github.lopesfelipe.f5",
     productName,
-    artifactName: "T3-Code-${version}-${arch}.${ext}",
+    artifactName: "F5-${version}-${arch}.${ext}",
     asarUnpack: DESKTOP_ASAR_UNPACK,
     ...(platform !== "linux"
       ? {
@@ -502,10 +506,37 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   }
 
   if (platform === "mac") {
+    if (
+      signed &&
+      [
+        "CSC_LINK",
+        "CSC_KEY_PASSWORD",
+        "APPLE_API_KEY",
+        "APPLE_API_KEY_ID",
+        "APPLE_API_ISSUER",
+      ].some((key) => !process.env[key])
+    ) {
+      return yield* new BuildScriptError({
+        message: "Signed macOS builds require all Apple signing and notarization credentials.",
+      });
+    }
     buildConfig.mac = {
       target: target === "dmg" ? [target, "zip"] : [target],
       icon: "icon.icns",
       category: "public.app-category.developer-tools",
+      extendInfo: {
+        NSAppleEventsUsageDescription:
+          "F5 uses Apple Events to inspect applications for computer use.",
+      },
+      ...(signed
+        ? {
+            hardenedRuntime: true,
+            gatekeeperAssess: false,
+            notarize: true,
+            entitlements: "apps/desktop/resources/entitlements.mac.plist",
+            entitlementsInherit: "apps/desktop/resources/entitlements.mac.plist",
+          }
+        : {}),
       binaries: ["Contents/Resources/native/f5-computer-helper"],
     };
   }
@@ -527,6 +558,13 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       winConfig.azureSignOptions = yield* AzureTrustedSigningOptionsConfig;
     }
     buildConfig.win = winConfig;
+    buildConfig.nsis = {
+      oneClick: true,
+      perMachine: false,
+      allowElevation: false,
+      createStartMenuShortcut: true,
+      createDesktopShortcut: false,
+    };
   }
 
   return buildConfig;
@@ -622,6 +660,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     yield* runCommand(
       ChildProcess.make({
         cwd: repoRoot,
+        env: withoutSigningCredentials(process.env),
+        extendEnv: false,
         ...commandOutputOptions(options.verbose),
         // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
         shell: process.platform === "win32",
@@ -691,18 +731,18 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(stageResourcesDir, path.join(stageAppDir, "apps/desktop/prod-resources"));
 
   const stagePackageJson: StagePackageJson = {
-    name: "t3-code-desktop",
+    name: "f5-desktop",
     version: appVersion,
     buildVersion: appVersion,
     t3codeCommitHash: commitHash,
     private: true,
-    description: "T3 Code desktop build",
-    author: "T3 Tools",
+    description: "F5 desktop app",
+    author: "Felipe Lopes",
     main: "apps/desktop/dist-electron/main.js",
     build: yield* createBuildConfig(
       options.platform,
       options.target,
-      desktopPackageJson.productName ?? "T3 Code",
+      desktopPackageJson.productName ?? "F5",
       options.signed,
     ),
     dependencies: {
@@ -726,10 +766,27 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* runCommand(
     ChildProcess.make({
       cwd: stageAppDir,
+      env: withoutSigningCredentials(process.env),
+      extendEnv: false,
       ...commandOutputOptions(options.verbose),
       // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
       shell: process.platform === "win32",
     })`bun install --production`,
+  );
+
+  yield* Effect.try({
+    try: () =>
+      verifyStagedLockfile(
+        requireReadLock(path.join(repoRoot, "bun.lock"), "utf8"),
+        requireReadLock(path.join(stageAppDir, "bun.lock"), "utf8"),
+      ),
+    catch: (error) =>
+      new BuildScriptError({ message: `Staged dependency audit failed: ${String(error)}` }),
+  });
+  yield* fs.makeDirectory(options.outputDir, { recursive: true });
+  yield* fs.copyFile(
+    path.join(stageAppDir, "bun.lock"),
+    path.join(options.outputDir, `staged-${options.platform}-${options.arch}.lock`),
   );
 
   const buildEnv: NodeJS.ProcessEnv = {

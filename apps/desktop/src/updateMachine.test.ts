@@ -21,17 +21,14 @@ const runtimeInfo = {
 
 describe("updateMachine", () => {
   it("clears transient errors when a check starts", () => {
-    const state = reduceDesktopUpdateStateOnCheckStart(
-      {
-        ...createInitialDesktopUpdateState("1.0.0", runtimeInfo),
-        enabled: true,
-        status: "error",
-        message: "network",
-        errorContext: "check",
-        canRetry: true,
-      },
-      "2026-03-04T00:00:00.000Z",
-    );
+    const state = reduceDesktopUpdateStateOnCheckStart({
+      ...createInitialDesktopUpdateState("1.0.0", runtimeInfo),
+      enabled: true,
+      status: "error",
+      message: "network",
+      errorContext: "check",
+      canRetry: true,
+    });
 
     expect(state.status).toBe("checking");
     expect(state.message).toBeNull();

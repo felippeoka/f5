@@ -7,6 +7,7 @@ export function createInitialDesktopUpdateState(
   runtimeInfo: DesktopRuntimeInfo,
 ): DesktopUpdateState {
   return {
+    channel: "stable",
     enabled: false,
     status: "disabled",
     currentVersion,
@@ -26,12 +27,10 @@ export function createInitialDesktopUpdateState(
 
 export function reduceDesktopUpdateStateOnCheckStart(
   state: DesktopUpdateState,
-  checkedAt: string,
 ): DesktopUpdateState {
   return {
     ...state,
     status: "checking",
-    checkedAt,
     message: null,
     downloadPercent: null,
     errorContext: null,

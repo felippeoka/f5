@@ -53,3 +53,11 @@ describe("normalizeDesktopUpdateReleaseNotes", () => {
     expect(noteReads).toBeLessThanOrEqual(64);
   });
 });
+
+it("omits the release installation footer from in-app notes", () => {
+  expect(
+    normalizeDesktopUpdateReleaseNotes(
+      "Fixed a bug.\n\n[Installation and upgrade instructions](https://github.com/lopes-felipe/f5/blob/main/docs/install.md)",
+    ),
+  ).toBe("Fixed a bug.");
+});
