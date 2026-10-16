@@ -183,7 +183,10 @@ Codex, whose assistant item completion includes the full final text. Claude and
 other drivers retain their existing delivery behavior. Batches flush at 40 ms or
 2 KiB, before other events on that thread, on controls, and during scope close.
 Retries preserve the first event’s command ID and immutable text. After three
-failed attempts the batch remains failed rather than mixing in new text.
+failed attempts, or a permanent rejection, the batch is dropped and logged. Later
+deltas for that message wait for its authoritative completion so the stored text
+stays a valid prefix. Other events and other threads continue. Set
+`F5_COALESCE_STREAMING_DELTAS=false` before startup to disable batching independently.
 
 SQLite helper ownership (R12), non-handling projector skipping (P1b), and pragma
 tuning (P3) remain measurement-gated. `synchronous = NORMAL` is not enabled.
@@ -232,7 +235,7 @@ completion recovery, backup ownership/restore/storage limits, incremental skill
 scans and deleted roots, migrated summaries, and stale detail-query cancellation.
 The changed-feature browser batch passes all 36 tests.
 
-Full verification is not green in this environment: the full test command was
+Initial full verification was not green in this environment: the full test command was
 attempted, and a continuing workspace run exposed process-birth identity failures
 in upstream-ledger and launcher tests, a workspace-watch race test, and the passive
 Codex reconciliation test. A clean server run passed 4,116 tests with those five
@@ -262,3 +265,18 @@ including an empty provider installation. This verifies its early maintenance
 route; it does not replace the release archive smoke with the pinned Node 26.10.0
 runtime and packaged native dependencies. The archive smoke now also requests a
 backup with a clean PATH.
+
+PR review follow-up adds regression coverage for exhausted/permanent batches,
+legacy unregistered attachments, previously restored registry paths, settings
+credential redaction/encryption, failed scheduled exports, interrupted partials,
+clock rollback, failed skill refreshes and normally ended watch streams. Scheduled
+results are persisted and shown in Storage settings. The passive reconciliation
+CI failure was traced to a test runtime missing the newly required skill-sync
+service, and that fixture is now corrected.
+
+Review follow-up verification passes formatting, formatting check, lint (26 existing
+warnings), all eight typecheck tasks, build, Bun HTTP backup export, 180 focused
+server tests, all 125 WebSocket tests and 40 browser tests. The server performance
+smoke also passes (stream per-delta p95 about 75 ms, 143 event rows). A new full-suite
+attempt still stops at the two upstream-port migration process-identity failures
+on this host. No new full interactive soak or paid provider run was performed.

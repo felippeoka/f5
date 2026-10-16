@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { mkdtemp, mkdir, writeFile, rm, readdir } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, readdir, readFile, stat, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createReadStream } from "node:fs";
@@ -11,7 +11,11 @@ import { parseBackupArchive, resolveBackupRestoreLimits } from "./backupArchive.
 import { applyPendingRestore, makeBackupService } from "./backupService.ts";
 import { backupMaintenanceEffect, runBackupMaintenance } from "./backupMaintenance.ts";
 import { withAttachmentRetentionLease } from "./storage/attachmentRetention.ts";
-import { listScheduledBackups, runScheduledBackup } from "./storage/scheduledBackups.ts";
+import {
+  listScheduledBackups,
+  readScheduledBackupStatus,
+  runScheduledBackup,
+} from "./storage/scheduledBackups.ts";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -51,6 +55,9 @@ async function fixture() {
   );
   db.prepare("INSERT INTO attachment_cleanup_jobs VALUES ('unowned', ?)").run(
     join(config.attachmentsDir, "other", "owned.txt"),
+  );
+  db.prepare("INSERT INTO attachments VALUES ('unowned-file', ?, 'deleting')").run(
+    join(config.attachmentsDir, "unowned.txt"),
   );
   return { directory, config, db };
 }
@@ -193,7 +200,11 @@ describe("backup maintenance process", () => {
       makeBackupService.pipe(Effect.provideService(ServerConfig, config)),
     );
     await expect(Effect.runPromise(runScheduledBackup(backup, backups))).rejects.toBeDefined();
-    expect(await readdir(backups)).toEqual([previous]);
+    expect(await readdir(backups)).toEqual(expect.arrayContaining([previous, "status.json"]));
+    expect(await readScheduledBackupStatus(backups)).toMatchObject({
+      lastSuccessAt: new Date(Number(previous.split("-")[1])).toISOString(),
+      lastError: expect.any(String),
+    });
   });
 
   it("daily retention keeps seven successful exports and ignores unrelated files", async () => {
@@ -223,4 +234,147 @@ describe("backup maintenance process", () => {
     await Effect.runPromise(runScheduledBackup(backup, backups, now + 1000));
     expect(await readdir(backups)).toEqual(before);
   });
+});
+
+it("preserves pre-registry attachment files referenced by an upgraded snapshot", async () => {
+  const { directory, config, db } = await fixture();
+  await writeFile(join(config.attachmentsDir, "legacy.txt"), "legacy evidence");
+  db.exec("CREATE TABLE projection_thread_messages(attachments_json TEXT)");
+  db.prepare("INSERT INTO projection_thread_messages VALUES (?)").run(
+    JSON.stringify([{ id: "legacy", name: "legacy.txt" }]),
+  );
+  db.close();
+  const stagingDir = join(directory, "legacy-export");
+  await mkdir(stagingDir);
+  const manifest = await runBackupMaintenance({ config, stagingDir, includeSecrets: false });
+  expect(manifest.files.map((entry) => entry.path)).toContain("attachments/legacy.txt");
+  const parsed = await parseBackupArchive({
+    source: createReadStream(join(stagingDir, "backup.f5backup")),
+    stagingDir: join(directory, "legacy-read"),
+    limits: resolveBackupRestoreLimits(),
+  });
+  expect(await readFile(join(parsed.payloadDir, "attachments/legacy.txt"), "utf8")).toBe(
+    "legacy evidence",
+  );
+});
+
+it("repairs stale cross-directory registry paths only in the exported snapshot", async () => {
+  const { directory, config, db } = await fixture();
+  const foreign = join(directory, "old-profile", "attachments", "owned.txt");
+  db.prepare("UPDATE attachments SET final_path=? WHERE attachment_id='owned'").run(foreign);
+  const stagingDir = join(directory, "rebound-export");
+  await mkdir(stagingDir);
+  try {
+    await runBackupMaintenance({ config, stagingDir, includeSecrets: false });
+    const snapshot = new DatabaseSync(join(stagingDir, "database.sqlite"), { readOnly: true });
+    try {
+      expect(
+        snapshot.prepare("SELECT final_path FROM attachments WHERE attachment_id='owned'").get(),
+      ).toEqual({ final_path: join(config.attachmentsDir, "owned.txt") });
+    } finally {
+      snapshot.close();
+    }
+    expect(
+      db.prepare("SELECT final_path FROM attachments WHERE attachment_id='owned'").get(),
+    ).toEqual({ final_path: foreign });
+  } finally {
+    db.close();
+  }
+});
+
+it.each([false, true])(
+  "redacts settings credentials or encrypts the settings entry (includeSecrets=%s)",
+  async (includeSecrets) => {
+    const { directory, config, db } = await fixture();
+    db.close();
+    const credentials = {
+      providers: { opencode: { serverPassword: "global-private-password" } },
+      providerInstances: {
+        instance: {
+          driver: "opencode",
+          config: { serverPassword: "instance-private-password" },
+          environment: [
+            { name: "API_KEY", value: "environment-private-key", sensitive: true },
+            { name: "REGION", value: "eu" },
+          ],
+        },
+      },
+    };
+    await writeFile(config.settingsPath!, JSON.stringify(credentials));
+    const stagingDir = join(directory, "credential-export");
+    await mkdir(stagingDir);
+    const password = "a-strong-backup-password";
+    const manifest = await runBackupMaintenance({
+      config,
+      stagingDir,
+      includeSecrets,
+      ...(includeSecrets ? { password } : {}),
+    });
+    expect(manifest.files.find((entry) => entry.path === "settings.json")?.encrypted).toBe(
+      includeSecrets,
+    );
+    const parsed = await parseBackupArchive({
+      source: createReadStream(join(stagingDir, "backup.f5backup")),
+      stagingDir: join(directory, "credentials-read"),
+      limits: resolveBackupRestoreLimits(),
+      ...(includeSecrets ? { password } : {}),
+    });
+    const text = await readFile(join(parsed.payloadDir, "settings.json"), "utf8");
+    for (const secret of [
+      "global-private-password",
+      "instance-private-password",
+      "environment-private-key",
+    ])
+      expect(text.includes(secret)).toBe(includeSecrets);
+    expect(text).toContain('"eu"');
+  },
+);
+
+it("persists an actionable scheduled failure and keeps the last successful backup", async () => {
+  const { directory, config, db } = await fixture();
+  db.close();
+  const backups = join(directory, "daily-failure");
+  const service = await Effect.runPromise(
+    makeBackupService.pipe(Effect.provideService(ServerConfig, config)),
+  );
+  const now = Date.now();
+  await Effect.runPromise(runScheduledBackup(service, backups, now));
+  await rm(join(config.attachmentsDir, "owned.txt"));
+  await expect(
+    Effect.runPromise(runScheduledBackup(service, backups, now + 86400001)),
+  ).rejects.toThrow("owned");
+  expect(await listScheduledBackups(backups)).toHaveLength(1);
+  expect(await readScheduledBackupStatus(backups)).toMatchObject({
+    lastSuccessAt: new Date(now).toISOString(),
+    lastAttemptAt: new Date(now + 86400001).toISOString(),
+    lastError: expect.stringContaining("owned"),
+  });
+});
+
+it("sweeps interrupted partials, restores directory permissions, and handles clock rollback", async () => {
+  const { directory, config, db } = await fixture();
+  db.close();
+  const backups = join(directory, "daily-recovery");
+  await mkdir(backups);
+  await chmod(backups, 0o755);
+  const now = Date.now(),
+    future = now + 86400000;
+  const suffix = "00000000-0000-0000-0000-000000000000";
+  for (let i = 0; i < 8; i++)
+    await writeFile(join(backups, `daily-${future + i}-${suffix}.f5backup`), "future backup");
+  const partial = `daily-${now}-${suffix}.f5backup.partial`;
+  await writeFile(join(backups, partial), "interrupted export");
+  await writeFile(join(backups, "manual.partial"), "keep");
+  const service = await Effect.runPromise(
+    makeBackupService.pipe(Effect.provideService(ServerConfig, config)),
+  );
+  await Effect.runPromise(runScheduledBackup(service, backups, now));
+  const names = await readdir(backups);
+  expect(names).not.toContain(partial);
+  expect(names).toContain("manual.partial");
+  expect((await listScheduledBackups(backups)).some((entry) => entry.createdAt === now)).toBe(true);
+  expect(await listScheduledBackups(backups)).toHaveLength(7);
+  if (process.platform !== "win32") expect((await stat(backups)).mode & 0o777).toBe(0o700);
+  await Effect.runPromise(runScheduledBackup(service, backups, now + 1000));
+  expect(await readdir(backups)).toEqual(names);
 });

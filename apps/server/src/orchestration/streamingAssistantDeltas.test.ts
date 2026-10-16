@@ -64,7 +64,7 @@ describe("streaming delta batches", () => {
     ]);
   });
 
-  it("bounds retry attempts and never merges new text into an exhausted batch", async () => {
+  it("drops exhausted batches and suppresses later suffixes until authoritative completion", async () => {
     let attempts = 0;
     const buffer = makeStreamingAssistantDeltas(
       () =>
@@ -75,9 +75,14 @@ describe("streaming delta batches", () => {
       () => {},
     );
     await Effect.runPromise(buffer.append(command("first", "hello")));
-    await expect(Effect.runPromise(buffer.flushAll())).rejects.toBeDefined();
-    await expect(Effect.runPromise(buffer.append(command("later", "world")))).rejects.toBeDefined();
+    await Effect.runPromise(buffer.flushAll());
+    await Effect.runPromise(buffer.append(command("later", "world")));
+    await Effect.runPromise(buffer.flushThread(threadId));
     expect(attempts).toBe(3);
+    buffer.forgetMessage(threadId, messageId);
+    await Effect.runPromise(buffer.append(command("after-completion", "new message")));
+    await Effect.runPromise(buffer.flushAll());
+    expect(attempts).toBe(6);
   });
 
   it("flushes at 2 KiB of UTF-8 and ignores a stale timer after completion/interrupt", async () => {
@@ -104,4 +109,25 @@ describe("streaming delta batches", () => {
     await Effect.runPromise(buffer.flushAll());
     expect(seen[2]?.delta).toBe("b");
   });
+});
+
+it("does not retry permanent rejections and flushes other threads after one fails", async () => {
+  const seen: string[] = [];
+  const buffer = makeStreamingAssistantDeltas(
+    (batch) =>
+      Effect.suspend(() => {
+        seen.push(batch.delta);
+        return batch.threadId === threadId ? Effect.fail("permanent") : Effect.void;
+      }),
+    () => {},
+    () => true,
+  );
+  await Effect.runPromise(buffer.append(command("bad", "bad")));
+  await Effect.runPromise(
+    buffer.append({ ...command("good", "good"), threadId: ThreadId.makeUnsafe("other") }),
+  );
+  await Effect.runPromise(buffer.flushAll());
+  expect(seen).toEqual(["bad", "good"]);
+  await Effect.runPromise(buffer.flushThread(threadId));
+  expect(seen).toHaveLength(2);
 });

@@ -1,8 +1,10 @@
+import { ProjectionProjectRepository } from "./persistence/Services/ProjectionProjects";
+import { ProjectionProjectRepositoryLive } from "./persistence/Layers/ProjectionProjects";
 import {
   ProjectSkillSyncService,
   type ProjectSkillSyncServiceShape,
 } from "./orchestration/Services/ProjectSkillSyncService.ts";
-import { startScheduledBackups } from "./storage/scheduledBackups.ts";
+import { startScheduledBackups, readScheduledBackupStatus } from "./storage/scheduledBackups.ts";
 import { rpcBusyTotal } from "./observability/Metrics";
 import { rpcLane, RpcAdmission } from "@t3tools/shared/rpcScheduling";
 import { writeWorkspaceFile } from "./WorkspaceFileWriter";
@@ -939,6 +941,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const attachmentUploads = yield* makeAttachmentUploads(serverConfig.attachmentsDir);
   const nextTurnQueueStore = yield* NextTurnQueueStore;
   const globalSearch = yield* makeGlobalSearch;
+  const projectionProjects = yield* Effect.service(ProjectionProjectRepository).pipe(
+    Effect.provide(ProjectionProjectRepositoryLive),
+  );
   const backupService = yield* makeBackupService;
 
   yield* keybindingsManager.syncDefaultKeybindingsOnStartup.pipe(
@@ -5320,17 +5325,22 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.serverGetProjectSettings: {
         const { projectId } = stripRequestTag(request.body);
-        const { orchestrationEngine } = yield* awaitOrchestrationRuntimeForRoute;
-        const model = yield* orchestrationEngine.getReadModel();
-        const project = model.projects.find((p) => p.id === projectId && p.deletedAt === null);
-        if (!project) return yield* new RouteRequestError({ message: "Project not found." });
+        const projected = yield* projectionProjects.getById({ projectId });
+        if (Option.isNone(projected) || projected.value.deletedAt !== null)
+          return yield* new RouteRequestError({ message: "Project not found." });
+        const project = { ...projected.value, id: projected.value.projectId };
         const global = yield* serverSettings.getSettings.pipe(
           Effect.map(redactServerSettingsForClient),
         );
-        const { projectSkillSyncService } = yield* awaitOrchestrationRuntimeForRoute;
+        const ready = yield* Deferred.isDone(orchestrationRuntime);
+        const runtime = ready
+          ? yield* Deferred.await(orchestrationRuntime).pipe(Effect.option)
+          : Option.none();
         return {
           ...(yield* readProjectSettings(global, project)),
-          skillScanWarnings: yield* projectSkillSyncService.getWarnings(projectId),
+          skillScanWarnings: Option.isSome(runtime)
+            ? yield* runtime.value.projectSkillSyncService.getWarnings(projectId)
+            : [],
         };
       }
       case WS_METHODS.serverMigrateClientSetting:
@@ -5575,7 +5585,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             (error) => new RouteRequestError({ message: `Cannot read audit: ${error.message}` }),
           ),
         );
-        return { entries };
+        const scheduledBackupStatus = yield* Effect.tryPromise({
+          try: () => readScheduledBackupStatus(path.join(serverConfig.stateDir, "backups")),
+          catch: (cause) =>
+            new RouteRequestError({ message: `Cannot read backup status: ${String(cause)}` }),
+        });
+        return { entries, scheduledBackupStatus };
       }
 
       case WS_METHODS.worktreeSetupSubscribe: {

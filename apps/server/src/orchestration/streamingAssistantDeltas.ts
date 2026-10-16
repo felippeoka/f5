@@ -20,15 +20,26 @@ const FLUSH_MS = 40;
 export function makeStreamingAssistantDeltas<E>(
   dispatch: (command: AssistantDeltaCommand) => Effect.Effect<unknown, E>,
   enqueueFlush: (threadId: ThreadId, messageId: MessageId, commandId: CommandId) => void,
+  isPermanentRejection: (cause: Cause.Cause<E>) => boolean = () => false,
 ) {
   interface Batch {
     command: AssistantDeltaCommand;
     bytes: number;
     timer: ReturnType<typeof setTimeout> | undefined;
     frozen: boolean;
-    failure?: Cause.Cause<E>;
   }
   const threads = new Map<ThreadId, Map<MessageId, Batch>>();
+  // Once a prefix was dropped, later text must wait for the authoritative
+  // completion. Persisting a suffix alone would prevent prefix-based recovery.
+  const awaitingCompletion = new Map<ThreadId, Set<MessageId>>();
+  const forgetMessage = (threadId: ThreadId, messageId: MessageId) => {
+    const messages = awaitingCompletion.get(threadId);
+    messages?.delete(messageId);
+    if (messages?.size === 0) awaitingCompletion.delete(threadId);
+  };
+  const forgetThread = (threadId: ThreadId) => {
+    awaitingCompletion.delete(threadId);
+  };
   const clearTimer = (batch: Batch) => {
     if (batch.timer !== undefined) clearTimeout(batch.timer);
     batch.timer = undefined;
@@ -43,7 +54,6 @@ export function makeStreamingAssistantDeltas<E>(
       const batch = messages?.get(messageId);
       if (!batch || (expectedId !== undefined && batch.command.commandId !== expectedId)) return;
       clearTimer(batch);
-      if (batch.failure) return yield* Effect.failCause(batch.failure);
       // Freeze once. Neither retries nor newer deltas can modify this payload/id.
       batch.frozen = true;
       const command = Object.freeze({ ...batch.command });
@@ -55,19 +65,34 @@ export function makeStreamingAssistantDeltas<E>(
           return;
         }
         if (Cause.hasInterruptsOnly(result.cause)) return yield* Effect.failCause(result.cause);
-        if (attempt === 2) {
-          batch.failure = result.cause;
-          return yield* Effect.failCause(result.cause);
+        if (attempt === 2 || isPermanentRejection(result.cause)) {
+          messages!.delete(messageId);
+          if (messages!.size === 0) threads.delete(threadId);
+          const waiting = awaitingCompletion.get(threadId) ?? new Set<MessageId>();
+          waiting.add(messageId);
+          awaitingCompletion.set(threadId, waiting);
+          yield* Effect.logWarning(
+            "dropping rejected streaming batch; native completion can recover assistant text",
+            {
+              threadId,
+              messageId,
+              commandId: command.commandId,
+              cause: Cause.pretty(result.cause),
+            },
+          );
+          return;
         }
         yield* Effect.sleep(10 * 2 ** attempt);
       }
     });
   const append = (command: AssistantDeltaCommand): Effect.Effect<void, E> =>
     Effect.gen(function* () {
+      if (awaitingCompletion.get(command.threadId)?.has(command.messageId)) return;
       let messages = threads.get(command.threadId);
       let batch = messages?.get(command.messageId);
       if (batch?.frozen) {
         yield* flush(command.threadId, command.messageId);
+        if (awaitingCompletion.get(command.threadId)?.has(command.messageId)) return;
         batch = undefined;
         messages = threads.get(command.threadId);
       }
@@ -98,10 +123,25 @@ export function makeStreamingAssistantDeltas<E>(
     Effect.forEach([...(threads.get(threadId)?.keys() ?? [])], (id) => flush(threadId, id), {
       discard: true,
     });
-  const flushAll = () => Effect.forEach([...threads.keys()], flushThread, { discard: true });
+  const flushAll = () =>
+    Effect.forEach(
+      [...threads.keys()],
+      (threadId) =>
+        flushThread(threadId).pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.failCause(cause)
+              : Effect.logWarning("streaming flush failed", {
+                  threadId,
+                  cause: Cause.pretty(cause),
+                }),
+          ),
+        ),
+      { discard: true },
+    );
   const cancelTimers = () => {
     for (const messages of threads.values())
       for (const batch of messages.values()) clearTimer(batch);
   };
-  return { append, flush, flushThread, flushAll, cancelTimers };
+  return { append, flush, flushThread, flushAll, cancelTimers, forgetMessage, forgetThread };
 }

@@ -29,6 +29,7 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 
 ### Server performance and storage
 
+- Fix review findings in streaming retry recovery, legacy attachment backup coverage, settings credential redaction, scheduled-backup diagnostics and cleanup, skill watcher recovery, and workflow detail invalidation. Add an independent streaming-batching startup switch.
 - Coalesce Codex streaming assistant and reasoning deltas with ordered, idempotent batches and full-text completion recovery.
 - Export backups through an owned maintenance process while normal writes continue; protect snapshot attachments from cleanup. Add opt-in daily backups retaining seven successful archives, with credentials excluded. Preserve attachment ownership when restoring into a different state directory.
 - Refresh only dirty projects’ skills, preserve unchanged watchers, and show scan diagnostics in project settings.

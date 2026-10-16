@@ -77,7 +77,8 @@ cannot set either one: automation that removes worktrees or pulls branches is al
 ## Backups
 
 Settings → Storage → **Export backup** creates a consistent SQLite snapshot,
-checks its integrity, and archives settings plus snapshot-owned attachments in a
+checks its integrity, and archives settings, snapshot-owned attachments and older
+unregistered attachment files in a
 separate maintenance process. You can keep using F5 while it runs. Attachment
 cleanup waits until the snapshot’s files have been copied; ordinary thread writes
 do not take that retention lease. Cancelling export terminates the helper before
@@ -97,3 +98,12 @@ control; restoration takes effect on restart.
 Restoring into a different state directory rebinds attachment registry and cleanup
 paths to that directory while retaining ownership and content hashes. Restored
 archives can be exported again without relying on files in the source profile.
+
+Daily backup status shows the last attempt, last success and any failure in Storage
+settings. Missing owned attachment errors identify the attachment and path. Known
+owned files that are missing are not silently omitted. Old restored registry paths
+are rebound only in the exported snapshot; the live database is unchanged.
+Credential-free exports redact OpenCode passwords and sensitive provider environment
+values from settings. When credential export is explicitly selected, settings and
+secret files are encrypted with the supplied password. Old interrupted daily partial
+files are removed before the next scheduled check.

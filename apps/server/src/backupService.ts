@@ -1,3 +1,5 @@
+import { redactBackupSettings } from "./backupSettings.ts";
+import { resolveBackupAttachmentPath } from "./backupAttachmentPaths.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import type { Readable, Writable } from "node:stream";
@@ -215,7 +217,8 @@ export const makeBackupService: Effect.Effect<BackupService, never, ServerConfig
                 restoreId,
                 createdAt: parsed.manifest.createdAt,
                 fileCount: parsed.manifest.files.length,
-                includesEncryptedSecrets: replaceSecrets,
+                includesEncryptedSecrets:
+                  !crossProfile && parsed.manifest.files.some((file) => file.encrypted),
                 restartRequired: true,
                 ...(parsed.manifest.source
                   ? {
@@ -420,7 +423,7 @@ export async function rebindRestoredProviderHomes(
       if (root) instance.config[key] = resolve(stateDir, "provider-homes", relative(root, value));
     }
   }
-  await atomicWriteJson(settingsPath, settings);
+  await atomicWriteJson(settingsPath, crossProfile ? redactBackupSettings(settings) : settings);
 }
 
 /** The archive owns relative attachment files; registry paths are profile-local. */
@@ -474,21 +477,17 @@ export async function rebindRestoredAttachmentPaths(
       for (const row of rows) {
         const oldPath = row.final_path.replaceAll("\\", "/");
         const ownsArchivedBytes = row.lifecycle === "ready" && Boolean(row.owned);
-        const matches: string[] = [];
-        let suffix = oldPath;
-        while (ownsArchivedBytes && suffix.length > 0) {
-          if (relativePaths.has(suffix)) matches.push(suffix);
-          const separator = suffix.indexOf("/");
-          if (separator === -1) break;
-          suffix = suffix.slice(separator + 1);
-        }
-        if (matches.length > 1) throw new Error("Backup attachment path is ambiguous.");
-        if (matches.length === 0 && ownsArchivedBytes)
-          throw new Error("Backup is missing an owned attachment.");
+        const match = ownsArchivedBytes
+          ? resolveBackupAttachmentPath(oldPath, relativePaths)
+          : undefined;
+        if (match === undefined && ownsArchivedBytes)
+          throw new Error(
+            `Backup is missing owned attachment '${row.attachment_id}' (${row.final_path}).`,
+          );
         // No bytes are exported for unowned/deleting rows. Never let a cleanup
         // job for one adopt another record's archived file through a suffix match.
         const relativePath =
-          matches[0] ??
+          match ??
           `__restore_unowned__/${createHash("sha256").update(row.attachment_id).digest("hex")}`;
         if (!ownsArchivedBytes && relativePaths.has(relativePath))
           throw new Error("Backup orphan cleanup path collides with archived evidence.");

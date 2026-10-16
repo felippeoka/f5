@@ -2558,15 +2558,17 @@ const make = Effect.gen(function* () {
     _messageId: MessageId,
     _commandId: CommandId,
   ) => {};
+  const coalescingEnabled = process.env.F5_COALESCE_STREAMING_DELTAS !== "false";
   const streamingDeltas = makeStreamingAssistantDeltas(
     (command) => orchestrationEngine.dispatch(command),
     (threadId, messageId, commandId) => enqueueAssistantDeltaFlush(threadId, messageId, commandId),
+    isPermanentDispatchRejection,
   );
   const dispatchStreamingDelta = (
     event: ProviderRuntimeEvent,
     command: Parameters<typeof streamingDeltas.append>[0],
   ) =>
-    COALESCE_STREAMING_DELTAS_DRIVERS.has(event.provider)
+    coalescingEnabled && COALESCE_STREAMING_DELTAS_DRIVERS.has(event.provider)
       ? streamingDeltas.append({
           ...command,
           commandId: providerCommandId(event, "assistant-delta-batch"),
@@ -3058,6 +3060,7 @@ const make = Effect.gen(function* () {
         ...(input.turnId ? { turnId: input.turnId } : {}),
         createdAt: input.createdAt,
       });
+      streamingDeltas.forgetMessage(input.threadId, input.messageId);
       yield* clearAssistantMessageState(
         input.messageId,
         input.turnId ? providerTurnKey(input.threadId, input.turnId) : undefined,
@@ -3893,15 +3896,29 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const coalescible =
         incomingEvent.type === "content.delta" &&
+        coalescingEnabled &&
         COALESCE_STREAMING_DELTAS_DRIVERS.has(incomingEvent.provider) &&
         ["assistant_text", "reasoning_text", "reasoning_summary_text"].includes(
           incomingEvent.payload.streamKind,
         );
-      if (!coalescible) yield* streamingDeltas.flushThread(incomingEvent.threadId);
+      if (!coalescible)
+        yield* streamingDeltas.flushThread(incomingEvent.threadId).pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.failCause(cause)
+              : Effect.logWarning("streaming flush failed before runtime event", {
+                  threadId: incomingEvent.threadId,
+                  cause: Cause.pretty(cause),
+                }),
+          ),
+        );
       let event = incomingEvent;
       const readModel = yield* orchestrationEngine.getReadModel();
       const thread = readModel.threads.find((entry) => entry.id === event.threadId);
-      if (!thread) return;
+      if (!thread) {
+        streamingDeltas.forgetThread(incomingEvent.threadId);
+        return;
+      }
       const previousLimit = thread.session?.usageLimit;
       if (
         (event.type === "runtime.error" || event.type === "turn.completed") &&

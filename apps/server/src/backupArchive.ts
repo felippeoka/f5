@@ -589,8 +589,8 @@ export async function parseBackupArchive(input: {
         if (records.some((record) => record.path === archivePath)) {
           throw new Error(`Backup contains duplicate path '${archivePath}'.`);
         }
-        if (encrypted && !archivePath.startsWith("secrets/")) {
-          throw new Error("Only secret files may be encrypted in a backup.");
+        if (encrypted && archivePath !== "settings.json" && !archivePath.startsWith("secrets/")) {
+          throw new Error("Only settings and secret files may be encrypted in a backup.");
         }
         const storedPath = `${destinationPath(payloadDir, archivePath)}${encrypted ? ".encrypted" : ""}`;
         if (rawSize + extractedBytes + size > maxTemporaryBytes) {

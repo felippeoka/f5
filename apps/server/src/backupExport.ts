@@ -1,7 +1,9 @@
+import { resolveBackupAttachmentPath } from "./backupAttachmentPaths.ts";
+import { redactBackupSettings } from "./backupSettings.ts";
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { copyFile, lstat, readFile, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { copyFile, lstat, readFile, stat, writeFile } from "node:fs/promises";
+import { relative, resolve, sep } from "node:path";
 import { version as appVersion } from "../package.json" with { type: "json" };
 import { openRuntimeSqliteDatabase } from "./persistence/runtimeSqlite.ts";
 import { validateBackupDatabase } from "./backupDatabase.ts";
@@ -53,11 +55,16 @@ export async function buildBackupArchive(input: {
   ];
   if (config.settingsPath && (await exists(config.settingsPath))) {
     const settingsSnapshot = resolve(stagingDir, "settings.json");
-    await copyFile(config.settingsPath, settingsSnapshot);
+    const settings = JSON.parse(await readFile(config.settingsPath, "utf8"));
+    await writeFile(
+      settingsSnapshot,
+      JSON.stringify(includeSecrets ? settings : redactBackupSettings(settings)),
+      { mode: 0o600 },
+    );
     entries.push({
       archivePath: "settings.json",
       sourcePath: settingsSnapshot,
-      encrypt: false,
+      encrypt: includeSecrets,
     });
   }
   if (await exists(config.keybindingsConfigPath)) {
@@ -69,34 +76,62 @@ export async function buildBackupArchive(input: {
       encrypt: false,
     });
   }
-  const snapshot = await openRuntimeSqliteDatabase(databaseSnapshot, { readOnly: true });
-  let attachmentFiles: string[];
+  // Keep unregistered files: profiles upgraded from before the registry still
+  // reference them in historical projections/events. Registered unowned files
+  // remain excluded. Retention covers both kinds while the snapshot is copied.
+  const localFiles = await listRegularFiles(config.attachmentsDir);
+  const relativePaths = new Set(
+    localFiles.map((file) => relative(config.attachmentsDir, file).split(sep).join("/")),
+  );
+  const localPaths = new Set(localFiles);
+  const snapshot = await openRuntimeSqliteDatabase(databaseSnapshot, { readOnly: false });
+  const attachmentFiles = new Set<string>();
   try {
     const hasRegistry = snapshot
       .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='attachment_owners'")
       .get();
-    attachmentFiles = hasRegistry
-      ? (
-          snapshot
-            .prepare(
-              "SELECT final_path FROM attachments WHERE lifecycle = 'ready' AND EXISTS (SELECT 1 FROM attachment_owners WHERE attachment_owners.attachment_id = attachments.attachment_id)",
-            )
-            .all() as { final_path: string }[]
-        ).map((row) => row.final_path)
-      : await listRegularFiles(config.attachmentsDir);
+    const registered = new Set<string>();
+    if (hasRegistry) {
+      const rows = snapshot
+        .prepare(
+          "SELECT attachment_id, final_path, lifecycle, EXISTS(SELECT 1 FROM attachment_owners WHERE attachment_owners.attachment_id = attachments.attachment_id) AS owned FROM attachments",
+        )
+        .all() as { attachment_id: string; final_path: string; lifecycle: string; owned: number }[];
+      const update = snapshot.prepare(
+        "UPDATE attachments SET final_path = ? WHERE attachment_id = ? RETURNING attachment_id",
+      );
+      for (const row of rows) {
+        const inside = isInside(config.attachmentsDir, row.final_path);
+        const relativePath = inside
+          ? undefined
+          : resolveBackupAttachmentPath(row.final_path, relativePaths);
+        const file = inside
+          ? resolve(row.final_path)
+          : relativePath
+            ? resolve(config.attachmentsDir, relativePath)
+            : undefined;
+        if (file) registered.add(file);
+        if (row.lifecycle !== "ready" || !row.owned) continue;
+        if (!file || !localPaths.has(file))
+          throw new Error(
+            `Owned attachment '${row.attachment_id}' is missing or is not a regular file: ${row.final_path}`,
+          );
+        attachmentFiles.add(file);
+        // Repair only the disposable snapshot, including old cross-directory
+        // restores. Do not modify application state while exporting.
+        if (file !== row.final_path) update.all(file, row.attachment_id);
+      }
+    }
+    for (const file of localFiles) if (!registered.has(file)) attachmentFiles.add(file);
   } finally {
     snapshot.close();
   }
-  for (const file of attachmentFiles) {
-    if (!isInside(config.attachmentsDir, file) || !(await lstat(file)).isFile()) {
-      throw new Error("Snapshot attachment is outside storage or is not a regular file.");
-    }
+  for (const file of attachmentFiles)
     entries.push({
       archivePath: archivePathForFile("attachments", config.attachmentsDir, file),
       sourcePath: file,
       encrypt: false,
     });
-  }
   if (includeSecrets && config.secretsDir) {
     for (const file of await listRegularFiles(config.secretsDir)) {
       entries.push({

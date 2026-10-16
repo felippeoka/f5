@@ -50,7 +50,7 @@ import {
   Scope,
   Stream,
 } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readToolActivityPayload } from "@t3tools/shared/orchestrationActivityPayload";
 
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
@@ -278,6 +278,7 @@ describe("ProviderRuntimeIngestion", () => {
     readonly failDispatchOnce?: (command: OrchestrationCommand) => boolean;
     /** A transient store failure (default) or a permanent decider rejection. */
     readonly dispatchFailure?: "transient" | "rejected";
+    readonly dispatchFailureCount?: number;
   }) {
     const workspaceRoot = makeTempDir("t3-provider-project-");
     fs.mkdirSync(path.join(workspaceRoot, ".git"));
@@ -296,7 +297,7 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provide(SqlitePersistenceMemory),
     );
     const failDispatchOnce = options?.failDispatchOnce;
-    let dispatchFailureUsed = false;
+    let dispatchFailureUsed = 0;
     const faultyEngineLayer = failDispatchOnce
       ? Layer.effect(
           OrchestrationEngineService,
@@ -305,8 +306,11 @@ describe("ProviderRuntimeIngestion", () => {
             (engine): OrchestrationEngineShape => ({
               ...engine,
               dispatch: (command) => {
-                if (!dispatchFailureUsed && failDispatchOnce(command)) {
-                  dispatchFailureUsed = true;
+                if (
+                  dispatchFailureUsed < (options?.dispatchFailureCount ?? 1) &&
+                  failDispatchOnce(command)
+                ) {
+                  dispatchFailureUsed++;
                   return Effect.fail(
                     options?.dispatchFailure === "rejected"
                       ? new OrchestrationCommandInvariantError({
@@ -2425,10 +2429,13 @@ describe("ProviderRuntimeIngestion", () => {
     );
   });
 
-  it.each(["codex", "claudeAgent"] as const)(
+  it.each(["codex", "claudeAgent", "codex-unbatched"] as const)(
     "preserves delta/tool/delta order in streaming mode for %s",
-    async (provider) => {
+    async (driver) => {
+      const provider = driver === "codex-unbatched" ? "codex" : driver;
+      if (driver === "codex-unbatched") vi.stubEnv("F5_COALESCE_STREAMING_DELTAS", "false");
       const harness = await createHarness({ settings: { enableAssistantStreaming: true } });
+      vi.unstubAllEnvs();
       const threadId = asThreadId("thread-1");
       const turnId = asTurnId("ordered-turn");
       const at = new Date().toISOString();
@@ -2509,10 +2516,95 @@ describe("ProviderRuntimeIngestion", () => {
           return ["tool"];
         return [];
       });
-      expect(order).toEqual(provider === "codex" ? ["ab", "tool", "c"] : ["a", "b", "tool", "c"]);
+      expect(order).toEqual(driver === "codex" ? ["ab", "tool", "c"] : ["a", "b", "tool", "c"]);
       expect(rows.filter((row) => row.commandId?.includes("assistant-delta-batch"))).toHaveLength(
-        provider === "codex" ? 2 : 0,
+        driver === "codex" ? 2 : 0,
       );
+    },
+  );
+
+  it.each(["transient", "rejected"] as const)(
+    "finalizes after an exhausted %s batch without persisting a broken suffix",
+    async (dispatchFailure) => {
+      const harness = await createHarness({
+        settings: { enableAssistantStreaming: true },
+        dispatchFailure,
+        dispatchFailureCount: 3,
+        failDispatchOnce: (command) => String(command.commandId).includes("assistant-delta-batch"),
+      });
+      const threadId = asThreadId("thread-1"),
+        turnId = asTurnId("failed-batch-turn");
+      const base = {
+        provider: "codex" as const,
+        threadId,
+        turnId,
+        createdAt: new Date().toISOString(),
+      };
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe("failed-start"),
+          threadId,
+          message: {
+            messageId: asMessageId("failed-user"),
+            role: "user",
+            text: "Start",
+            attachments: [],
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          assistantDeliveryMode: "streaming",
+          createdAt: base.createdAt,
+        }),
+      );
+      await harness.drain();
+      harness.emit({ ...base, type: "turn.started", eventId: asEventId("failed-started") });
+      // A non-delta forces the first flush, exhausting retries before more text.
+      for (const [eventId, delta] of [
+        ["bad-first", "hello"],
+        ["bad-second", " world"],
+      ]) {
+        harness.emit({
+          ...base,
+          type: "content.delta",
+          eventId: asEventId(eventId!),
+          itemId: asItemId("failed-batch-message"),
+          payload: { streamKind: "assistant_text", delta: delta! },
+        });
+        harness.emit({
+          ...base,
+          type: "item.started",
+          eventId: asEventId(`${eventId}-tool`),
+          itemId: asItemId(`${eventId}-tool`),
+          payload: { itemType: "mcp_tool_call", status: "in_progress", title: "Tool" },
+        });
+      }
+      harness.emit({
+        ...base,
+        type: "item.completed",
+        eventId: asEventId("failed-batch-complete"),
+        itemId: asItemId("failed-batch-message"),
+        payload: { itemType: "assistant_message", detail: "hello world", status: "completed" },
+      });
+      harness.emit({
+        ...base,
+        type: "turn.completed",
+        eventId: asEventId("failed-batch-turn-complete"),
+        payload: { state: "completed" },
+      });
+      await harness.drain();
+      const thread = await waitForThread(harness.engine, (thread) =>
+        thread.messages.some(
+          (message) => message.id === "assistant:failed-batch-message" && !message.streaming,
+        ),
+      );
+      expect(
+        thread.messages.find((message) => message.id === "assistant:failed-batch-message")?.text,
+      ).toBe("hello world");
+      expect(thread.activities.filter((activity) => activity.kind === "tool.started")).toHaveLength(
+        2,
+      );
+      expect(thread.session?.status).not.toBe("running");
     },
   );
 

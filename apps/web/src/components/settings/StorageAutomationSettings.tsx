@@ -100,6 +100,7 @@ export function StorageAutomationSettings() {
   const audit = useQuery({
     queryKey: auditQueryKey,
     queryFn: () => ensureNativeApi().storage.automationAudit({ limit: 50 }),
+    refetchInterval: 30_000,
   });
 
   const rulesDisabled = !storageCleanup.enabled;
@@ -142,6 +143,33 @@ export function StorageAutomationSettings() {
           onCheckedChange={saveScheduledBackups}
         />
       </label>
+      <div className="space-y-1 text-xs text-muted-foreground" aria-live="polite">
+        <p>
+          Last successful daily backup:{" "}
+          {audit.data?.scheduledBackupStatus?.lastSuccessAt
+            ? new Date(audit.data.scheduledBackupStatus.lastSuccessAt).toLocaleString()
+            : "None recorded"}
+        </p>
+        {audit.data?.scheduledBackupStatus?.lastAttemptAt && (
+          <p>
+            Last attempt:{" "}
+            {new Date(audit.data.scheduledBackupStatus.lastAttemptAt).toLocaleString()}
+          </p>
+        )}
+        {audit.data?.scheduledBackupStatus?.lastError && (
+          <p role="alert" className="whitespace-pre-wrap text-destructive">
+            Daily backup failed: {audit.data.scheduledBackupStatus.lastError}
+          </p>
+        )}
+        {audit.isError && (
+          <p role="alert">
+            Could not load daily backup status.{" "}
+            <Button size="xs" onClick={() => void audit.refetch()}>
+              Try again
+            </Button>
+          </p>
+        )}
+      </div>
       <fieldset disabled={rulesDisabled} className="space-y-1 disabled:opacity-60">
         <legend className="text-xs font-medium text-muted-foreground">
           Remove a worktree when any rule matches (projects can override these)

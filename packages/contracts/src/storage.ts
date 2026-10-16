@@ -63,8 +63,16 @@ export const StorageAutomationAuditInput = Schema.Struct({
 });
 export type StorageAutomationAuditInput = typeof StorageAutomationAuditInput.Type;
 
+export const ScheduledBackupStatus = Schema.Struct({
+  lastAttemptAt: Schema.NullOr(IsoDateTime),
+  lastSuccessAt: Schema.NullOr(IsoDateTime),
+  lastError: Schema.NullOr(Schema.String),
+});
+export type ScheduledBackupStatus = typeof ScheduledBackupStatus.Type;
+
 export const StorageAutomationAuditResult = Schema.Struct({
   entries: Schema.Array(StorageAutomationAuditEntry),
+  scheduledBackupStatus: Schema.optional(ScheduledBackupStatus),
 });
 export type StorageAutomationAuditResult = typeof StorageAutomationAuditResult.Type;
 
