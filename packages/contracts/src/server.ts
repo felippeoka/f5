@@ -74,6 +74,7 @@ export const ServerProviderModel = Schema.Struct({
   shortName: Schema.optional(TrimmedNonEmptyString),
   subProvider: Schema.optional(TrimmedNonEmptyString),
   isCustom: Schema.Boolean,
+  isUnlisted: Schema.optional(Schema.Boolean),
   capabilities: Schema.NullOr(ModelCapabilities),
 });
 export type ServerProviderModel = typeof ServerProviderModel.Type;
@@ -184,6 +185,13 @@ export const ServerProvider = Schema.Struct({
   availability: Schema.optional(ServerProviderAvailability),
   unavailableReason: Schema.optional(TrimmedNonEmptyString),
   versionAdvisory: Schema.optional(ServerProviderVersionAdvisory),
+  modelCatalog: Schema.optional(
+    Schema.Struct({
+      status: Schema.Literals(["complete", "menu", "partial", "failed"]),
+      lastSuccessAt: Schema.optional(IsoDateTime),
+      firstPartialAt: Schema.optional(IsoDateTime),
+    }),
+  ),
   models: Schema.Array(ServerProviderModel),
   slashCommands: Schema.Array(ServerProviderSlashCommand).pipe(
     Schema.withDecodingDefault(() => []),

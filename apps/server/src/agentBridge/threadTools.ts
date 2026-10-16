@@ -1,3 +1,4 @@
+import { pickPreferredModel } from "@t3tools/shared/model";
 /**
  * Agent Bridge thread tools: read exposed projects, threads, and diffs, and
  * create threads or queue turns. Every bridge turn runs supervised
@@ -644,11 +645,8 @@ export function makeThreadTools(deps: ThreadToolsDeps): ReadonlyArray<AgentBridg
         ? DEFAULT_MODEL_BY_PROVIDER[provider.driver as ProviderKind]
         : undefined;
       const model =
-        (driverDefault !== undefined &&
-        (provider.models.length === 0 ||
-          provider.models.some((entry) => entry.slug === driverDefault))
-          ? driverDefault
-          : undefined) ?? provider.models[0]?.slug;
+        pickPreferredModel(provider.models, driverDefault ? [driverDefault] : [])?.slug ??
+        (provider.models.length === 0 ? driverDefault : undefined);
       if (!model) return yield* toolError(`${providerLabel(provider)} reports no models.`);
       return { provider, model };
     });

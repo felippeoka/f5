@@ -33,6 +33,7 @@ import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL,
   ProviderInstanceId,
   type ModelSelection,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 
@@ -41,6 +42,7 @@ import {
   type ProviderInstanceRegistryShape,
 } from "../../provider/Services/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../../provider/ProviderDriver.ts";
+import { ProviderRegistry } from "../../provider/Services/ProviderRegistry";
 import { TextGeneration, type TextGenerationShape } from "../Services/TextGeneration.ts";
 
 type TextGenerationOp =
@@ -68,6 +70,28 @@ const resolveInstance = (
     ),
   );
 
+const resolveInstanceSelection = (
+  registry: ProviderInstanceRegistryShape,
+  operation: TextGenerationOp,
+  selection: ModelSelection,
+  getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>,
+) =>
+  resolveInstance(registry, operation, selection.instanceId).pipe(
+    Effect.flatMap((instance) =>
+      getProviders.pipe(
+        Effect.map((providers) => {
+          const snapshot = providers.find(
+            (provider) => provider.instanceId === selection.instanceId,
+          );
+          return {
+            instance,
+            modelSelection: snapshot ? resolveAuxiliaryTextModel(selection, snapshot) : selection,
+          };
+        }),
+      ),
+    ),
+  );
+
 /**
  * Build a `TextGenerationShape` that routes every call through the
  * registry. Exposed separately from the Layer so tests can construct it
@@ -75,12 +99,18 @@ const resolveInstance = (
  */
 export const makeTextGenerationFromRegistry = (
   registry: ProviderInstanceRegistryShape,
+  getProviders: Effect.Effect<ReadonlyArray<ServerProvider>> = Effect.succeed([]),
 ): TextGenerationShape => ({
   generateCommitMessage: (input) =>
     Effect.succeed(input.modelSelection ?? defaultCodexModelSelection(input.model)).pipe(
       Effect.flatMap((modelSelection) =>
-        resolveInstance(registry, "generateCommitMessage", modelSelection.instanceId).pipe(
-          Effect.flatMap((instance) =>
+        resolveInstanceSelection(
+          registry,
+          "generateCommitMessage",
+          modelSelection,
+          getProviders,
+        ).pipe(
+          Effect.flatMap(({ instance, modelSelection }) =>
             Effect.promise(() =>
               readRepositoryWritingContext(
                 input.cwd,
@@ -103,8 +133,8 @@ export const makeTextGenerationFromRegistry = (
   generatePrContent: (input) =>
     Effect.succeed(input.modelSelection ?? defaultCodexModelSelection(input.model)).pipe(
       Effect.flatMap((modelSelection) =>
-        resolveInstance(registry, "generatePrContent", modelSelection.instanceId).pipe(
-          Effect.flatMap((instance) =>
+        resolveInstanceSelection(registry, "generatePrContent", modelSelection, getProviders).pipe(
+          Effect.flatMap(({ instance, modelSelection }) =>
             Effect.promise(() =>
               readRepositoryWritingContext(
                 input.cwd,
@@ -127,8 +157,8 @@ export const makeTextGenerationFromRegistry = (
   generateBranchName: (input) =>
     Effect.succeed(input.modelSelection ?? defaultCodexModelSelection(input.model)).pipe(
       Effect.flatMap((modelSelection) =>
-        resolveInstance(registry, "generateBranchName", modelSelection.instanceId).pipe(
-          Effect.flatMap((tg) =>
+        resolveInstanceSelection(registry, "generateBranchName", modelSelection, getProviders).pipe(
+          Effect.flatMap(({ instance: tg, modelSelection }) =>
             tg.textGeneration.generateBranchName({ ...input, modelSelection }),
           ),
         ),
@@ -137,8 +167,13 @@ export const makeTextGenerationFromRegistry = (
   generateThreadTitle: (input) =>
     Effect.succeed(input.modelSelection ?? defaultCodexModelSelection(input.model)).pipe(
       Effect.flatMap((modelSelection) =>
-        resolveInstance(registry, "generateThreadTitle", modelSelection.instanceId).pipe(
-          Effect.flatMap((tg) =>
+        resolveInstanceSelection(
+          registry,
+          "generateThreadTitle",
+          modelSelection,
+          getProviders,
+        ).pipe(
+          Effect.flatMap(({ instance: tg, modelSelection }) =>
             tg.textGeneration.generateThreadTitle({ ...input, modelSelection }),
           ),
         ),
@@ -147,8 +182,13 @@ export const makeTextGenerationFromRegistry = (
   generateStructuredJson: (input) =>
     Effect.succeed(input.modelSelection ?? defaultCodexModelSelection(input.model)).pipe(
       Effect.flatMap((modelSelection) =>
-        resolveInstance(registry, "generateStructuredJson", modelSelection.instanceId).pipe(
-          Effect.flatMap((tg) =>
+        resolveInstanceSelection(
+          registry,
+          "generateStructuredJson",
+          modelSelection,
+          getProviders,
+        ).pipe(
+          Effect.flatMap(({ instance: tg, modelSelection }) =>
             tg.textGeneration.generateStructuredJson({ ...input, modelSelection }),
           ),
         ),
@@ -171,6 +211,36 @@ export const TextGenerationLive = Layer.effect(
   TextGeneration,
   Effect.gen(function* () {
     const registry = yield* ProviderInstanceRegistry;
-    return makeTextGenerationFromRegistry(registry);
+    const providers = yield* ProviderRegistry;
+    return makeTextGenerationFromRegistry(registry, providers.getProviders);
   }),
 );
+
+const AUXILIARY_DEFAULT_MODELS = new Set([
+  "gpt-6-luna",
+  "gpt-5.4-mini",
+  "claude-haiku-5-5",
+  "claude-haiku-4-5",
+  "claude-sonnet-4-6",
+]);
+const AUXILIARY_FALLBACKS: Record<string, readonly string[]> = {
+  codex: ["gpt-6-luna", "gpt-5.6-luna", "gpt-5.4-mini"],
+  claudeAgent: ["claude-haiku-5-5", "claude-haiku-4-5"],
+};
+export function resolveAuxiliaryTextModel(
+  selection: ModelSelection,
+  snapshot: ServerProvider,
+): ModelSelection {
+  if (!AUXILIARY_DEFAULT_MODELS.has(selection.model)) return selection;
+  if (snapshot.modelCatalog?.status === "failed" || snapshot.modelCatalog?.status === "partial")
+    return selection;
+  const selected = snapshot.models.find((model) => model.slug === selection.model);
+  if (selected?.isUnlisted !== true && (selected || snapshot.modelCatalog?.status !== "complete"))
+    return selection;
+  const listed = snapshot.models.filter((model) => model.isCustom || !model.isUnlisted);
+  const fallback =
+    AUXILIARY_FALLBACKS[snapshot.driver]
+      ?.map((slug) => listed.find((model) => model.slug === slug))
+      .find(Boolean) ?? listed[0];
+  return fallback ? { ...selection, model: fallback.slug } : selection;
+}

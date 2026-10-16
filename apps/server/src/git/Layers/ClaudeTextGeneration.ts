@@ -19,6 +19,7 @@ import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   ProviderInstanceId,
   type ClaudeSettings,
+  type ModelCapabilities,
   type ModelSelection,
 } from "@t3tools/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
@@ -82,6 +83,7 @@ const ClaudeOutputMessage = Schema.Struct({
 export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(function* (
   claudeSettings: ClaudeSettings,
   environment: NodeJS.ProcessEnv = process.env,
+  resolveCapabilities?: (model: string) => Effect.Effect<ModelCapabilities>,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -127,7 +129,9 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     modelSelection: ModelSelection;
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
     const jsonSchemaStr = JSON.stringify(toJsonSchemaObject(outputSchemaJson));
-    const caps = getClaudeModelCapabilities(modelSelection.model);
+    const caps = resolveCapabilities
+      ? yield* resolveCapabilities(modelSelection.model)
+      : getClaudeModelCapabilities(modelSelection.model);
     const descriptors = getProviderOptionDescriptors({
       caps,
       selections: modelSelection.options,

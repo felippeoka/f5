@@ -1,3 +1,10 @@
+import { useState } from "react";
+import type { ProviderModelOptions } from "@t3tools/contracts";
+import {
+  createReportedClaudeModelCapabilities,
+  createReportedCodexModelCapabilities,
+} from "@t3tools/shared/model";
+import { WorkflowReasoningPicker } from "./SlotRow";
 import "../../index.css";
 
 import type { ReactElement } from "react";
@@ -749,14 +756,12 @@ describe("WorkflowCreateDialog", () => {
     }
   });
 
-  it("preserves explicit workflow codex high reasoning", () => {
+  it("omits workflow codex effort equal to the default", () => {
     expect(
       normalizeWorkflowSlotModelOptions("codex", "gpt-5-codex", {
         codex: { reasoningEffort: "high" },
       }),
-    ).toEqual({
-      codex: { reasoningEffort: "high" },
-    });
+    ).toBeUndefined();
   });
 
   it("clamps unsupported Astra workflow reasoning before submission", () => {
@@ -1524,4 +1529,102 @@ describe("WorkflowCreateDialog", () => {
       host.remove();
     }
   });
+});
+
+describe("reported workflow capabilities", () => {
+  it.each(["codex", "claudeAgent"] as const)(
+    "keeps unfamiliar %s model controls in the submitted options",
+    async (provider) => {
+      const capabilities =
+        provider === "codex"
+          ? createReportedCodexModelCapabilities({
+              model: "gpt-future-agent",
+              supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "high" }],
+              defaultReasoningEffort: "low",
+              serviceTiers: [{ id: "priority" }],
+            })
+          : createReportedClaudeModelCapabilities({
+              value: "claude-opus-6",
+              supportedEffortLevels: ["low", "high"],
+              supportsFastMode: true,
+            });
+      const model = provider === "codex" ? "gpt-future-agent" : "claude-opus-6";
+      const changes = vi.fn();
+      const host = document.createElement("div");
+      document.body.append(host);
+      const Harness = () => {
+        const [options, setOptions] = useState<ProviderModelOptions>();
+        return (
+          <WorkflowReasoningPicker
+            provider={provider}
+            model={model}
+            capabilities={capabilities}
+            modelOptions={options}
+            onChange={(next) => {
+              setOptions(next);
+              changes(next);
+            }}
+          />
+        );
+      };
+      const screen = await render(<Harness />, { container: host });
+      try {
+        const defaultEffort = provider === "codex" ? "Low" : "High";
+        await page.getByRole("button", { name: defaultEffort, exact: true }).click();
+        const nondefaultEffort = provider === "codex" ? "High" : "Low";
+        await page.getByRole("menuitemradio", { name: nondefaultEffort, exact: true }).click();
+        await page.getByRole("button", { name: nondefaultEffort, exact: true }).click();
+        await page.getByRole("menuitemradio", { name: "On", exact: true }).click();
+        expect(changes.mock.lastCall?.[0]).toEqual(
+          provider === "codex"
+            ? { codex: { reasoningEffort: "high", fastMode: true } }
+            : { claudeAgent: { effort: "low", fastMode: true } },
+        );
+      } finally {
+        await screen.unmount();
+        host.remove();
+      }
+    },
+  );
+});
+
+it("uses the reported default for an unsupported stored effort and shows fast-only controls", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const props = {
+    provider: "codex" as const,
+    model: "gpt-future",
+    modelOptions: { codex: { reasoningEffort: "high" as const } },
+    onChange: () => {},
+  };
+  const screen = await render(
+    <WorkflowReasoningPicker
+      {...props}
+      capabilities={createReportedCodexModelCapabilities({
+        model: props.model,
+        supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
+        defaultReasoningEffort: "medium",
+      })}
+    />,
+    { container: host },
+  );
+  try {
+    await expect.element(page.getByRole("button", { name: "Medium", exact: true })).toBeVisible();
+    await screen.rerender(
+      <WorkflowReasoningPicker
+        {...props}
+        capabilities={createReportedCodexModelCapabilities({
+          model: props.model,
+          supportedReasoningEfforts: [],
+          serviceTiers: [{ id: "priority" }],
+        })}
+      />,
+    );
+    await expect
+      .element(page.getByRole("button", { name: "Fast Mode", exact: true }))
+      .toBeVisible();
+  } finally {
+    await screen.unmount();
+    host.remove();
+  }
 });

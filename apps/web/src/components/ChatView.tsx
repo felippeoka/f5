@@ -1,3 +1,4 @@
+import { pickPreferredModel } from "../providerModels";
 import { AgentComputerLiveCard } from "./AgentComputerLiveCard";
 import { parseNativeReviewTarget } from "@t3tools/shared/nativeReviewTarget";
 import { NativeRuntimePanel } from "./chat/NativeRuntimePanel";
@@ -1342,7 +1343,11 @@ export default function ChatView({
     modelOptionsByInstance.get(selectedProviderInstanceId) ?? [];
   const baseThreadModel = useMemo(() => {
     const rawModel =
-      activeThread?.model ?? activeProject?.model ?? getDefaultModel(selectedProvider);
+      activeThread?.model ??
+      activeProject?.model ??
+      pickPreferredModel(selectedProviderPickerOptions, [getDefaultModel(selectedProvider)])
+        ?.slug ??
+      getDefaultModel(selectedProvider);
     return (
       resolveSelectableModel(selectedProviderDriver, rawModel, selectedProviderPickerOptions) ??
       selectedProviderPickerOptions[0]?.slug ??

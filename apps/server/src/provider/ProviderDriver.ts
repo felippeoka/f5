@@ -25,6 +25,7 @@ import type {
   ProviderDriverKind,
   ProviderInstanceEnvironment,
   ProviderInstanceId,
+  ServerProviderModel,
 } from "@t3tools/contracts";
 import type { Effect, Schema, Scope } from "effect";
 
@@ -84,6 +85,8 @@ export interface ProviderInstance {
   >;
   readonly accountUsage?: AccountUsageCapability;
   readonly invalidateAccountStatus?: Effect.Effect<void>;
+  readonly invalidateModelCatalog?: Effect.Effect<void>;
+  readonly updateModelCatalog?: (models: ReadonlyArray<ServerProviderModel>) => Effect.Effect<void>;
   /**
    * Read-only hooks/plugins/connectors/agents inventory for this instance.
    * `projectRoot` is resolved by the server from a project id, never taken

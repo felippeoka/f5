@@ -1,8 +1,8 @@
+import { resolveProjectModel } from "./orchestrationState";
 import { revertTaskToolState } from "@t3tools/shared/claudeTaskToolProjection";
 import { projectPendingUserInputs } from "@t3tools/shared/pendingUserInputs";
 import { REASONING_STATUS_ACTIVITY_KIND } from "@t3tools/shared/orchestrationActivityPayload";
 import {
-  DEFAULT_MODEL_BY_PROVIDER,
   type OrchestrationEvent,
   type PlanningWorkflow,
   type ProjectMemory,
@@ -11,7 +11,6 @@ import {
   estimateModelContextWindowTokens,
   estimateContextTokensAfterMessageUpdate,
   estimateMessageContextCharacters,
-  resolveModelSlug,
   roughTokenEstimateFromCharacters,
 } from "@t3tools/shared/model";
 
@@ -631,7 +630,10 @@ export function applyDomainEvent(state: AppState, event: OrchestrationEvent): Ap
         id: event.payload.projectId,
         name: event.payload.title,
         cwd: event.payload.workspaceRoot,
-        model: resolveModelSlug(event.payload.defaultModel ?? DEFAULT_MODEL_BY_PROVIDER.codex),
+        model: resolveProjectModel(
+          event.payload.defaultModel,
+          event.payload.defaultModelSelection?.instanceId,
+        ),
         createdAt: event.payload.createdAt,
         expanded: true,
         defaultEnvMode: event.payload.defaultEnvMode ?? null,
@@ -648,7 +650,10 @@ export function applyDomainEvent(state: AppState, event: OrchestrationEvent): Ap
       const projects = updateProject(state.projects, event.payload.projectId, (project) => {
         const model =
           event.payload.defaultModel !== undefined
-            ? resolveModelSlug(event.payload.defaultModel ?? DEFAULT_MODEL_BY_PROVIDER.codex)
+            ? resolveProjectModel(
+                event.payload.defaultModel,
+                event.payload.defaultModelSelection?.instanceId,
+              )
             : project.model;
         const scripts =
           event.payload.scripts !== undefined

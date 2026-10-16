@@ -1,3 +1,4 @@
+import { filterPickerVisibleModels } from "./providerIconUtils";
 import { resolveShortcutCommand } from "~/keybindings";
 import {
   type ModelSlug,
@@ -163,7 +164,16 @@ export const ProviderInstanceModelPicker = memo(function ProviderInstanceModelPi
       ) {
         continue;
       }
-      for (const model of props.modelOptionsByInstance.get(instance.instanceId) ?? []) {
+      const selectedSlugs = new Set(
+        (props.selectedModels ?? [])
+          .filter((selected) => selected.instanceId === instance.instanceId)
+          .map((selected) => selected.model),
+      );
+      if (instance.instanceId === activeInstanceId) selectedSlugs.add(props.model);
+      for (const model of filterPickerVisibleModels(
+        props.modelOptionsByInstance.get(instance.instanceId) ?? [],
+        selectedSlugs,
+      )) {
         const item = { ...model, instance } satisfies InstanceModelItem;
         if (!matchesSearch(item, search)) continue;
         if (
@@ -202,6 +212,9 @@ export const ProviderInstanceModelPicker = memo(function ProviderInstanceModelPi
     favoriteKeys,
     isSearching,
     props.modelOptionsByInstance,
+    activeInstanceId,
+    props.model,
+    props.selectedModels,
     search,
     selectedSource,
     visibleEntries,

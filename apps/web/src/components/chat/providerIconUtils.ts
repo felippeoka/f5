@@ -18,6 +18,7 @@ import {
 import { PROVIDER_OPTIONS, type ProviderPickerKind } from "../../session-logic";
 
 export type ModelEsque = {
+  isUnlisted?: boolean | undefined;
   slug: string;
   name: string;
   shortName?: string | undefined;
@@ -145,4 +146,11 @@ export function getTriggerDisplayModelName(model: ModelPickerModelOption): strin
 export function getTriggerDisplayModelLabel(model: ModelPickerModelOption): string {
   const title = getTriggerDisplayModelName(model);
   return model.subProvider ? `${model.subProvider} · ${title}` : title;
+}
+
+export function filterPickerVisibleModels<T extends ModelEsque>(
+  models: ReadonlyArray<T>,
+  selectedSlugs: ReadonlySet<string>,
+): T[] {
+  return models.filter((model) => model.isUnlisted !== true || selectedSlugs.has(model.slug));
 }

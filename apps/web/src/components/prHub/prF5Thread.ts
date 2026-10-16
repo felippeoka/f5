@@ -1,3 +1,4 @@
+import { pickPreferredModel, isListedModel } from "@t3tools/shared/model";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
@@ -159,7 +160,7 @@ export function resolvePrF5ModelSelection(
       provider.availability !== "unavailable",
   );
   const matchingProvider = available.find((provider) =>
-    provider.models.some((model) => model.slug === preferredModel),
+    provider.models.some((model) => model.slug === preferredModel && isListedModel(model)),
   );
   const provider = matchingProvider ?? available[0];
   if (!provider) {
@@ -173,9 +174,7 @@ export function resolvePrF5ModelSelection(
     };
   }
   const model =
-    provider.models.find((candidate) => candidate.slug === preferredModel)?.slug ??
-    provider.models.find((candidate) => !candidate.isCustom)?.slug ??
-    provider.models[0]?.slug ??
+    pickPreferredModel(provider.models, [preferredModel])?.slug ??
     (preferredModel.trim() || DEFAULT_MODEL_BY_PROVIDER.codex);
   return {
     model,

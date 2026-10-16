@@ -63,6 +63,16 @@ interface ClaudeModelMetadata {
 }
 
 const CLAUDE_MODEL_METADATA: Record<ClaudeBuiltInModelSlug, ClaudeModelMetadata> = {
+  "claude-sonnet-5-5": {
+    contextWindowTokens: 1_000_000,
+    effortOptions: CLAUDE_CODE_EFFORT_OPTIONS,
+    defaultEffort: "high",
+  },
+  "claude-haiku-5-5": {
+    contextWindowTokens: 1_000_000,
+    effortOptions: CLAUDE_CODE_EFFORT_OPTIONS,
+    defaultEffort: "medium",
+  },
   [CLAUDE_OPUS_5_5_MODEL]: {
     contextWindowTokens: 1_000_000,
     effortOptions: CLAUDE_CODE_EFFORT_OPTIONS,
@@ -135,6 +145,11 @@ interface CodexModelMetadata {
 }
 
 const CODEX_MODEL_METADATA: Record<string, CodexModelMetadata> = {
+  "gpt-6-sol": { contextWindowTokens: 1_050_000 },
+  "gpt-6-luna": {
+    contextWindowTokens: 1_050_000,
+    effortOptions: ["max", "xhigh", "high", "medium", "low"],
+  },
   "gpt-6.1-sol": { contextWindowTokens: 1_050_000 },
   "gpt-6-astra": {
     contextWindowTokens: 1_050_000,
@@ -816,9 +831,11 @@ export function normalizeCodexModelOptions(
 export function normalizeClaudeModelOptions(
   model: string | null | undefined,
   modelOptions: ClaudeModelOptions | null | undefined,
+  reported?: ModelCapabilities | null,
 ): ClaudeModelOptions | undefined {
-  const reasoningOptions = getReasoningEffortOptions("claudeAgent", model);
-  const defaultReasoningEffort = getDefaultReasoningEffort("claudeAgent", model);
+  const capabilities = resolveModelCapabilities("claudeAgent", model, reported);
+  const reasoningOptions = capabilities.effortOptions;
+  const defaultReasoningEffort = capabilities.defaultEffort;
   const resolvedEffort = resolveReasoningEffortForProvider("claudeAgent", modelOptions?.effort);
   const effort =
     resolvedEffort &&
@@ -828,10 +845,10 @@ export function normalizeClaudeModelOptions(
       ? resolvedEffort
       : undefined;
   const thinking =
-    supportsClaudeThinkingToggle(model) && modelOptions?.thinking === false ? false : undefined;
+    capabilities.supportsThinkingToggle && modelOptions?.thinking === false ? false : undefined;
   const fastMode =
-    supportsClaudeFastMode(model) && modelOptions?.fastMode === true ? true : undefined;
-  const contextWindow = supportsClaudeContextWindow(model)
+    capabilities.supportsFastMode && modelOptions?.fastMode === true ? true : undefined;
+  const contextWindow = capabilities.supportsContextWindow
     ? normalizeClaudeContextWindow(modelOptions?.contextWindow)
     : undefined;
   const nextOptions: ClaudeModelOptions = {
@@ -940,7 +957,10 @@ export function resolveModelCapabilities(
               [
                 ...effortDescriptor.options.map((option) => option.id),
                 // The prompt keyword is F5 metadata; executables never report it.
-                ...(builtInEfforts.includes("ultrathink") ? ["ultrathink"] : []),
+                ...(builtInEfforts.includes("ultrathink") &&
+                effortDescriptor.options.some((option) => option.id === "max")
+                  ? ["ultrathink"]
+                  : []),
               ],
               CLAUDE_CODE_EFFORT_OPTIONS,
             )
@@ -1073,13 +1093,14 @@ export function createReportedClaudeModelCapabilities(
   const optionDescriptors: ProviderOptionDescriptor[] = [];
   if (info.supportsEffort === false) {
     // Explicitly no effort: no descriptor, and the resolver sends none.
-  } else if (efforts.length === 0) {
+  } else if (info.supportedEffortLevels === undefined) {
     // Levels not reported: keep F5's own effort choices for this model.
     if (builtInEffort) optionDescriptors.push(builtInEffort);
   } else {
-    const withKeyword = builtInEffort?.promptInjectedValues?.includes("ultrathink")
-      ? [...efforts, "ultrathink" as const]
-      : efforts;
+    const withKeyword =
+      efforts.includes("max") && builtInEffort?.promptInjectedValues?.includes("ultrathink")
+        ? [...efforts, "ultrathink" as const]
+        : efforts;
     optionDescriptors.push({
       id: "effort",
       label: "Reasoning",
@@ -1117,7 +1138,13 @@ export function createReportedClaudeModelCapabilities(
   return {
     optionDescriptors,
     source: "reported",
-    ...(info.supportsEffort !== undefined ? { supportsEffort: info.supportsEffort } : {}),
+    ...(info.supportsEffort !== undefined || info.supportedEffortLevels !== undefined
+      ? {
+          supportsEffort:
+            info.supportsEffort !== false &&
+            (info.supportedEffortLevels === undefined || efforts.length > 0),
+        }
+      : {}),
     ...(info.supportsFastMode !== undefined ? { supportsFastMode: info.supportsFastMode } : {}),
     ...(info.supportsAdaptiveThinking !== undefined
       ? { supportsAdaptiveThinking: info.supportsAdaptiveThinking }
@@ -1205,7 +1232,11 @@ export function createReportedCodexModelCapabilities(
     // A reported empty list means "none"; an absent field leaves F5's defaults.
     ...(effortsReported ? { supportsEffort: efforts.length > 0 } : {}),
     ...(tiersReported
-      ? { supportsFastMode: serviceTiers.some((tier) => tier.id === CODEX_FAST_SERVICE_TIER) }
+      ? {
+          supportsFastMode: serviceTiers.some(
+            (tier) => tier.id === CODEX_FAST_SERVICE_TIER || tier.id === "priority",
+          ),
+        }
       : {}),
     ...(serviceTiers.length > 0 ? { serviceTiers } : {}),
     ...(defaultServiceTier ? { defaultServiceTier } : {}),
@@ -1214,3 +1245,46 @@ export function createReportedCodexModelCapabilities(
 }
 
 export { CLAUDE_CODE_EFFORT_OPTIONS, CODEX_REASONING_EFFORT_OPTIONS };
+
+/** Readable names for executable-discovered models; unknown naming schemes stay verbatim. */
+export function formatModelDisplayName(provider: string, slug: string): string | undefined {
+  if (provider === "claudeAgent") {
+    const match = /^claude-([a-z]+)-(\d{1,2})(?:-(\d{1,2}))?$/.exec(slug.replace(/-\d{8}$/, ""));
+    if (match)
+      return `Claude ${match[1]![0]!.toUpperCase()}${match[1]!.slice(1)} ${match[2]}${match[3] ? "." + match[3] : ""}`;
+  }
+  if (provider === "codex") {
+    const match = /^gpt-(\d+(?:\.\d+)?)(?:-([a-z][a-z0-9-]*))?$/.exec(slug);
+    if (match)
+      return `GPT-${match[1]}${
+        match[2]
+          ? " " +
+            match[2]
+              .split("-")
+              .map((word) => word[0]!.toUpperCase() + word.slice(1))
+              .join(" ")
+          : ""
+      }`;
+  }
+  return undefined;
+}
+
+export function isListedModel(model: {
+  readonly isCustom?: boolean | undefined;
+  readonly isUnlisted?: boolean | undefined;
+}): boolean {
+  return model.isCustom === true || model.isUnlisted !== true;
+}
+export function pickPreferredModel<
+  T extends {
+    readonly slug: string;
+    readonly isCustom?: boolean | undefined;
+    readonly isUnlisted?: boolean | undefined;
+  },
+>(options: ReadonlyArray<T>, preferred: ReadonlyArray<string> = []): T | undefined {
+  for (const slug of preferred) {
+    const model = options.find((option) => option.slug === slug && isListedModel(option));
+    if (model) return model;
+  }
+  return options.find(isListedModel) ?? options[0];
+}

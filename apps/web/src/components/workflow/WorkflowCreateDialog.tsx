@@ -1,3 +1,7 @@
+import type { ModelCapabilities } from "@t3tools/contracts";
+import { ProviderDriverKind } from "@t3tools/contracts";
+import { normalizeClaudeModelOptions, normalizeCodexModelOptions } from "@t3tools/shared/model";
+import { getWorkflowModelCapabilities } from "../../providerModels";
 import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from "../ui/select";
 import {
   DOCUMENT_WORKFLOW_TEMPLATE_ID,
@@ -28,15 +32,7 @@ import type {
 } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import {
-  getDefaultModel,
-  getReasoningEffortOptions,
-  normalizeModelSlug,
-  resolveCodexReasoningEffortForModel,
-  resolveReasoningEffortForProvider,
-  supportsClaudeFastMode,
-  supportsClaudeThinkingToggle,
-} from "@t3tools/shared/model";
+import { getDefaultModel, normalizeModelSlug } from "@t3tools/shared/model";
 
 import { resolveThreadTitleModel, useAppSettings } from "../../appSettings";
 import { isElectron } from "../../env";
@@ -129,38 +125,17 @@ export function normalizeWorkflowSlotModelOptions(
   provider: ProviderKind,
   model: string,
   modelOptions: ProviderModelOptions | undefined,
+  capabilities?: ModelCapabilities | null,
 ): ProviderModelOptions | undefined {
   if (provider === "codex") {
-    const effort = modelOptions?.codex?.reasoningEffort
-      ? resolveCodexReasoningEffortForModel(model, modelOptions.codex.reasoningEffort)
-      : undefined;
-    const codex = {
-      ...(effort ? { reasoningEffort: effort } : {}),
-      ...(modelOptions?.codex?.fastMode === true ? { fastMode: true } : {}),
-    };
-    return Object.keys(codex).length > 0 ? { codex } : undefined;
+    const codex = normalizeCodexModelOptions(model, modelOptions?.codex, capabilities);
+    return codex ? { codex } : undefined;
   }
-  if (provider !== "claudeAgent") {
-    return getSingleProviderModelOptions(provider, modelOptions);
+  if (provider === "claudeAgent") {
+    const claudeAgent = normalizeClaudeModelOptions(model, modelOptions?.claudeAgent, capabilities);
+    return claudeAgent ? { claudeAgent } : undefined;
   }
-  const reasoningOptions = getReasoningEffortOptions("claudeAgent", model);
-  const effort = resolveReasoningEffortForProvider(
-    "claudeAgent",
-    modelOptions?.claudeAgent?.effort,
-  );
-  const claudeAgent = {
-    ...(supportsClaudeThinkingToggle(model) && modelOptions?.claudeAgent?.thinking === false
-      ? { thinking: false }
-      : {}),
-    ...(effort && effort !== "ultrathink" && reasoningOptions.includes(effort) ? { effort } : {}),
-    ...(supportsClaudeFastMode(model) && modelOptions?.claudeAgent?.fastMode === true
-      ? { fastMode: true }
-      : {}),
-  };
-  if (Object.keys(claudeAgent).length === 0) {
-    return undefined;
-  }
-  return claudeAgent ? { claudeAgent } : undefined;
+  return getSingleProviderModelOptions(provider, modelOptions);
 }
 
 function getSingleProviderModelOptions(
@@ -721,7 +696,16 @@ export function WorkflowCreateDialog(props: WorkflowCreateDialogProps) {
         model: ModelSlug,
         rawModelOptions: ProviderModelOptions | undefined,
       ): WorkflowModelSlot => {
-        const modelOptions = normalizeWorkflowSlotModelOptions(provider, model, rawModelOptions);
+        const modelOptions = normalizeWorkflowSlotModelOptions(
+          provider,
+          model,
+          rawModelOptions,
+          getWorkflowModelCapabilities(
+            serverConfigQuery.data?.providers ?? [],
+            ProviderDriverKind.make(provider),
+            model,
+          ),
+        );
         let providerOptions = providerOptionsCache.get(provider);
         if (!providerOptionsCache.has(provider)) {
           providerOptions = resolveProviderOptionsForDispatch({
@@ -1042,6 +1026,7 @@ export function WorkflowCreateDialog(props: WorkflowCreateDialogProps) {
               <section aria-label="Models" className="flex flex-col gap-2">
                 <SectionLabel as="h3">Models</SectionLabel>
                 <SlotRow
+                  providers={serverConfigQuery.data?.providers}
                   label={
                     workflowType === "planning" || workflowType === "document"
                       ? "Author A"
@@ -1071,11 +1056,17 @@ export function WorkflowCreateDialog(props: WorkflowCreateDialogProps) {
                         branchAProvider,
                         branchASelection,
                         modelOptions,
+                        getWorkflowModelCapabilities(
+                          serverConfigQuery.data?.providers ?? [],
+                          ProviderDriverKind.make(branchAProvider),
+                          branchASelection,
+                        ),
                       ),
                     );
                   }}
                 />
                 <SlotRow
+                  providers={serverConfigQuery.data?.providers}
                   label={
                     workflowType === "planning" || workflowType === "document"
                       ? "Author B"
@@ -1105,11 +1096,17 @@ export function WorkflowCreateDialog(props: WorkflowCreateDialogProps) {
                         branchBProvider,
                         branchBSelection,
                         modelOptions,
+                        getWorkflowModelCapabilities(
+                          serverConfigQuery.data?.providers ?? [],
+                          ProviderDriverKind.make(branchBProvider),
+                          branchBSelection,
+                        ),
                       ),
                     );
                   }}
                 />
                 <SlotRow
+                  providers={serverConfigQuery.data?.providers}
                   label={
                     workflowType === "document"
                       ? "Merge model"
@@ -1139,6 +1136,11 @@ export function WorkflowCreateDialog(props: WorkflowCreateDialogProps) {
                         mergeProvider,
                         mergeSelection,
                         modelOptions,
+                        getWorkflowModelCapabilities(
+                          serverConfigQuery.data?.providers ?? [],
+                          ProviderDriverKind.make(mergeProvider),
+                          mergeSelection,
+                        ),
                       ),
                     );
                   }}
@@ -1169,6 +1171,7 @@ export function WorkflowCreateDialog(props: WorkflowCreateDialogProps) {
                         {readerPersona.length} / 500
                       </p>
                       <SlotRow
+                        providers={serverConfigQuery.data?.providers}
                         label="Reader model"
                         provider={effectiveReaderSlot.provider}
                         model={readerSelection}
