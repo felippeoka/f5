@@ -1642,13 +1642,13 @@ it("saves a Codex pick of the built-in default when no capabilities were reporte
   }
 });
 
-it("uses the reported default for an unsupported stored effort and shows fast-only controls", async () => {
+it("walks an unsupported stored effort down, not to the default, and shows fast-only controls", async () => {
   const host = document.createElement("div");
   document.body.append(host);
   const props = {
     provider: "codex" as const,
     model: "gpt-future",
-    modelOptions: { codex: { reasoningEffort: "high" as const } },
+    modelOptions: { codex: { reasoningEffort: "ultra" as const } },
     onChange: () => {},
   };
   const screen = await render(
@@ -1656,14 +1656,19 @@ it("uses the reported default for an unsupported stored effort and shows fast-on
       {...props}
       capabilities={createReportedCodexModelCapabilities({
         model: props.model,
-        supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
-        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: [
+          { reasoningEffort: "max" },
+          { reasoningEffort: "high" },
+          { reasoningEffort: "low" },
+        ],
+        defaultReasoningEffort: "low",
       })}
     />,
     { container: host },
   );
   try {
-    await expect.element(page.getByRole("button", { name: "Medium", exact: true })).toBeVisible();
+    // turn/start lowers Ultra to Max; Low (the default) would misstate the run.
+    await expect.element(page.getByRole("button", { name: "Max", exact: true })).toBeVisible();
     await screen.rerender(
       <WorkflowReasoningPicker
         {...props}

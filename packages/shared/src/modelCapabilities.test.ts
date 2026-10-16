@@ -116,6 +116,13 @@ describe("normalizeCodexModelOptions with reported capabilities", () => {
     ).toBeUndefined();
   });
 
+  it("walks an unsupported effort down instead of dropping it", () => {
+    // [low, high] reported: Max is unsupported, and turn/start would run High.
+    expect(normalizeCodexModelOptions("gpt-6.1-sol", { reasoningEffort: "max" }, reported)).toEqual(
+      { reasoningEffort: "high" },
+    );
+  });
+
   it("drops fast mode the model does not offer", () => {
     expect(normalizeCodexModelOptions("gpt-6.1-sol", { fastMode: true }, reported)).toBeUndefined();
   });

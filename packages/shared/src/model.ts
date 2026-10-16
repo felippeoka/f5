@@ -807,9 +807,11 @@ export function normalizeCodexModelOptions(
 ): CodexModelOptions | undefined {
   if (reported?.source === "reported") {
     const capabilities = resolveModelCapabilities("codex", model, reported);
-    const requested = modelOptions?.reasoningEffort;
-    const effort =
-      requested && capabilities.effortOptions.includes(requested) ? requested : undefined;
+    // Walk an unsupported pick down as `turn/start` does, so saving another
+    // option (fast mode) keeps the effort the picker showed.
+    const effort = modelOptions?.reasoningEffort
+      ? resolveCodexEffectiveReasoningEffort(model, modelOptions.reasoningEffort, reported)
+      : undefined;
     const reportedOptions: CodexModelOptions = {
       ...(effort && effort !== capabilities.defaultEffort ? { reasoningEffort: effort } : {}),
       ...(modelOptions?.fastMode === true && capabilities.supportsFastMode

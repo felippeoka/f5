@@ -42,16 +42,12 @@ const CODEX_REASONING_LABELS: Record<CodexReasoningEffort, string> = {
 
 const CODEX_PROVIDER = ProviderDriverKind.make("codex");
 
-/** Same resolver the server uses for `turn/start`, fed with reported capabilities. */
-function resolveCodexTraitCapabilities(
+/** Capabilities the session reported; the same input `turn/start` resolves against. */
+function getReportedCodexCapabilities(
   model: string,
   models: ReadonlyArray<ServerProviderModel> | undefined,
 ) {
-  return resolveModelCapabilities(
-    "codex",
-    model,
-    models ? getProviderModelCapabilities(models, model, CODEX_PROVIDER) : undefined,
-  );
+  return models ? getProviderModelCapabilities(models, model, CODEX_PROVIDER) : undefined;
 }
 
 function getSelectedCodexTraits(
@@ -62,14 +58,11 @@ function getSelectedCodexTraits(
   effort: CodexReasoningEffort;
   fastModeEnabled: boolean;
 } {
-  const capabilities = resolveCodexTraitCapabilities(model, models);
+  const reported = getReportedCodexCapabilities(model, models);
+  const capabilities = resolveModelCapabilities("codex", model, reported);
   const requested = modelOptions?.reasoningEffort;
   // The effort `turn/start` runs at, which the composer also dispatches explicitly.
-  const effort = resolveCodexEffectiveReasoningEffort(
-    model,
-    requested,
-    models ? getProviderModelCapabilities(models, model, CODEX_PROVIDER) : undefined,
-  );
+  const effort = resolveCodexEffectiveReasoningEffort(model, requested, reported);
   return {
     effort: effort ?? resolveCodexReasoningEffortForModel(model, requested),
     fastModeEnabled: modelOptions?.fastMode === true && capabilities.supportsFastMode,
@@ -85,10 +78,8 @@ function CodexTraitsMenuContentImpl(props: {
   const draft = useComposerThreadDraft(props.threadId);
   const modelOptions = draft.modelOptions?.codex;
   const setModelOptions = useComposerDraftStore((store) => store.setModelOptions);
-  const reported = props.models
-    ? getProviderModelCapabilities(props.models, props.model, CODEX_PROVIDER)
-    : undefined;
-  const capabilities = resolveCodexTraitCapabilities(props.model, props.models);
+  const reported = getReportedCodexCapabilities(props.model, props.models);
+  const capabilities = resolveModelCapabilities("codex", props.model, reported);
   const options = capabilities.effortOptions as ReadonlyArray<CodexReasoningEffort>;
   const defaultReasoningEffort = capabilities.defaultEffort;
   const { effort, fastModeEnabled } = getSelectedCodexTraits(
