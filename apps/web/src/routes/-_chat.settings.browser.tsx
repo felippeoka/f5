@@ -1,4 +1,7 @@
-import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
+import {
+  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  DEFAULT_SERVER_SETTINGS,
+} from "@t3tools/contracts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import "../index.css";
@@ -429,7 +432,7 @@ describe("settings route", () => {
             [PROJECT_ONE]: {
               textGenerationModelSelection: {
                 instanceId: "claudeAgent",
-                model: "claude-haiku-4-5",
+                model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.claudeAgent,
               },
             },
           },
