@@ -1868,7 +1868,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           yield* sql`
           UPDATE provider_turn_deliveries SET reservation_released_at = ${event.occurredAt}
           WHERE thread_id = ${event.payload.threadId} AND state = 'accepted' AND reservation_released_at IS NULL
-            AND (${releaseThread} OR provider_turn_id = ${turnId ?? null})
+            AND (${releaseThread ? 1 : 0} = 1 OR provider_turn_id = ${turnId ?? null})
         `.pipe(
             Effect.mapError(toPersistenceSqlError("ProjectionPipeline.releaseDeliveryReservation")),
           );

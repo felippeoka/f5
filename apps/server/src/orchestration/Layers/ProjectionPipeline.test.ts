@@ -3617,3 +3617,55 @@ it.effect("keeps delivery reservations released after rewind and admits the foll
     ),
   ),
 );
+
+it.effect(
+  "releases only the settled turn's delivery reservation when a session becomes ready",
+  () =>
+    Effect.gen(function* () {
+      const pipeline = yield* OrchestrationProjectionPipeline;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.makeUnsafe("reservation-settled");
+      const at = "2026-10-16T00:00:00.000Z";
+      for (const [deliveryId, providerTurnId] of [
+        ["reservation-settled-turn", "settled-native"],
+        ["reservation-other-turn", "other-native"],
+      ] as const) {
+        yield* sql`INSERT INTO provider_turn_deliveries(delivery_id, thread_id, command_id, message_id, state, provider_turn_id, event_json, created_at, updated_at)
+        VALUES (${deliveryId}, ${threadId}, ${deliveryId}, ${deliveryId}, 'accepted', ${providerTurnId}, '{}', ${at}, ${at})`;
+      }
+      yield* pipeline.projectEvent({
+        type: "thread.session-set",
+        sequence: 1,
+        eventId: EventId.makeUnsafe("reservation-settled-session"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: at,
+        commandId: CommandId.makeUnsafe("reservation-settled-session"),
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        payload: {
+          threadId,
+          settledTurnId: TurnId.makeUnsafe("settled-native"),
+          session: {
+            threadId,
+            status: "ready",
+            providerName: "claudeAgent",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: at,
+          },
+        },
+      } as never);
+      const rows = yield* sql<{
+        readonly deliveryId: string;
+        readonly releasedAt: string | null;
+      }>`SELECT delivery_id AS "deliveryId", reservation_released_at AS "releasedAt"
+      FROM provider_turn_deliveries WHERE thread_id = ${threadId} ORDER BY delivery_id`;
+      assert.deepEqual(rows, [
+        { deliveryId: "reservation-other-turn", releasedAt: null },
+        { deliveryId: "reservation-settled-turn", releasedAt: at },
+      ]);
+    }).pipe(Effect.provide(makeProjectionPipelineTestLayer(process.cwd()))),
+);
