@@ -1,6 +1,6 @@
+import { resolveProjectModel } from "./orchestrationState";
 import { Fragment, type ReactNode, createElement, useEffect } from "react";
 import {
-  DEFAULT_MODEL_BY_PROVIDER,
   ThreadId,
   type OrchestrationEvent,
   type OrchestrationThreadHistoryPage,
@@ -11,7 +11,6 @@ import {
   type ThreadReference,
   type ThreadSessionNotes,
 } from "@t3tools/contracts";
-import { resolveModelSlug } from "@t3tools/shared/model";
 import { create } from "zustand";
 import {
   type ChatMessage,
@@ -248,7 +247,7 @@ function mapProjectsFromReadModel(
       cwd: project.workspaceRoot,
       model:
         existing?.model ??
-        resolveModelSlug(project.defaultModel ?? DEFAULT_MODEL_BY_PROVIDER.codex),
+        resolveProjectModel(project.defaultModel, project.defaultModelSelection?.instanceId),
       createdAt: project.createdAt,
       defaultEnvMode: project.defaultEnvMode ?? null,
       icon: project.icon ?? null,

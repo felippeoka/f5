@@ -1,3 +1,4 @@
+import { pickPreferredModel } from "@t3tools/shared/model";
 import { useComputerStatus, computerSettingsCanEnable } from "../../hooks/useComputerStatus";
 import { RememberedComputerApps } from "./RememberedComputerApps";
 import { serverConfigQueryOptions } from "../../lib/serverReactQuery";
@@ -623,7 +624,7 @@ export function ProjectGitOverrides() {
                   const provider = providers.find((entry) => entry.instanceId === e.target.value);
                   if (!provider) return;
                   const model =
-                    provider.models[0]?.slug ??
+                    pickPreferredModel(provider.models)?.slug ??
                     (isKnownProviderKind(provider.driver)
                       ? DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[
                           provider.driver as ProviderKind

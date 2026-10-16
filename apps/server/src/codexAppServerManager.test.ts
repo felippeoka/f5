@@ -1,3 +1,4 @@
+import { createReportedCodexModelCapabilities } from "@t3tools/shared/model";
 import { describe, expect, it, vi } from "vitest";
 import { normalizeProviderRuntimeInfo } from "@t3tools/shared/runtimeInfo";
 import { randomUUID } from "node:crypto";
@@ -4267,3 +4268,96 @@ it.each(["0.144.3", "0.147.0", "0.160.1", "0.162.0"])(
     expect("deferGoalContinuation" in params.resume!).toBe(cliVersion === "0.162.0");
   },
 );
+
+describe("session catalog paging and effective fallback", () => {
+  it.each(["partial", "failed", "paged"] as const)(
+    "uses fresh restrictions and hidden later-page metadata: %s",
+    async (mode) => {
+      const directory = mkdtempSync(path.join(os.tmpdir(), "codex-catalog-review-"));
+      const binaryPath = path.join(directory, "codex.cjs");
+      writeFileSync(binaryPath, "#!/usr/bin/env node\nprocess.stdin.resume();\n", { mode: 0o755 });
+      const manager = new CodexAppServerManager();
+      const events: ProviderEvent[] = [];
+      manager.on("event", (event) => events.push(event));
+      vi.spyOn(
+        manager as unknown as { assertSupportedCodexCliVersion: () => void },
+        "assertSupportedCodexCliVersion",
+      ).mockImplementation(() => {});
+      let pages = 0;
+      const requests = vi
+        .spyOn(
+          manager as unknown as { sendRequest: (...args: unknown[]) => Promise<unknown> },
+          "sendRequest",
+        )
+        .mockImplementation(async (_context, method) => {
+          if (method === "model/list") {
+            if (mode === "failed") throw new Error("offline");
+            if (pages++ === 0)
+              return {
+                data: [
+                  {
+                    model: mode === "paged" ? "gpt-other" : "gpt-fresh",
+                    supportedReasoningEfforts: [],
+                    serviceTiers: [],
+                  },
+                ],
+                nextCursor: "second",
+              };
+            if (mode === "partial") throw new Error("page two offline");
+            return {
+              data: [
+                {
+                  model: "gpt-fresh",
+                  hidden: true,
+                  limits: { contextWindowTokens: 872_000 },
+                  supportedReasoningEfforts: [],
+                  serviceTiers: [{ id: "priority" }],
+                },
+              ],
+              nextCursor: null,
+            };
+          }
+          if (method === "thread/start") return { thread: { id: "provider-thread" } };
+          if (method === "turn/start") return { turn: { id: "turn" } };
+          return {};
+        });
+      const fallback = createReportedCodexModelCapabilities({
+        model: "gpt-fresh",
+        supportedReasoningEfforts: [{ reasoningEffort: "high" }],
+        serviceTiers: [{ id: "priority" }],
+      });
+      try {
+        await manager.startSession({
+          threadId: asThreadId("review"),
+          model: "gpt-fresh",
+          serviceTier: "fast",
+          cwd: directory,
+          runtimeMode: "full-access",
+          providerOptions: { codex: { binaryPath } },
+          effectiveModelCapabilities: new Map([["gpt-fresh", fallback]]),
+        });
+        await manager.sendTurn({
+          threadId: asThreadId("review"),
+          input: "hello",
+          model: "gpt-fresh",
+          effort: "high",
+          serviceTier: "fast",
+        });
+        const turn = requests.mock.calls.find((call) => call[1] === "turn/start")?.[2] as Record<
+          string,
+          unknown
+        >;
+        expect(turn.serviceTier).toBe(mode === "partial" ? null : "priority");
+        if (mode === "failed") expect(turn.effort).toBe("high");
+        else expect(turn).not.toHaveProperty("effort");
+        const configured = events.find((event) => event.method === "session/configured")
+          ?.payload as { config: Record<string, unknown> };
+        expect(configured.config.serviceTier).toBe(mode === "partial" ? null : "priority");
+        if (mode === "paged") expect(configured.config.modelContextWindowTokens).toBe(872_000);
+      } finally {
+        manager.stopAll();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+});

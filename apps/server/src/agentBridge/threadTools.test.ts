@@ -244,6 +244,56 @@ layer("Agent Bridge thread tools", (it) => {
     }),
   );
 
+  it.effect("skips an unlisted Claude coding default", () =>
+    Effect.gen(function* () {
+      const { host, run } = yield* setup();
+      const claude = provider("claude", "claudeAgent", ["claude-opus-5-5", "claude-opus-4-6"]);
+      host.providers = [
+        {
+          ...claude,
+          models: claude.models.map((model) => ({
+            ...model,
+            isUnlisted: model.slug === "claude-opus-5-5",
+          })),
+        },
+      ];
+      const created = yield* run("create_thread", { projectId: "exposed", prompt: "Hi" });
+      assert.isTrue(created.ok);
+      assert.strictEqual(host.submissions[0]!.command.model, "claude-opus-4-6");
+    }),
+  );
+
+  it.effect("does not advertise or accept unlisted models for new bridge threads", () =>
+    Effect.gen(function* () {
+      const { host, run } = yield* setup();
+      const claude = provider("claude", "claudeAgent", ["claude-haiku-5-5", "claude-haiku-4-5"]);
+      host.providers = [
+        {
+          ...claude,
+          models: claude.models.map((model) => ({
+            ...model,
+            isUnlisted: model.slug === "claude-haiku-5-5",
+          })),
+        },
+      ];
+      const listed = yield* run("list_providers", {});
+      assert.isTrue(listed.ok);
+      if (listed.ok)
+        assert.deepStrictEqual(
+          listed.value.providers[0].models.map((model: { slug: string }) => model.slug),
+          ["claude-haiku-4-5"],
+        );
+      const created = yield* run("create_thread", {
+        projectId: "exposed",
+        prompt: "Hi",
+        providerInstanceId: "claude",
+        model: "claude-haiku-5-5",
+      });
+      assert.isFalse(created.ok);
+      assert.strictEqual(host.submissions.length, 0);
+    }),
+  );
+
   it.effect("uses the checkout for non-git projects", () =>
     Effect.gen(function* () {
       const { host, run } = yield* setup();

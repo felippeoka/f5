@@ -99,6 +99,7 @@ const mergeProviderModels = (
   retainMissingModels: boolean,
   previousModels: ReadonlyArray<ServerProvider["models"][number]>,
   nextModels: ReadonlyArray<ServerProvider["models"][number]>,
+  catalogAware = false,
 ): ReadonlyArray<ServerProvider["models"][number]> => {
   // Custom models are authoritative settings data, not probe-discovered inventory.
   const retainablePrevious = previousModels.filter((model) => !model.isCustom);
@@ -108,6 +109,7 @@ const mergeProviderModels = (
 
   const previousBySlug = new Map(previousModels.map((model) => [model.slug, model] as const));
   const mergedModels = nextModels.map((model) => {
+    if (catalogAware && model.isCustom) return model;
     const previousModel = previousBySlug.get(model.slug);
     // A probe that could not read the executable's catalog falls back to
     // built-ins; keep the capabilities the executable reported earlier.
@@ -120,7 +122,13 @@ const mergeProviderModels = (
     ) {
       return { ...model, capabilities: previousModel.capabilities };
     }
-    if (!previousModel || hasModelCapabilities(model) || !hasModelCapabilities(previousModel)) {
+    if (
+      !previousModel ||
+      model.capabilities?.source === "reported" ||
+      hasModelCapabilities(model) ||
+      (catalogAware && !retainMissingModels && isReportedModel(previousModel)) ||
+      !hasModelCapabilities(previousModel)
+    ) {
       return model;
     }
     return {
@@ -140,6 +148,51 @@ export const mergeProviderSnapshot = (
 ): ServerProvider => {
   if (!previousProvider) {
     return nextProvider;
+  }
+  if (nextProvider.modelCatalog) {
+    const catalog = nextProvider.modelCatalog;
+    const compatible =
+      previousProvider.instanceId === nextProvider.instanceId &&
+      previousProvider.driver === nextProvider.driver &&
+      previousProvider.version === nextProvider.version &&
+      previousProvider.configurationFingerprint === nextProvider.configurationFingerprint &&
+      nextProvider.enabled &&
+      nextProvider.availability !== "unavailable";
+    const prior = compatible ? previousProvider.modelCatalog : undefined;
+    const success = catalog.status === "complete" || catalog.status === "menu";
+    const lastSuccessAt = success ? catalog.lastSuccessAt : prior?.lastSuccessAt;
+    const firstPartialAt = success ? undefined : (prior?.firstPartialAt ?? catalog.firstPartialAt);
+    const start = lastSuccessAt ?? firstPartialAt;
+    const age = start ? Date.parse(nextProvider.checkedAt) - Date.parse(start) : Infinity;
+    const retain = compatible && !success && age >= 0 && age < 24 * 60 * 60 * 1000;
+    const incomingBySlug = new Map(nextProvider.models.map((model) => [model.slug, model]));
+    const models = mergeProviderModels(
+      retain,
+      previousProvider.models,
+      nextProvider.models,
+      true,
+    ).map((model) => {
+      const previous = previousProvider.models.find((row) => row.slug === model.slug);
+      return retain &&
+        !model.isCustom &&
+        incomingBySlug.get(model.slug)?.capabilities?.source !== "reported" &&
+        previous
+        ? {
+            ...model,
+            ...(previous.isUnlisted !== undefined ? { isUnlisted: previous.isUnlisted } : {}),
+            capabilities: previous.capabilities,
+          }
+        : model;
+    });
+    return {
+      ...nextProvider,
+      models,
+      modelCatalog: {
+        status: catalog.status,
+        ...(lastSuccessAt ? { lastSuccessAt } : {}),
+        ...(firstPartialAt ? { firstPartialAt } : {}),
+      },
+    };
   }
   const outcome = probeOutcome(nextProvider);
   const outcomeStartedAt = probeOutcomeStartedAt(previousProvider, nextProvider, outcome);
@@ -211,6 +264,7 @@ const buildSnapshotSource = (instance: ProviderInstance): ProviderSnapshotSource
     : {}),
   getSnapshot: instance.snapshot.getSnapshot,
   refresh: (instance.invalidateAccountStatus ?? Effect.void).pipe(
+    Effect.andThen(instance.invalidateModelCatalog ?? Effect.void),
     Effect.andThen(instance.snapshot.refresh),
   ),
   streamChanges: instance.snapshot.streamChanges,
@@ -324,7 +378,8 @@ export const ProviderRegistryLive = Layer.effect(
         );
       });
 
-    const upsertProviders = Effect.fn("upsertProviders")(function* (
+    const catalogUpdateLock = yield* Semaphore.make(1);
+    const upsertProvidersUnlocked = Effect.fn("upsertProviders")(function* (
       nextProviders: ReadonlyArray<ServerProvider>,
       options?: {
         readonly publish?: boolean;
@@ -366,6 +421,10 @@ export const ProviderRegistryLive = Layer.effect(
         },
       );
 
+      for (const provider of providersToPersist) {
+        const instance = yield* instanceRegistry.getInstance(provider.instanceId);
+        if (instance?.updateModelCatalog) yield* instance.updateModelCatalog(provider.models);
+      }
       if (haveProvidersChanged(previousProviders, providers)) {
         if (options?.persist !== false) {
           yield* Effect.forEach(providersToPersist, persistProvider, {
@@ -380,6 +439,9 @@ export const ProviderRegistryLive = Layer.effect(
 
       return providers;
     });
+
+    const upsertProviders = (...args: Parameters<typeof upsertProvidersUnlocked>) =>
+      upsertProvidersUnlocked(...args).pipe(catalogUpdateLock.withPermits(1));
 
     const syncProvider = Effect.fn("syncProvider")(function* (
       provider: ServerProvider,

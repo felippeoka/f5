@@ -9,6 +9,7 @@ import {
   buildCodexInitializeParams,
   killChildTree,
 } from "../codexAppServerManager.ts";
+import { readCodexModelPages } from "./readCodexModelPages.ts";
 import { createJsonRpcStdinWriter, type JsonRpcStdinWriter } from "./JsonRpcStdinWriter.ts";
 import { buildCodexAppServerCommand } from "../provider/codexLaunchArgs.ts";
 import { buildProviderChildProcessEnv } from "../providerProcessEnv.ts";
@@ -549,11 +550,15 @@ export class CodexControlClient extends EventEmitter<{
   }
 
   /**
-   * Page through `model/list`. Hidden models are excluded by the server
-   * default (`includeHidden` omitted); callers filter again defensively.
+   * Page through `model/list`, including hidden rows for launch metadata.
+   * Picker consumers filter hidden additions after parsing.
    */
   async listModels(maxPages = 10): Promise<ReadonlyArray<Record<string, unknown>>> {
-    return this.listPaged("model/list", {}, maxPages);
+    return (await this.listModelPages(maxPages)).entries;
+  }
+
+  async listModelPages(maxPages = 10) {
+    return readCodexModelPages((params) => this.sendRequest("model/list", params), { maxPages });
   }
 
   /** `skills/list` entries (one per requested cwd) with their skills. */

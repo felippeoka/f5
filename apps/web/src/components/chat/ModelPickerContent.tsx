@@ -1,3 +1,4 @@
+import { filterPickerVisibleModels } from "./providerIconUtils";
 import {
   type ModelSlug,
   type ProviderKind,
@@ -131,12 +132,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const flatModels = useMemo<ModelPickerItem[]>(
     () =>
       Object.entries(props.modelOptionsByProvider).flatMap(([providerKind, models]) =>
-        models.map((model) => ({
+        filterPickerVisibleModels(
+          models,
+          new Set(providerKind === props.provider ? [props.model] : []),
+        ).map((model) => ({
           ...model,
           providerKind: providerKind as ProviderKind,
         })),
       ),
-    [props.modelOptionsByProvider],
+    [props.modelOptionsByProvider, props.provider, props.model],
   );
 
   const filteredModels = useMemo(() => {

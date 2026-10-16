@@ -55,6 +55,7 @@ import {
   resolveModelCapabilities,
   resolveReasoningEffortForProvider,
 } from "@t3tools/shared/model";
+import { readCodexModelPages } from "./codex/readCodexModelPages.ts";
 import { readCodexReportedModelCapabilities } from "./provider/codexModelCatalog.ts";
 import { assertNever } from "@t3tools/shared/exhaustive";
 import { killProcessTree } from "@t3tools/shared/processTree";
@@ -275,6 +276,7 @@ export interface CodexAppServerSendTurnInput {
 }
 
 export interface CodexAppServerStartSessionInput {
+  readonly effectiveModelCapabilities?: ReadonlyMap<string, ModelCapabilities>;
   readonly threadId: ThreadId;
   readonly provider?: "codex";
   readonly cwd?: string;
@@ -745,6 +747,20 @@ function resolveReportedCodexEffort(
   return capabilities.defaultEffort;
 }
 
+export function resolveCodexServiceTier(
+  requested: string | null | undefined,
+  capabilities?: ModelCapabilities,
+): string | null | undefined {
+  if (requested !== "fast") return requested;
+  if (capabilities && !resolveModelCapabilities("codex", undefined, capabilities).supportsFastMode)
+    return null;
+  return (
+    capabilities?.serviceTiers?.find((tier) => tier.id === "fast")?.id ??
+    capabilities?.serviceTiers?.find((tier) => tier.id === "priority")?.id ??
+    "fast"
+  );
+}
+
 export function buildCodexTurnStartParams(
   input: CodexAppServerSendTurnInput,
   state: {
@@ -822,11 +838,7 @@ export function buildCodexTurnStartParams(
     // A persisted fast-mode choice must not reach a model whose reported tiers
     // lack it (the composer hides the toggle); null clears a thread-level tier.
     turnStartParams.serviceTier =
-      input.serviceTier === "fast" &&
-      reportedCapabilities &&
-      !resolveModelCapabilities("codex", effortModel, reportedCapabilities).supportsFastMode
-        ? null
-        : input.serviceTier;
+      resolveCodexServiceTier(input.serviceTier, reportedCapabilities) ?? null;
   }
   // An absent effort means the model default (the composer strips it when it
   // equals the default), so the resolvers always run instead of letting the
@@ -1227,10 +1239,23 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
       await this.writeMessage(context, { method: "initialized" });
       try {
-        const modelListResponse = await this.sendRequest(context, "model/list", {});
+        const pages = await readCodexModelPages((params) =>
+          this.sendRequest(context!, "model/list", params),
+        );
+        const modelListResponse = { data: pages.entries };
         context.modelContextWindowCatalog = readCodexModelContextWindowCatalog(modelListResponse);
-        context.reportedModelCapabilities = readCodexReportedModelCapabilities(modelListResponse);
+        context.reportedModelCapabilities = new Map([
+          ...[...(input.effectiveModelCapabilities ?? [])].filter(
+            ([, caps]) => caps.source === "reported",
+          ),
+          ...readCodexReportedModelCapabilities(modelListResponse),
+        ]);
       } catch (error) {
+        context.reportedModelCapabilities = new Map(
+          [...(input.effectiveModelCapabilities ?? [])].filter(
+            ([, caps]) => caps.source === "reported",
+          ),
+        );
         await Effect.logWarning("codex model/list did not expose context window metadata", {
           threadId,
           cause: error instanceof Error ? error.message : String(error),
@@ -1247,11 +1272,15 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       }
 
       const normalizedModel = resolveCodexModelForAccount(fallbackModel, context.account);
+      const launchServiceTier = resolveCodexServiceTier(
+        input.serviceTier,
+        context.reportedModelCapabilities?.get(normalizedModel ?? DEFAULT_MODEL_BY_PROVIDER.codex),
+      );
       context.workflowExecutionProfile = input.workflowExecutionProfile;
       const threadOpenParams = buildCodexThreadOpenRequestParams({
         cliVersion,
         ...(normalizedModel ? { model: normalizedModel } : {}),
-        ...(input.serviceTier !== undefined ? { serviceTier: input.serviceTier } : {}),
+        ...(typeof launchServiceTier === "string" ? { serviceTier: launchServiceTier } : {}),
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(resumeThreadId ? { resumeThreadId } : {}),
         runtimeMode: input.runtimeMode ?? DEFAULT_RUNTIME_MODE,
@@ -1359,12 +1388,12 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           : [],
       );
       context.requestedRuntime = { model: input.model, serviceTier: input.serviceTier };
-      context.fastTierApplied = input.serviceTier === "fast";
+      context.fastTierApplied = launchServiceTier === "fast" || launchServiceTier === "priority";
       this.emitSessionConfigured(context, {
         ...(normalizedModel ? { model: normalizedModel } : {}),
         ...(modelContextWindowTokens !== undefined ? { modelContextWindowTokens } : {}),
         ...(resolvedCwd ? { cwd: resolvedCwd } : {}),
-        ...(input.serviceTier !== undefined ? { serviceTier: input.serviceTier } : {}),
+        ...(launchServiceTier !== undefined ? { serviceTier: launchServiceTier } : {}),
         [INSTRUCTION_PROFILE_CONFIG_KEY]: buildInstructionProfile({ provider: "codex" }),
       });
       this.emitLifecycleEvent(
@@ -1470,7 +1499,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       serviceTier: input.serviceTier,
     };
     if (turnStartParams.serviceTier !== undefined) {
-      context.fastTierApplied = turnStartParams.serviceTier === "fast";
+      context.fastTierApplied =
+        turnStartParams.serviceTier === "fast" || turnStartParams.serviceTier === "priority";
     }
     if (nextConfiguredModel !== undefined) {
       const modelContextWindowTokens = lookupModelContextWindowTokens({

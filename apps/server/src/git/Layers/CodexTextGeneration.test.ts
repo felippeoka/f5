@@ -1,3 +1,4 @@
+import { createReportedCodexModelCapabilities } from "@t3tools/shared/model";
 import { delimiter } from "node:path";
 import { writeCliCommand } from "../../testUtils/cli.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -10,6 +11,7 @@ import { ProviderInstanceId } from "@t3tools/contracts";
 import { ServerConfig } from "../../config.ts";
 import {
   CodexTextGenerationLive,
+  makeCodexTextGeneration,
   resolveCodexTextGenerationReasoningEffort,
 } from "./CodexTextGeneration.ts";
 import { TextGenerationError } from "../Errors.ts";
@@ -212,6 +214,37 @@ it("clamps unsupported Astra reasoning efforts before invoking the CLI", () => {
 });
 
 it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
+  for (const effort of ["high", undefined] as const) {
+    it.effect(`uses reported auxiliary effort controls: ${effort ?? "none"}`, () =>
+      withFakeCodexEnv(
+        {
+          output: JSON.stringify({ subject: "Use reported model", body: "" }),
+          argsMustContain: effort
+            ? 'model_reasoning_effort="high"'
+            : "--model gpt-reported --output-schema",
+        },
+        Effect.gen(function* () {
+          const textGeneration = yield* makeCodexTextGeneration(undefined, process.env, () =>
+            Effect.succeed(
+              createReportedCodexModelCapabilities({
+                model: "gpt-reported",
+                supportedReasoningEfforts: effort ? [{ reasoningEffort: effort }] : [],
+              }),
+            ),
+          );
+          const result = yield* textGeneration.generateCommitMessage({
+            cwd: process.cwd(),
+            branch: null,
+            stagedSummary: "M file",
+            stagedPatch: "diff",
+            modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-reported" },
+          });
+          expect(result.subject).toBe("Use reported model");
+        }),
+      ),
+    );
+  }
+
   it.effect("generates and sanitizes commit messages without branch by default", () =>
     withFakeCodexEnv(
       {

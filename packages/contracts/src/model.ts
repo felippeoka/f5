@@ -211,6 +211,8 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
     // NOTE: first codex entry must equal DEFAULT_MODEL_BY_PROVIDER.codex.
     { slug: "gpt-6.1-sol", name: "GPT-6.1 Sol" },
     { slug: "gpt-6-astra", name: "GPT-6 Astra" },
+    { slug: "gpt-6-sol", name: "GPT-6 Sol" },
+    { slug: "gpt-6-luna", name: "GPT-6 Luna" },
     { slug: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
     { slug: "gpt-5.6-terra", name: "GPT-5.6 Terra" },
     { slug: "gpt-5.6-luna", name: "GPT-5.6 Luna" },
@@ -228,12 +230,14 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
     { slug: "claude-opus-5", name: "Claude Opus 5" },
     { slug: "claude-fable-5-1", name: "Claude Fable 5.1" },
     { slug: "claude-fable-5", name: "Claude Fable 5" },
+    { slug: "claude-sonnet-5-5", name: "Claude Sonnet 5.5" },
+    { slug: "claude-sonnet-5", name: "Claude Sonnet 5" },
     { slug: "claude-opus-4-8", name: "Claude Opus 4.8" },
     { slug: "claude-opus-4-7", name: "Claude Opus 4.7" },
     { slug: "claude-opus-4-6", name: "Claude Opus 4.6" },
     { slug: "claude-opus-4-5", name: "Claude Opus 4.5" },
-    { slug: "claude-sonnet-5", name: "Claude Sonnet 5" },
     { slug: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+    { slug: "claude-haiku-5-5", name: "Claude Haiku 5.5" },
     { slug: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
   ],
   cursor: [
@@ -267,13 +271,13 @@ export const DEFAULT_MODEL_BY_PROVIDER = {
 
 export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
 
-export const DEFAULT_GIT_TEXT_GENERATION_MODEL = "gpt-5.4-mini" as const;
+export const DEFAULT_GIT_TEXT_GENERATION_MODEL = "gpt-6-luna" as const;
 
 export const DEFAULT_PR_ADVISORY_MODEL = "gpt-5.6-sol" as const;
 
 export const DEFAULT_THREAD_TITLE_MODEL_BY_PROVIDER = {
   codex: DEFAULT_GIT_TEXT_GENERATION_MODEL,
-  claudeAgent: "claude-sonnet-4-6",
+  claudeAgent: "claude-haiku-5-5",
   cursor: "composer-2",
   opencode: "openai/gpt-5",
   grok: "grok-build",
@@ -283,7 +287,7 @@ export const DEFAULT_THREAD_TITLE_MODEL_BY_PROVIDER = {
 
 export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER = {
   codex: DEFAULT_GIT_TEXT_GENERATION_MODEL,
-  claudeAgent: "claude-haiku-4-5",
+  claudeAgent: "claude-haiku-5-5",
   cursor: "composer-2",
   opencode: "openai/gpt-5",
   grok: "grok-build",
@@ -293,6 +297,9 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER = {
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER = {
   codex: {
+    "6": "gpt-6-sol",
+    "gpt-6": "gpt-6-sol",
+    "6-luna": "gpt-6-luna",
     "6.1": "gpt-6.1-sol",
     "gpt-6.1": "gpt-6.1-sol",
     "5.6": "gpt-5.6-sol",
@@ -331,14 +338,20 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER = {
     "opus-4.5": "claude-opus-4-5",
     "claude-opus-4.5": "claude-opus-4-5",
     "claude-opus-4-5": "claude-opus-4-5",
-    sonnet: "claude-sonnet-5",
+    sonnet: "claude-sonnet-5-5",
+    "sonnet-5.5": "claude-sonnet-5-5",
+    "sonnet-5-5": "claude-sonnet-5-5",
+    "claude-sonnet-5.5": "claude-sonnet-5-5",
     "sonnet-5": "claude-sonnet-5",
     "claude-sonnet-5.0": "claude-sonnet-5",
     "claude-sonnet-5-0": "claude-sonnet-5",
     "sonnet-4.6": "claude-sonnet-4-6",
     "claude-sonnet-4.6": "claude-sonnet-4-6",
     "claude-sonnet-4-6-20251117": "claude-sonnet-4-6",
-    haiku: "claude-haiku-4-5",
+    haiku: "claude-haiku-5-5",
+    "haiku-5.5": "claude-haiku-5-5",
+    "haiku-5-5": "claude-haiku-5-5",
+    "claude-haiku-5.5": "claude-haiku-5-5",
     "haiku-4.5": "claude-haiku-4-5",
     "claude-haiku-4.5": "claude-haiku-4-5",
     "claude-haiku-4-5-20251001": "claude-haiku-4-5",

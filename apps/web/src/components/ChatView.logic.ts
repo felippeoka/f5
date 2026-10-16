@@ -668,6 +668,7 @@ function getLiveProviderModels(
 
 function toModelPickerOption(model: ServerProviderModel): ModelPickerOptionWithCustomFlag {
   return {
+    ...(model.isUnlisted !== undefined ? { isUnlisted: model.isUnlisted } : {}),
     slug: model.slug,
     name: model.name,
     ...(model.shortName ? { shortName: model.shortName } : {}),
