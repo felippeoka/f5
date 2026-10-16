@@ -1061,6 +1061,55 @@ export function resolveSupportedEffort(
   return null;
 }
 
+/**
+ * The Codex effort a turn runs at, as `turn/start` resolves it: the requested
+ * effort walked down to one the model supports, else the model default.
+ * Reported capabilities win over the built-in table. `undefined` only when a
+ * reported model takes no effort.
+ */
+export function resolveCodexEffectiveReasoningEffort(
+  model: string | null | undefined,
+  effort: string | null | undefined,
+  reported?: ModelCapabilities | null,
+): CodexReasoningEffort | undefined {
+  if (reported?.source !== "reported") {
+    return resolveCodexReasoningEffortForModel(model, effort);
+  }
+  const capabilities = resolveModelCapabilities("codex", model, reported);
+  const requested = resolveReasoningEffortForProvider("codex", effort);
+  if (requested) {
+    const start = CODEX_REASONING_EFFORT_OPTIONS.indexOf(requested);
+    for (const candidate of CODEX_REASONING_EFFORT_OPTIONS.slice(start)) {
+      if (capabilities.effortOptions.includes(candidate)) return candidate;
+    }
+  }
+  return capabilities.defaultEffort as CodexReasoningEffort | undefined;
+}
+
+/**
+ * Codex options to send or save for a turn. Unlike `normalizeCodexModelOptions`
+ * (draft persistence), the effective effort stays explicit even when it is the
+ * default, so a session whose `model/list` reports another default (or reports
+ * one the client never saw) cannot substitute it.
+ */
+export function resolveCodexDispatchModelOptions(
+  model: string | null | undefined,
+  modelOptions: CodexModelOptions | null | undefined,
+  reported?: ModelCapabilities | null,
+): CodexModelOptions | undefined {
+  const normalized = normalizeCodexModelOptions(model, modelOptions, reported);
+  const reasoningEffort = resolveCodexEffectiveReasoningEffort(
+    model,
+    modelOptions?.reasoningEffort,
+    reported,
+  );
+  const nextOptions: CodexModelOptions = {
+    ...normalized,
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+  };
+  return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+}
+
 /** Subset of the SDK's `ModelInfo` that F5 reads. */
 export interface ReportedClaudeModelInfo {
   readonly value: string;

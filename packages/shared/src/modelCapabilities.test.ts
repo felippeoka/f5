@@ -4,6 +4,8 @@ import {
   createReportedClaudeModelCapabilities,
   createReportedCodexModelCapabilities,
   normalizeCodexModelOptions,
+  resolveCodexDispatchModelOptions,
+  resolveCodexEffectiveReasoningEffort,
   resolveModelCapabilities,
   resolveSupportedEffort,
 } from "./model";
@@ -116,5 +118,53 @@ describe("normalizeCodexModelOptions with reported capabilities", () => {
 
   it("drops fast mode the model does not offer", () => {
     expect(normalizeCodexModelOptions("gpt-6.1-sol", { fastMode: true }, reported)).toBeUndefined();
+  });
+});
+
+describe("Codex effective and dispatched effort", () => {
+  const reported = createReportedCodexModelCapabilities({
+    model: "gpt-6.1-sol",
+    supportedReasoningEfforts: [
+      { reasoningEffort: "max" },
+      { reasoningEffort: "high" },
+      { reasoningEffort: "low" },
+    ],
+    defaultReasoningEffort: "low",
+    serviceTiers: [],
+  });
+
+  it("resolves an absent effort to the reported default, not the built-in one", () => {
+    expect(resolveCodexEffectiveReasoningEffort("gpt-6.1-sol", undefined, reported)).toBe("low");
+    expect(resolveCodexEffectiveReasoningEffort("gpt-6.1-sol", undefined)).toBe("high");
+  });
+
+  it("walks an unsupported effort down to a reported one, as turn/start does", () => {
+    expect(resolveCodexEffectiveReasoningEffort("gpt-6.1-sol", "ultra", reported)).toBe("max");
+    expect(resolveCodexEffectiveReasoningEffort("gpt-6.1-sol", "xhigh", reported)).toBe("high");
+    expect(resolveCodexEffectiveReasoningEffort("gpt-6.1-sol", "bogus", reported)).toBe("low");
+  });
+
+  it("is undefined for a reported model that takes no effort", () => {
+    const noEfforts = createReportedCodexModelCapabilities({
+      model: "gpt-no-effort",
+      supportedReasoningEfforts: [],
+    });
+    expect(resolveCodexEffectiveReasoningEffort("gpt-no-effort", "high", noEfforts)).toBe(
+      undefined,
+    );
+    expect(resolveCodexDispatchModelOptions("gpt-no-effort", undefined, noEfforts)).toBe(undefined);
+  });
+
+  it("dispatches the default effort explicitly", () => {
+    // Built-in only: "high" is the built-in default, still sent.
+    expect(resolveCodexDispatchModelOptions("gpt-6.1-sol", { reasoningEffort: "high" })).toEqual({
+      reasoningEffort: "high",
+    });
+    expect(resolveCodexDispatchModelOptions("gpt-6.1-sol", undefined, reported)).toEqual({
+      reasoningEffort: "low",
+    });
+    expect(
+      resolveCodexDispatchModelOptions("gpt-6.1-sol", { reasoningEffort: "ultra" }, reported),
+    ).toEqual({ reasoningEffort: "max" });
   });
 });

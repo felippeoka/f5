@@ -8,6 +8,7 @@ import {
 } from "@t3tools/contracts";
 import {
   normalizeCodexModelOptions,
+  resolveCodexEffectiveReasoningEffort,
   resolveCodexReasoningEffortForModel,
   resolveModelCapabilities,
 } from "@t3tools/shared/model";
@@ -63,12 +64,12 @@ function getSelectedCodexTraits(
 } {
   const capabilities = resolveCodexTraitCapabilities(model, models);
   const requested = modelOptions?.reasoningEffort;
-  const effort =
-    capabilities.source === "reported"
-      ? ((requested && capabilities.effortOptions.includes(requested)
-          ? requested
-          : capabilities.defaultEffort) as CodexReasoningEffort | undefined)
-      : undefined;
+  // The effort `turn/start` runs at, which the composer also dispatches explicitly.
+  const effort = resolveCodexEffectiveReasoningEffort(
+    model,
+    requested,
+    models ? getProviderModelCapabilities(models, model, CODEX_PROVIDER) : undefined,
+  );
   return {
     effort: effort ?? resolveCodexReasoningEffortForModel(model, requested),
     fastModeEnabled: modelOptions?.fastMode === true && capabilities.supportsFastMode,
