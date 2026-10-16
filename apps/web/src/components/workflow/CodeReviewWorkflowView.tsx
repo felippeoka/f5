@@ -1,3 +1,4 @@
+import { useWorkflowDetails, WorkflowDetailsStatus } from "../../hooks/useWorkflowDetails";
 import type { ThreadId } from "@t3tools/contracts";
 import { useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
@@ -5,7 +6,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { useThreadDetail } from "../../lib/orchestrationReactQuery";
 import { WORKFLOW_TYPE_DIALOG_LABEL } from "../../lib/workflowType";
 import { readNativeApi } from "../../nativeApi";
-import { useStore } from "../../store";
 import { useThreadsByIds } from "../../threadSelectors";
 import { threadIdsForCodeReviewWorkflow } from "./codeReviewWorkflowUtils";
 import ChatMarkdown from "../ChatMarkdown";
@@ -28,7 +28,7 @@ import {
   statusLabel,
 } from "./codeReviewWorkflowView.logic";
 import { deriveCodeReviewTimelinePhases } from "./codeReviewWorkflowSidebarTimeline";
-import { WorkflowPageLayout, WorkflowPageNotFound } from "./WorkflowPageLayout";
+import { WorkflowPageLayout } from "./WorkflowPageLayout";
 import { WorkflowRunInspector } from "./WorkflowRunInspector";
 import {
   WorkflowArtifactSection,
@@ -54,9 +54,8 @@ export function CodeReviewWorkflowView(props: { workflowId: string }) {
   const navigate = useNavigate();
   const [busy, setBusy] = useState<"retry" | "delete" | null>(null);
   const [duplicateRisk, setDuplicateRisk] = useState<DuplicateRisk | null>(null);
-  const workflow = useStore((store) =>
-    store.codeReviewWorkflows.find((entry) => entry.id === props.workflowId),
-  );
+  const detail = useWorkflowDetails("codeReview", props.workflowId);
+  const workflow = detail.workflow;
   // Only this workflow's threads: unrelated streaming does not re-render the view.
   const workflowThreadIds = useMemo(
     () => (workflow ? threadIdsForCodeReviewWorkflow(workflow) : EMPTY_WORKFLOW_THREAD_IDS),
@@ -79,7 +78,9 @@ export function CodeReviewWorkflowView(props: { workflowId: string }) {
   );
 
   if (!workflow) {
-    return <WorkflowPageNotFound />;
+    return (
+      <WorkflowDetailsStatus missing={detail.missing} error={detail.error} retry={detail.retry} />
+    );
   }
 
   const consolidationThread = consolidationThreadId ? threadById.get(consolidationThreadId) : null;

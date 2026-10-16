@@ -59,3 +59,10 @@ If draft settings cannot be fetched, the draft uses its last resolved project pe
 An invalid persisted project override does not reset valid global or other project settings. The affected project uses approval-required and no submodule initialization; writes remain blocked until the original file is repaired. The file is not silently rewritten.
 
 Streaming previously defaulted to on in the browser. Unmigrated server streaming defaults retain that behavior. A migrated browser preference or explicit global edit records the choice and takes precedence over later migration requests. Old browser storage does not distinguish a saved default from an explicit choice, so migration preserves present keys as recorded rather than guessing intent.
+
+Skill scan diagnostics appear above project settings with the affected path and
+parse or filesystem error. Invalid skills are omitted from the catalog. Watcher
+failures use periodic retries; **Refresh diagnostics** reloads the latest scan
+results. Repository changes refresh only affected projects, with shared watch
+registrations retained until their final project subscriber is removed. User-scope
+provider catalogs remain isolated to their configured provider homes.

@@ -319,6 +319,10 @@
     "./runtimeInfo": {
       "types": "./src/runtimeInfo.ts",
       "import": "./src/runtimeInfo.ts"
+    },
+    "./workflowSummary": {
+      "types": "./src/workflowSummary.ts",
+      "import": "./src/workflowSummary.ts"
     }
   },
   "scripts": {

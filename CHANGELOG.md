@@ -27,6 +27,14 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 - MCP CLI login times out after nine minutes to leave teardown time within the shared ten-minute OAuth lease.
 - Fix Claude instance environments, Windows home overrides, instance model-catalog credentials, configured worktree roots, and explicit-state-dir backup settings/secrets.
 
+### Server performance and storage
+
+- Fix review findings in streaming retry recovery, legacy attachment backup coverage, settings credential redaction, scheduled-backup diagnostics and cleanup, skill watcher recovery, and workflow detail invalidation. Add an independent streaming-batching startup switch.
+- Coalesce Codex streaming assistant and reasoning deltas with ordered, idempotent batches and full-text completion recovery.
+- Export backups through an owned maintenance process while normal writes continue; protect snapshot attachments from cleanup. Add opt-in daily backups retaining seven successful archives, with credentials excluded. Preserve attachment ownership when restoring into a different state directory.
+- Refresh only dirty projects’ skills, preserve unchanged watchers, and show scan diagnostics in project settings.
+- Load workflow summaries at startup and fetch full run details when a workflow is opened. Upgrade the wire protocol to 22.
+
 - Fix reliability review findings: persist delivery reservation release across rewind, preserve editor draft identity after saving, admit controls during resynchronization, retry overloaded reads safely, and start offline-mounted terminals once synchronized. Preserve normal umask permissions for new workspace exports.
 
 ### Reliability

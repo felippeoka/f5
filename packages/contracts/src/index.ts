@@ -54,3 +54,5 @@ export * from "./prHubExtensions";
 export * from "./usageLimit";
 
 export * from "./runtimeInfo";
+
+export * from "./workflowSummary";

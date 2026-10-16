@@ -50,9 +50,25 @@ function errorMessage(error: unknown): string {
 }
 
 export function StorageAutomationSettings() {
+  const scheduledBackupsEnabled = useSettings((settings) => settings.scheduledBackupsEnabled);
   const storageCleanup = useSettings((settings) => settings.storageCleanup);
   const autoPullDefaultBranch = useSettings((settings) => settings.autoPullDefaultBranch);
   const queryClient = useQueryClient();
+  const saveScheduledBackups = (enabled: boolean) =>
+    void ensureNativeApi()
+      .server.updateSettings({ scheduledBackupsEnabled: enabled })
+      .then((settings) =>
+        queryClient.setQueryData(serverQueryKeys.config(), (existing) =>
+          existing ? { ...existing, settings } : existing,
+        ),
+      )
+      .catch((error: unknown) =>
+        toastManager.add({
+          type: "error",
+          title: "Could not save scheduled backups",
+          description: errorMessage(error),
+        }),
+      );
 
   // Send only the changed fields; the server deep-merges them. Spreading the
   // rendered `storageCleanup` would let a second quick edit revert the first.
@@ -84,6 +100,7 @@ export function StorageAutomationSettings() {
   const audit = useQuery({
     queryKey: auditQueryKey,
     queryFn: () => ensureNativeApi().storage.automationAudit({ limit: 50 }),
+    refetchInterval: 30_000,
   });
 
   const rulesDisabled = !storageCleanup.enabled;
@@ -112,6 +129,47 @@ export function StorageAutomationSettings() {
         />
       </label>
 
+      <label className="flex items-center justify-between gap-4 py-2 text-sm">
+        <span>
+          Daily backups
+          <span className="block text-xs text-muted-foreground">
+            Retain seven successful archives in this profile’s backups folder. Credentials are
+            excluded. Runs while F5 is open.
+          </span>
+        </span>
+        <Switch
+          aria-label="Daily backups"
+          checked={scheduledBackupsEnabled}
+          onCheckedChange={saveScheduledBackups}
+        />
+      </label>
+      <div className="space-y-1 text-xs text-muted-foreground" aria-live="polite">
+        <p>
+          Last successful daily backup:{" "}
+          {audit.data?.scheduledBackupStatus?.lastSuccessAt
+            ? new Date(audit.data.scheduledBackupStatus.lastSuccessAt).toLocaleString()
+            : "None recorded"}
+        </p>
+        {audit.data?.scheduledBackupStatus?.lastAttemptAt && (
+          <p>
+            Last attempt:{" "}
+            {new Date(audit.data.scheduledBackupStatus.lastAttemptAt).toLocaleString()}
+          </p>
+        )}
+        {audit.data?.scheduledBackupStatus?.lastError && (
+          <p role="alert" className="whitespace-pre-wrap text-destructive">
+            Daily backup failed: {audit.data.scheduledBackupStatus.lastError}
+          </p>
+        )}
+        {audit.isError && (
+          <p role="alert">
+            Could not load daily backup status.{" "}
+            <Button size="xs" onClick={() => void audit.refetch()}>
+              Try again
+            </Button>
+          </p>
+        )}
+      </div>
       <fieldset disabled={rulesDisabled} className="space-y-1 disabled:opacity-60">
         <legend className="text-xs font-medium text-muted-foreground">
           Remove a worktree when any rule matches (projects can override these)

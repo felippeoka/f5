@@ -73,3 +73,37 @@ appear in Recent activity and in the preview.
 **Automatic worktree cleanup** (use the global rules, off, or custom rules) and **Auto-pull the
 default branch** can be set per project in Settings → Global › Project. A checked-in `f5.json`
 cannot set either one: automation that removes worktrees or pulls branches is always your choice.
+
+## Backups
+
+Settings → Storage → **Export backup** creates a consistent SQLite snapshot,
+checks its integrity, and archives settings, snapshot-owned attachments and older
+unregistered attachment files in a
+separate maintenance process. You can keep using F5 while it runs. Attachment
+cleanup waits until the snapshot’s files have been copied; ordinary thread writes
+do not take that retention lease. Cancelling export terminates the helper before
+staging files and the lease are released. Profile credentials stay excluded from
+manual backups unless you choose encrypted credential export and supply a password.
+
+**Daily backups** is off by default and independent of automatic cleanup. While
+F5 is open it checks hourly, starting one minute after launch, and exports when
+there is no successful scheduled backup in the preceding 24 hours. It keeps the
+seven newest successful scheduled archives in `<profile state>/backups`; manual
+archives and failed exports do not count against retention. Scheduled backups
+always exclude credentials. F5 does not store an encryption password for them.
+A failed export preserves the previous successful backups and retries at the next
+hourly check. Backups can be validated and restored through the existing Restore
+control; restoration takes effect on restart.
+
+Restoring into a different state directory rebinds attachment registry and cleanup
+paths to that directory while retaining ownership and content hashes. Restored
+archives can be exported again without relying on files in the source profile.
+
+Daily backup status shows the last attempt, last success and any failure in Storage
+settings. Missing owned attachment errors identify the attachment and path. Known
+owned files that are missing are not silently omitted. Old restored registry paths
+are rebound only in the exported snapshot; the live database is unchanged.
+Credential-free exports redact OpenCode passwords and sensitive provider environment
+values from settings. When credential export is explicitly selected, settings and
+secret files are encrypted with the supplied password. Old interrupted daily partial
+files are removed before the next scheduled check.

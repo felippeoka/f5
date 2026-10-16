@@ -1,10 +1,10 @@
 import {
-  type CodeReviewWorkflow,
+  type CodeReviewWorkflowSummary as CodeReviewWorkflow,
   type CodeReviewWorkflowId,
   type GitStatusResult,
-  type InvestigationWorkflow,
+  type InvestigationWorkflowSummary as InvestigationWorkflow,
   type InvestigationWorkflowId,
-  type PlanningWorkflow,
+  type PlanningWorkflowSummary as PlanningWorkflow,
   type PlanningWorkflowId,
   ThreadId,
 } from "@t3tools/contracts";

@@ -1,6 +1,7 @@
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
-import { useQuery } from "@tanstack/react-query";
+import { invalidateWorkflowQueries } from "../../lib/workflowQueries";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL,
   defaultInstanceIdForDriver,
@@ -84,6 +85,7 @@ export interface UseSettingsRouteStateOptions {
 }
 
 export function useSettingsRouteState(options: UseSettingsRouteStateOptions = {}) {
+  const queryClient = useQueryClient();
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { defaults: appDefaults } = useAppSettings();
   const settings = useSettings();
@@ -220,7 +222,8 @@ export function useSettingsRouteState(options: UseSettingsRouteStateOptions = {}
   const refreshSnapshot = useCallback(async () => {
     const { snapshot } = await ensureNativeApi().orchestration.getStartupSnapshot();
     syncStartupSnapshot(snapshot);
-  }, [syncStartupSnapshot]);
+    await invalidateWorkflowQueries(queryClient);
+  }, [syncStartupSnapshot, queryClient]);
 
   const updateSelectedProjectMetadata = useCallback(
     async (patch: {

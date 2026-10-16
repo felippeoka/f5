@@ -68,6 +68,16 @@ try {
     }
     if (!ready) await new Promise((resolve) => setTimeout(resolve, 250));
   }
+  if (ready) {
+    const backup = await fetch(`http://127.0.0.1:${port}/api/storage/backup`, {
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!backup.ok || backup.headers.get("content-type") !== "application/x-f5-backup")
+      throw new Error(`Bun maintenance export failed: ${await backup.text()}`);
+    const bytes = await backup.arrayBuffer();
+    if (bytes.byteLength === 0 || bytes.byteLength !== Number(backup.headers.get("content-length")))
+      throw new Error("Bun maintenance export was incomplete.");
+  }
 } finally {
   child.kill("SIGTERM");
   const forceKill = setTimeout(() => child.kill("SIGKILL"), 5_000);
@@ -83,4 +93,4 @@ if (!ready) {
   );
   process.exit(1);
 }
-console.log(`Server became ready under Bun on port ${port}.`);
+console.log(`Server became ready and exported a backup under Bun on port ${port}.`);

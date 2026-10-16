@@ -251,6 +251,21 @@ export function ProjectScopeProvider({
           {error}
         </p>
       )}
+      {(query.data?.skillScanWarnings?.length ?? 0) > 0 && (
+        <div role="status" className="rounded-lg border border-border p-3 text-sm">
+          <p>Some project skills could not be loaded.</p>
+          <ul>
+            {query.data?.skillScanWarnings?.map((warning) => (
+              <li key={`${warning.path}:${warning.reason}`} className="mt-1 break-all">
+                <code>{warning.path}</code>: {warning.reason}
+              </li>
+            ))}
+          </ul>
+          <Button size="xs" variant="outline" onClick={retry}>
+            Refresh diagnostics
+          </Button>
+        </div>
+      )}
       {children}
     </ProjectScopeContext.Provider>
   );

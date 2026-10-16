@@ -1,3 +1,5 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import "../../index.css";
 
 import {
@@ -10,6 +12,14 @@ import type { AnchorHTMLAttributes } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
+const renderView = (view: ReactNode) =>
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      {view}
+    </QueryClientProvider>,
+  );
 
 import { useStore } from "../../store";
 import { toastManager } from "../ui/toast";
@@ -124,7 +134,7 @@ describe("CodeReviewWorkflowView recovery", () => {
   it("shows the exact failed stage and reports retry failures", async () => {
     nativeApiMocks.retryCodeReviewWorkflow.mockRejectedValue(new Error("Provider is unavailable"));
     const toastSpy = vi.spyOn(toastManager, "add");
-    const screen = await render(<CodeReviewWorkflowView workflowId={workflowId} />);
+    const screen = await renderView(<CodeReviewWorkflowView workflowId={workflowId} />);
 
     try {
       await expect.element(page.getByText("Reviewer A provider disconnected")).toBeVisible();
@@ -144,7 +154,7 @@ describe("CodeReviewWorkflowView recovery", () => {
     nativeApiMocks.retryCodeReviewWorkflow
       .mockResolvedValueOnce({ status: "confirmation_required", threadIds: ["reviewer-a"] })
       .mockResolvedValueOnce({ status: "started" });
-    const screen = await render(<CodeReviewWorkflowView workflowId={workflowId} />);
+    const screen = await renderView(<CodeReviewWorkflowView workflowId={workflowId} />);
 
     try {
       await page.getByRole("button", { name: "Retry failed" }).click();
@@ -164,7 +174,7 @@ describe("CodeReviewWorkflowView recovery", () => {
   it("reports that retry is unavailable while disconnected", async () => {
     nativeApiMocks.connected = false;
     const toastSpy = vi.spyOn(toastManager, "add");
-    const screen = await render(<CodeReviewWorkflowView workflowId={workflowId} />);
+    const screen = await renderView(<CodeReviewWorkflowView workflowId={workflowId} />);
 
     try {
       await page.getByRole("button", { name: "Retry failed" }).click();

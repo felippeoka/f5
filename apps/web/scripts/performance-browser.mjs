@@ -237,6 +237,7 @@ try {
   if (errors.length) throw new Error(`Browser runtime errors: ${errors.join("\n")}`);
   writeFileSync(output, JSON.stringify(report), { flag: "wx" });
 } catch (error) {
+  console.error("Fixture diagnostics", await control("stats").catch(() => null));
   console.error(
     await page
       .locator("body")

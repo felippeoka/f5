@@ -1,3 +1,7 @@
+import {
+  COALESCE_STREAMING_DELTAS_DRIVERS,
+  makeStreamingAssistantDeltas,
+} from "../streamingAssistantDeltas.ts";
 import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
 import { ComputerAutomationBroker } from "../../computer/ComputerAutomationBroker";
 import { parseCodexTryAgainAt } from "../../provider/codexErrors.ts";
@@ -259,6 +263,14 @@ type ItemLifecycleRuntimeEvent = Extract<
 >;
 
 type RuntimeIngestionInput =
+  | {
+      source: "assistant-delta-flush";
+      threadId: ThreadId;
+      messageId: MessageId;
+      commandId: CommandId;
+    }
+  | { source: "assistant-delta-flush-thread"; threadId: ThreadId }
+  | { source: "assistant-delta-flush-all" }
   | {
       source: "usage-limit-resolved";
       threadId: ThreadId;
@@ -2541,6 +2553,28 @@ const make = Effect.gen(function* () {
     profiledTurnWatchdogs.set(input.threadId, { turnId: input.turnId, timer });
   });
 
+  let enqueueAssistantDeltaFlush = (
+    _threadId: ThreadId,
+    _messageId: MessageId,
+    _commandId: CommandId,
+  ) => {};
+  const coalescingEnabled = process.env.F5_COALESCE_STREAMING_DELTAS !== "false";
+  const streamingDeltas = makeStreamingAssistantDeltas(
+    (command) => orchestrationEngine.dispatch(command),
+    (threadId, messageId, commandId) => enqueueAssistantDeltaFlush(threadId, messageId, commandId),
+    isPermanentDispatchRejection,
+  );
+  const dispatchStreamingDelta = (
+    event: ProviderRuntimeEvent,
+    command: Parameters<typeof streamingDeltas.append>[0],
+  ) =>
+    coalescingEnabled && COALESCE_STREAMING_DELTAS_DRIVERS.has(event.provider)
+      ? streamingDeltas.append({
+          ...command,
+          commandId: providerCommandId(event, "assistant-delta-batch"),
+        })
+      : orchestrationEngine.dispatch(command).pipe(Effect.asVoid);
+
   const assistantDeliveryModes = yield* Cache.make<ThreadId, AssistantDeliveryMode>({
     capacity: 10000,
     timeToLive: "24 hours",
@@ -2957,6 +2991,7 @@ const make = Effect.gen(function* () {
     commandTag: string;
     finalDeltaCommandTag: string;
     fallbackText?: string;
+    preserveFallbackWhitespace?: boolean;
   }) =>
     Effect.gen(function* () {
       const turnKey = input.turnId ? providerTurnKey(input.threadId, input.turnId) : undefined;
@@ -2965,7 +3000,9 @@ const make = Effect.gen(function* () {
       const text =
         bufferedText.length > 0
           ? bufferedText
-          : (input.fallbackText?.trim().length ?? 0) > 0
+          : (input.preserveFallbackWhitespace
+                ? (input.fallbackText?.length ?? 0)
+                : (input.fallbackText?.trim().length ?? 0)) > 0
             ? input.fallbackText!
             : "";
 
@@ -3023,6 +3060,7 @@ const make = Effect.gen(function* () {
         ...(input.turnId ? { turnId: input.turnId } : {}),
         createdAt: input.createdAt,
       });
+      streamingDeltas.forgetMessage(input.threadId, input.messageId);
       yield* clearAssistantMessageState(
         input.messageId,
         input.turnId ? providerTurnKey(input.threadId, input.turnId) : undefined,
@@ -3856,10 +3894,31 @@ const make = Effect.gen(function* () {
 
   const processRuntimeEvent = (incomingEvent: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
+      const coalescible =
+        incomingEvent.type === "content.delta" &&
+        coalescingEnabled &&
+        COALESCE_STREAMING_DELTAS_DRIVERS.has(incomingEvent.provider) &&
+        ["assistant_text", "reasoning_text", "reasoning_summary_text"].includes(
+          incomingEvent.payload.streamKind,
+        );
+      if (!coalescible)
+        yield* streamingDeltas.flushThread(incomingEvent.threadId).pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.failCause(cause)
+              : Effect.logWarning("streaming flush failed before runtime event", {
+                  threadId: incomingEvent.threadId,
+                  cause: Cause.pretty(cause),
+                }),
+          ),
+        );
       let event = incomingEvent;
       const readModel = yield* orchestrationEngine.getReadModel();
       const thread = readModel.threads.find((entry) => entry.id === event.threadId);
-      if (!thread) return;
+      if (!thread) {
+        streamingDeltas.forgetThread(incomingEvent.threadId);
+        return;
+      }
       const previousLimit = thread.session?.usageLimit;
       if (
         (event.type === "runtime.error" || event.type === "turn.completed") &&
@@ -4737,7 +4796,7 @@ const make = Effect.gen(function* () {
             });
           }
         } else {
-          yield* orchestrationEngine.dispatch({
+          yield* dispatchStreamingDelta(event, {
             type: "thread.message.assistant.delta",
             commandId: providerCommandId(event, "assistant-delta"),
             threadId: thread.id,
@@ -4789,25 +4848,23 @@ const make = Effect.gen(function* () {
           });
           if (assistantDeliveryMode === "streaming") {
             if (assistantMessageId && spillChunk.length > 0) {
-              yield* orchestrationEngine
-                .dispatch({
-                  // Empty assistant deltas are safe because assistant completion always follows.
-                  type: "thread.message.assistant.delta",
-                  commandId: providerCommandId(event, "assistant-reasoning-buffer-spill"),
-                  threadId: thread.id,
-                  messageId: assistantMessageId,
-                  delta: "",
-                  reasoningDelta: spillChunk,
-                  turnId,
-                  createdAt: now,
-                })
-                .pipe(
-                  Effect.onError((cause) =>
-                    isPermanentDispatchRejection(cause)
-                      ? Effect.void
-                      : restoreBufferedReasoningText(turnKey, spillChunk),
-                  ),
-                );
+              yield* dispatchStreamingDelta(event, {
+                // Empty assistant deltas are safe because assistant completion always follows.
+                type: "thread.message.assistant.delta",
+                commandId: providerCommandId(event, "assistant-reasoning-buffer-spill"),
+                threadId: thread.id,
+                messageId: assistantMessageId,
+                delta: "",
+                reasoningDelta: spillChunk,
+                turnId,
+                createdAt: now,
+              }).pipe(
+                Effect.onError((cause) =>
+                  isPermanentDispatchRejection(cause)
+                    ? Effect.void
+                    : restoreBufferedReasoningText(turnKey, spillChunk),
+                ),
+              );
             } else if (spillChunk.length > 0) {
               const cappedReasoningText = capBufferedReasoningText(spillChunk);
               if (cappedReasoningText.length < spillChunk.length) {
@@ -4823,25 +4880,23 @@ const make = Effect.gen(function* () {
 
             if (assistantMessageId && spillChunk.length === 0) {
               const reasoningText = yield* takeBufferedReasoningText(turnKey);
-              yield* orchestrationEngine
-                .dispatch({
-                  // Empty assistant deltas are safe because assistant completion always follows.
-                  type: "thread.message.assistant.delta",
-                  commandId: providerCommandId(event, "assistant-reasoning-delta"),
-                  threadId: thread.id,
-                  messageId: assistantMessageId,
-                  delta: "",
-                  reasoningDelta: reasoningText,
-                  turnId,
-                  createdAt: now,
-                })
-                .pipe(
-                  Effect.onError((cause) =>
-                    isPermanentDispatchRejection(cause)
-                      ? Effect.void
-                      : restoreBufferedReasoningText(turnKey, reasoningText),
-                  ),
-                );
+              yield* dispatchStreamingDelta(event, {
+                // Empty assistant deltas are safe because assistant completion always follows.
+                type: "thread.message.assistant.delta",
+                commandId: providerCommandId(event, "assistant-reasoning-delta"),
+                threadId: thread.id,
+                messageId: assistantMessageId,
+                delta: "",
+                reasoningDelta: reasoningText,
+                turnId,
+                createdAt: now,
+              }).pipe(
+                Effect.onError((cause) =>
+                  isPermanentDispatchRejection(cause)
+                    ? Effect.void
+                    : restoreBufferedReasoningText(turnKey, reasoningText),
+                ),
+              );
             }
           } else if (spillChunk.length > 0) {
             const cappedReasoningText = capBufferedReasoningText(spillChunk);
@@ -4872,7 +4927,13 @@ const make = Effect.gen(function* () {
               messageId: MessageId.makeUnsafe(
                 `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
               ),
-              fallbackText: event.payload.detail,
+              // Codex's display detail is trimmed. Its native item is the exact
+              // full-text recovery source, including leading/trailing whitespace.
+              fallbackText:
+                event.provider === "codex" &&
+                typeof asRecord(asRecord(event.payload.data)?.item)?.text === "string"
+                  ? (asRecord(asRecord(event.payload.data)?.item)!.text as string)
+                  : event.payload.detail,
             }
           : undefined;
       const proposedPlanCompletion =
@@ -4890,8 +4951,16 @@ const make = Effect.gen(function* () {
         const existingAssistantMessage = thread.messages.find(
           (entry) => entry.id === assistantMessageId,
         );
+        const finalText = assistantCompletion.fallbackText;
+        const persistedText = existingAssistantMessage?.text ?? "";
+        const recoverableSuffix =
+          COALESCE_STREAMING_DELTAS_DRIVERS.has(event.provider) &&
+          finalText !== undefined &&
+          finalText.startsWith(persistedText)
+            ? finalText.slice(persistedText.length)
+            : undefined;
         const shouldApplyFallbackCompletionText =
-          !existingAssistantMessage || existingAssistantMessage.text.length === 0;
+          persistedText.length === 0 || recoverableSuffix !== undefined;
         if (turnId) {
           yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
         }
@@ -4905,7 +4974,10 @@ const make = Effect.gen(function* () {
           commandTag: "assistant-complete",
           finalDeltaCommandTag: "assistant-delta-finalize",
           ...(assistantCompletion.fallbackText !== undefined && shouldApplyFallbackCompletionText
-            ? { fallbackText: assistantCompletion.fallbackText }
+            ? {
+                fallbackText: recoverableSuffix ?? assistantCompletion.fallbackText,
+                ...(recoverableSuffix !== undefined ? { preserveFallbackWhitespace: true } : {}),
+              }
             : {}),
         });
 
@@ -5503,40 +5575,46 @@ const make = Effect.gen(function* () {
     );
 
   const processInput = (input: RuntimeIngestionInput) =>
-    input.source === "usage-limit-resolved"
-      ? Effect.gen(function* () {
-          const model = yield* orchestrationEngine.getReadModel();
-          const thread = model.threads.find((entry) => entry.id === input.threadId);
-          const session = thread?.session;
-          const current = session?.usageLimit;
-          // Apply through the same worker, so later turns and unrelated errors cannot be overwritten.
-          if (
-            !session ||
-            !current ||
-            current.turnId !== input.limit.turnId ||
-            current.providerInstanceId !== input.limit.providerInstanceId ||
-            !session.lastError ||
-            current.resetsAt ||
-            session.status === "running" ||
-            session.status === "starting" ||
-            (session.activeTurnId !== null && session.activeTurnId !== input.limit.turnId)
-          )
-            return;
-          yield* orchestrationEngine.dispatch({
-            type: "thread.session.set",
-            commandId: providerCommandId(input.event, "usage-limit-reset-resolved"),
-            threadId: input.threadId,
-            session: { ...session, usageLimit: input.limit },
-            createdAt: new Date().toISOString(),
-          });
-        })
-      : input.source === "runtime"
-        ? processRuntimeEvent(input.event)
-        : input.source === "domain"
-          ? processDomainEvent(input.event)
-          : input.source === "command-output-flush"
-            ? flushCommandExecutionOutput(input.commandExecutionId).pipe(Effect.asVoid)
-            : flushAllCommandExecutionOutput();
+    input.source === "assistant-delta-flush"
+      ? streamingDeltas.flush(input.threadId, input.messageId, input.commandId)
+      : input.source === "assistant-delta-flush-thread"
+        ? streamingDeltas.flushThread(input.threadId)
+        : input.source === "assistant-delta-flush-all"
+          ? streamingDeltas.flushAll()
+          : input.source === "usage-limit-resolved"
+            ? Effect.gen(function* () {
+                const model = yield* orchestrationEngine.getReadModel();
+                const thread = model.threads.find((entry) => entry.id === input.threadId);
+                const session = thread?.session;
+                const current = session?.usageLimit;
+                // Apply through the same worker, so later turns and unrelated errors cannot be overwritten.
+                if (
+                  !session ||
+                  !current ||
+                  current.turnId !== input.limit.turnId ||
+                  current.providerInstanceId !== input.limit.providerInstanceId ||
+                  !session.lastError ||
+                  current.resetsAt ||
+                  session.status === "running" ||
+                  session.status === "starting" ||
+                  (session.activeTurnId !== null && session.activeTurnId !== input.limit.turnId)
+                )
+                  return;
+                yield* orchestrationEngine.dispatch({
+                  type: "thread.session.set",
+                  commandId: providerCommandId(input.event, "usage-limit-reset-resolved"),
+                  threadId: input.threadId,
+                  session: { ...session, usageLimit: input.limit },
+                  createdAt: new Date().toISOString(),
+                });
+              })
+            : input.source === "runtime"
+              ? processRuntimeEvent(input.event)
+              : input.source === "domain"
+                ? processDomainEvent(input.event)
+                : input.source === "command-output-flush"
+                  ? flushCommandExecutionOutput(input.commandExecutionId).pipe(Effect.asVoid)
+                  : flushAllCommandExecutionOutput();
 
   const processInputSafely = (input: RuntimeIngestionInput) =>
     processInput(input).pipe(
@@ -5585,6 +5663,18 @@ const make = Effect.gen(function* () {
 
   const worker = yield* makeDrainableWorker(processInputSafely);
   enqueueResolvedUsageLimit = worker.enqueue;
+  enqueueAssistantDeltaFlush = (threadId, messageId, commandId) => {
+    void Effect.runPromise(
+      worker.enqueue({ source: "assistant-delta-flush", threadId, messageId, commandId }),
+    );
+  };
+  yield* Effect.addFinalizer(() =>
+    Effect.gen(function* () {
+      streamingDeltas.cancelTimers();
+      yield* worker.enqueue({ source: "assistant-delta-flush-all" });
+      yield* worker.drain;
+    }),
+  );
   enqueueCommandOutputFlush = (commandExecutionId) => {
     void Effect.runPromise(worker.enqueue({ source: "command-output-flush", commandExecutionId }));
   };
@@ -5798,9 +5888,16 @@ const make = Effect.gen(function* () {
     );
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
-        if (event.type !== "thread.turn-start-requested") {
-          return Effect.void;
+        if (
+          event.type === "thread.turn-interrupt-requested" ||
+          event.type === "thread.session-stop-requested"
+        ) {
+          return worker.enqueue({
+            source: "assistant-delta-flush-thread",
+            threadId: event.payload.threadId,
+          });
         }
+        if (event.type !== "thread.turn-start-requested") return Effect.void;
         return worker.enqueue({ source: "domain", event });
       }),
     );
@@ -5808,9 +5905,10 @@ const make = Effect.gen(function* () {
 
   return {
     start,
-    drain: worker
-      .enqueue({ source: "command-output-flush-all" })
-      .pipe(Effect.flatMap(() => worker.drain)),
+    drain: worker.enqueue({ source: "command-output-flush-all" }).pipe(
+      Effect.flatMap(() => worker.enqueue({ source: "assistant-delta-flush-all" })),
+      Effect.flatMap(() => worker.drain),
+    ),
   } satisfies ProviderRuntimeIngestionShape;
 });
 
