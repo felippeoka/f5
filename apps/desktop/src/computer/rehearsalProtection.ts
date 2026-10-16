@@ -1,6 +1,7 @@
 import { ComputerControlError } from "@t3tools/shared/computerControl";
 import type { ComputerAutomationBackendStatus, ComputerInspectResult } from "@t3tools/contracts";
 import { isAbsolute } from "node:path";
+import { rehearsalExecutionCode } from "./rehearsalResponses";
 
 export const BROWSER_PROTECTION_IDS = {
   browser: "com.google.Chrome",
@@ -31,6 +32,9 @@ export function protectionFailureSummary(error: unknown, status: ComputerAutomat
               }
             : {}),
         }
+      : {}),
+    ...(result?._tag === "Execution" && rehearsalExecutionCode(result.message)
+      ? { executionCode: rehearsalExecutionCode(result.message) }
       : {}),
     helperAvailable: status.available,
     ...(!status.available ? { helperUnavailableReason: status.reason } : {}),

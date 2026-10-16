@@ -14,6 +14,7 @@ const executionCodes = new Map([
   ["Observation timed out.", "helper-observation-timeout"],
   ["Request expired before execution.", "request-expired"],
   ["Native action failed.", "native-action-failed"],
+  ["Capture layout did not match window positions.", "capture-layout-mismatch"],
 ]);
 export function rehearsalExecutionCode(message: string): string | undefined {
   return executionCodes.get(message);

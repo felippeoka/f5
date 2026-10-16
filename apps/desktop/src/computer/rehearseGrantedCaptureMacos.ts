@@ -45,9 +45,13 @@ helper.onEvent((event) => {
   }
 });
 const checks: Array<
-  { displayId: string; passed: boolean; markerVisible?: boolean; neutralFrame?: boolean } & Partial<
-    ReturnType<typeof protectionFailureSummary>
-  >
+  {
+    displayId: string;
+    passed: boolean;
+    markerVisible?: boolean;
+    markerInPlace?: boolean;
+    neutralFrame?: boolean;
+  } & Partial<ReturnType<typeof protectionFailureSummary>>
 > = [];
 let fixture: Awaited<ReturnType<typeof createRehearsalFixture>> | undefined;
 let metadata: Record<string, unknown> = {};
@@ -157,40 +161,55 @@ try {
           overlayWindowIds: [],
         }),
       );
-      const pixels = await new Promise<{ markerVisible: boolean; neutralFrame: boolean }>(
-        (done, reject) => {
-          const child = execFile(
-            verifier,
-            [],
-            { timeout: 10000, maxBuffer: 2048 },
-            (error, stdout) => {
-              if (error) return reject(new Error("Pixel verifier failed."));
-              try {
-                const result = JSON.parse(stdout);
-                done({
-                  markerVisible: result.blueMarkerVisible === true,
-                  neutralFrame: result.allNeutral === true,
-                });
-              } catch {
-                reject(new Error("Invalid verifier result."));
-              }
-            },
-          );
-          child.stdin!.end(
-            JSON.stringify({
-              data: image.data,
-              mimeType: image.mimeType,
-              requireBlue: false,
-              neutralFrame: true,
-            }),
-          );
-        },
-      );
+      // On the marker's display the marker must appear inside its own AX bounds, so a
+      // capture that misplaces granted windows fails instead of merely showing blue somewhere.
+      const markerDisplay = display.displayId === marker.displayId;
+      const pixels = await new Promise<{
+        markerVisible: boolean;
+        markerInPlace: boolean;
+        neutralFrame: boolean;
+      }>((done, reject) => {
+        const child = execFile(
+          verifier,
+          [],
+          { timeout: 10000, maxBuffer: 2048 },
+          (error, stdout) => {
+            if (error) return reject(new Error("Pixel verifier failed."));
+            try {
+              const result = JSON.parse(stdout);
+              done({
+                markerVisible: result.blueMarkerVisible === true,
+                markerInPlace: result.grantedMarkerVisible === true,
+                neutralFrame: result.allNeutral === true,
+              });
+            } catch {
+              reject(new Error("Invalid verifier result."));
+            }
+          },
+        );
+        child.stdin!.end(
+          JSON.stringify(
+            markerDisplay
+              ? {
+                  data: image.data,
+                  mimeType: image.mimeType,
+                  blueRect: marker.bounds,
+                  requireBlue: true,
+                }
+              : {
+                  data: image.data,
+                  mimeType: image.mimeType,
+                  requireBlue: false,
+                  neutralFrame: true,
+                },
+          ),
+        );
+      });
       const passed =
         image.displayId === display.displayId &&
         image.geometryGeneration === display.geometryGeneration &&
         image.mimeType === "image/jpeg" &&
-        (pixels.markerVisible || pixels.neutralFrame);
+        (markerDisplay ? pixels.markerInPlace : pixels.markerVisible || pixels.neutralFrame);
       checks.push({ displayId: display.displayId, passed, ...pixels });
       if (!passed) throw new Error("Capture geometry or encoding changed.");
     } catch (error) {
@@ -222,7 +241,8 @@ try {
     resolve(output),
     JSON.stringify(
       {
-        reportVersion: 1,
+        // 2: on the marker's display the marker must appear inside its own bounds.
+        reportVersion: 2,
         recordedAt: new Date().toISOString(),
         ...metadata,
         platform: process.platform,
