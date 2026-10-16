@@ -19,8 +19,7 @@ final class CaptureConfigurationTests: XCTestCase {
       XCTAssertEqual(copy.destinationRect, CGRect(x: 0, y: 0, width: 1456, height: 609))
       XCTAssertTrue(copy.ignoreShadowsDisplay)
       XCTAssertFalse(copy.showsCursor)
-      XCTAssertEqual(copy.backgroundColor.alpha, 1)
-      XCTAssertEqual(copy.backgroundColor.components?.first, 0.45)
+      XCTAssertEqual(copy.backgroundColor.alpha, 0)
       return 42
     }
     XCTAssertEqual(result, 42)

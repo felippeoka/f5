@@ -45,9 +45,13 @@ helper.onEvent((event) => {
   }
 });
 const checks: Array<
-  { displayId: string; passed: boolean; markerVisible?: boolean; neutralFrame?: boolean } & Partial<
-    ReturnType<typeof protectionFailureSummary>
-  >
+  {
+    displayId: string;
+    passed: boolean;
+    markerVisible?: boolean;
+    markerInPlace?: boolean;
+    neutralFrame?: boolean;
+  } & Partial<ReturnType<typeof protectionFailureSummary>>
 > = [];
 let fixture: Awaited<ReturnType<typeof createRehearsalFixture>> | undefined;
 let metadata: Record<string, unknown> = {};
@@ -237,7 +241,8 @@ try {
     resolve(output),
     JSON.stringify(
       {
-        reportVersion: 1,
+        // 2: on the marker's display the marker must appear inside its own bounds.
+        reportVersion: 2,
         recordedAt: new Date().toISOString(),
         ...metadata,
         platform: process.platform,

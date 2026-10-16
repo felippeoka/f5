@@ -11,6 +11,22 @@ public func computerCanvasRect(
     width: rect.width * scaleX, height: rect.height * scaleY)
 }
 
+/// The menu bar strip across the top of `display`, in global points. Its height comes from
+/// the main-menu-level windows on that display, capped at 64 pt so a stray full-height
+/// window at that level cannot disable the layout check. Falls back to 44 pt, enough for
+/// notched displays, when no menu window is found.
+public func computerMenuBarBand(display: CGRect, menuWindows: [CGRect]) -> CGRect {
+  let heights = menuWindows.filter { $0.intersects(display) && $0.minY <= display.minY + 1 }
+    .map { $0.maxY - display.minY }
+  let height = min(64, heights.max() ?? 44)
+  return CGRect(x: display.minX, y: display.minY, width: display.width, height: max(0, height))
+}
+
+/// Converts a top-left-origin canvas rect to the bottom-left origin Core Graphics draws with.
+public func computerCanvasDrawRect(_ rect: CGRect, canvasHeight: Int) -> CGRect {
+  CGRect(x: rect.minX, y: Double(canvasHeight) - rect.maxY, width: rect.width, height: rect.height)
+}
+
 /// True when the canvas holds content outside `allowed` (canvas pixels, top-left origin).
 /// Only granted windows are captured, so anything but the neutral fill elsewhere means the
 /// capture does not line up with the display. Samples a stride-2 grid; a sample counts when

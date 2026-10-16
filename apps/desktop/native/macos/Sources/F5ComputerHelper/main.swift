@@ -1213,7 +1213,20 @@ func backgroundType(_ request: [String: Any], _ host: [String: Any]) throws -> (
   if let final { verification["valueLength"] = final.count }
   return (app, bounds, verification)
 }
+/// A capture whose content does not line up with the granted windows' frames.
+struct CaptureLayoutMismatch: Error {}
+/// Window animations or transient popovers can briefly misplace content between the window
+/// snapshot and the capture, so a mismatch is retried once before it fails the request.
 func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws -> [String: Any] {
+  for attempt in 0..<2 {
+    do { return try await captureScreenshot(request, host) } catch is CaptureLayoutMismatch {
+      if attempt == 1 { break }
+    }
+  }
+  throw Failure("Execution", "message", "Capture layout did not match window positions.")
+}
+func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async throws -> [String: Any]
+{
   try checkGrants(request)
   guard CGPreflightScreenCaptureAccess() else {
     throw Failure("Unavailable", "reason", "missing-permissions",
@@ -1319,11 +1332,12 @@ func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws ->
   }
   func fillMask(_ rect: CGRect) {
     let r = canvasRect(rect)
+    // Rounded outward with 2 px of padding toward the top and right, as before.
+    let padded = CGRect(
+      x: floor(r.minX), y: ceil(r.maxY) - ceil(r.height) - 2, width: ceil(r.width) + 2,
+      height: ceil(r.height) + 2)
     canvas.setFillColor(CGColor(gray: 0.45, alpha: 1))
-    canvas.fill(
-      CGRect(
-        x: floor(r.minX), y: Double(captureHeight) - ceil(r.maxY), width: ceil(r.width) + 2,
-        height: ceil(r.height) + 2))
+    canvas.fill(computerCanvasDrawRect(padded, canvasHeight: captureHeight))
   }
   let capturedWindows = content.windows.filter { window in
     captureApps.contains { $0.processID == window.owningApplication?.processID }
@@ -1403,17 +1417,30 @@ func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws ->
   if !captureApps.isEmpty {
     // Fail closed: pixels outside the granted windows' real frames mean the capture is
     // misplaced, and coordinates read from it would land on other content.
-    let menuLevels = [
-      Int(CGWindowLevelForKey(.mainMenuWindow)), Int(CGWindowLevelForKey(.statusWindow)),
-    ]
+    // The filter includes applications, not the enumerated window list, so allow every
+    // on-screen window those apps own, desktop elements included (Finder's desktop icons).
+    let capturedPids = Set(captureApps.map { Int($0.processID) })
+    let records =
+      CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+    let ownedFrames = records.filter {
+      capturedPids.contains(integer($0, kCGWindowOwnerPID as String))
+    }.compactMap(windowRect).filter { $0.intersects(target.bounds) }
+    // Before 14.2 the menu bar cannot be excluded explicitly, so its strip is always allowed.
+    var menuBarAllowed = includeMenuBar
+    if #unavailable(macOS 14.2) { menuBarAllowed = true }
     let menuBar =
-      includeMenuBar
-      ? windows().filter { menuLevels.contains(integer($0, kCGWindowLayer as String)) }
-        .compactMap(windowRect).filter { $0.intersects(target.bounds) } : []
+      menuBarAllowed
+      ? [
+        computerMenuBarBand(
+          display: target.bounds,
+          menuWindows: records.filter {
+            integer($0, kCGWindowLayer as String) == Int(CGWindowLevelForKey(.mainMenuWindow))
+          }.compactMap(windowRect))
+      ] : []
     if computerCaptureContentOutside(
-      canvas, allowed: (capturedWindows.map(\.frame) + menuBar).map(canvasRect))
+      canvas, allowed: (capturedWindows.map(\.frame) + ownedFrames + menuBar).map(canvasRect))
     {
-      throw Failure("Execution", "message", "Capture layout did not match window positions.")
+      throw CaptureLayoutMismatch()
     }
   }
   try checkGrants(request)

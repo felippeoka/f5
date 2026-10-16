@@ -10,7 +10,10 @@ public func withComputerCaptureConfiguration<Result>(
   width: Int, height: Int, displaySize: CGSize,
   capture: (SCStreamConfiguration) async throws -> Result
 ) async rethrows -> Result {
-  let background = CGColor(gray: 0.45, alpha: 1)
+  // Transparent, so the canvas's own neutral fill shows through outside granted windows.
+  // A colored background would pass through the capture's color matching and drift from
+  // the reference the layout check compares against.
+  let background = CGColor(gray: 0, alpha: 0)
   let configuration = SCStreamConfiguration()
   configuration.width = width
   configuration.height = height

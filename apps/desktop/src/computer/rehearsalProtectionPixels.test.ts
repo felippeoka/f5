@@ -78,6 +78,12 @@ FileHandle.standardOutput.write(Data(bytes.base64EncodedString().utf8))`,
       greenMarkerVisible: false,
     });
   });
+  it("finds a marker downscaled to a few pixels tall on a wide display", async () => {
+    // A 400x24 pt marker on a 5120x1440 display shrinks to about 114x7 model pixels.
+    const thin = (x: number) => ({ x, y: 10, width: 30, height: 7 });
+    expect(await verify({ blueRect: thin(0) })).toMatchObject({ blueMarkerVisible: true });
+    expect(await verify({ blueRect: thin(60) })).toMatchObject({ blueMarkerVisible: false });
+  });
   it("rejects an exposed secure rectangle and off-image marker bounds", async () => {
     expect(await verify({ secureRect: rect(30) })).toMatchObject({ secureMasked: false });
     await expect(verify({ blueRect: rect(80) })).rejects.toThrow();
