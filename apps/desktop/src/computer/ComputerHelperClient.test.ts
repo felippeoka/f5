@@ -242,6 +242,38 @@ describe("computer helper supervision", () => {
     await rejected;
     expect(h.client.status()).toMatchObject({ available: false, reason: "monitor-unhealthy" });
   });
+  it("recovers from a heartbeat gap once healthy heartbeats resume", async () => {
+    const h = make();
+    ready(h);
+    const event = vi.fn();
+    h.client.onEvent(event);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(h.client.status()).toMatchObject({ available: false, reason: "monitor-unhealthy" });
+    // The helper never saw a failure, so it has no new status to push.
+    h.emit({ type: "heartbeat", monitorHealthy: true, suspended: true });
+    expect(h.client.status()).toEqual({ available: true, displays: [] });
+    expect(event).toHaveBeenCalledWith({ type: "status", status: h.client.status() });
+  });
+  it("waits for the helper's own status after it reports an unhealthy monitor", () => {
+    const h = make();
+    ready(h);
+    h.emit({ type: "heartbeat", monitorHealthy: false, suspended: true });
+    h.emit({ type: "status", status: { available: false, reason: "monitor-unhealthy" } });
+    h.emit({ type: "heartbeat", monitorHealthy: true, suspended: true });
+    expect(h.client.status()).toMatchObject({ available: false, reason: "monitor-unhealthy" });
+    h.emit({ type: "status", status: { available: true, displays: [] } });
+    expect(h.client.status().available).toBe(true);
+  });
+  it("does not blame the helper for a stall in its own event loop", async () => {
+    const h = make();
+    ready(h);
+    vi.setSystemTime(Date.now() + 2000);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(h.client.status().available).toBe(true);
+    h.emit({ type: "heartbeat", monitorHealthy: true, suspended: true });
+    await vi.advanceTimersByTimeAsync(250);
+    expect(h.client.status().available).toBe(true);
+  });
   it("preserves protocol mismatch and another-instance failures after exit", () => {
     const h = make();
     h.emit({ type: "hello", protocolVersion: 2 });
