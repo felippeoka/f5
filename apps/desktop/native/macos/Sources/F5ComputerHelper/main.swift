@@ -1279,21 +1279,22 @@ func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws ->
     zoom ? max(1, Int(floor(Double(target.pixelWidth) * captureScale))) : target.width
   let captureHeight =
     zoom ? max(1, Int(floor(Double(target.pixelHeight) * captureScale))) : target.height
+  // The menu bar belongs to the frontmost app, never to a background target.
+  let includeMenuBar =
+    scopedAppId == nil
+    && (NSWorkspace.shared.frontmostApplication.map { front in
+      captureApps.contains(where: { $0.processID == front.processIdentifier })
+    } ?? false)
   let canvas: CGContext
   do {
     canvas = try await authorizedComputerCaptureCanvas(
       width: captureWidth, height: captureHeight, applicationCount: captureApps.count
     ) {
       let filter = SCContentFilter(display: screen, including: captureApps, exceptingWindows: [])
-      if #available(macOS 14.2, *) {
-        // The menu bar belongs to the frontmost app, never to a background target.
-        filter.includeMenuBar =
-          scopedAppId == nil
-          && (NSWorkspace.shared.frontmostApplication.map { front in
-            captureApps.contains(where: { $0.processID == front.processIdentifier })
-          } ?? false)
-      }
-      return try await withComputerCaptureConfiguration(width: captureWidth, height: captureHeight) {
+      if #available(macOS 14.2, *) { filter.includeMenuBar = includeMenuBar }
+      return try await withComputerCaptureConfiguration(
+        width: captureWidth, height: captureHeight, displaySize: target.bounds.size
+      ) {
         configuration in
         do {
           return try await SCScreenshotManager.captureImage(
@@ -1312,16 +1313,17 @@ func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws ->
   }
   // Mask secure fields; an incomplete tree cannot establish that remaining pixels are safe.
   var maskIncomplete = false
+  func canvasRect(_ rect: CGRect) -> CGRect {
+    computerCanvasRect(
+      rect, display: target.bounds, canvasWidth: captureWidth, canvasHeight: captureHeight)
+  }
   func fillMask(_ rect: CGRect) {
-    let x = (rect.minX - target.bounds.minX) * Double(captureWidth) / target.bounds.width
-    let y = (rect.minY - target.bounds.minY) * Double(captureHeight) / target.bounds.height
-    let w = rect.width * Double(captureWidth) / target.bounds.width
-    let h = rect.height * Double(captureHeight) / target.bounds.height
+    let r = canvasRect(rect)
     canvas.setFillColor(CGColor(gray: 0.45, alpha: 1))
     canvas.fill(
       CGRect(
-        x: floor(x), y: Double(captureHeight) - ceil(y + h), width: ceil(w) + 2, height: ceil(h) + 2
-      ))
+        x: floor(r.minX), y: Double(captureHeight) - ceil(r.maxY), width: ceil(r.width) + 2,
+        height: ceil(r.height) + 2))
   }
   let capturedWindows = content.windows.filter { window in
     captureApps.contains { $0.processID == window.owningApplication?.processID }
@@ -1397,6 +1399,22 @@ func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws ->
   }) {
     maskIncomplete = true
     fillMask(target.bounds)
+  }
+  if !captureApps.isEmpty {
+    // Fail closed: pixels outside the granted windows' real frames mean the capture is
+    // misplaced, and coordinates read from it would land on other content.
+    let menuLevels = [
+      Int(CGWindowLevelForKey(.mainMenuWindow)), Int(CGWindowLevelForKey(.statusWindow)),
+    ]
+    let menuBar =
+      includeMenuBar
+      ? windows().filter { menuLevels.contains(integer($0, kCGWindowLayer as String)) }
+        .compactMap(windowRect).filter { $0.intersects(target.bounds) } : []
+    if computerCaptureContentOutside(
+      canvas, allowed: (capturedWindows.map(\.frame) + menuBar).map(canvasRect))
+    {
+      throw Failure("Execution", "message", "Capture layout did not match window positions.")
+    }
   }
   try checkGrants(request)
   guard var encoded = canvas.makeImage() else {
