@@ -11,6 +11,7 @@ import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
 import { parsePersistedAppSettings } from "../appSettings";
+import { migrateLegacyClientSetting } from "../hooks/useMigrateClientSettings";
 import { getRouter } from "../router";
 import { useStore } from "../store";
 import { createTestServerProvider } from "../testServerProvider";
@@ -463,6 +464,31 @@ describe("settings route", () => {
         expect(document.body.textContent).toContain("Settings for this profile.");
       });
     } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("shows a pending browser workspace default on the global and project pages", async () => {
+    createNativeApiMock({ serverConfig: { settings: DEFAULT_SERVER_SETTINGS } });
+    const migrate = vi.mocked(nativeApiRef.current!.server.migrateClientSetting);
+    // Startup sync keeps rejecting the migration, so the browser value stays pending.
+    migrate.mockRejectedValue(new Error("Sync pending"));
+    seedProjects();
+    seedAppSettings({ defaultThreadEnvMode: "worktree" });
+    const router = getRouter(
+      createMemoryHistory({ initialEntries: ["/settings?category=threads"] }),
+    );
+    const screen = await render(<RouterProvider router={router} />);
+    try {
+      await vi.waitFor(() => expect(getCategoryPanelText("threads")).toContain("New worktree"));
+      await selectScopeProject("Project One");
+      await expect
+        .element(page.getByRole("combobox", { name: "Default workspace", exact: true }))
+        .toHaveValue("worktree");
+      expect(getCategoryPanelText("threads")).toContain("From global");
+    } finally {
+      migrate.mockResolvedValue({ applied: true, currentValue: "worktree" });
+      await migrateLegacyClientSetting();
       await screen.unmount();
     }
   });

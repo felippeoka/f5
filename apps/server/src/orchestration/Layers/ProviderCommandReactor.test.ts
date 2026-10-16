@@ -863,60 +863,66 @@ describe("ProviderCommandReactor", () => {
     );
     const harness = await createHarness({ realCursorBinary: binary, threadModel: "composer-2" });
     const threadId = ThreadId.makeUnsafe("thread-1");
-    const approvalPromise = Effect.runPromise(
-      Stream.runHead(
-        harness.actualProvider.streamEvents.pipe(
-          Stream.filter((event) => event.type === "request.opened"),
+    try {
+      const approvalPromise = Effect.runPromise(
+        Stream.runHead(
+          harness.actualProvider.streamEvents.pipe(
+            Stream.filter((event) => event.type === "request.opened"),
+          ),
         ),
-      ),
-    );
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.makeUnsafe("composed-acp:start"),
-        threadId,
-        provider: "cursor",
-        model: "composer-2",
-        runtimeMode: "approval-required",
-        interactionMode: "default",
-        message: {
-          messageId: MessageId.makeUnsafe("composed-acp:message"),
-          role: "user",
-          text: "run tool",
-          attachments: [],
-        },
-        createdAt: new Date().toISOString(),
-      }),
-    );
-    const approval = await approvalPromise;
-    expect(Option.isSome(approval)).toBe(true);
-    if (Option.isNone(approval) || approval.value.type !== "request.opened")
-      throw new Error("No ACP approval");
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.approval.respond",
-        commandId: CommandId.makeUnsafe("composed-acp:approve"),
-        threadId,
-        requestId: asApprovalRequestId(approval.value.requestId!),
-        decision: "accept",
-        createdAt: new Date().toISOString(),
-      }),
-    );
-    await harness.drain();
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.turn.interrupt",
-        commandId: CommandId.makeUnsafe("composed-acp:interrupt"),
-        threadId,
-        createdAt: new Date().toISOString(),
-      }),
-    );
-    await harness.drain();
-    const sessions = await Effect.runPromise(harness.actualProvider.listSessions());
-    expect(sessions.find((session) => session.threadId === threadId)?.status).not.toBe("stopped");
-    // The agent runs in the workspace; Windows cannot remove a live process's cwd.
-    await Effect.runPromise(harness.actualProvider.stopSession({ threadId }));
-    await waitForAgentExit(exitLogPath);
+      );
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe("composed-acp:start"),
+          threadId,
+          provider: "cursor",
+          model: "composer-2",
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          message: {
+            messageId: MessageId.makeUnsafe("composed-acp:message"),
+            role: "user",
+            text: "run tool",
+            attachments: [],
+          },
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      const approval = await approvalPromise;
+      expect(Option.isSome(approval)).toBe(true);
+      if (Option.isNone(approval) || approval.value.type !== "request.opened")
+        throw new Error("No ACP approval");
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.approval.respond",
+          commandId: CommandId.makeUnsafe("composed-acp:approve"),
+          threadId,
+          requestId: asApprovalRequestId(approval.value.requestId!),
+          decision: "accept",
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      await harness.drain();
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.interrupt",
+          commandId: CommandId.makeUnsafe("composed-acp:interrupt"),
+          threadId,
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      await harness.drain();
+      const sessions = await Effect.runPromise(harness.actualProvider.listSessions());
+      expect(sessions.find((session) => session.threadId === threadId)?.status).not.toBe("stopped");
+    } finally {
+      // The agent runs in the workspace and Windows cannot remove a live
+      // process's cwd, so stop it even when an assertion above failed.
+      await Effect.runPromise(harness.actualProvider.stopSession({ threadId })).catch(
+        () => undefined,
+      );
+      if (fs.existsSync(`${exitLogPath}.pids`)) await waitForAgentExit(exitLogPath);
+    }
   }, 20_000);
 
   it("reuses a read-only document merge session for a profile-less refinement", async () => {

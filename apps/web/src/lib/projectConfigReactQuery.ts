@@ -1,9 +1,9 @@
 import { cachedGlobalDraftSettings } from "./draftSettingsDefaults";
 import { useStore } from "../store";
 import type {
+  ProjectCheckedInConfig,
   ProjectId,
   ProjectSettingsResult,
-  ServerSettings,
   ThreadEnvMode,
 } from "@t3tools/contracts";
 import { queryOptions, useQueryClient } from "@tanstack/react-query";
@@ -13,6 +13,7 @@ import { nonDefaultThreadEnvMode } from "@t3tools/shared/threadEnvMode";
 import { projectSettingsQueryOptions } from "./projectSettingsQuery";
 import {
   migrateLegacyClientSetting,
+  pendingLegacyThreadEnvMode,
   readLegacyClientSetting,
 } from "../hooks/useMigrateClientSettings";
 import { ensureNativeApi } from "../nativeApi";
@@ -43,26 +44,23 @@ export function resolveCachedProjectThreadEnvMode(projectId: ProjectId): ThreadE
 
 type ThreadEnvModeSource = ProjectSettingsResult["sources"]["defaultThreadEnvMode"];
 
-function cachedProjectThreadEnvModeSource(projectId: ProjectId): ThreadEnvModeSource {
+/**
+ * Where the workspace default comes from without the server, in the server's
+ * precedence order, or `null` when a checked-in file may set it but is not cached.
+ */
+export function cachedProjectThreadEnvModeSource(
+  projectId: ProjectId,
+  checkedIn: ProjectCheckedInConfig | undefined,
+): ThreadEnvModeSource | null {
   const global = cachedGlobalDraftSettings();
   if (global.projectSettingsOverrides[projectId]?.defaultThreadEnvMode !== undefined)
     return "project";
   const project = useStore.getState().projects.find((p) => p.id === projectId);
-  return project?.defaultEnvMode ? "legacy-project" : "global";
-}
-
-/**
- * The browser's legacy workspace default while its migration is still pending,
- * when the server will accept it: it applies only the first migration per key,
- * and project-level values outrank the global default it fills.
- */
-export function pendingLegacyThreadEnvMode(
-  settings: ServerSettings,
-  source: ThreadEnvModeSource,
-): ThreadEnvMode | undefined {
-  if (settings.clientSettingMigrations.defaultThreadEnvMode) return undefined;
-  if (source !== "global" && source !== "default") return undefined;
-  return readLegacyClientSetting();
+  if (project?.defaultEnvMode) return "legacy-project";
+  if (!checkedIn) return null;
+  if (checkedIn.settings?.defaultThreadEnvMode !== undefined || checkedIn.defaultThreadEnvMode)
+    return checkedIn.sourceFile ?? "f5.json";
+  return "global";
 }
 
 export function useProjectThreadEnvModeResolver() {
@@ -79,8 +77,10 @@ export function useProjectThreadEnvModeResolver() {
       const hadPendingMigration = readLegacyClientSetting() !== undefined;
       await migrateLegacyClientSetting().catch(() => undefined);
       const query = projectSettingsQueryOptions(projectId);
+      // A copy fetched before the migration landed would carry the old default,
+      // and fetchQuery joins a request already in flight instead of starting one.
+      if (hadPendingMigration) await queryClient.cancelQueries({ queryKey: query.queryKey });
       const { settings, source } = await queryClient
-        // A copy fetched before the migration landed would carry the old default.
         .fetchQuery(hadPendingMigration ? { ...query, staleTime: 0 } : query)
         .then((result) => ({
           settings: result.settings,
@@ -96,7 +96,10 @@ export function useProjectThreadEnvModeResolver() {
               ...global,
               defaultThreadEnvMode: resolveCachedProjectThreadEnvMode(projectId),
             },
-            source: cachedProjectThreadEnvModeSource(projectId),
+            source: cachedProjectThreadEnvModeSource(
+              projectId,
+              queryClient.getQueryData(projectCheckedInConfigQueryOptions(projectId).queryKey),
+            ),
           };
         });
       const envMode = pendingLegacyThreadEnvMode(settings, source) ?? settings.defaultThreadEnvMode;
