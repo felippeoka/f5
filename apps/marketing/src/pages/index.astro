@@ -26,25 +26,21 @@ import { RELEASES_URL } from "../lib/releases";
 
 <script>
   import {
+    DOWNLOAD_AVAILABILITY,
     fetchLatestRelease,
-    pickPlatformAsset,
-    RELEASES_URL,
-    type DownloadPlatform,
+    resolveDownload,
+    type DownloadTarget,
   } from "../lib/releases";
 
-  type Platform = DownloadPlatform & { label: string };
+  type Platform = { os: "mac" | "win" | "linux"; target: DownloadTarget; label: string };
 
   function detectPlatform(): Platform | null {
     const ua = navigator.userAgent;
-    if (/Win/i.test(ua)) return { os: "win", label: "Download for Windows" };
-    if (/Mac/i.test(ua)) {
-      return {
-        os: "mac",
-        label: `Download for macOS`,
-        arch: "arm64",
-      };
-    }
-    if (/Linux/i.test(ua)) return { os: "linux", label: "Download for Linux" };
+    if (/Win/i.test(ua)) return { os: "win", target: "win-x64", label: "Download for Windows" };
+    // The user agent cannot tell Apple Silicon from Intel; the preview is arm64 only.
+    if (/Mac/i.test(ua))
+      return { os: "mac", target: "mac-arm64", label: "Download macOS preview (Apple Silicon)" };
+    if (/Linux/i.test(ua)) return { os: "linux", target: "linux-x64", label: "Linux: not yet available" };
     return null;
   }
 
@@ -59,16 +55,21 @@ import { RELEASES_URL } from "../lib/releases";
     document.documentElement.dataset.platform = platform.os;
     label.textContent = platform.label;
 
-    try {
-      const release = await fetchLatestRelease();
-      const url = pickPlatformAsset(release.assets, platform);
-      btn.href = url ?? RELEASES_URL;
-      if (url) {
-        btn.removeAttribute("target");
-        btn.removeAttribute("rel");
+    const availability = DOWNLOAD_AVAILABILITY[platform.target];
+    let release = null;
+    if (availability.kind === "stable") {
+      try {
+        release = await fetchLatestRelease();
+      } catch {
+        // resolveDownload falls back to the releases page.
       }
-    } catch {
-      btn.href = RELEASES_URL;
+    }
+    const { href } = resolveDownload(platform.target, release);
+    // Without a direct installer, the download page explains each platform's status.
+    btn.href = href ?? "/download";
+    if (href && href.includes("/releases/download/")) {
+      btn.removeAttribute("target");
+      btn.removeAttribute("rel");
     }
   }
 

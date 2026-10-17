@@ -4,20 +4,59 @@ import { join, basename } from "node:path";
 import { createHash } from "node:crypto";
 import { CLI_TARGETS, parseRelease } from "@t3tools/shared/cliRelease";
 import { parseDesktopUpdateManifest } from "./desktop-update-manifest.ts";
-export function verifyReleaseAssets(dir: string, version: string, channel: string): void {
+import {
+  desktopReleaseAssets,
+  parseReleaseProfile,
+  type ReleaseProfile,
+} from "./lib/release-profile.ts";
+
+const CHECKSUMS = "SHA256SUMS";
+
+/** Requires exactly one `<sha256>  <name>` line for every other asset. */
+export function verifyChecksumFile(dir: string, names: readonly string[]): void {
+  const expected = names.filter((name) => name !== CHECKSUMS);
+  const seen = new Set<string>();
+  const content = readFileSync(join(dir, CHECKSUMS), "utf8");
+  if (!content.endsWith("\n")) throw new Error(`${CHECKSUMS} must end with a newline`);
+  for (const line of content.slice(0, -1).split("\n")) {
+    const match = /^([0-9a-f]{64}) {2}(\S+)$/.exec(line);
+    if (!match) throw new Error(`Malformed ${CHECKSUMS} line: ${line}`);
+    const [, hash, name] = match as unknown as [string, string, string];
+    if (name === CHECKSUMS) throw new Error(`${CHECKSUMS} must not list itself`);
+    if (!expected.includes(name)) throw new Error(`${CHECKSUMS} lists unexpected asset: ${name}`);
+    if (seen.has(name)) throw new Error(`${CHECKSUMS} lists ${name} twice`);
+    seen.add(name);
+    if (
+      createHash("sha256")
+        .update(readFileSync(join(dir, name)))
+        .digest("hex") !== hash
+    )
+      throw new Error(`${CHECKSUMS} checksum mismatch: ${name}`);
+  }
+  for (const name of expected)
+    if (!seen.has(name)) throw new Error(`${CHECKSUMS} is missing asset: ${name}`);
+}
+
+export function verifyReleaseAssets(
+  dir: string,
+  version: string,
+  channel: string,
+  profile: ReleaseProfile,
+): void {
   if (channel !== "latest" && channel !== "beta") throw new Error("Invalid channel");
-  const installers = [
-    `F5-${version}-arm64.dmg`,
-    `F5-${version}-arm64.zip`,
-    `F5-${version}-x64.dmg`,
-    `F5-${version}-x64.zip`,
-    `F5-${version}-x64.exe`,
-    `F5-${version}-x86_64.AppImage`,
-  ];
-  const manifests = [`${channel}.yml`, `${channel}-mac.yml`, `${channel}-linux.yml`];
+  const desktop = desktopReleaseAssets(profile, version, channel);
+  const installers = desktop.installers;
+  const manifests = desktop.feeds.map((feed) => feed.manifest);
   const cli = CLI_TARGETS.map((target) => `f5-${version}-${target}.tar.gz`);
-  const required = [...installers, ...manifests, ...cli, "f5-cli-release.json", "SHA256SUMS"];
-  const allowed = new Set([...required, ...installers.map((name) => `${name}.blockmap`)]);
+  const required = [
+    ...installers,
+    ...desktop.requiredBlockmaps,
+    ...manifests,
+    ...cli,
+    "f5-cli-release.json",
+    CHECKSUMS,
+  ];
+  const allowed = new Set([...required, ...desktop.optionalBlockmaps]);
   const names = readdirSync(dir);
   for (const name of required) if (!names.includes(name)) throw new Error(`Missing asset: ${name}`);
   for (const name of names)
@@ -36,17 +75,11 @@ export function verifyReleaseAssets(dir: string, version: string, channel: strin
     if (bytes.length !== size || createHash(algorithm).update(bytes).digest(encoding) !== hash)
       throw new Error(`Asset checksum/size mismatch: ${name}`);
   };
-  for (const name of manifests) {
-    const expected =
-      name === `${channel}-mac.yml`
-        ? installers.slice(0, 4)
-        : name === `${channel}.yml`
-          ? [installers[4]!]
-          : [installers[5]!];
+  for (const { manifest: name, installers: expected } of desktop.feeds) {
     const manifest = parseDesktopUpdateManifest(readFileSync(join(dir, name), "utf8"), name);
     if (manifest.version !== version) throw new Error(`Version mismatch: ${name}`);
     for (const file of manifest.files) {
-      if (!installers.includes(file.url)) throw new Error(`Unexpected desktop URL: ${file.url}`);
+      if (!expected.includes(file.url)) throw new Error(`Unexpected desktop URL: ${file.url}`);
       verify(file.url, file.size, file.sha512, "sha512", "base64");
       if (file.blockMapSize !== undefined && file.blockMapSize > file.size)
         throw new Error(`Invalid blockMapSize: ${file.url}`);
@@ -75,27 +108,38 @@ export function verifyReleaseAssets(dir: string, version: string, channel: strin
       throw new Error(`Invalid CLI URL: ${target}`);
     verify(name, artifact.size, artifact.sha256, "sha256", "hex");
   }
+  verifyChecksumFile(dir, names);
 }
 export function parseReleaseAssetArgs(args: string[]): {
   dir: string;
   version: string;
   channel: string;
+  profile: ReleaseProfile;
 } {
   let version: string | undefined;
   let channel: string | undefined;
+  let profile: string | undefined;
   let dir: string | undefined;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]!;
     if (arg === "--version" && !version) version = args[++index];
     else if (arg === "--channel" && !channel) channel = args[++index];
+    else if (arg === "--profile" && !profile) profile = args[++index];
     else if (arg.startsWith("--") || dir) throw new Error(`Unexpected argument: ${arg}`);
     else dir = arg;
   }
-  if (!version || !channel || !dir || version.startsWith("--") || channel.startsWith("--"))
-    throw new Error("Usage: verify-release-assets.ts --version V --channel C DIR");
-  return { dir, version, channel };
+  if (
+    !version ||
+    !channel ||
+    !profile ||
+    !dir ||
+    version.startsWith("--") ||
+    channel.startsWith("--")
+  )
+    throw new Error("Usage: verify-release-assets.ts --version V --channel C --profile P DIR");
+  return { dir, version, channel, profile: parseReleaseProfile(profile) };
 }
 if (process.argv[1]?.endsWith("verify-release-assets.ts")) {
-  const { dir, version, channel } = parseReleaseAssetArgs(process.argv.slice(2));
-  verifyReleaseAssets(dir, version, channel);
+  const { dir, version, channel, profile } = parseReleaseAssetArgs(process.argv.slice(2));
+  verifyReleaseAssets(dir, version, channel, profile);
 }

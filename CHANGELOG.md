@@ -6,6 +6,10 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 
 ### Installation
 
+- Windows x64 is the first stable desktop platform: an unsigned per-user installer with in-app updates from the GitHub release feed. SmartScreen may warn, and Windows 11 Smart App Control blocks unsigned apps; see the install guide. A later signed release updates unsigned installations in place.
+- The download page links the Windows installer, keeps the labelled macOS Apple Silicon preview, and shows "Not yet available" for macOS Intel and Linux instead of a misleading link.
+- Releases follow a checked-in desktop profile (`windows` or `all`). Windows-only releases are refused once macOS or Linux updates have shipped. Every release verifies the `SHA256SUMS` contents and the packaged update feed, and must pass an installed Windows upgrade rehearsal.
+
 - Production desktop updates now use only the public baked GitHub feed; ambient `GH_TOKEN` and `T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN` private-feed overrides are no longer supported.
 
 - F5 now uses its own app identity and imports existing F5 (Alpha) settings once. Screen Recording and Accessibility must be granted again.
