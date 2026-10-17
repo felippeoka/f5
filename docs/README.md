@@ -20,7 +20,6 @@
 - [Usage and limits](user/usage-limits.md): recorded activity, account limits and cost.
 - [Worktrees and storage automation](user/worktrees-and-storage-automation.md): worktrees, fan-out and cleanup.
 - [Profiles](profiles.md): separate F5 profiles with their own state and accounts.
-- [Agent Bridge](agent-bridge.md): letting outside MCP clients work with shared projects.
 - [Agent browser and computer use](agent-browser.md): how agents drive pages and, optionally, this computer.
 - [Project configuration](project-configuration.md): checked-in `f5.json` defaults.
 - [Environment variables](environment.md): the full environment reference.
@@ -36,6 +35,7 @@
 - [Performance](performance.md): the performance baseline.
 - [Encyclopedia](encyclopedia.md): glossary of domain terms.
 - [Workspace layout](workspace-layout.md): one line per package.
+- [Agent Bridge](agent-bridge.md): internal reference for the hidden Agent Bridge and Bots.
 
 ## Developing and releasing
 

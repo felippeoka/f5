@@ -1,6 +1,6 @@
 # Agent tools
 
-This guide covers the tools F5 hands to the agents it runs: MCP servers, skills, native provider inventories and project memory. It also explains how that differs from Agent Bridge, where outside clients reach into F5.
+This guide covers the tools F5 hands to the agents it runs: MCP servers, skills, native provider inventories and project memory.
 
 ## MCP servers
 
@@ -44,10 +44,6 @@ Project settings include **Project memory**: short notes about the project that 
 ## Agents panel
 
 The **Agents** panel in a thread follows subagents and background workflows that the thread started, so you can watch delegated work without leaving the conversation. Claude subagents are controlled under **Settings → Threads** (**Enable Claude sub-agents** and **Claude sub-agent model**).
-
-## Agent Bridge is the other direction
-
-Everything above is F5 giving tools to the agents it runs. [Agent Bridge](../agent-bridge.md) is the reverse: an MCP server inside F5 that an outside client, such as ChatGPT or another MCP client, connects to. Through it, a connected agent can list the projects you share, read threads and start supervised turns. It cannot answer approvals, change settings or reach files, terminals or secrets. Turn it on under **Settings > Tools > Agent Bridge**; it is off by default.
 
 ## Related
 

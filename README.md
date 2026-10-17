@@ -129,7 +129,6 @@ Guides: [threads and workspaces](./docs/user/threads-and-workspaces.md) and [age
 - **Usage dashboard** with recorded activity and account limits: [usage guide](./docs/user/usage-limits.md).
 - **Profiles** that keep state and provider accounts apart: [profiles](./docs/profiles.md).
 - **Preview browser** and the opt-in, uncertified macOS computer use preview: [preview browser](./docs/user/preview-browser.md) and [agent browser](./docs/agent-browser.md).
-- **Agent Bridge and Bots** for external clients that reach F5: [Agent Bridge](./docs/agent-bridge.md).
 - **Themes, fonts and keybindings:** [keybindings](./KEYBINDINGS.md).
 - **Remote access and the standalone CLI:** [remote](./REMOTE.md) and [standalone CLI](./docs/user/standalone-cli.md).
 
@@ -168,7 +167,7 @@ bun run build:desktop
 bun run start:desktop
 ```
 
-Desktop builds target macOS (arm64/x64), Linux (x64), and Windows 11 (x64).
+From source you can package the desktop app for macOS (arm64/x64), Linux (x64) and Windows 11 (x64), even where no download is published yet.
 
 Full source-build recipes: [`docs/quick-start.md`](./docs/quick-start.md).
 
