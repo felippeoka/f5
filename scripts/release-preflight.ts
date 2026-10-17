@@ -3,11 +3,28 @@ import { readFileSync, appendFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { compareCliReleaseVersions, versionToken } from "@t3tools/shared/cliRelease";
 import { releasePackageFiles } from "./update-release-package-versions.ts";
+import {
+  assertReleaseProfileAllowed,
+  desktopBuildMatrix,
+  fetchReleaseSummaries,
+  mergesMacManifests,
+  readCheckedInReleaseProfile,
+  resolveReleaseProfile,
+} from "./lib/release-profile.ts";
 const run = (command: string, args: string[]) =>
   execFileSync(command, args, { encoding: "utf8" }).trim();
 const dryRun = process.env.DRY_RUN === "true";
 const ref = process.env.GITHUB_REF_NAME ?? "";
 const current = JSON.parse(readFileSync("apps/desktop/package.json", "utf8")).version as string;
+// The checkout is the tagged commit, so tagged releases read the profile they were cut with.
+const profile = resolveReleaseProfile({
+  checkedIn: readCheckedInReleaseProfile("."),
+  dryRun,
+  override: process.env.PROFILE_OVERRIDE,
+});
+const releases = fetchReleaseSummaries(process.env.GITHUB_REPOSITORY!);
+// Dry runs check the lock too, so a profile the tag would reject fails before tagging.
+assertReleaseProfileAllowed(profile, releases);
 let version: string;
 if (dryRun) {
   if (ref !== "main") throw new Error("Dry runs require main");
@@ -27,15 +44,7 @@ if (dryRun) {
     ]),
   ) as { workflow_runs: unknown[] };
   if (!runs.workflow_runs.length) throw new Error("No successful CI push run for release SHA");
-  const releases = JSON.parse(
-    run("gh", [
-      "api",
-      "--paginate",
-      "--slurp",
-      `repos/${process.env.GITHUB_REPOSITORY}/releases?per_page=100`,
-    ]),
-  ) as { tag_name: string; draft: boolean }[][];
-  for (const release of releases.flat())
+  for (const release of releases)
     if (
       !release.draft &&
       /^v\d+\.\d+\.\d+(?:-beta\.\d+)?$/.test(release.tag_name) &&
@@ -48,5 +57,14 @@ if (dryRun) {
 const beta = version.includes("-beta.");
 appendFileSync(
   process.env.GITHUB_OUTPUT!,
-  `version=${version}\ntag=v${version}\nchannel=${beta ? "beta" : "latest"}\nis_prerelease=${beta}\ndry_run=${dryRun}\n`,
+  [
+    `version=${version}`,
+    `tag=v${version}`,
+    `channel=${beta ? "beta" : "latest"}`,
+    `is_prerelease=${beta}`,
+    `dry_run=${dryRun}`,
+    `profile=${profile}`,
+    `desktop_matrix=${JSON.stringify(desktopBuildMatrix(profile))}`,
+    `merge_mac=${mergesMacManifests(profile)}`,
+  ].join("\n") + "\n",
 );

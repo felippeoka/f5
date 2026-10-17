@@ -137,8 +137,6 @@ export async function fetchLatestRelease(
   return release;
 }
 
-export type DownloadPlatform = { os: "mac" | "win" | "linux"; arch?: string };
-
 /** Matches `<name>-<version>-<suffix>` assets, e.g. `-arm64.dmg`. */
 export function findAssetBySuffix(
   assets: ReadonlyArray<ReleaseAsset>,
@@ -147,17 +145,58 @@ export function findAssetBySuffix(
   return assets.find((asset) => asset.name.endsWith(`-${suffix}`));
 }
 
-export function pickPlatformAsset(
-  assets: ReadonlyArray<ReleaseAsset>,
-  platform: DownloadPlatform,
-): string | null {
-  if (platform.os === "win") {
-    return findAssetBySuffix(assets, "x64.exe")?.browser_download_url ?? null;
-  }
-  if (platform.os === "mac") {
-    const preferred = platform.arch ? findAssetBySuffix(assets, `${platform.arch}.dmg`) : undefined;
-    const fallback = assets.find((asset) => asset.name.endsWith(".dmg"));
-    return (preferred ?? fallback)?.browser_download_url ?? null;
-  }
-  return assets.find((asset) => asset.name.endsWith(".AppImage"))?.browser_download_url ?? null;
+export type DownloadTarget = "mac-arm64" | "mac-x64" | "win-x64" | "linux-x64";
+
+export type DownloadAvailability =
+  /** Served from the latest stable release by asset suffix. */
+  | { readonly kind: "stable"; readonly suffix: string }
+  /** A pinned prerelease that `/releases/latest` never returns. */
+  | {
+      readonly kind: "preview";
+      readonly tag: string;
+      readonly asset: string;
+      readonly note: string;
+    }
+  | { readonly kind: "unavailable"; readonly note: string };
+
+export const MAC_PREVIEW_TAG = "v0.0.11-computer-use-preview.1";
+
+/**
+ * Which platforms currently ship. Kept explicit so a release that lacks a
+ * platform's installer shows a status rather than a misleading download.
+ */
+export const DOWNLOAD_AVAILABILITY: Readonly<Record<DownloadTarget, DownloadAvailability>> = {
+  "win-x64": { kind: "stable", suffix: "x64.exe" },
+  "mac-arm64": {
+    kind: "preview",
+    tag: MAC_PREVIEW_TAG,
+    asset: "F5-0.0.11-computer-use-preview.1-arm64.dmg",
+    note: "Preview: unsigned, not notarized, no automatic updates, replaces F5 (Alpha)",
+  },
+  "mac-x64": { kind: "unavailable", note: "Not yet available" },
+  "linux-x64": { kind: "unavailable", note: "Not yet available" },
+};
+
+export interface ResolvedDownload {
+  readonly href: string | null;
+  readonly note: string | null;
+}
+
+/**
+ * `release` is the latest stable release, or `null` when it could not be
+ * loaded; only then does a stable download fall back to the releases page.
+ */
+export function resolveDownload(target: DownloadTarget, release: Release | null): ResolvedDownload {
+  const availability = DOWNLOAD_AVAILABILITY[target];
+  if (availability.kind === "unavailable") return { href: null, note: availability.note };
+  if (availability.kind === "preview")
+    return {
+      href: `${REPOSITORY_URL}/releases/download/${availability.tag}/${availability.asset}`,
+      note: availability.note,
+    };
+  if (!release) return { href: RELEASES_URL, note: null };
+  const asset = findAssetBySuffix(release.assets, availability.suffix);
+  return asset
+    ? { href: asset.browser_download_url, note: null }
+    : { href: null, note: "Not in the latest release" };
 }
