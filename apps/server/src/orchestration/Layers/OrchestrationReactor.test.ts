@@ -189,6 +189,7 @@ describe("OrchestrationReactor", () => {
           ),
           Layer.provideMerge(
             Layer.succeed(ProjectSkillSyncService, {
+              getWarnings: () => Effect.succeed([]),
               start: Effect.sync(() => {
                 started.push("project-skill-sync-service");
               }),

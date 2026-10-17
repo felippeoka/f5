@@ -1,4 +1,7 @@
-import { deriveCodeReviewWorkflowStatus, type CodeReviewWorkflow } from "@t3tools/contracts";
+import {
+  deriveCodeReviewWorkflowStatus,
+  type CodeReviewWorkflowSummary as CodeReviewWorkflow,
+} from "@t3tools/contracts";
 
 export interface CodeReviewWorkflowError {
   readonly key: "reviewerA" | "reviewerB" | "consolidation";

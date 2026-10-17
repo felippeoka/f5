@@ -1,3 +1,4 @@
+import { withAttachmentRetentionLease } from "./attachmentRetention.ts";
 import * as Crypto from "node:crypto";
 import * as FS from "node:fs/promises";
 import * as OS from "node:os";
@@ -3424,9 +3425,11 @@ const makeStorageMaintenance = Effect.gen(function* () {
   return {
     inspect,
     summarizeReclaimable,
-    cleanup,
+    cleanup: (request, context) =>
+      withAttachmentRetentionLease(config.attachmentsDir, cleanup(request, context)),
     cancel,
-    purgeThreads,
+    purgeThreads: (input) =>
+      withAttachmentRetentionLease(config.attachmentsDir, purgeThreads(input)),
     reclaimDatabaseSpace,
     listTerminalThreadLogs,
     pruneTerminalThreadLogs,

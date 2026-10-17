@@ -39,6 +39,28 @@ final class CaptureCanvasTests: XCTestCase {
     XCTAssertLessThan(pixels[0], 20)
     XCTAssertLessThan(pixels[2], 20)
   }
+  func testTransparentCaptureBackgroundLeavesTheNeutralFill() async throws {
+    // The capture's background is transparent, so outside windows the canvas keeps its own
+    // neutral fill and the layout check's reference matches exactly.
+    let source = CGContext(
+      data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 0,
+      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    source.clear(CGRect(x: 0, y: 0, width: 64, height: 64))
+    source.setFillColor(CGColor(gray: 0.12, alpha: 1))
+    source.fill(CGRect(x: 0, y: 32, width: 32, height: 32))
+    let canvas = try await authorizedComputerCaptureCanvas(width: 64, height: 64, applicationCount: 1) {
+      source.makeImage()!
+    }
+    let pixels = canvas.data!.assumingMemoryBound(to: UInt8.self)
+    let outside = 48 * canvas.bytesPerRow + 48 * 4
+    XCTAssertEqual(
+      [Int(pixels[outside]), Int(pixels[outside + 1]), Int(pixels[outside + 2])],
+      computerNeutralCanvasPixel())
+    // The opaque block sits at the top-left: allowed there it passes, unallowed it fails.
+    XCTAssertFalse(
+      computerCaptureContentOutside(canvas, allowed: [CGRect(x: 0, y: 0, width: 32, height: 32)]))
+    XCTAssertTrue(computerCaptureContentOutside(canvas, allowed: []))
+  }
   func testInvalidGeometryOrCountFailsBeforeCapture() async {
     var calls = 0
     for (width, height, count) in [(0, 16, 1), (16, 0, 1), (16, 16, -1)] {

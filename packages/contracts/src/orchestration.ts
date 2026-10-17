@@ -1,3 +1,8 @@
+import {
+  PlanningWorkflowSummary,
+  CodeReviewWorkflowSummary,
+  InvestigationWorkflowSummary,
+} from "./workflowSummary";
 import { ProviderRuntimeInfo } from "./runtimeInfo";
 import { RuntimeUsageLimit } from "./usageLimit";
 import { PendingUserInput } from "./userInput";
@@ -2927,8 +2932,15 @@ export const OrchestrationThreadHistoryPage = Schema.Struct({
 });
 export type OrchestrationThreadHistoryPage = typeof OrchestrationThreadHistoryPage.Type;
 
+export const OrchestrationStartupSnapshot = Schema.Struct({
+  ...OrchestrationReadModel.fields,
+  planningWorkflows: Schema.Array(PlanningWorkflowSummary),
+  codeReviewWorkflows: Schema.Array(CodeReviewWorkflowSummary),
+  investigationWorkflows: Schema.Array(InvestigationWorkflowSummary),
+});
+export type OrchestrationStartupSnapshot = typeof OrchestrationStartupSnapshot.Type;
 export const OrchestrationGetStartupSnapshotResult = Schema.Struct({
-  snapshot: OrchestrationReadModel,
+  snapshot: OrchestrationStartupSnapshot,
   threadTailDetails: Schema.NullOr(OrchestrationThreadTailDetails).pipe(
     Schema.withDecodingDefault(() => null),
   ),

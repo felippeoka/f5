@@ -1,3 +1,4 @@
+import type { OrchestrationStartupSnapshot } from "@t3tools/contracts";
 import { resolveProjectModel } from "./orchestrationState";
 import { Fragment, type ReactNode, createElement, useEffect } from "react";
 import {
@@ -1336,7 +1337,7 @@ export function evictThreadDetails(state: AppState, threadIds: Iterable<ThreadId
 
 export function syncStartupSnapshot(
   state: AppState,
-  readModel: OrchestrationReadModel,
+  readModel: OrchestrationStartupSnapshot,
   options?: { rewindDraftReadTicket?: number },
 ): AppState {
   if (readModel.snapshotSequence < state.lastAppliedSequence) {
@@ -1897,7 +1898,10 @@ export function setThreadRewindDrafts(
  * @deprecated Production hydration now uses `syncStartupSnapshot`.
  * Keep this full-sync path for tests and debug-only callers.
  */
-export function syncServerReadModel(state: AppState, readModel: OrchestrationReadModel): AppState {
+export function syncServerReadModel(
+  state: AppState,
+  readModel: OrchestrationStartupSnapshot,
+): AppState {
   const projects = mapProjectsFromReadModel(
     readModel.projects.filter((project) => project.deletedAt === null),
     state.projects,
@@ -2132,14 +2136,14 @@ export function setThreadBranch(
 interface AppStore extends AppState {
   invalidateThreadDetails: (options?: { preserveThreadIds?: Iterable<ThreadId> }) => void;
   evictThreadDetails: (threadIds: Iterable<ThreadId>) => void;
-  syncServerReadModel: (readModel: OrchestrationReadModel) => void;
+  syncServerReadModel: (readModel: OrchestrationStartupSnapshot) => void;
   setThreadRewindDrafts: (
     threadId: ThreadId,
     drafts: ReadonlyArray<RewindDraft>,
     ticket: number,
   ) => void;
   syncStartupSnapshot: (
-    readModel: OrchestrationReadModel,
+    readModel: OrchestrationStartupSnapshot,
     options?: { rewindDraftReadTicket?: number },
   ) => void;
   syncThreadTailDetails: (

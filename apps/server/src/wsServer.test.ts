@@ -1875,6 +1875,9 @@ describe("WebSocket Server", () => {
       const storageCleanupWorkerModule = await vi.importActual<
         typeof import("./storage/StorageCleanupWorker.ts")
       >("./storage/StorageCleanupWorker.ts");
+      const skillSyncModule = await vi.importActual<
+        typeof import("./orchestration/Services/ProjectSkillSyncService.ts")
+      >("./orchestration/Services/ProjectSkillSyncService.ts");
       const defaultBranchAutoPullModule = await vi.importActual<
         typeof import("./git/DefaultBranchAutoPull.ts")
       >("./git/DefaultBranchAutoPull.ts");
@@ -1917,6 +1920,11 @@ describe("WebSocket Server", () => {
           getQuotaHistory: Effect.die("unused quota history"),
         }),
         Layer.succeed(providerSessionDirectoryModule.ProviderSessionDirectory, {} as any),
+        Layer.succeed(skillSyncModule.ProjectSkillSyncService, {
+          start: Effect.void,
+          drain: Effect.void,
+          getWarnings: () => Effect.succeed([]),
+        }),
         Layer.succeed(workflowServiceModule.WorkflowService, {} as any),
         Layer.succeed(codeReviewWorkflowServiceModule.CodeReviewWorkflowService, {} as any),
         Layer.succeed(investigationWorkflowServiceModule.InvestigationWorkflowService, {} as any),
@@ -1968,6 +1976,17 @@ describe("WebSocket Server", () => {
 
     const [ws] = await connectAndAwaitWelcome(port);
     connections.push(ws);
+
+    const settingsResponse = await Promise.race([
+      sendRequest(ws, WS_METHODS.serverGetProjectSettings, {
+        projectId: "project-pending-runtime",
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Project settings waited for runtime startup")), 1000),
+      ),
+    ]);
+    expect(settingsResponse.error).toBeUndefined();
+    expect(settingsResponse.result).toMatchObject({ skillScanWarnings: [] });
 
     const threadDetailsResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getThreadDetails, {
       threadId: "thread-pending-runtime",
@@ -2098,6 +2117,9 @@ describe("WebSocket Server", () => {
       const storageCleanupWorkerModule = await vi.importActual<
         typeof import("./storage/StorageCleanupWorker.ts")
       >("./storage/StorageCleanupWorker.ts");
+      const skillSyncModule = await vi.importActual<
+        typeof import("./orchestration/Services/ProjectSkillSyncService.ts")
+      >("./orchestration/Services/ProjectSkillSyncService.ts");
       const defaultBranchAutoPullModule = await vi.importActual<
         typeof import("./git/DefaultBranchAutoPull.ts")
       >("./git/DefaultBranchAutoPull.ts");
@@ -2204,6 +2226,11 @@ describe("WebSocket Server", () => {
                 : Option.none(),
             ),
         } as any),
+        Layer.succeed(skillSyncModule.ProjectSkillSyncService, {
+          start: Effect.void,
+          drain: Effect.void,
+          getWarnings: () => Effect.succeed([]),
+        }),
         Layer.succeed(workflowServiceModule.WorkflowService, {} as any),
         Layer.succeed(codeReviewWorkflowServiceModule.CodeReviewWorkflowService, {} as any),
         Layer.succeed(investigationWorkflowServiceModule.InvestigationWorkflowService, {} as any),
@@ -6389,6 +6416,9 @@ describe("WebSocket Server", () => {
       cwd: "/test",
       authToken: "secret-token",
       stateDir,
+      persistenceLayer: makeSqlitePersistenceLive(path.join(stateDir, "state.sqlite")).pipe(
+        Layer.provide(NodeServices.layer),
+      ),
     });
     const addr = server.address();
     const port = typeof addr === "object" && addr !== null ? addr.port : 0;
@@ -6575,7 +6605,13 @@ describe("WebSocket Server", () => {
 
   it("prepares a complete backup before committing the download response", async () => {
     const stateDir = makeTempDir("t3code-state-backup-export-");
-    server = await createTestServer({ cwd: "/test", stateDir });
+    server = await createTestServer({
+      cwd: "/test",
+      stateDir,
+      persistenceLayer: makeSqlitePersistenceLive(path.join(stateDir, "state.sqlite")).pipe(
+        Layer.provide(NodeServices.layer),
+      ),
+    });
     const addr = server.address();
     const port = typeof addr === "object" && addr !== null ? addr.port : 0;
 

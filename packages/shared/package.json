@@ -327,6 +327,10 @@
     "./mcpValidation": {
       "types": "./src/mcpValidation.ts",
       "import": "./src/mcpValidation.ts"
+    },
+    "./workflowSummary": {
+      "types": "./src/workflowSummary.ts",
+      "import": "./src/workflowSummary.ts"
     }
   },
   "scripts": {

@@ -1,3 +1,4 @@
+import { withAttachmentRetentionLease } from "../../storage/attachmentRetention.ts";
 import {
   stampSubmissionSource,
   readSubmissionSource,
@@ -1619,7 +1620,9 @@ export const makeNextTurnQueueStore = Effect.gen(function* () {
         discard: true,
       });
       return [...itemsByThread.keys()];
-    }).pipe(Effect.mapError(normalizeError)),
+    }).pipe(Effect.mapError(normalizeError), (effect) =>
+      withAttachmentRetentionLease(config.attachmentsDir, effect),
+    ),
 
     deleteForThread: (threadId) =>
       sql
@@ -1631,7 +1634,9 @@ export const makeNextTurnQueueStore = Effect.gen(function* () {
             return items;
           }),
         )
-        .pipe(Effect.mapError(normalizeError)),
+        .pipe(Effect.mapError(normalizeError), (effect) =>
+          withAttachmentRetentionLease(config.attachmentsDir, effect),
+        ),
 
     deleteOrphans: Effect.gen(function* () {
       const rows = yield* sql<{ readonly threadId: string }>`
@@ -1648,58 +1653,60 @@ export const makeNextTurnQueueStore = Effect.gen(function* () {
       return threadIds;
     }).pipe(Effect.mapError(normalizeError)),
 
-    drainOrphanedAttachments: Effect.gen(function* () {
-      const attachmentsRoot = nodePath.resolve(config.attachmentsDir);
-      const isOwnedAttachmentPath = (candidate: string) => {
-        const resolved = nodePath.resolve(candidate);
-        return (
-          resolved !== attachmentsRoot && resolved.startsWith(`${attachmentsRoot}${nodePath.sep}`)
-        );
-      };
-      const staged = yield* sql<{
-        readonly attachmentId: string;
-        readonly stagingPath: string;
-        readonly finalPath: string;
-      }>`
+    drainOrphanedAttachments: withAttachmentRetentionLease(
+      config.attachmentsDir,
+      Effect.gen(function* () {
+        const attachmentsRoot = nodePath.resolve(config.attachmentsDir);
+        const isOwnedAttachmentPath = (candidate: string) => {
+          const resolved = nodePath.resolve(candidate);
+          return (
+            resolved !== attachmentsRoot && resolved.startsWith(`${attachmentsRoot}${nodePath.sep}`)
+          );
+        };
+        const staged = yield* sql<{
+          readonly attachmentId: string;
+          readonly stagingPath: string;
+          readonly finalPath: string;
+        }>`
         SELECT attachment_id AS "attachmentId", staging_path AS "stagingPath",
           final_path AS "finalPath"
         FROM attachments
         WHERE lifecycle = 'staged' AND staging_path IS NOT NULL
       `;
-      for (const attachment of staged) {
-        if (
-          !isOwnedAttachmentPath(attachment.stagingPath) ||
-          !isOwnedAttachmentPath(attachment.finalPath)
-        ) {
-          yield* Effect.logWarning("discarding attachment metadata with unsafe staging paths", {
-            attachmentId: attachment.attachmentId,
-          });
-          yield* sql`DELETE FROM attachments WHERE attachment_id = ${attachment.attachmentId}`;
-          continue;
-        }
-        const stagingInfo = yield* fileSystem
-          .stat(attachment.stagingPath)
-          .pipe(Effect.catch(() => Effect.succeed(null)));
-        const finalInfo = yield* fileSystem
-          .stat(attachment.finalPath)
-          .pipe(Effect.catch(() => Effect.succeed(null)));
-        if (stagingInfo?.type === "File") {
-          yield* fileSystem.rename(attachment.stagingPath, attachment.finalPath);
-        } else if (finalInfo?.type !== "File") {
-          yield* sql`DELETE FROM attachments WHERE attachment_id = ${attachment.attachmentId}`;
-          continue;
-        }
-        yield* sql`
+        for (const attachment of staged) {
+          if (
+            !isOwnedAttachmentPath(attachment.stagingPath) ||
+            !isOwnedAttachmentPath(attachment.finalPath)
+          ) {
+            yield* Effect.logWarning("discarding attachment metadata with unsafe staging paths", {
+              attachmentId: attachment.attachmentId,
+            });
+            yield* sql`DELETE FROM attachments WHERE attachment_id = ${attachment.attachmentId}`;
+            continue;
+          }
+          const stagingInfo = yield* fileSystem
+            .stat(attachment.stagingPath)
+            .pipe(Effect.catch(() => Effect.succeed(null)));
+          const finalInfo = yield* fileSystem
+            .stat(attachment.finalPath)
+            .pipe(Effect.catch(() => Effect.succeed(null)));
+          if (stagingInfo?.type === "File") {
+            yield* fileSystem.rename(attachment.stagingPath, attachment.finalPath);
+          } else if (finalInfo?.type !== "File") {
+            yield* sql`DELETE FROM attachments WHERE attachment_id = ${attachment.attachmentId}`;
+            continue;
+          }
+          yield* sql`
           UPDATE attachments SET lifecycle = 'ready', staging_path = NULL, updated_at = ${now()}
           WHERE attachment_id = ${attachment.attachmentId}
         `;
-      }
+        }
 
-      const abandonedIngress = yield* sql<{
-        readonly attachmentId: string;
-        readonly stagingPath: string | null;
-        readonly finalPath: string;
-      }>`
+        const abandonedIngress = yield* sql<{
+          readonly attachmentId: string;
+          readonly stagingPath: string | null;
+          readonly finalPath: string;
+        }>`
         SELECT attachment.attachment_id AS "attachmentId",
           attachment.staging_path AS "stagingPath", attachment.final_path AS "finalPath"
         FROM attachments AS attachment
@@ -1716,53 +1723,54 @@ export const makeNextTurnQueueStore = Effect.gen(function* () {
               AND live_owner.owner_kind != 'ingress'
           )
       `;
-      for (const attachment of abandonedIngress) {
-        for (const candidate of [attachment.stagingPath, attachment.finalPath]) {
-          if (candidate !== null && isOwnedAttachmentPath(candidate)) {
-            yield* fileSystem
-              .remove(candidate, { force: true })
-              .pipe(Effect.catch(() => Effect.void));
+        for (const attachment of abandonedIngress) {
+          for (const candidate of [attachment.stagingPath, attachment.finalPath]) {
+            if (candidate !== null && isOwnedAttachmentPath(candidate)) {
+              yield* fileSystem
+                .remove(candidate, { force: true })
+                .pipe(Effect.catch(() => Effect.void));
+            }
           }
+          yield* sql`DELETE FROM attachments WHERE attachment_id = ${attachment.attachmentId}`;
         }
-        yield* sql`DELETE FROM attachments WHERE attachment_id = ${attachment.attachmentId}`;
-      }
-      const remainingStaged = yield* sql<{ readonly count: number }>`
+        const remainingStaged = yield* sql<{ readonly count: number }>`
         SELECT COUNT(*) AS count FROM attachments WHERE lifecycle = 'staged'
       `;
-      if ((remainingStaged[0]?.count ?? 0) === 0) {
-        yield* fileSystem
-          .remove(nodePath.join(config.attachmentsDir, ".staging"), {
-            recursive: true,
-            force: true,
-          })
-          .pipe(Effect.catch(() => Effect.void));
-      }
+        if ((remainingStaged[0]?.count ?? 0) === 0) {
+          yield* fileSystem
+            .remove(nodePath.join(config.attachmentsDir, ".staging"), {
+              recursive: true,
+              force: true,
+            })
+            .pipe(Effect.catch(() => Effect.void));
+        }
 
-      const rows = yield* sql<{ readonly attachmentId: string }>`
+        const rows = yield* sql<{ readonly attachmentId: string }>`
         SELECT attachment_id AS "attachmentId"
         FROM next_turn_queue_orphaned_attachments
       `;
-      for (const row of rows) {
-        const matches = yield* fileSystem
-          .readDirectory(config.attachmentsDir)
-          .pipe(Effect.catch(() => Effect.succeed([])));
-        yield* Effect.forEach(
-          matches.filter((entry) => entry.startsWith(`${row.attachmentId}.`)),
-          (entry) =>
-            fileSystem
-              .remove(`${config.attachmentsDir}/${entry}`, { force: true })
-              .pipe(Effect.catch(() => Effect.void)),
-          { discard: true },
-        );
-        yield* sql`
+        for (const row of rows) {
+          const matches = yield* fileSystem
+            .readDirectory(config.attachmentsDir)
+            .pipe(Effect.catch(() => Effect.succeed([])));
+          yield* Effect.forEach(
+            matches.filter((entry) => entry.startsWith(`${row.attachmentId}.`)),
+            (entry) =>
+              fileSystem
+                .remove(`${config.attachmentsDir}/${entry}`, { force: true })
+                .pipe(Effect.catch(() => Effect.void)),
+            { discard: true },
+          );
+          yield* sql`
           DELETE FROM attachments WHERE attachment_id = ${row.attachmentId}
         `;
-        yield* sql`
+          yield* sql`
           DELETE FROM next_turn_queue_orphaned_attachments
           WHERE attachment_id = ${row.attachmentId}
         `;
-      }
-    }).pipe(Effect.mapError(normalizeError)),
+        }
+      }),
+    ).pipe(Effect.mapError(normalizeError)),
 
     purgeSettledSubmissions: sql`
       DELETE FROM turn_submissions

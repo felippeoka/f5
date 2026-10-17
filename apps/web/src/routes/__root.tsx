@@ -1,3 +1,4 @@
+import { invalidateWorkflowQueries } from "../lib/workflowQueries";
 import { noteWsSynchronized, noteWsResynchronizing } from "../wsConnectionState";
 import { useComposerMentionHistoryStore } from "../composerMentionHistoryStore";
 import { usePreviewArtifactRetentionSync } from "../hooks/usePreviewArtifactRetentionSync";
@@ -351,7 +352,9 @@ export function pruneDraftThreadsForCurrentProjects(): void {
   pruneOrphanedDraftThreads(collectValidProjectIds(useStore.getState().projects));
 }
 
-export function reconcileDraftThreadsAfterStartupSnapshot(snapshot: OrchestrationReadModel): void {
+export function reconcileDraftThreadsAfterStartupSnapshot(
+  snapshot: Pick<OrchestrationReadModel, "projects" | "threads">,
+): void {
   pruneOrphanedDraftThreads(
     collectValidProjectIds(snapshot.projects.filter((project) => project.deletedAt === null)),
   );
@@ -637,6 +640,7 @@ function EventRouter() {
         useComposerMentionHistoryStore.getState().forgetThread(event.payload.threadId);
         removeOrphanedTerminalsForCurrentStoreThreads();
       }
+      void invalidateWorkflowQueries(queryClient, [event]);
       invalidateWorkspaceQueriesForEvents([event]);
     };
 
@@ -709,6 +713,7 @@ function EventRouter() {
           .retainThreads(new Set(useStore.getState().threads.map((thread) => thread.id)));
         removeOrphanedTerminalsForCurrentStoreThreads();
       }
+      void invalidateWorkflowQueries(queryClient, batch);
       invalidateWorkspaceQueriesForEvents(batch);
       if (import.meta.env.DEV && batch.length >= 64) {
         console.info("EventRouter coalesced a large batch", {
@@ -994,6 +999,7 @@ function EventRouter() {
       committedSequence = Math.max(committedSequence, snapshot.snapshotSequence);
       flushSequenceCommitWaiters();
       syncStartupSnapshot(snapshot, { rewindDraftReadTicket });
+      void invalidateWorkflowQueries(queryClient);
       if (!snapshotIsProvisional) {
         useComposerMentionHistoryStore
           .getState()

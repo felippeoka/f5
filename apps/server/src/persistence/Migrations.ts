@@ -1,3 +1,4 @@
+import Migration0117 from "./Migrations/117_WorkflowSummaries.ts";
 import Migration0116 from "./Migrations/116_UsageAccountHistory.ts";
 import Migration0115 from "./Migrations/115_DeliveryHistoryEvidence.ts";
 import Migration0114 from "./Migrations/114_BotTasks.ts";
@@ -150,6 +151,7 @@ import Migration0101 from "./Migrations/101_UsageResetCreditRequests.ts";
 
 export const MIGRATIONS = {
   "116_UsageAccountHistory": Migration0116,
+  "117_WorkflowSummaries": Migration0117,
   "115_DeliveryHistoryEvidence": Migration0115,
   "114_BotTasks": Migration0114,
   "113_AgentBridge": Migration0113,

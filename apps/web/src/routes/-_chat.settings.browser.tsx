@@ -1,4 +1,7 @@
-import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
+import {
+  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  DEFAULT_SERVER_SETTINGS,
+} from "@t3tools/contracts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import "../index.css";
@@ -401,6 +404,37 @@ describe("settings route", () => {
     });
   });
 
+  it("invalidates cached workflow details when project settings refresh the startup snapshot", async () => {
+    const { screen, router } = await renderSettingsRoute(
+      `/settings?category=project&project=${PROJECT_ONE}`,
+    );
+    const client = router.options.context.queryClient;
+    const key = ["workflow-platform", "details", "planning", "cached-run"];
+    try {
+      client.setQueryData(key, { detail: "old" });
+      nativeApiRef.current!.orchestration.getStartupSnapshot = vi.fn(async () => ({
+        snapshot: {
+          snapshotSequence: 1,
+          pinRevision: 0,
+          projects: [],
+          threads: [],
+          planningWorkflows: [],
+          codeReviewWorkflows: [],
+          investigationWorkflows: [],
+          updatedAt: NOW_ISO,
+        },
+        threadTailDetails: null,
+      }));
+      await page.getByRole("combobox", { name: "Project icon source" }).click();
+      await page.getByRole("option", { name: "Emoji", exact: true }).click();
+      await vi.waitFor(() => expect(client.getQueryState(key)?.isInvalidated).toBe(true));
+      expect(nativeApiRef.current!.orchestration.getStartupSnapshot).toHaveBeenCalled();
+    } finally {
+      await screen.unmount();
+      client.clear();
+    }
+  });
+
   it("lists runtime providers and resets model options when switching the project text-generation account", async () => {
     const { screen } = await renderSettingsRoute(`/settings?category=git&project=${PROJECT_ONE}`, {
       serverConfig: {
@@ -429,7 +463,7 @@ describe("settings route", () => {
             [PROJECT_ONE]: {
               textGenerationModelSelection: {
                 instanceId: "claudeAgent",
-                model: "claude-haiku-4-5",
+                model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.claudeAgent,
               },
             },
           },

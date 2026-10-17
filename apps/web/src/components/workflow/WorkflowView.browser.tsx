@@ -1,3 +1,6 @@
+import { summarizePlanningWorkflow } from "@t3tools/shared/workflowSummary";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import type { Thread } from "../../types";
 import "../../index.css";
 
@@ -6,19 +9,28 @@ import type { AnchorHTMLAttributes } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
+const renderView = (view: ReactNode) =>
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      {view}
+    </QueryClientProvider>,
+  );
 
 import { useStore } from "../../store";
 import { toastManager } from "../ui/toast";
 import { createPlanningWorkflow, createDocumentReaderPass } from "../../test/workflowFixtures";
 
 const nativeApiMocks = vi.hoisted(() => ({
+  inspectRun: vi.fn(),
   retryWorkflow: vi.fn(),
   skipDocumentReaderPass: vi.fn(),
 }));
 
 vi.mock("../../nativeApi", () => ({
   ensureNativeApi: () => {
-    throw new Error("Native API not available in this test");
+    return { workflowPlatform: { inspectRun: nativeApiMocks.inspectRun } };
   },
   readNativeApi: () => ({
     orchestration: {
@@ -57,6 +69,7 @@ const workflowId = PlanningWorkflowId.makeUnsafe("retry-workflow");
 
 describe("WorkflowView retry", () => {
   beforeEach(() => {
+    nativeApiMocks.inspectRun.mockReset();
     nativeApiMocks.retryWorkflow.mockReset();
     nativeApiMocks.skipDocumentReaderPass.mockReset();
     useStore.setState({
@@ -78,6 +91,35 @@ describe("WorkflowView retry", () => {
     document.body.innerHTML = "";
     vi.restoreAllMocks();
     useStore.setState({ threads: [], planningWorkflows: [] });
+  });
+
+  it("opens a startup summary with lazy full details and actionable retry", async () => {
+    const workflow = createPlanningWorkflow({
+      id: workflowId,
+      requirementPrompt: "Full prompt loaded on demand",
+    });
+    useStore.setState({ planningWorkflows: [summarizePlanningWorkflow(workflow)] });
+    nativeApiMocks.inspectRun.mockRejectedValueOnce(new Error("offline"));
+    nativeApiMocks.inspectRun.mockResolvedValue({
+      workflowDetails: { runKind: "planning", workflow },
+    });
+    const screen = await renderView(<WorkflowView workflowId={workflowId} />);
+    try {
+      await expect
+        .element(screen.getByRole("button", { name: "Try again", exact: true }))
+        .toBeVisible();
+      await screen.getByRole("button", { name: "Try again", exact: true }).click();
+      await expect
+        .element(screen.getByText("Full prompt loaded on demand", { exact: true }))
+        .toBeVisible();
+      expect(nativeApiMocks.inspectRun).toHaveBeenLastCalledWith({
+        runKind: "planning",
+        workflowId,
+        includeWorkflow: true,
+      });
+    } finally {
+      await screen.unmount();
+    }
   });
 
   it("shows the canonical draft during reading and the approved document after polish", async () => {
@@ -140,7 +182,7 @@ describe("WorkflowView retry", () => {
       ],
     };
     useStore.setState({ threads: [thread], planningWorkflows: [workflow] });
-    const screen = await render(<WorkflowView workflowId={workflowId} />);
+    const screen = await renderView(<WorkflowView workflowId={workflowId} />);
     try {
       await expect
         .element(page.getByRole("heading", { name: "Merged draft", exact: true }))
@@ -196,7 +238,7 @@ describe("WorkflowView retry", () => {
         }),
       ],
     });
-    const screen = await render(<WorkflowView workflowId={workflowId} />);
+    const screen = await renderView(<WorkflowView workflowId={workflowId} />);
     try {
       await expect.element(page.getByText("Document · RFC", { exact: true })).toBeInTheDocument();
       await expect
@@ -240,7 +282,7 @@ describe("WorkflowView retry", () => {
           }),
         ],
       });
-      const screen = await render(<WorkflowView workflowId={workflowId} />);
+      const screen = await renderView(<WorkflowView workflowId={workflowId} />);
       try {
         await page
           .getByRole("button", { name: "Finish without reader review", exact: true })
@@ -267,7 +309,7 @@ describe("WorkflowView retry", () => {
   it("shows retry failures instead of swallowing them", async () => {
     nativeApiMocks.retryWorkflow.mockRejectedValue(new Error("Provider is unavailable"));
     const toastSpy = vi.spyOn(toastManager, "add");
-    const screen = await render(<WorkflowView workflowId={workflowId} />);
+    const screen = await renderView(<WorkflowView workflowId={workflowId} />);
 
     try {
       await page.getByRole("button", { name: "Retry failed" }).click();
@@ -287,7 +329,7 @@ describe("WorkflowView retry", () => {
       .mockResolvedValueOnce({ status: "confirmation_required", threadIds: ["author-a"] })
       .mockRejectedValueOnce(new Error("Confirmed retry failed"));
     const toastSpy = vi.spyOn(toastManager, "add");
-    const screen = await render(<WorkflowView workflowId={workflowId} />);
+    const screen = await renderView(<WorkflowView workflowId={workflowId} />);
 
     try {
       await page.getByRole("button", { name: "Retry failed" }).click();
@@ -364,7 +406,7 @@ describe("WorkflowView steps", () => {
 
   it("shows phases as board columns on wide screens", async () => {
     await page.viewport(1440, 900);
-    const screen = await render(<WorkflowView workflowId={workflowId} />);
+    const screen = await renderView(<WorkflowView workflowId={workflowId} />);
     try {
       await vi.waitFor(() => {
         expect(document.querySelector('[data-slot="workflow-board"]')).not.toBeNull();
@@ -382,7 +424,7 @@ describe("WorkflowView steps", () => {
 
   it("falls back to the step list on narrow screens", async () => {
     await page.viewport(760, 900);
-    const screen = await render(<WorkflowView workflowId={workflowId} />);
+    const screen = await renderView(<WorkflowView workflowId={workflowId} />);
     try {
       await vi.waitFor(() => {
         expect(document.querySelector('[data-slot="workflow-phase-list"]')).not.toBeNull();
@@ -395,7 +437,7 @@ describe("WorkflowView steps", () => {
 
   it("labels steps by role and shows the thread's model, or the slot before it exists", async () => {
     await page.viewport(1440, 900);
-    const screen = await render(<WorkflowView workflowId={workflowId} />);
+    const screen = await renderView(<WorkflowView workflowId={workflowId} />);
     try {
       await vi.waitFor(() => expect(stepByLabel("Branch A")).toBeDefined());
       const branchA = stepByLabel("Branch A")!;

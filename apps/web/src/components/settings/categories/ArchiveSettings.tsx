@@ -1,10 +1,10 @@
 import { isDocumentWorkflow } from "@t3tools/shared/documentWorkflow";
 import {
-  type CodeReviewWorkflow,
+  type CodeReviewWorkflowSummary as CodeReviewWorkflow,
   type CodeReviewWorkflowId,
-  type InvestigationWorkflow,
+  type InvestigationWorkflowSummary as InvestigationWorkflow,
   type InvestigationWorkflowId,
-  type PlanningWorkflow,
+  type PlanningWorkflowSummary as PlanningWorkflow,
   type PlanningWorkflowId,
   ThreadId,
 } from "@t3tools/contracts";

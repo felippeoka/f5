@@ -38,6 +38,29 @@ it("records safe unavailable enums without persisting error messages or status d
   });
 });
 
+it("names a capture layout mismatch but never an unknown execution message", () => {
+  const status = { available: true } as const;
+  expect(
+    protectionFailureSummary(
+      new ComputerControlError({
+        _tag: "Execution",
+        message: "Capture layout did not match window positions.",
+      }),
+      status,
+    ),
+  ).toEqual({
+    outcome: "Execution",
+    executionCode: "capture-layout-mismatch",
+    helperAvailable: true,
+  });
+  expect(
+    protectionFailureSummary(
+      new ComputerControlError({ _tag: "Execution", message: "PRIVATE_SENTINEL" }),
+      status,
+    ),
+  ).toEqual({ outcome: "Execution", helperAvailable: true });
+});
+
 it("requires the exact protection refusal rather than an unrelated failure", () => {
   const errors: ComputerAutomationError[] = [
     { _tag: "NotGranted", needed: "type" },

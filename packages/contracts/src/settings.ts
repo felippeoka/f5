@@ -9,7 +9,7 @@ import {
   ProviderOptionSelections,
   ModelCapabilities,
 } from "./model";
-import { ModelSelection, RuntimeMode } from "./orchestration";
+import { ModelSelection, ProjectSkillScope, RuntimeMode } from "./orchestration";
 import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance";
 import { ThreadEnvMode, type ThreadEnvMode as ThreadEnvModeType } from "./threadEnvMode";
 export { ThreadEnvMode };
@@ -377,6 +377,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(() => null),
   ),
   sourceControlWriting: SourceControlWritingSettings.pipe(Schema.withDecodingDefault(() => ({}))),
+  scheduledBackupsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   storageCleanup: StorageCleanupSettings.pipe(Schema.withDecodingDefault(() => ({}))),
   /** Project-scopable worktree cleanup policy; null uses `storageCleanup.worktree`. */
   worktreeCleanup: Schema.NullOr(WorktreeCleanup).pipe(Schema.withDecodingDefault(() => null)),
@@ -538,6 +539,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.NullOr(Schema.Literals(["squash", "merge", "rebase"])),
   ),
   sourceControlWriting: Schema.optionalKey(SourceControlWritingSettingsPatch),
+  scheduledBackupsEnabled: Schema.optionalKey(Schema.Boolean),
   storageCleanup: Schema.optionalKey(StorageCleanupSettingsPatch),
   worktreeCleanup: Schema.optionalKey(Schema.NullOr(WorktreeCleanup)),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
@@ -607,7 +609,15 @@ export const ProjectSettingSource = Schema.Literals([
   "global",
   "default",
 ]);
+export const ProjectSkillScanWarning = Schema.Struct({
+  scope: ProjectSkillScope,
+  commandName: Schema.String,
+  path: Schema.String,
+  reason: Schema.String,
+});
+export type ProjectSkillScanWarning = typeof ProjectSkillScanWarning.Type;
 export const ProjectSettingsResult = Schema.Struct({
+  skillScanWarnings: Schema.optional(Schema.Array(ProjectSkillScanWarning)),
   settings: ServerSettings,
   sources: Schema.Record(Schema.Literals(PROJECT_SCOPED_SERVER_SETTING_KEYS), ProjectSettingSource),
   overrides: ProjectSettingsOverrides,

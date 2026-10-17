@@ -1,10 +1,13 @@
+import { once } from "node:events";
+import { Writable } from "node:stream";
+import { makeBackupService } from "../../src/backupService.ts";
 /**
  * Streaming assistant workload through the production ingestion path:
  * ProviderRuntimeIngestion -> OrchestrationEngine.dispatch -> ProjectionPipeline,
  * against a disposable on-disk SQLite database.
  */
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,7 +16,8 @@ import { monitorEventLoopDelay } from "node:perf_hooks";
 import { Effect, Exit, Layer, ManagedRuntime, PubSub, Scope, Stream } from "effect";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { expect } from "vitest";
+import { expect, vi } from "vitest";
+import { COALESCE_STREAMING_DELTAS_DRIVERS } from "../../src/orchestration/streamingAssistantDeltas.ts";
 import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -205,11 +209,22 @@ const percentile = (values: ReadonlyArray<number>, fraction: number) => {
 export async function measureAssistantStream(
   method: typeof fixture.method,
 ): Promise<{ samples: Samples; observations: Observation[] }> {
+  const coalescingSpy =
+    process.env.F5_PERF_STREAM_COALESCE === "0"
+      ? vi.spyOn(COALESCE_STREAMING_DELTAS_DRIVERS, "has").mockReturnValue(false)
+      : undefined;
   const directory = mkdtempSync(path.join(tmpdir(), "f5-performance-stream-"));
   const probe = new DatabaseSync(":memory:");
   const statementPrototype = Object.getPrototypeOf(probe.prepare("SELECT 1")) as StatementSync;
   probe.close();
-  const counts = { statements: 0, projectionStatements: 0, eventRows: 0, domainEvents: 0 };
+  const storageGate = process.env.F5_PERF_STREAM_STORAGE_GATE === "1";
+  const counts = {
+    statements: 0,
+    projectionStatements: 0,
+    eventRows: 0,
+    domainEvents: 0,
+    sqlMaxMs: 0,
+  };
   const count = (statement: StatementSync) => {
     counts.statements++;
     if (statement.sourceSQL.includes("projection_")) counts.projectionStatements++;
@@ -220,11 +235,21 @@ export async function measureAssistantStream(
   const originalRun = statementPrototype.run;
   statementPrototype.all = function (this: StatementSync, ...params: unknown[]) {
     count(this);
-    return Reflect.apply(originalAll, this, params);
+    const start = storageGate ? performance.now() : 0;
+    try {
+      return Reflect.apply(originalAll, this, params);
+    } finally {
+      if (storageGate) counts.sqlMaxMs = Math.max(counts.sqlMaxMs, performance.now() - start);
+    }
   } as typeof originalAll;
   statementPrototype.run = function (this: StatementSync, ...params: unknown[]) {
     count(this);
-    return Reflect.apply(originalRun, this, params);
+    const start = storageGate ? performance.now() : 0;
+    try {
+      return Reflect.apply(originalRun, this, params);
+    } finally {
+      if (storageGate) counts.sqlMaxMs = Math.max(counts.sqlMaxMs, performance.now() - start);
+    }
   } as typeof originalRun;
   const loopDelay = monitorEventLoopDelay({ resolution: 10 });
   try {
@@ -245,16 +270,25 @@ export async function measureAssistantStream(
           workload.seededMessages,
         );
 
-      const waiters = new Map<string, () => void>();
+      const committedLengths = new Map<string, number>();
+      const waiters = new Map<string, Array<{ length: number; resolve: () => void }>>();
       runtime.runFork(
         Stream.runForEach(engine.streamDomainEvents, (event) =>
           Effect.sync(() => {
             counts.domainEvents++;
-            const resolve = event.commandId === null ? undefined : waiters.get(event.commandId);
-            if (resolve) {
-              waiters.delete(event.commandId!);
-              resolve();
-            }
+            if (event.type !== "thread.message-sent") return;
+            const length =
+              (committedLengths.get(event.payload.messageId) ?? 0) + event.payload.text.length;
+            committedLengths.set(event.payload.messageId, length);
+            const pending = waiters.get(event.payload.messageId);
+            if (!pending) return;
+            const remaining = pending.filter((waiter) => {
+              if (length < waiter.length) return true;
+              waiter.resolve();
+              return false;
+            });
+            if (remaining.length) waiters.set(event.payload.messageId, remaining);
+            else waiters.delete(event.payload.messageId);
           }),
         ),
       );
@@ -310,6 +344,8 @@ export async function measureAssistantStream(
         const createdAt = at(86_400_000 + rep * 1000);
         const id = (suffix: string) => `perf-${rep}-${stream}-${suffix}`;
         provider.emit({ ...base, type: "turn.started", eventId: id("turn-started"), createdAt });
+        let projectedLength = 0;
+        let burst: Promise<void>[] = [];
         for (let index = 0; index < workload.deltasPerStream; index++) {
           if (stream === 0 && index > 0 && index % workload.toolEvery === 0) {
             for (const [itemType, title] of [
@@ -336,21 +372,29 @@ export async function measureAssistantStream(
             }
           }
           const eventId = id(`delta-${index}`);
-          const commandId = `provider:${eventId}:assistant-delta`;
-          // Fail fast and say where, instead of hanging until the test timeout.
+          const messageId = `assistant:${itemId}`;
+          const delta = assistantStreamDelta(stream, index);
+          projectedLength += delta.length;
+          const expectedLength = projectedLength;
           const committed = new Promise<void>((resolve, reject) => {
-            const timer = setTimeout(() => {
-              waiters.delete(commandId);
-              reject(
-                new Error(
-                  `Stream ${stream} delta ${index} (repetition ${rep}) was not committed within ${DELTA_COMMIT_TIMEOUT_MS} ms; expected a domain event with commandId ${commandId}`,
+            const timer = setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    `Stream ${stream} delta ${index} did not commit within ${DELTA_COMMIT_TIMEOUT_MS} ms`,
+                  ),
                 ),
-              );
-            }, DELTA_COMMIT_TIMEOUT_MS);
-            waiters.set(commandId, () => {
-              clearTimeout(timer);
-              resolve();
+              DELTA_COMMIT_TIMEOUT_MS,
+            );
+            const pending = waiters.get(messageId) ?? [];
+            pending.push({
+              length: expectedLength,
+              resolve: () => {
+                clearTimeout(timer);
+                resolve();
+              },
             });
+            waiters.set(messageId, pending);
           });
           const startedAt = performance.now();
           provider.emit({
@@ -359,10 +403,21 @@ export async function measureAssistantStream(
             eventId,
             itemId,
             createdAt,
-            payload: { streamKind: "assistant_text", delta: assistantStreamDelta(stream, index) },
+            payload: { streamKind: "assistant_text", delta },
           });
-          await committed;
-          latencies[rep]!.push(performance.now() - startedAt);
+          burst.push(
+            committed.then(() => {
+              latencies[rep]!.push(performance.now() - startedAt);
+            }),
+          );
+          // Bounded concurrent deltas exercise coalescing without an unbounded publisher queue.
+          if (
+            burst.length === workload.maxInFlightDeltasPerStream ||
+            index === workload.deltasPerStream - 1
+          ) {
+            await Promise.all(burst);
+            burst = [];
+          }
         }
         provider.emit({
           ...base,
@@ -380,12 +435,75 @@ export async function measureAssistantStream(
           payload: { state: "completed" },
         });
       };
+      const backup = storageGate
+        ? await runtime.runPromise(
+            Effect.gen(function* () {
+              const config = yield* ServerConfig;
+              return yield* makeBackupService.pipe(
+                Effect.provideService(ServerConfig, { ...config, dbPath: database }),
+              );
+            }),
+          )
+        : null;
+      let backupExports = 0;
+      const withStorageContention = async (work: () => Promise<void>) => {
+        if (!backup) return work();
+        const reader = spawn(
+          process.execPath,
+          [
+            "--input-type=module",
+            "-e",
+            `
+          import { DatabaseSync } from 'node:sqlite';
+          const db = new DatabaseSync(process.argv[1], { readOnly: true });
+          db.exec('BEGIN');
+          db.prepare('SELECT COUNT(*) FROM projection_thread_messages').get();
+          process.stdout.write('ready');
+          process.stdin.resume();
+          process.stdin.on('end', () => db.close());
+        `,
+            database,
+          ],
+          { stdio: ["pipe", "pipe", "ignore"] },
+        );
+        const closed = once(reader, "close");
+        try {
+          await Promise.race([
+            once(reader.stdout, "data"),
+            closed.then(() => {
+              throw new Error("External SQLite reader exited before readiness");
+            }),
+          ]);
+          await Promise.all([
+            work(),
+            runtime
+              .runPromise(
+                backup.exportArchive({
+                  includeSecrets: false,
+                  output: new Writable({
+                    write(_chunk, _encoding, done) {
+                      done();
+                    },
+                  }),
+                }),
+              )
+              .then(() => {
+                backupExports++;
+              }),
+          ]);
+        } finally {
+          reader.stdin.end();
+          await closed;
+        }
+      };
       loopDelay.enable();
       const samples = await measure(
         async () => {
           const rep = repetition++;
           latencies[rep] = [];
-          await Promise.all(threadIds.map((_, stream) => runStream(stream, rep)));
+          await withStorageContention(() =>
+            Promise.all(threadIds.map((_, stream) => runStream(stream, rep))).then(() => {}),
+          );
           await runtime.runPromise(ingestion.drain);
           perRepetition.push({ ...counts });
         },
@@ -393,6 +511,7 @@ export async function measureAssistantStream(
         async () => {
           counts.statements = counts.projectionStatements = counts.eventRows = 0;
           counts.domainEvents = 0;
+          counts.sqlMaxMs = 0;
           // Like the other stream observations, the delay histogram covers measured runs only.
           if (repetition === method.warmups) loopDelay.reset();
         },
@@ -415,6 +534,7 @@ export async function measureAssistantStream(
         );
       }
 
+      if (storageGate) expect(backupExports).toBe(method.warmups + method.repetitions);
       const measured = latencies.slice(-method.repetitions).flat();
       const measuredCounts = perRepetition.slice(-method.repetitions);
       const most = (key: keyof typeof counts) =>
@@ -431,6 +551,16 @@ export async function measureAssistantStream(
           bounded("stream.sqlStatements", most("statements")),
           bounded("stream.projectionSqlStatements", most("projectionStatements")),
           bounded("stream.eventLoopDelayP99Ms", loopDelay.percentile(99) / 1e6),
+          ...(storageGate
+            ? [
+                maximumObservation("stream.storageGate.sqlExecutionMaxMs", most("sqlMaxMs"), 1000),
+                maximumObservation(
+                  "stream.storageGate.completedBackups",
+                  backupExports,
+                  method.warmups + method.repetitions,
+                ),
+              ]
+            : []),
         ],
       };
     } finally {
@@ -438,6 +568,7 @@ export async function measureAssistantStream(
       await runtime.dispose();
     }
   } finally {
+    coalescingSpy?.mockRestore();
     loopDelay.disable();
     statementPrototype.all = originalAll;
     statementPrototype.run = originalRun;
