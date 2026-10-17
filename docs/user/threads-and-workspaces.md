@@ -22,7 +22,7 @@ The composer also takes attachments ([attachments and media](attachments-and-med
 
 - **Approvals and questions.** In Supervised and Auto-accept edits modes the agent stops for approval; questions from the agent appear in the thread and wait for your answer.
 - **Steer or stop.** Where the provider supports it, a message sent during a running turn can steer that turn instead of waiting. **Settings → Threads → Follow-up behavior** chooses between queueing follow-ups and steering. **Stop generation** ends the turn.
-- **Next-turn queue.** Queued messages appear above the composer. You can pause the queue, drag a turn to reorder it or move it to the top, run one now, edit, duplicate or cancel it. The queue is stored on the server, so it survives restarts; a turn that was running during a restart comes back as "Resuming after restart".
+- **Next-turn queue.** Queued messages appear above the composer. You can pause the queue, drag a turn to reorder it or move it to the top, run one now, edit, duplicate or cancel it. The queue is stored on the server, so it survives restarts. A turn that was running during a restart only comes back as "Resuming after restart" if **Settings → Threads → Resume active turns after restart** is on (off by default; projects can override it).
 
 ## Find your work
 

@@ -21,6 +21,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import * as FS from "node:fs";
 import * as Path from "node:path";
+import { isRunning, waitForChild } from "./lib/child-lifecycle.ts";
 import {
   createDemoRoot,
   demoStateDir,
@@ -103,16 +104,24 @@ const desktop = spawn("bun", ["run", "scripts/start-electron.mjs"], {
   env,
 });
 
+// Forward every signal while the app runs, so a second Ctrl+C still reaches a
+// child that ignored the first.
 const forwardSignal = (signal: NodeJS.Signals) => {
-  if (!desktop.killed) {
-    desktop.kill(signal);
-  }
+  if (isRunning(desktop)) desktop.kill(signal);
 };
 process.on("SIGINT", () => forwardSignal("SIGINT"));
 process.on("SIGTERM", () => forwardSignal("SIGTERM"));
 
-desktop.on("exit", (code, signal) => {
+try {
+  const { code, signal } = await waitForChild(desktop);
   console.log(`\n[run-demo] desktop exited (code=${code ?? "null"}, signal=${signal ?? "null"})`);
+  process.exitCode = code ?? 0;
+} catch (error) {
+  console.error(
+    `[run-demo] could not launch the desktop app: ${error instanceof Error ? error.message : String(error)}`,
+  );
+  process.exitCode = 1;
+} finally {
   console.log(`[run-demo] demo data kept at ${DEMO_ROOT}`);
-  process.exit(code ?? 0);
-});
+}
+process.exit();

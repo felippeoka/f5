@@ -10,8 +10,9 @@
  *   2. Builds the server and web app (skip with `--skip-build`).
  *   3. Seeds demo data, starts the built server in web mode on loopback and
  *      drives Playwright through `apps/web/scripts/capture-readme-screenshots.mjs`.
- *   4. Verifies that no provider turn was started or replayed while the
- *      server ran.
+ *   4. Stops the server and verifies that no provider turn was started or
+ *      replayed while it ran.
+ *   5. Copies the staged images into the repo only if every step succeeded.
  *
  * The sandbox root is kept after exit for inspection.
  *
@@ -97,8 +98,13 @@ interface DeliverySnapshot {
   readonly maxSequence: number;
 }
 
+// Only queried while the server is not running. A read-only connection cannot
+// open a WAL database after a clean shutdown removed its -wal/-shm files, so
+// open read-write; these helpers only ever SELECT.
+const openDb = (dbPath: string) => new Database(dbPath, { readwrite: true, create: false });
+
 function snapshot(dbPath: string): DeliverySnapshot {
-  const db = new Database(dbPath, { readonly: true });
+  const db = openDb(dbPath);
   try {
     const deliveries = db
       .query<{ count: number }, []>("SELECT COUNT(*) AS count FROM provider_turn_deliveries")
@@ -112,9 +118,11 @@ function snapshot(dbPath: string): DeliverySnapshot {
   }
 }
 
-function noTurnViolations(dbPath: string, before: DeliverySnapshot, serverLog: string): string[] {
+// The database is the source of truth: every turn start, steer or replay
+// leaves a delivery row, an orchestration event or a restart marker.
+function noTurnViolations(dbPath: string, before: DeliverySnapshot): string[] {
   const violations: string[] = [];
-  const db = new Database(dbPath, { readonly: true });
+  const db = openDb(dbPath);
   try {
     const after = snapshot(dbPath);
     if (after.deliveries !== before.deliveries) {
@@ -142,12 +150,9 @@ function noTurnViolations(dbPath: string, before: DeliverySnapshot, serverLog: s
         "SELECT COUNT(*) AS count FROM orchestration_events WHERE sequence > ?",
       )
       .get(before.maxSequence)!.count;
-    log(`server startup appended ${appended} orchestration events`);
+    log(`server appended ${appended} orchestration events`);
   } finally {
     db.close();
-  }
-  if (serverLog.split("\n").some((line) => line.includes("provider delivery"))) {
-    violations.push('server.log mentions "provider delivery"');
   }
   return violations;
 }
@@ -156,6 +161,9 @@ const root = createDemoRoot("f5-screenshots-");
 const stateDir = demoStateDir(root);
 const dbPath = path.join(stateDir, "state.sqlite");
 const serverLogPath = path.join(root, "server.log");
+// Shots land here first, mirroring repo-relative paths, so a failed run never
+// leaves the tracked images half regenerated.
+const stagingDir = path.join(root, "screenshots");
 const env = isolatedEnv(root);
 let server: ChildProcess | undefined;
 let serverStopping = false;
@@ -163,6 +171,9 @@ let serverError: Error | null = null;
 let serverUnexpectedExit: ChildExit | null = null;
 let capture: ChildProcess | undefined;
 let failed = false;
+// Taken after seeding. The no-turn check compares against it once the server
+// has stopped, so it also covers anything written during shutdown.
+let seededSnapshot: DeliverySnapshot | null = null;
 
 // A signal only records the interrupt and stops the browser so the main flow
 // unblocks; the `finally` below owns all other cleanup, so the server is
@@ -227,6 +238,7 @@ try {
   checkInterrupted();
   if (seeded.status !== 0) throw new Error(`seed-demo failed with exit code ${seeded.status}`);
   const before = snapshot(dbPath);
+  seededSnapshot = before;
   log(`seeded ${before.deliveries} delivery rows, max event sequence ${before.maxSequence}`);
 
   const port = await freePort();
@@ -287,7 +299,7 @@ try {
   }
   log(`server ready at ${baseUrl}`);
 
-  capture = spawn("node", ["scripts/capture-readme-screenshots.mjs", baseUrl, REPO_ROOT], {
+  capture = spawn("node", ["scripts/capture-readme-screenshots.mjs", baseUrl, stagingDir], {
     cwd: WEB_DIR,
     stdio: "inherit",
     env: browserEnv,
@@ -304,12 +316,6 @@ try {
   // A server that died during capture invalidates the screenshots even if the
   // browser happened to finish.
   checkServerAlive();
-
-  const violations = noTurnViolations(dbPath, before, serverLogText());
-  for (const violation of violations)
-    console.error(`[screenshots] no-turn check failed: ${violation}`);
-  if (violations.length > 0) failed = true;
-  else log("no-turn checks passed");
 } catch (error) {
   if (!(error instanceof Interrupted)) {
     failed = true;
@@ -323,6 +329,30 @@ try {
   // a crash) means the server did not shut down cleanly.
   if (server?.signalCode && server.signalCode !== "SIGTERM") failed = true;
   if (capture?.signalCode && !interrupted) failed = true;
+  // Runs after any seeded run, including a failed capture, so a turn started
+  // along the way is always reported.
+  try {
+    if (seededSnapshot && !interrupted) {
+      const violations = noTurnViolations(dbPath, seededSnapshot);
+      for (const violation of violations)
+        console.error(`[screenshots] no-turn check failed: ${violation}`);
+      if (violations.length > 0) failed = true;
+      else log("no-turn checks passed");
+    }
+    if (seededSnapshot && !interrupted && !failed) {
+      fs.cpSync(stagingDir, REPO_ROOT, { recursive: true });
+      for (const file of fs.readdirSync(stagingDir, { recursive: true, withFileTypes: true })) {
+        if (file.isFile()) {
+          log(`wrote ${path.relative(stagingDir, path.join(file.parentPath, file.name))}`);
+        }
+      }
+    } else {
+      log("tracked screenshots left unchanged");
+    }
+  } catch (error) {
+    failed = true;
+    console.error(`[screenshots] ${error instanceof Error ? error.message : String(error)}`);
+  }
   log(`sandbox kept at ${root}`);
 }
 

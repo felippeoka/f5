@@ -33,8 +33,22 @@ export function createDemoRoot(prefix: string): string {
 }
 
 // Non-secret variables a child needs to start processes. The Windows entries
-// let child processes resolve executables and shells.
-const PASSTHROUGH_KEYS = ["PATH", "TMPDIR", "LANG", "PATHEXT", "SystemRoot", "ComSpec"] as const;
+// let child processes resolve executables, shells and a writable temp dir; the
+// display entries let Electron reach the graphical session on Linux.
+export const PASSTHROUGH_KEYS = [
+  "PATH",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "LANG",
+  "PATHEXT",
+  "SystemRoot",
+  "ComSpec",
+  "DISPLAY",
+  "WAYLAND_DISPLAY",
+  "XAUTHORITY",
+  "XDG_RUNTIME_DIR",
+] as const;
 
 export function isolatedEnv(
   root: string,

@@ -1,15 +1,18 @@
 // Captures the README screenshots and the marketing hero image from a running
 // F5 web server seeded with demo data. Driven by `scripts/capture-screenshots.ts`
 // at the repo root, which owns the sandbox, the server and the safety checks.
+// Images are written under <out-dir> with their repo-relative paths; the
+// caller copies them into the repo only after every shot and check succeeds.
 //
-// Usage: node scripts/capture-readme-screenshots.mjs <server-url> <repo-root>
+// Usage: node scripts/capture-readme-screenshots.mjs <server-url> <out-dir>
 import { chromium } from "playwright";
+import * as FS from "node:fs";
 import * as Path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-const [baseUrl, repoRoot] = process.argv.slice(2);
-if (!baseUrl || !repoRoot) {
-  console.error("Usage: capture-readme-screenshots.mjs <server-url> <repo-root>");
+const [baseUrl, outDir] = process.argv.slice(2);
+if (!baseUrl || !outDir) {
+  console.error("Usage: capture-readme-screenshots.mjs <server-url> <out-dir>");
   process.exit(1);
 }
 
@@ -44,7 +47,11 @@ try {
   const page = await context.newPage();
   page.on("pageerror", (error) => pageErrors.push(String(error)));
 
-  const out = (relative) => Path.join(repoRoot, relative);
+  const out = (relative) => {
+    const file = Path.join(outDir, relative);
+    FS.mkdirSync(Path.dirname(file), { recursive: true });
+    return file;
+  };
 
   const waitFor = async (shot, locator, description) => {
     try {
@@ -84,7 +91,7 @@ try {
 
   const capture = async (shot, relative, options = {}) => {
     await page.screenshot({ path: out(relative), ...options });
-    console.log(`[capture] wrote ${relative}`);
+    console.log(`[capture] captured ${relative}`);
     if (pageErrors.length > 0) throw new Error(`[${shot}] page error: ${pageErrors[0]}`);
   };
 

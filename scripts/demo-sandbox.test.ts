@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   DEMO_SERVER_SETTINGS,
+  PASSTHROUGH_KEYS,
   createDemoRoot,
   isolatedEnv,
   writeDemoSettings,
@@ -14,9 +15,16 @@ import {
 
 const roots: string[] = [];
 const PLANTED = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "META_API_KEY", "GH_TOKEN", "CODEX_HOME"];
+// Tests overwrite these, so restore the developer's real values afterwards.
+const ORIGINAL_ENV = Object.fromEntries(
+  [...PLANTED, ...PASSTHROUGH_KEYS].map((key) => [key, process.env[key]]),
+);
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-  for (const key of PLANTED) delete process.env[key];
+  for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
 });
 
 function freshRoot(): string {
@@ -48,6 +56,24 @@ describe("demo sandbox", () => {
     expect(env.F5_STATE_DIR).toBe(Path.join(root, "state"));
     expect(env.T3CODE_STATE_DIR).toBe(Path.join(root, "state"));
     expect(env.F5_SKIP_USERDATA_IMPORT).toBe("1");
+  });
+
+  it("passes through display, temp and shell variables", () => {
+    // Create the root first: TMPDIR, TEMP and TMP steer os.tmpdir().
+    const root = freshRoot();
+    for (const key of PASSTHROUGH_KEYS) process.env[key] = `value-of-${key}`;
+    const env = isolatedEnv(root);
+    for (const key of [
+      "PATH",
+      "TEMP",
+      "TMP",
+      "DISPLAY",
+      "WAYLAND_DISPLAY",
+      "XAUTHORITY",
+      "XDG_RUNTIME_DIR",
+    ]) {
+      expect(env[key]).toBe(`value-of-${key}`);
+    }
   });
 
   it("keeps a child process's home and app-data resolution inside the root", () => {

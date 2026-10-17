@@ -44,7 +44,7 @@ Document authors must use different provider and model pairs, and so must the tw
 
 ## Review and implement a Feature plan
 
-A Feature run stops after the merge. Read the merged plan on the workflow page; nothing has changed in your repository yet.
+A Feature run stops after the merge. Read the merged plan on the workflow page. So far only the plan files under the plans directory have been written; no code has changed.
 
 <p align="center">
   <img src="../../assets/screenshots/workflow.png" alt="Finished Feature workflow showing its phase board and the merged plan" width="800" />
