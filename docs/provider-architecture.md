@@ -7,24 +7,29 @@ The web app communicates with the server via WebSocket. Requests and pushes are 
 
 Push channels include `server.welcome`, `server.configUpdated`, `terminal.event`, `orchestration.domainEvent`, and `git.actionProgress`. The full list lives in `packages/contracts/src/ws.ts`. Payloads are schema-validated at the transport boundary (`wsTransport.ts`). Decode failures produce structured `WsDecodeDiagnostic` entries with `code`, `reason`, and path info.
 
-Methods mirror the `NativeApi` interface defined in `@t3tools/contracts` (legacy package name; see [NOTICE.md](../NOTICE.md)):
+Methods mirror the `NativeApi` interface (`packages/contracts/src/ipc.ts`; `@t3tools/contracts` is a legacy package name, see [NOTICE.md](../NOTICE.md)), grouped by namespace. Examples:
 
-- `providers.startSession`, `providers.sendTurn`, `providers.interruptTurn`
-- `providers.respondToRequest`, `providers.stopSession`
-- `shell.openInEditor`, `server.getConfig`
+- `orchestration.dispatchCommand`, `orchestration.getStartupSnapshot`, `orchestration.getTurnDiff`
+- `nextTurnQueue.submit`, `nextTurnQueue.setPaused`
+- `terminal.*`, `git.*`
+- `server.getConfig`, `shell.openInEditor`
 
 ## Supported providers
 
-Both providers implement the shared `ProviderAdapter` contract (`apps/server/src/provider/Services/ProviderAdapter.ts`) so the rest of the server — orchestration, checkpointing, projections, workflows — stays provider-agnostic.
+Every provider implements the shared `ProviderAdapter` contract (`apps/server/src/provider/Services/ProviderAdapter.ts`), so orchestration, checkpointing, projections and workflows stay provider-agnostic. Adapters live in `apps/server/src/provider/Layers/`:
 
-- **Codex** — `apps/server/src/provider/Layers/CodexAdapter.ts` launches `codex app-server` per session and speaks JSON-RPC over stdio.
-- **Claude Code** — launched through the `@anthropic-ai/claude-agent-sdk`; the adapter normalizes its SDK events into the same orchestration event shapes that the Codex adapter emits.
+- **Codex:** `CodexAdapter.ts` launches `codex app-server` per session and speaks JSON-RPC over stdio.
+- **Claude Code:** `ClaudeAdapter.ts` runs sessions through `@anthropic-ai/claude-agent-sdk` and normalizes its SDK events into the shared orchestration event shapes.
+- **Cursor:** `CursorAdapter.ts` speaks the Agent Client Protocol (ACP) to `agent acp`.
+- **OpenCode:** `OpenCodeAdapter.ts` talks to a local `opencode serve` process or an external OpenCode server.
+- **Grok and Antigravity:** `GrokAdapter.ts` serves both over ACP.
+- **Muse Code:** `MuseAdapter.ts` speaks the Muse Session Protocol (MSP) to `muse serve` through `@muse-code/sdk`.
 
-Additional providers can be added by implementing the `ProviderAdapter` contract and wiring them into `ProviderService`.
+Each adapter is constructed by a driver in `apps/server/src/provider/Drivers/*Driver.ts`, and every built-in driver is listed in `apps/server/src/provider/builtInDrivers.ts`. `ProviderAdapterRegistry.ts` is a lookup facade over the live instance registry, so settings changes and custom instances are visible without rebuilding the server layer, and `ProviderService.ts` routes sessions and turns to the right adapter. To add a provider, implement the `ProviderAdapter` contract, wrap it in a `ProviderDriver` and add that driver to `builtInDrivers.ts`.
 
 ## Client transport
 
-`wsTransport.ts` manages connection state: `connecting` → `open` → `reconnecting` → `closed` → `disposed`. Outbound requests are queued while disconnected and flushed on reconnect. Inbound pushes are decoded and validated at the boundary, then cached per channel. Subscribers can opt into `replayLatest` to receive the last push on subscribe.
+`wsTransport.ts` tracks connection phases `connecting`, `connected`, `reconnecting` and `disconnected` (`apps/web/src/wsConnectionState.ts`). Read-only requests work in any phase. Mutating requests fail with a retryable `ConnectionNotReady` error until the socket is connected and synchronized; stop and answer requests skip the synchronization wait. Drafts are kept, and a reconnect never re-sends a change on its own. Inbound pushes are decoded and validated at the boundary, then cached per channel. Subscribers can opt into `replayLatest` to receive the last push on subscribe.
 
 ## Server-side orchestration layers
 

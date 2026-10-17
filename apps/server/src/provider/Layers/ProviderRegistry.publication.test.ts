@@ -83,6 +83,7 @@ it.live(
           });
           const failed = yield* registry.refreshInstance(id);
           expect(failed[0]?.models).toEqual([model]);
+          expect(failed[0]?.probeOutcome).toBe("success");
           expect(updates).toEqual([[model], [model]]);
           yield* Ref.set(raw, {
             ...initial,
@@ -112,4 +113,62 @@ it.live(
         );
       }).pipe(Effect.provide(infra)),
     ),
+);
+
+it.effect("stamps fresh probe evidence for an arbitrary driver's snapshots", () =>
+  Effect.gen(function* () {
+    const id = ProviderInstanceId.make("custom-instance");
+    const driver = ProviderDriverKind.make("custom-driver");
+    const raw = yield* Ref.make<ServerProvider>({
+      instanceId: id,
+      driver,
+      enabled: true,
+      installed: true,
+      version: "1.0.0",
+      status: "ready",
+      auth: { status: "unknown" },
+      checkedAt: "2026-10-17T00:00:00Z",
+      models: [],
+      skills: [],
+      slashCommands: [],
+    });
+    const instance: ProviderInstance = {
+      instanceId: id,
+      driverKind: driver,
+      displayName: undefined,
+      enabled: true,
+      continuationIdentity: { driverKind: driver, continuationKey: "test" },
+      snapshot: { getSnapshot: Ref.get(raw), refresh: Ref.get(raw), streamChanges: Stream.empty },
+      adapter: {} as ProviderInstance["adapter"],
+      textGeneration: {} as ProviderInstance["textGeneration"],
+    };
+    yield* Effect.gen(function* () {
+      const registry = yield* ProviderRegistry;
+      const first = (yield* registry.getProviders)[0]!;
+      expect(first.probeOutcome).toBe("success");
+      expect(first.probeOutcomeStartedAt).toBe(first.checkedAt);
+      yield* Ref.update(raw, (snapshot) => ({
+        ...snapshot,
+        status: "error" as const,
+        checkedAt: "2026-10-17T00:01:00Z",
+      }));
+      const second = (yield* registry.refreshInstance(id))[0]!;
+      expect(second.probeOutcome).toBe("transient_failure");
+      expect(second.probeOutcomeStartedAt).toBe(second.checkedAt);
+      yield* Ref.update(raw, (snapshot) => ({ ...snapshot, checkedAt: "2026-10-17T00:02:00Z" }));
+      const third = (yield* registry.refreshInstance(id))[0]!;
+      expect(third.probeOutcomeStartedAt).toBe(second.probeOutcomeStartedAt);
+    }).pipe(
+      Effect.provide(ProviderRegistryLive),
+      Effect.provideService(ProviderInstanceRegistry, {
+        listInstances: Effect.succeed([instance]),
+        getInstance: () => Effect.succeed(instance),
+        listUnavailable: Effect.succeed([]),
+        streamChanges: Stream.empty,
+        subscribeChanges: Effect.acquireRelease(PubSub.unbounded<void>(), PubSub.shutdown).pipe(
+          Effect.flatMap(PubSub.subscribe),
+        ),
+      }),
+    );
+  }).pipe(Effect.provide(infra)),
 );

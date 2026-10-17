@@ -1,5 +1,15 @@
 # Quick start
 
+There are three ways to run F5:
+
+- **Desktop app:** download an installer; no source checkout, Bun or Node needed. See
+  [Install F5](install.md).
+- **Standalone CLI:** download a CLI release archive and run `f5 serve` to use F5 in a
+  browser. See [Standalone F5 CLI](user/standalone-cli.md).
+- **From source:** the recipes below, for development and local builds.
+
+## From source
+
 Run `bun install --frozen-lockfile` from the repository root before using these
 commands, including after pulling changes or switching branches with different dependencies.
 
@@ -25,10 +35,10 @@ bun run dist:desktop:linux
 
 # Build a Windows x64 NSIS installer
 bun run dist:desktop:win
-
-# Or from any project directory after publishing:
-npx t3
 ```
+
+To run the server outside the desktop app without a checkout, use the
+[standalone CLI](user/standalone-cli.md) (`f5 install`, then `f5 serve`).
 
 ## Updating a source checkout
 

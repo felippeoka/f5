@@ -1,15 +1,15 @@
 # Agent browser and computer use
 
 How agents (Claude and Codex) see and drive web pages and, optionally, this computer, and
-the safety rules each path follows. Settings live in **Settings → Browser and capture** and
-per project in **Project settings → Conversation**. Every flag below is ANDed with
+the safety rules each path follows. Settings live in **Settings → Browser & Computer** and
+per project in the Browser & Computer category of project settings. Every flag below is ANDed with
 `enableAgentBrowserAccess`. A checked-in `f5.json` can never set `previewExternalHosts`,
 `enableClaudeInChrome`, or `enableAgentComputerUse` (`USER_ONLY_PROJECT_SETTING_KEYS`).
 
 ## macOS opt-in preview
 
 macOS 14+ native computer control is available in development and packaged builds as
-an **uncertified, opt-in preview**. In Settings → Browser and capture, enable Agent
+an **uncertified, opt-in preview**. In Settings → Browser & Computer, enable Agent
 browser access and Computer use (preview), grant Screen Recording and Accessibility
 in System Settings, then start a new Claude or Codex turn and approve each app in
 F5's native dialog. Defaults remain off. Your input pauses control; ⌃⌘Esc stops it.
@@ -120,7 +120,7 @@ validation only in unpackaged builds; it cannot enable a certified release. The 
 For local use from this checkout, build with `bun run build:desktop`, quit any
 existing F5 instance, then launch with
 `F5_COMPUTER_CONTROL_DEV=1 bun run --cwd apps/desktop start`. Enable **Computer use**
-in Settings → Integrations, grant the missing OS permissions, and start a new
+in Settings → Browser & Computer, grant the missing OS permissions, and start a new
 provider session. The root desktop launch also passes this development flag
 through Turbo. A running app must be restarted to receive the flag; setting it
 in a different shell cannot change the existing process. This remains an
@@ -325,7 +325,7 @@ helper permission identities must agree before release certification.
 
 ### Background delivery and per-app leases
 
-Settings → Computer use → Execution mode chooses `foreground` (default) or `background`
+Settings → Browser & Computer → Computer use → Execution mode chooses `foreground` (default) or `background`
 (`computerUseExecutionMode`, machine-wide, no project override). Background lets each agent
 act inside one named, granted app through Accessibility without moving the pointer or
 changing focus, so the user keeps working. It is a macOS-only preview, open by default

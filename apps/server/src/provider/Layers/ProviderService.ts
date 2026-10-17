@@ -18,7 +18,7 @@ import {
   getProviderAttachmentLimitError,
   nativeProviderAttachments,
 } from "@t3tools/shared/attachmentLimits";
-import { withAccountAdmission } from "../../profiles/ProviderAccountGuard.ts";
+import { hasProviderUpdate, withAccountAdmission } from "../../profiles/ProviderAccountGuard.ts";
 import { ensureWorkspaceDirectory } from "../workspaceDirectory.ts";
 /**
  * ProviderServiceLive - Cross-provider orchestration layer.
@@ -55,7 +55,7 @@ import {
   ProviderStopSessionInput,
   ProviderDriverKind,
   defaultInstanceIdForDriver,
-  type ProviderInstanceId,
+  ProviderInstanceId,
   type ProviderRuntimeEvent,
   type ProviderSession,
   type McpReloadResult,
@@ -1009,7 +1009,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         });
         return { adapter, session: resumedWithCapabilities, orphanedTurnId } as const;
       }).pipe(
-        withAccountAdmission(
+        withProviderAdmission(
           serverConfig.stateDir,
           resolveBindingInstanceId(input.binding),
           input.operation,
@@ -1138,6 +1138,34 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         { discard: true },
       );
     });
+
+    // Resolve physical identity only while updating, including aliases added during the update.
+    const withProviderAdmission =
+      (stateDir: string, instanceId: string, operation: string) =>
+      <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        Effect.gen(function* () {
+          let installKey: string | undefined;
+          if (hasProviderUpdate(stateDir) && instanceId) {
+            const info = yield* registry.getInstanceInfo(ProviderInstanceId.make(instanceId));
+            const target = yield* Effect.try({
+              try: () => info.resolveInstallTarget?.(),
+              catch: () =>
+                toValidationError(
+                  operation,
+                  "Could not identify this installation while a provider update is running. Try again after it finishes.",
+                ),
+            });
+            if (info.resolveInstallTarget && !target)
+              return yield* toValidationError(
+                operation,
+                "Could not identify this installation while a provider update is running. Try again after it finishes.",
+              );
+            installKey = target?.installKey;
+          }
+          return yield* effect.pipe(
+            withAccountAdmission(stateDir, instanceId, operation, installKey),
+          );
+        });
 
     const startSession: ProviderServiceShape["startSession"] = (threadId, rawInput) =>
       Effect.gen(function* () {
@@ -1366,7 +1394,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
 
           return sessionWithInstance;
         }).pipe(
-          withAccountAdmission(
+          withProviderAdmission(
             serverConfig.stateDir,
             requestedInstanceId,
             "ProviderService.startSession",
@@ -1436,7 +1464,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             ...(prepare
               ? {
                   prepare: prepare.pipe(
-                    withAccountAdmission(
+                    withProviderAdmission(
                       serverConfig.stateDir,
                       routed.instanceId,
                       "ProviderService.nativeOperation.prepare",
@@ -1480,7 +1508,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                   );
               }
             }).pipe(
-              withAccountAdmission(
+              withProviderAdmission(
                 serverConfig.stateDir,
                 routed.instanceId,
                 "ProviderService.nativeOperation.validate",
@@ -1494,7 +1522,14 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 ),
               ),
           })
-          .pipe(Effect.mapError(nativeError));
+          .pipe(
+            withProviderAdmission(
+              serverConfig.stateDir,
+              routed.instanceId,
+              "ProviderService.nativeOperation",
+            ),
+            Effect.mapError(nativeError),
+          );
         if (!background) return yield* execution;
         yield* execution.pipe(
           Effect.tap((record) => Deferred.succeed(admitted, record)),
@@ -1888,7 +1923,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 submissionTokens.delete(input.threadId);
             }),
           ),
-          withAccountAdmission(serverConfig.stateDir, instanceId, "ProviderService.sendTurn"),
+          withProviderAdmission(serverConfig.stateDir, instanceId, "ProviderService.sendTurn"),
           withMetrics({
             counter: providerTurnsTotal,
             timer: providerTurnDuration,
@@ -2477,7 +2512,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 Effect.map((response) => ({ text: response.summary })),
               )
         ).pipe(
-          withAccountAdmission(
+          withProviderAdmission(
             serverConfig.stateDir,
             input.modelSelection?.instanceId ??
               defaultInstanceIdForDriver(ProviderDriverKind.make(provider)),
