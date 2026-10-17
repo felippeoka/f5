@@ -36,6 +36,8 @@ export function normalizeMcpServersRecord(
   let count = 0;
 
   for (const [name, server] of Object.entries(value)) {
+    // TODO(Phase 1a): reject overflow at write boundaries and remove this silent
+    // truncation from pure normalization. Keep it only for Phase 0 behavior preservation.
     if (count >= MAX_SERVER_COUNT) {
       break;
     }

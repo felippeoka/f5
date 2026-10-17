@@ -20,8 +20,6 @@ export function McpServerList({
   selectedProvider,
   selectedInstanceId,
   projectId,
-  selectedBinaryPath,
-  selectedHomePath,
   providerStatus,
   serverStatusByName,
   codexCallbackSummaryByName,
@@ -39,8 +37,6 @@ export function McpServerList({
   readonly selectedProvider: ProviderKind;
   readonly selectedInstanceId: ProviderInstanceId;
   readonly projectId: ProjectId | null;
-  readonly selectedBinaryPath: string | undefined;
-  readonly selectedHomePath: string | undefined;
   readonly providerStatus: McpProviderStatusResult | undefined;
   readonly serverStatusByName: ReadonlyMap<string, McpServerStatusEntry>;
   readonly codexCallbackSummaryByName: ReadonlyMap<string, string | null>;
@@ -74,8 +70,6 @@ export function McpServerList({
               selectedProvider={selectedProvider}
               instanceId={selectedInstanceId}
               projectId={projectId}
-              binaryPath={selectedBinaryPath}
-              homePath={selectedHomePath}
               name={name}
               server={server}
               providerStatus={providerStatus}

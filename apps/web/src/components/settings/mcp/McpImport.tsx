@@ -1,19 +1,16 @@
-import type { Dispatch, SetStateAction } from "react";
 import { Button } from "../../ui/button";
 import { Textarea } from "../../ui/textarea";
 
 export function McpImport({
   importText,
-  setImportText,
+  onTextChange,
   importError,
-  setImportError,
   isSavingConfig,
   importServers,
 }: {
   readonly importText: string;
-  readonly setImportText: Dispatch<SetStateAction<string>>;
+  readonly onTextChange: (text: string) => void;
   readonly importError: string | null;
-  readonly setImportError: Dispatch<SetStateAction<string | null>>;
   readonly isSavingConfig: boolean;
   readonly importServers: () => void;
 }) {
@@ -28,10 +25,7 @@ export function McpImport({
       </div>
       <Textarea
         value={importText}
-        onChange={(event) => {
-          setImportText(event.target.value);
-          setImportError(null);
-        }}
+        onChange={(event) => onTextChange(event.target.value)}
         className="min-h-36 font-mono text-xs"
         placeholder='{"mcpServers":{"filesystem":{"type":"stdio","command":"npx","args":["@modelcontextprotocol/server-filesystem"]}}}'
       />

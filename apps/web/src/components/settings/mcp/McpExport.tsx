@@ -6,13 +6,13 @@ export function McpExport({
   effectiveJson,
   selectedProject,
   isCopied,
-  copyToClipboard,
+  onCopy,
   handleExportJson,
 }: {
   readonly effectiveJson: string;
   readonly selectedProject: { readonly id: ProjectId; readonly name: string } | null;
   readonly isCopied: boolean;
-  readonly copyToClipboard: (text: string, event: undefined) => void;
+  readonly onCopy: () => void;
   readonly handleExportJson: () => void;
 }) {
   return (
@@ -34,7 +34,7 @@ export function McpExport({
               if (!effectiveJson) {
                 return;
               }
-              copyToClipboard(effectiveJson, undefined);
+              onCopy();
             }}
           >
             {isCopied ? "Copied" : "Copy JSON"}

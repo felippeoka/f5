@@ -1,4 +1,3 @@
-import type { Dispatch, SetStateAction } from "react";
 import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../../ui/collapsible";
@@ -11,22 +10,22 @@ import type { ServerDraft } from "./mcpDraft";
 export function McpServerEditor({
   editingServerName,
   draft,
-  setDraft,
+  onDraftChange,
+  onAdvancedDraftChange,
   formError,
-  setFormError,
   isAdvancedOpen,
-  setIsAdvancedOpen,
+  onAdvancedOpenChange,
   isSavingConfig,
   beginCreate,
   saveDraft,
 }: {
   readonly editingServerName: string | null;
   readonly draft: ServerDraft;
-  readonly setDraft: Dispatch<SetStateAction<ServerDraft>>;
+  readonly onDraftChange: (patch: Partial<ServerDraft>) => void;
+  readonly onAdvancedDraftChange: (patch: Partial<ServerDraft>) => void;
   readonly formError: string | null;
-  readonly setFormError: Dispatch<SetStateAction<string | null>>;
   readonly isAdvancedOpen: boolean;
-  readonly setIsAdvancedOpen: Dispatch<SetStateAction<boolean>>;
+  readonly onAdvancedOpenChange: (open: boolean) => void;
   readonly isSavingConfig: boolean;
   readonly beginCreate: () => void;
   readonly saveDraft: () => void;
@@ -56,8 +55,7 @@ export function McpServerEditor({
           <Input
             value={draft.name}
             onChange={(event) => {
-              setDraft((current) => ({ ...current, name: event.target.value }));
-              setFormError(null);
+              onDraftChange({ name: event.target.value });
             }}
             placeholder="filesystem"
           />
@@ -71,8 +69,7 @@ export function McpServerEditor({
               if (value !== "stdio" && value !== "sse" && value !== "http") {
                 return;
               }
-              setDraft((current) => ({ ...current, type: value }));
-              setFormError(null);
+              onDraftChange({ type: value });
             }}
           >
             <SelectTrigger aria-label="MCP transport type">
@@ -97,8 +94,7 @@ export function McpServerEditor({
         <Switch
           checked={draft.enabled}
           onCheckedChange={(checked) => {
-            setDraft((current) => ({ ...current, enabled: Boolean(checked) }));
-            setFormError(null);
+            onDraftChange({ enabled: Boolean(checked) });
           }}
           aria-label="Enable MCP server"
         />
@@ -112,8 +108,7 @@ export function McpServerEditor({
               className="font-mono"
               value={draft.command}
               onChange={(event) => {
-                setDraft((current) => ({ ...current, command: event.target.value }));
-                setFormError(null);
+                onDraftChange({ command: event.target.value });
               }}
               placeholder="npx"
             />
@@ -123,8 +118,7 @@ export function McpServerEditor({
             <Textarea
               value={draft.args}
               onChange={(event) => {
-                setDraft((current) => ({ ...current, args: event.target.value }));
-                setFormError(null);
+                onDraftChange({ args: event.target.value });
               }}
               className="min-h-20 font-mono"
               placeholder="@modelcontextprotocol/server-filesystem&#10;/path/to/project"
@@ -137,8 +131,7 @@ export function McpServerEditor({
               <Textarea
                 value={draft.env}
                 onChange={(event) => {
-                  setDraft((current) => ({ ...current, env: event.target.value }));
-                  setFormError(null);
+                  onDraftChange({ env: event.target.value });
                 }}
                 className="min-h-24 font-mono"
                 placeholder="API_KEY=secret"
@@ -151,8 +144,7 @@ export function McpServerEditor({
                 className="font-mono"
                 value={draft.cwd}
                 onChange={(event) => {
-                  setDraft((current) => ({ ...current, cwd: event.target.value }));
-                  setFormError(null);
+                  onDraftChange({ cwd: event.target.value });
                 }}
                 placeholder="/path/to/project"
               />
@@ -167,8 +159,7 @@ export function McpServerEditor({
               className="font-mono"
               value={draft.url}
               onChange={(event) => {
-                setDraft((current) => ({ ...current, url: event.target.value }));
-                setFormError(null);
+                onDraftChange({ url: event.target.value });
               }}
               placeholder="https://example.com/mcp"
             />
@@ -178,8 +169,7 @@ export function McpServerEditor({
             <Textarea
               value={draft.headers}
               onChange={(event) => {
-                setDraft((current) => ({ ...current, headers: event.target.value }));
-                setFormError(null);
+                onDraftChange({ headers: event.target.value });
               }}
               className="min-h-24 font-mono"
               placeholder="Authorization=Bearer ..."
@@ -189,7 +179,7 @@ export function McpServerEditor({
         </div>
       )}
 
-      <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
+      <Collapsible open={isAdvancedOpen} onOpenChange={onAdvancedOpenChange}>
         <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border border-border px-3 py-2 text-left">
           <span>
             <span className="block text-xs font-medium text-foreground">Codex-only options</span>
@@ -208,10 +198,7 @@ export function McpServerEditor({
                   className="font-mono"
                   value={draft.bearerTokenEnvVar}
                   onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      bearerTokenEnvVar: event.target.value,
-                    }))
+                    onAdvancedDraftChange({ bearerTokenEnvVar: event.target.value })
                   }
                   placeholder="MCP_AUTH_TOKEN"
                 />
@@ -221,12 +208,7 @@ export function McpServerEditor({
                 <Input
                   className="font-mono"
                   value={draft.oauthClientId}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      oauthClientId: event.target.value,
-                    }))
-                  }
+                  onChange={(event) => onAdvancedDraftChange({ oauthClientId: event.target.value })}
                   placeholder="client_id"
                 />
               </label>
@@ -239,10 +221,7 @@ export function McpServerEditor({
                   className="font-mono"
                   value={draft.oauthCallbackPort}
                   onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      oauthCallbackPort: event.target.value,
-                    }))
+                    onAdvancedDraftChange({ oauthCallbackPort: event.target.value })
                   }
                   placeholder="3118"
                 />
@@ -252,10 +231,7 @@ export function McpServerEditor({
                 <Input
                   value={draft.oauthCallbackUrl}
                   onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      oauthCallbackUrl: event.target.value,
-                    }))
+                    onAdvancedDraftChange({ oauthCallbackUrl: event.target.value })
                   }
                   placeholder="http://127.0.0.1:3118/callback"
                 />
@@ -267,12 +243,7 @@ export function McpServerEditor({
                 <span className="text-xs font-medium text-foreground">OAuth resource</span>
                 <Input
                   value={draft.oauthResource}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      oauthResource: event.target.value,
-                    }))
-                  }
+                  onChange={(event) => onAdvancedDraftChange({ oauthResource: event.target.value })}
                   placeholder="https://example.com"
                 />
               </label>
@@ -281,10 +252,7 @@ export function McpServerEditor({
                 <Input
                   value={draft.startupTimeoutSec}
                   onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      startupTimeoutSec: event.target.value,
-                    }))
+                    onAdvancedDraftChange({ startupTimeoutSec: event.target.value })
                   }
                   placeholder="30"
                 />
@@ -294,10 +262,7 @@ export function McpServerEditor({
                 <Input
                   value={draft.toolTimeoutSec}
                   onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      toolTimeoutSec: event.target.value,
-                    }))
+                    onAdvancedDraftChange({ toolTimeoutSec: event.target.value })
                   }
                   placeholder="60"
                 />
@@ -314,10 +279,7 @@ export function McpServerEditor({
               <Switch
                 checked={draft.supportsParallelToolCalls}
                 onCheckedChange={(checked) =>
-                  setDraft((current) => ({
-                    ...current,
-                    supportsParallelToolCalls: Boolean(checked),
-                  }))
+                  onAdvancedDraftChange({ supportsParallelToolCalls: Boolean(checked) })
                 }
                 aria-label="Supports parallel tool calls"
               />
@@ -328,12 +290,7 @@ export function McpServerEditor({
                 <span className="text-xs font-medium text-foreground">Enabled tools</span>
                 <Textarea
                   value={draft.enabledTools}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      enabledTools: event.target.value,
-                    }))
-                  }
+                  onChange={(event) => onAdvancedDraftChange({ enabledTools: event.target.value })}
                   className="min-h-20"
                   placeholder="search&#10;read_file"
                 />
@@ -342,12 +299,7 @@ export function McpServerEditor({
                 <span className="text-xs font-medium text-foreground">Disabled tools</span>
                 <Textarea
                   value={draft.disabledTools}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      disabledTools: event.target.value,
-                    }))
-                  }
+                  onChange={(event) => onAdvancedDraftChange({ disabledTools: event.target.value })}
                   className="min-h-20"
                   placeholder="dangerous_tool"
                 />
@@ -358,9 +310,7 @@ export function McpServerEditor({
               <span className="text-xs font-medium text-foreground">Scopes</span>
               <Textarea
                 value={draft.scopes}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, scopes: event.target.value }))
-                }
+                onChange={(event) => onAdvancedDraftChange({ scopes: event.target.value })}
                 className="min-h-20"
                 placeholder="read&#10;write"
               />

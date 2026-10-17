@@ -21,8 +21,6 @@ export function McpServerRow(props: {
   readonly selectedProvider: ProviderKind;
   readonly instanceId: ProviderInstanceId;
   readonly projectId: ProjectId | null;
-  readonly binaryPath: string | undefined;
-  readonly homePath: string | undefined;
   readonly name: string;
   readonly server: McpProjectServersConfig[string];
   readonly providerStatus: McpProviderStatusResult | undefined;

@@ -10,11 +10,7 @@ import {
 } from "@t3tools/contracts";
 import { formatMcpServersAsJson } from "@t3tools/shared/mcpConfig";
 import { parseImportedServers } from "@t3tools/shared/mcpImport";
-import {
-  MAX_SERVER_COUNT,
-  normalizeMcpServersRecord,
-  trimToUndefined,
-} from "@t3tools/shared/mcpValidation";
+import { MAX_SERVER_COUNT, normalizeMcpServersRecord } from "@t3tools/shared/mcpValidation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { ensureNativeApi } from "../../../nativeApi";
@@ -88,11 +84,6 @@ export function McpServersSettings(props: {
 
   const selectedProject = props.selectedProject;
   const selectedProjectId = selectedProject?.id ?? null;
-  const codexBinaryPath = trimToUndefined(props.codexBinaryPath);
-  const codexHomePath = trimToUndefined(props.codexHomePath);
-  const claudeBinaryPath = trimToUndefined(props.claudeBinaryPath);
-  const selectedBinaryPath = selectedProvider === "codex" ? codexBinaryPath : claudeBinaryPath;
-  const selectedHomePath = selectedProvider === "codex" ? codexHomePath : undefined;
 
   const commonConfigQuery = useQuery(mcpCommonConfigQueryOptions());
   const projectConfigQuery = useQuery(
@@ -237,6 +228,21 @@ export function McpServersSettings(props: {
     } finally {
       setIsSavingConfig(false);
     }
+  };
+
+  // Advanced field edits retain existing errors until another basic-field edit or save.
+  const changeAdvancedDraft = (patch: Partial<ServerDraft>) => {
+    setDraft((current) => ({ ...current, ...patch }));
+  };
+
+  const changeDraft = (patch: Partial<ServerDraft>) => {
+    changeAdvancedDraft(patch);
+    setFormError(null);
+  };
+
+  const changeImportText = (text: string) => {
+    setImportText(text);
+    setImportError(null);
   };
 
   const beginCreate = () => {
@@ -587,8 +593,6 @@ export function McpServersSettings(props: {
               selectedProvider={selectedProvider}
               selectedInstanceId={selectedInstanceId}
               projectId={selectedProjectId}
-              selectedBinaryPath={selectedBinaryPath}
-              selectedHomePath={selectedHomePath}
               providerStatus={providerStatusQuery.data}
               serverStatusByName={serverStatusByName}
               codexCallbackSummaryByName={codexCallbackSummaryByName}
@@ -601,11 +605,11 @@ export function McpServersSettings(props: {
             <McpServerEditor
               editingServerName={editingServerName}
               draft={draft}
-              setDraft={setDraft}
+              onDraftChange={changeDraft}
+              onAdvancedDraftChange={changeAdvancedDraft}
               formError={formError}
-              setFormError={setFormError}
               isAdvancedOpen={isAdvancedOpen}
-              setIsAdvancedOpen={setIsAdvancedOpen}
+              onAdvancedOpenChange={setIsAdvancedOpen}
               isSavingConfig={isSavingConfig}
               beginCreate={beginCreate}
               saveDraft={saveDraft}
@@ -614,14 +618,13 @@ export function McpServersSettings(props: {
               effectiveJson={effectiveJson}
               selectedProject={selectedProject}
               isCopied={isCopied}
-              copyToClipboard={copyToClipboard}
+              onCopy={() => copyToClipboard(effectiveJson, undefined)}
               handleExportJson={handleExportJson}
             />
             <McpImport
               importText={importText}
-              setImportText={setImportText}
+              onTextChange={changeImportText}
               importError={importError}
-              setImportError={setImportError}
               isSavingConfig={isSavingConfig}
               importServers={importServers}
             />

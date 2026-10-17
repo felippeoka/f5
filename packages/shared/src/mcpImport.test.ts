@@ -179,7 +179,7 @@ Authorization = "Bearer example"
     });
   });
 
-  it("retains the existing sixteen-entry import cap and trimmed names", () => {
+  it("characterizes known silent truncation after sixteen imports (Phase 1a fix)", () => {
     const servers = Object.fromEntries(
       Array.from({ length: 17 }, (_, index) => [` server-${index} `, { command: "node" }]),
     );
