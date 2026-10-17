@@ -235,3 +235,21 @@ http_headers = { Authorization = "Bearer token" }
     });
   });
 });
+
+it.each([
+  JSON.stringify({ mcpServers: { shell: { command: "node", args: ["--port", 3000] } } }),
+  '[mcp_servers.shell]\ncommand = "node"\nargs = ["--port", 3000]',
+])("rejects malformed arguments atomically and names the server", (text) => {
+  expect(() => parseImportedServers(text)).toThrow(
+    "Cannot import MCP server 'shell': args must be an array of strings",
+  );
+});
+it("preserves explicit empty identifier lists without turning whitespace into an empty list", () => {
+  expect(
+    parseImportedServers(
+      JSON.stringify({
+        shell: { command: "node", args: [], enabledTools: [" "], disabledTools: [], scopes: [] },
+      }),
+    ),
+  ).toEqual({ shell: { type: "stdio", command: "node", args: [], disabledTools: [], scopes: [] } });
+});

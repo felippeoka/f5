@@ -1,5 +1,6 @@
 import {
   assertMcpRuntimeConfig,
+  mcpConfigErrorMessage,
   assertMcpServerLimit,
   MCP_RUNTIME_SERVER_LIMIT,
 } from "@t3tools/shared/mcpValidation";
@@ -2504,15 +2505,15 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
         const baseProviderMcpServers = providerOptions?.mcpServers;
         yield* Effect.try({
           try: () => {
-            assertMcpRuntimeConfig(input.providerOptions?.mcpServers);
-            assertMcpRuntimeConfig(providerOptions?.mcpServers);
+            assertMcpRuntimeConfig(input.providerOptions?.mcpServers, PROVIDER);
+            assertMcpRuntimeConfig(providerOptions?.mcpServers, PROVIDER);
             readCodexMcpOAuthCallbackConfig(providerOptions?.mcpServers);
           },
           catch: (cause) =>
             new ProviderAdapterValidationError({
               provider: PROVIDER,
               operation: "startSession",
-              issue: String(cause),
+              issue: mcpConfigErrorMessage(cause),
             }),
         });
         previewMcpSessions.get(input.threadId)?.dispose();
@@ -2581,12 +2582,16 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
               }
             : baseProviderMcpServers;
         yield* Effect.try({
-          try: () => assertMcpServerLimit(providerMcpServers, MCP_RUNTIME_SERVER_LIMIT),
+          try: () =>
+            assertMcpServerLimit(
+              filterEnabledMcpServers(providerMcpServers),
+              MCP_RUNTIME_SERVER_LIMIT,
+            ),
           catch: (cause) =>
             new ProviderAdapterValidationError({
               provider: PROVIDER,
               operation: "startSession",
-              issue: String(cause),
+              issue: mcpConfigErrorMessage(cause),
             }),
         });
         const mcpOAuthCallbackConfig = providerMcpServers
@@ -2922,14 +2927,14 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
     const reloadMcpConfig: CodexAdapterShape["reloadMcpConfig"] = ({ threadId, mcpServers }) =>
       Effect.try({
         try: () => {
-          assertMcpRuntimeConfig(mcpServers);
+          assertMcpRuntimeConfig(mcpServers, PROVIDER);
           readCodexMcpOAuthCallbackConfig(mcpServers);
         },
         catch: (cause) =>
           new ProviderAdapterValidationError({
             provider: PROVIDER,
             operation: "reloadMcpConfig",
-            issue: String(cause),
+            issue: mcpConfigErrorMessage(cause),
           }),
       })
         .pipe(

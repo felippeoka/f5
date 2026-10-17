@@ -16,6 +16,7 @@ export type ServerDraft = {
   readonly enabled: boolean;
   readonly command: string;
   readonly args: string;
+  readonly argsFormat: "lines" | "json";
   readonly env: string;
   readonly cwd: string;
   readonly url: string;
@@ -40,6 +41,7 @@ export function createEmptyDraft(type: TransportType = "stdio"): ServerDraft {
     enabled: true,
     command: "",
     args: "",
+    argsFormat: "lines",
     env: "",
     cwd: "",
     url: "",
@@ -165,6 +167,7 @@ export function draftFromServer(
     enabled: server.enabled !== false,
     command: server.type === "stdio" ? server.command : "",
     args: server.type === "stdio" && server.args !== undefined ? JSON.stringify(server.args) : "",
+    argsFormat: server.type === "stdio" && server.args !== undefined ? "json" : "lines",
     env: server.type === "stdio" ? formatStringRecord(server.env) : "",
     cwd: server.type === "stdio" ? (server.cwd ?? "") : "",
     url: server.type !== "stdio" ? server.url : "",
@@ -240,9 +243,10 @@ export function decodeDraftServer(draft: ServerDraft): {
           command: draft.command,
           ...(draft.args !== ""
             ? {
-                args: draft.args.trimStart().startsWith("[")
-                  ? (JSON.parse(draft.args) as unknown)
-                  : draft.args.split(/\r?\n/u),
+                args:
+                  draft.argsFormat === "json"
+                    ? (JSON.parse(draft.args) as unknown)
+                    : draft.args.split(/\r?\n/u),
               }
             : {}),
           ...(parseStringRecordInput(draft.env, "Environment")
@@ -266,7 +270,8 @@ export function decodeDraftServer(draft: ServerDraft): {
     for (const key of Object.keys({ ...draft.original.server, ...candidate })) {
       if (
         key in draft &&
-        draft[key as keyof ServerDraft] === originalDraft[key as keyof ServerDraft]
+        draft[key as keyof ServerDraft] === originalDraft[key as keyof ServerDraft] &&
+        (key !== "args" || draft.argsFormat === originalDraft.argsFormat)
       ) {
         const value = (draft.original.server as unknown as Record<string, unknown>)[key];
         if (value === undefined) delete writable[key];

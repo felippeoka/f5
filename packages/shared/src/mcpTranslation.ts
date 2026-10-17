@@ -135,7 +135,7 @@ function toEntries(servers: McpProjectServersConfig | null | undefined): McpServ
   }
   return Object.entries(servers)
     .map(([name, definition]) => {
-      const normalizedName = normalizeServerName(name);
+      const normalizedName = normalizeServerName(name) ?? name.trim();
       if (!normalizedName || !definition || typeof definition !== "object") {
         return null;
       }
@@ -203,7 +203,7 @@ export function translateMcpForCodex(
       ...(normalized.toolTimeoutSec !== undefined
         ? { tool_timeout_sec: normalized.toolTimeoutSec }
         : {}),
-      ...(normalized.enabledTools ? { enabled_tools: normalized.enabledTools } : {}),
+      ...(normalized.enabledTools?.length ? { enabled_tools: normalized.enabledTools } : {}),
       ...(normalized.disabledTools ? { disabled_tools: normalized.disabledTools } : {}),
       ...(normalized.scopes ? { scopes: normalized.scopes } : {}),
       ...(normalized.oauthClientId

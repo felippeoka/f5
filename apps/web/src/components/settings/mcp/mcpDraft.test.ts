@@ -39,7 +39,7 @@ describe("lossless MCP editing", () => {
       args: "  arg  \n\nlast",
     };
     expect(decodeDraftServer(draft).server.args).toEqual(["  arg  ", "", "last"]);
-    expect(decodeDraftServer({ ...draft, args: "[]" }).server.args).toEqual([]);
+    expect(decodeDraftServer({ ...draft, args: "[]", argsFormat: "json" }).server.args).toEqual([]);
   });
   it("preserves empty header maps when another field changes", () => {
     const server: McpServerDefinition = { type: "http", url: "http://localhost/mcp", headers: {} };
@@ -58,5 +58,10 @@ describe("lossless MCP editing", () => {
         url: "http://localhost:3000",
       }).server.url,
     ).toBe("http://localhost:3000");
+  });
+  it("uses explicit argument formats so a leading bracket is a valid line argument", () => {
+    const draft = { ...createEmptyDraft(), name: "shell", command: "node", args: "[literal\n" };
+    expect(decodeDraftServer(draft).server.args).toEqual(["[literal", ""]);
+    expect(() => decodeDraftServer({ ...draft, argsFormat: "json" })).toThrow();
   });
 });

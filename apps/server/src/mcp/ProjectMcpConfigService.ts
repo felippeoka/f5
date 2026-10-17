@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 import {
   assertMcpRuntimeConfig,
+  mcpConfigErrorMessage,
   readMcpValidationIssues,
   readMcpLayerNameConflicts,
   validateMcpLayerWrite,
@@ -71,7 +72,7 @@ function readCodexMcpOAuthCallbackConfigOrError(servers: McpProjectServersConfig
 > {
   return Effect.try({
     try: () => {
-      assertMcpRuntimeConfig(servers);
+      assertMcpRuntimeConfig(servers, "codex");
       return readCodexMcpOAuthCallbackConfig(servers);
     },
     catch: (cause) =>
@@ -166,7 +167,7 @@ const makeProjectMcpConfigService = Effect.gen(function* () {
   const validationError = (cause: unknown) =>
     new ProjectMcpConfigServiceError({
       code: "validation",
-      message: cause instanceof Error ? cause.message : String(cause),
+      message: mcpConfigErrorMessage(cause),
     });
   const listProjects = () =>
     repository
@@ -245,31 +246,39 @@ const makeProjectMcpConfigService = Effect.gen(function* () {
   const readEffectiveStoredConfig: ProjectMcpConfigServiceShape["readEffectiveStoredConfig"] = (
     projectId,
   ) =>
-    writeLock.withPermits(1)(
-      Effect.gen(function* () {
-        const [commonConfig, projectConfig] = yield* Effect.all([
-          readCommonStoredConfig(),
-          readProjectStoredConfig(projectId),
-        ]);
-        const servers = mergeMcpServerLayers({
-          common: commonConfig.servers,
-          project: projectConfig.servers,
-        });
-        return {
-          projectId,
-          ...(commonConfig.version ? { commonVersion: commonConfig.version } : {}),
-          ...(projectConfig.version ? { projectVersion: projectConfig.version } : {}),
-          effectiveVersion: computeEffectiveMcpConfigVersion(servers),
-          servers,
-          issues: [
-            ...readMcpValidationIssues(commonConfig.servers),
-            ...readMcpValidationIssues(projectConfig.servers),
-            ...readMcpLayerNameConflicts(commonConfig.servers, projectConfig.servers),
-            ...callbackIssue(servers, [projectId], [projectConfig.projectName ?? projectId]),
-          ],
-        };
-      }),
-    );
+    repository
+      .withTransaction(
+        Effect.gen(function* () {
+          const [commonConfig, projectConfig] = yield* Effect.all([
+            readCommonStoredConfig(),
+            readProjectStoredConfig(projectId),
+          ]);
+          const servers = mergeMcpServerLayers({
+            common: commonConfig.servers,
+            project: projectConfig.servers,
+          });
+          return {
+            projectId,
+            ...(commonConfig.version ? { commonVersion: commonConfig.version } : {}),
+            ...(projectConfig.version ? { projectVersion: projectConfig.version } : {}),
+            effectiveVersion: computeEffectiveMcpConfigVersion(servers),
+            servers,
+            issues: [
+              ...readMcpValidationIssues(commonConfig.servers),
+              ...readMcpValidationIssues(projectConfig.servers),
+              ...readMcpLayerNameConflicts(commonConfig.servers, projectConfig.servers),
+              ...callbackIssue(servers, [projectId], [projectConfig.projectName ?? projectId]),
+            ],
+          };
+        }),
+      )
+      .pipe(
+        Effect.mapError((error) =>
+          Schema.is(ProjectMcpConfigServiceError)(error)
+            ? error
+            : toStorageError("Failed to read effective MCP config")(error),
+        ),
+      );
 
   const readCommonConfig: ProjectMcpConfigServiceShape["readCommonConfig"] = () =>
     Effect.gen(function* () {

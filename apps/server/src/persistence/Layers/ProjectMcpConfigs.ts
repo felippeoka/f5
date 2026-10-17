@@ -70,7 +70,7 @@ const makeProjectMcpConfigRepository = Effect.gen(function* () {
     Result: ProjectMcpConfigDbRowSchema,
     execute: (scope) => sql`
       SELECT c.scope, c.project_id AS "projectId", p.title AS "projectName", c.version, c.servers_json AS "servers", c.updated_at AS "updatedAt"
-      FROM project_mcp_configs c LEFT JOIN projection_projects p ON p.project_id = c.project_id WHERE c.scope = ${scope}
+      FROM project_mcp_configs c LEFT JOIN projection_projects p ON p.project_id = c.project_id WHERE c.scope = ${scope} AND p.deleted_at IS NULL
     `,
   });
   const listByScope: ProjectMcpConfigRepositoryShape["listByScope"] = (scope) =>

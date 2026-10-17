@@ -2,9 +2,10 @@ import {
   McpServerWriteDefinition,
   type McpConfigIssue,
   type McpProjectServersConfig,
+  type ProviderKind,
 } from "@t3tools/contracts";
-import { Schema } from "effect";
-import { stableMcpServersJson } from "./mcpConfig";
+import { Schema, SchemaIssue } from "effect";
+import { mergeMcpServerLayers, stableMcpServersJson } from "./mcpConfig";
 
 export const MCP_SERVERS_PER_SCOPE = 16;
 export const MCP_EFFECTIVE_SERVER_LIMIT = 32;
@@ -32,6 +33,16 @@ export function normalizeMcpServersRecord(
   value: McpProjectServersConfig | null | undefined,
 ): McpProjectServersConfig {
   return { ...value };
+}
+
+export function mcpConfigErrorMessage(cause: unknown): string {
+  if (
+    Schema.isSchemaError(cause) ||
+    (cause instanceof Error &&
+      (SchemaIssue.isIssue(cause.cause) || Schema.isSchemaError(cause.cause)))
+  )
+    return "Invalid MCP server fields. Check the command, HTTP/HTTPS URLs, and advanced options in F5 MCP settings.";
+  return cause instanceof Error ? cause.message : String(cause);
 }
 
 function equalEntry(left: McpProjectServersConfig[string], right: McpProjectServersConfig[string]) {
@@ -71,7 +82,7 @@ export function readMcpValidationIssues(servers: McpProjectServersConfig): McpCo
       issues.push({
         kind: "validation",
         serverName,
-        message: `Invalid MCP server '${serverName}': ${String(error)}`,
+        message: `Invalid MCP server '${serverName}': ${mcpConfigErrorMessage(error)}`,
       });
     }
   }
@@ -154,6 +165,22 @@ export function validateMcpLayerMerge(input: {
   baseCommon: McpProjectServersConfig;
   baseProject: McpProjectServersConfig;
 }): void {
+  const effective = mergeMcpServerLayers(input);
+  const previous = mergeMcpServerLayers({ common: input.baseCommon, project: input.baseProject });
+  const counts = (servers: McpProjectServersConfig) => [
+    Object.keys(servers).length,
+    Object.values(servers).filter((server) => server.enabled !== false).length,
+  ];
+  const previousCounts = counts(previous);
+  if (
+    counts(effective).some(
+      (count, index) => count > MCP_EFFECTIVE_SERVER_LIMIT && count > previousCounts[index]!,
+    )
+  ) {
+    throw new Error(
+      `This change would exceed the ${MCP_EFFECTIVE_SERVER_LIMIT}-server effective limit. Remove entries or add exact-name overrides in F5 MCP settings.`,
+    );
+  }
   const participants = (
     common: McpProjectServersConfig,
     project: McpProjectServersConfig,
@@ -191,13 +218,29 @@ export function assertMcpServerLimit(
     throw new Error(`MCP configuration exceeds the ${limit}-server limit.`);
 }
 
-export function assertMcpRuntimeConfig(servers: McpProjectServersConfig | null | undefined): void {
-  assertMcpServerLimit(servers);
-  for (const name of Object.keys(servers ?? {})) {
+/** A provider argument validates stored runtime config; omitted means strict client input. */
+export function assertMcpRuntimeConfig(
+  servers: McpProjectServersConfig | null | undefined,
+  provider?: ProviderKind,
+): void {
+  const checked = provider
+    ? Object.fromEntries(
+        Object.entries(servers ?? {}).filter(([, server]) => server.enabled !== false),
+      )
+    : servers;
+  assertMcpServerLimit(checked);
+  // Claude can continue using legacy names; new persisted names are checked on writes.
+  if (provider === "claudeAgent") return;
+  for (const name of Object.keys(checked ?? {})) {
     if (!normalizeServerName(name))
-      throw new Error("MCP server names must contain 1–128 characters.");
+      throw new Error(
+        "MCP server names must contain 1–128 characters. Repair the names in F5 MCP settings.",
+      );
   }
-  for (const names of collisionGroups(servers ?? {}).values()) {
-    if (names.length > 1) throw new Error(`Conflicting MCP server names: ${names.join(", ")}.`);
+  for (const names of collisionGroups(checked ?? {}).values()) {
+    if (names.length > 1)
+      throw new Error(
+        `Conflicting MCP server names: ${names.join(", ")}. Repair the names in F5 MCP settings.`,
+      );
   }
 }

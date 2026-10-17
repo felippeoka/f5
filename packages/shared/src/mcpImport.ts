@@ -45,11 +45,7 @@ function readImportedStringArray(value: unknown): string[] | undefined {
   const parsed = value
     .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
     .filter((entry) => entry.length > 0);
-  return parsed;
-}
-
-function readImportedArgs(value: unknown): string[] | undefined {
-  return Array.isArray(value) && value.every((arg) => typeof arg === "string") ? value : undefined;
+  return parsed.length > 0 || value.length === 0 ? parsed : undefined;
 }
 
 function readImportedStringRecord(value: unknown): Record<string, string> | undefined {
@@ -93,7 +89,10 @@ function readImportedOauthConfig(value: unknown): {
   };
 }
 
-function decodeImportedServer(value: unknown): McpProjectServersConfig[string] | null {
+function decodeImportedServer(
+  value: unknown,
+  serverName: string,
+): McpProjectServersConfig[string] | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -118,12 +117,21 @@ function decodeImportedServer(value: unknown): McpProjectServersConfig[string] |
     return null;
   }
 
+  if (
+    type === "stdio" &&
+    value.args !== undefined &&
+    (!Array.isArray(value.args) || !value.args.every((arg) => typeof arg === "string"))
+  ) {
+    throw new Error(
+      `Cannot import MCP server '${serverName}': args must be an array of strings. No arguments were imported.`,
+    );
+  }
   const candidate =
     type === "stdio"
       ? {
           type,
           command: readImportedString(value.command),
-          ...(readImportedArgs(value.args) ? { args: readImportedArgs(value.args) } : {}),
+          ...(value.args !== undefined ? { args: value.args } : {}),
           ...(readImportedStringRecord(value.env)
             ? { env: readImportedStringRecord(value.env) }
             : {}),
@@ -273,19 +281,22 @@ function parseCodexTomlServers(text: string): McpProjectServersConfig {
         .map(([name, value]) => {
           if (!isRecord(value)) return null;
           const shouldApplyTopLevelOauthCallback = canUseTopLevelOauthCallback(value);
-          const decoded = decodeImportedServer({
-            ...value,
-            ...(topLevelOauthCallbackPort !== undefined &&
-            shouldApplyTopLevelOauthCallback &&
-            !hasImportedServerOauthCallbackPort(value)
-              ? { oauthCallbackPort: topLevelOauthCallbackPort }
-              : {}),
-            ...(topLevelOauthCallbackUrl &&
-            shouldApplyTopLevelOauthCallback &&
-            !hasImportedServerOauthCallbackUrl(value)
-              ? { oauthCallbackUrl: topLevelOauthCallbackUrl }
-              : {}),
-          });
+          const decoded = decodeImportedServer(
+            {
+              ...value,
+              ...(topLevelOauthCallbackPort !== undefined &&
+              shouldApplyTopLevelOauthCallback &&
+              !hasImportedServerOauthCallbackPort(value)
+                ? { oauthCallbackPort: topLevelOauthCallbackPort }
+                : {}),
+              ...(topLevelOauthCallbackUrl &&
+              shouldApplyTopLevelOauthCallback &&
+              !hasImportedServerOauthCallbackUrl(value)
+                ? { oauthCallbackUrl: topLevelOauthCallbackUrl }
+                : {}),
+            },
+            name,
+          );
           return decoded ? ([name, decoded] as const) : null;
         })
         .filter(
@@ -312,7 +323,7 @@ function parseJsonServers(text: string): McpProjectServersConfig {
     Object.fromEntries(
       Object.entries(root)
         .map(([name, value]) => {
-          const decoded = decodeImportedServer(value);
+          const decoded = decodeImportedServer(value, name);
           return decoded ? ([name, decoded] as const) : null;
         })
         .filter(

@@ -1,3 +1,4 @@
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { ProjectMcpConfigRepositoryLive } from "../persistence/Layers/ProjectMcpConfigs.ts";
 import { type McpProjectServersConfig, ProjectId } from "@t3tools/contracts";
@@ -603,5 +604,86 @@ it("serializes cross-layer validation inside real SQLite transactions", async ()
       expect(Object.keys(effective.servers)).toHaveLength(1);
     }),
     ProjectMcpConfigRepositoryLive.pipe(Layer.provide(SqlitePersistenceMemory)),
+  );
+});
+
+it("rejects common saves that push a legacy effective config from 32 to 33 and allows reductions", async () => {
+  const { layer, rows } = makeRepositoryLayer();
+  const projectId = ProjectId.makeUnsafe("effective-limit-legacy");
+  const entry = { type: "stdio" as const, command: "node" };
+  const servers = (prefix: string, count: number) =>
+    Object.fromEntries(Array.from({ length: count }, (_, i) => [`${prefix}${i}`, entry]));
+  const seed = (commonCount: number) => {
+    rows.set("common", {
+      scope: "common",
+      projectId: null,
+      version: "common-base",
+      servers: servers("c", commonCount),
+      updatedAt: new Date().toISOString(),
+    });
+    rows.set(scopeKey("project", projectId), {
+      scope: "project",
+      projectId,
+      version: "legacy",
+      servers: servers("p", 17),
+      updatedAt: new Date().toISOString(),
+    });
+  };
+  seed(15);
+  await runServiceEffect(
+    Effect.gen(function* () {
+      const service = yield* ProjectMcpConfigService;
+      const result = yield* service
+        .replaceCommonConfig({ expectedVersion: "common-base", servers: servers("c", 16) })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      expect((yield* service.readCommonConfig()).version).toBe("common-base");
+      seed(17);
+      const saved = yield* service.replaceCommonConfig({
+        expectedVersion: "common-base",
+        servers: servers("c", 16),
+      });
+      expect(Object.keys(saved.servers)).toHaveLength(16);
+      expect(
+        Object.keys((yield* service.readEffectiveStoredConfig(projectId)).servers),
+      ).toHaveLength(33);
+    }),
+    layer,
+  );
+});
+
+it("excludes soft-deleted projects from common save validation and compatibility warnings", async () => {
+  const layer = ProjectMcpConfigServiceLive.pipe(
+    Layer.provideMerge(
+      ProjectMcpConfigRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+    ),
+  );
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const service = yield* ProjectMcpConfigService;
+      const projectId = ProjectId.makeUnsafe("deleted-project");
+      yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at) VALUES (${projectId}, 'Deleted workspace', '/tmp/deleted', '[]', 'now', 'now', 'now')`;
+      yield* service.replaceProjectConfig({
+        projectId,
+        servers: {
+          github: { type: "http", url: "http://localhost/project", oauthCallbackPort: 3001 },
+        },
+      });
+      const saved = yield* service.replaceCommonConfig({
+        servers: {
+          GitHub: { type: "http", url: "http://localhost/common", oauthCallbackPort: 3002 },
+        },
+      });
+      expect(saved.issues).toEqual([]);
+      expect((yield* service.readCommonConfig()).issues).toEqual([]);
+      yield* sql`UPDATE projection_projects SET deleted_at = NULL WHERE project_id = ${projectId}`;
+      expect((yield* service.readCommonConfig()).issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: "validation" }),
+          expect.objectContaining({ kind: "compatibility", projectIds: [projectId] }),
+        ]),
+      );
+    }).pipe(Effect.provide(layer)),
   );
 });

@@ -1,4 +1,4 @@
-import { assertMcpRuntimeConfig } from "@t3tools/shared/mcpValidation";
+import { assertMcpRuntimeConfig, mcpConfigErrorMessage } from "@t3tools/shared/mcpValidation";
 import { readCodexMcpOAuthCallbackConfig } from "@t3tools/shared/mcpTranslation";
 import { DeliveryAttemptContext } from "../deliveryAttemptContext";
 import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
@@ -822,11 +822,11 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
 
         yield* Effect.try({
           try: () => {
-            assertMcpRuntimeConfig(resumedProviderOptions?.mcpServers);
+            assertMcpRuntimeConfig(resumedProviderOptions?.mcpServers, input.binding.provider);
             if (input.binding.provider === "codex")
               readCodexMcpOAuthCallbackConfig(resumedProviderOptions?.mcpServers);
           },
-          catch: (cause) => toValidationError(input.operation, String(cause)),
+          catch: (cause) => toValidationError(input.operation, mcpConfigErrorMessage(cause)),
         });
 
         const recoveredRuntimeMode = input.binding.runtimeMode ?? DEFAULT_RUNTIME_MODE;
@@ -1154,7 +1154,8 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
 
         yield* Effect.try({
           try: () => assertMcpRuntimeConfig(parsed.providerOptions?.mcpServers),
-          catch: (cause) => toValidationError("ProviderService.startSession", String(cause)),
+          catch: (cause) =>
+            toValidationError("ProviderService.startSession", mcpConfigErrorMessage(cause)),
         });
         const requestedInstanceId = resolveStartInstanceId(parsed);
         yield* Effect.annotateCurrentSpan({
@@ -1274,11 +1275,12 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           };
           yield* Effect.try({
             try: () => {
-              assertMcpRuntimeConfig(adapterInput.providerOptions?.mcpServers);
+              assertMcpRuntimeConfig(adapterInput.providerOptions?.mcpServers, resolvedProvider);
               if (resolvedProvider === "codex")
                 readCodexMcpOAuthCallbackConfig(adapterInput.providerOptions?.mcpServers);
             },
-            catch: (cause) => toValidationError("ProviderService.startSession", String(cause)),
+            catch: (cause) =>
+              toValidationError("ProviderService.startSession", mcpConfigErrorMessage(cause)),
           });
           const launchFingerprint = computeProviderLaunchFingerprint({
             provider: resolvedProvider,
@@ -2531,26 +2533,35 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           return { sessions: [] };
         }
 
-        const currentProjectMcp = yield* projectMcpConfigService
+        const configResult = yield* projectMcpConfigService
           .readEffectiveStoredConfig(input.projectId)
           .pipe(
-            Effect.mapError(
-              toProjectMcpProviderError(
-                "ProviderService.reloadMcpConfigForProject",
-                input.projectId,
-              ),
+            Effect.flatMap((stored) =>
+              Effect.try({
+                try: () => {
+                  assertMcpRuntimeConfig(stored.servers, input.provider);
+                  if (input.provider === "codex") readCodexMcpOAuthCallbackConfig(stored.servers);
+                  return stored;
+                },
+                catch: mcpConfigErrorMessage,
+              }),
             ),
+            Effect.result,
           );
-
-        yield* Effect.try({
-          try: () => {
-            assertMcpRuntimeConfig(currentProjectMcp.servers);
-            if (input.provider === "codex")
-              readCodexMcpOAuthCallbackConfig(currentProjectMcp.servers);
-          },
-          catch: (cause) =>
-            toValidationError("ProviderService.reloadMcpConfigForProject", String(cause)),
-        });
+        if (configResult._tag === "Failure") {
+          return {
+            sessions: matchingBindings.map((binding) => ({
+              threadId: binding.threadId,
+              result: {
+                converged: false,
+                restartRequired: false,
+                servers: [],
+                errors: [{ message: mcpConfigErrorMessage(configResult.failure) }],
+              } satisfies McpReloadResult,
+            })),
+          };
+        }
+        const currentProjectMcp = configResult.success;
 
         // `reached` is false when the reload request itself failed, so the
         // session may not hold the new config at all.

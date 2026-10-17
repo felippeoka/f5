@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { McpProjectServersConfig } from "@t3tools/contracts";
 import {
   assertMcpServerLimit,
+  assertMcpRuntimeConfig,
+  mcpConfigErrorMessage,
   MCP_RUNTIME_SERVER_LIMIT,
   normalizeMcpServersRecord,
   readMcpValidationIssues,
@@ -49,9 +51,9 @@ describe("MCP configuration correctness", () => {
       servers,
     );
     expect(translateMcpForClaudeAgent(servers)?.shell).toMatchObject({ args: servers.shell!.args });
+    expect(translateMcpForCodex(servers)?.shell).not.toHaveProperty("enabled_tools");
     expect(translateMcpForCodex(servers)?.shell).toMatchObject({
       args: servers.shell!.args,
-      enabled_tools: [],
       disabled_tools: [],
       scopes: [],
       supports_parallel_tool_calls: false,
@@ -140,5 +142,65 @@ describe("MCP configuration correctness", () => {
     expect(Object.keys(validateMcpLayerWrite({}, servers))).toEqual(["__proto__", "constructor"]);
     expect(Object.keys(translateMcpForClaudeAgent(servers)!)).toEqual(["__proto__", "constructor"]);
     expect(Object.keys(translateMcpForCodex(servers)!)).toEqual(["__proto__", "constructor"]);
+  });
+  it("validates active runtime config by provider without weakening client limits", () => {
+    const legacy = {
+      ...entries(32),
+      GitHub: { ...server, enabled: false },
+      github: { ...server, enabled: false },
+    };
+    expect(() => assertMcpRuntimeConfig(legacy)).toThrow("32");
+    expect(() => assertMcpRuntimeConfig(legacy, "codex")).not.toThrow();
+    expect(() =>
+      assertMcpRuntimeConfig({ GitHub: server, github: server }, "claudeAgent"),
+    ).not.toThrow();
+    expect(() => assertMcpRuntimeConfig({ GitHub: server, github: server }, "codex")).toThrow(
+      "F5 MCP settings",
+    );
+  });
+  it("rejects an effective count increase past 32 but permits legacy reductions", () => {
+    const project = Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`p${i}`, server]));
+    expect(() =>
+      validateMcpLayerMerge({
+        baseCommon: entries(15),
+        baseProject: project,
+        common: entries(16),
+        project,
+      }),
+    ).toThrow("32-server effective limit");
+    expect(() =>
+      validateMcpLayerMerge({
+        baseCommon: entries(17),
+        baseProject: project,
+        common: entries(16),
+        project,
+      }),
+    ).not.toThrow();
+  });
+  it("formats ordinary validation errors without the Error prefix", () => {
+    expect(mcpConfigErrorMessage(new Error("Fix the callback port"))).toBe("Fix the callback port");
+  });
+  it("rejects enabling a 33rd active server in an oversized legacy config", () => {
+    const common = entries(17);
+    const project = Object.fromEntries(
+      Array.from({ length: 17 }, (_, i) => [
+        `p${i}`,
+        { ...server, ...(i >= 15 ? { enabled: false } : {}) },
+      ]),
+    );
+    expect(() =>
+      validateMcpLayerMerge({
+        baseCommon: common,
+        baseProject: project,
+        common,
+        project: { ...project, p15: { ...server, enabled: true } },
+      }),
+    ).toThrow("32-server effective limit");
+  });
+  it("keeps schema validation issues compact for settings banners", () => {
+    const issue = readMcpValidationIssues({ remote: { type: "http", url: "invalid" } })[0]!;
+    expect(issue.message).not.toContain("\n");
+    expect(issue.message).not.toContain("Error:");
+    expect(issue.message).toContain("HTTP/HTTPS");
   });
 });

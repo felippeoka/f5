@@ -37,6 +37,8 @@ describe("Codex MCP name matching", () => {
     ];
     const merged = mergeCodexMcpStartupStatuses([status("GitHub")], notifications);
     expect(merged.map((entry) => entry.name)).toEqual(["GitHub", "github"]);
+    expect(merged[0]?.startupStatus).toBe("ready");
+    expect(merged[1]?.startupStatus).toBe("failed");
     expect(findCodexServerStatusByName(merged, "github")).toBeUndefined();
   });
 });

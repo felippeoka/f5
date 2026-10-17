@@ -1,5 +1,6 @@
 import {
   assertMcpRuntimeConfig,
+  mcpConfigErrorMessage,
   assertMcpServerLimit,
   MCP_RUNTIME_SERVER_LIMIT,
 } from "@t3tools/shared/mcpValidation";
@@ -5991,12 +5992,12 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         }
 
         yield* Effect.try({
-          try: () => assertMcpRuntimeConfig(input.providerOptions?.mcpServers),
+          try: () => assertMcpRuntimeConfig(input.providerOptions?.mcpServers, PROVIDER),
           catch: (cause) =>
             new ProviderAdapterValidationError({
               provider: PROVIDER,
               operation: "startSession",
-              issue: String(cause),
+              issue: mcpConfigErrorMessage(cause),
             }),
         });
         const startedAt = yield* nowIso;
@@ -7127,7 +7128,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             new ProviderAdapterValidationError({
               provider: PROVIDER,
               operation: "startSession",
-              issue: String(cause),
+              issue: mcpConfigErrorMessage(cause),
             }),
         });
 
@@ -7989,12 +7990,12 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
     }) =>
       Effect.gen(function* () {
         yield* Effect.try({
-          try: () => assertMcpRuntimeConfig(mcpServers),
+          try: () => assertMcpRuntimeConfig(mcpServers, PROVIDER),
           catch: (cause) =>
             new ProviderAdapterValidationError({
               provider: PROVIDER,
               operation: "reloadMcpConfig",
-              issue: String(cause),
+              issue: mcpConfigErrorMessage(cause),
             }),
         });
         const context = yield* requireSession(threadId);
@@ -8019,7 +8020,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             new ProviderAdapterValidationError({
               provider: PROVIDER,
               operation: "reloadMcpConfig",
-              issue: String(cause),
+              issue: mcpConfigErrorMessage(cause),
             }),
         });
         const outcome = yield* Effect.tryPromise({

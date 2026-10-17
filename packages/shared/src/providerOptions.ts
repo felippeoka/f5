@@ -64,7 +64,8 @@ function normalizeMcpServers(
   servers: McpProjectServersConfig | null | undefined,
 ): McpProjectServersConfig | undefined {
   if (!servers || Object.keys(servers).length === 0) return undefined;
-  const decoded = Schema.decodeUnknownSync(McpServersSchema)(servers);
+  const result = Schema.decodeUnknownExit(McpServersSchema)(servers);
+  const decoded = result._tag === "Success" ? result.value : servers;
   const entries = Object.entries(decoded).map(
     ([name, server]) => [normalizeServerName(name) ?? name, server] as const,
   );

@@ -114,6 +114,19 @@ export function McpServerEditor({
             />
           </label>
           <label className="space-y-1">
+            <span className="text-xs font-medium text-foreground">Argument format</span>
+            <select
+              value={draft.argsFormat}
+              onChange={(event) =>
+                onDraftChange({ argsFormat: event.target.value as ServerDraft["argsFormat"] })
+              }
+              className="block rounded border border-border bg-background px-2 py-1 text-xs"
+            >
+              <option value="lines">One argument per line</option>
+              <option value="json">JSON array</option>
+            </select>
+          </label>
+          <label className="space-y-1">
             <span className="text-xs font-medium text-foreground">Args</span>
             <Textarea
               value={draft.args}
@@ -124,7 +137,7 @@ export function McpServerEditor({
               placeholder="@modelcontextprotocol/server-filesystem&#10;/path/to/project"
             />
             <span className="text-xs text-muted-foreground">
-              JSON array or one argument per line.
+              Empty lines are empty arguments. Use JSON for arguments containing line breaks.
             </span>
           </label>
           <div className="grid gap-3 sm:grid-cols-2">

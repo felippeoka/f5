@@ -27,7 +27,10 @@ export function mergeCodexMcpStartupStatuses(
   }
   const merged = statuses.map((status) => {
     const matches = byName.get(mcpServerNameKey(status.name)) ?? [];
-    return matches.length === 1 ? { ...status, ...matches[0], name: status.name } : status;
+    const exact = matches.filter((entry) => entry.name.trim() === status.name.trim());
+    const notification =
+      exact.length === 1 ? exact[0] : matches.length === 1 ? matches[0] : undefined;
+    return notification ? { ...status, ...notification, name: status.name } : status;
   });
   const returnedKeys = new Set(statuses.map((status) => mcpServerNameKey(status.name)));
   const returnedNames = new Set(statuses.map((status) => status.name.trim()));

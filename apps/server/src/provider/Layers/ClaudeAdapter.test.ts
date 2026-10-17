@@ -12555,3 +12555,24 @@ it.effect("rejects excessive MCP start and reload inputs before creating a query
     assert.equal(harness.getCreateQueryInputs().length, 0);
   }).pipe(Effect.provide(harness.layer));
 });
+
+it.effect("launches legacy case-variant MCP servers for Claude", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const adapter = yield* ClaudeAdapter;
+    yield* adapter.startSession({
+      threadId: ThreadId.makeUnsafe("legacy-aliases"),
+      runtimeMode: "approval-required",
+      providerOptions: {
+        mcpServers: {
+          GitHub: { type: "stdio", command: "node" },
+          github: { type: "stdio", command: "node" },
+        },
+      },
+    });
+    assert.deepEqual(Object.keys(harness.getLastCreateQueryInput()?.options.mcpServers ?? {}), [
+      "GitHub",
+      "github",
+    ]);
+  }).pipe(Effect.provide(harness.layer));
+});

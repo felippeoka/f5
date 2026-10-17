@@ -227,3 +227,9 @@ describe("Claude thinking launch identity", () => {
     expect(typed({ type: "bogus" })).toBe(LEGACY_KEY);
   });
 });
+
+it("keeps malformed legacy entries in pure normalization without throwing", () => {
+  const mcpServers = { legacy: { type: "stdio" as const, command: "", args: [" ", ""] } };
+  expect(() => normalizeProviderStartOptions("codex", { mcpServers })).not.toThrow();
+  expect(normalizeProviderStartOptions("codex", { mcpServers })?.mcpServers).toEqual(mcpServers);
+});
