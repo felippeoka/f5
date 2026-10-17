@@ -2,7 +2,7 @@
 
 F5 reads keybindings from its local keybindings file:
 
-- `~/.f5/keybindings.json`
+- `~/.f5/userdata/keybindings.json` (`keybindings.json` in the state directory)
 
 The file must be a JSON array of rules:
 
@@ -15,10 +15,74 @@ The file must be a JSON array of rules:
 
 See the full schema for more details: [`packages/contracts/src/keybindings.ts`](packages/contracts/src/keybindings.ts)
 
+You can also browse and change shortcuts in the app under **Settings → Keyboard**. Press `mod+/` to see every active shortcut.
+
 ## Defaults
 
 ```json
 [
+  { "key": "mod+[", "command": "navigation.back", "when": "!terminalFocus && !dialogFocus" },
+  { "key": "mod+]", "command": "navigation.forward", "when": "!terminalFocus && !dialogFocus" },
+  {
+    "key": "mod+z",
+    "command": "thread.undo",
+    "when": "threadUndoAvailable && !editableFocus && !dialogFocus"
+  },
+  {
+    "key": "pageup",
+    "command": "chat.pageUp",
+    "when": "!composerFocus && !terminalFocus && !dialogFocus"
+  },
+  {
+    "key": "pagedown",
+    "command": "chat.pageDown",
+    "when": "!composerFocus && !terminalFocus && !dialogFocus"
+  },
+  {
+    "key": "mod+w",
+    "command": "rightPanel.closeTab",
+    "when": "isElectron && !terminalFocus && !dialogFocus"
+  },
+  {
+    "key": "mod+shift+e",
+    "command": "composer.effort",
+    "when": "isElectron && !terminalFocus && !dialogFocus"
+  },
+  {
+    "key": "mod+shift+a",
+    "command": "composer.runtimeMode",
+    "when": "isElectron && !terminalFocus && !dialogFocus"
+  },
+  {
+    "key": "mod+shift+x",
+    "command": "composer.envMode",
+    "when": "isElectron && !terminalFocus && !dialogFocus"
+  },
+  {
+    "key": "mod+shift+g",
+    "command": "composer.branch",
+    "when": "isElectron && !terminalFocus && !dialogFocus"
+  },
+  {
+    "key": "mod+shift+u",
+    "command": "composer.interactionMode",
+    "when": "isElectron && !terminalFocus && !dialogFocus"
+  },
+  {
+    "key": "mod+shift+arrowup",
+    "command": "modelPicker.previousProvider",
+    "when": "modelPickerOpen"
+  },
+  {
+    "key": "mod+shift+arrowdown",
+    "command": "modelPicker.nextProvider",
+    "when": "modelPickerOpen"
+  },
+  {
+    "key": "mod+shift+k",
+    "command": "prHub.copyNumber",
+    "when": "isElectron && !terminalFocus && !dialogFocus"
+  },
   { "key": "mod+b", "command": "sidebar.toggle", "when": "!terminalFocus && !dialogFocus" },
   { "key": "mod+j", "command": "terminal.toggle" },
   { "key": "mod+d", "command": "terminal.split", "when": "terminalFocus" },
@@ -27,20 +91,45 @@ See the full schema for more details: [`packages/contracts/src/keybindings.ts`](
   { "key": "mod+d", "command": "diff.toggle", "when": "!terminalFocus" },
   { "key": "mod+n", "command": "chat.new", "when": "!terminalFocus" },
   { "key": "mod+shift+n", "command": "workflow.new", "when": "!terminalFocus" },
-  { "key": "mod+enter", "command": "chat.scrollToBottom" },
-  { "key": "mod+shift+enter", "command": "chat.queueTurn" },
-  { "key": "alt+enter", "command": "chat.queueTurnNext" },
+  { "key": "mod+enter", "command": "chat.scrollToBottom", "when": "!dialogFocus" },
+  { "key": "mod+shift+enter", "command": "chat.queueTurn", "when": "!dialogFocus" },
+  { "key": "mod+alt+enter", "command": "chat.steerTurn", "when": "!dialogFocus" },
+  { "key": "alt+enter", "command": "chat.queueTurnNext", "when": "!dialogFocus" },
+  {
+    "key": "mod+shift+v",
+    "command": "composer.pasteAsText",
+    "when": "isElectron && composerFocus && !dialogFocus"
+  },
   { "key": "mod+s", "command": "composer.stash", "when": "composerFocus && !dialogFocus" },
+  { "key": "mod+enter", "command": "dialog.primaryAction", "when": "dialogFocus" },
   { "key": "mod+o", "command": "editor.openFavorite" },
   { "key": "ctrl+tab", "command": "thread.switchRecentNext" },
   { "key": "ctrl+shift+tab", "command": "thread.switchRecentPrevious" },
   { "key": "alt+tab", "command": "model.switchRecent" },
+  { "key": "mod+shift+p", "command": "prHub.open", "when": "!terminalFocus" },
+  { "key": "mod+p", "command": "palette.files", "when": "!terminalFocus" },
+  { "key": "mod+shift+f", "command": "projectContentSearch.toggle", "when": "!terminalFocus" },
+  { "key": "mod+shift+m", "command": "modelPicker.toggle", "when": "!terminalFocus" },
+  { "key": "mod+1", "command": "modelPicker.jump.1", "when": "modelPickerOpen" },
+  { "key": "mod+2", "command": "modelPicker.jump.2", "when": "modelPickerOpen" },
+  { "key": "mod+3", "command": "modelPicker.jump.3", "when": "modelPickerOpen" },
+  { "key": "mod+4", "command": "modelPicker.jump.4", "when": "modelPickerOpen" },
+  { "key": "mod+5", "command": "modelPicker.jump.5", "when": "modelPickerOpen" },
+  { "key": "mod+6", "command": "modelPicker.jump.6", "when": "modelPickerOpen" },
+  { "key": "mod+7", "command": "modelPicker.jump.7", "when": "modelPickerOpen" },
+  { "key": "mod+8", "command": "modelPicker.jump.8", "when": "modelPickerOpen" },
+  { "key": "mod+9", "command": "modelPicker.jump.9", "when": "modelPickerOpen" },
   { "key": "mod+k", "command": "commandPalette.toggle", "when": "!terminalFocus" },
-  { "key": "mod+/", "command": "help.shortcuts", "when": "!terminalFocus" }
+  { "key": "mod+/", "command": "help.shortcuts", "when": "!terminalFocus" },
+  {
+    "key": "mod+enter",
+    "command": "chat.newBackground",
+    "when": "newThreadComposer && !dialogFocus"
+  }
 ]
 ```
 
-For most up to date defaults, see [`DEFAULT_KEYBINDINGS` in `apps/server/src/keybindings.ts`](apps/server/src/keybindings.ts)
+For the most up to date defaults, see [`DEFAULT_KEYBINDINGS` in `packages/shared/src/keybindings.ts`](packages/shared/src/keybindings.ts), which the server re-exports from `apps/server/src/keybindings.ts`.
 
 ## Recent Changes
 

@@ -46,9 +46,7 @@ For commands with safe and destructive variants, use the safe variant rather tha
 
 ## Project Snapshot
 
-T3 Code is a minimal web GUI for using code agents like Codex and Claude Code (coming soon).
-
-This repository is a VERY EARLY WIP. Proposing sweeping changes that improve long-term maintainability is encouraged.
+F5 is a desktop and web GUI for coding agents (Codex, Claude Code, Cursor, OpenCode, Grok, Antigravity, Muse Code) with multi-model workflows. It is a fork of T3 Code. This repository is a VERY EARLY WIP. Proposing sweeping changes that improve long-term maintainability is encouraged.
 
 ## Core Priorities
 
@@ -70,19 +68,20 @@ Long term maintainability is a core priority. If you add new functionality, firs
 
 ## Package Roles
 
-- `apps/server`: Node.js WebSocket server. Wraps Codex app-server (JSON-RPC over stdio), serves the React web app, and manages provider sessions.
+- `apps/server`: Node.js WebSocket server. Hosts provider adapters (Codex app-server over JSON-RPC, Claude Agent SDK, ACP, OpenCode, MSP), serves the React web app, and manages provider sessions.
 - `apps/web`: React/Vite UI. Owns session UX, conversation/event rendering, and client-side state. Connects to the server via WebSocket.
 - `packages/contracts`: Shared effect/Schema schemas and TypeScript contracts for provider events, WebSocket protocol, and model/session types. Keep this package schema-only — no runtime logic.
 - `packages/shared`: Shared runtime utilities consumed by both server and web. Uses explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.
+- `packages/effect-acp`: Agent Client Protocol (ACP) client built on Effect, used by the Cursor, Grok and Antigravity adapters.
 
-## Codex App Server (Important)
+## Provider runtimes
 
-T3 Code is currently Codex-first. The server starts `codex app-server` (JSON-RPC over stdio) per provider session, then streams structured events to the browser through WebSocket push messages.
+Each provider runs behind an adapter that implements the shared `ProviderAdapter` contract and streams structured events to the browser through WebSocket push messages. For Codex, the server starts `codex app-server` (JSON-RPC over stdio) per provider session.
 
 How we use it in this codebase:
 
-- Session startup/resume and turn lifecycle are brokered in `apps/server/src/codexAppServerManager.ts`.
-- Provider dispatch and thread event logging are coordinated in `apps/server/src/providerManager.ts`.
+- Provider adapters live in `apps/server/src/provider/Layers/*Adapter.ts` and are constructed by drivers in `apps/server/src/provider/Drivers/*Driver.ts`, listed in `apps/server/src/provider/builtInDrivers.ts`. `apps/server/src/provider/Layers/ProviderAdapterRegistry.ts` is a lookup facade over the live instance registry, and `apps/server/src/provider/Layers/ProviderService.ts` routes sessions and turns.
+- Codex session startup/resume and turn lifecycle are brokered in `apps/server/src/codexAppServerManager.ts`.
 - WebSocket server routes NativeApi methods in `apps/server/src/wsServer.ts`.
 - Web app consumes orchestration domain events via WebSocket push on channel `orchestration.domainEvent` (provider runtime activity is projected into orchestration events server-side).
 

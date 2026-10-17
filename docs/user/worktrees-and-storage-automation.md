@@ -61,7 +61,7 @@ retention any profile sets applies.
 
 ## Auto-pull default branches
 
-**Auto-pull default branches** (Settings → Storage, off by default) fast-forwards a project root
+**Auto-pull default branches** (Settings → Git & GitHub, off by default) fast-forwards a project root
 every 15 minutes when it has the default branch checked out with an upstream, a clean tree with no
 untracked files, no merge, rebase, cherry-pick, revert or bisect in progress, no local commits the
 upstream lacks, and no agent session working in it. It runs `git pull --ff-only` and never merges
