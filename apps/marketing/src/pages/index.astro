@@ -34,12 +34,30 @@ import { RELEASES_URL } from "../lib/releases";
 
   type Platform = { os: "mac" | "win" | "linux"; target: DownloadTarget; label: string };
 
-  function detectPlatform(): Platform | null {
+  /** Chromium's client hints report "arm" on Apple Silicon; other browsers cannot tell. */
+  async function isAppleSilicon(): Promise<boolean> {
+    const hints = (
+      navigator as Navigator & {
+        userAgentData?: {
+          getHighEntropyValues(keys: string[]): Promise<{ architecture?: string }>;
+        };
+      }
+    ).userAgentData;
+    try {
+      return (await hints?.getHighEntropyValues(["architecture"]))?.architecture === "arm";
+    } catch {
+      return false;
+    }
+  }
+
+  async function detectPlatform(): Promise<Platform | null> {
     const ua = navigator.userAgent;
     if (/Win/i.test(ua)) return { os: "win", target: "win-x64", label: "Download for Windows" };
-    // The user agent cannot tell Apple Silicon from Intel; the preview is arm64 only.
     if (/Mac/i.test(ua))
-      return { os: "mac", target: "mac-arm64", label: "Download macOS preview (Apple Silicon)" };
+      // Intel Macs and undetectable architectures get the download page and its caveats.
+      return (await isAppleSilicon())
+        ? { os: "mac", target: "mac-arm64", label: "Download macOS preview (Apple Silicon)" }
+        : { os: "mac", target: "mac-x64", label: "macOS: see download options" };
     if (/Linux/i.test(ua)) return { os: "linux", target: "linux-x64", label: "Linux: not yet available" };
     return null;
   }
@@ -49,7 +67,7 @@ import { RELEASES_URL } from "../lib/releases";
     const label = document.getElementById("download-label");
     if (!btn || !label) return;
 
-    const platform = detectPlatform();
+    const platform = await detectPlatform();
     if (!platform) return;
 
     document.documentElement.dataset.platform = platform.os;

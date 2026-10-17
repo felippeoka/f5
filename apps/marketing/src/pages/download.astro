@@ -1,6 +1,27 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import { RELEASES_URL, REPOSITORY_URL } from "../lib/releases";
+import {
+  DOWNLOAD_AVAILABILITY,
+  RELEASES_URL,
+  REPOSITORY_URL,
+  resolveDownload,
+  type DownloadTarget,
+} from "../lib/releases";
+
+// Rendered without the release fetch so the preview link and platform statuses
+// work without JavaScript; the client script then links the latest Windows installer.
+const initial = Object.fromEntries(
+  (Object.keys(DOWNLOAD_AVAILABILITY) as DownloadTarget[]).map((target) => [
+    target,
+    resolveDownload(target, null),
+  ]),
+) as Record<DownloadTarget, ReturnType<typeof resolveDownload>>;
+const card = (target: DownloadTarget) => ({
+  "data-target": target,
+  href: initial[target].href ?? undefined,
+  "aria-disabled": initial[target].href ? undefined : ("true" as const),
+  class: initial[target].href ? "download-card" : "download-card download-card--unavailable",
+});
 ---
 
 <Layout title="Download — F5" description="Download F5 for Windows, with a macOS preview.">
@@ -18,15 +39,15 @@ import { RELEASES_URL, REPOSITORY_URL } from "../lib/releases";
         <h2 class="platform-name">macOS</h2>
       </div>
       <div class="download-cards">
-        <a class="download-card" data-target="mac-arm64">
+        <a {...card("mac-arm64")}>
           <span class="card-arch">Apple Silicon (arm64)</span>
           <span class="card-format">.dmg</span>
-          <span class="card-status"></span>
+          <span class="card-status">{initial["mac-arm64"].note}</span>
         </a>
-        <a class="download-card" data-target="mac-x64">
+        <a {...card("mac-x64")}>
           <span class="card-arch">Intel (x64)</span>
           <span class="card-format">.dmg</span>
-          <span class="card-status"></span>
+          <span class="card-status">{initial["mac-x64"].note}</span>
         </a>
       </div>
     </section>
@@ -38,10 +59,10 @@ import { RELEASES_URL, REPOSITORY_URL } from "../lib/releases";
         <h2 class="platform-name">Windows</h2>
       </div>
       <div class="download-cards">
-        <a class="download-card" data-target="win-x64">
+        <a {...card("win-x64")}>
           <span class="card-arch">Windows 10, 11 (x64)</span>
           <span class="card-format">.exe · unsigned</span>
-          <span class="card-status"></span>
+          <span class="card-status">{initial["win-x64"].note}</span>
         </a>
       </div>
     </section>
@@ -53,10 +74,10 @@ import { RELEASES_URL, REPOSITORY_URL } from "../lib/releases";
         <h2 class="platform-name">Linux</h2>
       </div>
       <div class="download-cards">
-        <a class="download-card" data-target="linux-x64">
+        <a {...card("linux-x64")}>
           <span class="card-arch">x86_64</span>
           <span class="card-format">AppImage</span>
-          <span class="card-status"></span>
+          <span class="card-status">{initial["linux-x64"].note}</span>
         </a>
       </div>
     </section>
@@ -107,8 +128,6 @@ import { RELEASES_URL, REPOSITORY_URL } from "../lib/releases";
 
   async function init() {
     const versionLabel = document.getElementById("version-label");
-    // Availability that does not depend on the latest release renders immediately.
-    renderCards(null);
 
     try {
       const release = await fetchLatestRelease();

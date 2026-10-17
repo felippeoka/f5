@@ -9,15 +9,22 @@ import {
   parseAppUpdateConfig,
 } from "./app-update-config.ts";
 
-/** `0.1.0-dryrun.7` → `{ baseline: "0.1.0", target: "0.1.1" }`; both are stable versions. */
-export function rehearsalVersions(version: string): { baseline: string; target: string } {
+/**
+ * Versions for the unpublished rehearsal pair, matching the release channel:
+ * stable `0.1.0-dryrun.7` → 0.1.0 → 0.1.1; beta `0.2.0-beta.3` → 0.2.0-beta.1 →
+ * 0.2.0-beta.2, so beta rehearsals resolve updates through the Atom feed.
+ */
+export function rehearsalVersions(
+  version: string,
+  channel: string,
+): { baseline: string; target: string } {
   const match = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$/.exec(version);
   if (!match) throw new Error(`Invalid release version: ${version}`);
   const [, major, minor, patch] = match as unknown as [string, string, string, string];
-  return {
-    baseline: `${major}.${minor}.${patch}`,
-    target: `${major}.${minor}.${Number(patch) + 1}`,
-  };
+  const core = `${major}.${minor}.${patch}`;
+  if (channel === "beta") return { baseline: `${core}-beta.1`, target: `${core}-beta.2` };
+  if (channel !== "latest") throw new Error(`Invalid release channel: ${channel}`);
+  return { baseline: core, target: `${major}.${minor}.${Number(patch) + 1}` };
 }
 
 /**

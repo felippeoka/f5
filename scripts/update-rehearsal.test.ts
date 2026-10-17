@@ -41,9 +41,17 @@ async function emulator(): Promise<{ feed: UpdateFeedEmulator; url: (path: strin
 
 describe("rehearsal versions and feed config", () => {
   it("derives stable baseline and next patch target", () => {
-    expect(rehearsalVersions("0.1.0")).toEqual({ baseline: "0.1.0", target: "0.1.1" });
-    expect(rehearsalVersions("0.1.9-dryrun.42")).toEqual({ baseline: "0.1.9", target: "0.1.10" });
-    expect(() => rehearsalVersions("v0.1.0")).toThrow();
+    expect(rehearsalVersions("0.1.0", "latest")).toEqual({ baseline: "0.1.0", target: "0.1.1" });
+    expect(rehearsalVersions("0.1.9-dryrun.42", "latest")).toEqual({
+      baseline: "0.1.9",
+      target: "0.1.10",
+    });
+    expect(rehearsalVersions("0.2.0-beta.3", "beta")).toEqual({
+      baseline: "0.2.0-beta.1",
+      target: "0.2.0-beta.2",
+    });
+    expect(() => rehearsalVersions("v0.1.0", "latest")).toThrow();
+    expect(() => rehearsalVersions("0.1.0", "alpha")).toThrow(/channel/);
   });
   it("adds a loopback host to the production feed only", () => {
     const original = "owner: lopes-felipe\nrepo: f5\nprovider: github\nchannel: latest\n";

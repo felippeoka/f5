@@ -22,6 +22,9 @@ const profile = resolveReleaseProfile({
   dryRun,
   override: process.env.PROFILE_OVERRIDE,
 });
+const releases = fetchReleaseSummaries(process.env.GITHUB_REPOSITORY!);
+// Dry runs check the lock too, so a profile the tag would reject fails before tagging.
+assertReleaseProfileAllowed(profile, releases);
 let version: string;
 if (dryRun) {
   if (ref !== "main") throw new Error("Dry runs require main");
@@ -41,7 +44,6 @@ if (dryRun) {
     ]),
   ) as { workflow_runs: unknown[] };
   if (!runs.workflow_runs.length) throw new Error("No successful CI push run for release SHA");
-  const releases = fetchReleaseSummaries(process.env.GITHUB_REPOSITORY!);
   for (const release of releases)
     if (
       !release.draft &&
@@ -49,7 +51,6 @@ if (dryRun) {
       compareCliReleaseVersions(version, release.tag_name.slice(1)) <= 0
     )
       throw new Error(`Version must exceed ${release.tag_name}`);
-  assertReleaseProfileAllowed(profile, releases);
   if (!version.includes("-") && !readFileSync("CHANGELOG.md", "utf8").includes(`## [${version}]`))
     throw new Error("Stable release needs changelog entry");
 }

@@ -25,21 +25,28 @@ Apply a tag ruleset restricting create/update/delete of `refs/tags/v*` to admins
 
 First public release: Windows-only `v0.1.0` stable. It is rehearsed without publishing anything: by the `windows-update-rehearsal` job (on every dry run and tag) and by the manual acceptance checks below. No public beta precedes it.
 
-The rehearsal job builds unpublished installers for the release's base version and its next patch. It then runs `scripts/windows-update-rehearsal.ts` on a fresh Windows runner, which:
+The rehearsal job builds two unpublished installers from the release commit, on the release channel. Stable pairs are the base version and its next patch; beta pairs are `<base>-beta.1` and `<base>-beta.2`, which resolve through the Atom feed. It then runs `scripts/windows-update-rehearsal.ts` on a fresh Windows runner, which:
 
 - installs the baseline silently and redirects that installation's `app-update.yml` to a loopback GitHub emulator, so the real GitHub provider code path runs;
-- launches the app without Node or Bun on PATH;
+- renames every directory providing Node or Bun on F5's effective PATH (inherited, registry machine/user, and the known install folders F5 adds at startup), then launches the app and checks that no Node or Bun process starts;
 - through the renderer bridge and UI Automation, exercises an offline check, sha512 rejection, an interrupted download and retry, cancellation, installer-launch failure recovery, and the real restart into the target;
 - verifies the version, install path, Start Menu shortcut and preserved profile data (seeded settings, markers and the app's own state files);
 - uninstalls silently and checks that user data stays.
 
 `assemble` depends on it, so no draft is created without it.
 
-1. Run `node scripts/prepare-release.ts 0.1.0-beta.1` (or a higher version). It updates four manifests and the lockfile. Stable preparation moves Unreleased into a dated section; beta preparation leaves it untouched. Follow the printed commands to open a release PR.
+What the rehearsal does **not** prove:
+
+- **Published clients:** both builds contain the release commit's updater, so it cannot show that already-published clients can update to the new release. That matters from the second Windows release on. Before tagging `v0.1.1` (or any Windows release after `v0.1.0`), change the job to use the latest published stable installer as the baseline and the `desktop-win-x64` build artifact as the target.
+- **Signed builds:** its builds are always unsigned. When Windows signing is enabled, extend it to signed-to-signed upgrades and to rejecting unsigned or wrongly signed updates.
+
+A green dry run with the release's profile is a hard precondition for tagging. The rehearsal has no non-blocking mode; a flaky failure means re-running the job.
+
+1. Run `node scripts/prepare-release.ts <version>`: `0.1.0` for the Windows-only first release (no beta). With the `all` profile, rehearse as `X.Y.Z-beta.N` first. It updates four manifests and the lockfile. Stable preparation moves Unreleased into a dated section; beta preparation leaves it untouched. Follow the printed commands to open a release PR.
 2. Merge and wait for a successful **CI push** run on main at the exact release SHA.
 3. Run `git tag vX.Y.Z <sha>` and `git push origin vX.Y.Z` (use `-beta.N` for beta). Only stable and beta.N tags are accepted. The version must exceed every published stable/beta version.
-4. Approve the release environment. The workflow builds, signs, notarizes, checks all hashes/manifests, and creates a **draft**. Updaters cannot see drafts. `workflow_dispatch` with `dry_run=true` on main rehearses builds with a unique dryrun version and creates no release.
-5. Smoke-test one installer per OS and both macOS architectures using the checklist below. Inspect `release-bundle`, staged dependency lock artifacts, and the draft's asset names and sizes. Changelog text is the release body; YAML never contains releaseNotes.
+4. Approve the release environment. The workflow builds the profile's desktops (with `all`, it also signs and notarizes macOS; with `windows`, it produces only the unsigned Windows installer), runs the Windows rehearsal, checks all hashes/manifests, and creates a **draft**. Updaters cannot see drafts. `workflow_dispatch` with `dry_run=true` on main rehearses builds with a unique dryrun version and creates no release.
+5. Smoke-test using the checklist for the profile below: Windows only for `windows`; one installer per OS and both macOS architectures for `all`. Inspect `release-bundle`, staged dependency lock artifacts, and the draft's asset names and sizes. Changelog text is the release body; YAML never contains releaseNotes.
 6. Publish: `gh release edit <tag> --draft=false`, adding `--latest` for stable. Beta releases remain prereleases.
 
 Published releases are immutable. Fix regressions with a higher patch release; never overwrite assets or enable downgrades. Existing drafts are preserved on retry for inspection. After verifying that an existing release is still a draft and saving anything needed for investigation, the maintainer can remove only that draft with `gh release delete <tag> --yes` (without `--cleanup-tag`), then rerun publication. The tag is retained. Agents do not perform this destructive operation under this repository's Git/GitHub policy.
@@ -51,6 +58,7 @@ Releases across both channels must increase globally. If a higher beta is alread
 ## Windows-only checklist (`windows` profile; record results in the PR)
 
 - Dry run on main with `profile=windows`: the Windows installer, blockmap and `latest.yml`, five CLI archives, the CLI manifest and `SHA256SUMS` assemble, `windows-update-rehearsal` passes, and no release is created.
+- Confirm that the `refs/tags/v*` tag ruleset is active and release immutability is enabled. With unsigned Windows updates, these controls, plus the sha512 in the release's `latest.yml`, are the only protection for installed clients until a signed release embeds `publisherName`.
 - Before publishing, confirm the macOS preview app has no `resources/app-update.yml`, so it shows no update errors once a Windows-only release becomes latest.
 - On clean Windows 10 and Windows 11 x64 VMs, using the **draft's** installer:
   - Download through a browser (SmartScreen path), verify its hash against `SHA256SUMS`, install, launch without Node/Bun, create data, and uninstall (data is kept).

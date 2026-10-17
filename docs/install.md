@@ -2,7 +2,7 @@
 
 Download installers from [GitHub Releases](https://github.com/lopes-felipe/f5/releases/latest). F5 bundles its backend runtime; Node, Bun and a source checkout are unnecessary. Git and your chosen provider CLI are separate prerequisites for using agents; diagnostics remain available if either is missing.
 
-Current availability: Windows x64 has stable releases with in-app updates. macOS Apple Silicon has only the computer use preview below. macOS Intel and Linux desktop builds are not yet available. The `f5` CLI ships for all five targets in every release.
+Current availability: Windows x64 is the first stable desktop platform, starting with `v0.1.0`, with in-app updates. If the latest release lists no `F5-<version>-x64.exe`, that first Windows release has not been published yet. macOS Apple Silicon has only the computer use preview below. macOS Intel and Linux desktop builds are not yet available. The `f5` CLI ships for all five targets in every release.
 
 ## macOS
 

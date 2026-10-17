@@ -210,7 +210,8 @@ jobs:
         shell: bash
     env:
       VERSION: ${{ needs.preflight.outputs.version }}
-      T3CODE_DESKTOP_UPDATE_CHANNEL: latest
+      CHANNEL: ${{ needs.preflight.outputs.channel }}
+      T3CODE_DESKTOP_UPDATE_CHANNEL: ${{ needs.preflight.outputs.channel }}
     steps:
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
@@ -223,7 +224,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - run: bun install --frozen-lockfile
       - id: versions
-        run: node --input-type=module -e 'import { rehearsalVersions } from "./scripts/lib/update-rehearsal.ts"; const v = rehearsalVersions(process.env.VERSION); console.log(`baseline=${v.baseline}\ntarget=${v.target}`)' >> "$GITHUB_OUTPUT"
+        run: node --input-type=module -e 'import { rehearsalVersions } from "./scripts/lib/update-rehearsal.ts"; const v = rehearsalVersions(process.env.VERSION, process.env.CHANNEL); console.log(`baseline=${v.baseline}\ntarget=${v.target}`)' >> "$GITHUB_OUTPUT"
       - name: Build unpublished baseline and target installers
         env:
           BASELINE: ${{ steps.versions.outputs.baseline }}
@@ -235,7 +236,14 @@ jobs:
             node scripts/build-desktop-artifact.ts --skip-build --platform win --arch x64 --target nsis --build-version "$version" --output-dir "rehearsal/$version"
           done
       - name: Install, upgrade and uninstall through a loopback feed
-        run: node scripts/windows-update-rehearsal.ts --baseline-dir "rehearsal/${{ steps.versions.outputs.baseline }}" --target-dir "rehearsal/${{ steps.versions.outputs.target }}" --baseline "${{ steps.versions.outputs.baseline }}" --target "${{ steps.versions.outputs.target }}" --log-dir rehearsal-logs
+        env:
+          BASELINE: ${{ steps.versions.outputs.baseline }}
+          TARGET: ${{ steps.versions.outputs.target }}
+        # The script hides every Node/Bun directory F5 could find, so it runs from a copy.
+        run: |
+          mkdir -p "$RUNNER_TEMP/rehearsal-node"
+          cp "$(command -v node)" "$RUNNER_TEMP/rehearsal-node/node.exe"
+          "$RUNNER_TEMP/rehearsal-node/node.exe" scripts/windows-update-rehearsal.ts --baseline-dir "rehearsal/$BASELINE" --target-dir "rehearsal/$TARGET" --baseline "$BASELINE" --target "$TARGET" --channel "$CHANNEL" --log-dir rehearsal-logs
       - if: always()
         uses: actions/upload-artifact@v4
         with:
