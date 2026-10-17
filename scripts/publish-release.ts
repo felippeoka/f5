@@ -1,5 +1,10 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { readdirSync, statSync } from "node:fs";
+import {
+  assertReleaseProfileAllowed,
+  fetchReleaseSummaries,
+  parseReleaseProfile,
+} from "./lib/release-profile.ts";
 const tag = process.env.TAG!;
 const run = (args: string[]) => execFileSync("gh", args, { encoding: "utf8" });
 const existing = spawnSync("gh", ["release", "view", tag, "--json", "isDraft"], {
@@ -10,6 +15,11 @@ if (existing.status === 0) {
   // Preserve existing drafts and assets. A maintainer can inspect a failed attempt.
   throw new Error("A draft already exists. Inspect it before retrying publication.");
 }
+// Re-check immediately before the draft exists: another release may have shipped since preflight.
+assertReleaseProfileAllowed(
+  parseReleaseProfile(process.env.PROFILE),
+  fetchReleaseSummaries(process.env.GH_REPO!),
+);
 const assets = readdirSync("release-assets").sort();
 run([
   "release",

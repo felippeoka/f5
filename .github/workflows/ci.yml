@@ -67,6 +67,9 @@ jobs:
       - name: Run full test suite
         run: bun run test:full
 
+      - name: Release smoke checks (both desktop profiles)
+        run: bun run release:smoke
+
       - name: Fetch authoritative upstream history
         run: |
           git remote add upstream https://github.com/pingdotgg/t3code.git

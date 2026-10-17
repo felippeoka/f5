@@ -135,11 +135,12 @@ Guides: [threads and workspaces](./docs/user/threads-and-workspaces.md) and [age
 
 ## Download
 
-[Download F5](https://github.com/lopes-felipe/f5/releases/latest) for macOS, Windows or Linux. No Node or Bun runtime is needed.
+[Download F5](https://github.com/lopes-felipe/f5/releases/latest). No Node or Bun runtime is needed.
 
-- macOS: open the DMG and drag F5 to Applications. Screen Recording and Accessibility are only needed for the optional computer use preview.
-- Windows: run the per-user x64 installer, then open F5 from the Start menu.
-- Linux: make the x64 AppImage executable and open it from a writable folder.
+- Windows: run the per-user x64 installer, then open F5 from the Start menu. Windows x64 is the first stable desktop platform, with in-app updates.
+- macOS: no stable release yet. Apple Silicon has an unsigned computer use preview.
+- Linux: no desktop build yet.
+- The `f5` CLI ships for every platform; see the [standalone CLI](./docs/user/standalone-cli.md).
 
 See [installation and preview upgrade instructions](docs/install.md). Check for updates in Settings → About.
 

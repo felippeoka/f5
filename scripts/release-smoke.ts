@@ -1,4 +1,5 @@
 import { createReleaseFixture } from "./lib/release-fixture.ts";
+import { mergesMacManifests, RELEASE_PROFILES } from "./lib/release-profile.ts";
 import {
   parseMacUpdateManifest,
   serializeMacUpdateManifest,
@@ -134,63 +135,69 @@ try {
     "Merged manifest is missing the x64 asset.",
   );
 
-  const fixture = createReleaseFixture();
-  try {
-    const macPath = join(fixture.dir, "beta-mac.yml");
-    const mac = parseMacUpdateManifest(readFileSync(macPath, "utf8"), macPath);
-    const x64 = join(fixture.dir, "beta-mac-x64.yml");
-    writeFileSync(
-      macPath,
-      serializeMacUpdateManifest({
-        ...mac,
-        files: mac.files.filter((file) => file.url.includes("arm64")),
-      }),
-    );
-    writeFileSync(
-      x64,
-      serializeMacUpdateManifest({
-        ...mac,
-        files: mac.files.filter((file) => file.url.includes("x64")),
-      }),
-    );
-    execFileSync(process.execPath, [
-      resolve(repoRoot, "scripts/merge-mac-update-manifests.ts"),
-      macPath,
-      x64,
-    ]);
-    rmSync(x64);
-    const cliPath = join(fixture.dir, "f5-cli-release.json");
-    const cli = JSON.parse(readFileSync(cliPath, "utf8")) as {
-      schemaVersion: number;
-      version: string;
-      artifacts: { target: string }[];
-    };
-    const fragments = cli.artifacts.map((artifact) => {
-      const path = join(fixture.dir, `f5-${artifact.target}.json`);
-      writeFileSync(path, JSON.stringify({ ...cli, artifacts: [artifact] }));
-      return path;
-    });
-    rmSync(cliPath);
-    execFileSync(process.execPath, [
-      resolve(repoRoot, "scripts/merge-cli-release-manifests.ts"),
-      cliPath,
-      ...fragments,
-    ]);
-    for (const path of fragments) rmSync(path);
-    execFileSync(process.execPath, [
-      resolve(repoRoot, "scripts/assemble-release-checksums.ts"),
-      fixture.dir,
-    ]);
-    execFileSync(process.execPath, [
-      resolve(repoRoot, "scripts/verify-release-assets.ts"),
-      "--version",
-      fixture.version,
-      "--channel",
-      "beta",
-      fixture.dir,
-    ]);
-  } finally {
-    rmSync(fixture.dir, { recursive: true, force: true });
+  for (const profile of RELEASE_PROFILES) {
+    const fixture = createReleaseFixture(profile);
+    try {
+      if (mergesMacManifests(profile)) {
+        const macPath = join(fixture.dir, "beta-mac.yml");
+        const mac = parseMacUpdateManifest(readFileSync(macPath, "utf8"), macPath);
+        const x64 = join(fixture.dir, "beta-mac-x64.yml");
+        writeFileSync(
+          macPath,
+          serializeMacUpdateManifest({
+            ...mac,
+            files: mac.files.filter((file) => file.url.includes("arm64")),
+          }),
+        );
+        writeFileSync(
+          x64,
+          serializeMacUpdateManifest({
+            ...mac,
+            files: mac.files.filter((file) => file.url.includes("x64")),
+          }),
+        );
+        execFileSync(process.execPath, [
+          resolve(repoRoot, "scripts/merge-mac-update-manifests.ts"),
+          macPath,
+          x64,
+        ]);
+        rmSync(x64);
+      }
+      const cliPath = join(fixture.dir, "f5-cli-release.json");
+      const cli = JSON.parse(readFileSync(cliPath, "utf8")) as {
+        schemaVersion: number;
+        version: string;
+        artifacts: { target: string }[];
+      };
+      const fragments = cli.artifacts.map((artifact) => {
+        const path = join(fixture.dir, `f5-${artifact.target}.json`);
+        writeFileSync(path, JSON.stringify({ ...cli, artifacts: [artifact] }));
+        return path;
+      });
+      rmSync(cliPath);
+      execFileSync(process.execPath, [
+        resolve(repoRoot, "scripts/merge-cli-release-manifests.ts"),
+        cliPath,
+        ...fragments,
+      ]);
+      for (const path of fragments) rmSync(path);
+      execFileSync(process.execPath, [
+        resolve(repoRoot, "scripts/assemble-release-checksums.ts"),
+        fixture.dir,
+      ]);
+      execFileSync(process.execPath, [
+        resolve(repoRoot, "scripts/verify-release-assets.ts"),
+        "--version",
+        fixture.version,
+        "--channel",
+        "beta",
+        "--profile",
+        profile,
+        fixture.dir,
+      ]);
+    } finally {
+      rmSync(fixture.dir, { recursive: true, force: true });
+    }
   }
 
   console.log("Release smoke checks passed.");

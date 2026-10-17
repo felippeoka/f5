@@ -320,6 +320,14 @@
       "types": "./src/runtimeInfo.ts",
       "import": "./src/runtimeInfo.ts"
     },
+    "./mcpImport": {
+      "types": "./src/mcpImport.ts",
+      "import": "./src/mcpImport.ts"
+    },
+    "./mcpValidation": {
+      "types": "./src/mcpValidation.ts",
+      "import": "./src/mcpValidation.ts"
+    },
     "./workflowSummary": {
       "types": "./src/workflowSummary.ts",
       "import": "./src/workflowSummary.ts"
@@ -331,7 +339,8 @@
   },
   "dependencies": {
     "@t3tools/contracts": "workspace:*",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "smol-toml": "1.6.0"
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",
