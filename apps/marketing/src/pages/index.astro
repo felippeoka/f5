@@ -26,25 +26,39 @@ import { RELEASES_URL } from "../lib/releases";
 
 <script>
   import {
+    DOWNLOAD_AVAILABILITY,
     fetchLatestRelease,
-    pickPlatformAsset,
-    RELEASES_URL,
-    type DownloadPlatform,
+    resolveDownload,
+    type DownloadTarget,
   } from "../lib/releases";
 
-  type Platform = DownloadPlatform & { label: string };
+  type Platform = { os: "mac" | "win" | "linux"; target: DownloadTarget; label: string };
 
-  function detectPlatform(): Platform | null {
-    const ua = navigator.userAgent;
-    if (/Win/i.test(ua)) return { os: "win", label: "Download for Windows" };
-    if (/Mac/i.test(ua)) {
-      return {
-        os: "mac",
-        label: `Download for macOS`,
-        arch: "arm64",
-      };
+  /** Chromium's client hints report "arm" on Apple Silicon; other browsers cannot tell. */
+  async function isAppleSilicon(): Promise<boolean> {
+    const hints = (
+      navigator as Navigator & {
+        userAgentData?: {
+          getHighEntropyValues(keys: string[]): Promise<{ architecture?: string }>;
+        };
+      }
+    ).userAgentData;
+    try {
+      return (await hints?.getHighEntropyValues(["architecture"]))?.architecture === "arm";
+    } catch {
+      return false;
     }
-    if (/Linux/i.test(ua)) return { os: "linux", label: "Download for Linux" };
+  }
+
+  async function detectPlatform(): Promise<Platform | null> {
+    const ua = navigator.userAgent;
+    if (/Win/i.test(ua)) return { os: "win", target: "win-x64", label: "Download for Windows" };
+    if (/Mac/i.test(ua))
+      // Intel Macs and undetectable architectures get the download page and its caveats.
+      return (await isAppleSilicon())
+        ? { os: "mac", target: "mac-arm64", label: "Download macOS preview (Apple Silicon)" }
+        : { os: "mac", target: "mac-x64", label: "macOS: see download options" };
+    if (/Linux/i.test(ua)) return { os: "linux", target: "linux-x64", label: "Linux: not yet available" };
     return null;
   }
 
@@ -53,22 +67,27 @@ import { RELEASES_URL } from "../lib/releases";
     const label = document.getElementById("download-label");
     if (!btn || !label) return;
 
-    const platform = detectPlatform();
+    const platform = await detectPlatform();
     if (!platform) return;
 
     document.documentElement.dataset.platform = platform.os;
     label.textContent = platform.label;
 
-    try {
-      const release = await fetchLatestRelease();
-      const url = pickPlatformAsset(release.assets, platform);
-      btn.href = url ?? RELEASES_URL;
-      if (url) {
-        btn.removeAttribute("target");
-        btn.removeAttribute("rel");
+    const availability = DOWNLOAD_AVAILABILITY[platform.target];
+    let release = null;
+    if (availability.kind === "stable") {
+      try {
+        release = await fetchLatestRelease();
+      } catch {
+        // resolveDownload falls back to the releases page.
       }
-    } catch {
-      btn.href = RELEASES_URL;
+    }
+    const { href } = resolveDownload(platform.target, release);
+    // Without a direct installer, the download page explains each platform's status.
+    btn.href = href ?? "/download";
+    if (href && href.includes("/releases/download/")) {
+      btn.removeAttribute("target");
+      btn.removeAttribute("rel");
     }
   }
 

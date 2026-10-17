@@ -10,6 +10,7 @@ import desktopPackageJson from "../apps/desktop/package.json" with { type: "json
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
 import { verifyStagedLockfile } from "./verify-staged-lockfile.ts";
+import { RELEASE_UPDATE_REPOSITORY, verifyAppUpdateConfig } from "./lib/app-update-config.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
@@ -452,7 +453,7 @@ function resolveFffBinaryDependencies(
   );
 }
 
-function resolveGitHubPublishConfig():
+function resolveGitHubPublishConfig(release: boolean):
   | {
       readonly provider: "github";
       readonly owner: string;
@@ -461,10 +462,12 @@ function resolveGitHubPublishConfig():
       readonly channel: string;
     }
   | undefined {
-  const rawRepo =
-    process.env.T3CODE_DESKTOP_UPDATE_REPOSITORY?.trim() ||
-    process.env.GITHUB_REPOSITORY?.trim() ||
-    "";
+  // Versioned builds always bake the production feed; the override only serves local builds.
+  const rawRepo = release
+    ? RELEASE_UPDATE_REPOSITORY
+    : process.env.T3CODE_DESKTOP_UPDATE_REPOSITORY?.trim() ||
+      process.env.GITHUB_REPOSITORY?.trim() ||
+      "";
   if (!rawRepo) return undefined;
 
   const [owner, repo, ...rest] = rawRepo.split("/");
@@ -484,7 +487,14 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   target: string,
   productName: string,
   signed: boolean,
+  release: boolean,
 ) {
+  const repositoryOverride = process.env.T3CODE_DESKTOP_UPDATE_REPOSITORY?.trim();
+  if (release && repositoryOverride && repositoryOverride !== RELEASE_UPDATE_REPOSITORY) {
+    return yield* new BuildScriptError({
+      message: `Versioned builds use the ${RELEASE_UPDATE_REPOSITORY} update feed; unset T3CODE_DESKTOP_UPDATE_REPOSITORY (${repositoryOverride}).`,
+    });
+  }
   const buildConfig: Record<string, unknown> = {
     appId: "io.github.lopesfelipe.f5",
     electronFuses: {
@@ -507,9 +517,13 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       buildResources: "apps/desktop/resources",
     },
   };
-  const publishConfig = resolveGitHubPublishConfig();
+  const publishConfig = resolveGitHubPublishConfig(release);
   if (publishConfig) {
     buildConfig.publish = [publishConfig];
+  } else if (release) {
+    return yield* new BuildScriptError({
+      message: "Versioned builds require a resolved update feed.",
+    });
   }
 
   if (platform === "mac") {
@@ -564,6 +578,12 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     };
     if (signed) {
       winConfig.azureSignOptions = yield* AzureTrustedSigningOptionsConfig;
+    } else {
+      // `signAndEditExecutable: false` would also skip rcedit and drop the icon and
+      // version metadata. Without a publisherName, updates skip signature checks;
+      // the first signed release embeds one for all later updates.
+      winConfig.signExecutable = false;
+      winConfig.verifyUpdateCodeSignature = false;
     }
     buildConfig.win = winConfig;
     buildConfig.nsis = {
@@ -752,6 +772,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       options.target,
       desktopPackageJson.productName ?? "F5",
       options.signed,
+      options.version !== undefined,
     ),
     dependencies: {
       ...resolvedServerDependencies,
@@ -812,6 +833,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     delete buildEnv.APPLE_API_KEY;
     delete buildEnv.APPLE_API_KEY_ID;
     delete buildEnv.APPLE_API_ISSUER;
+    // A stray Windows certificate would otherwise sign and embed a publisherName.
+    delete buildEnv.WIN_CSC_LINK;
+    delete buildEnv.WIN_CSC_KEY_PASSWORD;
   }
 
   if (process.platform === "win32") {
@@ -856,6 +880,34 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   if (!(yield* fs.exists(stageDistDir))) {
     return yield* new BuildScriptError({
       message: `Build completed but dist directory was not found at ${stageDistDir}`,
+    });
+  }
+
+  if (options.platform === "win" && options.version !== undefined) {
+    const unpacked = options.arch === "x64" ? "win-unpacked" : `win-${options.arch}-unpacked`;
+    const appUpdatePath = path.join(stageDistDir, unpacked, "resources", "app-update.yml");
+    const appUpdate = yield* fs.readFileString(appUpdatePath).pipe(
+      Effect.mapError(
+        (cause) =>
+          new BuildScriptError({
+            message: `Packaged update feed missing at ${appUpdatePath}`,
+            cause,
+          }),
+      ),
+    );
+    yield* Effect.try({
+      try: () =>
+        verifyAppUpdateConfig(appUpdate, {
+          channel: process.env.T3CODE_DESKTOP_UPDATE_CHANNEL || "latest",
+          publisherName: options.signed
+            ? process.env.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME
+            : undefined,
+        }),
+      catch: (cause) =>
+        new BuildScriptError({
+          message: `Packaged update feed is invalid: ${String(cause)}`,
+          cause,
+        }),
     });
   }
 
