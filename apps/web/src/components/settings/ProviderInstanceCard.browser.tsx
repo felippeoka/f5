@@ -340,6 +340,43 @@ function withAdvisory(
 }
 
 describe("provider update execution", () => {
+  for (const [installChannel, message] of [
+    [
+      "remote",
+      "Update OpenCode on the machine hosting the remote server, then refresh and verify.",
+    ],
+    [
+      "self-update",
+      "Check autoUpdatesChannel in Claude settings, update manually, then refresh and verify.",
+    ],
+  ] as const)
+    it(`shows ${installChannel} guidance without claiming an available update`, async () => {
+      const screen = await renderCard({
+        liveProvider: withAdvisory({
+          status: "manual",
+          installChannel,
+          latestVersion: null,
+          updateCommand: null,
+          updateAvailable: false,
+          canRunUpdate: false,
+          message,
+        }),
+        onCheckProviderUpdates: async () => {},
+      });
+      try {
+        expect(
+          page.getByRole("button", { name: "Update available - view details" }).query(),
+        ).toBeNull();
+        await page.getByRole("button", { name: "Codex update details" }).click();
+        expect(document.body.textContent).toContain(message);
+        await expect
+          .element(page.getByRole("button", { name: "Refresh and verify" }))
+          .toBeVisible();
+      } finally {
+        await screen.unmount();
+      }
+    });
+
   it("keeps a known update visible after a failed check without offering an unrunnable update", async () => {
     const check = vi.fn(async () => {});
     const screen = await renderCard({

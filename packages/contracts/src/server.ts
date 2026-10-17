@@ -145,6 +145,8 @@ export const ServerProviderVersionAdvisory = Schema.Struct({
       "isolated_profile",
       "unsupported_source",
       "custom_registry",
+      "registry_unverified",
+      "permissions",
       "remote",
     ]),
   ),

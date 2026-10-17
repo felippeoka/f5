@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ProviderDriverKind,
   ProviderInstanceId,
+  ServerSettingsError,
   ThreadId,
   type ProviderSession,
   type ServerProvider,
@@ -11,6 +12,7 @@ import { expect, vi } from "vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, PubSub, Scope, Stream } from "effect";
 import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { withAccountAdmission } from "../../profiles/ProviderAccountGuard.ts";
 import { ServerConfig } from "../../config.ts";
 import type { ProcessRunOptions, ProcessRunResult } from "../../processRunner.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -60,6 +62,7 @@ function makeHarness(
     enabled?: boolean;
     platform?: NodeJS.Platform;
     isolated?: boolean;
+    settingsReadFailure?: boolean;
   } = {},
 ) {
   return Effect.gen(function* () {
@@ -68,10 +71,14 @@ function makeHarness(
     const config = yield* ServerConfig;
     const ids = options.shared ? [id, otherId] : [id];
     const state = {
-      targets: new Map(ids.map((key) => [key, options.target ?? target])),
+      targets: new Map<ProviderInstanceId, ProviderInstallTarget>(
+        ids.map((key) => [key, options.target ?? target]),
+      ),
       beforeSnapshotRead: Effect.void as Effect.Effect<void>,
       beforeHttp: Effect.void as Effect.Effect<void>,
       beforeStop: Effect.void as Effect.Effect<void, Error>,
+      beforeRefresh: Effect.void as Effect.Effect<void>,
+      registryResult: null as ProcessRunResult | Error | null,
       targetReads: 0,
       httpCalls: 0,
       httpStatus: 200,
@@ -153,20 +160,24 @@ function makeHarness(
       streamChanges: Stream.empty,
       refresh: () => Effect.sync(() => state.snapshots),
       refreshInstance: (instanceId: ProviderInstanceId) =>
-        Effect.sync(() => {
-          state.refreshed.push(instanceId);
-          state.snapshots = state.snapshots.map((snapshot) =>
-            snapshot.instanceId !== instanceId || state.stale
-              ? snapshot
-              : {
-                  ...snapshot,
-                  version: state.version,
-                  checkedAt: new Date().toISOString(),
-                  probeOutcome: state.probeFailure ? "transient_failure" : "success",
-                },
-          );
-          return state.snapshots;
-        }),
+        Effect.suspend(() => state.beforeRefresh).pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              state.refreshed.push(instanceId);
+              state.snapshots = state.snapshots.map((snapshot) =>
+                snapshot.instanceId !== instanceId || state.stale
+                  ? snapshot
+                  : {
+                      ...snapshot,
+                      version: state.version,
+                      checkedAt: new Date().toISOString(),
+                      probeOutcome: state.probeFailure ? "transient_failure" : "success",
+                    },
+              );
+              return state.snapshots;
+            }),
+          ),
+        ),
     };
     const providerService = {
       listSessions: () =>
@@ -190,6 +201,8 @@ function makeHarness(
       runProcess: async (command, args, opts) => {
         if (args[0] === "config") {
           state.registryCalls.push(args[2]!);
+          if (state.registryResult instanceof Error) throw state.registryResult;
+          if (state.registryResult) return state.registryResult;
           return {
             ...processSuccess,
             stdout:
@@ -202,6 +215,17 @@ function makeHarness(
         return state.run(opts);
       },
     }).pipe(
+      Effect.provideService(
+        ServerSettingsService,
+        options.settingsReadFailure
+          ? {
+              ...settings,
+              getSettings: Effect.fail(
+                new ServerSettingsError({ settingsPath: "settings.json", detail: "read failed" }),
+              ),
+            }
+          : settings,
+      ),
       Effect.provideService(ProviderInstanceRegistry, instanceRegistry),
       Effect.provideService(ProviderRegistry, registry),
       Effect.provideService(ProviderService, providerService),
@@ -220,7 +244,16 @@ function makeHarness(
         currentVersion:
           state.snapshots.find((snapshot) => snapshot.instanceId === instanceId)?.version ?? null,
       });
-    return { advisor, state, settings, advisory };
+    const admit = (instanceId: ProviderInstanceId) =>
+      Effect.void.pipe(
+        withAccountAdmission(
+          config.stateDir,
+          instanceId,
+          "test.startWork",
+          state.targets.get(instanceId)?.installKey,
+        ),
+      );
+    return { advisor, state, settings, advisory, admit };
   }).pipe(
     Effect.provide(
       Layer.merge(
@@ -263,6 +296,129 @@ function gate() {
 }
 
 describe("provider update advisor", () => {
+  it.effect(
+    "keeps automatic checks off after a settings read failure while explicit checks still work",
+    () =>
+      Effect.gen(function* () {
+        const { advisor, state } = yield* makeHarness({ settingsReadFailure: true });
+        yield* TestClock.adjust("7 hours");
+        expect(state.httpCalls).toBe(0);
+        yield* advisor.refreshAdvisories({ mode: "explicit" });
+        expect(state.httpCalls).toBe(1);
+      }),
+  );
+  for (const failure of [
+    new Error("spawn failed"),
+    { ...processSuccess, code: 1 },
+    { ...processSuccess, timedOut: true },
+  ])
+    it.effect(
+      `reports registry detection failure separately and retries without caching (${failure instanceof Error ? "spawn" : failure.timedOut ? "timeout" : "exit"})`,
+      () =>
+        Effect.gen(function* () {
+          const { advisor, state, advisory } = yield* makeHarness();
+          state.registryResult = failure;
+          yield* advisor.refreshAdvisories({ mode: "explicit" });
+          expect((yield* advisory()).status).toBe("check_failed");
+          expect((yield* advisory()).blockedReason).toBe("registry_unverified");
+          expect((yield* advisory()).message).toContain("could not determine");
+          expect((yield* advisory()).latestVersion).toBeNull();
+          const calls = state.registryCalls.length;
+          state.registryResult = null;
+          state.instances = state.instances.map((instance) => ({ ...instance }));
+          yield* advisor.noteRegistryChanged;
+          yield* Effect.yieldNow;
+          expect(state.registryCalls.length).toBeGreaterThan(calls);
+          yield* advisor.refreshAdvisories({ mode: "explicit" });
+          expect((yield* advisory()).canRunUpdate).toBe(true);
+        }),
+    );
+  it.effect("does not compare a custom registry against public npm or show a release badge", () =>
+    Effect.gen(function* () {
+      const { advisor, state, advisory } = yield* makeHarness();
+      state.registry = "https://private.example/";
+      yield* advisor.refreshAdvisories({ mode: "explicit" });
+      expect(state.httpCalls).toBe(0);
+      expect((yield* advisory()).status).toBe("manual");
+      expect((yield* advisory()).latestVersion).toBeNull();
+      expect((yield* advisory()).updateAvailable).toBe(false);
+    }),
+  );
+  it.effect("holds admission for every shared instance through installation and verification", () =>
+    Effect.gen(function* () {
+      const { advisor, state, admit } = yield* makeHarness({ shared: true });
+      const pending = gate();
+      state.run = pending.run;
+      const verifying = yield* Deferred.make<void>();
+      const finishVerification = yield* Deferred.make<void>();
+      state.beforeRefresh = Deferred.succeed(verifying, undefined).pipe(
+        Effect.andThen(Deferred.await(finishVerification)),
+      );
+      const caller = yield* advisor.runUpdate(id).pipe(Effect.forkChild);
+      yield* Effect.promise(() => pending.ready);
+      expect((yield* admit(id).pipe(Effect.flip)).message).toContain("update in progress");
+      expect((yield* admit(otherId).pipe(Effect.flip)).message).toContain("update in progress");
+      pending.release(processSuccess);
+      yield* Deferred.await(verifying);
+      expect((yield* admit(otherId).pipe(Effect.flip)).message).toContain("update in progress");
+      yield* Deferred.succeed(finishVerification, undefined);
+      yield* Fiber.join(caller);
+      yield* admit(id);
+      yield* admit(otherId);
+    }),
+  );
+  it.effect("gives shared-install joiners their own versions and verification result", () =>
+    Effect.gen(function* () {
+      const { advisor, state } = yield* makeHarness({ shared: true });
+      state.snapshots = state.snapshots.map((snapshot) =>
+        snapshot.instanceId === otherId ? { ...snapshot, version: "0.9.0" } : snapshot,
+      );
+      const pending = gate();
+      state.run = pending.run;
+      const caller = yield* advisor.runUpdate(id).pipe(Effect.forkChild);
+      yield* Effect.promise(() => pending.ready);
+      const joined = yield* advisor.runUpdate(otherId).pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      pending.release(processSuccess);
+      expect((yield* Fiber.join(caller)).instanceId).toBe(id);
+      const result = yield* Fiber.join(joined);
+      expect(result.instanceId).toBe(otherId);
+      expect(result.previousVersion).toBe("0.9.0");
+      expect(result.currentVersion).toBe("1.1.0");
+      expect(result.outcome).toBe("updated");
+      expect(state.executions).toHaveLength(1);
+    }),
+  );
+
+  it.effect("joins a newly configured physical alias and refreshes it by its own ID", () =>
+    Effect.gen(function* () {
+      const { advisor, state } = yield* makeHarness();
+      const pending = gate();
+      state.run = pending.run;
+      const caller = yield* advisor.runUpdate(id).pipe(Effect.forkChild);
+      yield* Effect.promise(() => pending.ready);
+      state.instances = [
+        ...state.instances,
+        { ...state.instances[0]!, instanceId: otherId, resolveInstallTarget: () => target },
+      ];
+      state.snapshots = [
+        ...state.snapshots,
+        { ...state.snapshots[0]!, instanceId: otherId, version: "0.8.0" },
+      ];
+      const joined = yield* advisor.runUpdate(otherId).pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      pending.release(processSuccess);
+      yield* Fiber.join(caller);
+      const result = yield* Fiber.join(joined);
+      expect(result.instanceId).toBe(otherId);
+      expect(result.previousVersion).toBe("0.8.0");
+      expect(result.currentVersion).toBe("1.1.0");
+      expect(result.outcome).toBe("updated");
+      expect(state.refreshed).toContain(otherId);
+      expect(state.executions).toHaveLength(1);
+    }),
+  );
+
   it.effect("validates the package scope before the global npm registry", () =>
     Effect.gen(function* () {
       const { advisor, state, advisory } = yield* makeHarness({ shared: true });
@@ -311,13 +467,13 @@ describe("provider update advisor", () => {
     }),
   );
   for (const channel of ["remote", "self-update"] as const)
-    it.effect(`does not advertise an unknown ${channel} update`, () =>
+    it.effect(`preserves ${channel} manual guidance without an update notification`, () =>
       Effect.gen(function* () {
         const { advisor, advisory } = yield* makeHarness({
           target: { ...target, channel, latestSource: null, sourceKey: null },
         });
         yield* advisor.refreshAdvisories({ mode: "explicit" });
-        expect((yield* advisory()).status).toBe("unknown");
+        expect((yield* advisory()).status).toBe("manual");
         expect((yield* advisory()).updateAvailable).toBe(false);
         expect((yield* advisory()).canRunUpdate).toBe(false);
       }),
@@ -559,6 +715,17 @@ describe("provider update advisor", () => {
       Effect.gen(function* () {
         const { advisor, state, advisory } = yield* makeHarness({ shared: true });
         state.sessions = [session()];
+        state.targets.set(id, {
+          ...target,
+          updateEnvironment: {
+            ...target.updateEnvironment,
+            OPENAI_API_KEY: "secret",
+            ANTHROPIC_API_KEY: "secret",
+            GITHUB_TOKEN: "secret",
+            HTTPS_PROXY: "http://proxy.test",
+            npm_config_prefix: "/wrong-prefix",
+          },
+        });
         state.run = async (opts) => {
           expect(state.stopped).toEqual(["idle-session"]);
           expect(opts.stdin).toBe("");
@@ -566,6 +733,10 @@ describe("provider update advisor", () => {
           expect(opts.env.HOME).toBe("/real-home");
           expect(opts.env.PATH).toBe("/nvm/bin:/base/bin");
           expect(opts.env.NPM_CONFIG_PREFIX).toBe("/nvm");
+          expect(opts.env.OPENAI_API_KEY).toBeUndefined();
+          expect(opts.env.ANTHROPIC_API_KEY).toBeUndefined();
+          expect(opts.env.GITHUB_TOKEN).toBeUndefined();
+          expect(opts.env.HTTPS_PROXY).toBe("http://proxy.test");
           expect(opts.outputMode).toBe("tail");
           expect(opts.timeoutMs).toBe(600_000);
           return processSuccess;
@@ -812,6 +983,26 @@ describe("provider update advisor", () => {
     }),
   );
 
+  it.effect("shutdown interrupts an already-started verification without retaining admission", () =>
+    Effect.gen(function* () {
+      const childScope = yield* Scope.make();
+      const { advisor, state, admit } = yield* makeHarness().pipe(
+        Effect.provideService(Scope.Scope, childScope),
+      );
+      const verifying = yield* Deferred.make<void>();
+      state.beforeRefresh = Deferred.succeed(verifying, undefined).pipe(
+        Effect.andThen(Effect.never),
+      );
+      const caller = yield* advisor.runUpdate(id).pipe(Effect.forkChild);
+      yield* Deferred.await(verifying);
+      const registryCalls = state.registryCalls.length;
+      yield* Scope.close(childScope, Exit.void);
+      expect((yield* Fiber.join(caller).pipe(Effect.flip)).message).toContain("shutdown");
+      expect(state.registryCalls).toHaveLength(registryCalls);
+      yield* admit(id);
+    }),
+  );
+
   it.effect("aborts on layer shutdown and waits for process settlement before scope close", () =>
     Effect.gen(function* () {
       const childScope = yield* Scope.make();
@@ -820,6 +1011,7 @@ describe("provider update advisor", () => {
       );
       let aborted = false,
         settled = false;
+      state.beforeRefresh = Effect.never;
       const pending = gate();
       state.run = async (opts) => {
         opts.signal!.addEventListener("abort", () => {
@@ -832,11 +1024,15 @@ describe("provider update advisor", () => {
       };
       const caller = yield* advisor.runUpdate(id).pipe(Effect.forkChild);
       yield* Effect.promise(() => pending.ready);
+      const targetReads = state.targetReads;
+      const registryCalls = state.registryCalls.length;
       yield* Scope.close(childScope, Exit.void);
+      expect(state.targetReads).toBe(targetReads);
+      expect(state.registryCalls).toHaveLength(registryCalls);
       expect((yield* Fiber.join(caller).pipe(Effect.flip)).message).toContain("shutdown");
       expect(aborted).toBe(true);
       expect(settled).toBe(true);
-      expect(state.refreshed).toEqual([id]);
+      expect(state.refreshed).toEqual([]);
     }),
   );
 });

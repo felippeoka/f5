@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import * as Path from "node:path";
 import type {
@@ -37,7 +37,12 @@ export interface ProviderInstallTarget {
   readonly latestSource: ProviderLatestSource | null;
   readonly sourceKey: string | null;
   readonly guidance: string;
-  readonly blockedReason?: "custom_registry" | "unsupported_source" | "remote";
+  readonly blockedReason?:
+    | "custom_registry"
+    | "registry_unverified"
+    | "permissions"
+    | "unsupported_source"
+    | "remote";
   readonly npm?: { readonly prefix: string; readonly pkg: string; readonly npmPath: string };
   readonly brew?: { readonly executable: string; readonly ref: string; readonly cask: boolean };
   readonly selfUpdateArgs?: ReadonlyArray<string>;
@@ -58,6 +63,7 @@ export interface InstallTargetDependencies {
   readonly realpath: (path: string) => string;
   readonly exists: (path: string) => boolean;
   readonly readFile: (path: string) => string;
+  readonly canWrite: (path: string) => boolean;
   readonly bundledExecutable: () => string;
   readonly homeDir: string;
   readonly platform: NodeJS.Platform;
@@ -73,6 +79,14 @@ export function detectProviderInstallTarget(
     resolveInvocation,
     realpath: realpathSync,
     exists: existsSync,
+    canWrite: (path) => {
+      try {
+        accessSync(path, constants.W_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    },
     readFile: (path) => readFileSync(path, "utf8"),
     bundledExecutable: resolveBundledClaudeExecutable,
     homeDir: homedir(),
@@ -181,7 +195,7 @@ export function detectProviderInstallTarget(
     const tap = typeof source?.tap === "string" ? source.tap : cask ? "homebrew/cask" : null;
     if (!tap) return unmanaged();
     const core = tap === (cask ? "homebrew/cask" : "homebrew/core");
-    const ref = core || cask ? name : `${tap}/${name}`;
+    const ref = core ? name : `${tap}/${name}`;
     const latestSource: ProviderLatestSource = core
       ? cask
         ? { kind: "brew-api-cask", token: name }
@@ -224,22 +238,35 @@ export function detectProviderInstallTarget(
         deps.platform === "win32" ? "node_modules" : "lib/node_modules",
         pkg,
       );
-      const npmPath = path.join(prefix, deps.platform === "win32" ? "npm.cmd" : "bin/npm");
+      const prefixNpm = path.join(prefix, deps.platform === "win32" ? "npm.cmd" : "bin/npm");
+      // Windows separates the global package prefix from the Node installation; copy-only uses its npm.
+      const npmPath =
+        deps.platform === "win32" && !deps.exists(prefixNpm)
+          ? deps.resolveExecutable("npm", input.resolutionEnvironment, {
+              platform: deps.platform,
+              useCache: false,
+            })
+          : prefixNpm;
       const nodePath = path.join(prefix, deps.platform === "win32" ? "node.exe" : "bin/node");
       if (
         readJson(path.join(packageRoot, "package.json"))?.name !== pkg ||
+        !npmPath ||
         !deps.exists(npmPath) ||
         (deps.platform !== "win32" && !deps.exists(nodePath))
       )
         return unmanaged();
+      const writable =
+        deps.platform === "win32" || deps.canWrite(path.join(prefix, "lib/node_modules"));
       return make(
         "npm",
         executable,
         resolved,
         `npm:${prefix}:${pkg}`,
         npmSource,
-        "Update the public npm package in its existing global prefix.",
-        { npm: { prefix, pkg, npmPath } },
+        writable
+          ? "Update the public npm package in its existing global prefix."
+          : "F5 cannot write to this npm installation. Run the copied command with the permissions required by its original installer, then refresh and verify.",
+        { npm: { prefix, pkg, npmPath }, ...(!writable ? { blockedReason: "permissions" } : {}) },
       );
     }
   }
@@ -263,7 +290,7 @@ export function detectProviderInstallTarget(
       "self-update",
       executable,
       resolved,
-      `self-update:${executable}`,
+      `self-update:${path.join(deps.homeDir, ".local/share/claude")}`,
       source,
       source
         ? "Update with Claude's built-in updater."
@@ -276,12 +303,62 @@ export function detectProviderInstallTarget(
       "self-update",
       executable,
       resolved,
-      `self-update:${executable}`,
+      `self-update:${path.join(deps.homeDir, ".opencode")}`,
       npmSource,
       "Update with OpenCode's built-in updater.",
       { selfUpdateArgs: ["upgrade"] },
     );
   return unmanaged();
+}
+
+/** Installers need OS/tooling configuration, never the provider's API credentials. */
+export function filterProviderUpdateEnvironment(
+  environment: NodeJS.ProcessEnv,
+  channel?: ServerProviderUpdateCommand["channel"],
+): NodeJS.ProcessEnv {
+  const allowed = new Set([
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LANGUAGE",
+    "TERM",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "NODE_EXTRA_CA_CERTS",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "CURL_CA_BUNDLE",
+    "REQUESTS_CA_BUNDLE",
+    "NONINTERACTIVE",
+  ]);
+  const result: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(environment)) {
+    const upper = key.toUpperCase();
+    if (
+      allowed.has(upper) ||
+      upper.startsWith("LC_") ||
+      ((channel === undefined || channel === "npm") && upper.startsWith("NPM_CONFIG_")) ||
+      ((channel === undefined || channel === "homebrew") && upper.startsWith("HOMEBREW_")) ||
+      ((channel === undefined || channel === "self-update") && upper === "CLAUDE_CONFIG_DIR")
+    )
+      result[upper.startsWith("NPM_CONFIG_") ? upper : key] = value;
+  }
+  return result;
 }
 
 export function makeInstanceInstallTargetResolver(
@@ -295,10 +372,12 @@ export function makeInstanceInstallTargetResolver(
     const base = { ...process.env };
     for (const key of Object.keys(base))
       if (key.toUpperCase() === "F5_PROFILE_ISOLATED") delete base[key];
-    const updateEnvironment = buildProviderChildProcessEnv(
-      base,
-      Object.fromEntries(
-        input.instanceEnvironment.map((variable) => [variable.name, variable.value]),
+    const updateEnvironment = filterProviderUpdateEnvironment(
+      buildProviderChildProcessEnv(
+        base,
+        Object.fromEntries(
+          input.instanceEnvironment.map((variable) => [variable.name, variable.value]),
+        ),
       ),
     );
     if (input.claudeConfigDir) updateEnvironment.CLAUDE_CONFIG_DIR = input.claudeConfigDir;
@@ -319,7 +398,7 @@ export function buildProviderUpdateCommand(
       executable: target.npm.npmPath,
       args: ["install", "-g", `${target.npm.pkg}@${latestVersion}`, "--no-audit", "--no-fund"],
       env: { NPM_CONFIG_PREFIX: target.npm.prefix },
-      ...(platform !== "win32" ? { pathPrepend: Path.posix.dirname(target.npm.npmPath) } : {}),
+      pathPrepend: (platform === "win32" ? Path.win32 : Path.posix).dirname(target.npm.npmPath),
       channel: "npm",
       shell,
     };
@@ -351,6 +430,7 @@ export function canRunInApp(
   return (
     (platform === "darwin" || platform === "linux") &&
     (profile?.isDefault ?? true) &&
+    !target.blockedReason &&
     (target.channel === "npm" ||
       target.channel === "homebrew" ||
       (target.channel === "self-update" && !!target.selfUpdateArgs))

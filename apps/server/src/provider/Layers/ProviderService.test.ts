@@ -1,7 +1,7 @@
 import { withProviderThreadAccess } from "../providerThreadAccess.ts";
 import { Deferred } from "effect";
 import { ServerSettingsService } from "../../serverSettings";
-import { beginAccountChange } from "../../profiles/ProviderAccountGuard.ts";
+import { beginAccountChange, beginProviderUpdate } from "../../profiles/ProviderAccountGuard.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +17,7 @@ import type {
 import {
   ApprovalRequestId,
   EventId,
+  ProviderDriverKind,
   ProjectId,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   type ProviderKind,
@@ -45,6 +46,7 @@ import {
   ProviderAdapterRegistry,
   type ProviderAdapterRegistryShape,
 } from "../Services/ProviderAdapterRegistry.ts";
+import type { ProviderInstallTarget } from "../providerInstallChannel.ts";
 import { ProviderService } from "../Services/ProviderService.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import { makeProviderServiceLive, type ProviderServiceLiveOptions } from "./ProviderService.ts";
@@ -3010,6 +3012,106 @@ it.effect(
       assert.ok((yield* Fiber.join(pending)).turnId);
     }).pipe(
       Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]))),
+    );
+  },
+);
+
+it.effect(
+  "rejects starts, recovery and sends for both known instances and new physical aliases during an update",
+  () => {
+    const fake = makeFakeCodexAdapter();
+    let targetAvailable = true;
+    const physical: ProviderInstallTarget = {
+      channel: "self-update",
+      executablePath: "/cli",
+      realPath: "/versions/1.0.0",
+      installKey: "shared-install",
+      updateEnvironment: {},
+      latestSource: null,
+      sourceKey: null,
+      guidance: "test",
+    };
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const known = ProviderInstanceId.make("codex");
+      const alias = ProviderInstanceId.make("codex-alias");
+      const first = asThreadId("update-first");
+      const second = asThreadId("update-alias");
+      for (const [threadId, providerInstanceId] of [
+        [first, known],
+        [second, alias],
+      ] as const)
+        yield* service.startSession(threadId, {
+          threadId,
+          providerInstanceId,
+          runtimeMode: "full-access",
+        });
+      const release = beginProviderUpdate(
+        path.join(os.tmpdir(), `f5-provider-service-tests-${process.pid}`),
+        physical.installKey,
+        [known],
+      );
+      try {
+        for (const threadId of [first, second]) {
+          const failure = yield* service
+            .sendTurn({ threadId, input: "must wait", attachments: [] })
+            .pipe(Effect.flip);
+          assert.match(failure.message, /update in progress/);
+        }
+        const failure = yield* service
+          .startSession(asThreadId("update-new"), {
+            threadId: asThreadId("update-new"),
+            providerInstanceId: alias,
+            runtimeMode: "full-access",
+          })
+          .pipe(Effect.flip);
+        assert.match(failure.message, /update in progress/);
+        // Stopped bindings ordinarily recover; the gate must reject before launching a replacement.
+        yield* service.stopSession({ threadId: second });
+        assert.match(
+          (yield* service
+            .sendTurn({ threadId: second, input: "recover", attachments: [] })
+            .pipe(Effect.flip)).message,
+          /update in progress/,
+        );
+        targetAvailable = false;
+        const unresolved = yield* service
+          .startSession(asThreadId("update-missing-alias"), {
+            threadId: asThreadId("update-missing-alias"),
+            providerInstanceId: alias,
+            runtimeMode: "full-access",
+          })
+          .pipe(Effect.flip);
+        assert.match(
+          unresolved.message,
+          /Could not identify this installation while a provider update is running/,
+        );
+        assert.equal(fake.sendTurn.mock.calls.length, 0);
+        assert.equal(fake.startSession.mock.calls.length, 2);
+      } finally {
+        release();
+        targetAvailable = true;
+      }
+      yield* service.sendTurn({ threadId: second, input: "after update", attachments: [] });
+      assert.equal(fake.sendTurn.mock.calls.length, 1);
+    }).pipe(
+      Effect.provide(
+        makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]), {
+          getByInstance: () => Effect.succeed(fake.adapter),
+          getInstanceInfo: (instanceId) =>
+            Effect.succeed({
+              instanceId,
+              driverKind: ProviderDriverKind.make("codex"),
+              displayName: "Codex",
+              enabled: true,
+              continuationIdentity: {
+                driverKind: ProviderDriverKind.make("codex"),
+                continuationKey: String(instanceId),
+              },
+              resolveInstallTarget: () => (targetAvailable ? physical : null),
+            }),
+        }),
+      ),
     );
   },
 );

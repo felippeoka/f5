@@ -146,3 +146,36 @@ it.skipIf(process.platform === "win32")(
     }
   },
 );
+
+for (const exitCode of [0, 7])
+  it.skipIf(process.platform === "win32")(
+    `preserves exit ${exitCode} when a helper holds stdout open`,
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "f5-process-exited-"));
+      const pidPath = join(root, "helper-pid");
+      const daemon = "setInterval(() => {}, 1000);";
+      const parent = `const child = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(daemon)}], { detached: true, stdio: 'inherit' }); require('node:fs').writeFileSync(${JSON.stringify(pidPath)}, String(child.pid)); child.unref(); process.stdout.write('finished'); process.exitCode = ${exitCode};`;
+      const startedAt = Date.now();
+      try {
+        const result = await runProcess(process.execPath, ["-e", parent], {
+          env: process.env,
+          timeoutMs: 500,
+          allowNonZeroExit: true,
+        });
+        expect(result.code).toBe(exitCode);
+        expect(result.stdout).toBe("finished");
+        expect(result.timedOut).toBe(false);
+        expect(result.aborted).toBe(false);
+        expect(Date.now() - startedAt).toBeLessThan(2500);
+      } finally {
+        if (existsSync(pidPath)) {
+          try {
+            process.kill(Number(readFileSync(pidPath, "utf8")), "SIGKILL");
+          } catch {
+            /* already exited */
+          }
+        }
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );

@@ -93,6 +93,33 @@ describe("ProviderAdvisoryProjectionLive", () => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("keeps source-specific manual guidance even without a known release", () => {
+    const advisory = {
+      ...makeAdvisory(),
+      status: "manual" as const,
+      latestVersion: null,
+      updateCommand: null,
+      updateAvailable: false,
+      canRunUpdate: false,
+      message: "Update OpenCode on its remote host, then refresh and verify.",
+    };
+    return Effect.gen(function* () {
+      const projection = yield* ProviderAdvisoryProjection;
+      const provider = (yield* projection.getProviders)[0]!;
+      assert.strictEqual(provider.versionAdvisory?.status, "manual");
+      assert.strictEqual(provider.versionAdvisory?.latestVersion, null);
+      assert.strictEqual(provider.versionAdvisory?.updateAvailable, false);
+      assert.strictEqual(provider.versionAdvisory?.message, advisory.message);
+    }).pipe(
+      Effect.provide(
+        ProviderAdvisoryProjectionLive.pipe(
+          Layer.provide(registryLayer([makeProvider()])),
+          Layer.provide(advisorLayer(advisory)),
+        ),
+      ),
+    );
+  });
+
   it.effect("does not attach unknown advisories to provider snapshots", () => {
     const provider = makeProvider();
     const unknownAdvisory: ServerProviderVersionAdvisory = {

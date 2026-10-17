@@ -213,6 +213,12 @@ export async function runProcess(
         else resolve(result);
       });
     };
+    const drainPipes = () => {
+      child.stdin.destroy();
+      child.stdout.destroy();
+      child.stderr.destroy();
+      finish();
+    };
     const terminateProcessGroup = () => {
       if (terminating || settled) return;
       terminating = true;
@@ -222,12 +228,8 @@ export async function runProcess(
         killChild(child, "SIGKILL");
         // An escaped daemon can retain our pipes after its process group is gone.
         // Bound pipe draining too, so cancellation always settles and releases callers.
-        drainTimer = setTimeout(() => {
-          child.stdin.destroy();
-          child.stdout.destroy();
-          child.stderr.destroy();
-          finish();
-        }, 100);
+        if (drainTimer) clearTimeout(drainTimer);
+        drainTimer = setTimeout(drainPipes, 100);
       }, 1_000);
     };
     const timeoutTimer = setTimeout(() => {
@@ -319,6 +321,14 @@ export async function runProcess(
     child.once("exit", (code, signal) => {
       exitCode = code;
       exitSignal = signal;
+      if (!terminating) {
+        // The command has completed; inherited pipes must not turn its success into a timeout.
+        clearTimeout(timeoutTimer);
+        drainTimer = setTimeout(() => {
+          killChild(child, "SIGKILL");
+          drainPipes();
+        }, 1000);
+      }
     });
     child.once("close", (code, signal) => {
       exitCode = code;

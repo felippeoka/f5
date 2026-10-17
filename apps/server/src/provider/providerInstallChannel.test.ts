@@ -14,6 +14,7 @@ import { ProviderDriverKind } from "@t3tools/contracts";
 import {
   buildProviderUpdateCommand,
   canRunInApp,
+  filterProviderUpdateEnvironment,
   detectProviderInstallTarget,
   makeInstanceInstallTargetResolver,
   type DetectProviderInstallTargetInput,
@@ -44,6 +45,7 @@ function fixture(
     realpath: () => realPath,
     resolveInvocation: () => ({ file: "C:\\node.exe", args: [realPath], kind: "npmShim" }),
     exists: (file) => Object.hasOwn(files, file),
+    canWrite: () => true,
     readFile: (file) => {
       if (!(file in files)) throw new Error("missing");
       return files[file]!;
@@ -61,6 +63,76 @@ const npmFiles = {
 };
 
 describe("provider installation ownership", () => {
+  it("uses one canonical native-install key for different Claude aliases", () => {
+    const first = fixture("/home/test/.local/share/claude/versions/2.0.0", {
+      driver: "claudeAgent",
+      binaryPath: "/bin/claude-alias",
+    }).target!;
+    const second = fixture("/home/test/.local/share/claude/versions/2.1.0", {
+      driver: "claudeAgent",
+      binaryPath: "/other/claude",
+    }).target!;
+    expect(first.installKey).toBe(second.installKey);
+    expect(first.executablePath).not.toBe(second.executablePath);
+    expect(buildProviderUpdateCommand(first, "linux")?.executable).toBe("/bin/claude-alias");
+  });
+  it("keeps non-writable npm prefixes copy-only", () => {
+    const { input, dependencies } = fixture(
+      "/nvm/v24/lib/node_modules/@openai/codex/bin/codex.js",
+      { files: npmFiles },
+    );
+    const target = detectProviderInstallTarget(input, { ...dependencies, canWrite: () => false })!;
+    expect(target.channel).toBe("npm");
+    expect(target.blockedReason).toBe("permissions");
+    expect(canRunInApp(target, "linux", { isDefault: true })).toBe(false);
+    expect(buildProviderUpdateCommand(target, "linux", "1.1.0")).not.toBeNull();
+  });
+  it("keeps third-party cask references qualified for checking and upgrading", () => {
+    const { target } = fixture("/opt/homebrew/Caskroom/codex/1.0/codex", {
+      files: {
+        "/opt/homebrew/bin/brew": "",
+        "/opt/homebrew/Caskroom/codex/.metadata/INSTALL_RECEIPT.json": JSON.stringify({
+          source: { tap: "custom/tap" },
+        }),
+      },
+    });
+    expect(target?.latestSource).toMatchObject({
+      kind: "brew-local",
+      ref: "custom/tap/codex",
+      cask: true,
+    });
+    expect(buildProviderUpdateCommand(target!, "darwin")?.args).toEqual([
+      "upgrade",
+      "--cask",
+      "custom/tap/codex",
+    ]);
+  });
+  it("finds Windows npm in the Node installation when the global prefix is APPDATA", () => {
+    const prefix = "C:\\Users\\test\\AppData\\Roaming\\npm";
+    const npmPath = "C:\\Program Files\\nodejs\\npm.cmd";
+    const { input, dependencies } = fixture(
+      prefix + "\\node_modules\\@openai\\codex\\bin\\codex.js",
+      {
+        platform: "win32",
+        binaryPath: prefix + "\\codex.cmd",
+        files: {
+          [npmPath]: "",
+          [prefix + "\\node_modules\\@openai\\codex\\package.json"]: '{"name":"@openai/codex"}',
+        },
+      },
+    );
+    const target = detectProviderInstallTarget(input, {
+      ...dependencies,
+      resolveExecutable: (command) => (command === "npm" ? npmPath : input.binaryPath!),
+    })!;
+    expect(target.channel).toBe("npm");
+    const command = buildProviderUpdateCommand(target, "win32", "1.1.0")!;
+    expect(command.executable).toBe(npmPath);
+    expect(command.env).toEqual({ NPM_CONFIG_PREFIX: prefix });
+    expect(command.pathPrepend).toBe("C:\\Program Files\\nodejs");
+    expect(canRunInApp(target, "win32", { isDefault: true })).toBe(false);
+  });
+
   it("uses same-prefix nvm npm and pins the requested version", () => {
     const { target } = fixture("/nvm/v24/lib/node_modules/@openai/codex/bin/codex.js", {
       files: npmFiles,
@@ -267,7 +339,7 @@ describe("provider installation ownership", () => {
         resolutionEnvironment: {},
         updateEnvironment: {},
       };
-      const deps = { homeDir: root, platform: "linux" as const, resolveExecutable: () => bin };
+      const deps = { homeDir: root, platform: process.platform, resolveExecutable: () => bin };
       const first = detectProviderInstallTarget(input, deps);
       unlinkSync(bin);
       symlinkSync(versions[1]!, bin);
@@ -314,3 +386,34 @@ it.each([
     }
   },
 );
+
+it("only gives each updater its own tooling variables and never provider credentials", () => {
+  const environment = {
+    PATH: "/bin",
+    HOME: "/home",
+    HTTPS_PROXY: "http://proxy",
+    SSL_CERT_FILE: "/ca",
+    npm_config_registry: "https://registry.npmjs.org/",
+    HOMEBREW_GITHUB_API_TOKEN: "brew-only",
+    CLAUDE_CONFIG_DIR: "/claude",
+    OPENAI_API_KEY: "secret",
+    ANTHROPIC_API_KEY: "secret",
+    GITHUB_TOKEN: "secret",
+    AWS_SECRET_ACCESS_KEY: "secret",
+    F5_PROFILE_ISOLATED: "1",
+    NODE_OPTIONS: "--require=unexpected.js",
+  };
+  const base = { PATH: "/bin", HOME: "/home", HTTPS_PROXY: "http://proxy", SSL_CERT_FILE: "/ca" };
+  expect(filterProviderUpdateEnvironment(environment, "npm")).toEqual({
+    ...base,
+    NPM_CONFIG_REGISTRY: environment.npm_config_registry,
+  });
+  expect(filterProviderUpdateEnvironment(environment, "homebrew")).toEqual({
+    ...base,
+    HOMEBREW_GITHUB_API_TOKEN: "brew-only",
+  });
+  expect(filterProviderUpdateEnvironment(environment, "self-update")).toEqual({
+    ...base,
+    CLAUDE_CONFIG_DIR: "/claude",
+  });
+});

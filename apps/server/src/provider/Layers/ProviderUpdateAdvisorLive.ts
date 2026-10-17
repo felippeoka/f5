@@ -26,10 +26,12 @@ import { HttpClient } from "effect/unstable/http";
 import { ServerConfig } from "../../config.ts";
 import { runProcess } from "../../processRunner.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { beginProviderUpdate } from "../../profiles/ProviderAccountGuard.ts";
 import { clearCommandResolutionCache } from "../../spawn/resolveCommand.ts";
 import {
   buildProviderUpdateCommand,
   canRunInApp,
+  filterProviderUpdateEnvironment,
   type ProviderInstallTarget,
 } from "../providerInstallChannel.ts";
 import type { ProviderInstance } from "../ProviderDriver.ts";
@@ -69,7 +71,11 @@ interface Flight {
   readonly target: ProviderInstallTarget;
   readonly previousVersion: string;
   readonly installKey: string;
-  readonly affectedIds: readonly ProviderInstanceId[];
+  readonly affectedIds: ProviderInstanceId[];
+  readonly previousVersions: Map<ProviderInstanceId, string | null>;
+  readonly beforeVerification: Map<ProviderInstanceId, ServerProvider>;
+  readonly refreshedIds: Set<ProviderInstanceId>;
+  verificationStartedAt: string | null;
   readonly startedAt: string;
   readonly targetVersion: string;
   readonly deferred: Deferred.Deferred<ProviderUpdateRunResult, ProviderUpdateRunError>;
@@ -112,10 +118,13 @@ export function nextProviderUpdateCheckDelay(
 function installerEnvironment(
   executable: string,
   environment: NodeJS.ProcessEnv,
+  channel: "npm" | "homebrew" | "self-update",
+  platform: NodeJS.Platform,
 ): NodeJS.ProcessEnv {
-  const env = { ...environment };
+  const path = platform === "win32" ? Path.win32 : Path.posix;
+  const env = filterProviderUpdateEnvironment(environment, channel);
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
-  env[pathKey] = Path.dirname(executable) + Path.delimiter + (env[pathKey] ?? "");
+  env[pathKey] = path.dirname(executable) + path.delimiter + (env[pathKey] ?? "");
   for (const key of Object.keys(env))
     if (key.toUpperCase() === "F5_PROFILE_ISOLATED") delete env[key];
   return env;
@@ -179,7 +188,7 @@ export const makeProviderUpdateAdvisor = (
       Effect.gen(function* () {
         const instances = yield* instanceRegistry.listInstances;
         const next = new Map<ProviderInstanceId, ProviderInstallTarget | null>();
-        const passRegistries = new Map<string, boolean>();
+        const passRegistries = new Map<string, boolean | null>();
         for (const instance of instances) {
           const detected = yield* Effect.try({
             try: () => instance.resolveInstallTarget?.() ?? null,
@@ -209,10 +218,15 @@ export const makeProviderUpdateAdvisor = (
             )
               publicRegistry = cached.publicRegistry;
             if (publicRegistry === undefined) {
-              const env = installerEnvironment(npmPath, {
-                ...target.updateEnvironment,
-                NPM_CONFIG_PREFIX: prefix,
-              });
+              const env = installerEnvironment(
+                npmPath,
+                {
+                  ...target.updateEnvironment,
+                  NPM_CONFIG_PREFIX: prefix,
+                },
+                "npm",
+                platform,
+              );
               const readRegistry = (name: string) =>
                 Effect.tryPromise(() =>
                   runner(npmPath, ["config", "get", name], {
@@ -236,17 +250,26 @@ export const makeProviderUpdateAdvisor = (
                 : "undefined";
               if (registry === "undefined" || registry === "null" || registry === "")
                 registry = yield* readRegistry("registry");
-              publicRegistry = registry?.replace(/\/+$/, "") === "https://registry.npmjs.org";
-              registryCache.set(key, { publicRegistry, at: Date.now() });
+              publicRegistry =
+                registry === null
+                  ? null
+                  : registry.replace(/\/+$/, "") === "https://registry.npmjs.org";
+              if (publicRegistry !== null)
+                registryCache.set(key, { publicRegistry, at: Date.now() });
+              else registryCache.delete(key);
             }
             passRegistries.set(key, publicRegistry);
             if (!publicRegistry)
               target = {
                 ...target,
-                channel: "unmanaged",
-                blockedReason: "custom_registry",
+                channel: publicRegistry === null ? "npm" : "unmanaged",
+                blockedReason: publicRegistry === null ? "registry_unverified" : "custom_registry",
+                latestSource: null,
+                sourceKey: null,
                 guidance:
-                  "F5 only automates the public npm registry. Update this installation using its configured registry, then refresh and verify.",
+                  publicRegistry === null
+                    ? "F5 could not determine this package's npm registry. Check npm is available, then refresh and verify."
+                    : "F5 only automates the public npm registry. Update this installation using its configured registry, then refresh and verify.",
               };
           }
           next.set(instance.instanceId, target);
@@ -321,6 +344,21 @@ export const makeProviderUpdateAdvisor = (
               ? `Bundled with F5. Claude Code v${latestVersion} ships with a future F5 release.`
               : "Bundled with F5.",
           };
+        if (target.blockedReason === "registry_unverified")
+          return {
+            ...common,
+            status: "check_failed",
+            canRunUpdate: false,
+            message: target.guidance,
+          };
+        if (!target.latestSource && target.guidance)
+          return {
+            ...common,
+            status: "manual",
+            canRunUpdate: false,
+            updateAvailable: false,
+            message: target.guidance,
+          };
         if (entry?.lastFailure)
           return {
             ...common,
@@ -331,7 +369,8 @@ export const makeProviderUpdateAdvisor = (
               ? { retryAt: new Date(entry.lastFailure.retryAt).toISOString() }
               : {}),
           };
-        if (behind && !command) return { ...common, status: "manual", message: target.guidance };
+        if (behind && (!command || target.blockedReason === "permissions"))
+          return { ...common, status: "manual", message: target.guidance };
         if (!currentVersion || !latestVersion)
           return {
             ...common,
@@ -398,7 +437,7 @@ export const makeProviderUpdateAdvisor = (
         }
         const result = yield* lookupLatestVersion(target.latestSource, {
           runProcess: runner,
-          environment: target.updateEnvironment,
+          environment: filterProviderUpdateEnvironment(target.updateEnvironment, "homebrew"),
           cwd: workDir,
         }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
         const checkedAt = Date.now();
@@ -555,6 +594,7 @@ export const makeProviderUpdateAdvisor = (
       target: ProviderInstallTarget,
       previousVersion: string,
       providerName: string,
+      releaseAdmission: () => void,
     ) =>
       Effect.gen(function* () {
         yield* Effect.logInfo("provider update started", { instanceId, channel: target.channel });
@@ -563,10 +603,13 @@ export const makeProviderUpdateAdvisor = (
         let beforeVerification: ServerProvider | undefined;
         const verifyAfterAttempt = Effect.gen(function* () {
           verificationStartedAt = new Date().toISOString();
-          beforeVerification = (yield* providerRegistry.getProviders).find(
-            (provider) => provider.instanceId === instanceId,
-          );
+          flight.verificationStartedAt = verificationStartedAt;
+          const providers = yield* providerRegistry.getProviders;
+          for (const provider of providers)
+            flight.beforeVerification.set(provider.instanceId, provider);
+          beforeVerification = flight.beforeVerification.get(instanceId);
           yield* refreshAffected(flight.affectedIds);
+          for (const id of flight.affectedIds) flight.refreshedIds.add(id);
         });
         const result = yield* Effect.gen(function* () {
           yield* stopIdleSessions(flight, providerName);
@@ -583,7 +626,7 @@ export const makeProviderUpdateAdvisor = (
           // Capture settlement before making the wait interruptible. Shutdown waits for process-tree termination.
           const settled = Promise.resolve().then(() =>
             runner(command.executable, command.args, {
-              env: installerEnvironment(command.executable, environment),
+              env: installerEnvironment(command.executable, environment, command.channel, platform),
               cwd: workDir,
               stdin: "",
               timeoutMs: 600_000,
@@ -611,7 +654,14 @@ export const makeProviderUpdateAdvisor = (
               }),
             ),
           );
-        }).pipe(Effect.result, Effect.ensuring(verifyAfterAttempt));
+        }).pipe(
+          Effect.result,
+          Effect.onExit((exit) =>
+            Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)
+              ? Effect.void
+              : verifyAfterAttempt.pipe(Effect.interruptible),
+          ),
+        );
         if (result._tag === "Failure" && Schema.is(ProviderUpdateRunError)(result.failure))
           return yield* new ProviderUpdateRunError({ message: result.failure.message });
         const snapshot = (yield* providerRegistry.getProviders).find(
@@ -666,16 +716,70 @@ export const makeProviderUpdateAdvisor = (
                   "Provider update failed unexpectedly. Check the provider status before retrying.",
                 ),
               );
-          return Ref.update(inFlightRef, (active) => (active === flight ? null : active)).pipe(
-            Effect.andThen(targetSemaphore.withPermits(1)(resolveTargets())),
-            Effect.andThen(publish),
-            Effect.andThen(refreshAdvisories().pipe(Effect.forkIn(scope))),
-            // onExit finalizers cannot be interrupted, including this completion on shutdown.
-            Effect.ensuring(Deferred.done(flight.deferred, completed)),
+          const interrupted = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause);
+          const finish = Effect.sync(releaseAdmission).pipe(
+            Effect.andThen(
+              Ref.update(inFlightRef, (active) => (active === flight ? null : active)),
+            ),
+            Effect.andThen(Deferred.done(flight.deferred, completed)),
           );
+          // Process settlement is awaited by onInterrupt; shutdown must not start probes or npm config.
+          if (interrupted) return finish;
+          return targetSemaphore
+            .withPermits(1)(resolveTargets())
+            .pipe(
+              Effect.interruptible,
+              Effect.ensuring(finish),
+              Effect.andThen(publish),
+              Effect.andThen(refreshAdvisories().pipe(Effect.forkIn(scope))),
+            );
         }),
         Effect.asVoid,
       );
+
+    const awaitFlight = (flight: Flight, instanceId: ProviderInstanceId) =>
+      Effect.gen(function* () {
+        if (!flight.affectedIds.includes(instanceId)) {
+          // The same physical install may gain an alias while the worker is running.
+          flight.affectedIds.push(instanceId);
+          const previous = (yield* providerRegistry.getProviders).find(
+            (provider) => provider.instanceId === instanceId,
+          );
+          flight.previousVersions.set(
+            instanceId,
+            previous ? extractProviderVersion(previous.driver, previous.version) : null,
+          );
+        }
+        const result = yield* Deferred.await(flight.deferred);
+        if (instanceId === result.instanceId) return result;
+        if (!flight.refreshedIds.has(instanceId)) yield* refreshAffected([instanceId]);
+        const snapshot = (yield* providerRegistry.getProviders).find(
+          (provider) => provider.instanceId === instanceId,
+        );
+        const previousVersion = flight.previousVersions.get(instanceId) ?? null;
+        const currentVersion = snapshot
+          ? extractProviderVersion(snapshot.driver, snapshot.version)
+          : null;
+        const verified =
+          snapshot &&
+          snapshot !== flight.beforeVerification.get(instanceId) &&
+          snapshot.probeOutcome === "success" &&
+          flight.verificationStartedAt &&
+          Date.parse(snapshot.checkedAt) >= Date.parse(flight.verificationStartedAt) &&
+          currentVersion &&
+          previousVersion;
+        const outcome: ProviderUpdateRunResult["outcome"] =
+          result.outcome === "failed"
+            ? "failed"
+            : !verified
+              ? "unverified"
+              : compareProviderVersions(currentVersion!, previousVersion!) <= 0
+                ? "unchanged"
+                : flight.target.channel === "npm" && currentVersion !== flight.targetVersion
+                  ? "unexpected_version"
+                  : "updated";
+        return { ...result, instanceId, previousVersion, currentVersion, outcome };
+      });
 
     const runUpdate: ProviderUpdateAdvisorShape["runUpdate"] = (instanceId) =>
       Effect.uninterruptibleMask((restore) =>
@@ -684,17 +788,18 @@ export const makeProviderUpdateAdvisor = (
           if (!instance)
             return yield* new ProviderUpdateRunError({ message: "Provider instance not found." });
           const active = yield* Ref.get(inFlightRef);
-          const cachedTarget = (yield* Ref.get(targetsRef)).get(instanceId);
-          if (
-            active &&
-            (active.affectedIds.includes(instanceId) ||
-              cachedTarget?.installKey === active.installKey)
-          )
-            return yield* restore(Deferred.await(active.deferred));
-          if (active)
+          if (active) {
+            const activeInstance = instance;
+            const target = yield* Effect.try({
+              try: () => activeInstance.resolveInstallTarget?.() ?? null,
+              catch: () => null,
+            }).pipe(Effect.orElseSucceed(() => null));
+            if (active.affectedIds.includes(instanceId) || target?.installKey === active.installKey)
+              return yield* restore(awaitFlight(active, instanceId));
             return yield* new ProviderUpdateRunError({
               message: "Another provider update is already running.",
             });
+          }
           // Rebuild the physical target and refresh stale metadata before accepting an installation request.
           yield* restore(refreshAdvisories({ mode: "explicit", instanceId }));
           instance = yield* instanceRegistry.getInstance(instanceId);
@@ -705,7 +810,7 @@ export const makeProviderUpdateAdvisor = (
           const existing = yield* Ref.get(inFlightRef);
           if (existing) {
             if (target?.installKey === existing.installKey)
-              return yield* restore(Deferred.await(existing.deferred));
+              return yield* restore(awaitFlight(existing, instanceId));
             return yield* new ProviderUpdateRunError({
               message: "Another provider update is already running.",
             });
@@ -718,9 +823,8 @@ export const makeProviderUpdateAdvisor = (
             return yield* new ProviderUpdateRunError({
               message: "F5 can't update this installation automatically.",
             });
-          const snapshot = (yield* providerRegistry.getProviders).find(
-            (provider) => provider.instanceId === instanceId,
-          );
+          const snapshots = yield* providerRegistry.getProviders;
+          const snapshot = snapshots.find((provider) => provider.instanceId === instanceId);
           if (!instance.enabled || !snapshot?.enabled || !snapshot.installed)
             return yield* new ProviderUpdateRunError({
               message: "Enable and install this provider before updating.",
@@ -746,6 +850,17 @@ export const makeProviderUpdateAdvisor = (
             previousVersion: currentVersion,
             installKey: target.installKey,
             affectedIds,
+            previousVersions: new Map(
+              snapshots
+                .filter((provider) => affectedIds.includes(provider.instanceId))
+                .map((provider) => [
+                  provider.instanceId,
+                  extractProviderVersion(provider.driver, provider.version),
+                ]),
+            ),
+            beforeVerification: new Map(),
+            refreshedIds: new Set(),
+            verificationStartedAt: null,
             deferred,
             startedAt: new Date().toISOString(),
             targetVersion: latestVersion,
@@ -757,13 +872,24 @@ export const makeProviderUpdateAdvisor = (
           );
           if (claimed) {
             if (claimed.installKey === target.installKey)
-              return yield* restore(Deferred.await(claimed.deferred));
+              return yield* restore(awaitFlight(claimed, instanceId));
             return yield* new ProviderUpdateRunError({
               message: "Another provider update is already running.",
             });
           }
           let workerStarted = false;
+          let releaseAdmission: () => void = () => {};
           yield* Effect.gen(function* () {
+            releaseAdmission = yield* Effect.try({
+              try: () => beginProviderUpdate(serverConfig.stateDir, target.installKey, affectedIds),
+              catch: (cause) =>
+                new ProviderUpdateRunError({
+                  message:
+                    cause instanceof Error
+                      ? cause.message
+                      : "Could not reserve this provider installation for updating.",
+                }),
+            });
             if ((yield* affectedSessions(affectedIds)).some(hasActiveWork))
               return yield* new ProviderUpdateRunError({
                 message: `${instance.displayName ?? instance.driverKind} has active work. Finish or stop it before updating.`,
@@ -775,6 +901,7 @@ export const makeProviderUpdateAdvisor = (
               target,
               currentVersion,
               instance.displayName ?? instance.driverKind,
+              releaseAdmission,
             ).pipe(Effect.interruptible, Effect.forkIn(scope));
             workerStarted = true;
           }).pipe(
@@ -783,17 +910,24 @@ export const makeProviderUpdateAdvisor = (
               const error = Exit.isFailure(exit)
                 ? updateRunError(exit.cause, "Provider update admission failed. Please try again.")
                 : new ProviderUpdateRunError({ message: "Provider update did not start." });
-              return Ref.update(inFlightRef, (active) => (active === flight ? null : active)).pipe(
+              return Effect.sync(releaseAdmission).pipe(
+                Effect.andThen(
+                  Ref.update(inFlightRef, (active) => (active === flight ? null : active)),
+                ),
                 Effect.andThen(Deferred.fail(deferred, error)),
               );
             }),
           );
-          return yield* restore(Deferred.await(deferred));
+          return yield* restore(awaitFlight(flight, instanceId));
         }),
       );
 
     const initial = yield* settings.getSettings.pipe(
-      Effect.catch(() => Effect.succeed({ enableProviderUpdateChecks: true })),
+      Effect.catch(() =>
+        Effect.logWarning(
+          "could not read provider update check setting; automatic checks off",
+        ).pipe(Effect.as({ enableProviderUpdateChecks: false })),
+      ),
     );
     automaticChecks = initial.enableProviderUpdateChecks;
     yield* targetSemaphore.withPermits(1)(resolveTargets());
