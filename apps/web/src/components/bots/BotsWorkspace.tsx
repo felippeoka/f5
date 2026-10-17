@@ -1,3 +1,4 @@
+/** Shelved workspace, not routed or mounted; retained for future work. See PR #148. */
 import {
   BOT_TASK_INSTRUCTIONS_MAX_CHARS,
   BOT_TASK_TERMINAL_STATUSES,

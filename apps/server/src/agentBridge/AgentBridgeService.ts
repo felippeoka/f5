@@ -37,6 +37,8 @@ import { makeThreadTools, type AgentBridgeCaller } from "./threadTools.ts";
 export const AGENT_BRIDGE_STATE_COALESCE_MS = 400;
 const TOUCH_INTERVAL_MS = 60_000;
 const PRUNE_INTERVAL = Duration.hours(6);
+// Shelved with its UI in PR #148. Preserve saved settings without opening an unmanaged listener.
+const AGENT_BRIDGE_LISTENER_AVAILABLE = false;
 
 /**
  * Deletes task progress and completed retry receipts past the 30-day
@@ -271,8 +273,9 @@ export const makeAgentBridgeService = (input: {
         Effect.gen(function* () {
           const previous = settings;
           settings = next;
-          if (next.enabled && !listener) yield* startLocal;
-          if (!next.enabled && listener) yield* stopLocal;
+          const shouldRun = AGENT_BRIDGE_LISTENER_AVAILABLE && next.enabled;
+          if (shouldRun && !listener) yield* startLocal;
+          if (!shouldRun && listener) yield* stopLocal;
           if (localState.status === "failed")
             yield* Effect.logWarning("agentBridge.local.start.failed", {
               detail: localState.detail,
