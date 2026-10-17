@@ -177,6 +177,7 @@
       "dependencies": {
         "@t3tools/contracts": "workspace:*",
         "effect": "catalog:",
+        "smol-toml": "1.6.0",
       },
       "devDependencies": {
         "@effect/language-service": "catalog:",
