@@ -1,5 +1,8 @@
 # F5 Agent Bridge
 
+Internal reference for a hidden feature. Bots and Agent Bridge are no longer exposed in the
+user interface. Their implementation, existing configuration, APIs, and stored data are retained.
+
 The Agent Bridge is a vendor-neutral MCP server inside F5. A ChatGPT Dot, the ChatGPT desktop
 app, or any MCP client can connect to it to read the projects you share and start supervised
 coding threads.
@@ -29,11 +32,10 @@ settings, delete anything, or reach files, terminals, the browser, computer cont
 A connection is whoever holds its credential, not a verified bot. In particular, other ChatGPT
 conversations that use the same connected plugin can use a ChatGPT / Dots connection.
 
-## Turning it on
+## Retained configuration and listener
 
-1. Open **Settings > Integrations > Agent Bridge**.
-2. Turn on **Enable Agent Bridge**. It is off by default.
-3. Tick the projects to share. No project is visible to any agent until you share it.
+Agent Bridge is off by default. Its enablement and shared-project settings remain persisted,
+but the settings card is hidden. No project is visible to an agent unless it is shared.
 
 F5 starts a local listener on `127.0.0.1` with a random port, separate from the app port. The
 port and a 32-byte token, rotated on every start, are written to
@@ -42,8 +44,7 @@ port and a 32-byte token, rotated on every start, are written to
 ## Connecting a local MCP client (STDIO)
 
 Local clients connect through a STDIO shim that reads `local.json` for every request, so a
-restart needs no reconfiguration. Add a STDIO MCP server to your client with the values the
-settings card shows:
+restart needs no reconfiguration. The retained connection formats are:
 
 - **Desktop app:** command = the F5 executable, environment `ELECTRON_RUN_AS_NODE=1`,
   arguments `[<backend entry>, "agent-bridge-stdio", "--state-dir", <dir>, "--profile", <id>]`.
@@ -107,9 +108,8 @@ cannot overshoot it; errors include `retryAfterSeconds`.
 
 ## Task board
 
-F5 can also assign work to a connected agent. Open **Bots** in the sidebar, choose **New task**,
-and pick the client, a shared project, a title, and instructions. The thread menu's **Assign task
-to bot…** pre-fills the task from that thread. The task tools show the agent only the title,
+The retained task board implementation supports assigning work to a connected agent, but its
+page and thread-menu action are hidden. The task tools show the agent only the title,
 instructions, the project's display name, and its own activity — never paths, files,
 transcripts, or settings. (The thread tools above are separate: `list_projects` returns each
 shared project's workspace root.)

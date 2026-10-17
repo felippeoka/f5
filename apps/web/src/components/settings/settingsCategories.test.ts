@@ -105,6 +105,18 @@ describe("settings item descriptors", () => {
     expect(getSettingsItemDescriptor("general.theme")?.id).toBe("appearance.theme");
     expect(getSettingsItemDescriptor("missing.setting")).toBeNull();
   });
+
+  it("keeps Agent Bridge out of search and current or legacy deep links", () => {
+    expect(filterSettingsItems("Agent Bridge")).toEqual([]);
+    expect(filterSettingsItems("bots")).toEqual([]);
+    for (const item of ["tools.agent-bridge", "integrations.agent-bridge"]) {
+      expect(getSettingsItemDescriptor(item)).toBeNull();
+      expect(resolveSettingsSearch({ category: "tools", item })).toEqual({ category: "tools" });
+      expect(resolveSettingsSearch({ category: "integrations", item })).toEqual({
+        category: "tools",
+      });
+    }
+  });
 });
 
 describe("legacy aliases", () => {

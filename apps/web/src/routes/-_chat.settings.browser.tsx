@@ -692,6 +692,8 @@ describe("settings route", () => {
     ["/settings?item=integrations.keybindings", "keyboard", "keyboard.keybindings"],
     ["/settings?item=notifications.pr-refresh", "git", "git.pr-refresh"],
     ["/settings?item=general.pr-merge-method", "git", "git.merge-method"],
+    ["/settings?category=tools&item=tools.agent-bridge", "tools", undefined],
+    ["/settings?category=integrations&item=integrations.agent-bridge", "tools", undefined],
   ])("redirects the legacy deep link %s", async (url, category, item) => {
     const { screen, router } = await renderSettingsRoute(url);
     try {
@@ -1118,6 +1120,11 @@ describe("settings route", () => {
         expect(getCategoryPanelText("tools")).toContain("Common servers");
       });
       expect(document.querySelector('[aria-label="MCP servers project"]')).toBeNull();
+      expect(getCategoryPanelText("tools")).not.toContain("Agent Bridge");
+      expect(
+        document.querySelector('[data-settings-search-target="tools.agent-bridge"]'),
+      ).toBeNull();
+      expect(nativeApiRef.current!.agentBridge.getState).not.toHaveBeenCalled();
     } finally {
       await screen.unmount();
     }

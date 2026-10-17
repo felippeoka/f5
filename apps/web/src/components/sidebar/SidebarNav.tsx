@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { BotIcon, GaugeIcon, GitPullRequestIcon, HomeIcon, type LucideIcon } from "lucide-react";
+import { GaugeIcon, GitPullRequestIcon, HomeIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { readNativeApi } from "../../nativeApi";
@@ -63,7 +63,7 @@ function NavRow(props: {
   );
 }
 
-/** Home, thread search, Pull requests, Bots and Usage. */
+/** Home, thread search, Pull requests and Usage. */
 export function SidebarNav(props: {
   searchQuery: string;
   onSearchQueryChange: (query: string) => void;
@@ -74,7 +74,6 @@ export function SidebarNav(props: {
   const navigate = useNavigate();
   const isOnHome = useLocation({ select: (loc) => loc.pathname === "/" });
   const isOnPullRequests = useLocation({ select: (loc) => loc.pathname === "/pull-requests" });
-  const isOnBots = useLocation({ select: (loc) => loc.pathname === "/bots" });
   const isOnUsage = useLocation({ select: (loc) => loc.pathname === "/usage" });
   const prHubNeedsYouCount = usePrHubNeedsYouCount();
 
@@ -118,14 +117,6 @@ export function SidebarNav(props: {
                 </>
               ) : undefined
             }
-          />
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <NavRow
-            icon={BotIcon}
-            label="Bots"
-            isActive={isOnBots}
-            onSelect={() => void navigate({ to: "/bots" })}
           />
         </SidebarMenuItem>
         <SidebarMenuItem>

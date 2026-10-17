@@ -1383,6 +1383,36 @@ describe("Thread sidebar", () => {
     }
   });
 
+  it.each([
+    "/bots",
+    "/bots?task=old-task",
+    "/bots?fromThread=old-thread",
+    "/bots?task=old-task&fromThread=old-thread",
+  ])("redirects the hidden Bots link %s to Home without adding history", async (url) => {
+    const mounted = await mountApp({
+      width: 1_400,
+      initialEntries: ["/settings"],
+    });
+    try {
+      // Finish startup first so the fixture's bootstrap thread cannot replace Home.
+      await vi.waitFor(() =>
+        expect(useRecoveryStateStore.getState().recoveryEpoch).toBeGreaterThan(0),
+      );
+      await mounted.router.navigate({ href: url });
+      await vi.waitFor(() => {
+        expect(mounted.router.state.location.pathname).toBe("/");
+        expect(mounted.router.state.location.search).toEqual({});
+      });
+      expect(mounted.router.history.length).toBe(2);
+      expect(mounted.router.history.location.href).toBe("/");
+      expect(document.body.textContent).not.toContain("Bot tasks");
+      mounted.router.history.back();
+      await vi.waitFor(() => expect(mounted.router.state.location.pathname).toBe("/settings"));
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("opens the command palette from the sidebar search input", async () => {
     const mounted = await mountApp({
       width: 1_400,
@@ -1418,6 +1448,10 @@ describe("Thread sidebar", () => {
           ).find((button) => button.textContent?.trim() === "Home") ?? null,
         "Home sidebar button should render on the home route.",
       );
+      const navigation = document.querySelector('nav[aria-label="Primary"]');
+      expect(navigation?.textContent).toContain("Pull requests");
+      expect(navigation?.textContent).toContain("Usage");
+      expect(navigation?.textContent).not.toContain("Bots");
 
       expect(
         Boolean(homeButton.compareDocumentPosition(trigger) & Node.DOCUMENT_POSITION_FOLLOWING),

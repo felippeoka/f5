@@ -242,7 +242,6 @@ export const LEGACY_SETTINGS_ITEM_ALIASES: Readonly<Record<string, string>> = {
   // Integrations
   "integrations.browser": "browser.agent-access",
   "integrations.github": "accounts.github",
-  "integrations.agent-bridge": "tools.agent-bridge",
   "integrations.keybindings": "keyboard.keybindings",
   "integrations.search-keybindings": "keyboard.search",
   "integrations.mcp": "tools.mcp",
