@@ -784,8 +784,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       buildEnv.PYTHON = python;
       buildEnv.npm_config_python = python;
     }
-    buildEnv.npm_config_msvs_version = buildEnv.npm_config_msvs_version ?? "2022";
-    buildEnv.GYP_MSVS_VERSION = buildEnv.GYP_MSVS_VERSION ?? "2022";
+    // Let node-gyp pick the newest supported Visual Studio: pinning a year rejects
+    // every other install, and windows-latest now ships only VS 2026.
   }
 
   yield* Effect.log(
@@ -817,7 +817,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       {
         cwd: stageAppDir,
         env: buildEnv,
-        ...commandOutputOptions(options.verbose),
+        // electron-builder reports its errors on stdout, so never hide it.
+        stdout: "inherit",
+        stderr: "inherit",
       },
     ),
   );
