@@ -1,4 +1,4 @@
-import { assertWorktreeReady } from "../../project/worktreeReadiness.ts";
+import { assertWorktreeReady, WorktreeInspectionError } from "../../project/worktreeReadiness.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import type { OrchestrationReadModel, ProjectId, ThreadId } from "@t3tools/contracts";
 import { NextTurnQueueStore } from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
@@ -116,6 +116,24 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
   const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
 
+  const readSteerFallback = (command: OrchestrationCommand) =>
+    Effect.gen(function* () {
+      if (command.type !== "thread.turn.start" && command.type !== "thread.turn.steer")
+        return false;
+      const rows = yield* sql<{
+        readonly event: string;
+      }>`SELECT d.event_json AS event FROM provider_turn_deliveries d JOIN next_turn_queue q ON q.command_id = d.command_id WHERE d.command_id = ${command.commandId} AND d.thread_id = ${command.threadId} AND d.state = 'rejected' AND d.certainty = 'not_sent' AND q.last_error_code = 'steer_queued' AND q.deleted_at IS NULL`;
+      return rows.some(
+        (row) =>
+          Schema.decodeUnknownSync(Schema.fromJsonString(OrchestrationEvent))(row.event).type ===
+          "thread.turn-steer-requested",
+      );
+    }).pipe(Effect.mapError(toPersistenceSqlError("OrchestrationEngine.readSteerFallback")));
+  const workspaceWaitError = (command: OrchestrationCommand, detail: string) =>
+    command.type === "thread.turn.start" && command.dispatchSource === "next-turn-queue"
+      ? new ThreadTurnNotReadyError({ threadId: command.threadId, detail })
+      : new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
     const dispatchStartSequence = readModel.snapshotSequence;
     const processingStartedAtMs = Date.now();
@@ -155,19 +173,8 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         const existingReceipt = yield* commandReceiptRepository.getByCommandId({
           commandId: envelope.command.commandId,
         });
-        const fallbackRows =
-          (envelope.command.type === "thread.turn.start" ||
-            envelope.command.type === "thread.turn.steer") &&
-          Option.isSome(existingReceipt)
-            ? yield* sql<{
-                readonly event: string;
-              }>`SELECT d.event_json AS event FROM provider_turn_deliveries d JOIN next_turn_queue q ON q.command_id = d.command_id WHERE d.command_id = ${envelope.command.commandId} AND d.thread_id = ${envelope.command.threadId} AND d.state = 'rejected' AND d.certainty = 'not_sent' AND q.last_error_code = 'steer_queued' AND q.deleted_at IS NULL`
-            : [];
-        const steerFallback = fallbackRows.some(
-          (row) =>
-            Schema.decodeUnknownSync(Schema.fromJsonString(OrchestrationEvent))(row.event).type ===
-            "thread.turn-steer-requested",
-        );
+        const steerFallback =
+          Option.isSome(existingReceipt) && (yield* readSteerFallback(envelope.command));
         if (Option.isSome(existingReceipt) && !steerFallback) {
           const receipt = existingReceipt.value;
           let matchesAggregate =
@@ -305,10 +312,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             Option.isSome(queueStore) &&
             (yield* queueStore.value.listByThread(command.threadId)).state.worktreeBlockToken
           )
-            return yield* new OrchestrationCommandInvariantError({
-              commandType: command.type,
-              detail: "Workspace preparation is still in progress. Wait for it to finish.",
-            });
+            return yield* workspaceWaitError(
+              command,
+              "Workspace preparation is still in progress. Wait for it to finish.",
+            );
           if (thread?.worktreePath || envelope.workspace) {
             const project = readModel.projects.find(
               (entry) => entry.id === thread?.projectId && entry.deletedAt === null,
@@ -320,10 +327,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               envelope.workspace.branch !== thread.branch ||
               envelope.workspace.projectCwd !== project?.workspaceRoot
             )
-              return yield* new OrchestrationCommandInvariantError({
-                commandType: command.type,
-                detail: "The workspace changed during verification. Retry the request.",
-              });
+              return yield* workspaceWaitError(
+                command,
+                "The workspace changed during verification. Retry the request.",
+              );
           }
         }
 
@@ -748,9 +755,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       let workspace: CommandEnvelope["workspace"];
       if (
         (command.type === "thread.turn.start" || command.type === "thread.turn.steer") &&
-        Option.isNone(
+        (Option.isNone(
           yield* commandReceiptRepository.getByCommandId({ commandId: command.commandId }),
-        )
+        ) ||
+          (yield* readSteerFallback(command)))
       ) {
         const thread = readModel.threads.find((entry) => entry.id === command.threadId);
         if (thread?.worktreePath) {
@@ -776,12 +784,13 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             },
             command.type === "thread.turn.start",
           ).pipe(
-            Effect.mapError(
-              (error) =>
-                new OrchestrationCommandInvariantError({
-                  commandType: command.type,
-                  detail: error.message,
-                }),
+            Effect.mapError((error) =>
+              error instanceof WorktreeInspectionError
+                ? workspaceWaitError(command, error.message)
+                : new OrchestrationCommandInvariantError({
+                    commandType: command.type,
+                    detail: error.message,
+                  }),
             ),
           );
         }

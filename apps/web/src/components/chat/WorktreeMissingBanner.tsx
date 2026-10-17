@@ -10,11 +10,13 @@ export function WorktreeMissingBanner({
   worktreePath,
   branch,
   queue = false,
+  recoveryOnly = false,
 }: {
   threadId: ThreadId;
   worktreePath?: string | null;
   branch?: string | null;
   queue?: boolean;
+  recoveryOnly?: boolean;
 }) {
   const queryClient = useQueryClient();
   const revision = useNextTurnQueueStore((state) => state.byThreadId[threadId]?.snapshot?.revision);
@@ -38,6 +40,7 @@ export function WorktreeMissingBanner({
     } catch (error) {
       setError(error instanceof Error ? error.message : "Recovery failed.");
     } finally {
+      await queryClient.invalidateQueries({ queryKey: ["worktrees"] });
       setBusy(false);
     }
   };
@@ -48,7 +51,7 @@ export function WorktreeMissingBanner({
         <Button
           size="sm"
           variant="outline"
-          disabled={busy}
+          disabled={busy || state.data?.recovery === "running"}
           onClick={() => void recover("useProjectCheckout")}
         >
           Continue in project checkout
@@ -58,7 +61,10 @@ export function WorktreeMissingBanner({
     );
   if (
     !state.data?.worktreePath ||
+    (recoveryOnly && state.data.recovery !== "interrupted" && state.data.recovery !== "running") ||
     (!queue &&
+      state.data.recovery !== "interrupted" &&
+      state.data.recovery !== "running" &&
       (state.data.registration === "matching" ||
         (state.data.branchExists &&
           !state.data.directoryExists &&
@@ -66,6 +72,7 @@ export function WorktreeMissingBanner({
   )
     return null;
   const data = state.data;
+  const recovering = data.recovery === "running";
   const canRecreateOriginal =
     data.branchExists &&
     (data.registration === "matching" ||
@@ -76,21 +83,29 @@ export function WorktreeMissingBanner({
       role="status"
     >
       <p>
-        {data.directoryExists && data.registration === "otherBranch"
-          ? "This checkout is on a different branch or has a different identity. Its files have been kept. Restore the recorded branch to continue here, or choose another workspace."
-          : data.branchExists || data.directoryExists
-            ? "This conversation's worktree needs recovery."
-            : `This thread's worktree and branch ${data.branch ?? "(unknown)"} are gone.`}
+        {data.recovery === "interrupted"
+          ? "Worktree recovery was interrupted. Retry preparation or continue in the project checkout."
+          : recovering
+            ? "Worktree recovery is in progress."
+            : data.directoryExists && data.registration === "otherBranch"
+              ? "This checkout is on a different branch or has a different identity. Its files have been kept. Restore the recorded branch to continue here, or choose another workspace."
+              : data.branchExists || data.directoryExists
+                ? "This conversation's worktree needs recovery."
+                : `This thread's worktree and branch ${data.branch ?? "(unknown)"} are gone.`}
       </p>
       <div className="flex flex-wrap gap-2">
         {canRecreateOriginal ? (
-          <Button size="sm" disabled={busy} onClick={() => void recover("recreate")}>
-            Recreate now
+          <Button
+            size="sm"
+            disabled={busy || state.data?.recovery === "running"}
+            onClick={() => void recover("recreate")}
+          >
+            {data.recovery === "interrupted" ? "Retry recovery" : "Recreate now"}
           </Button>
         ) : (
           <Button
             size="sm"
-            disabled={busy || !data.defaultBranch}
+            disabled={busy || recovering || !data.defaultBranch}
             onClick={() => void recover("recreateFromBase")}
           >
             Recreate from {data.defaultBranch ?? "default branch"}
@@ -99,7 +114,7 @@ export function WorktreeMissingBanner({
         <Button
           size="sm"
           variant="outline"
-          disabled={busy}
+          disabled={busy || state.data?.recovery === "running"}
           onClick={() => void recover("useProjectCheckout")}
         >
           Continue in project checkout

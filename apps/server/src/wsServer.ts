@@ -1557,15 +1557,22 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       command: prepared.command,
       orchestrationEngine: input.orchestrationEngine,
       git: { ...git, createWorktree: createConfiguredWorktree },
-      rollbackWorktree: (receipt) =>
-        removeWorktreeSafely({
-          projectCwd: receipt.cwd,
-          path: receipt.path,
-          policy: {
-            kind: "ownedRollback",
-            ownThreadId: prepared.command.threadId,
-            ownedCreation: { ...receipt, created: true },
-          },
+      rollbackWorktree: (receipt, ownedTerminalId) =>
+        Effect.gen(function* () {
+          if (ownedTerminalId)
+            yield* terminalManager.close({
+              threadId: prepared.command.threadId,
+              terminalId: ownedTerminalId,
+            });
+          return yield* removeWorktreeSafely({
+            projectCwd: receipt.cwd,
+            path: receipt.path,
+            policy: {
+              kind: "ownedRollback",
+              ownThreadId: prepared.command.threadId,
+              ownedCreation: { ...receipt, created: true },
+            },
+          });
         }).pipe(
           Effect.provideService(GitCore, git),
           Effect.provideService(ServerConfig, serverConfig),
@@ -3208,7 +3215,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     host: agentBridgeHost,
     store: makeAgentBridgeStore(sql),
     tasks: makeBotTaskStore(sql),
-    settingsChanges: serverSettings.streamChanges,
+    settingsChanges: yield* serverSettings.subscribeChanges,
     stateDir: serverConfig.stateDir,
     serverVersion: serverPackageVersion,
     stdio: agentBridgeStdioSetups({
@@ -4764,17 +4771,24 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             break;
           }
         }
-        if (!projectId) return yield* Effect.fail(new Error("Unknown project"));
-        const preview = yield* worktreeManager.inspect({ projectId, path: body.path });
-        const result = yield* worktreeManager.remove({
-          projectId,
-          path: body.path,
-          deleteBranch: false,
-          expectedHead: preview.headSha,
-        });
+        if (!projectId)
+          return yield* Effect.fail(new RouteRequestError({ message: "Unknown project" }));
+        const preview = yield* worktreeManager
+          .inspect({ projectId, path: body.path })
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+        const result = yield* worktreeManager
+          .remove({
+            projectId,
+            path: body.path,
+            deleteBranch: false,
+            expectedHead: preview.headSha,
+          })
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
         if (!result.removed)
           return yield* Effect.fail(
-            new Error(result.blockedReasons.join("; ") || "Worktree was not removed."),
+            new RouteRequestError({
+              message: result.blockedReasons.join("; ") || "Worktree was not removed.",
+            }),
           );
         return;
       }
@@ -5682,19 +5696,27 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.worktreesInspect: {
         const { worktreeManager } = yield* awaitOrchestrationRuntimeForRoute;
-        return yield* worktreeManager.inspect(request.body);
+        return yield* worktreeManager
+          .inspect(request.body)
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
       }
       case WS_METHODS.worktreesRemove: {
         const { worktreeManager } = yield* awaitOrchestrationRuntimeForRoute;
-        return yield* worktreeManager.remove(request.body);
+        return yield* worktreeManager
+          .remove(request.body)
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
       }
       case WS_METHODS.worktreesThreadState: {
         const { worktreeManager } = yield* awaitOrchestrationRuntimeForRoute;
-        return yield* worktreeManager.threadState(request.body);
+        return yield* worktreeManager
+          .threadState(request.body)
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
       }
       case WS_METHODS.worktreesRecover: {
         const { worktreeManager } = yield* awaitOrchestrationRuntimeForRoute;
-        return yield* worktreeManager.recover(request.body);
+        return yield* worktreeManager
+          .recover(request.body)
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
       }
       case WS_METHODS.worktreeSetupSubscribe: {
         const body = stripRequestTag(request.body);

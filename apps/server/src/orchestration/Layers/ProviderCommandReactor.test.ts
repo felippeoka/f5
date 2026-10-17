@@ -589,6 +589,7 @@ describe("ProviderCommandReactor", () => {
             headSha: "abc",
             branch: thread?.branch ?? null,
             operation: null,
+            hasInitializedSubmodules: false,
             hasTrackedChanges: false,
             hasUntrackedChanges: false,
             ignoredEntries: [],
@@ -3022,6 +3023,53 @@ describe("ProviderCommandReactor", () => {
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
+  });
+
+  it("finishes first-turn branch naming before session startup and delivery", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const worktreePath = path.join(harness.workspaceRoot, "named-worktree");
+    fs.mkdirSync(worktreePath);
+    harness.generateBranchName.mockImplementation(() => Effect.succeed({ branch: "safe-name" }));
+    const startSession = harness.startSession.getMockImplementation()!;
+    harness.startSession.mockImplementation((provider, input) =>
+      Effect.gen(function* () {
+        expect(harness.renameBranch).toHaveBeenCalledOnce();
+        const model = yield* harness.engine.getReadModel();
+        expect(model.threads.find((thread) => thread.id === threadId)?.branch).toBe("f5/safe-name");
+        yield* Effect.sleep("50 millis");
+        return yield* startSession(provider, input);
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("named-meta"),
+        threadId,
+        branch: "t3code/abcdef12",
+        worktreePath,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("named-start"),
+        threadId,
+        message: {
+          messageId: asMessageId("named-message"),
+          role: "user",
+          text: "first",
+          attachments: [],
+        },
+        provider: "codex",
+        model: "gpt-5.4",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.ensureWorktree.mock.calls[0]?.[0]).toMatchObject({ branch: "f5/safe-name" });
   });
 
   it.each(["none", "shallow"] as const)(

@@ -262,7 +262,6 @@ export function ArchiveSettings() {
       clearTerminalState,
       navigate,
       projects,
-
       routeThreadId,
     ],
   );

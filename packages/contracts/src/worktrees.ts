@@ -47,6 +47,7 @@ export type WorktreesRemoveResult = typeof WorktreesRemoveResult.Type;
 export const WorktreesThreadStateInput = Schema.Struct({ threadId: ThreadId });
 export type WorktreesThreadStateInput = typeof WorktreesThreadStateInput.Type;
 export const WorktreesThreadStateResult = Schema.Struct({
+  recovery: Schema.optional(Schema.Literals(["none", "running", "interrupted"])),
   worktreePath: Schema.NullOr(FilesystemPath),
   branch: Schema.NullOr(Schema.String),
   directoryExists: Schema.Boolean,

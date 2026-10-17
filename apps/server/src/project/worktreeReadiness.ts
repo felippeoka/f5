@@ -3,8 +3,12 @@ import { Effect } from "effect";
 import type { GitCoreShape } from "../git/Services/GitCore.ts";
 import { canonicalWorktreePath } from "../git/worktreePaths.ts";
 
-export class WorktreeNotReadyError extends Error {}
-export class WorktreeInspectionError extends Error {}
+export class WorktreeNotReadyError extends Error {
+  readonly _tag = "WorktreeNotReadyError";
+}
+export class WorktreeInspectionError extends Error {
+  readonly _tag = "WorktreeInspectionError";
+}
 
 export const MISSING_WORKTREE_MESSAGE =
   "This thread's worktree is gone. Recreate it or continue in the project checkout.";

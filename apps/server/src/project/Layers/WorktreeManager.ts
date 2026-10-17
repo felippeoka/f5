@@ -255,11 +255,19 @@ export const makeWorktreeManager = Effect.gen(function* () {
   const threadState: WorktreeManagerShape["threadState"] = (input) =>
     Effect.gen(function* () {
       const { thread, project } = yield* context(input.threadId);
-      return yield* readWorktreeState(git, {
+      const state = yield* readWorktreeState(git, {
         projectCwd: project.workspaceRoot,
         worktreePath: thread.worktreePath,
         branch: thread.branch,
       });
+      const data = yield* queue.listByThread(thread.id);
+      const token = data.state.worktreeBlockToken;
+      const recovery = token?.startsWith("recovery:")
+        ? (yield* setup.check(thread.id, token)) === "gating"
+          ? "running"
+          : "interrupted"
+        : "none";
+      return { ...state, recovery } as const;
     });
   const recover: WorktreeManagerShape["recover"] = (input) =>
     Effect.gen(function* () {
@@ -289,7 +297,9 @@ export const makeWorktreeManager = Effect.gen(function* () {
           return yield* Effect.fail(new Error("Workspace setup is already in progress."));
         return { thread, project, data };
       });
-      yield* check;
+      const beforeRecovery = yield* check;
+      const retryingRecovery =
+        beforeRecovery.data.state.worktreeBlockToken?.startsWith("recovery:") === true;
       yield* stopIdleSession(input.threadId);
       const path = initial.thread.worktreePath ?? initial.project.workspaceRoot;
       const plannedState = input.action === "recreateFromBase" ? yield* threadState(input) : null;
@@ -466,7 +476,11 @@ export const makeWorktreeManager = Effect.gen(function* () {
         });
         yield* setup.unregister(input.threadId, token);
         const data = yield* queue.listByThread(input.threadId);
-        if (data.state.paused && data.state.pauseReasonCode === "worktree_missing")
+        if (
+          data.state.paused &&
+          (data.state.pauseReasonCode === "worktree_missing" ||
+            (retryingRecovery && data.state.pauseReasonCode === "worktree_setup_failed"))
+        )
           yield* queue.setPaused({
             threadId: input.threadId,
             paused: false,

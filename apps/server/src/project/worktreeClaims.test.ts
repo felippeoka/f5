@@ -90,6 +90,34 @@ describe("effective workspace claims and removal gate", () => {
       }).pipe(Effect.provide(automationLayer(world, {}, "f5-removal-state-")), Effect.scoped),
     );
   });
+  it("blocks initialized submodules in both preview and removal, preserving their files", async () => {
+    const repo = await makeClonedRepo("f5-submodule-removal-");
+    cleanups.push(repo.cleanup);
+    const world = makeWorld();
+    world.projects.push(project("p", repo.root));
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const target = path.join((yield* ServerConfig).worktreesDir, "submodules");
+        git(repo.root, "worktree", "add", "-q", "-b", "submodules", target, "main");
+        git(target, "-c", "protocol.file.allow=always", "submodule", "add", repo.root, "child");
+        git(target, "commit", "-qm", "add submodule");
+        const input = {
+          projectCwd: repo.root,
+          path: target,
+          policy: { kind: "manual" as const, ownThreadId: null },
+        };
+        expect((yield* evaluateWorktreeRemoval(input)).blockedReasons.join(" ")).toContain(
+          "initialized submodules",
+        );
+        const removed = yield* removeWorktreeSafely(input);
+        expect(removed.blockedReasons.join(" ")).toContain("initialized submodules");
+        expect(
+          yield* Effect.promise(() => fs.stat(path.join(target, "child", ".git"))),
+        ).toBeDefined();
+      }).pipe(Effect.provide(automationLayer(world, {}, "f5-submodule-state-")), Effect.scoped),
+    );
+  }, 60_000);
+
   it("uses the default branch for maintenance when a new worktree has no upstream", async () => {
     const repo = await makeClonedRepo("f5-maintenance-base-");
     cleanups.push(repo.cleanup);
@@ -122,14 +150,15 @@ describe("effective workspace claims and removal gate", () => {
     await Effect.runPromise(
       evaluateWorktreeRemoval({
         projectCwd: "/repo",
-        path: "/outside",
+        path: process.cwd(),
         policy: { kind: "manual", ownThreadId: null },
       }).pipe(
         Effect.provideService(GitCore, fake.service),
         Effect.tap((result) =>
-          Effect.sync(() =>
-            expect(result.blockedReasons).toContain("outside the allowed worktrees root"),
-          ),
+          Effect.sync(() => {
+            expect(result.blockedReasons).toContain("outside the allowed worktrees root");
+            expect(result.exists).toBe(false);
+          }),
         ),
         Effect.provide(automationLayer(makeWorld(), {}, "f5-outside-state-")),
         Effect.scoped,

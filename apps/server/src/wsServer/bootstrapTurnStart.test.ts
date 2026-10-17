@@ -183,8 +183,9 @@ function makeDependencies(input?: {
 
   return {
     orchestrationEngine,
-    rollbackWorktree: (receipt: { cwd: string; path: string }) =>
+    rollbackWorktree: vi.fn((receipt: { cwd: string; path: string }, _ownedTerminalId?: string) =>
       git.removeWorktree({ cwd: receipt.cwd, path: receipt.path }),
+    ),
     git,
     projectSetupScriptRunner,
   };
@@ -575,6 +576,7 @@ describe("dispatchBootstrapTurnStart", () => {
     );
 
     expect(runForThread).toHaveBeenCalledWith({
+      preferredTerminalId: expect.stringMatching(/^setup-/),
       threadId: ThreadId.makeUnsafe("thread-1"),
       projectId: PROJECT_ID,
       projectCwd: "/repo/project",
@@ -1345,6 +1347,7 @@ describe("dispatchBootstrapTurnStart", () => {
             ...dependencies,
             command: makeTurnStartCommand({
               bootstrap: {
+                runSetupScript: true,
                 createThread: {
                   projectId: PROJECT_ID,
                   title: "New thread",
@@ -1373,6 +1376,7 @@ describe("dispatchBootstrapTurnStart", () => {
           ? OrchestrationCommandIdConflictError
           : OrchestrationCommandInvariantError,
       );
+      expect(dependencies.rollbackWorktree.mock.calls[0]?.[1]).toBe("setup-setup");
       expect((caught as Error).message).toContain("turn start failed");
       expect((caught as Error).message).toContain("Cleanup failed during worktree removal");
       expect((caught as OrchestrationCommandInvariantError).detail).toContain(

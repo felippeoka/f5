@@ -1,4 +1,4 @@
-import { assertWorktreeReady } from "../../project/worktreeReadiness.ts";
+import { assertWorktreeReady, WorktreeNotReadyError } from "../../project/worktreeReadiness.ts";
 import { NextTurnQueueStore } from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { Option } from "effect";
 import { GitCore } from "../../git/Services/GitCore.ts";
@@ -49,15 +49,6 @@ export const cleanupStaleWorktrees = Effect.fn("server.startup.worktree.cleanup"
         worktreePath,
         cause: probe.cause instanceof Error ? probe.cause.message : String(probe.cause),
       });
-      if (Option.isSome(queue))
-        yield* queue.value
-          .setPaused({
-            threadId: thread.id,
-            paused: true,
-            reasonCode: "worktree_missing",
-            detail: "The recorded workspace could not be inspected. Recover it before sending.",
-          })
-          .pipe(Effect.ignore);
       continue;
     }
 
@@ -70,7 +61,11 @@ export const cleanupStaleWorktrees = Effect.fn("server.startup.worktree.cleanup"
             true,
           ).pipe(Effect.exit)
         : null;
-      if (readiness === null || readiness._tag === "Failure") {
+      if (
+        readiness === null ||
+        (readiness._tag === "Failure" &&
+          Cause.squash(readiness.cause) instanceof WorktreeNotReadyError)
+      ) {
         if (Option.isSome(queue))
           yield* queue.value
             .setPaused({

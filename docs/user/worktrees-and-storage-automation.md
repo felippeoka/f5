@@ -66,9 +66,14 @@ retention any profile sets applies.
 **Auto-pull default branches** (Settings → Storage, off by default) fast-forwards a project root
 every 15 minutes when it has the default branch checked out with an upstream, a clean tree with no
 untracked files, no merge, rebase, cherry-pick, revert or bisect in progress, no local commits the
-upstream lacks, and no agent session working in it. It runs `git pull --ff-only` and never merges
-or rebases. When another F5 profile is updating the same repository, the cycle is skipped. Pulls
-appear in Recent activity and in the preview.
+upstream lacks, and no active conversation, queued work, live agent session, or live terminal
+using the root checkout. Idle and archived conversations alone do not prevent an update; unknown
+workspace usage does. Close a root terminal before expecting auto-pull to run.
+
+The fetch runs before lifecycle and repository locks so network delays do not block local work.
+Under those locks F5 rechecks claims, checkout identity, and the local upstream reference, then
+fast-forwards to that inspected commit. It never merges or rebases. When another F5 profile is
+updating the same repository, the cycle is skipped. Updates appear in Recent activity and in the preview.
 
 ## Project overrides
 
@@ -131,7 +136,8 @@ The recovery controls offer **Recreate now** when the original branch survives, 
 default branch** when it does not, and **Continue in project checkout** as an explicit alternative.
 Recovery stops an idle provider session before switching the reference. Recreation resolves the
 project's submodule setting and runs its opted-in worktree setup script before releasing queued
-work. It resumes only a queue paused for a missing worktree; manual pauses remain in place.
+work. It resumes a queue paused for a missing worktree, or for interrupted recovery when that
+recovery is retried successfully; manual pauses remain in place.
 
 Cancel and bootstrap rollback use the same file protection rules as manual removal. Ignored files
 created by setup, such as `.env` or a local database, keep the checkout on disk and are reported as
@@ -151,3 +157,8 @@ A checkout on a different branch (including a detached HEAD during rebase) is pr
 until its recorded branch is restored or an explicit recovery action is chosen. Recovery does not
 discard or overwrite files in the old checkout. Adopting another branch is part of the later workspace
 switching release.
+
+Initialized submodules also block worktree removal, including rollback after failed creation.
+Preserve any submodule work and deinitialize the submodules before retrying removal. F5 does not
+force removal of these checkouts. A failed or interrupted recovery keeps its retry controls visible
+even when the checkout has already been created; retry preparation or continue in the project checkout.

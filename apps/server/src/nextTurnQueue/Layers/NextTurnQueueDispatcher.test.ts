@@ -584,6 +584,7 @@ for (const scenario of [
             headSha: "abc123",
             branch: "feature",
             operation: null,
+            hasInitializedSubmodules: false,
             hasTrackedChanges: false,
             hasUntrackedChanges: false,
             ignoredEntries: [],

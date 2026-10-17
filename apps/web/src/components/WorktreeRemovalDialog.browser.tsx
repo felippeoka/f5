@@ -167,3 +167,45 @@ it("closes when selected removals succeed even when other rows are kept or block
   await expect.poll(() => close.mock.calls.length).toBe(1);
   expect(api.worktrees.remove).toHaveBeenCalledOnce();
 });
+
+it.each([false, true])(
+  "keeps interrupted recovery retryable after reload (queue: %s)",
+  async (queue) => {
+    api.worktrees.threadState.mockResolvedValue({
+      worktreePath: "/recovered",
+      branch: "feature",
+      directoryExists: true,
+      registration: "matching",
+      branchExists: true,
+      defaultBranch: "main",
+      recovery: "interrupted",
+    });
+    api.nextTurnQueue.list.mockResolvedValue({ revision: 9 });
+    api.worktrees.recover.mockRejectedValue(new Error("Submodule initialization failed"));
+    const threadId = ThreadId.makeUnsafe("retry-recovery");
+    const banner = (
+      <WorktreeMissingBanner
+        threadId={threadId}
+        worktreePath="/recovered"
+        branch="feature"
+        queue={queue}
+        recoveryOnly={queue}
+      />
+    );
+    const first = await mount(banner);
+    await first.getByRole("button", { name: "Retry recovery" }).click();
+    await expect
+      .element(first.getByRole("alert"))
+      .toHaveTextContent("Submodule initialization failed");
+    await first.unmount();
+    // A fresh query cache models a reload after the failed request (or server restart).
+    const reloaded = await mount(banner);
+    await expect.element(reloaded.getByRole("button", { name: "Retry recovery" })).toBeEnabled();
+    await reloaded.getByRole("button", { name: "Retry recovery" }).click();
+    expect(api.worktrees.recover).toHaveBeenLastCalledWith({
+      threadId,
+      expectedQueueRevision: 9,
+      action: "recreate",
+    });
+  },
+);

@@ -90,6 +90,7 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
         headSha: "abc123",
         branch: "feature/test",
         operation: null,
+        hasInitializedSubmodules: false,
         hasTrackedChanges: false,
         hasUntrackedChanges: false,
         ignoredEntries: [],

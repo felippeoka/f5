@@ -399,8 +399,13 @@ export function NextTurnQueuePanel({
           className={`mt-1 rounded px-2 py-1 text-xs ${snapshot.blockedKind === "waiting" ? "text-muted-foreground" : "bg-warning/10 text-warning-foreground"}`}
         >
           {blockedDescription}
-          {snapshot.reasonCode === "worktree_missing" ? (
-            <WorktreeMissingBanner threadId={threadId} queue />
+          {snapshot.reasonCode === "worktree_missing" ||
+          snapshot.reasonCode === "worktree_setup_failed" ? (
+            <WorktreeMissingBanner
+              threadId={threadId}
+              queue
+              recoveryOnly={snapshot.reasonCode === "worktree_setup_failed"}
+            />
           ) : null}
           {hasDeliveryFailure || hasDeliveryPause ? (
             <span className="ml-1 inline-flex gap-1">

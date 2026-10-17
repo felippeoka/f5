@@ -1,3 +1,4 @@
+import { NextTurnQueueStore } from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { ServerSettingsService } from "../../serverSettings";
 import { UsageService, type UsageServiceShape } from "../../usage/Services/UsageService.ts";
 import {
@@ -1107,8 +1108,10 @@ describe("ProviderRuntimeIngestion", () => {
               )
             : Effect.succeed(branchExists),
       });
+      const setPaused = vi.fn(() => Effect.void);
       await Effect.runPromise(
         cleanupStaleWorktrees(harness.engine).pipe(
+          Effect.provideService(NextTurnQueueStore, { setPaused } as never),
           Effect.provide(Layer.mergeAll(Layer.succeed(GitCore, git.service), NodeServices.layer)),
         ),
       );
@@ -1117,6 +1120,7 @@ describe("ProviderRuntimeIngestion", () => {
         missingPath,
       );
       expect(git.calls.branchExists).toHaveLength(1);
+      expect(setPaused).toHaveBeenCalledTimes(branchExists === false ? 1 : 0);
     },
   );
 

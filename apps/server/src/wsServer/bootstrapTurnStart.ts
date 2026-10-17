@@ -81,6 +81,7 @@ interface BootstrapTurnStartBaseDependencies {
   readonly projectSetupScriptRunner: Pick<ProjectSetupScriptRunnerShape, "runForThread">;
   readonly rollbackWorktree: (
     input: BootstrapCreatedWorktree,
+    ownedTerminalId?: string,
   ) => Effect.Effect<void, GitCommandError>;
   readonly worktreesDir?: string | undefined;
   /**
@@ -228,6 +229,7 @@ export const dispatchBootstrapTurnStart = Effect.fnUntraced(function* (
   const finalTurnStartCommand = stripBootstrapFromTurnStart(input.command);
   let createdThread = false;
   let createdWorktree: BootstrapCreatedWorktree | null = null;
+  let ownedSetupTerminalId: string | undefined;
   let previousThreadMeta: BootstrapPreviousThreadMeta | null = null;
   let appliedBootstrapThreadMeta: BootstrapPreviousThreadMeta | null = null;
   let mutatedExistingThreadMeta = false;
@@ -333,7 +335,7 @@ export const dispatchBootstrapTurnStart = Effect.fnUntraced(function* (
             const removeWorktree = yield* runCleanupStep(
               error,
               "worktree removal",
-              input.rollbackWorktree(createdWorktree),
+              input.rollbackWorktree(createdWorktree, ownedSetupTerminalId),
             );
             if (!removeWorktree.ok) {
               return yield* removeWorktree.error;
@@ -386,7 +388,7 @@ export const dispatchBootstrapTurnStart = Effect.fnUntraced(function* (
             const removeWorktree = yield* runCleanupStep(
               error,
               "worktree removal",
-              input.rollbackWorktree(createdWorktree),
+              input.rollbackWorktree(createdWorktree, ownedSetupTerminalId),
             );
             if (!removeWorktree.ok) {
               return yield* removeWorktree.error;
@@ -399,7 +401,7 @@ export const dispatchBootstrapTurnStart = Effect.fnUntraced(function* (
           const removeWorktree = yield* runCleanupStep(
             error,
             "worktree removal",
-            input.rollbackWorktree(createdWorktree),
+            input.rollbackWorktree(createdWorktree, ownedSetupTerminalId),
           );
           if (!removeWorktree.ok) {
             return yield* removeWorktree.error;
@@ -585,8 +587,15 @@ export const dispatchBootstrapTurnStart = Effect.fnUntraced(function* (
             ...(targetProjectId ? { projectId: targetProjectId } : {}),
             ...(targetProjectCwd ? { projectCwd: targetProjectCwd } : {}),
             worktreePath: targetWorktreePath,
+            // A rollback may stop this terminal; never reuse a pre-existing script tab.
+            ...(createdWorktree ? { preferredTerminalId: `setup-${crypto.randomUUID()}` } : {}),
           })
           .pipe(
+            Effect.tap((result) =>
+              Effect.sync(() => {
+                if (result.status === "started") ownedSetupTerminalId = result.terminalId;
+              }),
+            ),
             Effect.tap((result) =>
               increment(setupScriptLaunchTotal, {
                 outcome: result.status,

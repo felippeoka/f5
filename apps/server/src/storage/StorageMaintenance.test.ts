@@ -122,6 +122,7 @@ function makeGitCoreStub(input?: {
           headSha: "abc123",
           branch: "feature",
           operation: null,
+          hasInitializedSubmodules: false,
           hasTrackedChanges: state.hasWorkingTreeChanges,
           hasUntrackedChanges: false,
           ignoredEntries: [],

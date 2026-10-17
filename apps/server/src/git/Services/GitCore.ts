@@ -38,6 +38,7 @@ export interface CheckoutInspection extends CheckoutIdentity {
   readonly headSha: string | null;
   readonly branch: string | null;
   readonly operation: "merge" | "rebase" | "cherry-pick" | "revert" | "bisect" | null;
+  readonly hasInitializedSubmodules: boolean;
   readonly hasTrackedChanges: boolean;
   readonly hasUntrackedChanges: boolean;
   readonly ignoredEntries: ReadonlyArray<string>;
@@ -169,7 +170,7 @@ export interface GitCoreShape {
   ) => Effect.Effect<CheckoutIdentity, GitCommandError>;
   readonly inspectCheckout: (
     path: string,
-    options?: { aheadOf?: string },
+    options?: { aheadOf?: string; statusTimeoutMs?: number },
   ) => Effect.Effect<CheckoutInspection, GitCommandError>;
   readonly clearMissingRegistration: (
     cwd: string,

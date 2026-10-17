@@ -11,6 +11,7 @@ import {
 } from "../remoteInspection.ts";
 import {
   isAbsolute as isAbsolutePath,
+  join as joinPath,
   relative as relativePath,
   resolve as resolvePath,
 } from "node:path";
@@ -43,6 +44,7 @@ import { ServerConfig } from "../../config.ts";
 import { canonicalWorktreePath, resolveDefaultWorktreePath } from "../worktreePaths.ts";
 
 const inspectionSemaphore = Semaphore.makeUnsafe(4);
+const fullInspectionSemaphore = Semaphore.makeUnsafe(4);
 
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
@@ -1974,7 +1976,7 @@ const makeGitCore = Effect.gen(function* () {
     );
 
   const inspectCheckout: GitCoreShape["inspectCheckout"] = (cwd, options) =>
-    inspectionSemaphore.withPermits(1)(
+    fullInspectionSemaphore.withPermits(1)(
       Effect.gen(function* () {
         const root = yield* runGitStdout("GitCore.inspectCheckout", cwd, [
           "rev-parse",
@@ -2010,11 +2012,32 @@ const makeGitCore = Effect.gen(function* () {
             [],
             "Cannot inspect symbolic HEAD.",
           );
+        const gitlinks = (yield* runGitStdout("GitCore.inspectCheckout", cwd, [
+          "ls-files",
+          "--stage",
+          "-z",
+        ]))
+          .split("\0")
+          .filter((entry) => entry.startsWith("160000 "))
+          .map((entry) => entry.slice(entry.indexOf("\t") + 1));
+        const populated = yield* Effect.forEach(
+          gitlinks,
+          (path) =>
+            fileSystem
+              .exists(joinPath(cwd, path, ".git"))
+              .pipe(
+                Effect.mapError((error) =>
+                  createGitCommandError("GitCore.inspectCheckout", cwd, [], error.message),
+                ),
+              ),
+          { concurrency: 4 },
+        );
+        const hasInitializedSubmodules = populated.some(Boolean);
         const status = (yield* executeGit(
           "GitCore.inspectCheckout",
           cwd,
           ["--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=normal"],
-          { timeoutMs: 5_000 },
+          { timeoutMs: options?.statusTimeoutMs ?? 30_000 },
         )).stdout;
         let hasTrackedChanges = false;
         let hasUntrackedChanges = false;
@@ -2058,6 +2081,7 @@ const makeGitCore = Effect.gen(function* () {
           headSha: yield* resolveCommit(cwd, "HEAD"),
           branch: symbolic.code === 0 ? stripPathTerminator(symbolic.stdout) : null,
           operation: yield* readOperationInProgress(cwd),
+          hasInitializedSubmodules,
           hasTrackedChanges,
           hasUntrackedChanges,
           ignoredEntries: ignored.entries,
@@ -2352,6 +2376,13 @@ const makeGitCore = Effect.gen(function* () {
           `The target ${input.path} is not an unlocked linked worktree.`,
         );
       const inspection = yield* inspectCheckout(target);
+      if (inspection.hasInitializedSubmodules)
+        return yield* createGitCommandError(
+          "GitCore.removeWorktree",
+          input.cwd,
+          [],
+          "Initialized submodules prevent safe removal. Deinitialize them after preserving their local work, then retry.",
+        );
       const expectedCommon = yield* resolveCommonDir(input.cwd).pipe(Effect.flatMap(canonicalPath));
       if (
         inspection.commonDir !== expectedCommon ||

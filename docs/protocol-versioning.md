@@ -29,7 +29,8 @@ provider inventory RPC).
 
 Worktree safety Release 1 uses version 23 (the preceding version was 22). It adds
 `worktrees.inspect`, `worktrees.remove`, `worktrees.threadState`, and `worktrees.recover`,
-removes public force removal, and preserves filesystem paths without trimming.
+removes public force removal, and preserves filesystem paths without trimming. Thread state
+also reports whether recovery is running or interrupted so a retained recovery barrier stays actionable.
 
 The authenticated `GET /api/bootstrap` response and WebSocket welcome advertise
 current capabilities, upload support, and global send limits. Today

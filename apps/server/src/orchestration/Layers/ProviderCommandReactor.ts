@@ -1,3 +1,4 @@
+import { withWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import { assertWorktreeReady } from "../../project/worktreeReadiness.ts";
 import { readSubmissionSource } from "../../provider/submissionProvenance.ts";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -1374,6 +1375,7 @@ const make = Effect.gen(function* () {
         writingPreferences,
       })
       .pipe(
+        Effect.timeout("3 seconds"),
         Effect.catch((error) =>
           Effect.logWarning(
             "provider command reactor failed to generate worktree branch name; skipping rename",
@@ -1389,16 +1391,20 @@ const make = Effect.gen(function* () {
           );
           if (targetBranch === oldBranch) return Effect.void;
 
-          return Effect.flatMap(
-            git.renameBranch({ cwd, oldBranch, newBranch: targetBranch }),
-            (renamed) =>
-              orchestrationEngine.dispatch({
+          return withWorktreeLifecycleLock(
+            cwd,
+            Effect.gen(function* () {
+              const current = yield* resolveThread(input.threadId);
+              if (current?.worktreePath !== cwd || current.branch !== oldBranch) return;
+              const renamed = yield* git.renameBranch({ cwd, oldBranch, newBranch: targetBranch });
+              yield* orchestrationEngine.dispatch({
                 type: "thread.meta.update",
                 commandId: serverCommandId("worktree-branch-rename"),
                 threadId: input.threadId,
                 branch: renamed.branch,
                 worktreePath: cwd,
-              }),
+              });
+            }),
           );
         }),
         Effect.catchCause((cause) =>
@@ -1700,7 +1706,7 @@ const make = Effect.gen(function* () {
       messageText: message.text,
       ...(submissionSource ? { submissionSource } : {}),
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
-    }).pipe(Effect.forkScoped);
+    });
 
     yield* maybeRequestThreadTitleForFirstTurn({
       threadId: event.payload.threadId,

@@ -277,6 +277,15 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
   if (!target || !root) blockedReasons.push("workspace identity could not be verified");
   else if (target === root || !pathContains(root, target))
     blockedReasons.push("outside the allowed worktrees root");
+  // Never execute Git in an arbitrary client-supplied checkout.
+  if (blockedReasons.length)
+    return {
+      exists: false,
+      registration: null,
+      blockedReasons,
+      linkedThreads: [] as ThreadId[],
+      deletedThreadClaims: [] as ThreadId[],
+    };
   const exists = yield* Effect.tryPromise(() => FS.lstat(input.path)).pipe(
     Effect.map(() => true),
     Effect.catch((error) => {
@@ -285,15 +294,6 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
       return Effect.succeed(false);
     }),
   );
-  // Never execute Git in an arbitrary client-supplied checkout.
-  if (blockedReasons.length)
-    return {
-      exists,
-      registration: null,
-      blockedReasons,
-      linkedThreads: [] as ThreadId[],
-      deletedThreadClaims: [] as ThreadId[],
-    };
   const entries = yield* git.listWorktrees(input.projectCwd).pipe(
     Effect.orElseSucceed(() => {
       blockedReasons.push("worktree registrations could not be read");
@@ -362,6 +362,10 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
       : null;
     if (!inspected && matches) blockedReasons.push("checkout status could not be read");
     if (inspected) {
+      if (inspected.hasInitializedSubmodules)
+        blockedReasons.push(
+          "initialized submodules prevent safe removal; preserve their local work and deinitialize them before retrying",
+        );
       if (inspected.branch === null) blockedReasons.push("HEAD is detached");
       if (inspected.operation) blockedReasons.push(`a ${inspected.operation} is in progress`);
       if (inspected.hasTrackedChanges || inspected.hasUntrackedChanges)

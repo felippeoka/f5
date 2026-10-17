@@ -4370,7 +4370,7 @@ describe("WebSocket Server", () => {
           cwd: path.join(repo, "unknown"),
           path: path.join(repo, "untouched"),
         });
-        expect(result.error?.message).toContain("Unknown project");
+        expect(result.error?.message).toBe("Unknown project");
       });
 
       it("cancel mid-setup removes the clean worktree and the branch it created", async () => {

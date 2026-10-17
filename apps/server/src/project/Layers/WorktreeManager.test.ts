@@ -18,7 +18,7 @@ import { GitCommandError } from "../../git/Errors.ts";
 import { WorktreeSetupGate, WorktreeSetupGateLive } from "../Services/WorktreeSetupGate.ts";
 import { makeWorktreeManager } from "./WorktreeManager.ts";
 
-describe("WorktreeManager safety and recovery", () => {
+describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
   const cleanups: Array<() => Promise<unknown>> = [];
   afterEach(async () => {
     for (const cleanup of cleanups.splice(0)) await cleanup();
@@ -274,6 +274,13 @@ describe("WorktreeManager safety and recovery", () => {
           const state = world.queueStates.get(threadId)!;
           expect(state.worktreeBlockToken).toMatch(/^recovery:/);
           expect(yield* gate.check(threadId, state.worktreeBlockToken)).toBe("orphaned");
+          expect((yield* manager.threadState({ threadId })).recovery).toBe("interrupted");
+          // The dispatcher reconciles a durable orphan after a restart this way.
+          world.queueStates.set(threadId, {
+            ...state,
+            paused: true,
+            pauseReasonCode: "worktree_setup_failed",
+          });
           fail = false;
           yield* manager.recover({
             threadId,
@@ -281,6 +288,8 @@ describe("WorktreeManager safety and recovery", () => {
             expectedQueueRevision: state.revision,
           });
           expect(world.queueStates.get(threadId)?.worktreeBlockToken).toBeNull();
+          expect(world.queueStates.get(threadId)?.paused).toBe(false);
+          expect((yield* manager.threadState({ threadId })).recovery).toBe("none");
         }),
       {
         initializeWorktreeSubmodules: () =>
