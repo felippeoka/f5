@@ -104,6 +104,7 @@ const makeIsolatedGitCore = (gitService: GitServiceShape) =>
 
     return {
       listWorktrees: (cwd) => core.listWorktrees(cwd),
+      inspectCheckoutIdentity: (path) => core.inspectCheckoutIdentity(path),
       inspectCheckout: (path, options) => core.inspectCheckout(path, options),
       clearMissingRegistration: (cwd, path) => core.clearMissingRegistration(cwd, path),
       fastForwardTo: (cwd, sha) => core.fastForwardTo(cwd, sha),

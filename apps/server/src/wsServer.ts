@@ -1530,7 +1530,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         );
         if (input.command.bootstrap?.prepareWorktree?.requireWorktree === true) {
           return yield* new RouteRequestError({
-            message: result.detail,
+            message: `Worktree isolation unavailable: ${result.detail}`,
             code: BOOTSTRAP_THREAD_NOT_CREATED_ERROR_CODE,
           });
         }

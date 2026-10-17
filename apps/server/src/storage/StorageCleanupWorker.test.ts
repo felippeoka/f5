@@ -112,6 +112,43 @@ describe("StorageCleanupWorker", { timeout: 60_000 }, () => {
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped);
 
+  it("removes a deleted owner's clean worktree after stopping its processes", async () => {
+    await Effect.runPromise(
+      withWorktree(
+        {
+          storageCleanup: {
+            enabled: true,
+            worktree: { afterDays: null, onMerge: false, onDelete: true, unchanged: false },
+          },
+        },
+        ({ worker, world, worktreePath, root }) =>
+          Effect.gen(function* () {
+            world.threads[0] = { ...world.threads[0]!, deletedAt: new Date().toISOString() };
+            world.sessions.push({ threadId: "thread-1", cwd: worktreePath, status: "ready" });
+            world.terminals.push({
+              threadId: "thread-1",
+              terminalId: "shell",
+              cwd: worktreePath,
+              status: "running",
+            });
+            expect((yield* worker.dryRun).targets[0]?.action).toBe("remove");
+            expect((yield* worker.runOnce)[0]?.action).toBe("remove");
+            expect(world.sessions).toEqual([]);
+            expect(world.terminals).toEqual([]);
+            expect(
+              yield* Effect.promise(() =>
+                fs.access(worktreePath).then(
+                  () => true,
+                  () => false,
+                ),
+              ),
+            ).toBe(false);
+            expect(git(root, "rev-parse", "refs/heads/feature")).toBeTruthy();
+          }),
+      ),
+    );
+  });
+
   it("does nothing while storage cleanup is off", async () => {
     const result = await Effect.runPromise(withWorktree({}, ({ worker }) => worker.dryRun));
     expect(result).toMatchObject({ storageCleanupEnabled: false, targets: [] });

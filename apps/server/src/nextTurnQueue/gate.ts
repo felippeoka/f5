@@ -16,7 +16,12 @@ export const WORKTREE_SETUP_INTERRUPTED_DETAIL =
 
 export type NextTurnQueueGate =
   | { readonly kind: "ready" }
-  | { readonly kind: "wait"; readonly reasonCode: QueueReasonCode; readonly detail?: string }
+  | {
+      readonly kind: "wait";
+      readonly reasonCode: QueueReasonCode;
+      readonly detail?: string;
+      readonly retryAfterMs?: number;
+    }
   | { readonly kind: "autoPause"; readonly reasonCode: QueueReasonCode; readonly detail?: string }
   | { readonly kind: "drop"; readonly reasonCode: QueueReasonCode };
 

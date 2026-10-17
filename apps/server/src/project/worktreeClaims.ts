@@ -285,6 +285,15 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
       return Effect.succeed(false);
     }),
   );
+  // Never execute Git in an arbitrary client-supplied checkout.
+  if (blockedReasons.length)
+    return {
+      exists,
+      registration: null,
+      blockedReasons,
+      linkedThreads: [] as ThreadId[],
+      deletedThreadClaims: [] as ThreadId[],
+    };
   const entries = yield* git.listWorktrees(input.projectCwd).pipe(
     Effect.orElseSucceed(() => {
       blockedReasons.push("worktree registrations could not be read");
@@ -333,16 +342,26 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
     )
       blockedReasons.push("an agent session is open in it");
   }
-  if (exists) {
-    const inspected = yield* git.inspectCheckout(input.path).pipe(Effect.orElseSucceed(() => null));
-    if (!inspected) blockedReasons.push("checkout status could not be read");
-    else {
-      const common = yield* git.resolveCommonDir(input.projectCwd).pipe(
-        Effect.flatMap(canonical),
-        Effect.orElseSucceed(() => null),
-      );
-      if (inspected.canonicalRoot !== target || !common || common !== inspected.commonDir)
-        blockedReasons.push("checkout identity does not match the expected repository");
+  if (exists && registration) {
+    const common = yield* git.resolveCommonDir(input.projectCwd).pipe(
+      Effect.flatMap(canonical),
+      Effect.orElseSucceed(() => null),
+    );
+    const identity = yield* git
+      .inspectCheckoutIdentity(input.path)
+      .pipe(Effect.orElseSucceed(() => null));
+    const matches =
+      identity !== null &&
+      identity.canonicalRoot === target &&
+      common !== null &&
+      identity.commonDir === common;
+    if (!matches) blockedReasons.push("checkout identity does not match the expected repository");
+    // Status can invoke repository-configured helpers. Only run it after identity matches.
+    const inspected = matches
+      ? yield* git.inspectCheckout(input.path).pipe(Effect.orElseSucceed(() => null))
+      : null;
+    if (!inspected && matches) blockedReasons.push("checkout status could not be read");
+    if (inspected) {
       if (inspected.branch === null) blockedReasons.push("HEAD is detached");
       if (inspected.operation) blockedReasons.push(`a ${inspected.operation} is in progress`);
       if (inspected.hasTrackedChanges || inspected.hasUntrackedChanges)
@@ -352,11 +371,21 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
         truncated: inspected.ignoredTruncated,
       });
       if (ignoredReason) blockedReasons.push(ignoredReason);
-      if (
-        input.policy.kind === "storageMaintenance" &&
-        (inspected.aheadCount === null || inspected.aheadCount > 0)
-      )
-        blockedReasons.push("unpushed commits could not be ruled out");
+      if (input.policy.kind === "storageMaintenance") {
+        let aheadCount = inspected.aheadCount;
+        if (inspected.upstreamRef === null) {
+          const base = yield* git
+            .readDefaultBranch(input.projectCwd)
+            .pipe(Effect.orElseSucceed(() => null));
+          if (base)
+            aheadCount = yield* git.inspectCheckout(input.path, { aheadOf: base }).pipe(
+              Effect.map((inspection) => inspection.aheadCount),
+              Effect.orElseSucceed(() => null),
+            );
+        }
+        if (aheadCount === null || aheadCount > 0)
+          blockedReasons.push("unpushed commits could not be ruled out");
+      }
       if (input.policy.kind === "ownedRollback") {
         const proof = input.policy.ownedCreation;
         if (
@@ -383,6 +412,9 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
   readonly projectCwd: string;
   readonly path: string;
   readonly policy: WorktreeRemovalPolicy;
+  readonly expectedHead?: string | null;
+  /** Runs under the same repository lock after the verified checkout is removed. */
+  readonly afterRemoval?: (registration: RegisteredWorktree | null) => Effect.Effect<void>;
 }) {
   const git = yield* GitCore;
   const config = yield* ServerConfig;
@@ -396,7 +428,13 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
       common,
       Effect.gen(function* () {
         const checked = yield* evaluateWorktreeRemoval(input);
+        if (
+          input.expectedHead !== undefined &&
+          (checked.registration?.headSha ?? null) !== input.expectedHead
+        )
+          checked.blockedReasons.push("HEAD changed since inspection. Review the checkout again.");
         const claims = yield* readWorktreeClaims(input.path);
+        if (claims.unknown) checked.blockedReasons.push("workspace usage could not be verified");
         // The caller must stop all processes belonging to deleted/owned threads before locking.
         const owned = new Set<string>([
           ...checked.deletedThreadClaims,
@@ -411,8 +449,10 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
           checked.blockedReasons.push(
             "owned or deleted conversation processes still use the checkout",
           );
-        if (checked.blockedReasons.length === 0)
+        if (checked.blockedReasons.length === 0) {
           yield* git.removeWorktree({ cwd: input.projectCwd, path: input.path });
+          if (input.afterRemoval) yield* input.afterRemoval(checked.registration);
+        }
         return checked;
       }),
     ),
@@ -423,24 +463,9 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
 export const stopDeletedWorktreeClaims = Effect.fn("stopDeletedWorktreeClaims")(function* (
   threadIds: ReadonlyArray<ThreadId>,
 ) {
-  const providers = yield* ProviderService;
   const terminals = yield* TerminalManager;
   for (const threadId of threadIds) {
-    if (
-      (yield* providers.listSessions()).some(
-        (session) => session.threadId === threadId && session.status !== "closed",
-      )
-    ) {
-      yield* providers.stopSession({ threadId });
-      yield* Effect.gen(function* () {
-        while (
-          (yield* providers.listSessions()).some(
-            (session) => session.threadId === threadId && session.status !== "closed",
-          )
-        )
-          yield* Effect.sleep("50 millis");
-      }).pipe(Effect.timeout("10 seconds"));
-    }
+    yield* stopWorktreeSession(threadId);
     if (
       (yield* terminals.listSessions).some(
         (terminal) =>
@@ -449,5 +474,25 @@ export const stopDeletedWorktreeClaims = Effect.fn("stopDeletedWorktreeClaims")(
       )
     )
       yield* terminals.close({ threadId });
+  }
+});
+
+/** Wait for an idle or deleted owner's provider session before taking lifecycle locks. */
+export const stopWorktreeSession = Effect.fn("stopWorktreeSession")(function* (threadId: ThreadId) {
+  const providers = yield* ProviderService;
+  if (
+    (yield* providers.listSessions()).some(
+      (session) => session.threadId === threadId && session.status !== "closed",
+    )
+  ) {
+    yield* providers.stopSession({ threadId });
+    yield* Effect.gen(function* () {
+      while (
+        (yield* providers.listSessions()).some(
+          (session) => session.threadId === threadId && session.status !== "closed",
+        )
+      )
+        yield* Effect.sleep("50 millis");
+    }).pipe(Effect.timeout("10 seconds"));
   }
 });

@@ -19,13 +19,17 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { TerminalManager } from "../../terminal/Services/Manager.ts";
 import { startOwnedSetupScript } from "../ownedSetupScript.ts";
 import { readProjectSettings } from "../projectSettings.ts";
-import { evaluateWorktreeRemoval } from "../worktreeClaims.ts";
+import {
+  evaluateWorktreeRemoval,
+  removeWorktreeSafely,
+  stopDeletedWorktreeClaims,
+  stopWorktreeSession,
+} from "../worktreeClaims.ts";
 import { readWorktreeState } from "../worktreeReadiness.ts";
 import { WorktreeManager, type WorktreeManagerShape } from "../Services/WorktreeManager.ts";
 import { WorktreeSetupGate } from "../Services/WorktreeSetupGate.ts";
 import {
   pathContains,
-  withRepositoryLifecycleLock,
   withWorktreeLifecycleLock,
   withWorktreeLifecycleLocks,
 } from "./WorktreeLifecycleCoordinator.ts";
@@ -43,8 +47,6 @@ export const makeWorktreeManager = Effect.gen(function* () {
   const git = yield* GitCore;
   const config = yield* ServerConfig;
   const engine = yield* OrchestrationEngineService;
-  const providers = yield* ProviderService;
-  const terminals = yield* TerminalManager;
   const queue = yield* NextTurnQueueStore;
   const setup = yield* WorktreeSetupGate;
   const dispatcher = yield* NextTurnQueueDispatcher;
@@ -72,6 +74,7 @@ export const makeWorktreeManager = Effect.gen(function* () {
     path: string,
     branch: string | null,
     headSha: string | null,
+    allowTargetCheckout = true,
   ) =>
     Effect.gen(function* () {
       const model = yield* engine.getReadModel();
@@ -118,17 +121,34 @@ export const makeWorktreeManager = Effect.gen(function* () {
           (yield* git.isAncestor(project.workspaceRoot, headSha, upstreamSha));
         const target = yield* canonical(path);
         const checkedOutElsewhere = (yield* git.listWorktrees(project.workspaceRoot)).some(
-          (entry) => entry.branch === branch && entry.canonicalPath !== target,
+          (entry) =>
+            entry.branch === branch && (!allowTargetCheckout || entry.canonicalPath !== target),
         );
-        let linked = model.threads.some(
-          (thread) => thread.deletedAt === null && thread.branch === branch,
-        );
+        const common = yield* canonical(yield* git.resolveCommonDir(project.workspaceRoot));
+        const repositories = new Map<string, string | null>();
+        let linked = false;
         for (const thread of model.threads) {
           if (thread.deletedAt !== null) continue;
-          const workspace =
-            thread.worktreePath ??
-            model.projects.find((entry) => entry.id === thread.projectId)?.workspaceRoot;
+          const owner = model.projects.find((entry) => entry.id === thread.projectId);
+          const workspace = thread.worktreePath ?? owner?.workspaceRoot;
+          // Unknown references remain fail-closed, but equal branch names in other
+          // repositories do not protect this repository's ref.
           if (!workspace || (yield* canonical(workspace)) === target) linked = true;
+          if (thread.branch !== branch) continue;
+          if (!owner) {
+            linked = true;
+            continue;
+          }
+          if (!repositories.has(owner.workspaceRoot))
+            repositories.set(
+              owner.workspaceRoot,
+              yield* git.resolveCommonDir(owner.workspaceRoot).pipe(
+                Effect.flatMap(canonical),
+                Effect.orElseSucceed(() => null),
+              ),
+            );
+          const ownerCommon = repositories.get(owner.workspaceRoot);
+          if (!ownerCommon || ownerCommon === common) linked = true;
         }
         branchBlockedReason = !branchExists
           ? "Branch no longer exists."
@@ -140,7 +160,7 @@ export const makeWorktreeManager = Effect.gen(function* () {
                 ? "Branch is checked out elsewhere."
                 : linked
                   ? "A conversation still references this branch or checkout."
-                  : !(branchMerged || branchPushed || branchUpstreamGone)
+                  : !(branchMerged || branchPushed)
                     ? "Branch has commits that are neither merged nor pushed."
                     : null;
       }
@@ -181,105 +201,56 @@ export const makeWorktreeManager = Effect.gen(function* () {
       } satisfies WorktreesInspectResult;
     });
   const stopIdleSession = (threadId: ThreadId) =>
-    Effect.gen(function* () {
-      if (
-        (yield* providers.listSessions()).some(
-          (session) => session.threadId === threadId && session.status !== "closed",
-        )
-      ) {
-        yield* providers.stopSession({ threadId });
-        yield* Effect.gen(function* () {
-          while (
-            (yield* providers.listSessions()).some(
-              (session) => session.threadId === threadId && session.status !== "closed",
-            )
-          )
-            yield* Effect.sleep("50 millis");
-        }).pipe(Effect.timeout("10 seconds"));
-      }
-    });
+    stopWorktreeSession(threadId).pipe(Effect.provideServices(services));
   const remove: WorktreeManagerShape["remove"] = (input) =>
     Effect.gen(function* () {
       const project = yield* projectFor(input.projectId);
       const preview = yield* inspect(input);
       if (preview.blockedReasons.length)
         return { removed: false, branchDeleted: false, blockedReasons: preview.blockedReasons };
-      // Process termination may wait. Finish it before acquiring lifecycle locks.
-      for (const threadId of preview.deletedThreadClaims) {
-        yield* stopIdleSession(threadId);
-        yield* terminals.close({ threadId });
-      }
-      const common = yield* git.resolveCommonDir(project.workspaceRoot);
-      return yield* withWorktreeLifecycleLock(
-        input.path,
-        withRepositoryLifecycleLock(
-          config.baseDir,
-          common,
-          Effect.gen(function* () {
-            const checked = yield* inspect(input);
-            if (checked.headSha !== input.expectedHead)
-              return {
-                removed: false,
-                branchDeleted: false,
-                blockedReasons: ["HEAD changed since inspection. Review the checkout again."],
-              };
-            if (checked.blockedReasons.length)
-              return {
-                removed: false,
-                branchDeleted: false,
-                blockedReasons: checked.blockedReasons,
-              };
-            const live = yield* providers.listSessions();
-            const liveTerminals = yield* terminals.listSessions;
-            if (
-              checked.deletedThreadClaims.some(
-                (id) =>
-                  live.some((session) => session.threadId === id && session.status !== "closed") ||
-                  liveTerminals.some(
-                    (terminal) =>
-                      terminal.threadId === id &&
-                      (terminal.status === "starting" || terminal.status === "running"),
-                  ),
-              )
-            )
-              return {
-                removed: false,
-                branchDeleted: false,
-                blockedReasons: ["A deleted conversation still has running processes."],
-              };
-            yield* git.removeWorktree({ cwd: project.workspaceRoot, path: input.path });
-            let branchDeleted = false;
-            const blockedReasons: string[] = [];
-            if (input.deleteBranch && checked.branch && checked.headSha) {
-              // Re-list after removal, then compare-and-delete the exact inspected commit.
-              const entries = yield* git.listWorktrees(project.workspaceRoot);
-              const facts = yield* inspectBranch(
-                project,
-                input.path,
-                checked.branch,
-                checked.headSha,
-              ).pipe(Effect.orElseSucceed(() => null));
-              if (
-                !facts?.branchDeletable ||
-                entries.some((entry) => entry.branch === checked.branch)
-              )
-                blockedReasons.push(
-                  facts?.branchBlockedReason ??
-                    "Branch identity could not be re-verified or it acquired a new checkout.",
-                );
-              else {
-                branchDeleted = yield* git.deleteBranchIfAt({
-                  cwd: project.workspaceRoot,
-                  branch: checked.branch,
-                  expectedSha: checked.headSha,
-                });
-                if (!branchDeleted) blockedReasons.push("Branch moved; it was retained.");
-              }
-            }
-            return { removed: true, branchDeleted, blockedReasons };
-          }),
-        ),
+      yield* stopDeletedWorktreeClaims(preview.deletedThreadClaims).pipe(
+        Effect.provideServices(services),
       );
+      let branchDeleted = false;
+      const branchReasons: string[] = [];
+      const checked = yield* removeWorktreeSafely({
+        projectCwd: project.workspaceRoot,
+        path: input.path,
+        policy: { kind: "manual", ownThreadId: null },
+        expectedHead: input.expectedHead,
+        afterRemoval: (registration) =>
+          Effect.gen(function* () {
+            if (!input.deleteBranch || !registration?.branch || !registration.headSha) return;
+            const facts = yield* inspectBranch(
+              project,
+              input.path,
+              registration.branch,
+              registration.headSha,
+              false,
+            );
+            if (!facts.branchDeletable) {
+              branchReasons.push(facts.branchBlockedReason ?? "Branch could not be verified.");
+              return;
+            }
+            branchDeleted = yield* git.deleteBranchIfAt({
+              cwd: project.workspaceRoot,
+              branch: registration.branch,
+              expectedSha: registration.headSha,
+            });
+            if (!branchDeleted) branchReasons.push("Branch moved; it was retained.");
+          }).pipe(
+            Effect.catch((error) =>
+              Effect.sync(() => {
+                branchReasons.push(`Branch retained: ${error.message}`);
+              }),
+            ),
+          ),
+      }).pipe(Effect.provideServices(services));
+      return {
+        removed: checked.blockedReasons.length === 0,
+        branchDeleted,
+        blockedReasons: [...checked.blockedReasons, ...branchReasons],
+      };
     });
   const threadState: WorktreeManagerShape["threadState"] = (input) =>
     Effect.gen(function* () {
@@ -343,178 +314,167 @@ export const makeWorktreeManager = Effect.gen(function* () {
         : path;
       const token = `recovery:${crypto.randomUUID()}`;
       let prepared: { path: string; project: typeof initial.project } | null = null;
-      yield* withWorktreeLifecycleLocks(
-        [path, destination],
-        Effect.gen(function* () {
-          const { thread, project } = yield* check;
-          if (
-            thread.worktreePath !== initial.thread.worktreePath ||
-            thread.branch !== initial.thread.branch
-          )
-            return yield* Effect.fail(new Error("The workspace changed. Refresh and try again."));
-          yield* setup.register(thread.id, token);
-          yield* queue.setWorktreeBlockToken({ threadId: thread.id, token });
-          if (input.action === "useProjectCheckout") {
-            const root = yield* git.inspectCheckout(project.workspaceRoot);
-            yield* engine.dispatch({
-              type: "thread.meta.update",
-              commandId: CommandId.makeUnsafe(token),
-              threadId: thread.id,
-              branch: root.branch,
-              worktreePath: null,
-            });
-            return;
-          }
-          const state = yield* threadState(input);
-          if (input.action === "recreate") {
-            if (!state.branchExists || !thread.worktreePath || !thread.branch)
-              return yield* Effect.fail(
-                new Error("The branch is missing. Recreate from the default branch instead."),
-              );
-            yield* git.ensureWorktree({
-              cwd: project.workspaceRoot,
-              path: thread.worktreePath,
-              branch: thread.branch,
-              submodules: "none",
-            });
-            prepared = { path: thread.worktreePath, project };
-          } else {
-            const base = state.defaultBranch;
-            if (!base) return yield* Effect.fail(new Error("No base branch is available."));
-            const branch = plannedBranch!;
-            const target = destination;
-            yield* withWorktreeLifecycleLock(
-              target,
-              Effect.gen(function* () {
-                yield* git.clearMissingRegistration(project.workspaceRoot, target);
-                const baseSha = yield* git.resolveCommit(project.workspaceRoot, base);
-                if (!baseSha)
-                  return yield* Effect.fail(new Error("The recovery base no longer exists."));
-                // A durable ownership record precedes checkout. Release 2 consolidates these
-                // preparation records into the shared preparation repository.
-                yield* engine.dispatch({
-                  type: "thread.activity.append",
-                  commandId: CommandId.makeUnsafe(`${token}:allocated`),
-                  threadId: thread.id,
-                  activity: {
-                    id: EventId.makeUnsafe(token),
-                    tone: "info",
-                    kind: "worktree.recovery",
-                    summary: "Preparing recovered worktree",
-                    payload: {
-                      operationId: token,
-                      worktreePath: target,
-                      branch,
-                      baseSha,
-                      commonDir: yield* git.resolveCommonDir(project.workspaceRoot),
-                      phase: "allocated",
+      return yield* Effect.gen(function* () {
+        yield* withWorktreeLifecycleLocks(
+          [path, destination],
+          Effect.gen(function* () {
+            const { thread, project } = yield* check;
+            if (
+              thread.worktreePath !== initial.thread.worktreePath ||
+              thread.branch !== initial.thread.branch
+            )
+              return yield* Effect.fail(new Error("The workspace changed. Refresh and try again."));
+            yield* setup.register(thread.id, token);
+            yield* queue.setWorktreeBlockToken({ threadId: thread.id, token });
+            if (input.action === "useProjectCheckout") {
+              const root = yield* git.inspectCheckout(project.workspaceRoot);
+              yield* engine.dispatch({
+                type: "thread.meta.update",
+                commandId: CommandId.makeUnsafe(token),
+                threadId: thread.id,
+                branch: root.branch,
+                worktreePath: null,
+              });
+              return;
+            }
+            const state = yield* threadState(input);
+            if (input.action === "recreate") {
+              if (!state.branchExists || !thread.worktreePath || !thread.branch)
+                return yield* Effect.fail(
+                  new Error("The branch is missing. Recreate from the default branch instead."),
+                );
+              yield* git.ensureWorktree({
+                cwd: project.workspaceRoot,
+                path: thread.worktreePath,
+                branch: thread.branch,
+                submodules: "none",
+              });
+              prepared = { path: thread.worktreePath, project };
+            } else {
+              const base = state.defaultBranch;
+              if (!base) return yield* Effect.fail(new Error("No base branch is available."));
+              const branch = plannedBranch!;
+              const target = destination;
+              yield* withWorktreeLifecycleLock(
+                target,
+                Effect.gen(function* () {
+                  yield* git.clearMissingRegistration(project.workspaceRoot, target);
+                  const baseSha = yield* git.resolveCommit(project.workspaceRoot, base);
+                  if (!baseSha)
+                    return yield* Effect.fail(new Error("The recovery base no longer exists."));
+                  // A durable ownership record precedes checkout. Release 2 consolidates these
+                  // preparation records into the shared preparation repository.
+                  yield* engine.dispatch({
+                    type: "thread.activity.append",
+                    commandId: CommandId.makeUnsafe(`${token}:allocated`),
+                    threadId: thread.id,
+                    activity: {
+                      id: EventId.makeUnsafe(token),
+                      tone: "info",
+                      kind: "worktree.recovery",
+                      summary: "Preparing recovered worktree",
+                      payload: {
+                        operationId: token,
+                        worktreePath: target,
+                        branch,
+                        baseSha,
+                        commonDir: yield* git.resolveCommonDir(project.workspaceRoot),
+                        phase: "allocated",
+                      },
+                      turnId: null,
+                      createdAt: new Date().toISOString(),
                     },
-                    turnId: null,
                     createdAt: new Date().toISOString(),
-                  },
-                  createdAt: new Date().toISOString(),
-                });
-                const created = yield* git.createWorktree({
-                  cwd: project.workspaceRoot,
-                  branch: base,
-                  baseRefName: baseSha,
-                  newBranch: branch,
-                  path: target,
-                  submodules: "none",
-                });
-                yield* engine.dispatch({
-                  type: "thread.meta.update",
-                  commandId: CommandId.makeUnsafe(token),
-                  threadId: thread.id,
-                  branch: created.worktree.branch,
-                  worktreePath: created.worktree.path,
-                });
-                prepared = { path: created.worktree.path, project };
+                  });
+                  const created = yield* git.createWorktree({
+                    cwd: project.workspaceRoot,
+                    branch: base,
+                    baseRefName: baseSha,
+                    newBranch: branch,
+                    path: target,
+                    submodules: "none",
+                  });
+                  yield* engine.dispatch({
+                    type: "thread.meta.update",
+                    commandId: CommandId.makeUnsafe(token),
+                    threadId: thread.id,
+                    branch: created.worktree.branch,
+                    worktreePath: created.worktree.path,
+                  });
+                  prepared = { path: created.worktree.path, project };
+                }),
+              );
+            }
+          }),
+        );
+        // Scripts run with the durable queue barrier set and no lifecycle lock held.
+        if (prepared !== null) {
+          const workspace = prepared as { path: string; project: typeof initial.project };
+          const submodules = (yield* readProjectSettings(
+            yield* settings.getSettings,
+            workspace.project,
+          )).settings.worktreeSubmodules;
+          yield* git.initializeWorktreeSubmodules(workspace.path, submodules);
+          const script = setupProjectScript(workspace.project.scripts);
+          let setupError: string | null = null;
+          if (script)
+            yield* Effect.scoped(
+              Effect.gen(function* () {
+                const owned = yield* Effect.acquireRelease(
+                  startOwnedSetupScript({
+                    command: script.command,
+                    cwd: workspace.path,
+                    env: projectScriptRuntimeEnv({
+                      project: { cwd: workspace.project.workspaceRoot },
+                      worktreePath: workspace.path,
+                    }),
+                    onLine: () => {},
+                  }),
+                  (process) => process.kill,
+                );
+                const code = yield* owned.exit;
+                if (code !== 0) {
+                  setupError = `Setup script exited with code ${code}.`;
+                  yield* Effect.logWarning("worktree recovery setup script failed", {
+                    threadId: input.threadId,
+                    code,
+                  });
+                }
               }),
             );
-          }
-        }),
-      ).pipe(
-        Effect.onError(() =>
-          setup.unregister(input.threadId, token).pipe(
-            Effect.andThen(
-              queue.setWorktreeBlockToken({
-                threadId: input.threadId,
-                token: null,
-                expectedToken: token,
-              }),
-            ),
-            Effect.ignore,
-          ),
-        ),
-      );
-      // Scripts run with the durable queue barrier set and no lifecycle lock held.
-      if (prepared !== null) {
-        const workspace = prepared as { path: string; project: typeof initial.project };
-        const submodules = (yield* readProjectSettings(
-          yield* settings.getSettings,
-          workspace.project,
-        )).settings.worktreeSubmodules;
-        yield* git.initializeWorktreeSubmodules(workspace.path, submodules);
-        const script = setupProjectScript(workspace.project.scripts);
-        let setupError: string | null = null;
-        if (script)
-          yield* Effect.scoped(
-            Effect.gen(function* () {
-              const owned = yield* Effect.acquireRelease(
-                startOwnedSetupScript({
-                  command: script.command,
-                  cwd: workspace.path,
-                  env: projectScriptRuntimeEnv({
-                    project: { cwd: workspace.project.workspaceRoot },
-                    worktreePath: workspace.path,
-                  }),
-                  onLine: () => {},
-                }),
-                (process) => process.kill,
-              );
-              const code = yield* owned.exit;
-              if (code !== 0) {
-                setupError = `Setup script exited with code ${code}.`;
-                yield* Effect.logWarning("worktree recovery setup script failed", {
-                  threadId: input.threadId,
-                  code,
-                });
-              }
-            }),
-          );
-        yield* engine.dispatch({
-          type: "thread.activity.append",
-          commandId: CommandId.makeUnsafe(`${token}:prepared`),
-          threadId: input.threadId,
-          activity: {
-            id: EventId.makeUnsafe(`worktree-prepared:${input.threadId}`),
-            tone: setupError ? "error" : "info",
-            kind: "worktree.prepared",
-            summary: setupError ? `Worktree recreated; ${setupError}` : "Worktree prepared",
-            payload: { worktreePath: workspace.path, operationId: token, error: setupError },
-            turnId: null,
+          yield* engine.dispatch({
+            type: "thread.activity.append",
+            commandId: CommandId.makeUnsafe(`${token}:prepared`),
+            threadId: input.threadId,
+            activity: {
+              id: EventId.makeUnsafe(`worktree-prepared:${input.threadId}`),
+              tone: setupError ? "error" : "info",
+              kind: "worktree.prepared",
+              summary: setupError ? `Worktree recreated; ${setupError}` : "Worktree prepared",
+              payload: { worktreePath: workspace.path, operationId: token, error: setupError },
+              turnId: null,
+              createdAt: new Date().toISOString(),
+            },
             createdAt: new Date().toISOString(),
-          },
-          createdAt: new Date().toISOString(),
-        });
-      }
-      yield* setup.open(input.threadId, token);
-      yield* queue.setWorktreeBlockToken({
-        threadId: input.threadId,
-        token: null,
-        expectedToken: token,
-      });
-      yield* setup.unregister(input.threadId, token);
-      const data = yield* queue.listByThread(input.threadId);
-      if (data.state.paused && data.state.pauseReasonCode === "worktree_missing")
-        yield* queue.setPaused({
+          });
+        }
+        yield* setup.open(input.threadId, token);
+        yield* queue.setWorktreeBlockToken({
           threadId: input.threadId,
-          paused: false,
-          expectedRevision: data.state.revision,
+          token: null,
+          expectedToken: token,
         });
-      yield* dispatcher.notify(input.threadId);
-      return yield* threadState(input);
+        yield* setup.unregister(input.threadId, token);
+        const data = yield* queue.listByThread(input.threadId);
+        if (data.state.paused && data.state.pauseReasonCode === "worktree_missing")
+          yield* queue.setPaused({
+            threadId: input.threadId,
+            paused: false,
+            expectedRevision: data.state.revision,
+          });
+        yield* dispatcher.notify(input.threadId);
+        return yield* threadState(input);
+      }).pipe(Effect.ensuring(setup.unregister(input.threadId, token)));
     });
   return { inspect, remove, threadState, recover } satisfies WorktreeManagerShape;
 });

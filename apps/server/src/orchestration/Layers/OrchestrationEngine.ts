@@ -53,6 +53,7 @@ interface CommandEnvelope {
   command: OrchestrationCommand;
   result: Deferred.Deferred<{ sequence: number }, OrchestrationDispatchError>;
   startedAtMs: number;
+  workspace?: { path: string; branch: string | null; projectCwd: string };
 }
 
 function commandToAggregateRef(command: OrchestrationCommand): {
@@ -308,34 +309,24 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               commandType: command.type,
               detail: "Workspace preparation is still in progress. Wait for it to finish.",
             });
-          if (thread?.worktreePath) {
+          if (thread?.worktreePath || envelope.workspace) {
             const project = readModel.projects.find(
-              (entry) => entry.id === thread.projectId && entry.deletedAt === null,
+              (entry) => entry.id === thread?.projectId && entry.deletedAt === null,
             );
-            if (!project || Option.isNone(workspaceGit))
+            if (
+              !thread ||
+              !envelope.workspace ||
+              envelope.workspace.path !== thread.worktreePath ||
+              envelope.workspace.branch !== thread.branch ||
+              envelope.workspace.projectCwd !== project?.workspaceRoot
+            )
               return yield* new OrchestrationCommandInvariantError({
                 commandType: command.type,
-                detail: "Workspace identity cannot be verified.",
+                detail: "The workspace changed during verification. Retry the request.",
               });
-            yield* assertWorktreeReady(
-              workspaceGit.value,
-              {
-                projectCwd: project.workspaceRoot,
-                worktreePath: thread.worktreePath,
-                branch: thread.branch,
-              },
-              command.type === "thread.turn.start",
-            ).pipe(
-              Effect.mapError(
-                (error) =>
-                  new OrchestrationCommandInvariantError({
-                    commandType: command.type,
-                    detail: error.message,
-                  }),
-              ),
-            );
           }
         }
+
         const eventBase = yield* decideOrchestrationCommand({
           command: envelope.command,
           readModel,
@@ -752,8 +743,56 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
     Effect.gen(function* () {
+      // Git I/O must not occupy the serialized projection worker. The worker
+      // revalidates this metadata fingerprint before accepting the command.
+      let workspace: CommandEnvelope["workspace"];
+      if (
+        (command.type === "thread.turn.start" || command.type === "thread.turn.steer") &&
+        Option.isNone(
+          yield* commandReceiptRepository.getByCommandId({ commandId: command.commandId }),
+        )
+      ) {
+        const thread = readModel.threads.find((entry) => entry.id === command.threadId);
+        if (thread?.worktreePath) {
+          const project = readModel.projects.find(
+            (entry) => entry.id === thread.projectId && entry.deletedAt === null,
+          );
+          if (!project || Option.isNone(workspaceGit))
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "Workspace identity cannot be verified.",
+            });
+          workspace = {
+            path: thread.worktreePath,
+            branch: thread.branch,
+            projectCwd: project.workspaceRoot,
+          };
+          yield* assertWorktreeReady(
+            workspaceGit.value,
+            {
+              projectCwd: workspace.projectCwd,
+              worktreePath: workspace.path,
+              branch: workspace.branch,
+            },
+            command.type === "thread.turn.start",
+          ).pipe(
+            Effect.mapError(
+              (error) =>
+                new OrchestrationCommandInvariantError({
+                  commandType: command.type,
+                  detail: error.message,
+                }),
+            ),
+          );
+        }
+      }
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
-      yield* Queue.offer(commandQueue, { command, result, startedAtMs: Date.now() });
+      yield* Queue.offer(commandQueue, {
+        command,
+        result,
+        startedAtMs: Date.now(),
+        ...(workspace ? { workspace } : {}),
+      });
       return yield* Deferred.await(result);
     });
 

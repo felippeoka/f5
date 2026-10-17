@@ -125,7 +125,7 @@ export const makeDefaultBranchAutoPull = Effect.gen(function* () {
         hasUpstream: inspection.upstreamSha !== null,
         hasWorkingTreeChanges: inspection.hasTrackedChanges || inspection.hasUntrackedChanges,
         aheadCount: inspection.aheadCount ?? 1,
-        behindCount: 0,
+        behindCount: inspection.behindCount ?? 0,
       };
 
       if (details.branch === null) return { reason: "HEAD is detached", details };

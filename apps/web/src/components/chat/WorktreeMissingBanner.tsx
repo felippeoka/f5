@@ -76,9 +76,11 @@ export function WorktreeMissingBanner({
       role="status"
     >
       <p>
-        {data.branchExists || data.directoryExists
-          ? "This conversation's worktree needs recovery."
-          : `This thread's worktree and branch ${data.branch ?? "(unknown)"} are gone.`}
+        {data.directoryExists && data.registration === "otherBranch"
+          ? "This checkout is on a different branch or has a different identity. Its files have been kept. Restore the recorded branch to continue here, or choose another workspace."
+          : data.branchExists || data.directoryExists
+            ? "This conversation's worktree needs recovery."
+            : `This thread's worktree and branch ${data.branch ?? "(unknown)"} are gone.`}
       </p>
       <div className="flex flex-wrap gap-2">
         {canRecreateOriginal ? (

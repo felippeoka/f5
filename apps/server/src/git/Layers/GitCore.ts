@@ -1108,91 +1108,103 @@ const makeGitCore = Effect.gen(function* () {
   const ensureWorktree: GitCoreShape["ensureWorktree"] = (input) =>
     withWorktreeLifecycleLock(
       input.path,
-      withRepositoryLock(
-        "GitCore.ensureWorktree",
-        input.cwd,
-        Effect.gen(function* () {
-          const target = yield* canonicalPath(input.path);
-          const entries = yield* listWorktrees(input.cwd);
-          const registration = entries.find((entry) => entry.canonicalPath === target);
-          if (yield* checkoutExists(input.path)) {
-            const inspected = yield* inspectCheckout(input.path);
-            const common = yield* canonicalPath(yield* resolveCommonDir(input.cwd));
+      Effect.gen(function* () {
+        const target = yield* canonicalPath(input.path);
+        const entries = yield* listWorktrees(input.cwd);
+        const registration = entries.find((entry) => entry.canonicalPath === target);
+        if (yield* checkoutExists(input.path)) {
+          const inspected = yield* inspectCheckoutIdentity(input.path);
+          const common = yield* canonicalPath(yield* resolveCommonDir(input.cwd));
+          if (
+            !registration ||
+            registration.isMain ||
+            inspected.canonicalRoot !== target ||
+            inspected.commonDir !== common ||
+            inspected.branch !== input.branch ||
+            registration.branch !== input.branch
+          ) {
+            return yield* createGitCommandError(
+              "GitCore.ensureWorktree",
+              input.cwd,
+              [],
+              "The target is not the registered checkout of the expected repository and branch.",
+            );
+          }
+          return { recreated: false };
+        }
+        return yield* withRepositoryLock(
+          "GitCore.ensureWorktree",
+          input.cwd,
+          Effect.gen(function* () {
+            // Another profile may have registered the branch while we waited.
+            const entries = yield* listWorktrees(input.cwd);
+            const registration = entries.find((entry) => entry.canonicalPath === target);
+            if (yield* checkoutExists(input.path))
+              return yield* createGitCommandError(
+                "GitCore.ensureWorktree",
+                input.cwd,
+                [],
+                "The target appeared during recreation. Retry verification.",
+              );
+            const managedRoot = yield* canonicalPath(worktreesDir);
+            const relative = relativePath(managedRoot, target);
             if (
-              !registration ||
-              registration.isMain ||
-              inspected.canonicalRoot !== target ||
-              inspected.commonDir !== common ||
-              inspected.branch !== input.branch ||
-              registration.branch !== input.branch
+              !isAbsolutePath(input.path) ||
+              !relative ||
+              relative === ".." ||
+              relative.startsWith("../") ||
+              relative.startsWith("..\\") ||
+              isAbsolutePath(relative)
             ) {
               return yield* createGitCommandError(
                 "GitCore.ensureWorktree",
                 input.cwd,
                 [],
-                "The target is not the registered checkout of the expected repository and branch.",
+                "Missing worktrees can only be recreated inside this profile's managed worktrees directory.",
               );
             }
-            return { recreated: false };
-          }
-          const managedRoot = yield* canonicalPath(worktreesDir);
-          const relative = relativePath(managedRoot, target);
-          if (
-            !isAbsolutePath(input.path) ||
-            !relative ||
-            relative === ".." ||
-            relative.startsWith("../") ||
-            relative.startsWith("..\\") ||
-            isAbsolutePath(relative)
-          ) {
-            return yield* createGitCommandError(
+            if (!(yield* branchExists(input.cwd, input.branch))) {
+              return yield* createGitCommandError(
+                "GitCore.ensureWorktree",
+                input.cwd,
+                [],
+                `Worktree branch ${input.branch} is missing.`,
+              );
+            }
+            if (
+              registration &&
+              (registration.branch !== input.branch ||
+                registration.isMain ||
+                registration.locked !== null)
+            ) {
+              return yield* createGitCommandError(
+                "GitCore.ensureWorktree",
+                input.cwd,
+                [],
+                "The missing worktree registration does not match the requested branch or is locked.",
+              );
+            }
+            const other = entries.find(
+              (entry) => entry.canonicalPath !== target && entry.branch === input.branch,
+            );
+            if (other)
+              return yield* createGitCommandError(
+                "GitCore.ensureWorktree",
+                input.cwd,
+                [],
+                `Branch ${input.branch} is checked out at ${other.path}.`,
+              );
+            yield* clearMissingRegistrationUnlocked(input.cwd, input.path);
+            yield* executeGit(
               "GitCore.ensureWorktree",
               input.cwd,
-              [],
-              "Missing worktrees can only be recreated inside this profile's managed worktrees directory.",
+              ["worktree", "add", "--", input.path, input.branch],
+              { timeoutMs: 300_000 },
             );
-          }
-          if (!(yield* branchExists(input.cwd, input.branch))) {
-            return yield* createGitCommandError(
-              "GitCore.ensureWorktree",
-              input.cwd,
-              [],
-              `Worktree branch ${input.branch} is missing.`,
-            );
-          }
-          if (
-            registration &&
-            (registration.branch !== input.branch ||
-              registration.isMain ||
-              registration.locked !== null)
-          ) {
-            return yield* createGitCommandError(
-              "GitCore.ensureWorktree",
-              input.cwd,
-              [],
-              "The missing worktree registration does not match the requested branch or is locked.",
-            );
-          }
-          const other = entries.find(
-            (entry) => entry.canonicalPath !== target && entry.branch === input.branch,
-          );
-          if (other)
-            return yield* createGitCommandError(
-              "GitCore.ensureWorktree",
-              input.cwd,
-              [],
-              `Branch ${input.branch} is checked out at ${other.path}.`,
-            );
-          yield* clearMissingRegistrationUnlocked(input.cwd, input.path);
-          yield* executeGit(
-            "GitCore.ensureWorktree",
-            input.cwd,
-            ["worktree", "add", "--", input.path, input.branch],
-            { timeoutMs: 300_000 },
-          );
-          return { recreated: true };
-        }),
-      ),
+            return { recreated: true };
+          }),
+        );
+      }),
     ).pipe(
       // Submodule initialization may fetch; never hold lifecycle locks while it runs.
       Effect.tap((result) =>
@@ -1773,7 +1785,7 @@ const makeGitCore = Effect.gen(function* () {
       Effect.mapError((error) =>
         Schema.is(GitCommandError)(error)
           ? error
-          : createGitCommandError(operation, cwd, [], error.message),
+          : createGitCommandError(operation, cwd, [], error.message, error),
       ),
     );
 
@@ -1932,6 +1944,35 @@ const makeGitCore = Effect.gen(function* () {
       { concurrency: 4 },
     ).pipe(Effect.map((found) => found.find((operation) => operation !== null) ?? null));
 
+  const inspectCheckoutIdentity: GitCoreShape["inspectCheckoutIdentity"] = (cwd) =>
+    inspectionSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const root = yield* runGitStdout("GitCore.inspectCheckoutIdentity", cwd, [
+          "rev-parse",
+          "--path-format=absolute",
+          "--show-toplevel",
+        ]);
+        const symbolic = yield* executeGit(
+          "GitCore.inspectCheckoutIdentity",
+          cwd,
+          ["symbolic-ref", "--quiet", "--short", "HEAD"],
+          { allowNonZeroExit: true },
+        );
+        if (symbolic.code !== 0 && symbolic.code !== 1)
+          return yield* createGitCommandError(
+            "GitCore.inspectCheckoutIdentity",
+            cwd,
+            [],
+            "Cannot inspect symbolic HEAD.",
+          );
+        return {
+          canonicalRoot: yield* canonicalPath(stripPathTerminator(root)),
+          commonDir: yield* canonicalPath(yield* resolveCommonDir(cwd)),
+          branch: symbolic.code === 0 ? stripPathTerminator(symbolic.stdout) : null,
+        };
+      }),
+    );
+
   const inspectCheckout: GitCoreShape["inspectCheckout"] = (cwd, options) =>
     inspectionSemaphore.withPermits(1)(
       Effect.gen(function* () {
@@ -2024,6 +2065,17 @@ const makeGitCore = Effect.gen(function* () {
           upstreamRef,
           upstreamSha,
           aheadCount,
+          behindCount: aheadSha
+            ? Number(
+                stripPathTerminator(
+                  yield* runGitStdout("GitCore.inspectCheckout", cwd, [
+                    "rev-list",
+                    "--count",
+                    `HEAD..${aheadSha}`,
+                  ]),
+                ),
+              )
+            : null,
         };
       }),
     );
@@ -2495,6 +2547,7 @@ const makeGitCore = Effect.gen(function* () {
     initializeWorktreeSubmodules: (path, policy) => initializeSubmodules(path, policy),
     listWorktrees,
     inspectCheckout,
+    inspectCheckoutIdentity,
     clearMissingRegistration,
     branchExists,
     statusDetails,

@@ -143,3 +143,27 @@ it("offers recreate now in the queue when the original branch survives", async (
   );
   await expect.element(screen.getByRole("button", { name: "Recreate now" })).toBeVisible();
 });
+
+it("closes when selected removals succeed even when other rows are kept or blocked", async () => {
+  api.worktrees.inspect.mockImplementation(async ({ path }: { path: string }) =>
+    inspection(path, path === "/blocked" ? { blockedReasons: ["Protected files"] } : {}),
+  );
+  api.worktrees.remove.mockResolvedValue({
+    removed: true,
+    branchDeleted: false,
+    blockedReasons: [],
+  });
+  const close = vi.fn();
+  const screen = await mount(
+    <WorktreeRemovalDialog
+      rows={["/selected", "/kept", "/blocked"].map((path) => ({ projectId, path }))}
+      onClose={close}
+    />,
+  );
+  const kept = screen.getByRole("checkbox", { name: "/kept", exact: true });
+  await expect.element(kept).toBeChecked();
+  await kept.click();
+  await screen.getByRole("button", { name: "Remove selected" }).click();
+  await expect.poll(() => close.mock.calls.length).toBe(1);
+  expect(api.worktrees.remove).toHaveBeenCalledOnce();
+});

@@ -1,4 +1,4 @@
-import { assertWorktreeReady } from "../../project/worktreeReadiness.ts";
+import { assertWorktreeReady, WorktreeInspectionError } from "../../project/worktreeReadiness.ts";
 import { readProjectSettings } from "../../project/projectSettings.ts";
 import { hasNativeOperationReservation } from "../../provider/nativeOperations.ts";
 import { ServerSecretStore } from "../../auth/Services/ServerSecretStore.ts";
@@ -23,7 +23,10 @@ import {
   EventId as importEventIdFactory,
 } from "@t3tools/contracts";
 import { GitCore } from "../../git/Services/GitCore.ts";
-import { withWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
+import {
+  withWorktreeLifecycleLock,
+  RepositoryBusyError,
+} from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import { WorktreeSetupGate } from "../../project/Services/WorktreeSetupGate.ts";
 import {
   CommandId,
@@ -314,13 +317,24 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
           });
         return gate;
       }).pipe(
-        Effect.catch((error) =>
-          Effect.succeed({
-            kind: "autoPause" as const,
-            reasonCode: "worktree_missing" as const,
-            detail: error.message,
-          }),
-        ),
+        Effect.catch((error) => {
+          const retryable =
+            error instanceof WorktreeInspectionError || error.cause instanceof RepositoryBusyError;
+          return Effect.succeed(
+            retryable
+              ? {
+                  kind: "wait" as const,
+                  reasonCode: "worktree_missing" as const,
+                  detail: error.message,
+                  retryAfterMs: 1_000,
+                }
+              : {
+                  kind: "autoPause" as const,
+                  reasonCode: "worktree_missing" as const,
+                  detail: error.message,
+                },
+          );
+        }),
       );
     });
 
@@ -634,6 +648,7 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
         return;
       }
       if (gate.kind === "wait") {
+        if (gate.retryAfterMs !== undefined) yield* scheduleRetry(threadId, gate.retryAfterMs);
         yield* publishSnapshotIfChanged(threadId);
         yield* settleWaiter(item.itemId, {
           disposition: "queued",

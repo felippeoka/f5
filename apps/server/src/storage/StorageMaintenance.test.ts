@@ -129,6 +129,7 @@ function makeGitCoreStub(input?: {
           upstreamRef: "origin/feature",
           upstreamSha: "abc123",
           aheadCount: state.aheadCount,
+          behindCount: state.behindCount,
         };
       }),
     removeWorktree:

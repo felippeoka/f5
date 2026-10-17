@@ -1,3 +1,4 @@
+import { RepositoryBusyError } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import * as fs from "node:fs/promises";
 import { canonicalWorktreePath } from "../../git/worktreePaths.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -550,7 +551,12 @@ layer("NextTurnQueueDispatcher", (it) => {
   );
 });
 
-for (const scenario of ["recoverable", "missing-ref", "checked-out-elsewhere"] as const) {
+for (const scenario of [
+  "recoverable",
+  "missing-ref",
+  "checked-out-elsewhere",
+  "repository-busy",
+] as const) {
   it.effect(`handles a missing worktree before queue dispatch: ${scenario}`, () => {
     const target = path.join(os.tmpdir(), `f5-missing-${crypto.randomUUID()}`);
     const registration = () =>
@@ -565,6 +571,7 @@ for (const scenario of ["recoverable", "missing-ref", "checked-out-elsewhere"] a
         prunable: null,
         isMain: false,
       }));
+    let busy = scenario === "repository-busy";
     const git = makeFakeGitCore({
       listWorktrees: () => registration().pipe(Effect.map((entry) => [entry])),
       inspectCheckout: () =>
@@ -584,22 +591,33 @@ for (const scenario of ["recoverable", "missing-ref", "checked-out-elsewhere"] a
             upstreamRef: null,
             upstreamSha: null,
             aheadCount: null,
+            behindCount: null,
           };
         }),
       branchExists: () => Effect.succeed(scenario !== "missing-ref"),
       ensureWorktree: () =>
-        scenario === "checked-out-elsewhere"
+        busy
           ? Effect.fail(
               new GitCommandError({
                 operation: "ensureWorktree",
                 cwd: process.cwd(),
                 command: "git worktree add",
-                detail: "Branch feature is checked out at another-worktree.",
+                detail: "Repository busy",
+                cause: new RepositoryBusyError({ message: "Repository busy" }),
               }),
             )
-          : Effect.promise(() => fs.mkdir(target, { recursive: true })).pipe(
-              Effect.as({ recreated: true }),
-            ),
+          : scenario === "checked-out-elsewhere"
+            ? Effect.fail(
+                new GitCommandError({
+                  operation: "ensureWorktree",
+                  cwd: process.cwd(),
+                  command: "git worktree add",
+                  detail: "Branch feature is checked out at another-worktree.",
+                }),
+              )
+            : Effect.promise(() => fs.mkdir(target, { recursive: true })).pipe(
+                Effect.as({ recreated: true }),
+              ),
     });
     return Effect.gen(function* () {
       dispatched.length = 0;
@@ -616,6 +634,13 @@ for (const scenario of ["recoverable", "missing-ref", "checked-out-elsewhere"] a
       if (scenario === "recoverable") {
         assert.equal(dispatched.length, 1);
         assert.equal(git.calls.ensureWorktree.length, 1);
+      } else if (scenario === "repository-busy") {
+        assert.equal(dispatched.length, 0);
+        assert.equal(queue.state.paused, false);
+        busy = false;
+        yield* dispatcher.notify(threadId);
+        yield* dispatcher.drain;
+        assert.equal(dispatched.length, 1);
       } else {
         assert.equal(dispatched.length, 0);
         assert.equal(queue.state.pauseReasonCode, "worktree_missing");

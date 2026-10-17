@@ -118,7 +118,7 @@ recreate their checkout on their next send. **Keep all** leaves every remaining 
 Removal rechecks HEAD and usage under lifecycle locks; a changed checkout is retained with a reason.
 
 Branch deletion is optional. It is selected by default only when the branch is merged. A branch
-that is pushed or whose configured upstream has disappeared can also be selected. Default branches,
+that is fully pushed can also be selected. A deleted upstream alone never makes unmerged local commits safe to delete. Default branches,
 branches checked out elsewhere, and branches or paths referenced by non-deleted conversations cannot
 be deleted. Branch deletion compares the inspected commit again before changing the ref.
 
@@ -140,3 +140,14 @@ retained artifacts. Legacy directories with unresolved Git metadata are also ret
 Paths are preserved exactly, including leading or trailing whitespace and embedded newlines.
 Previously trimmed persisted paths cannot be reconstructed; identity verification refuses unsafe
 operations on them.
+
+Automatic cleanup uses the same idle-reference policy as manual removal: idle and archived
+conversations keep their recorded paths and recreate on the next send. Cleanup can remove
+`node_modules`; automatic recreation initializes submodules but does not rerun setup scripts in
+Release 1. Protected ignored files such as `.env` and build outputs still block removal.
+Legacy worktrees with unresolved Git metadata are skipped with a warning, never recursively deleted.
+
+A checkout on a different branch (including a detached HEAD during rebase) is preserved and blocked
+until its recorded branch is restored or an explicit recovery action is chosen. Recovery does not
+discard or overwrite files in the old checkout. Adopting another branch is part of the later workspace
+switching release.

@@ -115,14 +115,7 @@ export function WorktreeRemovalDialog({
     await queryClient.invalidateQueries({ queryKey: ["git"] });
     await queryClient.invalidateQueries({ queryKey: ["worktrees"] });
     setBusy(false);
-    if (
-      !failed &&
-      states.every(
-        (state) =>
-          state.removed || (state.selected && state.inspection?.blockedReasons.length === 0),
-      )
-    )
-      onClose();
+    if (!failed) onClose();
   };
   return (
     <Dialog
@@ -189,7 +182,7 @@ export function WorktreeRemovalDialog({
                     <span>
                       Also delete branch <code>{inspection.branch}</code>
                       {inspection.branchUpstreamGone && !inspection.branchMerged
-                        ? " (upstream deleted, likely merged)"
+                        ? " (upstream deleted)"
                         : ""}
                     </span>
                   </label>

@@ -11,7 +11,13 @@ import {
   project,
   thread,
 } from "../storage/storageAutomation.testHarness.ts";
-import { evaluateWorktreeRemoval, readWorktreeClaims } from "./worktreeClaims.ts";
+import { GitCore } from "../git/Services/GitCore.ts";
+import { makeFakeGitCore } from "../git/testDoubles.ts";
+import {
+  evaluateWorktreeRemoval,
+  readWorktreeClaims,
+  removeWorktreeSafely,
+} from "./worktreeClaims.ts";
 
 describe("effective workspace claims and removal gate", () => {
   const cleanups: Array<() => Promise<unknown>> = [];
@@ -82,6 +88,111 @@ describe("effective workspace claims and removal gate", () => {
         world.projects.push(project("other", target));
         expect((yield* inspect()).blockedReasons.join(" ")).toContain("project checkout");
       }).pipe(Effect.provide(automationLayer(world, {}, "f5-removal-state-")), Effect.scoped),
+    );
+  });
+  it("uses the default branch for maintenance when a new worktree has no upstream", async () => {
+    const repo = await makeClonedRepo("f5-maintenance-base-");
+    cleanups.push(repo.cleanup);
+    const world = makeWorld();
+    world.projects.push(project("p", repo.root));
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const target = path.join((yield* ServerConfig).worktreesDir, "no-upstream");
+        git(repo.root, "worktree", "add", "-q", "-b", "no-upstream", target, "main");
+        const inspect = () =>
+          evaluateWorktreeRemoval({
+            projectCwd: repo.root,
+            path: target,
+            policy: { kind: "storageMaintenance", ownThreadId: null },
+          });
+        expect((yield* inspect()).blockedReasons).toEqual([]);
+        git(target, "commit", "--allow-empty", "-qm", "unpublished");
+        expect((yield* inspect()).blockedReasons).toContain(
+          "unpushed commits could not be ruled out",
+        );
+      }).pipe(
+        Effect.provide(automationLayer(world, {}, "f5-maintenance-base-state-")),
+        Effect.scoped,
+      ),
+    );
+  });
+
+  it("rejects an outside path before running any Git commands", async () => {
+    const fake = makeFakeGitCore();
+    await Effect.runPromise(
+      evaluateWorktreeRemoval({
+        projectCwd: "/repo",
+        path: "/outside",
+        policy: { kind: "manual", ownThreadId: null },
+      }).pipe(
+        Effect.provideService(GitCore, fake.service),
+        Effect.tap((result) =>
+          Effect.sync(() =>
+            expect(result.blockedReasons).toContain("outside the allowed worktrees root"),
+          ),
+        ),
+        Effect.provide(automationLayer(makeWorld(), {}, "f5-outside-state-")),
+        Effect.scoped,
+      ),
+    );
+    expect(Object.values(fake.calls).flat()).toEqual([]);
+  });
+
+  it("retains rollback checkouts with setup output, unproven ownership, or live owned terminals", async () => {
+    const repo = await makeClonedRepo("f5-rollback-gate-");
+    cleanups.push(repo.cleanup);
+    const world = makeWorld();
+    world.projects.push(project("p", repo.root));
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const core = yield* GitCore;
+        const target = path.join((yield* ServerConfig).worktreesDir, "owned");
+        git(repo.root, "worktree", "add", "-q", "-b", "owned", target, "main");
+        const owner = thread({
+          id: "owner",
+          projectId: "p",
+          worktreePath: target,
+          branch: "owned",
+        });
+        world.threads.push(owner);
+        const proof = {
+          path: target,
+          commonDir: yield* core.resolveCommonDir(repo.root),
+          baseSha: git(target, "rev-parse", "HEAD"),
+          created: true,
+        };
+        const remove = (created = true) =>
+          removeWorktreeSafely({
+            projectCwd: repo.root,
+            path: target,
+            policy: {
+              kind: "ownedRollback",
+              ownThreadId: owner.id,
+              ownedCreation: { ...proof, created },
+            },
+          });
+        expect((yield* remove(false)).blockedReasons.join(" ")).toContain("ownership");
+        yield* Effect.promise(() => fs.writeFile(path.join(target, "setup-output"), "keep"));
+        expect((yield* remove()).blockedReasons.join(" ")).toContain("uncommitted");
+        yield* Effect.promise(() => fs.rm(path.join(target, "setup-output")));
+        world.terminals.push({
+          threadId: owner.id,
+          terminalId: "setup",
+          cwd: target,
+          status: "running",
+        });
+        expect((yield* remove()).blockedReasons.join(" ")).toContain("terminal");
+        world.terminals.length = 0;
+        expect((yield* remove()).blockedReasons).toEqual([]);
+        expect(
+          yield* Effect.promise(() =>
+            fs.access(target).then(
+              () => true,
+              () => false,
+            ),
+          ),
+        ).toBe(false);
+      }).pipe(Effect.provide(automationLayer(world, {}, "f5-rollback-gate-state-")), Effect.scoped),
     );
   });
 });

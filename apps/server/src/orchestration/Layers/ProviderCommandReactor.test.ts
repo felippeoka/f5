@@ -596,6 +596,7 @@ describe("ProviderCommandReactor", () => {
             upstreamRef: null,
             upstreamSha: null,
             aheadCount: null,
+            behindCount: null,
           };
         }),
     }).service;

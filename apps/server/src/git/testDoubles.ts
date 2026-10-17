@@ -40,6 +40,7 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
       "initializeWorktreeSubmodules",
       "listWorktrees",
       "inspectCheckout",
+      "inspectCheckoutIdentity",
       "clearMissingRegistration",
       "readRangeContext",
       "readDefaultBranch",
@@ -80,6 +81,7 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
     ensureWorktree: () => Effect.succeed({ recreated: false }),
     listWorktrees: () => Effect.succeed([]),
     clearMissingRegistration: () => Effect.void,
+    inspectCheckoutIdentity: (path) => implementations.inspectCheckout(path),
     inspectCheckout: (path) =>
       Effect.succeed({
         canonicalRoot: path,
@@ -95,6 +97,7 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
         upstreamRef: null,
         upstreamSha: null,
         aheadCount: null,
+        behindCount: null,
       }),
     status: (_input) =>
       Effect.succeed({
@@ -178,6 +181,10 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
     listWorktrees: (cwd) => {
       record("listWorktrees", [cwd]);
       return implementations.listWorktrees(cwd);
+    },
+    inspectCheckoutIdentity: (path) => {
+      record("inspectCheckoutIdentity", [path]);
+      return implementations.inspectCheckoutIdentity(path);
     },
     inspectCheckout: (path, options) => {
       record("inspectCheckout", [path, options]);

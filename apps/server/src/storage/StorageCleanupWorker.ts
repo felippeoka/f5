@@ -203,8 +203,6 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
         path: worktreePath,
         policy: { kind: "autoCleanup", ownThreadId: thread.id },
       }).pipe(Effect.provideServices(services));
-      if (result.deletedThreadClaims.length)
-        return "deleted thread processes must be stopped first";
       return result.blockedReasons.length ? result.blockedReasons.join(", ") : null;
     });
 

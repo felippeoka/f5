@@ -26,7 +26,12 @@ import type { WorktreeListEntry } from "../worktreeList.ts";
 export interface RegisteredWorktree extends WorktreeListEntry {
   readonly canonicalPath: string;
 }
-export interface CheckoutInspection {
+export interface CheckoutIdentity {
+  readonly canonicalRoot: string;
+  readonly commonDir: string;
+  readonly branch: string | null;
+}
+export interface CheckoutInspection extends CheckoutIdentity {
   readonly canonicalRoot: string;
   readonly commonDir: string;
   readonly registration: RegisteredWorktree | null;
@@ -40,6 +45,7 @@ export interface CheckoutInspection {
   readonly upstreamRef: string | null;
   readonly upstreamSha: string | null;
   readonly aheadCount: number | null;
+  readonly behindCount: number | null;
 }
 
 /** Internal compatibility input; force is never honored for an existing checkout. */
@@ -157,6 +163,10 @@ export interface GitCoreShape {
   readonly listWorktrees: (
     cwd: string,
   ) => Effect.Effect<ReadonlyArray<RegisteredWorktree>, GitCommandError>;
+  /** Identity only: no status scan, upstream refresh, or repository mutation lock. */
+  readonly inspectCheckoutIdentity: (
+    path: string,
+  ) => Effect.Effect<CheckoutIdentity, GitCommandError>;
   readonly inspectCheckout: (
     path: string,
     options?: { aheadOf?: string },

@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { ServerConfig } from "../../config.ts";
 import { NextTurnQueueDispatcher } from "../../nextTurnQueue/Services/NextTurnQueueDispatcher.ts";
@@ -13,7 +13,9 @@ import {
   project,
   thread,
 } from "../../storage/storageAutomation.testHarness.ts";
-import { WorktreeSetupGateLive } from "../Services/WorktreeSetupGate.ts";
+import { GitCore, type GitCoreShape } from "../../git/Services/GitCore.ts";
+import { GitCommandError } from "../../git/Errors.ts";
+import { WorktreeSetupGate, WorktreeSetupGateLive } from "../Services/WorktreeSetupGate.ts";
 import { makeWorktreeManager } from "./WorktreeManager.ts";
 
 describe("WorktreeManager safety and recovery", () => {
@@ -32,13 +34,18 @@ describe("WorktreeManager safety and recovery", () => {
       effect: (
         manager: Effect.Success<typeof makeWorktreeManager>,
         root: string,
+        gate: typeof WorktreeSetupGate.Service,
       ) => Effect.Effect<A, E>,
+      overrides: Partial<GitCoreShape> = {},
     ) =>
       Effect.runPromise(
         Effect.gen(function* () {
-          const manager = yield* makeWorktreeManager;
+          const originalGit = yield* GitCore;
+          const manager = yield* makeWorktreeManager.pipe(
+            Effect.provideService(GitCore, { ...originalGit, ...overrides }),
+          );
           const config = yield* ServerConfig;
-          return yield* effect(manager, config.worktreesDir);
+          return yield* effect(manager, config.worktreesDir, yield* WorktreeSetupGate);
         }).pipe(
           Effect.provide(WorktreeSetupGateLive),
           Effect.provideService(NextTurnQueueDispatcher, {
@@ -106,7 +113,7 @@ describe("WorktreeManager safety and recovery", () => {
       }),
     );
   });
-  it("stops deleted owners and permits an unreferenced branch whose upstream is gone", async () => {
+  it("stops deleted owners but retains unmerged commits when the upstream is gone", async () => {
     const { repo, world, projectId, run } = await fixture();
     await run((manager, root) =>
       Effect.gen(function* () {
@@ -133,7 +140,7 @@ describe("WorktreeManager safety and recovery", () => {
         const preview = yield* manager.inspect({ projectId, path: target });
         expect(preview.branchMerged).toBe(false);
         expect(preview.branchUpstreamGone).toBe(true);
-        expect(preview.branchDeletable).toBe(true);
+        expect(preview.branchDeletable).toBe(false);
         expect(preview.deletedThreadClaims).toContain("deleted");
         expect(
           yield* manager.remove({
@@ -142,7 +149,8 @@ describe("WorktreeManager safety and recovery", () => {
             deleteBranch: true,
             expectedHead: preview.headSha,
           }),
-        ).toEqual({ removed: true, branchDeleted: true, blockedReasons: [] });
+        ).toMatchObject({ removed: true, branchDeleted: false });
+        expect(git(repo.root, "rev-parse", "refs/heads/upstream-gone")).toBe(preview.headSha);
         expect(world.sessions).toEqual([]);
         expect(world.terminals).toEqual([]);
       }),
@@ -221,6 +229,125 @@ describe("WorktreeManager safety and recovery", () => {
         ).toBe(null);
         expect(world.sessions).toEqual([]);
         expect(git(repo.root, "branch", "--show-current")).toBe("main");
+      }),
+    );
+  });
+  it("does not claim an equal branch name in a different repository", async () => {
+    const { repo, world, projectId, run } = await fixture();
+    const other = await makeClonedRepo("f5-manager-other-");
+    cleanups.push(other.cleanup);
+    world.projects.push(project("other", other.root));
+    world.threads.push(
+      thread({ id: "other", projectId: "other", branch: "feature", worktreePath: null }),
+    );
+    await run((manager, root) =>
+      Effect.gen(function* () {
+        const target = path.join(root, "feature");
+        git(repo.root, "worktree", "add", "-q", "-b", "feature", target, "main");
+        expect((yield* manager.inspect({ projectId, path: target })).branchDeletable).toBe(true);
+        world.projects.push(project("alias", repo.root));
+        world.threads.push(
+          thread({ id: "same-repo", projectId: "alias", branch: "feature", worktreePath: null }),
+        );
+        expect((yield* manager.inspect({ projectId, path: target })).branchDeletable).toBe(false);
+      }),
+    );
+  });
+
+  it("leaves a failed post-checkout recovery retryable without restarting", async () => {
+    const { repo, world, run } = await fixture();
+    let fail = true;
+    const threadId = ThreadId.makeUnsafe("failed-recovery");
+    await run(
+      (manager, root, gate) =>
+        Effect.gen(function* () {
+          const target = path.join(root, "retry");
+          git(repo.root, "worktree", "add", "-q", "-b", "retry", target, "main");
+          world.threads.push(
+            thread({ id: threadId, projectId: "p", branch: "retry", worktreePath: target }),
+          );
+          expect(
+            (yield* manager
+              .recover({ threadId, action: "recreate", expectedQueueRevision: 0 })
+              .pipe(Effect.exit))._tag,
+          ).toBe("Failure");
+          const state = world.queueStates.get(threadId)!;
+          expect(state.worktreeBlockToken).toMatch(/^recovery:/);
+          expect(yield* gate.check(threadId, state.worktreeBlockToken)).toBe("orphaned");
+          fail = false;
+          yield* manager.recover({
+            threadId,
+            action: "recreate",
+            expectedQueueRevision: state.revision,
+          });
+          expect(world.queueStates.get(threadId)?.worktreeBlockToken).toBeNull();
+        }),
+      {
+        initializeWorktreeSubmodules: () =>
+          Effect.suspend(() =>
+            fail
+              ? Effect.fail(
+                  new GitCommandError({
+                    operation: "test",
+                    command: "submodule",
+                    cwd: repo.root,
+                    detail: "network unavailable",
+                  }),
+                )
+              : Effect.void,
+          ),
+      },
+    );
+  });
+
+  it("unregisters the recovery gate when interrupted during the setup script", async () => {
+    const { repo, world, run } = await fixture();
+    const threadId = ThreadId.makeUnsafe("interrupted-recovery");
+    world.projects[0] = {
+      ...world.projects[0]!,
+      scripts: [
+        {
+          id: "setup",
+          name: "setup",
+          command: "echo started > setup-started; sleep 30",
+          icon: "play",
+          runOnWorktreeCreate: true,
+        },
+      ],
+    };
+    await run((manager, root, gate) =>
+      Effect.gen(function* () {
+        const target = path.join(root, "interrupt");
+        git(repo.root, "worktree", "add", "-q", "-b", "interrupt", target, "main");
+        world.threads.push(
+          thread({ id: threadId, projectId: "p", branch: "interrupt", worktreePath: target }),
+        );
+        const fiber = yield* manager
+          .recover({ threadId, action: "recreate", expectedQueueRevision: 0 })
+          .pipe(Effect.forkChild);
+        yield* Effect.promise(async () => {
+          for (let i = 0; i < 200; i++) {
+            if (
+              await fs.access(path.join(target, "setup-started")).then(
+                () => true,
+                () => false,
+              )
+            )
+              return;
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+          throw new Error("setup script did not start");
+        });
+        yield* Fiber.interrupt(fiber);
+        const state = world.queueStates.get(threadId)!;
+        expect(yield* gate.check(threadId, state.worktreeBlockToken)).toBe("orphaned");
+        // An explicit retry can safely choose the project checkout after interruption.
+        yield* manager.recover({
+          threadId,
+          action: "useProjectCheckout",
+          expectedQueueRevision: state.revision,
+        });
+        expect(world.queueStates.get(threadId)?.worktreeBlockToken).toBeNull();
       }),
     );
   });

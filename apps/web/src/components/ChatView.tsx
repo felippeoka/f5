@@ -6959,7 +6959,7 @@ export default function ChatView({
     });
   }
   if (
-    activeThread.error &&
+    activeThread.error?.startsWith("Worktree isolation unavailable:") &&
     isLocalDraftThread &&
     envMode === "worktree" &&
     !activeThread.worktreePath

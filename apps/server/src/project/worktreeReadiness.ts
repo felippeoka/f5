@@ -3,6 +3,9 @@ import { Effect } from "effect";
 import type { GitCoreShape } from "../git/Services/GitCore.ts";
 import { canonicalWorktreePath } from "../git/worktreePaths.ts";
 
+export class WorktreeNotReadyError extends Error {}
+export class WorktreeInspectionError extends Error {}
+
 export const MISSING_WORKTREE_MESSAGE =
   "This thread's worktree is gone. Recreate it or continue in the project checkout.";
 
@@ -14,6 +17,7 @@ export const readWorktreeState = (
     worktreePath: string | null;
     branch: string | null;
   },
+  includeDefaultBranch = true,
 ) =>
   Effect.gen(function* () {
     const target = input.worktreePath ?? input.projectCwd;
@@ -30,19 +34,19 @@ export const readWorktreeState = (
     const entry = entries.find((entry) => entry.canonicalPath === canonical);
     const branchExists =
       input.branch !== null && (yield* git.branchExists(input.projectCwd, input.branch));
-    const defaultBranch =
-      (yield* git.readDefaultBranch(input.projectCwd)) ??
-      (yield* git.inspectCheckout(input.projectCwd)).branch ??
-      null;
+    const defaultBranch = includeDefaultBranch
+      ? ((yield* git.readDefaultBranch(input.projectCwd)) ??
+        (yield* git.inspectCheckoutIdentity(input.projectCwd)).branch ??
+        null)
+      : null;
     let matching = entry !== undefined && (input.branch === null || entry.branch === input.branch);
     if (directoryExists && input.worktreePath !== null) {
-      const inspected = yield* git.inspectCheckout(target).pipe(Effect.orElseSucceed(() => null));
+      const inspected = yield* git.inspectCheckoutIdentity(target);
       const expectedCommon = yield* git
         .resolveCommonDir(input.projectCwd)
         .pipe(Effect.flatMap((value) => Effect.tryPromise(() => canonicalWorktreePath(value))));
       matching =
         matching &&
-        inspected !== null &&
         inspected.canonicalRoot === canonical &&
         inspected.commonDir === expectedCommon &&
         (input.branch === null || inspected.branch === input.branch);
@@ -75,12 +79,20 @@ export const assertWorktreeReady = (
 ) =>
   Effect.gen(function* () {
     if (input.worktreePath === null) return;
-    const state = yield* readWorktreeState(git, input);
+    const state = yield* readWorktreeState(git, input, false).pipe(
+      Effect.mapError(
+        (error) =>
+          new WorktreeInspectionError(
+            `Workspace verification failed; retry the request. ${error.message}`,
+            { cause: error },
+          ),
+      ),
+    );
     if (!state.directoryExists && input.branch === null)
-      return yield* Effect.fail(new Error(MISSING_WORKTREE_MESSAGE));
+      return yield* Effect.fail(new WorktreeNotReadyError(MISSING_WORKTREE_MESSAGE));
     if (!state.directoryExists && !state.branchExists)
       return yield* Effect.fail(
-        new Error(
+        new WorktreeNotReadyError(
           `Worktree branch ${input.branch ?? "(unknown)"} is missing. ${MISSING_WORKTREE_MESSAGE}`,
         ),
       );
@@ -89,10 +101,10 @@ export const assertWorktreeReady = (
       (state.directoryExists && state.registration !== "matching")
     )
       return yield* Effect.fail(
-        new Error(
+        new WorktreeNotReadyError(
           "The recorded worktree does not match this repository and branch. Recover the workspace before sending.",
         ),
       );
     if (!state.directoryExists && !allowRecreation)
-      return yield* Effect.fail(new Error(MISSING_WORKTREE_MESSAGE));
+      return yield* Effect.fail(new WorktreeNotReadyError(MISSING_WORKTREE_MESSAGE));
   });
