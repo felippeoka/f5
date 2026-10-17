@@ -1,6 +1,6 @@
 # Provider prerequisites
 
-F5 needs at least one authenticated coding-agent provider on the machine running the F5 server.
+F5 needs at least one authenticated provider on the machine running the F5 server.
 
 ## Codex
 
@@ -50,6 +50,36 @@ F5 does not imitate it).
 - Muse Code is unavailable in isolated (non-default) profiles. See
   [Muse Code](providers/muse.md).
 
+## Cursor
+
+Cursor is Early Access.
+
+- Install the Cursor CLI so `agent` is on your PATH. F5 runs it as `agent acp`.
+- Sign in once with `agent login`.
+- If `agent` is missing, set **Binary path** on the instance in **Settings → Providers**. If the
+  status card says Cursor Agent is not authenticated, run `agent login` again.
+
+## OpenCode
+
+OpenCode can run locally or against a server you already operate.
+
+- **Local:** install OpenCode so `opencode` is on your PATH; F5 starts `opencode serve` when a
+  session needs it. Configure models and credentials with OpenCode's own provider setup.
+- **External server:** set **Server URL** on the instance in **Settings → Providers**, and
+  **Server password** if the server needs one. The password is stored in plain text on disk. No
+  local `opencode` binary is needed in this mode.
+- If `opencode` is missing, F5 reports that it is not installed or not on PATH. On macOS, a
+  quarantined download is blocked; fix it with `xattr -d com.apple.quarantine $(which opencode)`.
+
+## Grok
+
+Grok is Early Access.
+
+- Install the Grok CLI so `grok` is on your PATH. F5 talks to it over ACP.
+- Sign in once with `grok login`.
+- If the status card says Grok is not logged in, run `grok login` in a terminal; if `grok` is not
+  found, set **Binary path** on the instance.
+
 ## Windows executable overrides
 
 F5 launches provider arguments without a command shell so workspace paths and provider options are
@@ -62,9 +92,16 @@ directly runnable executable or the Claude CLI JavaScript entry point, not a `.c
 
 ## Picking a provider at runtime
 
-The active provider (and model) is picked per thread from the composer. Switching providers doesn't
-require restarting the F5 server. F5 starts a fresh provider session on demand when the selected
-provider runtime is available and authenticated.
+Provider and model are picked per thread from the composer's model picker. Switching providers
+doesn't require restarting the F5 server. F5 starts a fresh provider session on demand when the
+selected provider runtime is available and authenticated.
+
+## Instances and profiles
+
+You can add several instances of one provider in **Settings → Providers**, for example two Codex
+accounts with different homes. Instances share the profile they run in. Isolated F5
+[profiles](profiles.md) support only managed Codex and the bundled Claude runtime; other providers
+run in the default profile.
 
 ## Updating provider versions
 

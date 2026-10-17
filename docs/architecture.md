@@ -1,11 +1,14 @@
 # Architecture
 
-F5 runs as a **Node.js WebSocket server** that wraps one or more coding-agent providers and serves a React web app. Today F5 supports two providers:
+F5 runs as a **Node.js WebSocket server** that wraps one or more coding-agent providers and serves a React web app. F5 supports seven providers:
 
-- **Codex** — via `codex app-server` (JSON-RPC over stdio).
-- **Claude Code** — via the `@anthropic-ai/claude-agent-sdk`.
+- **Codex** via `codex app-server` (JSON-RPC over stdio).
+- **Claude Code** via the `@anthropic-ai/claude-agent-sdk`.
+- **Cursor**, **Grok** and **Antigravity** via the Agent Client Protocol (ACP).
+- **OpenCode** via its SDK against a local or external OpenCode server.
+- **Muse Code** via the Muse Session Protocol (MSP) and `@muse-code/sdk`.
 
-Both providers are fronted by a shared `ProviderAdapter` interface so the UI, orchestration, and checkpoint layers stay provider-agnostic.
+All providers are fronted by a shared `ProviderAdapter` interface so the UI, orchestration, and checkpoint layers stay provider-agnostic.
 
 ```
 ┌─────────────────────────────────┐
@@ -28,8 +31,8 @@ Both providers are fronted by a shared `ProviderAdapter` interface so the UI, or
 └──────────┬──────────────────────┘
            │ provider-specific transport
 ┌──────────▼──────────────────────┐
-│  codex app-server  |  Claude    │
-│  (JSON-RPC/stdio)  |  Agent SDK │
+│  provider runtime               │
+│  (JSON-RPC, SDK, ACP or MSP)    │
 └─────────────────────────────────┘
 ```
 
@@ -39,7 +42,7 @@ Both providers are fronted by a shared `ProviderAdapter` interface so the UI, or
 
 - **Server**: `apps/server` is the main coordinator. It serves the web app, accepts WebSocket requests, waits for startup readiness before welcoming clients, and sends all outbound pushes through a single ordered push path.
 
-- **Provider runtime**: Each provider process does the actual session work. For Codex that is `codex app-server` over JSON-RPC on stdio; for Claude Code it is a session launched through the Claude Agent SDK. The server translates their native events into the app's shared orchestration model.
+- **Provider runtime**: Each provider process does the actual session work, for example `codex app-server` over JSON-RPC on stdio, a Claude Agent SDK session, an ACP agent process, an OpenCode server or `muse serve`. The server translates their native events into the app's shared orchestration model.
 
 - **Background workers**: Long-running async flows such as runtime ingestion, command reaction, and checkpoint processing run as queue-backed workers. This keeps work ordered, reduces timing races, and gives tests a deterministic way to wait for the system to go idle.
 
@@ -85,7 +88,7 @@ sequenceDiagram
     participant Engine as OrchestrationEngine
     participant Delivery as ProviderTurnDeliveryWorker
     participant Provider as ProviderService
-    participant ProviderProc as codex app-server / Claude Agent SDK
+    participant ProviderProc as provider runtime
     participant Ingest as ProviderRuntimeIngestion
     participant Engine as OrchestrationEngine
     participant Push as ServerPushBus
@@ -97,7 +100,7 @@ sequenceDiagram
     Queue->>Engine: Dispatch admitted queue head
     Engine->>Engine: Commit message, pending barrier, receipt, delivery outbox
     Delivery->>Provider: Replay pending provider delivery
-    Provider->>ProviderProc: JSON-RPC / SDK call
+    Provider->>ProviderProc: Provider-native call
     ProviderProc-->>Ingest: Provider runtime events
     Ingest->>Engine: Normalize provider events
     Engine-->>Server: Domain events

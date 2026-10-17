@@ -1,3 +1,4 @@
+/** Data helpers for the shelved Bots workspace; no active UI consumer. See PR #148. */
 import {
   AgentBridgeGetTaskActivitiesResult as AgentBridgeGetTaskActivitiesResultSchema,
   AgentBridgeGetTasksResult as AgentBridgeGetTasksResultSchema,
