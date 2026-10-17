@@ -111,12 +111,10 @@ export async function buildCliArchive(options: {
       node,
       [
         path.join(repo, "apps/server/node_modules/tsdown/dist/run.mjs"),
-        "src/distribution/launcherEntry.ts",
-        "--format",
-        "cjs",
+        "--config",
+        "tsdown.launcher.config.ts",
         "--out-dir",
         path.join(temporary, "launcher"),
-        "--no-config",
       ],
       path.join(repo, "apps/server"),
     );

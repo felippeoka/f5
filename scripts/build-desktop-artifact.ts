@@ -9,10 +9,10 @@ import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
-import { verifyStagedLockfile } from "./verify-staged-lockfile.ts";
+import { seedStagedLockfile, verifyStagedLockfile } from "./verify-staged-lockfile.ts";
 import { RELEASE_UPDATE_REPOSITORY, verifyAppUpdateConfig } from "./lib/app-update-config.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
-import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
+import { stagedDesktopDependencies } from "./lib/desktop-stage.ts";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -182,6 +182,7 @@ interface StagePackageJson {
   readonly devDependencies: {
     readonly electron: string;
   };
+  readonly overrides?: Record<string, string>;
 }
 
 const AzureTrustedSigningOptionsConfig = Config.all({
@@ -406,53 +407,6 @@ function validateBundledClientAssets(clientDir: string) {
   });
 }
 
-function resolveDesktopRuntimeDependencies(
-  dependencies: Record<string, unknown> | undefined,
-  catalog: Record<string, unknown>,
-): Record<string, unknown> {
-  if (!dependencies || Object.keys(dependencies).length === 0) {
-    return {};
-  }
-
-  const runtimeDependencies = Object.fromEntries(
-    Object.entries(dependencies).filter(([dependencyName]) => dependencyName !== "electron"),
-  );
-
-  return resolveCatalogDependencies(runtimeDependencies, catalog, "apps/desktop");
-}
-
-function resolveFffBinaryDependencies(
-  platform: typeof BuildPlatform.Type,
-  arch: typeof BuildArch.Type,
-  version: unknown,
-): Record<string, unknown> {
-  if (typeof version !== "string" || version.length === 0) {
-    return {};
-  }
-
-  const architectures = arch === "universal" ? (["arm64", "x64"] as const) : ([arch] as const);
-  if (platform === "mac") {
-    return Object.fromEntries(
-      architectures.map((architecture) => [`@ff-labs/fff-bin-darwin-${architecture}`, version]),
-    );
-  }
-
-  if (platform === "win") {
-    return Object.fromEntries(
-      architectures.map((architecture) => [`@ff-labs/fff-bin-win32-${architecture}`, version]),
-    );
-  }
-
-  return Object.fromEntries(
-    architectures.flatMap((architecture) =>
-      (["gnu", "musl"] as const).map((libc) => [
-        `@ff-labs/fff-bin-linux-${architecture}-${libc}`,
-        version,
-      ]),
-    ),
-  );
-}
-
 function resolveGitHubPublishConfig(release: boolean):
   | {
       readonly provider: "github";
@@ -634,35 +588,18 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   const electronVersion = desktopPackageJson.dependencies.electron;
 
-  const serverDependencies = serverPackageJson.dependencies;
-  if (!serverDependencies || Object.keys(serverDependencies).length === 0) {
-    return yield* new BuildScriptError({
-      message: "Could not resolve production dependencies from apps/server/package.json.",
-    });
-  }
-
-  const resolvedServerDependencies = yield* Effect.try({
+  const stagedDependencies = yield* Effect.try({
     try: () =>
-      resolveCatalogDependencies(
-        serverDependencies,
-        rootPackageJson.workspaces.catalog,
-        "apps/server",
-      ),
-    catch: (cause) =>
-      new BuildScriptError({
-        message: "Could not resolve production dependencies from apps/server/package.json.",
-        cause,
+      stagedDesktopDependencies({
+        platform: options.platform,
+        arch: options.arch,
+        serverDependencies: serverPackageJson.dependencies ?? {},
+        desktopDependencies: desktopPackageJson.dependencies,
+        catalog: rootPackageJson.workspaces.catalog,
       }),
-  });
-  const resolvedDesktopRuntimeDependencies = yield* Effect.try({
-    try: () =>
-      resolveDesktopRuntimeDependencies(
-        desktopPackageJson.dependencies,
-        rootPackageJson.workspaces.catalog,
-      ),
     catch: (cause) =>
       new BuildScriptError({
-        message: "Could not resolve desktop runtime dependencies from apps/desktop/package.json.",
+        message: `Could not resolve staged desktop dependencies: ${String(cause)}`,
         cause,
       }),
   });
@@ -774,44 +711,47 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       options.signed,
       options.version !== undefined,
     ),
-    dependencies: {
-      ...resolvedServerDependencies,
-      ...resolveFffBinaryDependencies(
-        options.platform,
-        options.arch,
-        serverPackageJson.dependencies["@ff-labs/fff-node"],
-      ),
-      ...resolvedDesktopRuntimeDependencies,
-    },
+    dependencies: stagedDependencies,
     devDependencies: {
       electron: electronVersion,
     },
+    ...(rootPackageJson.overrides ? { overrides: rootPackageJson.overrides } : {}),
   };
 
   const stagePackageJsonString = yield* encodeJsonString(stagePackageJson);
   yield* fs.writeFileString(path.join(stageAppDir, "package.json"), `${stagePackageJsonString}\n`);
 
-  yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
-  yield* runCommand(
-    ChildProcess.make({
-      cwd: stageAppDir,
-      env: withoutSigningCredentials(process.env),
-      extendEnv: false,
-      ...commandOutputOptions(options.verbose),
-      // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
-      shell: process.platform === "win32",
-    })`bun install --production`,
+  const stagedBun = (args: TemplateStringsArray) =>
+    runCommand(
+      ChildProcess.make({
+        cwd: stageAppDir,
+        env: withoutSigningCredentials(process.env),
+        extendEnv: false,
+        ...commandOutputOptions(options.verbose),
+        // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
+        shell: process.platform === "win32",
+      })(args),
+    );
+  // `bun install --production` never saves a lockfile, so resolve one first and
+  // audit it before anything is installed or any install script runs. Seeding the
+  // stage with the root lock keeps every root-locked version, including nested
+  // duplicates, instead of re-resolving the manifest's ranges against the registry.
+  const rootLock = requireReadLock(path.join(repoRoot, "bun.lock"), "utf8");
+  yield* fs.writeFileString(
+    path.join(stageAppDir, "bun.lock"),
+    seedStagedLockfile(rootLock, stagePackageJson),
   );
+  yield* Effect.log("[desktop-artifact] Resolving staged dependencies...");
+  yield* stagedBun`bun install --lockfile-only --ignore-scripts`;
 
   yield* Effect.try({
     try: () =>
-      verifyStagedLockfile(
-        requireReadLock(path.join(repoRoot, "bun.lock"), "utf8"),
-        requireReadLock(path.join(stageAppDir, "bun.lock"), "utf8"),
-      ),
+      verifyStagedLockfile(rootLock, requireReadLock(path.join(stageAppDir, "bun.lock"), "utf8")),
     catch: (error) =>
       new BuildScriptError({ message: `Staged dependency audit failed: ${String(error)}` }),
   });
+  yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
+  yield* stagedBun`bun install --production --frozen-lockfile`;
   yield* fs.makeDirectory(options.outputDir, { recursive: true });
   yield* fs.copyFile(
     path.join(stageAppDir, "bun.lock"),

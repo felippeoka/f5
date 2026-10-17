@@ -27,6 +27,7 @@
     "scripts",
     "integration",
     "../../scripts/lib",
-    "tsdown.standalone.config.ts"
+    "tsdown.standalone.config.ts",
+    "tsdown.launcher.config.ts"
   ]
 }
