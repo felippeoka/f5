@@ -162,8 +162,25 @@ function createNativeApiMock() {
     }),
   );
 
+  const replaceProjectConfig = vi.fn(
+    async (input: Parameters<NativeApi["mcp"]["replaceProjectConfig"]>[0]) => {
+      const result = { projectId: input.projectId, version: "project-v2", servers: input.servers };
+      getProjectConfig.mockResolvedValue(result);
+      return result;
+    },
+  );
+  const replaceCommonConfig = vi.fn(
+    async (input: Parameters<NativeApi["mcp"]["replaceCommonConfig"]>[0]) => {
+      const result = { version: "common-v2", servers: input.servers };
+      getCommonConfig.mockResolvedValue(result);
+      return result;
+    },
+  );
+
   nativeApiRef.current = {
     mcp: {
+      replaceProjectConfig,
+      replaceCommonConfig,
       getCommonConfig,
       getProjectConfig,
       getEffectiveConfig,
@@ -180,6 +197,8 @@ function createNativeApiMock() {
   } as unknown as NativeApi;
 
   return {
+    replaceProjectConfig,
+    replaceCommonConfig,
     getCommonConfig,
     getProjectConfig,
     getEffectiveConfig,
@@ -454,6 +473,88 @@ describe("McpServersSettings", () => {
         );
       });
       expect(mocks.openExternal).not.toHaveBeenCalled();
+    } finally {
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
+  it("keeps editing, toggling, and removing connected through the extracted components", async () => {
+    const mocks = createNativeApiMock();
+    const { screen, queryClient } = await renderSettings();
+    try {
+      await page.getByRole("button", { name: "Edit", exact: true }).click();
+      await page.getByRole("textbox", { name: "Command", exact: true }).fill("updated-command");
+      await page.getByRole("button", { name: "Save changes" }).click();
+      await vi.waitFor(() => {
+        expect(mocks.replaceProjectConfig).toHaveBeenLastCalledWith({
+          projectId: PROJECT_ID,
+          expectedVersion: "project-v1",
+          servers: {
+            "project-server": { type: "stdio", command: "updated-command", enabled: true },
+          },
+        });
+      });
+      await page
+        .getByRole("switch", { name: "Enable MCP server project-server", exact: true })
+        .click();
+      await vi.waitFor(() => {
+        expect(mocks.replaceProjectConfig).toHaveBeenLastCalledWith({
+          projectId: PROJECT_ID,
+          expectedVersion: "project-v2",
+          servers: {
+            "project-server": { type: "stdio", command: "updated-command", enabled: false },
+          },
+        });
+      });
+      await expect
+        .element(page.getByRole("switch", { name: "Enable MCP server", exact: true }))
+        .not.toBeChecked();
+      await page.getByRole("button", { name: "Remove", exact: true }).click();
+      await vi.waitFor(() => {
+        expect(mocks.replaceProjectConfig).toHaveBeenLastCalledWith({
+          projectId: PROJECT_ID,
+          expectedVersion: "project-v2",
+          servers: {},
+        });
+        expect(document.body.textContent).toContain("No MCP servers configured for this scope.");
+      });
+      await expect
+        .element(page.getByRole("textbox", { name: "Name", exact: true }))
+        .toHaveValue("");
+    } finally {
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
+
+  it("imports into the selected scope and keeps pasted text after a failed save", async () => {
+    const mocks = createNativeApiMock();
+    const { screen, queryClient } = await renderSettings();
+    const pasted = '{"mcpServers":{"docs":{"url":"https://example.test/mcp"}}}';
+    try {
+      clickButtonWithExactText("Common");
+      await vi.waitFor(() => expect(document.body.textContent).toContain("Common servers (1/16)"));
+      const importInput = page.getByPlaceholder(
+        '{"mcpServers":{"filesystem":{"type":"stdio","command":"npx","args":["@modelcontextprotocol/server-filesystem"]}}}',
+      );
+      await importInput.fill(pasted);
+      mocks.replaceCommonConfig.mockRejectedValueOnce(new Error("Save failed"));
+      await page.getByRole("button", { name: "Import", exact: true }).click();
+      await vi.waitFor(() => expect(document.body.textContent).toContain("Save failed"));
+      await expect.element(importInput).toHaveValue(pasted);
+      await page.getByRole("button", { name: "Import", exact: true }).click();
+      await vi.waitFor(() => {
+        expect(mocks.replaceCommonConfig).toHaveBeenLastCalledWith({
+          expectedVersion: "common-v1",
+          servers: {
+            ...commonConfig.servers,
+            docs: { type: "http", url: "https://example.test/mcp" },
+          },
+        });
+        expect(document.body.textContent).toContain("Common servers (2/16)");
+      });
+      await expect.element(importInput).toHaveValue("");
+      expect(mocks.replaceProjectConfig).not.toHaveBeenCalled();
     } finally {
       queryClient.clear();
       await screen.unmount();
