@@ -1,6 +1,6 @@
 # Codex
 
-This guide is for people who want to use more than one Codex account in T3 Code.
+This guide is for people who want to use more than one Codex account in F5.
 
 Common reasons:
 
@@ -54,7 +54,7 @@ codex login
 
 This is the account used by `~/.codex`.
 
-In T3 Code Settings, name it something obvious:
+In F5 Settings, name it something obvious:
 
 ```text
 Display name: Codex Work
@@ -71,7 +71,7 @@ mkdir -p ~/.codex_p
 CODEX_HOME=~/.codex_p codex login
 ```
 
-In T3 Code Settings, add another Codex provider:
+In F5 Settings, add another Codex provider:
 
 ```text
 Display name: Codex Personal
@@ -92,7 +92,7 @@ managed copy the next time it materializes that shadow home.
 
 Open Settings and look at the provider row.
 
-T3 Code shows the authenticated email for providers that report one. Emails are blurred by default;
+F5 shows the authenticated email for providers that report one. Emails are blurred by default;
 click the blurred email to reveal it.
 
 Use display names and accent colors to make accounts easy to tell apart in the model picker.
@@ -119,7 +119,7 @@ Codex Personal  CODEX_HOME path: ~/.codex, Shadow home path: ~/.codex_p
 Those two providers are considered compatible for continuation, so the locked model picker can show
 both.
 
-If you add a third Codex provider with a completely different `CODEX_HOME path`, T3 Code treats it
+If you add a third Codex provider with a completely different `CODEX_HOME path`, F5 treats it
 as a different workspace. It will not be offered for existing threads created under `~/.codex`.
 
 ## If Both Accounts Look The Same
@@ -146,6 +146,10 @@ That means separate sessions and less account switching inside old threads. Most
 should use the shared-home plus shadow-home setup instead.
 
 ### Isolated profiles
+
+Provider instances and profiles solve different problems. Instances are several Codex entries in
+**Settings > Providers** inside one profile, each with its own home or shadow home. A profile is a
+separate F5 environment with its own projects, threads and accounts.
 
 [Profiles](../profiles.md) provide independent managed Codex homes and in-app login for work and personal accounts. Managed profiles require Codex 0.144.3 or newer and file-backed credentials. Versions older than the audited 0.162.0 baseline show a notice that newer protocol features may be missing; newer versions show an informational notice. Legacy Default shadow-home behavior is unchanged.
 
@@ -550,7 +554,7 @@ any required request or completion does not succeed.
 Codex remains an external executable. Updating F5 or this baseline does not replace
 an operator's installation or custom executable path. For an npm installation,
 `npm install -g @openai/codex@0.162.0` installs the pinned certified version; verify
-`codex --version`, or select the upgraded executable in Settings > Providers & Models.
+`codex --version`, or select the upgraded executable in **Settings > Providers**.
 Compaction requires 0.159.2; the other native capability gates require the certified 0.162.0 runtime. Older CLIs retain their existing conversation and rewind paths. `deferGoalContinuation` is omitted from resume requests below 0.162.0.
 
 ### Review targets and recovery

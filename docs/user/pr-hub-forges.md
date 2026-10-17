@@ -1,5 +1,18 @@
 # PR Hub accounts and forges
 
+## Getting around
+
+Open **Pull requests** in the sidebar.
+
+- **Accounts:** **Manage accounts** adds and verifies a token per forge host. With several matching accounts, pick the account for a repository route (see below).
+- **Views:** the Inbox and Focus views list tracked pull requests. Attention filters such as Needs you, Needs my review, Comments, My PRs, CI failing, Ready, Snoozed and Resolved narrow the list, and you can filter by repository, relationship, CI, lifecycle and tracking status.
+- **Pull request tabs:** Summary, Timeline, Review threads and Files.
+- **Threads:** pull requests linked to an F5 thread show on both sides. **Send to agent** places a diff comment in the linked thread's composer without sending it.
+
+The rest of this page covers accounts, forges and how actions behave on each host.
+
+## Accounts and forges
+
 PR Hub supports GitHub (including configured Enterprise hosts), GitLab, Bitbucket Cloud, Azure DevOps, and Forgejo/Gitea. Thread Git actions and the hub use the same typed forge adapters. All support reading diffs. Only GitHub exposes native stacks; hosts returning 404 or 422 hide that section.
 
 Use **Manage accounts** in Pull requests to verify a token with its provider host. Azure DevOps PAT verification also requires an organization. Tokens live in the profile's server secret store, separately for each host, verified login, and credential generation. They are never returned to the browser. Account metadata and exact repository routes live in SQLite. Select the legacy profile account to retain the existing GitHub setup; this remains the default.

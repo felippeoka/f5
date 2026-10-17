@@ -31,7 +31,7 @@ conversations that use the same connected plugin can use a ChatGPT / Dots connec
 
 ## Turning it on
 
-1. Open **Settings > Integrations > Agent Bridge**.
+1. Open **Settings > Tools > Agent Bridge**.
 2. Turn on **Enable Agent Bridge**. It is off by default.
 3. Tick the projects to share. No project is visible to any agent until you share it.
 
