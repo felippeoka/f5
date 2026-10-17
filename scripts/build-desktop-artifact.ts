@@ -791,27 +791,33 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* Effect.log(
     `[desktop-artifact] Building ${options.platform}/${options.target} (arch=${options.arch}, version=${appVersion})...`,
   );
-  const electronBuilderExecutable = path.join(
-    repoRoot,
-    "node_modules",
-    ".bin",
-    process.platform === "win32" ? "electron-builder.cmd" : "electron-builder",
-  );
-  if (!(yield* fs.exists(electronBuilderExecutable))) {
+  // Run the pinned package's own entry point with this Node instead of a
+  // node_modules/.bin shim: bun creates no .cmd shims on Windows, and this
+  // avoids shell mode on every platform.
+  const electronBuilderPackage = path.join(repoRoot, "node_modules", "electron-builder");
+  const electronBuilderCli = path.join(electronBuilderPackage, "cli.js");
+  const installedElectronBuilder = yield* fs
+    .readFileString(path.join(electronBuilderPackage, "package.json"))
+    .pipe(
+      Effect.map((text) => (JSON.parse(text) as { version?: string }).version),
+      Effect.catch(() => Effect.succeed(undefined)),
+    );
+  if (
+    installedElectronBuilder !== rootPackageJson.devDependencies["electron-builder"] ||
+    !(yield* fs.exists(electronBuilderCli))
+  ) {
     return yield* new BuildScriptError({
-      message: `Pinned electron-builder executable was not found at ${electronBuilderExecutable}. Run bun install first.`,
+      message: `Pinned electron-builder ${rootPackageJson.devDependencies["electron-builder"]} was not found at ${electronBuilderPackage} (found ${installedElectronBuilder ?? "none"}). Run bun install first.`,
     });
   }
   yield* runCommand(
     ChildProcess.make(
-      electronBuilderExecutable,
-      [platformConfig.cliFlag, `--${options.arch}`, "--publish", "never"],
+      process.execPath,
+      [electronBuilderCli, platformConfig.cliFlag, `--${options.arch}`, "--publish", "never"],
       {
         cwd: stageAppDir,
         env: buildEnv,
         ...commandOutputOptions(options.verbose),
-        // This is a repository-pinned, input-free .cmd shim on Windows.
-        shell: process.platform === "win32",
       },
     ),
   );
