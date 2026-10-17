@@ -791,17 +791,21 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const stagePackageJsonString = yield* encodeJsonString(stagePackageJson);
   yield* fs.writeFileString(path.join(stageAppDir, "package.json"), `${stagePackageJsonString}\n`);
 
-  yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
-  yield* runCommand(
-    ChildProcess.make({
-      cwd: stageAppDir,
-      env: withoutSigningCredentials(process.env),
-      extendEnv: false,
-      ...commandOutputOptions(options.verbose),
-      // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
-      shell: process.platform === "win32",
-    })`bun install --production`,
-  );
+  const stagedBun = (args: TemplateStringsArray) =>
+    runCommand(
+      ChildProcess.make({
+        cwd: stageAppDir,
+        env: withoutSigningCredentials(process.env),
+        extendEnv: false,
+        ...commandOutputOptions(options.verbose),
+        // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
+        shell: process.platform === "win32",
+      })(args),
+    );
+  // `bun install --production` never saves a lockfile, so resolve one first and
+  // audit it before anything is installed or any install script runs.
+  yield* Effect.log("[desktop-artifact] Resolving staged dependencies...");
+  yield* stagedBun`bun install --lockfile-only`;
 
   yield* Effect.try({
     try: () =>
@@ -812,6 +816,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     catch: (error) =>
       new BuildScriptError({ message: `Staged dependency audit failed: ${String(error)}` }),
   });
+  yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
+  yield* stagedBun`bun install --production --frozen-lockfile`;
   yield* fs.makeDirectory(options.outputDir, { recursive: true });
   yield* fs.copyFile(
     path.join(stageAppDir, "bun.lock"),
