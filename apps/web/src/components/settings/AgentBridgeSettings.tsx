@@ -1,3 +1,4 @@
+/** Shelved UI, not mounted; retained for future work. See PR #148 and docs/agent-bridge.md. */
 import {
   AGENT_BRIDGE_LOCAL_CLIENT_ID,
   type AgentBridgeClient,
@@ -121,7 +122,7 @@ export function AgentBridgeSettings() {
     <SettingsCard
       title="Agent Bridge"
       searchTarget="tools.agent-bridge"
-      description="Let an external agent, such as a ChatGPT Dot or any MCP client, read the projects you share, start supervised threads, and take tasks you assign on the Bots page. F5 asks you before those threads act, and agents can never answer approvals, stop work, or change settings."
+      description="Let an external agent, such as a ChatGPT Dot or any MCP client, read the projects you share and start supervised threads. F5 asks you before those threads act, and agents can never answer approvals, stop work, or change settings."
       actions={
         state ? (
           <Badge variant={state.local.status === "running" ? "success" : "outline"}>

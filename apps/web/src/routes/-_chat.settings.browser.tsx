@@ -1113,7 +1113,18 @@ describe("settings route", () => {
   });
 
   it("keeps global MCP on the common scope and project MCP bound to the scope picker", async () => {
-    const { screen } = await renderSettingsRoute("/settings?category=tools");
+    const { screen } = await renderSettingsRoute("/settings?category=tools", {
+      serverConfig: {
+        settings: {
+          ...DEFAULT_SERVER_SETTINGS,
+          agentBridge: {
+            ...DEFAULT_SERVER_SETTINGS.agentBridge,
+            enabled: true,
+            exposedProjectIds: [PROJECT_ONE],
+          },
+        },
+      },
+    });
 
     try {
       await vi.waitFor(() => {

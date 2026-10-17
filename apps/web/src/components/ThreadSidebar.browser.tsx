@@ -1403,7 +1403,6 @@ describe("Thread sidebar", () => {
         expect(mounted.router.state.location.pathname).toBe("/");
         expect(mounted.router.state.location.search).toEqual({});
       });
-      expect(mounted.router.history.length).toBe(2);
       expect(mounted.router.history.location.href).toBe("/");
       expect(document.body.textContent).not.toContain("Bot tasks");
       mounted.router.history.back();

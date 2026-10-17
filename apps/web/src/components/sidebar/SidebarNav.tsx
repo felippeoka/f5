@@ -32,6 +32,7 @@ function usePrHubNeedsYouCount(): number {
   return count;
 }
 
+/** Navigation button with an optional shortcut tooltip and trailing status. */
 function NavRow(props: {
   icon: LucideIcon;
   label: string;

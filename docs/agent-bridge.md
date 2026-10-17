@@ -34,17 +34,20 @@ conversations that use the same connected plugin can use a ChatGPT / Dots connec
 
 ## Retained configuration and listener
 
-Agent Bridge is off by default. Its enablement and shared-project settings remain persisted,
-but the settings card is hidden. No project is visible to an agent unless it is shared.
+The listener is suspended while the feature is shelved, including for profiles with
+`agentBridge.enabled: true` already saved. Startup and settings changes cannot open it.
+Enablement, shared-project settings, and task data remain persisted for future work.
 
-F5 starts a local listener on `127.0.0.1` with a random port, separate from the app port. The
-port and a 32-byte token, rotated on every start, are written to
+The retained listener implementation uses `127.0.0.1` with a random port, separate from the
+app port. When active, its port and a 32-byte token, rotated on every start, are written to
 `<state dir>/agent-bridge/local.json` (mode 0600). The file is removed when the bridge stops.
 
-## Connecting a local MCP client (STDIO)
+## Internal STDIO connection reference
 
 Local clients connect through a STDIO shim that reads `local.json` for every request, so a
-restart needs no reconfiguration. The retained connection formats are:
+restart needs no reconfiguration. These formats document the retained implementation for
+maintainers; they are not user setup instructions and cannot connect while the listener is
+suspended. Placeholder paths and profile values previously came from the hidden settings card:
 
 - **Desktop app:** command = the F5 executable, environment `ELECTRON_RUN_AS_NODE=1`,
   arguments `[<backend entry>, "agent-bridge-stdio", "--state-dir", <dir>, "--profile", <id>]`.
