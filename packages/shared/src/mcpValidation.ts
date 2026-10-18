@@ -1,10 +1,3 @@
-import { normalizeServerName, mcpServerNameKey } from "./mcpNormalization";
-export {
-  MAX_SERVER_NAME_LENGTH,
-  normalizeServerName,
-  mcpServerNameKey,
-  trimToUndefined,
-} from "./mcpNormalization";
 import {
   McpServerWriteDefinition,
   type McpConfigIssue,
@@ -13,12 +6,21 @@ import {
 } from "@t3tools/contracts";
 import { Schema, SchemaIssue } from "effect";
 import { mergeMcpServerLayers, stableMcpServersJson } from "./mcpConfig";
+import { mcpServerNameKey, normalizeServerName } from "./mcpServerName";
+
+export {
+  MAX_SERVER_NAME_LENGTH,
+  mcpServerNameKey,
+  normalizeServerName,
+  trimToUndefined,
+} from "./mcpServerName";
 
 export const MCP_SERVERS_PER_SCOPE = 16;
 export const MCP_EFFECTIVE_SERVER_LIMIT = 32;
 export const MCP_INTERNAL_SERVER_RESERVE = 4;
 export const MCP_RUNTIME_SERVER_LIMIT = MCP_EFFECTIVE_SERVER_LIMIT + MCP_INTERNAL_SERVER_RESERVE;
 export const MAX_SERVER_COUNT = MCP_SERVERS_PER_SCOPE;
+
 // Normalization must never discard legacy entries or rewrite their values.
 export function normalizeMcpServersRecord(
   value: McpProjectServersConfig | null | undefined,

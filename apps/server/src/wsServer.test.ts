@@ -1,3 +1,5 @@
+import { WorkspaceTransition } from "./project/Services/WorkspaceTransition.ts";
+import { makeFakeGitCore } from "./git/testDoubles.ts";
 import { WorktreePreparation } from "./project/Services/WorktreePreparation.ts";
 import {
   F5_PROTOCOL_VERSION,
@@ -908,8 +910,7 @@ describe("WebSocket Server", () => {
       harnessValidation?: HarnessValidationShape;
       open?: OpenShape;
       gitManager?: GitManagerShape;
-      gitCore?: Pick<GitCoreShape, "listBranches" | "initRepo" | "pullCurrentBranch"> &
-        Partial<Pick<GitCoreShape, "checkoutBranch">>;
+      gitCore?: Partial<GitCoreShape>;
       terminalManager?: TerminalManagerShape;
       observabilityEnabled?: boolean;
       createServerFactory?: typeof createServer;
@@ -982,7 +983,7 @@ describe("WebSocket Server", () => {
         : Layer.empty,
       options.gitManager ? Layer.succeed(GitManager, options.gitManager) : Layer.empty,
       options.gitCore
-        ? Layer.succeed(GitCore, options.gitCore as unknown as GitCoreShape)
+        ? Layer.succeed(GitCore, makeFakeGitCore(options.gitCore).service)
         : Layer.empty,
       options.terminalManager
         ? Layer.succeed(TerminalManager, options.terminalManager)
@@ -2024,6 +2025,7 @@ describe("WebSocket Server", () => {
           startup: Effect.void,
         }),
         Layer.succeed(worktreeManagerModule.WorktreeManager, {} as never),
+        Layer.succeed(WorkspaceTransition, {} as never),
         Layer.succeed(worktreeSetupModule.WorktreeSetup, {
           startup: Effect.void,
           changes: Stream.empty,
@@ -2340,6 +2342,7 @@ describe("WebSocket Server", () => {
           startup: Effect.void,
         }),
         Layer.succeed(worktreeManagerModule.WorktreeManager, {} as never),
+        Layer.succeed(WorkspaceTransition, {} as never),
         Layer.succeed(worktreeSetupModule.WorktreeSetup, {
           startup: Effect.void,
           changes: Stream.empty,
@@ -3166,7 +3169,9 @@ describe("WebSocket Server", () => {
   });
 
   it("returns checkout conflicts as structured recovery data without a stack trace", async () => {
-    const checkoutConflict = { cwd: "/repo/worktree", branch: "main", files: ["index.css"] };
+    const cwd = makeTempDir("f5-checkout-conflict-");
+    fs.mkdirSync(path.join(cwd, ".git"));
+    const checkoutConflict = { cwd, branch: "main", files: ["index.css"] };
     server = await createTestServer({
       gitCore: {
         listBranches: () => Effect.die("unused"),
@@ -3194,7 +3199,7 @@ describe("WebSocket Server", () => {
     });
     expect(response.error).toEqual({
       code: "GitCheckoutConflict",
-      message: "Local changes in /repo/worktree would be overwritten by switching to 'main'.",
+      message: `Local changes in ${checkoutConflict.cwd} would be overwritten by switching to 'main'.`,
       checkoutConflict,
     });
   });

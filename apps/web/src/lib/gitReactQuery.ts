@@ -1,3 +1,4 @@
+import type { ThreadId } from "@t3tools/contracts";
 import type { GitStackedAction } from "@t3tools/contracts";
 import { mutationOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
 import { ensureNativeApi } from "../nativeApi";
@@ -135,6 +136,7 @@ export function gitCheckoutMutationOptions(input: {
 }
 
 export function gitRunStackedActionMutationOptions(input: {
+  threadId?: ThreadId | null;
   cwd: string | null;
   queryClient: QueryClient;
   model?: string | null;
@@ -158,6 +160,7 @@ export function gitRunStackedActionMutationOptions(input: {
       if (!input.cwd) throw new Error("Git action is unavailable.");
       return api.git.runStackedAction({
         actionId,
+        ...(input.threadId ? { threadId: input.threadId } : {}),
         cwd: input.cwd,
         action,
         ...(commitMessage ? { commitMessage } : {}),
@@ -201,6 +204,7 @@ export function gitRemoveWorktreeMutationOptions(input: { queryClient: QueryClie
 }
 
 export function gitPreparePullRequestThreadMutationOptions(input: {
+  threadId?: ThreadId | null;
   cwd: string | null;
   queryClient: QueryClient;
 }) {
@@ -209,6 +213,7 @@ export function gitPreparePullRequestThreadMutationOptions(input: {
       const api = ensureNativeApi();
       if (!input.cwd) throw new Error("Pull request thread preparation is unavailable.");
       return api.git.preparePullRequestThread({
+        ...(input.threadId ? { threadId: input.threadId } : {}),
         cwd: input.cwd,
         reference,
         mode,

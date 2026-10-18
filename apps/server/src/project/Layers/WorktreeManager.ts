@@ -1,13 +1,10 @@
-import { WorktreePreparation } from "../Services/WorktreePreparation.ts";
-import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
+import { WorkspaceTransition } from "../Services/WorkspaceTransition.ts";
 import {
-  CommandId,
-  EventId,
   type ThreadId,
   type WorktreesInspectInput,
   type WorktreesInspectResult,
 } from "@t3tools/contracts";
-import { Deferred, Effect, FileSystem, Layer, Option } from "effect";
+import { Effect, FileSystem, Layer, Option } from "effect";
 import { ServerConfig } from "../../config.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { canonicalWorktreePath } from "../../git/worktreePaths.ts";
@@ -20,16 +17,10 @@ import {
   evaluateWorktreeRemoval,
   removeWorktreeSafely,
   stopDeletedWorktreeClaims,
-  stopWorktreeSession,
 } from "../worktreeClaims.ts";
 import { readWorktreeState } from "../worktreeReadiness.ts";
 import { WorktreeManager, type WorktreeManagerShape } from "../Services/WorktreeManager.ts";
 import { WorktreeSetupGate } from "../Services/WorktreeSetupGate.ts";
-import {
-  pathContains,
-  withWorktreeLifecycleLock,
-  withWorktreeLifecycleLocks,
-} from "./WorktreeLifecycleCoordinator.ts";
 
 export const makeWorktreeManager = Effect.gen(function* () {
   const services = yield* Effect.services<
@@ -42,18 +33,12 @@ export const makeWorktreeManager = Effect.gen(function* () {
     | WorktreeSetupGate
   >();
   const git = yield* GitCore;
-  const config = yield* ServerConfig;
   const engine = yield* OrchestrationEngineService;
   const queue = yield* NextTurnQueueStore;
   const setup = yield* WorktreeSetupGate;
+  const transitions = yield* Effect.serviceOption(WorkspaceTransition);
   const dispatcher = yield* NextTurnQueueDispatcher;
-  const preparation = yield* WorktreePreparation;
-  const turns = yield* ProjectionTurnRepository;
   const fileSystem = yield* FileSystem.FileSystem;
-  const activeRecoveries = new Map<
-    ThreadId,
-    { token: string; cancel: Deferred.Deferred<void>; done: Deferred.Deferred<void> }
-  >();
   const canonical = (path: string) => Effect.tryPromise(() => canonicalWorktreePath(path));
   const projectFor = (id: WorktreesInspectInput["projectId"]) =>
     Effect.gen(function* () {
@@ -202,8 +187,6 @@ export const makeWorktreeManager = Effect.gen(function* () {
         ...facts,
       } satisfies WorktreesInspectResult;
     });
-  const stopIdleSession = (threadId: ThreadId) =>
-    stopWorktreeSession(threadId).pipe(Effect.provideServices(services));
   const remove: WorktreeManagerShape["remove"] = (input) =>
     Effect.gen(function* () {
       const project = yield* projectFor(input.projectId);
@@ -281,302 +264,80 @@ export const makeWorktreeManager = Effect.gen(function* () {
       const preparationInterrupted =
         receipt !== null &&
         ["allocated", "setup_failed", "setup_indeterminate"].includes(receipt.phase);
+      const transition = Option.isSome(transitions)
+        ? yield* transitions.value.getTransition(input)
+        : null;
       const recovery =
-        token?.startsWith("recovery:") || token?.startsWith("preparation:")
-          ? (yield* setup.check(thread.id, token)) === "gating"
-            ? "running"
-            : "interrupted"
-          : preparationInterrupted
+        transition &&
+        ["reserved", "stopping", "applying", "applied", "needs_recovery"].includes(transition.phase)
+          ? transition.phase === "needs_recovery"
             ? "interrupted"
-            : "none";
+            : "running"
+          : token?.startsWith("recovery:") || token?.startsWith("preparation:")
+            ? (yield* setup.check(thread.id, token)) === "gating"
+              ? "running"
+              : "interrupted"
+            : preparationInterrupted
+              ? "interrupted"
+              : "none";
       return { ...state, recovery } as const;
     });
   const recover: WorktreeManagerShape["recover"] = (input) =>
     Effect.gen(function* () {
-      const initial = yield* context(input.threadId);
+      if (Option.isNone(transitions))
+        return yield* Effect.fail(new Error("Workspace transitions are unavailable."));
+      const { thread } = yield* context(input.threadId);
+      const data = yield* queue.listByThread(thread.id);
+      if (data.state.revision !== input.expectedQueueRevision)
+        return yield* Effect.fail(new Error("The queue changed. Refresh and try again."));
       if (input.action === "cancel") {
-        const active = activeRecoveries.get(input.threadId);
-        const data = yield* queue.listByThread(input.threadId);
-        if (
-          !active ||
-          data.state.worktreeBlockToken !== active.token ||
-          data.state.revision !== input.expectedQueueRevision
-        )
-          return yield* Effect.fail(new Error("Recovery changed. Refresh and try again."));
-        yield* Deferred.succeed(active.cancel, undefined);
-        yield* Deferred.await(active.done);
+        yield* transitions.value.cancel(thread.id, true);
         return yield* threadState(input);
       }
-      const token = `recovery:${crypto.randomUUID()}`;
-      let reserved = false;
-      if (!initial.thread.worktreePath && input.action !== "useProjectCheckout")
-        return yield* Effect.fail(
-          new Error("This conversation already uses the project checkout."),
-        );
-      const check = Effect.gen(function* () {
-        const { thread, project } = yield* context(input.threadId);
-        const data = yield* queue.listByThread(thread.id);
-        if (
-          reserved
-            ? data.state.worktreeBlockToken !== token
-            : data.state.revision !== input.expectedQueueRevision
-        )
-          return yield* Effect.fail(new Error("The queue changed. Refresh and try again."));
-        if (
-          Option.isSome(yield* turns.getPendingTurnStartByThreadId({ threadId: thread.id })) ||
-          thread.session?.activeTurnId ||
-          thread.session?.status === "running" ||
-          thread.session?.status === "starting" ||
-          data.items.some((item) => item.status === "dispatching")
-        )
-          return yield* Effect.fail(new Error("Wait for the active turn to finish."));
-        const setupState = yield* setup.check(thread.id, data.state.worktreeBlockToken);
-        if (
-          (setupState === "gating" && !reserved) ||
-          (setupState === "orphaned" &&
-            !data.state.worktreeBlockToken?.startsWith("recovery:") &&
-            !data.state.worktreeBlockToken?.startsWith("preparation:"))
-        )
-          return yield* Effect.fail(new Error("Workspace setup is already in progress."));
-        return { thread, project, data };
-      });
-      const beforeRecovery = yield* check;
-      const retryingRecovery =
-        beforeRecovery.data.state.worktreeBlockToken?.startsWith("recovery:") === true ||
-        beforeRecovery.data.state.worktreeBlockToken?.startsWith("preparation:") === true ||
-        (beforeRecovery.data.state.worktreeBlockToken === null &&
-          (yield* threadState(input)).recovery === "interrupted");
-      const path = initial.thread.worktreePath ?? initial.project.workspaceRoot;
-      const plannedState = input.action === "recreateFromBase" ? yield* threadState(input) : null;
-      const plannedBranch =
-        input.action === "recreateFromBase"
-          ? initial.thread.branch && !plannedState?.branchExists
-            ? initial.thread.branch
-            : `t3code/${crypto.randomUUID().replaceAll("-", "").slice(0, 8)}`
-          : null;
-      const managed = yield* canonical(config.worktreesDir);
-      const old = initial.thread.worktreePath
-        ? yield* canonical(initial.thread.worktreePath)
-        : null;
-      const destination = plannedBranch
-        ? old && old !== managed && pathContains(managed, old) && !plannedState?.directoryExists
-          ? initial.thread.worktreePath!
-          : yield* git.allocateWorktreePath({
-              cwd: initial.project.workspaceRoot,
-              branch: plannedBranch,
-            })
-        : path;
-      const cancellation = yield* Deferred.make<void>();
-      const done = yield* Deferred.make<void>();
-      let prepared: { path: string; project: typeof initial.project } | null = null;
-      return yield* Effect.gen(function* () {
-        yield* withWorktreeLifecycleLocks(
-          [path, destination],
-          Effect.gen(function* () {
-            const { thread } = yield* check;
-            if (
-              thread.worktreePath !== initial.thread.worktreePath ||
-              thread.branch !== initial.thread.branch
-            )
-              return yield* Effect.fail(new Error("The workspace changed. Refresh and try again."));
-            yield* setup.register(thread.id, token);
-            yield* queue.setWorktreeBlockToken({ threadId: thread.id, token });
-            reserved = true;
-            activeRecoveries.set(thread.id, { token, cancel: cancellation, done });
-            // Serialize behind prior acceptance before deciding whether an idle session can stop.
-            const createdAt = new Date().toISOString();
-            yield* engine.dispatch({
-              type: "thread.activity.append",
-              commandId: CommandId.makeUnsafe(`${token}:reserved`),
-              threadId: thread.id,
-              activity: {
-                id: EventId.makeUnsafe(`${token}:reserved`),
-                tone: "info",
-                kind: "worktree.recovery",
-                summary: "Recovering workspace",
-                payload: { operationId: token, phase: "reserved" },
-                turnId: null,
-                createdAt,
-              },
-              createdAt,
-            });
-            yield* check;
-          }),
-        );
-        yield* stopIdleSession(input.threadId);
-        yield* withWorktreeLifecycleLocks(
-          [path, destination],
-          Effect.gen(function* () {
-            const { thread, project } = yield* check;
-            if (
-              thread.worktreePath !== initial.thread.worktreePath ||
-              thread.branch !== initial.thread.branch
-            )
-              return yield* Effect.fail(new Error("The workspace changed. Refresh and try again."));
-            if (input.action === "useProjectCheckout") {
-              const root = yield* git.inspectCheckoutIdentity(project.workspaceRoot);
-              yield* engine.dispatch({
-                type: "thread.meta.update",
-                commandId: CommandId.makeUnsafe(token),
-                threadId: thread.id,
-                branch: root.branch,
-                worktreePath: null,
-              });
-              return;
-            }
-            const state = yield* threadState(input);
-            if (input.action === "recreate") {
-              if (!state.branchExists || !thread.worktreePath || !thread.branch)
-                return yield* Effect.fail(
-                  new Error("The branch is missing. Recreate from the default branch instead."),
-                );
-              yield* git.ensureWorktree({
-                owner: `thread:${thread.id}`,
-                cwd: project.workspaceRoot,
-                path: thread.worktreePath,
-                branch: thread.branch,
-                submodules: "none",
-              });
-              prepared = { path: thread.worktreePath, project };
-            } else {
-              const base = state.defaultBranch;
-              if (!base) return yield* Effect.fail(new Error("No base branch is available."));
-              const branch = plannedBranch!;
-              const target = destination;
-              yield* withWorktreeLifecycleLock(
-                target,
-                Effect.gen(function* () {
-                  yield* git.clearMissingRegistration(project.workspaceRoot, target);
-                  const baseSha = yield* git.resolveCommit(project.workspaceRoot, base);
-                  if (!baseSha)
-                    return yield* Effect.fail(new Error("The recovery base no longer exists."));
-                  // A durable ownership record precedes checkout. Release 2 consolidates these
-                  // preparation records into the shared preparation repository.
-                  yield* engine.dispatch({
-                    type: "thread.activity.append",
-                    commandId: CommandId.makeUnsafe(`${token}:allocated`),
-                    threadId: thread.id,
-                    activity: {
-                      id: EventId.makeUnsafe(token),
-                      tone: "info",
-                      kind: "worktree.recovery",
-                      summary: "Preparing recovered worktree",
-                      payload: {
-                        operationId: token,
-                        worktreePath: target,
-                        branch,
-                        baseSha,
-                        commonDir: yield* git.resolveCommonDir(project.workspaceRoot),
-                        phase: "allocated",
-                      },
-                      turnId: null,
-                      createdAt: new Date().toISOString(),
-                    },
-                    createdAt: new Date().toISOString(),
-                  });
-                  const created = yield* git.createWorktree({
-                    preparation: {
-                      owner: `thread:${thread.id}`,
-                      runSetupScript: true,
-                      replaceMissing: true,
-                    },
-                    cwd: project.workspaceRoot,
-                    branch: base,
-                    baseRefName: baseSha,
-                    newBranch: branch,
-                    path: target,
-                    submodules: "none",
-                  });
-                  yield* engine.dispatch({
-                    type: "thread.meta.update",
-                    commandId: CommandId.makeUnsafe(token),
-                    threadId: thread.id,
-                    branch: created.worktree.branch,
-                    worktreePath: created.worktree.path,
-                  });
-                  prepared = { path: created.worktree.path, project };
-                }),
-              );
-            }
-          }),
-        );
-        // Scripts run with the durable queue barrier set and no lifecycle lock held.
-        if (prepared !== null) {
-          const workspace = prepared as { path: string; project: typeof initial.project };
-          const current = (yield* context(input.threadId)).thread;
-          if (!current.branch)
-            return yield* Effect.fail(new Error("The recovered branch is unavailable."));
-          yield* preparation
-            .prepare({
-              threadId: input.threadId,
-              projectId: workspace.project.id,
-              worktreePath: workspace.path,
-              branch: current.branch,
-              retry: true,
-            })
-            .pipe(
-              Effect.timeout("10 minutes"),
-              Effect.raceFirst(
-                Deferred.await(cancellation).pipe(
-                  Effect.andThen(
-                    Effect.fail(
-                      new Error("Worktree preparation was cancelled. Retry recovery when ready."),
-                    ),
-                  ),
-                ),
-              ),
-              Effect.tapError((error) => {
-                const createdAt = new Date().toISOString();
-                return engine
-                  .dispatch({
-                    type: "thread.activity.append",
-                    commandId: CommandId.makeUnsafe(`${token}:failed`),
-                    threadId: input.threadId,
-                    activity: {
-                      id: EventId.makeUnsafe(`${token}:failed`),
-                      tone: "error",
-                      kind: "worktree.recovery",
-                      summary: `Recovery stopped: ${error.message}`,
-                      payload: { operationId: token },
-                      turnId: null,
-                      createdAt,
-                    },
-                    createdAt,
-                  })
-                  .pipe(Effect.ignore);
-              }),
-            );
-        }
-        yield* setup.open(input.threadId, token);
-        yield* queue.setWorktreeBlockToken({
-          threadId: input.threadId,
-          token: null,
-          expectedToken: token,
-        });
-        yield* setup.unregister(input.threadId, token);
-        const data = yield* queue.listByThread(input.threadId);
-        if (
-          data.state.paused &&
-          (data.state.pauseReasonCode === "worktree_missing" ||
-            (retryingRecovery && data.state.pauseReasonCode === "worktree_setup_failed"))
-        )
-          yield* queue.setPaused({
-            threadId: input.threadId,
-            paused: false,
-            expectedRevision: data.state.revision,
-          });
-        yield* dispatcher.notify(input.threadId);
-        return yield* threadState(input);
-      }).pipe(
-        Effect.ensuring(
-          Effect.gen(function* () {
-            yield* setup.unregister(input.threadId, token);
-            if (activeRecoveries.get(input.threadId)?.token === token)
-              activeRecoveries.delete(input.threadId);
-            yield* Deferred.succeed(done, undefined);
-          }),
-        ),
+      const orphanedOwner =
+        data.state.worktreeBlockToken &&
+        (data.state.worktreeBlockToken.startsWith("recovery:") ||
+          data.state.worktreeBlockToken.startsWith("preparation:")) &&
+        (yield* setup.check(thread.id, data.state.worktreeBlockToken)) === "orphaned"
+          ? data.state.worktreeBlockToken
+          : undefined;
+      const result = yield* transitions.value.switchWorkspace(
+        {
+          operationId: crypto.randomUUID(),
+          threadId: thread.id,
+          expected: {
+            branch: thread.branch,
+            worktreePath: thread.worktreePath,
+            sessionUpdatedAt: thread.session?.updatedAt ?? null,
+          },
+          intent:
+            input.action === "recreateFromBase"
+              ? "recreate_from_base"
+              : input.action === "useProjectCheckout"
+                ? "use_project_checkout"
+                : "recreate",
+        },
+        orphanedOwner,
       );
+      if (result.phase !== "completed")
+        return yield* Effect.fail(
+          new Error(result.error ?? "Inspect and resolve the workspace transition."),
+        );
+      if (orphanedOwner)
+        yield* queue.setWorktreeBlockToken({
+          threadId: thread.id,
+          token: null,
+          expectedToken: orphanedOwner,
+        });
+      const latest = yield* queue.listByThread(thread.id);
+      if (latest.state.paused && latest.state.pauseReasonCode === "worktree_missing")
+        yield* queue.setPaused({
+          threadId: thread.id,
+          paused: false,
+          expectedRevision: latest.state.revision,
+        });
+      yield* dispatcher.notify(thread.id);
+      return yield* threadState(input);
     });
   return { inspect, remove, threadState, recover } satisfies WorktreeManagerShape;
 });

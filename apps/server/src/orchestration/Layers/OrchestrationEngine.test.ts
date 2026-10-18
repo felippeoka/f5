@@ -1,3 +1,6 @@
+import { WorkspaceWriteContext } from "../../project/workspaceTransitionContext.ts";
+import { WorkspaceTransitionsLive } from "../../persistence/Layers/WorkspaceTransitions.ts";
+import { WorkspaceTransitions } from "../../persistence/Services/WorkspaceTransitions.ts";
 import {
   NextTurnQueueStore,
   type NextTurnQueueStoreShape,
@@ -122,6 +125,7 @@ async function createOrchestrationSystem(input?: {
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+    Layer.provideMerge(WorkspaceTransitionsLive),
     Layer.provideMerge(SqlitePersistenceMemory),
     Layer.provide(input?.queue ? Layer.succeed(NextTurnQueueStore, input.queue) : Layer.empty),
     Layer.provide(input?.git ? Layer.succeed(GitCore, input.git) : Layer.empty),
@@ -136,6 +140,7 @@ async function createOrchestrationSystem(input?: {
   return {
     engine,
     sql,
+    transitions: await runtime.runPromise(Effect.service(WorkspaceTransitions)),
     run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
     dispose: () => runtime.dispose(),
   };
@@ -192,6 +197,141 @@ function now() {
 }
 
 describe("OrchestrationEngine", () => {
+  it("commits transition completion, metadata and receipt atomically and replays a lost response", async () => {
+    const system = await createOrchestrationSystem();
+    const threadId = ThreadId.makeUnsafe("transition-thread");
+    const projectId = ProjectId.makeUnsafe("transition-project");
+    const createdAt = now();
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("transition-project"),
+          projectId,
+          title: "Project",
+          workspaceRoot: "/repo",
+          defaultModel: "gpt-5-codex",
+          createdAt,
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("transition-thread"),
+          threadId,
+          projectId,
+          title: "Thread",
+          model: "gpt-5-codex",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: "main",
+          worktreePath: null,
+          createdAt,
+        }),
+      );
+      const expected = { branch: "main", worktreePath: null, sessionUpdatedAt: null };
+      const identity = { path: "/repo", repository: "/repo/.git", branch: "main", headSha: "a" };
+      let record = await system.run(
+        system.transitions.reserve({
+          operationId: "switch",
+          threadId,
+          version: 0,
+          intent: "attach_existing",
+          phase: "reserved",
+          source: identity,
+          target: { ...identity, path: "/managed/topic", branch: "topic" },
+          observed: null,
+          fingerprint: null,
+          mutationAttempted: false,
+          request: { operationId: "switch", threadId, intent: "attach_existing", expected },
+          requestHash: "switch",
+          commandId: "workspace:switch",
+          setupOwnerToken: null,
+          result: null,
+          error: null,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      );
+      // Neither a public metadata write nor a queue resume may bypass reservation.
+      await expect(
+        system.run(
+          system.engine.dispatch({
+            type: "thread.meta.update",
+            commandId: CommandId.makeUnsafe("bypass"),
+            threadId,
+            branch: "bypass",
+          }),
+        ),
+      ).rejects.toThrow(/transition/);
+      const turn = {
+        type: "thread.turn.start" as const,
+        commandId: CommandId.makeUnsafe("blocked-turn"),
+        threadId,
+        message: {
+          messageId: asMessageId("blocked-message"),
+          role: "user" as const,
+          text: "hello",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required" as const,
+        createdAt,
+      };
+      await expect(system.run(system.engine.dispatch(turn))).rejects.toThrow(/transition/);
+      record = await system.run(
+        system.transitions.update(record, {
+          phase: "applied",
+          result: { ...expected, branch: "topic", worktreePath: "/managed/topic" },
+        }),
+      );
+      const command = {
+        type: "thread.meta.update" as const,
+        commandId: CommandId.makeUnsafe(record.commandId),
+        threadId,
+        branch: "topic",
+        worktreePath: "/managed/topic",
+      };
+      await expect(
+        system.run(
+          system.engine.dispatch(command).pipe(
+            Effect.provideService(WorkspaceWriteContext, {
+              expected,
+              operationId: record.operationId,
+              version: record.version - 1,
+            }),
+          ),
+        ),
+      ).rejects.toThrow(/changed/);
+      // A rejected command receipt cannot be reused; completion uses its reserved unique command.
+      const valid = { ...command, commandId: CommandId.makeUnsafe("workspace:switch:commit") };
+      await system.run(
+        system.engine.dispatch(valid).pipe(
+          Effect.provideService(WorkspaceWriteContext, {
+            expected,
+            operationId: record.operationId,
+            version: record.version,
+          }),
+        ),
+      );
+      expect((await system.run(system.transitions.get("switch")))?.phase).toBe("completed");
+      expect(
+        (await system.run(system.engine.getReadModel())).threads.find(
+          (thread) => thread.id === threadId,
+        ),
+      ).toMatchObject({ branch: "topic", worktreePath: "/managed/topic" });
+      expect(await system.run(system.engine.dispatch(valid))).toEqual(
+        await system.run(system.engine.dispatch(valid)),
+      );
+      const receipts = await system.run(
+        system.sql`SELECT 1 FROM orchestration_command_receipts WHERE command_id = ${valid.commandId} AND status='accepted'`,
+      );
+      expect(receipts).toHaveLength(1);
+    } finally {
+      await system.dispose();
+    }
+  });
+
   it("keeps the command worker available during workspace verification and rejects changed metadata", async () => {
     const target = await canonicalWorktreePath(
       fs.mkdtempSync(path.join(os.tmpdir(), "f5-engine-workspace-")),
@@ -281,7 +421,12 @@ describe("OrchestrationEngine", () => {
             branch: "main",
             worktreePath: null,
           })
-          .pipe(Effect.timeout("2 seconds")),
+          .pipe(
+            Effect.provideService(WorkspaceWriteContext, {
+              expected: { branch: "feature", worktreePath: target, sessionUpdatedAt: null },
+            }),
+            Effect.timeout("2 seconds"),
+          ),
       );
       await system.run(Deferred.succeed(release, undefined));
       expect((await pending).message).toContain("workspace changed");
@@ -1613,31 +1758,85 @@ describe("OrchestrationEngine", () => {
         createdAt,
       }),
     );
+    // A session event can land after a verified branch observation captured its expected context.
     await system.run(
       engine.dispatch({
-        type: "thread.meta.update",
-        commandId: CommandId.makeUnsafe("cmd-thread-branch-cas-success"),
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("session-during-observation"),
         threadId,
-        branch: "feature/current",
-        expectedBranch: "feature/original",
+        createdAt,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          providerInstanceId: null,
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          lastErrorId: null,
+          lastErrorOccurredAt: null,
+          lastErrorRetryability: null,
+          updatedAt: createdAt,
+        },
       }),
+    );
+    await system.run(
+      engine
+        .dispatch({
+          type: "thread.meta.update",
+          commandId: CommandId.makeUnsafe("cmd-thread-branch-cas-success"),
+          threadId,
+          branch: "feature/current",
+          expectedBranch: "feature/original",
+        })
+        .pipe(
+          Effect.provideService(WorkspaceWriteContext, {
+            expected: { branch: "feature/original", worktreePath: null, sessionUpdatedAt: null },
+            observation: true,
+          }),
+        ),
     );
 
     await expect(
       system.run(
-        engine.dispatch({
-          type: "thread.meta.update",
-          commandId: CommandId.makeUnsafe("cmd-thread-branch-cas-stale"),
-          threadId,
-          branch: "feature/stale",
-          expectedBranch: "feature/original",
-        }),
+        engine
+          .dispatch({
+            type: "thread.meta.update",
+            commandId: CommandId.makeUnsafe("cmd-thread-branch-cas-stale"),
+            threadId,
+            branch: "feature/stale",
+            expectedBranch: "feature/original",
+          })
+          .pipe(
+            Effect.provideService(WorkspaceWriteContext, {
+              expected: { branch: "feature/current", worktreePath: null, sessionUpdatedAt: null },
+              observation: true,
+            }),
+          ),
       ),
     ).rejects.toThrow("branch changed before metadata update");
     expect(
       (await system.run(engine.getReadModel())).threads.find((entry) => entry.id === threadId),
     ).toMatchObject({ branch: "feature/current" });
 
+    await system.run(
+      engine.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.makeUnsafe("archive-for-root-guard"),
+        threadId,
+        createdAt,
+      }),
+    );
+    await expect(
+      system.run(
+        engine.dispatch({
+          type: "project.meta.update",
+          commandId: CommandId.makeUnsafe("move-project-root"),
+          projectId,
+          workspaceRoot: "/tmp/moved-checkout",
+        }),
+      ),
+    ).rejects.toThrow("Conversations still reference this project workspace");
     await system.dispose();
   });
 

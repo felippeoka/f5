@@ -1,3 +1,4 @@
+import { WorkspaceTransitionBanner } from "./chat/WorkspaceTransitionBanner";
 import { flushSync } from "react-dom";
 import { WorktreeMissingBanner } from "./chat/WorktreeMissingBanner";
 import { pickPreferredModel } from "../providerModels";
@@ -5153,6 +5154,9 @@ export default function ChatView({
 
     try {
       const bootstrap = buildFirstSendBootstrap({
+        sharedFilesystemConfirmed:
+          useComposerDraftStore.getState().getDraftThread(threadIdForSend)
+            ?.sharedFilesystemConfirmed ?? false,
         isLocalDraftThread,
         projectId: activeProject.id,
         projectCwd: activeProject.cwd,
@@ -7405,11 +7409,14 @@ export default function ChatView({
                       <ThreadNoticeStack notices={threadNotices} />
                     ) : null}
                     {isServerThread && (
-                      <WorktreeMissingBanner
-                        threadId={threadId}
-                        worktreePath={activeThread?.worktreePath}
-                        branch={activeThread?.branch}
-                      />
+                      <>
+                        <WorkspaceTransitionBanner threadId={threadId} />
+                        <WorktreeMissingBanner
+                          threadId={threadId}
+                          worktreePath={activeThread?.worktreePath}
+                          branch={activeThread?.branch}
+                        />
+                      </>
                     )}
                     {isServerThread &&
                     worktreeSetup &&
@@ -7582,6 +7589,7 @@ export default function ChatView({
 
             {pullRequestDialogState ? (
               <PullRequestThreadDialog
+                threadId={isServerThread && !activeThread?.worktreePath ? threadId : undefined}
                 key={pullRequestDialogState.key}
                 open
                 cwd={activeProject?.cwd ?? null}

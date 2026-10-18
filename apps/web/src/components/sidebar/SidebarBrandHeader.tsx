@@ -49,7 +49,7 @@ function SidebarWordmark() {
           }
         />
         <TooltipPopup side="bottom" sideOffset={2}>
-          {`F5 ${APP_VERSION} (${APP_STAGE_LABEL})`}
+          {`F5 ${APP_VERSION}${APP_STAGE_LABEL ? ` (${APP_STAGE_LABEL})` : ""}`}
         </TooltipPopup>
       </Tooltip>
     </div>

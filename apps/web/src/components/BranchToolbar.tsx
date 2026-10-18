@@ -1,9 +1,9 @@
+import { switchConversationWorkspace } from "../lib/workspaceTransitions";
+import { toastManager } from "./ui/toast";
 import type { ThreadId } from "@t3tools/contracts";
 import { FolderIcon, GitForkIcon } from "lucide-react";
 import { useCallback } from "react";
 
-import { newCommandId } from "../lib/utils";
-import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useShallow } from "zustand/react/shallow";
 
@@ -54,7 +54,6 @@ export default function BranchToolbar({
     }),
   );
   const projects = useStore((store) => store.projects);
-  const setThreadBranchAction = useStore((store) => store.setThreadBranch);
   const draftThread = useComposerDraftStore((store) => store.getDraftThread(threadId));
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
 
@@ -95,32 +94,21 @@ export default function BranchToolbar({
   };
 
   const setThreadBranch = useCallback(
-    (branch: string | null, worktreePath: string | null) => {
+    (branch: string | null, worktreePath: string | null, sharedFilesystemConfirmed = false) => {
       if (!activeThreadId) return;
-      const api = readNativeApi();
-      // If the effective cwd is about to change, stop the running session so the
-      // next message creates a new one with the correct cwd.
-      if (serverThread?.hasSession && worktreePath !== activeWorktreePath && api) {
-        void api.orchestration
-          .dispatchCommand({
-            type: "thread.session.stop",
-            commandId: newCommandId(),
-            threadId: activeThreadId,
-            createdAt: new Date().toISOString(),
-          })
-          .catch(() => undefined);
-      }
-      if (api && hasServerThread) {
-        void api.orchestration.dispatchCommand({
-          type: "thread.meta.update",
-          commandId: newCommandId(),
-          threadId: activeThreadId,
-          branch,
-          worktreePath,
-        });
-      }
       if (hasServerThread) {
-        setThreadBranchAction(activeThreadId, branch, worktreePath);
+        if (branch === activeThreadBranch && worktreePath === activeWorktreePath) return;
+        void switchConversationWorkspace(activeThreadId, {
+          intent: "attach_existing",
+          targetPath: worktreePath ?? activeProject!.cwd,
+          ...(branch ? { branch } : {}),
+        }).catch((error) =>
+          toastManager.add({
+            type: "error",
+            title: "Could not switch workspace",
+            description: String(error),
+          }),
+        );
         return;
       }
       const nextDraftEnvMode = resolveDraftEnvModeAfterBranchChange({
@@ -132,14 +120,15 @@ export default function BranchToolbar({
         branch,
         worktreePath,
         envMode: nextDraftEnvMode,
+        sharedFilesystemConfirmed,
       });
     },
     [
       activeThreadId,
-      serverThread?.hasSession,
       activeWorktreePath,
+      activeThreadBranch,
+      activeProject,
       hasServerThread,
-      setThreadBranchAction,
       setDraftThreadContext,
       threadId,
       effectiveEnvMode,

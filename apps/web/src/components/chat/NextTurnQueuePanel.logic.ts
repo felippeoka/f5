@@ -99,6 +99,10 @@ export function describeQueueBlockedState(snapshot: NextTurnQueueSnapshot): stri
       return "Waiting for conversation compaction to finish.";
     case "thread_compacted":
       return "Queue paused after conversation compaction.";
+    case "workspace_switch":
+      return "Switching workspace. Queued turns will wait.";
+    case "workspace_switch_failed":
+      return fallback ?? "Inspect and resolve the interrupted workspace switch.";
     case "worktree_missing":
       return fallback ?? "Queue paused because the worktree is missing.";
     case "dispatch_rejected":

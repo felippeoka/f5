@@ -1,3 +1,6 @@
+import { switchConversationWorkspace } from "../lib/workspaceTransitions";
+import { useStore } from "../store";
+import { selectThreadById } from "../threadSelectors";
 import type { ChangeRequest, GitBranch, GitCheckoutConflict, ThreadId } from "@t3tools/contracts";
 import { resolveChangeRequestWebUrl } from "@t3tools/shared/sourceControl";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -62,7 +65,11 @@ interface BranchToolbarBranchSelectorProps {
   branchCwd: string | null;
   effectiveEnvMode: EnvMode;
   envLocked: boolean;
-  onSetThreadBranch: (branch: string | null, worktreePath: string | null) => void;
+  onSetThreadBranch: (
+    branch: string | null,
+    worktreePath: string | null,
+    sharedFilesystemConfirmed?: boolean,
+  ) => void;
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
 }
@@ -235,7 +242,19 @@ export function BranchToolbarBranchSelector({
     });
   };
 
-  const handleCheckoutError = (error: unknown) => {
+  const handleCheckoutError = (error: unknown, desiredBranch?: string) => {
+    if (
+      desiredBranch &&
+      branchCwd &&
+      error instanceof WsRequestError &&
+      error.code === "WorkspaceRequiresNewWorktree"
+    ) {
+      setCheckoutConflict({
+        conflict: { cwd: branchCwd, branch: desiredBranch, files: [] },
+        context,
+      });
+      return;
+    }
     if (
       error instanceof WsRequestError &&
       error.code === "GitCheckoutConflict" &&
@@ -277,7 +296,21 @@ export function BranchToolbarBranchSelector({
 
     // If the branch already lives in a worktree, point the thread there.
     if (selectionTarget.reuseExistingWorktree) {
-      onSetThreadBranch(branch.name, selectionTarget.nextWorktreePath);
+      if (selectThreadById(useStore.getState(), threadId)) {
+        runBranchAction(async () => {
+          try {
+            await switchConversationWorkspace(threadId, {
+              intent: "attach_existing",
+              targetPath: selectionTarget.checkoutCwd,
+              branch: branch.name,
+              sharedFilesystemConfirmed: workspaceConfirmed,
+            });
+            await invalidateGitQueries(queryClient);
+          } catch (error) {
+            handleCheckoutError(error);
+          }
+        });
+      } else onSetThreadBranch(branch.name, selectionTarget.nextWorktreePath, workspaceConfirmed);
       setIsBranchMenuOpen(false);
       onComposerFocusRequest?.();
       return;
@@ -293,10 +326,23 @@ export function BranchToolbarBranchSelector({
     runBranchAction(async () => {
       setOptimisticBranch(selectedBranchName);
       try {
-        await api.git.checkout({ cwd: selectionTarget.checkoutCwd, branch: branch.name });
+        if (selectThreadById(useStore.getState(), threadId)) {
+          if (selectionTarget.checkoutCwd !== branchCwd)
+            await switchConversationWorkspace(threadId, {
+              intent: "attach_existing",
+              targetPath: selectionTarget.checkoutCwd,
+              branch: branch.name,
+              sharedFilesystemConfirmed: workspaceConfirmed,
+            });
+          else
+            await switchConversationWorkspace(threadId, {
+              intent: "checkout_branch",
+              branch: branch.name,
+            });
+        } else await api.git.checkout({ cwd: selectionTarget.checkoutCwd, branch: branch.name });
         await invalidateGitQueries(queryClient, { cwd: selectionTarget.checkoutCwd });
       } catch (error) {
-        handleCheckoutError(error);
+        handleCheckoutError(error, branch.name);
         return;
       }
 
@@ -309,7 +355,8 @@ export function BranchToolbarBranchSelector({
       }
 
       setOptimisticBranch(nextBranchName);
-      onSetThreadBranch(nextBranchName, selectionTarget.nextWorktreePath);
+      if (!selectThreadById(useStore.getState(), threadId))
+        onSetThreadBranch(nextBranchName, selectionTarget.nextWorktreePath, workspaceConfirmed);
     });
   };
 
@@ -325,12 +372,19 @@ export function BranchToolbarBranchSelector({
       setOptimisticBranch(name);
 
       try {
-        await api.git.createBranch({ cwd: branchCwd, branch: name });
-        try {
-          await api.git.checkout({ cwd: branchCwd, branch: name });
-        } catch (error) {
-          handleCheckoutError(error);
-          return;
+        if (selectThreadById(useStore.getState(), threadId))
+          await switchConversationWorkspace(threadId, {
+            intent: "create_branch_and_checkout",
+            branch: name,
+          });
+        else {
+          await api.git.createBranch({ cwd: branchCwd, branch: name });
+          try {
+            await api.git.checkout({ cwd: branchCwd, branch: name });
+          } catch (error) {
+            handleCheckoutError(error);
+            return;
+          }
         }
       } catch (error) {
         toastManager.add({
@@ -342,7 +396,8 @@ export function BranchToolbarBranchSelector({
       }
 
       setOptimisticBranch(name);
-      onSetThreadBranch(name, activeWorktreePath);
+      if (!selectThreadById(useStore.getState(), threadId))
+        onSetThreadBranch(name, activeWorktreePath);
       setBranchQuery("");
     });
   };

@@ -1,4 +1,4 @@
-import { normalizeServerName } from "./mcpNormalization";
+import { normalizeServerName } from "./mcpServerName";
 import type {
   ClaudeAgentMcpServerConfig,
   CodexMcpServerEntry,

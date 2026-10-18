@@ -1,3 +1,6 @@
+import { GitCore } from "../../git/Services/GitCore.ts";
+import { makeFakeGitCore } from "../../git/testDoubles.ts";
+import { withFixtureWorkspaceWrites } from "../testUtils/workspaceWrites.ts";
 import { GitService, type GitServiceShape } from "../../git/Services/GitService.ts";
 import { GitServiceLive } from "../../git/Layers/GitService.ts";
 import { execFileSync } from "node:child_process";
@@ -392,6 +395,27 @@ describe("CheckpointReactor", () => {
 
     const layer = CheckpointReactorLive.pipe(
       Layer.provide(
+        Layer.succeed(
+          GitCore,
+          makeFakeGitCore({
+            inspectCheckoutIdentity: (target) =>
+              Effect.gen(function* () {
+                const branch = options?.gitService
+                  ? (yield* options.gitService.execute({
+                      operation: "checkpoint.verifyBranch",
+                      cwd: target,
+                      args: ["symbolic-ref", "--short", "HEAD"],
+                    })).stdout.trim()
+                  : execFileSync("git", ["symbolic-ref", "--short", "HEAD"], {
+                      cwd: target,
+                      encoding: "utf8",
+                    }).trim();
+                return { canonicalRoot: target, commonDir: path.join(target, ".git"), branch };
+              }),
+          }).service,
+        ),
+      ),
+      Layer.provide(
         options?.gitService ? Layer.succeed(GitService, options.gitService) : GitServiceLive,
       ),
       Layer.provideMerge(orchestrationLayer),
@@ -412,7 +436,9 @@ describe("CheckpointReactor", () => {
     );
 
     runtime = ManagedRuntime.make(layer);
-    const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    const engine = withFixtureWorkspaceWrites(
+      await runtime.runPromise(Effect.service(OrchestrationEngineService)),
+    );
     const reactor = await runtime.runPromise(Effect.service(CheckpointReactor));
     const checkpointStore = await runtime.runPromise(Effect.service(CheckpointStore));
     scope = await Effect.runPromise(Scope.make("sequential"));

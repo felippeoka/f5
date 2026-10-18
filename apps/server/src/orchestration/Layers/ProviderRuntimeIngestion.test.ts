@@ -1,4 +1,5 @@
 import { CodexMcpEventBus } from "../../codex/CodexMcpEventBus.ts";
+import { withFixtureWorkspaceWrites } from "../testUtils/workspaceWrites.ts";
 import { NextTurnQueueStore } from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { ServerSettingsService } from "../../serverSettings";
 import { UsageService, type UsageServiceShape } from "../../usage/Services/UsageService.ts";
@@ -377,7 +378,9 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(NodeServices.layer),
     );
     runtime = ManagedRuntime.make(layer);
-    const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    const engine = withFixtureWorkspaceWrites(
+      await runtime.runPromise(Effect.service(OrchestrationEngineService)),
+    );
     const ingestion = await runtime.runPromise(Effect.service(ProviderRuntimeIngestionService));
     const providerSessionDirectory = await runtime.runPromise(
       Effect.service(ProviderSessionDirectory),

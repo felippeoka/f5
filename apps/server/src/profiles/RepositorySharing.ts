@@ -1,3 +1,4 @@
+import { WorkspaceRequiresNewWorktreeError } from "../git/workspaceSwitch.ts";
 import { stripPathTerminator } from "../git/worktreeList.ts";
 import * as FS from "node:fs/promises";
 import * as Path from "node:path";
@@ -102,4 +103,74 @@ export async function repositorySharingWarnings(
       .map((entry) => entry.profile.name);
     return otherProfiles.length ? [{ workspaceRoot: root.workspaceRoot, otherProfiles }] : [];
   });
+}
+
+/** Read-only cross-profile guard for in-place checkout. Unknown ownership fails closed. */
+export async function assertExclusiveProfileCheckout(
+  config: Pick<import("../config.ts").ServerConfigShape, "defaultStateDir" | "profile">,
+  checkout: string,
+): Promise<void> {
+  if (!config.defaultStateDir || !config.profile) return;
+  const { ProfileRegistryStore } = await import("./ProfileRegistryStore.ts");
+  const { profileStateDir } = await import("@t3tools/shared/profilePaths");
+  const { canonicalWorktreePath } = await import("../git/worktreePaths.ts");
+  const registry = await new ProfileRegistryStore(config.defaultStateDir).read();
+  if (!registry.ok) throw new Error("Other-profile checkout ownership could not be established.");
+  const target = await canonicalWorktreePath(checkout);
+  for (const profile of registry.registry.profiles) {
+    if (profile.id === config.profile.id) continue;
+    const stateDir = profileStateDir(config.defaultStateDir, profile);
+    const file = Path.join(stateDir, "state.sqlite");
+    const stat = await FS.stat(file).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT" && profile.status === "provisioning") return null;
+      throw error;
+    });
+    if (!stat) continue;
+    const database = process.versions.bun
+      ? new (await import("bun:sqlite")).Database(file, { readonly: true })
+      : new (await import("node:sqlite")).DatabaseSync(file, { readOnly: true });
+    try {
+      const rows = database
+        .prepare(`SELECT workspace_root AS path FROM projection_projects WHERE deleted_at IS NULL
+        UNION SELECT COALESCE(t.worktree_path,p.workspace_root) AS path FROM projection_threads t
+        LEFT JOIN projection_projects p ON p.project_id=t.project_id WHERE t.deleted_at IS NULL`)
+        .all() as { path: string | null }[];
+      for (const row of rows) {
+        if (!row.path)
+          throw new Error("Other-profile checkout ownership could not be established.");
+        if ((await canonicalWorktreePath(row.path)) === target)
+          throw new WorkspaceRequiresNewWorktreeError(
+            "Another profile references this checkout. Create a new worktree instead.",
+          );
+      }
+    } finally {
+      database.close();
+    }
+  }
+}
+
+/** A project root cannot turn another profile's managed checkout into an attachable target. */
+export async function assertNotOtherProfileManagedCheckout(
+  config: Pick<import("../config.ts").ServerConfigShape, "defaultStateDir" | "profile" | "baseDir">,
+  checkout: string,
+): Promise<void> {
+  if (!config.defaultStateDir || !config.profile) return;
+  const { ProfileRegistryStore } = await import("./ProfileRegistryStore.ts");
+  const { profileStateDir } = await import("@t3tools/shared/profilePaths");
+  const { canonicalWorktreePath } = await import("../git/worktreePaths.ts");
+  const { pathContains } = await import("../project/Layers/WorktreeLifecycleCoordinator.ts");
+  const registry = await new ProfileRegistryStore(config.defaultStateDir).read();
+  if (!registry.ok) throw new Error("Managed workspace ownership could not be established.");
+  const target = await canonicalWorktreePath(checkout);
+  for (const profile of registry.registry.profiles) {
+    if (profile.id === config.profile.id) continue;
+    const root = await canonicalWorktreePath(
+      Path.join(
+        profile.isDefault ? config.baseDir : profileStateDir(config.defaultStateDir, profile),
+        "worktrees",
+      ),
+    );
+    if (pathContains(root, target))
+      throw new Error("Another profile owns this managed checkout. It is inspect-only.");
+  }
 }

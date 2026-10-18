@@ -1,3 +1,8 @@
+import {
+  WorkspaceWriteContext,
+  type WorkspaceWrite,
+} from "../../project/workspaceTransitionContext.ts";
+import { WorkspaceTransitions } from "../../persistence/Services/WorkspaceTransitions.ts";
 import { assertWorktreeReady, WorktreeInspectionError } from "../../project/worktreeReadiness.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import type { OrchestrationReadModel, ProjectId, ThreadId } from "@t3tools/contracts";
@@ -51,6 +56,7 @@ import { withStartupPhaseTiming } from "../../startupTiming.ts";
 
 interface CommandEnvelope {
   command: OrchestrationCommand;
+  workspaceWrite?: WorkspaceWrite | null;
   result: Deferred.Deferred<{ sequence: number }, OrchestrationDispatchError>;
   startedAtMs: number;
   workspace?: { path: string; branch: string | null; projectCwd: string };
@@ -101,6 +107,7 @@ const QUEUE_PAUSES_KEPT_ACROSS_REVERT: ReadonlySet<string> = new Set([
 
 const makeOrchestrationEngine = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const transitions = yield* Effect.serviceOption(WorkspaceTransitions);
   const queueStore = yield* Effect.serviceOption(NextTurnQueueStore);
   const eventStore = yield* OrchestrationEventStore;
   const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository;
@@ -334,6 +341,102 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           }
         }
 
+        const checkWorkspaceBarrier = Effect.gen(function* () {
+          const command = envelope.command;
+          if (!("threadId" in command)) return;
+          const changingWorkspace =
+            command.type === "thread.meta.update" &&
+            (command.branch !== undefined || command.worktreePath !== undefined);
+          const executing =
+            command.type === "thread.turn.start" ||
+            command.type === "thread.turn.steer" ||
+            command.type === "thread.checkpoint.revert" ||
+            command.type === "thread.conversation.revert" ||
+            command.type === "thread.compact.request" ||
+            command.type === "thread.approval.respond" ||
+            command.type === "thread.user-input.respond";
+          if (!changingWorkspace && !executing) return;
+          const active = Option.isSome(transitions)
+            ? yield* transitions.value.forThread(command.threadId, true).pipe(
+                Effect.mapError(
+                  (error) =>
+                    new OrchestrationCommandInvariantError({
+                      commandType: command.type,
+                      detail: error.message,
+                    }),
+                ),
+              )
+            : null;
+          if (active && active.operationId !== envelope.workspaceWrite?.operationId)
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "A workspace transition must be resolved before continuing.",
+            });
+          if (!changingWorkspace || command.type !== "thread.meta.update") return;
+          const thread = readModel.threads.find((entry) => entry.id === command.threadId);
+          const changed =
+            thread &&
+            ((command.branch !== undefined && command.branch !== thread.branch) ||
+              (command.worktreePath !== undefined && command.worktreePath !== thread.worktreePath));
+          if (!changed) return;
+          const write = envelope.workspaceWrite;
+          if (
+            !write ||
+            !thread ||
+            thread.branch !== write.expected.branch ||
+            thread.worktreePath !== write.expected.worktreePath ||
+            (!write.operationId &&
+              !write.observation &&
+              (thread.session?.updatedAt ?? null) !== write.expected.sessionUpdatedAt)
+          )
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "Workspace changes require a verified transition and unchanged context.",
+            });
+          const token =
+            write.operationId && active && Option.isSome(queueStore)
+              ? (yield* queueStore.value.listByThread(command.threadId)).state.worktreeBlockToken
+              : undefined;
+          if (
+            token !== undefined &&
+            active &&
+            token !== active.setupOwnerToken &&
+            !(token === null && active.setupOwnerToken !== null && active.setupOwnerOperationId)
+          )
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "Workspace setup ownership changed before metadata commit.",
+            });
+          if (
+            write.operationId &&
+            (!active || active.phase !== "applied" || active.version !== write.version)
+          )
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "The workspace transition changed before metadata commit.",
+            });
+        });
+        yield* checkWorkspaceBarrier;
+
+        if (
+          envelope.command.type === "project.meta.update" &&
+          envelope.command.workspaceRoot !== undefined
+        ) {
+          const command = envelope.command;
+          const project = readModel.projects.find((entry) => entry.id === command.projectId);
+          if (
+            project &&
+            project.workspaceRoot !== command.workspaceRoot &&
+            readModel.threads.some(
+              (thread) => thread.projectId === project.id && thread.deletedAt === null,
+            )
+          )
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail:
+                "Conversations still reference this project workspace. Create a separate project for the new workspace.",
+            });
+        }
         const eventBase = yield* decideOrchestrationCommand({
           command: envelope.command,
           readModel,
@@ -345,6 +448,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         const committedCommand = yield* sql
           .withTransaction(
             Effect.gen(function* () {
+              yield* checkWorkspaceBarrier;
               if (
                 envelope.command.type === "thread.turn.start" &&
                 envelope.command.dispatchSource === "next-turn-queue"
@@ -578,6 +682,47 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 error: null,
               });
 
+              if (Option.isSome(transitions) && envelope.workspaceWrite?.operationId) {
+                const record = yield* transitions.value
+                  .get(envelope.workspaceWrite.operationId)
+                  .pipe(Effect.orDie);
+                if (
+                  !record ||
+                  record.phase !== "applied" ||
+                  record.version !== envelope.workspaceWrite.version
+                )
+                  return yield* new OrchestrationCommandInvariantError({
+                    commandType: envelope.command.type,
+                    detail: "Workspace transition completion lost its reservation.",
+                  });
+                if (
+                  record.intent === "use_project_checkout" &&
+                  record.setupOwnerOperationId &&
+                  record.operationId === `work-locally:${record.setupOwnerOperationId}` &&
+                  record.result?.worktreePath === null
+                ) {
+                  // Consume only this setup handoff's ownership in the completion transaction.
+                  // Manual and unrelated pauses remain untouched.
+                  yield* sql`UPDATE next_turn_queue_state SET
+                    worktree_block_token=NULL,
+                    paused=CASE WHEN pause_reason_code IN ('worktree_setup','worktree_setup_failed','worktree_setup_cancelled','worktree_setup_cancelled_kept') THEN 0 ELSE paused END,
+                    pause_detail=CASE WHEN pause_reason_code IN ('worktree_setup','worktree_setup_failed','worktree_setup_cancelled','worktree_setup_cancelled_kept') THEN NULL ELSE pause_detail END,
+                    resumed_at=CASE WHEN pause_reason_code IN ('worktree_setup','worktree_setup_failed','worktree_setup_cancelled','worktree_setup_cancelled_kept') THEN ${lastSavedEvent.occurredAt} ELSE resumed_at END,
+                    pause_reason_code=CASE WHEN pause_reason_code IN ('worktree_setup','worktree_setup_failed','worktree_setup_cancelled','worktree_setup_cancelled_kept') THEN NULL ELSE pause_reason_code END,
+                    revision=revision+1
+                    WHERE thread_id=${record.threadId} AND (worktree_block_token IS NULL OR worktree_block_token=${record.setupOwnerOperationId})`;
+                }
+                yield* transitions.value
+                  .update(record, { phase: "completed", error: null })
+                  .pipe(Effect.orDie);
+              }
+              if (
+                Option.isSome(transitions) &&
+                (envelope.command.type === "thread.archive" ||
+                  envelope.command.type === "thread.delete")
+              )
+                yield* transitions.value.cancel(envelope.command.threadId).pipe(Effect.orDie);
+
               return {
                 committedEvents,
                 lastSequence: lastSavedEvent.sequence,
@@ -800,6 +945,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         command,
         result,
         startedAtMs: Date.now(),
+        workspaceWrite: yield* WorkspaceWriteContext,
         ...(workspace ? { workspace } : {}),
       });
       return yield* Deferred.await(result);

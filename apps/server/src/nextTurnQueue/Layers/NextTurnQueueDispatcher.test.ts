@@ -1,3 +1,4 @@
+import { WorkspaceTransitionsLive } from "../../persistence/Layers/WorkspaceTransitions.ts";
 import {
   WorktreePreparation,
   type WorktreePreparationShape,
@@ -926,4 +927,78 @@ it.effect("promotes reset recovery once and returns already-sending on cancellat
     yield* dispatcher.drain;
     assert.equal(dispatched.length, 1);
   }).pipe(Effect.provide(makeTestLayer(makeFakeGitCore().service, null, thread)));
+});
+
+it.layer(
+  makeTestLayer().pipe(
+    Layer.provideMerge(WorkspaceTransitionsLive.pipe(Layer.provide(persistence))),
+  ),
+)("workspace transition queue barrier", (it) => {
+  it.effect("promotion and Resume cannot clear a durable transition or admit later work", () =>
+    Effect.gen(function* () {
+      const dispatcher = yield* NextTurnQueueDispatcher;
+      const store = yield* NextTurnQueueStore;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.makeUnsafe("transition-barrier-queue");
+      dispatched.length = 0;
+      yield* seedThread(threadId);
+      yield* insert(90, threadId);
+      const checkout = {
+        path: process.cwd(),
+        repository: path.join(process.cwd(), ".git"),
+        branch: "feature",
+        headSha: "head",
+      };
+      const record = {
+        operationId: "transition-barrier",
+        threadId,
+        version: 3,
+        intent: "checkout_branch",
+        phase: "needs_recovery",
+        source: checkout,
+        target: { ...checkout, branch: "topic" },
+        observed: null,
+        result: null,
+        error: "Inspect the interrupted switch.",
+        request: {
+          operationId: "transition-barrier",
+          threadId,
+          intent: "checkout_branch",
+          branch: "topic",
+          expected: { branch: null, worktreePath: null, sessionUpdatedAt: null },
+        },
+        requestHash: "hash",
+        fingerprint: null,
+        mutationAttempted: true,
+        commandId: "workspace:barrier",
+        setupOwnerToken: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      yield* sql`INSERT INTO workspace_transitions(operation_id,thread_id,request_hash,phase,version,record_json,created_at,updated_at) VALUES ('transition-barrier',${threadId},'hash','needs_recovery',3,${JSON.stringify(record)},${record.createdAt},${record.updatedAt})`;
+      yield* dispatcher.start;
+      yield* dispatcher.notify(threadId);
+      yield* dispatcher.drain;
+      assert.deepEqual(dispatched, []);
+      const before = yield* store.listByThread(threadId);
+      yield* dispatcher.promote({
+        itemId: CommandId.makeUnsafe("dispatcher-item-90"),
+        interruptActive: false,
+        expectedRevision: before.state.revision,
+      });
+      yield* store.setPaused({ threadId, paused: false });
+      yield* dispatcher.notify(threadId);
+      yield* dispatcher.drain;
+      const snapshot = yield* dispatcher.getSnapshot(threadId);
+      assert.equal(snapshot.reasonCode, "workspace_switch_failed");
+      assert.equal(snapshot.workspaceTransition?.operationId, "transition-barrier");
+      assert.deepEqual(dispatched, []);
+      assert.equal((yield* insert(91, threadId).pipe(Effect.exit))._tag, "Failure");
+      assert.equal(
+        (yield* store.setWorktreeBlockToken({ threadId, token: "setup-retry" }).pipe(Effect.exit))
+          ._tag,
+        "Failure",
+      );
+    }),
+  );
 });

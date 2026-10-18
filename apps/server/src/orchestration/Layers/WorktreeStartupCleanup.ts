@@ -1,3 +1,4 @@
+import { dispatchVerifiedWorkspace } from "../../project/workspaceTransitionContext.ts";
 import { assertWorktreeReady, WorktreeNotReadyError } from "../../project/worktreeReadiness.ts";
 import { NextTurnQueueStore } from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { Option } from "effect";
@@ -97,27 +98,30 @@ export const cleanupStaleWorktrees = Effect.fn("server.startup.worktree.cleanup"
       worktreePath,
     });
 
-    yield* orchestrationEngine
-      .dispatch({
+    yield* dispatchVerifiedWorkspace(
+      orchestrationEngine,
+      git,
+      {
         type: "thread.meta.update",
         commandId: CommandId.makeUnsafe(`server:worktree-startup-cleanup:${crypto.randomUUID()}`),
         threadId: thread.id,
         worktreePath: null,
-      })
-      .pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            clearedCount += 1;
-          }),
-        ),
-        Effect.catchCause((cause) =>
-          Effect.logWarning("failed to clear stale worktree projection", {
-            threadId: thread.id,
-            worktreePath,
-            cause: Cause.pretty(cause),
-          }),
-        ),
-      );
+      },
+      { allowMissing: true },
+    ).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          clearedCount += 1;
+        }),
+      ),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("failed to clear stale worktree projection", {
+          threadId: thread.id,
+          worktreePath,
+          cause: Cause.pretty(cause),
+        }),
+      ),
+    );
   }
 
   if (clearedCount > 0) {

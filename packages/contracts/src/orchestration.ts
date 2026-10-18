@@ -1237,6 +1237,7 @@ export const ThreadPullRequestLink = Schema.Struct({
 export type ThreadPullRequestLink = typeof ThreadPullRequestLink.Type;
 
 const ThreadCreateCommand = Schema.Struct({
+  sharedFilesystemConfirmed: Schema.optional(Schema.Boolean),
   pullRequest: Schema.optional(ThreadPullRequestLink),
   type: Schema.Literal("thread.create"),
   commandId: CommandId,
@@ -1357,6 +1358,7 @@ const ThreadInteractionModeSetCommand = Schema.Struct({
 });
 
 export const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
+  sharedFilesystemConfirmed: Schema.optional(Schema.Boolean),
   pullRequest: Schema.optional(ThreadPullRequestLink),
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
