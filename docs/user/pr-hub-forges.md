@@ -1,34 +1,91 @@
 # PR Hub accounts and forges
 
-## Getting around
+Review and act on pull requests from GitHub, GitLab, Bitbucket Cloud, Azure DevOps and
+Forgejo/Gitea without leaving F5. Each repository can use its own account.
 
-Open **Pull requests** in the sidebar.
+> [!NOTE]
+> This page has no screenshot because the PR Hub needs a connected forge account to show
+> anything.
 
-- **Accounts:** **Manage accounts** adds and verifies a token per forge host. With several matching accounts, pick the account for a repository route (see below).
-- **Views:** the Inbox and Focus views list tracked pull requests. Attention filters such as Needs you, Needs my review, Comments, My PRs, CI failing, Ready, Snoozed and Resolved narrow the list, and you can filter by repository, relationship, CI, lifecycle and tracking status.
-- **Pull request tabs:** Summary, Timeline, Review threads and Files.
-- **Threads:** pull requests linked to an F5 thread show on both sides. **Send to agent** places a diff comment in the linked thread's composer without sending it.
+## How to
 
-The rest of this page covers accounts, forges and how actions behave on each host.
+1. Open **Pull requests** and click **Manage accounts**.
+2. Add a token for your forge host. F5 verifies it with the host before saving it. Azure DevOps
+   also needs an organization.
+3. If several accounts match a repository, add a repository route that picks one.
+4. Open a pull request to read its diff, comment, review or merge.
 
-## Accounts and forges
+The existing GitHub setup stays the default as the legacy profile account.
 
-PR Hub supports GitHub (including configured Enterprise hosts), GitLab, Bitbucket Cloud, Azure DevOps, and Forgejo/Gitea. Thread Git actions and the hub use the same typed forge adapters. All support reading diffs. Only GitHub exposes native stacks; hosts returning 404 or 422 hide that section.
+## Finding pull requests
 
-Use **Manage accounts** in Pull requests to verify a token with its provider host. Azure DevOps PAT verification also requires an organization. Tokens live in the profile's server secret store, separately for each host, verified login, and credential generation. They are never returned to the browser. Account metadata and exact repository routes live in SQLite. Select the legacy profile account to retain the existing GitHub setup; this remains the default.
+The **Inbox** and **Focus** views list tracked pull requests. Attention filters such as **Needs
+you**, **Needs my review**, **CI failing** and **Ready** narrow the list, and you can also filter by
+repository, CI or lifecycle. Each pull request has **Summary**, **Timeline**, **Review threads**
+and **Files** tabs.
 
-A repository route binds provider, host, and repository to one verified account. With one matching account, routing can select it automatically. With several matching accounts, configure an explicit route. Selecting an account does not change a process-global active credential. Replacing credentials invalidates that account's runtime and caches. Monitoring and request budgets belong to the server and account, rather than to an open browser panel.
+## Safe actions
 
-The hub displays only advertised actions. Permissions can further narrow GitHub actions. GitLab supports comments and approval, with rebase updates. Bitbucket supports comments, approval, and change requests, but no branch updates, reactions, or merges: its merge endpoint cannot enforce the prepared head commit. Azure has no comment/review writes or branch updates and supports merge/squash. Forgejo supports comments and review verdicts, merge/rebase updates, and no review-thread reply/resolve or draft conversion. Native reviewer and label identifiers are preserved where a provider requires IDs. Azure reviewer replacement adds new reviewers before removing old ones; these host calls are not atomic, so interrupted replacements require inspecting the resulting set. Removing a saved account also removes its repository routes and stored credential. Individual repository routes can be removed without removing the account.
+Every action that changes a pull request is prepared first. F5 shows the account and the exact
+revision it will act on, and sends the action once you confirm. If a response gets lost,
+**Check saved operation** looks for proof on the forge instead of sending again. Once you have
+checked the forge yourself, **Acknowledge verified outcome** clears the operation without
+resending it.
 
-Forge controls first prepare an immutable operation, showing its account and pinned revision. Confirmation dispatches it once. Prepared operations can be canceled. Reloading restores the saved operation. If a response is lost, **Check saved operation** looks for verified host evidence; it never blindly sends the mutation again. An unresolved operation blocks preparing another mutation for that pull request. After checking the forge directly, **Acknowledge verified outcome** retires that uncertain operation without replaying it; its record remains saved. Outstanding operations are shown across panels and clients. GitLab/Bitbucket reviews persist their comment and verdict as separate phases, so a recovered comment cannot be mistaken for an accepted verdict. Stack actions verify layer revisions and preserve partial progress.
+## Reviewing changes
 
-Native inline comments pin the compared head and base. The server derives native line coordinates from the complete provider diff and checks both revisions again before dispatch; unavailable or changed comparisons must be refreshed. GitLab context comments include both line coordinates, and Forgejo comments identify the side and pinned commit.
+Inline comments are tied to the exact head and base you compared. If either changes, refresh
+before commenting. **Viewed** marks also belong to that revision, so a new push clears them.
+Hover a PR link to preview it, copy it, or open it in the hub. **Send to agent** puts a diff
+comment into the linked thread's composer without sending it.
 
-Viewed marks use the reader and compared head/base revision. GitHub stores them on the host; the other forges store them in F5. A changed revision does not inherit an old mark. Cached data stays visible with a stale warning when refresh fails. Reads, pagination, and account runtimes are bounded.
+## What each forge supports
 
-PR markdown renders authenticated GitHub images and videos through the media proxy. Its allowlist permits GitHub user attachments, GitHubusercontent hosts, and configured Enterprise hosts. Tokens go only to their own host, including through redirects. Images/videos have a 100 MB limit and support single byte ranges. Arbitrary HTML is escaped.
+| Forge         | Comments | Approve / request changes | Branch updates | Merge         |
+| ------------- | -------- | ------------------------- | -------------- | ------------- |
+| GitHub        | Yes      | Yes                       | Yes            | Yes           |
+| GitLab        | Yes      | Approve                   | Rebase         | Yes           |
+| Bitbucket     | Yes      | Yes                       | No             | No            |
+| Azure DevOps  | No       | No                        | No             | Merge, squash |
+| Forgejo/Gitea | Yes      | Yes                       | Merge, rebase  | Yes           |
 
-Hover a PR link to preview it, copy it, or open it in the hub. A thread can link several pull requests, including different providers; links use provider/host/repository/number identity and the existing additive projection. **Send to agent** places a diff comment in the linked F5 thread's composer and preserves existing draft text. It does not send a turn automatically.
+Only actions the forge advertises are shown, and GitHub permissions can narrow them further. Only
+GitHub has native stacks.
 
-This phase adds SQLite migration 102 for account routing, native snapshots, revision-specific viewed marks, and durable forge operations. WebSocket protocol 14 requires matching clients and servers. The web-local selected account is stored through the app settings schema; shared client settings do not acquire browser persistence fields.
+## Good to know
+
+- Tokens stay in the profile's server secret store and never reach the browser.
+- Removing an account also removes its repository routes and stored token.
+- When a refresh fails, cached data stays visible with a stale warning.
+- PR markdown can show authenticated GitHub images and videos. Other HTML is escaped.
+
+<details>
+<summary>Details and limits</summary>
+
+- Tokens are stored per host, verified login and credential generation. Replacing a token resets
+  that account's runtime and caches. Selecting an account never changes a process-wide
+  credential.
+- Monitoring and request budgets are owned by the server and account, not by an open panel. Reads,
+  pagination and account runtimes are bounded.
+- An unresolved operation blocks preparing another change for that pull request. Outstanding
+  operations are shown in every panel and client.
+- GitLab and Bitbucket reviews save the comment and the verdict as separate steps, so a recovered
+  comment is never mistaken for an accepted verdict. Stack actions check each layer's revision
+  and keep partial progress.
+- Bitbucket merges are disabled because its endpoint can't enforce the prepared head commit.
+  Forgejo has no review-thread reply/resolve or draft conversion.
+- Azure reviewer replacement adds new reviewers before removing old ones. These calls aren't
+  atomic, so check the reviewer list after an interruption.
+- GitHub stores viewed marks on the host; other forges store them in F5.
+- The media proxy allows GitHub user attachments, GitHubusercontent hosts and configured
+  Enterprise hosts. Tokens go only to their own host, including through redirects. Media is
+  limited to 100 MB and supports single byte ranges.
+- Stacks are hidden on hosts that return 404 or 422.
+- A thread can link several pull requests, even from different forges.
+
+</details>
+
+## Related
+
+- [Project settings](project-settings.md) (per-project merge method)
+- [Worktrees and storage automation](worktrees-and-storage-automation.md)

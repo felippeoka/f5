@@ -1,72 +1,88 @@
 # Threads and workspaces
 
-A thread is one conversation with one agent in one workspace. The agent edits files in the workspace you choose, and F5 records its commands, file changes and plans so you can inspect them afterwards.
+A thread is one conversation with one agent in one workspace. The agent edits files in the
+workspace you choose, and F5 records its commands, file changes and plans so you can inspect them
+afterwards.
 
-<p align="center">
-  <img src="../../assets/screenshots/thread.png" alt="Chat thread with commands, file changes and the diff panel open on a new Postgres adapter" width="800" />
-</p>
+![Chat thread with commands, file changes and the diff panel open on a new Postgres adapter](../../assets/screenshots/thread.png)
 
-## Start a thread
+## How to
 
-Click **New thread** (`Mod+N`) or type in the box on Home. Before you send the first message, pick:
+1. Click **New thread** (`mod+N`) or type in the box on Home.
+2. Pick the **provider and model** from the model chip, and **traits** such as reasoning effort.
+3. Pick **Access**, the thread's [runtime mode](../runtime-modes.md).
+4. Choose **Agent** or **Plan**. Plan asks for a plan you can accept or revise before any change.
+5. Choose the **workspace**: **Local** (the project checkout) or a
+   [worktree](worktrees-and-storage-automation.md) with its own branch and directory.
+6. Send your message.
 
-- **Provider and model** from the model chip. Providers come from **Settings → Providers**; see [provider prerequisites](../provider-prerequisites.md).
-- **Traits** such as reasoning effort, when the model offers them.
-- **Access**, the thread's permission mode. New threads default to Full access; change the default under **Settings → Threads → Default permissions** or per project. See [runtime modes](../runtime-modes.md).
-- **Agent or Plan.** Plan asks the agent for a plan you can accept or revise before it changes anything.
-- **Workspace:** **Local** works in the project checkout; a worktree gives the thread its own branch and directory. See [worktrees and storage automation](worktrees-and-storage-automation.md).
-
-The composer also takes attachments ([attachments and media](attachments-and-media.md)), `@` file mentions and `/` commands, including skills from your provider and project. The context ring shows how full the model's context window is.
+The composer also takes [attachments](attachments-and-media.md), `@` file mentions and `/`
+commands, including provider and project skills. The context ring shows how full the model's
+context window is.
 
 ## While the agent works
 
-- **Approvals and questions.** In Supervised and Auto-accept edits modes the agent stops for approval; questions from the agent appear in the thread and wait for your answer.
-- **Steer or stop.** Where the provider supports it, a message sent during a running turn can steer that turn instead of waiting. **Settings → Threads → Follow-up behavior** chooses between queueing follow-ups and steering. **Stop generation** ends the turn.
-- **Next-turn queue.** Queued messages appear above the composer. You can pause the queue, drag a turn to reorder it or move it to the top, run one now, edit, duplicate or cancel it. The queue is stored on the server, so it survives restarts. A turn that was running during a restart only comes back as "Resuming after restart" if **Settings → Threads → Resume active turns after restart** is on (off by default; projects can override it).
+In Supervised and Auto-accept edits modes the agent stops for approval, and its questions wait for
+your answer. Where the provider supports it, a message sent mid-turn can steer the turn instead of
+waiting (**Settings → Threads → Follow-up behavior**). **Stop generation** ends the turn.
 
-## Find your work
-
-- **Home** groups threads into Pinned, Needs you, Working and Recent, with project and status filters on Recent. Pin a thread from its row on Home.
-- **Search** (`Mod+K`) finds threads, workflows and commands.
-- **Archive** a thread from its sidebar menu. Archived threads and workflows are listed under **Settings → Archive**.
-- When a provider reports a usage limit, the notice in the thread can snooze it until a time you pick; snoozed threads show a moon icon.
+Queued messages appear above the composer. You can pause the queue, reorder it, run one now, edit,
+duplicate or cancel it. The queue is stored on the server, so it survives restarts.
 
 ## Panels
 
-The right side of a thread holds panels. Open them from the panel picker or their shortcuts:
+The right side of a thread holds the **Agents**, **Diff**, **Plan**, **Files** and **Preview**
+panels; open them from the panel picker or their shortcuts. The terminal (`mod+J`) opens below the
+thread in the workspace directory, and project scripts run from the thread header.
 
-| Panel   | What it shows                                                                    |
-| ------- | -------------------------------------------------------------------------------- |
-| Agents  | Subagents and background workflows started from the thread.                      |
-| Diff    | Files the thread changed, per turn or for a recorded file change.                |
-| Plan    | The current implementation plan.                                                 |
-| Files   | The workspace file tree and a file viewer with editing.                          |
-| Preview | The built-in browser, in desktop builds ([preview browser](preview-browser.md)). |
+The Files panel can edit files. If a file changes on disk while you have unsaved edits, F5 marks a
+conflict and keeps your draft. **Open in editor** hands the file to your external editor.
 
-The integrated terminal (`Mod+J`) opens below the thread in the workspace directory, and project scripts run from the thread header.
+## Review changes and rewind
 
-### Edit files
-
-The Files panel can edit files directly. Your unsaved draft is kept if you switch away. If the file changes on disk while you have unsaved edits, F5 marks a conflict and keeps your draft instead of overwriting either version, so you can decide what to keep. **Open in editor** hands the file to your external editor.
-
-### Review changes and rewind
-
-Each turn lists its changed files with line counts. **View diff** opens the Diff panel for that turn. F5 records a checkpoint after each turn; on providers that support it, you can revert a thread to an earlier message, which restores the files from that checkpoint. Stop the agent before reverting.
+Each turn lists its changed files with line counts, and **View diff** opens the Diff panel for that
+turn. F5 records a checkpoint after each turn; on providers that support it, you can revert the
+thread to an earlier message, which restores the files. Stop the agent before reverting.
 
 ## Git
 
-Threads show their branch. From the thread header you can create branches, open worktrees (setup progress is shown while a worktree is prepared) and run commit, push and pull request actions. Linked pull requests also appear in the [Pull Requests hub](pr-hub-forges.md).
+Threads show their branch. From the thread header you can create branches, open worktrees and run
+commit, push and pull request actions. Linked pull requests also appear in the
+[Pull Requests hub](pr-hub-forges.md).
 
-## Thread summaries
+## Good to know
 
-F5 can keep short summaries of threads. Under **Settings → Threads → Thread summaries** you choose the provider account and model that writes them. Summaries send thread messages, activities, plans, tasks and checkpoints to that account, including threads that ran on other providers. Pick an account you are comfortable sending that content to.
+> [!NOTE]
+> **Thread summaries** (**Settings → Threads**) send thread messages, activities, plans, tasks and
+> checkpoints to the account you choose, including threads that ran on other providers.
 
-## Shortcuts
+- **Home** groups threads into Pinned, Needs you, Working and Recent. `mod+K` searches threads,
+  workflows and commands.
+- Archive a thread from its sidebar menu; archived items are under **Settings → Archive**.
+- A usage-limit notice can be snoozed until a time you pick; snoozed threads show a moon icon.
+- A turn running during a restart resumes only if **Settings → Threads → Resume active turns after
+  restart** is on (off by default).
 
-Press `Mod+/` to see all shortcuts, and change them under **Settings → Keyboard**. Defaults and the config file format are in [KEYBINDINGS.md](../../KEYBINDINGS.md).
+<details>
+<summary>Panels in detail</summary>
+
+| Panel   | What it shows                                                                   |
+| ------- | ------------------------------------------------------------------------------- |
+| Agents  | Subagents and background workflows started from the thread                      |
+| Diff    | Files the thread changed, per turn or for a recorded file change                |
+| Plan    | The current implementation plan                                                 |
+| Files   | The workspace file tree and a file viewer with editing                          |
+| Preview | The built-in browser, in desktop builds ([preview browser](preview-browser.md)) |
+
+New threads default to **Full access**; change the default under **Settings → Threads → Default
+permissions** or per project. Resumed turns show "Resuming after restart", and projects can
+override the resume setting.
+
+</details>
 
 ## Related
 
-- [Project settings](project-settings.md)
+- [Getting started](getting-started.md)
 - [Agent tools](agent-tools.md)
 - [Workflows](workflows.md)
+- [Keybindings](../../KEYBINDINGS.md)

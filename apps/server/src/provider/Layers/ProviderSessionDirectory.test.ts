@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ThreadId } from "@t3tools/contracts";
+import { ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { it, assert } from "@effect/vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -153,6 +153,54 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
         assert.equal(runtime.value.providerName, "codex");
         assert.equal(runtime.value.adapterKey, "codex");
       }
+    }));
+
+  it("conditionally commits MCP state without touching a replacement or unrelated payload", () =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const threadId = ThreadId.makeUnsafe("mcp-fence");
+      const instanceId = ProviderInstanceId.make("work");
+      yield* directory.upsert({
+        threadId,
+        provider: "codex",
+        providerInstanceId: instanceId,
+        mcpEffectiveConfigVersion: "old",
+        runtimePayload: { sessionGeneration: 2, cwd: "/keep" },
+      });
+      const update = {
+        threadId,
+        instanceId,
+        generation: 2,
+        effectiveVersion: "v2",
+        unconvergedVersion: "v2",
+      };
+      assert.isFalse(yield* directory.updateMcpStateIfCurrent({ ...update, generation: 1 }));
+      assert.isFalse(
+        yield* directory.updateMcpStateIfCurrent({
+          ...update,
+          instanceId: ProviderInstanceId.make("personal"),
+        }),
+      );
+      assert.isTrue(yield* directory.updateMcpStateIfCurrent(update));
+      const binding = Option.getOrThrow(yield* directory.getBinding(threadId));
+      assert.equal(binding.mcpEffectiveConfigVersion, "v2");
+      assert.deepEqual(binding.runtimePayload, {
+        sessionGeneration: 2,
+        cwd: "/keep",
+        mcpUnconvergedConfigVersion: "v2",
+      });
+      yield* directory.upsert({
+        threadId,
+        provider: "codex",
+        providerInstanceId: instanceId,
+        mcpEffectiveConfigVersion: "new-generation",
+        runtimePayload: { sessionGeneration: 3 },
+      });
+      assert.isFalse(yield* directory.updateMcpStateIfCurrent(update));
+      assert.equal(
+        Option.getOrThrow(yield* directory.getBinding(threadId)).mcpEffectiveConfigVersion,
+        "new-generation",
+      );
     }));
 
   it("rehydrates persisted mappings across layer restart", () =>

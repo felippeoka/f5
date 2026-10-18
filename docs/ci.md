@@ -1,5 +1,7 @@
 # Continuous integration
 
+> Contributors: what CI runs and which checks to run locally.
+
 `.github/workflows/ci.yml` runs on pull requests, every main push, nightly at
 03:17 UTC, and manual dispatch. `CI result` is the single intended required check.
 It waits for all validation jobs and rejects failed, cancelled, or missing verdicts;

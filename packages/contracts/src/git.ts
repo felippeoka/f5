@@ -102,6 +102,9 @@ export const GitCreateWorktreeInput = Schema.Struct({
 export type GitCreateWorktreeInput = typeof GitCreateWorktreeInput.Type;
 
 export const GitPrepareWorktreeInput = Schema.Struct({
+  runSetupScript: Schema.optional(Schema.Boolean),
+  setupIdentity: Schema.optional(Schema.NullOr(Schema.String)),
+  retryAcknowledged: Schema.optional(Schema.Boolean),
   cwd: FilesystemPath,
   branch: TrimmedNonEmptyStringSchema,
   newBranch: TrimmedNonEmptyStringSchema,

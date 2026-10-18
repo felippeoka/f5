@@ -8,7 +8,7 @@ import { Effect, Layer } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { ServerConfig, type ServerConfigShape } from "../../../src/config.ts";
-import { GitCoreLive } from "../../../src/git/Layers/GitCore.ts";
+import { GitCoreTestLive as GitCoreLive } from "../../../src/git/testLayers.ts";
 import { GitServiceLive } from "../../../src/git/Layers/GitService.ts";
 import { makeGitManager } from "../../../src/git/Layers/GitManager.ts";
 import { GitCore, type GitCoreShape } from "../../../src/git/Services/GitCore.ts";

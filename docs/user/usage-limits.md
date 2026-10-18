@@ -1,42 +1,115 @@
 # Usage and limits
 
-## Getting around
+The Usage page shows two things. **Activity** covers the tokens, cost and turns F5 recorded.
+**Limits** shows how much of each account's allowance is left.
 
-Open **Usage** in the sidebar. It has two tabs:
+![Usage → Activity with the usage-over-time chart](../images/usage-activity.webp)
 
-- **Activity:** tokens, API-equivalent cost and turns for work F5 ran, filtered by range, provider and project.
-- **Limits:** each provider account's allowances and reset times, as the provider reports them.
+## How to
 
-These are four different numbers. Recorded F5 activity counts only turns F5 ran. Account allowances come from the provider and include use outside F5. API-equivalent cost is an estimate from token prices. Actual billing is your provider's invoice, which F5 never sees.
+1. Open **Usage** from the sidebar, or type `/usage-limits` in the composer for a quick read.
+2. Choose **Activity** or **Limits**.
+3. Pick a range (**24h**, **7d**, **30d**, **90d**) and, optionally, a provider or project.
+4. Switch the chart between tokens, cost and turns.
 
-## Details
+The URL keeps the tab, range and filters, so you can bookmark a view or share it.
 
-Open `/usage?tab=activity` for F5 activity or `/usage?tab=limits` for account allowances. The URL also carries `range` (`24h`, `7d`, `30d`, `90d`), `provider`, `projectId`, and the chart `metric` (`tokens`, `cost`, `turns`), so a filtered view can be bookmarked or shared and Back restores the previous view. F5 remembers the last tab and range and uses them when the URL omits them; once you change a control, the URL records the tab and range so Back keeps showing the earlier view. The default `tokens` metric is omitted from the URL. The Activity and Limits panels load independently, so one failing never hides the other.
+> [!NOTE]
+> These are different numbers. Activity counts only turns F5 ran. Account limits come from the
+> provider and include use outside F5. Cost is an estimate from token prices; your actual bill is
+> the provider's invoice, which F5 never sees.
 
-Quota meters show remaining allowance, the reset countdown (`in 5d 10h` for long windows), and the snapshot time. A meter whose reset time has passed shows "Reset time passed; awaiting updated usage" until a fresh read arrives; usage above the limit is labeled over limit. Unavailable credentials remain visible as unavailable. `/usage-limits` in the composer reads the cached snapshot without sending a turn or refreshing an account, using the same window labels as the Limits tab, and appends "(as of …)" when the snapshot is older than 15 minutes.
+## Activity
 
-The open Usage page re-reads accounts every five minutes and on focus or reconnect; these reads reuse a snapshot younger than five minutes. **Refresh limits** forces a new read and reports "Refresh queued." when a job starts, or explains that a recent-refresh cooldown or disabled accounts prevented a new job. In the background, the server samples each enabled account one minute after startup, then every ten minutes while one of its windows resets within six hours (such as a 5-hour limit), and hourly otherwise. Failed samples back off per account (10, 20, 40 … up to 120 minutes); this includes accounts that need a login or report usage as unsupported, so logging in through the provider's CLI is picked up within two hours. Each read has a two-minute deadline. Turn off **Settings → Threads → Sample account limits in the background** to stop background reads; limits then refresh only while you view them. Disabled instances are not probed, and account homes stay isolated. F5 does not combine accounts on the basis of email or display name.
+Activity counts completed F5 turns. It does not include CLI sessions you ran outside F5. Metric
+cards compare each value with the previous period of the same length and show how much input was
+served from cache.
 
-The latest snapshot for each account is persisted, so the Limits tab shows it after a restart, labeled "Last known before restart" until a new read succeeds. Snapshots belong to an account identity derived from the instance's configuration (binary, home, and the credential settings its reader uses); changing that configuration discards the old snapshot instead of showing it under the new account. Where an account ID is configured (CLIProxy) it identifies the account, so rotating the hub key keeps history; rotating a raw API key starts new history, because it cannot be told apart from a different account. Switching OAuth logins inside the same home is not detected. Identities are stored only as keyed hashes. Quota samples are kept for 35 days; snapshots of removed instances expire after 35 days. Meters with samples from the current reset window show a sparkline and a forecast at the current pace: when the limit would be reached before reset, or the expected use at reset. No forecast is shown without at least 15 minutes of recent samples, or when the latest snapshot is over 30 minutes old.
+**Usage over time** has a bar per interval. Hover a bar for details, or click it to pin it.
+**Show data table** lists every interval.
 
-Codex's main allowance and Spark windows remain separate. Reset-credit updates preserve previously reported credits when a response omits the field. Using a reset credit opens a confirmation naming the account and allowance. Each instance permits one redemption at a time, with a 30-second deadline. Retry after an uncertain outcome reuses the original key, including after a page reload or server restart; a different key is blocked until that attempt is resolved.
+## Projects and threads
 
-Cursor uses dashboard percentages for a token or file-based login; API-key-only and macOS keychain-only credentials are unavailable. Grok supports its standard subscription login, while custom authentication deployments remain unavailable. OpenCode Go supports local API credentials; externally managed OpenCode servers own their own credentials and are not probed through the host account.
+![Projects and threads table ranking usage by project and thread](../images/usage-breakdown.webp)
 
-Antigravity quotas can be read through an explicitly configured CLIProxyAPI hub. In the Antigravity provider instance's server-owned environment, configure `F5_CLIPROXY_HUB_URL`, `F5_CLIPROXY_ACCOUNT_ID` (the exact auth-file ID), and `F5_CLIPROXY_API_KEY` (mark it sensitive). Optionally set `F5_ANTIGRAVITY_PROJECT` when the account needs a project. The hub substitutes its own account token for the provider request. F5 sends the management key only to the configured hub, refuses redirects, and does not select accounts by email. A custom quota gateway may instead supply `F5_CLIPROXY_USAGE_URL` returning `{windows: [{id, label, usedPercent, resetsAt}]}`. Without supported credentials, the instance shows unavailable quota.
+This table ranks projects and their top threads by the chart metric. Choose a project to filter
+the page; thread names link to their chat. Deleted projects and threads still count and are
+labeled as deleted.
 
-Activity comes from durable usage facts emitted for completed F5 turns. Transcript cleanup does not remove these facts. F5 processes new events rather than rescanning transcript files, so external CLI activity is not inferred from unrelated account homes. The page updates as turns complete and rolls over to the next hour or day bucket in your local time zone, including across daylight-saving changes.
+## Usage prices
 
-Activity values are historical provider-reported tokens and API-equivalent cost; subscription or invoice spend may differ. Each token field counts only turns that reported it: a field no turn reported shows "Unreported", a partially reported field shows "N of M recorded turns", and a summary from an older server shows "Field coverage unavailable" rather than a confirmed zero. Older cost-only history is counted as legacy cost records, never as turns. Metric cards compare against the preceding period of equal length when it is fully covered (for example "+23% vs previous 7 days", or "New" when the previous period was zero) and show the share of input served from cache.
+![Usage prices editor](../images/usage-prices.webp)
 
-The **Usage over time** chart switches between tokens, cost, and recorded turns. Hover or focus a bar for details; click, Enter, or Space pins an interval, Previous/Next move between intervals, arrow keys, Home, and End navigate, and Escape clears the selection. **Show data table** lists every interval. **Projects and threads** ranks projects and the top threads by the chart metric; choosing a project filters the page, and thread names link to their chat. Deleted projects and threads remain counted and are labeled deleted. Historical cost recorded before per-project attribution appears as "Unattributed historical cost".
+Costs are API-equivalent estimates and can differ from your subscription or invoice. Where a
+provider reports no cost, set a price in **Usage prices** (USD per million tokens) for that
+provider and model. **Set price** next to an unpriced model opens the editor with that model
+filled in. Provider-reported costs, including zero, always win.
 
-In **Usage prices**, enter USD per million tokens for an exact provider/model pair. **Set price** next to an unpriced model opens the editor prefilled with that pair. Overrides apply only when the provider omitted cost and input/output token usage is known. Zero is valid; blank cache prices inherit the input price. Provider-reported costs, including zero, take precedence. Estimates are labeled; activity without a price stays explicitly unpriced.
+## Limits
 
-# Claude resume compaction
+Each account gets meters showing the allowance left, when it resets and when it was last read.
+Once a meter has enough recent samples, it shows a sparkline and a forecast at your current pace.
+**Refresh limits** forces a new read. Codex's main allowance and Spark windows are shown
+separately; using a reset credit asks you to confirm first.
 
-SDK 0.3.280 provides the dialog and auto-compaction settings used here. In a Claude instance, enable **Prompt before compacting resumed sessions** to show the SDK's resume dialog as blocking pending input. The default is off. **Auto-compact window** accepts zero for the CLI default or 100,000–1,000,000 tokens. A shown resume dialog suppresses the adapter's duplicate compaction recommendation for that session. F5's CompactionService is unchanged.
+## Good to know
 
-# Automatic titles
+- After a restart, the Limits tab shows each account's last snapshot, labeled **Last known before
+  restart**, until a fresh read succeeds.
+- Turn off **Settings → Threads → Sample account limits in the background** to read limits only
+  while the page is open.
+- Accounts are never merged by email or display name.
+- `/usage-limits` reads the cached snapshot. It never sends a turn or refreshes an account.
 
-The title generator returns a title and whether the user's intent still needs clarification. A generated title can refine after turns 1 and 3, with at most two durably recorded attempts. Context contains user messages, and late results must match the current title revision. A manual rename cancels pending generation and stops automatic refinement. Existing titles remain readable without title state. Database migrations 100 and 101 add title state and reset-credit request records; protocol version 13 prevents stale clients from receiving the new shapes.
+> [!NOTE]
+> The Limits screenshots are omitted because meters come from live accounts.
+
+<details>
+<summary>Details and limits</summary>
+
+**URL parameters.** `tab` (`activity`, `limits`), `range` (`24h`, `7d`, `30d`, `90d`), `provider`,
+`projectId` and `metric` (`tokens`, `cost`, `turns`). F5 remembers the last tab and range. The
+default `tokens` metric is left out of the URL.
+
+**Refresh timing**
+
+| Trigger                        | Behavior                                                                                             |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| Open Usage page                | Re-reads every 5 minutes and on focus or reconnect; reuses snapshots under 5 minutes old             |
+| Background sampling            | 1 minute after startup, then every 10 minutes while a window resets within 6 hours, otherwise hourly |
+| Failed reads                   | Back off per account: 10, 20, 40 … up to 120 minutes (includes logged-out accounts)                  |
+| Read deadline                  | 2 minutes                                                                                            |
+| `/usage-limits` staleness note | Adds "(as of …)" when the snapshot is over 15 minutes old                                            |
+
+**Retention and identity.** Quota samples are kept for 35 days. Snapshots of removed instances
+expire after 35 days. An account's identity comes from its binary, home and credential settings,
+so changing those starts a new history. A configured CLIProxy account ID keeps history when you
+rotate the hub key; rotating a raw API key starts new history. Switching OAuth logins inside the
+same home is not detected. Identities are stored as keyed hashes.
+
+**Forecasts** need at least 15 minutes of recent samples and a snapshot under 30 minutes old.
+
+**Reset credits.** One redemption runs at a time per instance, with a 30-second deadline. If the
+outcome is uncertain, a retry reuses the original key, even after a reload or restart.
+
+**Token coverage.** A field no turn reported shows "Unreported". A partly reported field shows "N
+of M recorded turns". Older cost-only history counts as legacy cost records. Cost recorded before
+per-project attribution appears as "Unattributed historical cost". Blank cache prices inherit the
+input price, and zero is a valid price.
+
+**Other providers**
+
+| Provider    | Supported credentials                                                                                                                                                                                                                                                                                                                                             |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cursor      | Token or file-based login. API-key-only and keychain-only credentials are unavailable                                                                                                                                                                                                                                                                             |
+| Grok        | Standard subscription login                                                                                                                                                                                                                                                                                                                                       |
+| OpenCode Go | Local API credentials. Externally managed servers are not probed                                                                                                                                                                                                                                                                                                  |
+| Antigravity | A CLIProxyAPI hub: set `F5_CLIPROXY_HUB_URL`, `F5_CLIPROXY_ACCOUNT_ID` and a sensitive `F5_CLIPROXY_API_KEY` (optionally `F5_ANTIGRAVITY_PROJECT`) in the instance environment. Alternatively, `F5_CLIPROXY_USAGE_URL` returning `{windows: [{id, label, usedPercent, resetsAt}]}`. The management key goes only to the configured hub, and redirects are refused |
+
+</details>
+
+## Related
+
+- [Claude](../providers/claude.md) and [Codex](../providers/codex.md) account setup
+- [Getting started](getting-started.md)
+- [Antigravity](../providers/antigravity.md)

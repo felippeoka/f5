@@ -91,8 +91,8 @@ export const DEMO_SERVER_SETTINGS = {
   resumeActiveTurnsAfterRestart: false,
 } as const;
 
-export function writeDemoSettings(root: string): string {
+export function writeDemoSettings(root: string, extra: Record<string, unknown> = {}): string {
   const file = path.join(demoStateDir(root), "settings.json");
-  fs.writeFileSync(file, `${JSON.stringify(DEMO_SERVER_SETTINGS, null, 2)}\n`);
+  fs.writeFileSync(file, `${JSON.stringify({ ...DEMO_SERVER_SETTINGS, ...extra }, null, 2)}\n`);
   return file;
 }
