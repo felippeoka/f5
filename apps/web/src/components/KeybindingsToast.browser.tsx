@@ -300,6 +300,7 @@ function resolveWsRpc(body: {
   if (tag === WS_METHODS.projectsSearchEntries) {
     return { entries: [], truncated: false };
   }
+  if (tag === WS_METHODS.worktreesGetTransition) return null;
   return {};
 }
 

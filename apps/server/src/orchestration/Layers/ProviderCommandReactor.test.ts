@@ -3703,6 +3703,9 @@ describe("ProviderCommandReactor", () => {
     const legacySession = harness.runtimeSessions[0] as { cwd?: string } | undefined;
     expect(legacySession).toBeDefined();
     delete legacySession!.cwd;
+    // Let the session-start bookkeeping settle first: the workspace write records the
+    // session's updatedAt, and a later session update would invalidate it.
+    await harness.drain();
 
     await Effect.runPromise(
       harness.engine.dispatch({
