@@ -1,53 +1,103 @@
 # Install F5
 
-Download installers from [GitHub Releases](https://github.com/lopes-felipe/f5/releases/latest). F5 bundles its backend runtime; Node, Bun and a source checkout are unnecessary. Git and your chosen provider CLI are separate prerequisites for using agents ([provider prerequisites](provider-prerequisites.md)); diagnostics remain available if either is missing.
+Install the F5 desktop app. It bundles its own backend, so you don't need Node, Bun or a source
+checkout. To run F5 in a browser instead, use the [standalone CLI](user/standalone-cli.md); to
+build from source, see [Quick start](quick-start.md).
 
-This page covers the desktop app. To run F5 in a browser without the desktop app, use the [standalone CLI](user/standalone-cli.md). To build from source, see [Quick start](quick-start.md).
+## How to
 
-Current availability: Windows x64 is the first stable desktop platform, starting with `v0.1.0`, with in-app updates. If the latest release lists no `F5-<version>-x64.exe`, that first Windows release has not been published yet. macOS Apple Silicon has only the computer use preview below. macOS Intel and Linux desktop builds are not yet available. The `f5` CLI ships for all five targets in every release.
+1. Download the installer from [GitHub Releases](https://github.com/lopes-felipe/f5/releases/latest).
+2. Install it (see your platform below).
+3. Install Git and at least one provider, then sign in. See
+   [Provider prerequisites](provider-prerequisites.md).
+4. Open F5 and follow [Getting started](user/getting-started.md).
 
-## macOS
+F5 still opens if Git or a provider is missing, and shows what needs fixing.
 
-No stable macOS release exists yet. The [`v0.0.11-computer-use-preview.1`](https://github.com/lopes-felipe/f5/releases/tag/v0.0.11-computer-use-preview.1) preview is Apple Silicon only, unsigned and not notarized, does not update automatically, and replaces F5 (Alpha); follow its release notes. Once stable macOS releases ship, they will use Developer ID signing and notarization: choose arm64 for Apple Silicon or x64 for Intel, open the DMG, drag F5 to Applications, eject the disk, then open F5 from Applications. If launched from a mounted disk or App Translocation, choose Move to Applications to enable updates.
+## Availability
+
+| Platform              | Status                                                                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Windows x64           | First stable desktop platform, from `v0.1.0`, with in-app updates                                                        |
+| macOS (Apple Silicon) | Only the unsigned [computer use preview](https://github.com/lopes-felipe/f5/releases/tag/v0.0.11-computer-use-preview.1) |
+| macOS (Intel), Linux  | No desktop build yet                                                                                                     |
+| `f5` CLI              | All five targets in every release                                                                                        |
+
+If the latest release lists no `F5-<version>-x64.exe`, the first Windows release hasn't been
+published yet.
 
 ## Windows
 
-Run the x64 installer (`F5-<version>-x64.exe`). It installs for your user without administrator privileges and adds a Start-menu shortcut. Windows on ARM is not supported by a native build.
+Run `F5-<version>-x64.exe`. It installs for your user without administrator rights and adds a
+Start-menu shortcut. Windows on ARM has no native build.
 
-The installer and application are **not code-signed** yet:
+> [!WARNING]
+> The installer isn't code-signed yet. SmartScreen may show "Windows protected your PC"; choose
+> **More info → Run anyway** only after checking the download. Smart App Control in enforcement
+> mode, and some organization policies, block unsigned apps entirely.
 
-- SmartScreen may show "Windows protected your PC" with an unknown publisher. Choose **More info → Run anyway** only after verifying the download. Signing alone also does not guarantee immediate SmartScreen reputation ([Microsoft guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)).
-- Windows 11 Smart App Control in enforcement mode blocks unsigned applications, with no per-app override. F5 cannot be installed there until signed releases ship.
-- Organisation policies (WDAC/App Control, AppLocker, or antivirus rules) may also block unsigned applications.
+Check the download before running it: compare
+`Get-FileHash F5-<version>-x64.exe -Algorithm SHA256` with the matching line in the release's
+`SHA256SUMS`.
 
-Verify the installer before running it: compare `Get-FileHash F5-<version>-x64.exe -Algorithm SHA256` with the matching line in the release's `SHA256SUMS`.
+## macOS and Linux
 
-Updates install in place through Settings → About. A later signed release updates unsigned installations normally; from then on, F5 verifies that each update is signed by the same publisher.
-
-## Linux
-
-No desktop build is available yet. Once AppImage releases ship: download the x64 AppImage, make it executable (`chmod +x F5-*.AppImage`), and open it. Keep the AppImage somewhere writable for updates. Your distribution may require FUSE support for AppImages.
-
-## Optional: computer use on macOS
-
-Screen Recording and Accessibility are only needed for the opt-in, uncertified computer use
-preview. Grant them in System Settings when you turn that preview on; see
-[agent browser and computer use](agent-browser.md).
-
-## Upgrade from F5 (Alpha)
-
-The unsigned `v0.0.11-computer-use-preview.1` preview does not support an in-place update. Quit F5 (Alpha) and T3 Code, delete `F5 (Alpha).app` on macOS, then install and launch F5. The first launch copies Chromium settings from `T3 Code (Alpha)` (or `t3code` if absent) into the new `f5` directory. The legacy directory is preserved. CacheStorage, service-worker script caches, and blob caches are excluded from the copy and disk-space estimate. A large first import still runs before Chromium starts and can take time; wait for it to finish. Backend data under `~/.f5` is untouched.
-
-On Windows, the new app identity installs alongside F5 (Alpha). Quit the old application, install and launch F5 to import settings, and verify your data before uninstalling F5 (Alpha) from Settings → Apps → Installed apps. Keep the legacy settings directory until the import is verified. Always use the new F5 Start-menu entry afterward.
-
-If you use computer use, Screen Recording and Accessibility must be granted again. On macOS and Linux, preview-browser sign-ins may need to be redone: Chromium Safe Storage uses the application name in Keychain/libsecret, and F5 does not copy that secret across identities. The profile copy preserves localStorage and IndexedDB but does not promise decryptable cookies. Windows also copies `Local State`, which contains its encrypted profile key. F5 and upstream T3 Code can run independently after import.
-
-An existing nonempty `f5` Chromium profile is preserved even if it has no migration marker. An empty folder (or one containing only `.DS_Store`, `Thumbs.db`, or `desktop.ini`) pre-created by Electron is eligible for import; F5 never replaces a populated profile solely because a marker is missing.
-
-If import fails, quit the legacy app and retry. Make sure there is enough disk space for another copy plus 64 MiB. Support escape hatch: launch once with `F5_SKIP_USERDATA_IMPORT=1` to create an empty F5 Chromium profile. This writes a `skipped` marker and does not remove backend data or legacy settings.
-
-Migration coordination uses `<appDataBase>/f5.migration.lock` (or `f5-dev.migration.lock` in development). The base is `~/Library/Application Support` on macOS, `%APPDATA%` on Windows, and `$XDG_CONFIG_HOME` (or `~/.config`) on Linux. F5 reclaims dead owners, records from before the current boot, and incomplete records after a five-second publication grace period. A live owner is never expired solely by age. If a lock still blocks launch, quit every F5 instance before inspecting it; preserve legacy and target settings, and remove only the confirmed abandoned lock if manual support recovery is necessary. The skip-import escape hatch also respects an active import lock.
+The macOS preview is Apple Silicon only, unsigned, not notarized and doesn't update automatically;
+follow its release notes. Once stable builds ship, macOS installs from a DMG (drag F5 to
+Applications) and Linux from an x64 AppImage.
 
 ## Updates
 
-Open Settings → About to check, download, then restart to install. Restart interrupts all windows and running agents, with confirmation. Beta updates are opt-in (and on by default for a beta installation). Turning beta off keeps your current version until a newer stable release ships; F5 never downgrades. A beta preference survives installing a stable build. Release notes appear with available updates.
+Open **Settings → About** to check for an update, download it, and restart to install. Restarting
+stops all windows and running agents, so F5 asks first. Beta updates are opt-in (on by default for
+beta installs). Turning beta off keeps your version until a newer stable release; F5 never
+downgrades.
+
+## Good to know
+
+- Your data under `~/.f5` is never touched by installing or upgrading.
+- Screen Recording and Accessibility are only needed for the opt-in macOS
+  [computer use preview](user/agent-browser-and-computer-use.md).
+- F5 and upstream T3 Code can run side by side.
+
+<details>
+<summary>Details and limits</summary>
+
+**Signing.** A later signed Windows release updates unsigned installs normally; from then on, F5
+checks that each update is signed by the same publisher. Signing alone doesn't guarantee immediate
+SmartScreen reputation ([Microsoft guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)).
+Stable macOS releases will use Developer ID signing and notarization; launched from a mounted disk,
+choose **Move to Applications** so updates work. AppImages need a writable folder for updates, and
+some distributions need FUSE.
+
+**Upgrade from F5 (Alpha).** The `v0.0.11-computer-use-preview.1` preview can't update in place.
+Quit F5 (Alpha) and T3 Code, delete `F5 (Alpha).app` on macOS (on Windows the new app installs
+alongside), then install and open F5. Check your data before removing the old app (on Windows:
+**Settings → Apps → Installed apps**), and use the new Start-menu entry afterwards. If you use
+computer use, grant Screen Recording and Accessibility again.
+
+**Settings import.** The first launch copies Chromium settings from `T3 Code (Alpha)` (or
+`t3code`) into the new `f5` directory and keeps the old one. CacheStorage, service-worker caches
+and blob caches are skipped. A large import runs before the window opens and needs room for another
+copy plus 64 MiB. Chromium Safe Storage keys aren't copied, so preview-browser sign-ins may need
+redoing on macOS and Linux; localStorage and IndexedDB are kept. Windows also copies `Local State`.
+
+**Existing profiles.** A non-empty `f5` Chromium profile is never replaced. An empty folder, or one
+holding only `.DS_Store`, `Thumbs.db` or `desktop.ini`, can still receive the import. Launch once
+with `F5_SKIP_USERDATA_IMPORT=1` to start empty instead; this writes a `skipped` marker and removes
+nothing.
+
+**Import lock.** The lock lives at `<appDataBase>/f5.migration.lock` (`f5-dev.migration.lock` in
+development), where `<appDataBase>` is `~/Library/Application Support`, `%APPDATA%` or
+`$XDG_CONFIG_HOME` (`~/.config`). F5 reclaims locks from dead processes, from before the current
+boot, and incomplete records after 5 seconds; a live owner never expires. If a lock still blocks
+launch, quit every F5 instance first and remove only a lock you've confirmed is abandoned.
+
+</details>
+
+## Related
+
+- [Provider prerequisites](provider-prerequisites.md)
+- [Getting started](user/getting-started.md)
+- [Standalone CLI](user/standalone-cli.md)
+- [Build from source](quick-start.md)

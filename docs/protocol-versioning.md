@@ -1,5 +1,7 @@
 # Client/server protocol compatibility
 
+> Contributors: when and how to bump the client/server protocol version.
+
 `F5_PROTOCOL_VERSION` in `packages/contracts/src/protocol.ts` is the exact wire
 version shared by the bundled server, desktop renderer, and web client. It starts
 at 1. Increment it when adding a union variant or state shape that a client must

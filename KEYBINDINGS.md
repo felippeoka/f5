@@ -1,8 +1,29 @@
 # Keybindings
 
-F5 reads keybindings from its local keybindings file:
+See every keyboard shortcut in F5 and change any of them. Press `mod+/` for a quick reference
+anywhere in the app.
 
-- `~/.f5/userdata/keybindings.json` (`keybindings.json` in the state directory)
+![Settings → Keyboard listing shortcuts with search](docs/images/settings-keyboard.webp)
+
+## How to
+
+1. Open **Settings → Keyboard**.
+2. Use **Search keybindings** to find a shortcut by command, key or context.
+3. Edit a binding there, or edit `~/.f5/userdata/keybindings.json` (`keybindings.json` in the
+   state directory) directly.
+
+`mod` means `cmd` on macOS and `ctrl` elsewhere.
+
+## Good to know
+
+- `mod+b` toggles the sidebar, except while a terminal or dialog has focus.
+- `mod+shift+n` opens a new workflow.
+- `mod+enter` scrolls to the bottom of the chat; it doesn't send. In a dialog it runs the primary
+  action.
+- `chat.newLocal` has no default binding but can still be bound.
+- Invalid rules, and invalid files, are ignored and logged by the server.
+
+## The keybindings file
 
 The file must be a JSON array of rules:
 
@@ -14,8 +35,6 @@ The file must be a JSON array of rules:
 ```
 
 See the full schema for more details: [`packages/contracts/src/keybindings.ts`](packages/contracts/src/keybindings.ts)
-
-You can also browse and change shortcuts in the app under **Settings → Keyboard**. Press `mod+/` to see every active shortcut.
 
 ## Defaults
 
@@ -130,13 +149,6 @@ You can also browse and change shortcuts in the app under **Settings → Keyboar
 ```
 
 For the most up to date defaults, see [`DEFAULT_KEYBINDINGS` in `packages/shared/src/keybindings.ts`](packages/shared/src/keybindings.ts), which the server re-exports from `apps/server/src/keybindings.ts`.
-
-## Recent Changes
-
-- `mod+b` toggles the main sidebar, except while a terminal or dialog has focus.
-- `mod+shift+n` now opens a new workflow by default.
-- `mod+enter` now scrolls to the bottom instead of sending a message.
-- `chat.newLocal` is still configurable, but it no longer has a default binding.
 
 ## Configuration
 

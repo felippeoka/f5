@@ -1,74 +1,74 @@
 # Muse Code
 
-**Muse Code** is Meta's coding CLI. F5 runs it as a first-party provider by starting
-`muse serve --approval-judge off` and speaking the Muse Session Protocol (MSP) through Meta's
-official `@muse-code/sdk`, pinned to 1.4.8 (the SDK versions in lockstep with the CLI).
+Use Meta's Muse Code CLI as an F5 provider. It is not the Muse personal agent, which has no public
+API; F5 doesn't imitate it.
 
-This is not the Muse personal agent. That agent has no public Meta API; F5 will integrate it
-when one exists and does not imitate it in the meantime.
+## How to
 
-## Setup
+1. Install the CLI yourself. F5 shows this command when `muse` is missing but never runs it:
 
-- Install the CLI yourself: `curl -fsSL https://dev.meta.ai/install.sh | bash`. F5 shows this
-  command when `muse` is missing but never runs it.
-- Sign in outside F5: run `muse` once in a terminal, use `muse auth set`, or add `META_API_KEY`
-  to the instance's environment variables. When `META_API_KEY` is set, the status card says it
-  masks any stored browser sign-in.
-- Optionally set a custom binary path on the instance.
-- Muse Code is unavailable in isolated profiles.
+   ```bash
+   curl -fsSL https://dev.meta.ai/install.sh | bash
+   ```
 
-## Runtime modes
+2. Sign in by running `muse` once in a terminal, using `muse auth set`, or adding `META_API_KEY` to
+   the provider's environment variables.
+3. Optionally, set a custom binary path on the provider in **Settings → Providers**.
+4. Pick Muse Code in the composer.
 
-Muse Code approves in-workspace file edits automatically in every approval mode, so F5 never
-offers **Supervised** (`approval-required`) for it. The two modes F5 offers map to MSP approval
-modes as follows:
+## Access modes
 
-| F5 mode           | MSP approval mode | What asks                                          |
-| ----------------- | ----------------- | -------------------------------------------------- |
-| Auto-accept edits | `promptUnmatched` | Unlisted commands and writes outside the workspace |
-| Full access       | `allowAll`        | Nothing                                            |
+Muse Code always approves file edits inside the workspace, so F5 doesn't offer **Supervised** for
+it.
 
-Every start and resume reads the effective approval mode back and requires the host's sandbox
-to be available. A mismatch stops the session with an error. If another client changes the
-session's approval mode while F5 is attached, F5 interrupts the turn, waits for it to settle,
-and stops the session. F5 never passes `--yolo`, `--disable-approval`, or `--disable-sandbox`.
+| F5 mode           | What still asks you                                |
+| ----------------- | -------------------------------------------------- |
+| Auto-accept edits | Unlisted commands and writes outside the workspace |
+| Full access       | Nothing                                            |
 
-Read-only workflow turns and plan mode are rejected: MSP 1.4 cannot switch a running session to
-a read-only permission profile. Text generation (titles, commit messages) uses a separate
-ephemeral session started with the read-only profile, which the SDK proves applied before the
-prompt runs.
+Plan mode and read-only workflow steps aren't supported, and Muse Code is never available through
+the [Agent Bridge](../agent-bridge.md).
 
-Because bridge turns require supervised mode, Muse Code is never reachable through the F5 Agent
-Bridge.
+## Approvals
 
-## Approvals and questions
+Approval buttons use Muse's own choices: allow once, allow for session, always allow, deny and
+abort. If Muse changes an approval while you are deciding, F5 reloads it and asks again; it never
+resends a decision on its own. Pending approvals and questions come back after a resume.
 
-Each MSP approval stage becomes its own F5 request. The buttons are Muse's own choices with its
-labels (allow once, allow for session, always allow, deny, abort); unknown choice kinds are
-omitted. When Muse advances an approval to a new stage, the earlier request is replaced. If an
-approval changes while you decide, F5 reloads it and asks you to review the updated request; it
-never retries a decision automatically. Approvals answered in another client close in F5.
-Pending approvals and questions reopen after a resume. An approval F5 cannot read is denied when
-a deny choice is available; otherwise the session stops.
+## Good to know
 
-## Reliability
-
-- F5 mints the native command id before the first send and stores it, so a retried delivery
-  reuses it and the host deduplicates the turn.
-- A command the host never admitted (closed transport, local or host overload, rejection,
-  invalid input) is reported as not sent; a timeout after the frame was written stays ambiguous.
-- Resume continues from the stored view cursor. If history after that cursor was pruned, F5
-  warns, reloads the session's current state, and continues. A new session starts only when the
-  host no longer knows the session, or after an in-memory host exited.
-- Stop sends `turn/cancel` and waits up to 10 seconds for the turn to settle before closing the
-  host.
+- `META_API_KEY` takes precedence over a stored browser sign-in, and the status card says so.
+- Muse Code is not available in isolated profiles.
 - Rollback is not supported.
+- F5 never passes `--yolo`, `--disable-approval` or `--disable-sandbox`.
 
-## Protocol pin
+<details>
+<summary>Details and limits</summary>
 
-`packages/shared/src/museProtocolManifest.ts` records the SDK/CLI version, expected schema
-fingerprint, and a disposition for every MSP notification. `bun run protocol:audit:muse` checks
-the installed SDK against it and the fixture under `scripts/fixtures/muse-protocol/`.
-`MUSE_LIVE=1 bun run protocol:audit:muse` also runs permission conformance against the real
-binary. A host advertising a different fingerprint still works, with an "untested Muse Code
-protocol" warning.
+**Runtime.** F5 starts `muse serve --approval-judge off` and talks to it through Meta's
+`@muse-code/sdk` (1.4.8, versioned with the CLI) over the Muse Session Protocol (MSP). F5's modes
+map to MSP's `promptUnmatched` and `allowAll`. Each start and resume reads the mode back and
+requires the host sandbox, and a mismatch stops the session. If another client changes the mode,
+F5 interrupts the turn and stops the session. Titles and commit messages use a separate read-only
+session.
+
+**Approvals.** Each MSP approval stage is its own F5 request, and a new stage replaces the
+previous one. Approvals answered in another client close in F5. If F5 can't read an approval, it
+denies it when a deny choice exists, and otherwise stops the session.
+
+**Reliability.** Command ids are stored before the first send, so retries are deduplicated. A
+command the host never accepted is reported as not sent, and a timeout after sending stays
+ambiguous. Resume continues from the stored cursor. If history was pruned, F5 warns and reloads
+the current state. Stop cancels the turn and waits up to 10 seconds.
+
+**Protocol pin.** `packages/shared/src/museProtocolManifest.ts` records the expected SDK version
+and schema fingerprint. `bun run protocol:audit:muse` checks the installed SDK, and
+`MUSE_LIVE=1` adds a run against the real binary. A host with a different fingerprint still works,
+with an "untested Muse Code protocol" warning.
+
+</details>
+
+## Related
+
+- [Provider prerequisites](../provider-prerequisites.md)
+- [Runtime modes](../runtime-modes.md)
