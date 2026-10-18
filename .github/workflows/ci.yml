@@ -51,6 +51,10 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      # Release builds enforce the initial-JS budget; catch regressions before merge.
+      - name: Build web app within the initial bundle budget
+        run: bun run --cwd apps/web build
+
       # `bun run dev` loads the server under Bun; Node-only built-ins break it.
       - name: Boot server under Bun
         run: bun run test:bun-server-boot
