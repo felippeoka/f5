@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -107,10 +108,12 @@ async function statSignature(absolutePath: string, kind: WorkspaceWatchKind) {
   try {
     const stat = await fsp.stat(absolutePath);
     if (kind === "directory" ? !stat.isDirectory() : !stat.isFile()) return null;
-    // A directory's mtime moves when entries are added, removed or renamed.
-    return kind === "directory"
-      ? `${stat.ino}:${stat.mtimeMs}`
-      : `${stat.ino}:${stat.mtimeMs}:${stat.size}`;
+    if (kind === "file") return `${stat.ino}:${stat.mtimeMs}:${stat.size}`;
+    // Entry names as well as mtime: a directory's mtime can miss a rename where
+    // timestamps are coarse or lazily updated (NTFS ticks, FAT, network shares).
+    const names = (await fsp.readdir(absolutePath)).toSorted();
+    const listing = createHash("sha1").update(names.join("\0")).digest("base64url");
+    return `${stat.ino}:${stat.mtimeMs}:${listing}`;
   } catch {
     return null;
   }
