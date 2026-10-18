@@ -424,6 +424,8 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
           .pipe(Effect.orElseSucceed(() => null));
         if (
           !receipt?.createdCheckout ||
+          (input.policy.ownThreadId !== null &&
+            receipt.owner !== `thread:${input.policy.ownThreadId}`) ||
           receipt.repositoryIdentity !== common ||
           receipt.baseOid !== inspected.headSha ||
           !proof?.created ||

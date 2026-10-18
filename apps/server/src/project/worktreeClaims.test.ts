@@ -1,3 +1,4 @@
+import { ThreadId } from "@t3tools/contracts";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -199,17 +200,20 @@ describe("effective workspace claims and removal gate", () => {
           baseSha: git(target, "rev-parse", "HEAD"),
           created: true,
         };
-        const remove = (created = true) =>
+        const remove = (created = true, ownThreadId = owner.id) =>
           removeWorktreeSafely({
             projectCwd: repo.root,
             path: target,
             policy: {
               kind: "ownedRollback",
-              ownThreadId: owner.id,
+              ownThreadId,
               ownedCreation: { ...proof, created },
             },
           });
         expect((yield* remove(false)).blockedReasons.join(" ")).toContain("ownership");
+        expect(
+          (yield* remove(true, ThreadId.makeUnsafe("other-owner"))).blockedReasons.join(" "),
+        ).toContain("ownership");
         yield* Effect.promise(() => fs.writeFile(path.join(target, "setup-output"), "keep"));
         expect((yield* remove()).blockedReasons.join(" ")).toContain("uncommitted");
         yield* Effect.promise(() => fs.rm(path.join(target, "setup-output")));
