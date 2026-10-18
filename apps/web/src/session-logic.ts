@@ -113,6 +113,7 @@ export interface WorkLogEntry {
   subagentModel?: string;
   mcpServerName?: string;
   mcpToolName?: string;
+  computerTool?: boolean;
   mcpInput?: string;
   mcpResult?: string;
   mcpImages?: ReadonlyArray<{ attachmentId: string; mimeType: string; sizeBytes: number }>;
@@ -785,6 +786,7 @@ function workEntryVisibleSignature(entry: WorkLogEntry): string {
     subagentStatesTruncated: entry.subagentStatesTruncated,
     mcpServerName: entry.mcpServerName,
     mcpToolName: entry.mcpToolName,
+    computerTool: entry.computerTool,
     mcpInput: entry.mcpInput,
     mcpResult: entry.mcpResult,
     mcpImages: entry.mcpImages?.map((image) => image.attachmentId) ?? [],
@@ -1604,6 +1606,7 @@ export function deriveWorkLogEntries(
       if (toolPayload?.mcpServerName) {
         entry.mcpServerName = toolPayload.mcpServerName;
       }
+      if (toolPayload?.computerTool === true) entry.computerTool = true;
       if (toolPayload?.mcpToolName) {
         entry.mcpToolName = toolPayload.mcpToolName;
       }

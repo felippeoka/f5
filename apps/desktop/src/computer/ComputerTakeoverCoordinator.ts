@@ -1,3 +1,4 @@
+import { COMPUTER_TAKEOVER_CONSENT_TIMEOUT_MS } from "@t3tools/contracts";
 import type {
   ComputerAccessRequested,
   ComputerAutomationError,
@@ -10,7 +11,7 @@ import type { ComputerTakeoverReservation } from "./ComputerLeaseAuthority";
 
 export const TAKEOVER_IDLE_MS = 1500;
 export const TAKEOVER_IDLE_TIMEOUT_MS = 30_000;
-export const TAKEOVER_CONSENT_TIMEOUT_MS = 300_000;
+export const TAKEOVER_CONSENT_TIMEOUT_MS = COMPUTER_TAKEOVER_CONSENT_TIMEOUT_MS;
 interface Takeover {
   requestId: string;
   approvalRequestId: string;

@@ -1,3 +1,7 @@
+import {
+  AGENT_AUTOMATION_SUPPORT,
+  OPENCODE_EXTERNAL_AUTOMATION_REASON,
+} from "@t3tools/shared/agentAutomationSupport";
 import { providerRuntimeCapabilities } from "@t3tools/shared/providerRuntimeCapabilities";
 import { loadOpenCodeCommands } from "../opencodeRuntime.ts";
 import {
@@ -1424,6 +1428,14 @@ export function makeOpenCodeAdapter(
           type: "session.configured",
           payload: {
             config: {
+              agentBrowser: {
+                computerUse: {
+                  state: "unavailable",
+                  detail: context.server.external
+                    ? OPENCODE_EXTERNAL_AUTOMATION_REASON
+                    : AGENT_AUTOMATION_SUPPORT.opencode.computer.reason,
+                },
+              },
               slashCommands: normalizeSupportedSlashCommands([
                 ...commands,
                 ...skills.map((skill) => ({

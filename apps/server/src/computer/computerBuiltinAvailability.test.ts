@@ -5,7 +5,7 @@ describe("installed provider computer-use compatibility", () => {
     const read = vi.fn();
     expect(
       (await probeComputerBuiltin({ provider: "claude", platform: "darwin", read })).reason,
-    ).toContain("interactive");
+    ).toContain("terminal app's consent");
     expect(
       (await probeComputerBuiltin({ provider: "codex", platform: "win32", read })).reason,
     ).toContain("unsupported");

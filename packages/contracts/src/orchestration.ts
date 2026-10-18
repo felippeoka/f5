@@ -753,6 +753,7 @@ export const CompactSubagentState = Schema.Struct({
 export type CompactSubagentState = typeof CompactSubagentState.Type;
 
 export const CompactToolActivityPayload = Schema.Struct({
+  computerTool: Schema.optional(Schema.Boolean),
   imagePath: Schema.optional(TrimmedNonEmptyString),
   itemType: CompactToolLifecycleItemType,
   providerItemId: Schema.optional(ProviderItemId),

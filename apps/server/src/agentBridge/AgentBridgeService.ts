@@ -38,7 +38,7 @@ export const AGENT_BRIDGE_STATE_COALESCE_MS = 400;
 const TOUCH_INTERVAL_MS = 60_000;
 const PRUNE_INTERVAL = Duration.hours(6);
 // Shelved with its UI in PR #148. Preserve saved settings without opening an unmanaged listener.
-const AGENT_BRIDGE_LISTENER_AVAILABLE = false;
+export const AGENT_BRIDGE_LISTENER_AVAILABLE = false;
 
 /**
  * Deletes task progress and completed retry receipts past the 30-day

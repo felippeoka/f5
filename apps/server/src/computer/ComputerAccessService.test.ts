@@ -355,3 +355,39 @@ it("denying typing keeps clicks, and app denial is not reported as session appro
   h.service.close();
   await retry;
 });
+
+it("publishes the actual service deadline for apps and the desktop's 300-second takeover deadline", async () => {
+  const requested = vi.fn();
+  const service = new ComputerAccessService({
+    platform: "darwin",
+    backendIncarnation: "deadline-test",
+    storage: { load: async () => [], save: async () => {} },
+    request: requested,
+    settled: () => {},
+    changed: () => {},
+  });
+  service.bind("t", "p", "s");
+  try {
+    const before = Date.now();
+    const access = service.requestAccess("t", "turn", [app], "Deadline");
+    const [request, deadline] = requested.mock.calls[0]!;
+    expect(deadline).toBeGreaterThanOrEqual(before + 300_000);
+    expect(deadline).toBeLessThanOrEqual(Date.now() + 300_000);
+    expect(request).not.toHaveProperty("expiresAtMs");
+    service.cancelRequest(request.requestId);
+    await access;
+    const takeover = service.requestTakeover(
+      "t",
+      { requestId: "takeover", appId: app.appId, turnId: "turn" },
+      "Takeover",
+    );
+    const [hostRequest, takeoverDeadline] = requested.mock.calls[1]!;
+    expect(takeoverDeadline).toBeLessThanOrEqual(Date.now() + 300_000);
+    expect(takeoverDeadline).toBeGreaterThanOrEqual(before + 300_000);
+    expect(hostRequest).not.toHaveProperty("expiresAtMs");
+    service.cancelRequest("takeover");
+    await takeover;
+  } finally {
+    service.close();
+  }
+});

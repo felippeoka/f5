@@ -258,7 +258,7 @@ const makeProviderSessionRuntimeRepository = Effect.gen(function* () {
     (input) =>
       sql`
       UPDATE provider_session_runtime
-      SET mcp_config_version = CASE WHEN ${input.effectiveVersion !== undefined} THEN ${input.effectiveVersion ?? null} ELSE mcp_config_version END,
+      SET mcp_config_version = CASE WHEN ${input.effectiveVersion !== undefined ? 1 : 0} THEN ${input.effectiveVersion ?? null} ELSE mcp_config_version END,
           runtime_payload_json = json_set(CASE WHEN json_type(runtime_payload_json) = 'object' THEN runtime_payload_json ELSE '{}' END,
             '$.mcpUnconvergedConfigVersion', ${input.unconvergedVersion})
       WHERE thread_id = ${input.threadId}

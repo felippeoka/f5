@@ -92,3 +92,16 @@ export function resolveComputerBackendSelection(input: {
     };
   });
 }
+
+/** Native-only reporting for ACP; deliberately has no session-restart fingerprint. */
+export function resolveNativeOnlyComputerSelection(input: {
+  enabled: boolean;
+  nativeStatus: ComputerAutomationBackendStatus;
+}) {
+  return input.enabled
+    ? {
+        ...(input.nativeStatus.available ? { selection: { kind: "native" as const } } : {}),
+        status: input.nativeStatus,
+      }
+    : { status: { available: false as const, reason: "disabled" as const } };
+}
