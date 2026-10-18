@@ -26,3 +26,14 @@ describe("AcpAdapterSupport", () => {
     expect(error.message).toContain("Invalid params");
   });
 });
+
+it("bounds setup errors but preserves scrubbed runtime diagnostics", () => {
+  const error = EffectAcpErrors.AcpRequestError.authRequired("Usage limit: secret");
+  const scrub = (value: string) => value.replaceAll("secret", "[redacted]");
+  expect(
+    mapAcpToAdapterError("cursor", "t" as never, "session/new", error, scrub).message,
+  ).toContain("ACP_REQUEST_FAILED (-32000)");
+  expect(
+    mapAcpToAdapterError("cursor", "t" as never, "session/prompt", error, scrub).message,
+  ).toContain("Usage limit: [redacted]");
+});

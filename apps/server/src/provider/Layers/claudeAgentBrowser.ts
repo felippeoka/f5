@@ -1,12 +1,11 @@
-import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
+import { AGENT_AUTOMATION_SUPPORT } from "@t3tools/shared/agentAutomationSupport";
+import { createComputerSessionScope } from "../../computer/ComputerSessionScope";
 import type { ComputerAutomationBrokerRuntime } from "../../computer/ComputerAutomationBroker";
 import {
-  callComputerTool,
   COMPUTER_TOOL_DEFINITIONS,
+  COMPUTER_GUIDANCE,
   COMPUTER_TOOL_TIMEOUT_MS,
-  ComputerToolGeometry,
   classifyComputerTool,
-  subscribeComputerObservationInvalidation,
 } from "../../computer/computerMcpTools";
 /**
  * Claude-side wiring for F5's agent browser: the in-process preview MCP server,
@@ -71,8 +70,7 @@ export interface ClaudeAgentBrowserState {
 export const CLAUDE_COMPUTER_USE_CERTIFIED = false;
 export const CLAUDE_IN_CHROME_CERTIFIED = false;
 
-export const COMPUTER_USE_UNAVAILABLE_DETAIL =
-  "Computer use is not available in F5 yet: Claude's app-access consent can't be answered safely outside its terminal app.";
+export const COMPUTER_USE_UNAVAILABLE_DETAIL = AGENT_AUTOMATION_SUPPORT.claudeAgent.builtin!;
 export const CLAUDE_IN_CHROME_UNAVAILABLE_DETAIL =
   "Claude in Chrome is not available in F5 yet: its Chrome native-messaging setup hasn't been verified.";
 
@@ -171,32 +169,22 @@ export function makeClaudeComputerMcpServer(input: {
   existingServerNames: ReadonlySet<string>;
 }): ClaudePreviewServer {
   const serverName = chooseServerName("f5_computer", input.existingServerNames);
-  const sessionGeneration = `claude:${randomUUID()}`;
-  const releaseProvenance = automationEventSanitizer.retain(input.threadId);
-  input.broker.bindSession(input.threadId, sessionGeneration, "claude");
-  automationEventSanitizer.register(input.threadId, {
+  const scope = createComputerSessionScope({
+    broker: input.broker,
+    threadId: input.threadId,
     serverName,
-    verified: true,
-    kind: "f5-computer",
+    provider: "claude",
   });
-  let geometry = new ComputerToolGeometry();
   let connectionId = randomUUID();
-  const unsubscribe = subscribeComputerObservationInvalidation(input.broker, input.threadId, () =>
-    geometry.clear(),
-  );
   return {
     serverName,
-    dispose: () => {
-      unsubscribe();
-      geometry.clear();
-      input.broker.releaseSession(input.threadId, sessionGeneration);
-      releaseProvenance();
-    },
-    endTurn: (turnId) => input.broker.endTurn(input.threadId, turnId, sessionGeneration),
+    dispose: scope.dispose,
+    endTurn: scope.endTurn,
     config: (() => {
       const config = createSdkMcpServer({
         name: serverName,
         version: "2",
+        instructions: COMPUTER_GUIDANCE,
         timeout: COMPUTER_TOOL_TIMEOUT_MS,
         tools: COMPUTER_TOOL_DEFINITIONS.map((definition) =>
           tool(
@@ -204,21 +192,15 @@ export function makeClaudeComputerMcpServer(input: {
             definition.description,
             definition.shape,
             async (args, extra) => {
-              const result = await callComputerTool(
-                {
-                  broker: input.broker,
-                  threadId: input.threadId,
-                  sessionGeneration,
-                  geometry,
-                  ...(extra !== null &&
+              const result = await scope.call(
+                definition.name,
+                args,
+                extra !== null &&
                   typeof extra === "object" &&
                   "requestId" in extra &&
                   (typeof extra.requestId === "string" || typeof extra.requestId === "number")
-                    ? { invocationId: `${connectionId}:${JSON.stringify(extra.requestId)}` }
-                    : {}),
-                },
-                definition.name,
-                args,
+                  ? `${connectionId}:${JSON.stringify(extra.requestId)}`
+                  : undefined,
               );
               return {
                 content: result.content.map((block) => ({ ...block })),
@@ -228,7 +210,10 @@ export function makeClaudeComputerMcpServer(input: {
                 ...(result.isError ? { isError: true } : {}),
               };
             },
-            { annotations: definition.annotations, alwaysLoad: definition.alwaysLoad },
+            {
+              annotations: { ...definition.annotations, title: definition.title },
+              alwaysLoad: definition.alwaysLoad,
+            },
           ),
         ),
       });
@@ -236,7 +221,7 @@ export function makeClaudeComputerMcpServer(input: {
         const initialized = config.instance.server.oninitialized;
         config.instance.server.oninitialized = () => {
           initialized?.();
-          geometry = new ComputerToolGeometry();
+          scope.resetConnection();
           connectionId = randomUUID();
         };
       }

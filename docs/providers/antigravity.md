@@ -49,3 +49,5 @@ so F5 scans them on each status check.
 The browser helper alone sets `ELECTRON_RUN_AS_NODE`. Agent tool commands retain Python
 and Google Cloud tool configuration; Antigravity-specific authentication overrides are
 removed, and the runtime explicitly uses the profile's personal OAuth account.
+
+F5 preview tools remain gated pending preview startup verification and negotiated HTTP MCP support; F5 computer tools remain unavailable pending Antigravity live privacy verification.

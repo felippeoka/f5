@@ -147,6 +147,12 @@ export class AutomationEventSanitizer {
       provenance,
     ]);
   }
+  registerItem(threadId: string, itemId: string, serverName: string): void {
+    const provenance = this.servers
+      .get(threadId)
+      ?.find((entry) => entry.serverName === serverName && entry.verified);
+    if (provenance) this.remember(threadId, itemId, provenance);
+  }
   clear(threadId: string): void {
     if (this.retainers.has(threadId)) {
       this.pendingClear.add(threadId);
@@ -177,7 +183,7 @@ export class AutomationEventSanitizer {
             ? record.name
             : "";
       const server = record.server ?? record.serverName;
-      const id = record.tool_use_id ?? record.itemId ?? record.id;
+      const id = record.tool_use_id ?? record.toolCallId ?? record.itemId ?? record.id;
       const found =
         servers.find(
           (entry) => isComputerAutomationTool(name, entry) || entry.serverName === server,
@@ -193,6 +199,9 @@ export class AutomationEventSanitizer {
         "message",
         "item",
         "tool",
+        "params",
+        "update",
+        "toolCall",
       ]) {
         const nested = lookup(record[key], depth + 1);
         if (nested) return nested;
@@ -211,7 +220,7 @@ export class AutomationEventSanitizer {
         typeof name === "string"
           ? servers.find((entry) => isComputerAutomationTool(name, entry))
           : undefined;
-      const id = record.itemId ?? record.id;
+      const id = record.toolCallId ?? record.itemId ?? record.id;
       if (match && typeof id === "string") this.remember(threadId, id, match);
       for (const key of [
         "message",
@@ -222,6 +231,9 @@ export class AutomationEventSanitizer {
         "raw",
         "item",
         "tool",
+        "params",
+        "update",
+        "toolCall",
       ])
         registerCalls(record[key], depth + 1);
     };
@@ -235,6 +247,7 @@ export class AutomationEventSanitizer {
       "itemId",
       "id",
       "tool_use_id",
+      "toolCallId",
       "createdAt",
       "method",
       "kind",
@@ -253,7 +266,7 @@ export class AutomationEventSanitizer {
           : typeof record.name === "string"
             ? record.name
             : "";
-      const itemId = record.tool_use_id ?? record.itemId ?? record.id;
+      const itemId = record.tool_use_id ?? record.toolCallId ?? record.itemId ?? record.id;
       const payload = record.payload as Record<string, unknown> | undefined;
       const assistantEnvelope =
         (record.type === "content.delta" &&
@@ -295,6 +308,7 @@ export class AutomationEventSanitizer {
       const result: Record<string, unknown> = {};
       for (const [key, entry] of Object.entries(record)) {
         if (!provenance) result[key] = visit(entry, depth + 1);
+        else if (key === "computerTool" && entry === true) result[key] = true;
         else if (
           (envelopeStrings.has(key) || SAFE_STRING_FIELDS.has(key)) &&
           typeof entry === "string"
@@ -307,7 +321,17 @@ export class AutomationEventSanitizer {
         )
           result[key] = entry;
         else if (
-          ["payload", "event", "raw", "content_block", "data", "item"].includes(key) &&
+          [
+            "payload",
+            "event",
+            "raw",
+            "content_block",
+            "data",
+            "item",
+            "params",
+            "update",
+            "toolCall",
+          ].includes(key) &&
           entry !== null &&
           typeof entry === "object"
         )

@@ -33,7 +33,13 @@ export const fixtureScreenshot = {
   hiddenContent: true,
 };
 /** Protocol fixture only: never injects OS input and never approves production consent. */
-export async function computerHostFixture() {
+export async function computerHostFixture(
+  options: { modern?: boolean; consentDelayMs?: number } = {},
+) {
+  const consentTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let interactionMode = "default";
+  let computerUse = true;
+  let turnId = "test-turn";
   const seen: ComputerAutomationRequest[] = [];
   let consentCount = 0;
   const ipc = Object.assign(new EventEmitter(), {
@@ -47,22 +53,40 @@ export async function computerHostFixture() {
             type: "status",
             status: { available: true, displays: [fixtureDisplay] },
           });
+        if (message.type === "hello" && options.modern)
+          ipc.emit("message", {
+            type: "hostCapabilities",
+            capabilities: ["computer-agent-identity-v1", "computer-activity-correlation-v1"],
+          });
+        if (message.type === "cancel") {
+          clearTimeout(consentTimers.get(message.requestId));
+          consentTimers.delete(message.requestId);
+        }
         if (message.type === "accessRequested") {
           consentCount++;
-          ipc.emit("message", {
-            type: "accessAnswer",
-            answer: {
-              requestId: message.request.requestId,
-              backendIncarnation: "test-incarnation",
-              decisions: message.request.apps.map((app) => ({
-                appId: app.appId,
-                allow: true,
-                allowTyping: false,
-                remember: false,
-              })),
-              allowSessionActions: true,
-            },
-          });
+          const answer = () => {
+            consentTimers.delete(message.request.requestId);
+            ipc.emit("message", {
+              type: "accessAnswer",
+              answer: {
+                requestId: message.request.requestId,
+                backendIncarnation: "test-incarnation",
+                decisions: message.request.apps.map((app) => ({
+                  appId: app.appId,
+                  allow: true,
+                  allowTyping: false,
+                  remember: false,
+                })),
+                allowSessionActions: true,
+              },
+            });
+          };
+          if (options.consentDelayMs)
+            consentTimers.set(
+              message.request.requestId,
+              setTimeout(answer, options.consentDelayMs),
+            );
+          else answer();
         }
         if (message.type === "leaseAcquire")
           ipc.emit("message", {
@@ -101,12 +125,12 @@ export async function computerHostFixture() {
       sessionGeneration,
       provider,
       projectId: "test-project",
-      turnId: "test-turn",
+      turnId,
       threadTitle: "Transport fixture",
       runtimeMode: "approval-required",
-      interactionMode: "default",
+      interactionMode,
       policy: {
-        computerUse: true,
+        computerUse,
         claudeInChrome: false,
         previewAutomation: true,
         externalHosts: [],
@@ -116,5 +140,18 @@ export async function computerHostFixture() {
   });
   await broker.initialize();
   await Promise.resolve();
-  return { broker, seen, consentCount: () => consentCount };
+  return {
+    broker,
+    seen,
+    consentCount: () => consentCount,
+    setTurn: (value: string) => {
+      turnId = value;
+    },
+    setInteractionMode: (value: string) => {
+      interactionMode = value;
+    },
+    setComputerUse: (value: boolean) => {
+      computerUse = value;
+    },
+  };
 }

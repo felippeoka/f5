@@ -708,6 +708,8 @@ export class ComputerController {
         }
         this.options.activity(request.authorization.profileId, {
           threadId: request.authorization.threadId,
+          requestId: request.requestId,
+          sessionGeneration: request.authorization.sessionGeneration,
           backend: "native",
           op: request.op,
           status: "started",
@@ -783,6 +785,8 @@ export class ComputerController {
         }
         this.options.activity(request.authorization.profileId, {
           threadId: request.authorization.threadId,
+          requestId: request.requestId,
+          sessionGeneration: request.authorization.sessionGeneration,
           backend: "native",
           op: request.op,
           status: "completed",
@@ -808,6 +812,8 @@ export class ComputerController {
       if (mutation && !job.cancelled) {
         this.options.activity(request.authorization.profileId, {
           threadId: request.authorization.threadId,
+          requestId: request.requestId,
+          sessionGeneration: request.authorization.sessionGeneration,
           backend: "native",
           op: request.op,
           status: "failed",
@@ -844,6 +850,8 @@ export class ComputerController {
       if (isComputerMutation(job.request.op))
         this.options.activity(job.request.authorization.profileId, {
           threadId: job.request.authorization.threadId,
+          requestId: job.request.requestId,
+          sessionGeneration: job.request.authorization.sessionGeneration,
           backend: "native",
           op: job.request.op,
           status: "interrupted",

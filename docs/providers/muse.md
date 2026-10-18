@@ -72,3 +72,5 @@ the installed SDK against it and the fixture under `scripts/fixtures/muse-protoc
 `MUSE_LIVE=1 bun run protocol:audit:muse` also runs permission conformance against the real
 binary. A host advertising a different fingerprint still works, with an "untested Muse Code
 protocol" warning.
+
+F5 preview and computer catalogs are unavailable: the pinned Muse SDK session API does not accept MCP configuration.

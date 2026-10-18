@@ -1,8 +1,12 @@
+import { runtimeEventToActivities } from "../orchestration/Layers/ProviderRuntimeIngestion";
 import { EventId, RuntimeItemId, ThreadId, type ProviderRuntimeEvent } from "@t3tools/contracts";
 import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAutomationRuntimeEventPreparer } from "./prepareAutomationRuntimeEvent";
+import {
+  carryPreparedComputerEvidence,
+  createAutomationRuntimeEventPreparer,
+} from "./prepareAutomationRuntimeEvent";
 import { compactThreadActivityPayload } from "@t3tools/shared/orchestrationActivityPayload";
 
 const png =
@@ -63,7 +67,9 @@ describe("computer event queue admission", () => {
         kind: "tool.completed",
         payload: logged.payload,
       });
+      expect(queued.payload.computerTool).toBe(true);
       expect(activity).toMatchObject({
+        computerTool: true,
         mcpServerName: "f5_computer",
         mcpToolName: "computer_screenshot",
       });
@@ -72,6 +78,19 @@ describe("computer event queue admission", () => {
       expect(JSON.stringify(activity)).not.toContain("PRIVATE_");
       automationEventSanitizer.clear(threadId);
       expect(automationEventSanitizer.sanitize(threadId, queued)).toEqual(queued);
+      const canonical = { ...queued };
+      carryPreparedComputerEvidence(queued, canonical);
+      expect(
+        runtimeEventToActivities(canonical).some(
+          (entry) => (entry.payload as Record<string, unknown>).computerTool === true,
+        ),
+      ).toBe(true);
+
+      expect(
+        runtimeEventToActivities(queued).some(
+          (entry) => (entry.payload as Record<string, unknown>).computerTool === true,
+        ),
+      ).toBe(true);
       expect(JSON.stringify(event)).toContain(png); // Model-facing input was not changed.
     },
   );
@@ -138,4 +157,35 @@ describe("computer event queue admission", () => {
     );
     expect(store).not.toHaveBeenCalled();
   });
+});
+
+it("ignores a third-party computer tool name and a provider-supplied computer marker", async () => {
+  const event: ProviderRuntimeEvent = {
+    type: "item.completed",
+    eventId: EventId.makeUnsafe("lookalike"),
+    threadId,
+    itemId: RuntimeItemId.makeUnsafe("lookalike"),
+    provider: "codex",
+    createdAt: new Date().toISOString(),
+    payload: {
+      itemType: "mcp_tool_call",
+      computerTool: true,
+      data: { toolName: "mcp__third_party__computer_click", status: "completed" },
+    },
+  };
+  const queued = await Effect.runPromise(
+    createAutomationRuntimeEventPreparer(() => Effect.succeed(null))(event),
+  );
+  if (queued.type !== "item.completed") throw new Error("Unexpected event");
+  expect(queued.payload.computerTool).toBeUndefined();
+  expect(
+    runtimeEventToActivities(event).every(
+      (entry) => !(entry.payload as Record<string, unknown>)?.computerTool,
+    ),
+  ).toBe(true);
+  expect(
+    runtimeEventToActivities(queued).every(
+      (entry) => !(entry.payload as Record<string, unknown>)?.computerTool,
+    ),
+  ).toBe(true);
 });

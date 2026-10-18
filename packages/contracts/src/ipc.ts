@@ -683,6 +683,7 @@ export interface NativeApi {
       onSettled: (listener: (event: typeof ComputerAccessSettled.Type) => void) => () => void;
       onGrantsChanged: (listener: (event: typeof ComputerGrantsChanged.Type) => void) => () => void;
     };
+    onObservationsInvalidated: (listener: (event: { threadId: string }) => void) => () => void;
     onActivity: (listener: (event: ComputerActivity) => void) => () => void;
     onLeaseChanged: (listener: (event: typeof AgentComputerUseChanged.Type) => void) => () => void;
   };

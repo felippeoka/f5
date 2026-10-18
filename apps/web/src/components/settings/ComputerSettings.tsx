@@ -1,3 +1,16 @@
+import type { Thread } from "../../types";
+import { useStore } from "../../store";
+import { readRuntimeConfiguredPayload } from "@t3tools/shared/orchestrationActivityPayload";
+import type { RuntimeAgentBrowserCapabilities } from "@t3tools/contracts";
+import { defaultInstanceIdForDriver, ProviderDriverKind } from "@t3tools/contracts";
+import {
+  AGENT_AUTOMATION_SUPPORT,
+  COMPUTER_AGENT_DISPLAY,
+  COMPUTER_UNAVAILABLE_LABEL,
+  computerAgentProviderFor,
+} from "@t3tools/shared/agentAutomationSupport";
+import type { ProviderKind } from "@t3tools/contracts";
+import { COMPUTER_STOP_SHORTCUT_LABEL } from "../computerControls";
 import type {
   ComputerAutomationBackendStatus,
   ComputerBackgroundUnavailableReason,
@@ -37,10 +50,87 @@ export function computerExecutionModeDescription(
     return `${base} Background is selected but unavailable: ${unavailable} Agents get an error until you switch to foreground.`;
   return unavailable && mode === "foreground" ? `${base} ${unavailable}` : base;
 }
+const configuredActivityCache = new WeakMap<
+  Thread["activities"],
+  { at: string; value: RuntimeAgentBrowserCapabilities } | null
+>();
+function latestConfigured(activities: Thread["activities"]) {
+  if (configuredActivityCache.has(activities)) return configuredActivityCache.get(activities)!;
+  for (let index = activities.length - 1; index >= 0; --index) {
+    const activity = activities[index]!;
+    if (activity.kind !== "runtime.configured") continue;
+    const value = readRuntimeConfiguredPayload(activity.payload)?.agentBrowser;
+    if (!value) continue;
+    const entry = { at: activity.createdAt, value };
+    configuredActivityCache.set(activities, entry);
+    return entry;
+  }
+  configuredActivityCache.set(activities, null);
+  return null;
+}
+const providerLabel = (kind: ProviderKind) => {
+  const provider = computerAgentProviderFor(kind);
+  return provider
+    ? COMPUTER_AGENT_DISPLAY[provider].label
+    : kind === "opencode"
+      ? "OpenCode"
+      : "Muse";
+};
 export function ComputerSettings() {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const { bridge, status, setStatus, error, setError } = useComputerStatus();
+  const enabledProviders = [
+    ...new Set([
+      ...Object.entries(settings.providers).flatMap(([kind, config]) =>
+        (settings.providerInstances?.[
+          defaultInstanceIdForDriver(ProviderDriverKind.makeUnsafe(kind))
+        ]?.enabled ?? config.enabled)
+          ? [kind as ProviderKind]
+          : [],
+      ),
+      ...Object.values(settings.providerInstances ?? {}).flatMap((instance) =>
+        instance.enabled && instance.driver in AGENT_AUTOMATION_SUPPORT
+          ? [instance.driver as ProviderKind]
+          : [],
+      ),
+    ]),
+  ];
+  // Only a changed configuration summary re-renders settings during streaming activity.
+  const readinessJson = useStore((store) => {
+    const latest: Record<string, { at: string; value: RuntimeAgentBrowserCapabilities }> = {};
+    for (const thread of store.threads) {
+      const provider = thread.session?.provider;
+      if (!provider || thread.session?.status === "closed") continue;
+      const entry = latestConfigured(thread.activities);
+      if (entry && (!latest[provider] || entry.at > latest[provider].at)) latest[provider] = entry;
+    }
+    return JSON.stringify(
+      Object.fromEntries(
+        Object.entries(latest)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([kind, entry]) => [kind, entry.value]),
+      ),
+    );
+  });
+  const readiness = JSON.parse(readinessJson) as Record<
+    string,
+    RuntimeAgentBrowserCapabilities | undefined
+  >;
+  const liveEntries = enabledProviders.flatMap((kind) => {
+    const provider = computerAgentProviderFor(kind);
+    const label = provider
+      ? COMPUTER_AGENT_DISPLAY[provider].label
+      : kind === "opencode"
+        ? "OpenCode"
+        : "Muse";
+    const entry = readiness[kind];
+    return entry
+      ? [
+          `${label}: ${entry.computerUse?.detail ?? entry.computerUse?.state ?? AGENT_AUTOMATION_SUPPORT[kind].computer.state}`,
+        ]
+      : [];
+  });
   const backgroundUnavailable = backgroundUnavailableReason(status, !!bridge);
   const run = (action: () => Promise<unknown>) => {
     setError("");
@@ -50,7 +140,7 @@ export function ComputerSettings() {
     <>
       <SettingsRow
         title="Computer use (preview)"
-        description="Opt-in macOS preview: let Claude and Codex see and control apps you approve. Signed-build safety certification is pending. Press ⌃⌘Esc to stop; your input pauses control. Project approvals expire when F5 closes. Windows remains unavailable."
+        description={`Opt-in macOS preview: let supported agents (see Agent support) see and control apps you approve. Signed-build safety certification is pending. Press ${COMPUTER_STOP_SHORTCUT_LABEL} to stop; your input pauses control. Project approvals expire when F5 closes. Windows remains unavailable.`}
         control={
           <Switch
             aria-label="Let agents control this computer"
@@ -69,12 +159,12 @@ export function ComputerSettings() {
               ? "Checking…"
               : status.available
                 ? "F5 computer control preview ready"
-                : `${status.reason}${status.detail ? `: ${status.detail}` : ""}`
+                : `${COMPUTER_UNAVAILABLE_LABEL[status.reason]}${status.detail ? `: ${status.detail}` : ""}`
         }
         control={
           status &&
           !status.available &&
-          ["helper-crashed", "monitor-unhealthy", "helper-missing"].includes(status.reason) ? (
+          ["helper-crashed", "monitor-unhealthy"].includes(status.reason) ? (
             <Button
               size="xs"
               variant="outline"
@@ -179,6 +269,115 @@ export function ComputerSettings() {
           </Select>
         }
       />
+      <SettingsRow
+        control={null}
+        title="Policy"
+        description={
+          settings.enableAgentComputerUse
+            ? "Computer use is on; each app still needs approval."
+            : "Computer use is off."
+        }
+      />
+      <SettingsRow
+        control={null}
+        title="Requested and effective mode"
+        description={`Requested: ${settings.computerUseExecutionMode}. Effective: ${!settings.enableAgentComputerUse ? "off" : !status?.available ? "unavailable" : settings.computerUseExecutionMode === "background" && backgroundUnavailable ? "unavailable" : settings.computerUseExecutionMode}.`}
+      />
+      <SettingsRow
+        control={null}
+        title="Harness compatibility"
+        description={
+          liveEntries.join(" · ") ||
+          "Start a supported agent session to check its live compatibility."
+        }
+      />
+      <SettingsRow
+        control={null}
+        title="Catalog installation"
+        description={
+          enabledProviders
+            .map((kind) => {
+              const entry = readiness[kind];
+              return `${providerLabel(kind)}: ${!entry ? "no active session report" : entry.computer?.installed ? "computer catalog installed" : entry.preview?.installed ? "preview catalog installed; computer catalog unavailable" : "no F5 catalog installed"}`;
+            })
+            .join(" · ") || "No enabled agents"
+        }
+      />
+      <SettingsRow
+        control={null}
+        title="Desktop and helper"
+        description={
+          !status
+            ? "Checking…"
+            : status.available
+              ? "Connected and ready"
+              : COMPUTER_UNAVAILABLE_LABEL[status.reason]
+        }
+      />
+      <SettingsRow
+        control={null}
+        title="Permissions"
+        description={
+          status?.available
+            ? "Granted"
+            : status && !status.available && status.reason === "missing-permissions"
+              ? status.missing?.join(", ")
+              : "Unavailable until the host is ready"
+        }
+      />
+      <SettingsRow
+        control={null}
+        title="Native backend fallback"
+        description={
+          enabledProviders
+            .map((kind) => {
+              const selection = readiness[kind]?.computerUse;
+              return `${providerLabel(kind)}: ${!selection ? "no active session report" : selection.backend === "native" ? `F5 native (${selection.detail ?? selection.state})` : (selection.detail ?? selection.state)}`;
+            })
+            .join(" · ") || "No enabled agents"
+        }
+      />
+      <div role="group" aria-label="Agent support">
+        <h3 className="font-medium text-sm">Agent support</h3>
+        {enabledProviders.map((kind) => {
+          const entry = AGENT_AUTOMATION_SUPPORT[kind];
+          const provider = computerAgentProviderFor(kind);
+          const label = provider
+            ? COMPUTER_AGENT_DISPLAY[provider].label
+            : kind === "opencode"
+              ? "OpenCode"
+              : "Muse";
+          return (
+            <div key={kind}>
+              <SettingsRow
+                control={null}
+                title={`${label}: Preview ${entry.preview.state} · Computer ${entry.computer.state}`}
+                description={[
+                  entry.preview.reason,
+                  entry.computer.reason,
+                  entry.builtin ? `Built-in awaiting certification: ${entry.builtin}` : undefined,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              />
+              {kind === "claudeAgent" ? (
+                <SettingsRow
+                  control={null}
+                  title="Claude in Chrome: awaiting certification"
+                  description={
+                    readiness.claudeAgent?.chrome?.detail ??
+                    "Off by default. Chrome native-messaging setup is awaiting certification for this build and architecture."
+                  }
+                />
+              ) : null}
+            </div>
+          );
+        })}
+        <p className="text-muted-foreground text-xs">
+          Harness compatibility and catalog installation are reported in each session's tool
+          configuration. Catalogs enforce live policy on every call.
+        </p>
+      </div>
       {error ? <p role="alert">{error}</p> : null}
     </>
   );

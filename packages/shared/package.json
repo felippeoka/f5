@@ -331,6 +331,14 @@
     "./workflowSummary": {
       "types": "./src/workflowSummary.ts",
       "import": "./src/workflowSummary.ts"
+    },
+    "./agentAutomationSupport": {
+      "types": "./src/agentAutomationSupport.ts",
+      "import": "./src/agentAutomationSupport.ts"
+    },
+    "./computerAction": {
+      "types": "./src/computerAction.ts",
+      "import": "./src/computerAction.ts"
     }
   },
   "scripts": {

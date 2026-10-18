@@ -1,3 +1,5 @@
+import { isPreparedComputerEvent } from "../../provider/prepareAutomationRuntimeEvent";
+import { computerToolHeading } from "@t3tools/shared/computerAction";
 import {
   COALESCE_STREAMING_DELTAS_DRIVERS,
   makeStreamingAssistantDeltas,
@@ -1392,11 +1394,20 @@ function buildCompactToolLifecyclePayload(
     { type: "item.started" | "item.updated" | "item.completed" }
   >,
   toolImages?: ToolImageRefs,
+  computerEvidence = false,
 ) {
   const fileChangeId = compactFileChangeIdForLifecycleEvent(event);
   const normalizedTitle = commandExecutionLifecycleTitle(event);
+  const computerTool =
+    (computerEvidence ||
+      automationEventSanitizer.isComputerItem(event.threadId, event.itemId ?? event.eventId)) &&
+    computerToolHeading(
+      readToolActivityPayload(event.payload)?.mcpToolName,
+      event.payload.status,
+    ) !== undefined;
   return {
     ...toolImages,
+    ...(computerTool ? { computerTool: true } : {}),
     itemType: event.payload.itemType,
     ...(event.itemId ? { providerItemId: event.itemId } : {}),
     ...(event.payload.status ? { status: event.payload.status } : {}),
@@ -1421,6 +1432,7 @@ interface ToolImageRefs {
 export function runtimeEventToActivities(
   event: ProviderRuntimeEvent,
   toolImages?: ToolImageRefs,
+  computerEvidence = isPreparedComputerEvent(event),
 ): ReadonlyArray<OrchestrationThreadActivity> {
   const maybeSequence = (() => {
     const eventWithSequence = event as ProviderRuntimeEvent & { sessionSequence?: number };
@@ -2229,7 +2241,7 @@ export function runtimeEventToActivities(
           summary: normalizedTitle ?? "Tool updated",
           payload: compactThreadActivityPayload({
             kind: "tool.updated",
-            payload: buildCompactToolLifecyclePayload(event, toolImages),
+            payload: buildCompactToolLifecyclePayload(event, toolImages, computerEvidence),
           }),
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -2257,7 +2269,7 @@ export function runtimeEventToActivities(
           summary: normalizedTitle ?? "Tool",
           payload: compactThreadActivityPayload({
             kind: "tool.completed",
-            payload: buildCompactToolLifecyclePayload(event, toolImages),
+            payload: buildCompactToolLifecyclePayload(event, toolImages, computerEvidence),
           }),
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -2282,7 +2294,7 @@ export function runtimeEventToActivities(
           summary: `${normalizedTitle ?? "Tool"} started`,
           payload: compactThreadActivityPayload({
             kind: "tool.started",
-            payload: buildCompactToolLifecyclePayload(event, toolImages),
+            payload: buildCompactToolLifecyclePayload(event, toolImages, computerEvidence),
           }),
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -5475,7 +5487,11 @@ const make = Effect.gen(function* () {
           computerAutomationBroker.value.endTurn(thread.id, event.turnId);
       }
       const lifecycle = yield* extractLifecycleImages(thread.id, event, thread.interactionMode);
-      const activities = runtimeEventToActivities(lifecycle.event, lifecycle.images);
+      const activities = runtimeEventToActivities(
+        lifecycle.event,
+        lifecycle.images,
+        isPreparedComputerEvent(event),
+      );
       yield* Effect.forEach(activities, (activity) =>
         orchestrationEngine.dispatch({
           type: "thread.activity.append",

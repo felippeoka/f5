@@ -1,6 +1,6 @@
 # Agent browser and computer use
 
-How agents (Claude and Codex) see and drive web pages and, optionally, this computer, and
+How supported agents see and drive web pages and, optionally, this computer, and
 the safety rules each path follows. Settings live in **Settings → Browser & Computer** and
 per project in the Browser & Computer category of project settings. Every flag below is ANDed with
 `enableAgentBrowserAccess`. A checked-in `f5.json` can never set `previewExternalHosts`,
@@ -47,12 +47,78 @@ Preview tools are installed in every interactive desktop session. Each call reso
 live policy (`resolveAgentBrowserPolicy`), so toggling a setting applies on the next tool
 call without restarting the session. Policy lookups fail closed.
 
-| Capability                | Claude                                                 | Codex                                                  |
-| ------------------------- | ------------------------------------------------------ | ------------------------------------------------------ |
-| F5 preview (`preview_*`)  | In-process SDK MCP server `f5_preview`                 | Loopback HTTP MCP `__f5_preview`                       |
-| External sites in preview | Allowlist (`previewExternalHosts`)                     | Same allowlist                                         |
-| Chrome integration        | Awaiting native-host certification (`--no-chrome`)     | Awaiting plugin certification                          |
-| Computer use              | F5 native catalog when available; built-in gate closed | F5 native catalog when available; built-in gate closed |
+| Capability                | Claude                                             | Codex                            | ACP (Cursor, Grok, Antigravity)                                         |
+| ------------------------- | -------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------------- |
+| F5 preview (`preview_*`)  | In-process SDK MCP `f5_preview`                    | Loopback HTTP MCP `__f5_preview` | Awaiting per-harness preview startup verification                       |
+| External sites in preview | Allowlist (`previewExternalHosts`)                 | Same allowlist                   | Same live allowlist                                                     |
+| Chrome integration        | Awaiting native-host certification (`--no-chrome`) | Awaiting plugin certification    | Unsupported                                                             |
+| Computer use              | F5 native; built-in gate closed                    | F5 native; built-in gate closed  | Awaiting per-harness live verification; no executable catalog installed |
+
+### ACP harnesses
+
+The read-only `bun apps/server/scripts/acp-capability-probe.ts` sends only `initialize`;
+it never authenticates or creates a session. Use `--state-dir <profile-state-dir>` to
+probe an existing managed Antigravity installation. The [2026-10-18 probe report](computer-certification/2026-10-18-acp-capability-probe.json)
+records Cursor `2026.07.09-a3815c0` advertising HTTP and SSE. Grok was not installed;
+Antigravity had no selected managed installation. HTTP is selected for Cursor. There
+is no evidence requiring the conditional stdio shim; non-HTTP harnesses receive no
+F5 catalog until that transport is implemented and checked.
+
+ACP preview installation is closed by the frozen `ACP_PREVIEW_CATALOG_VERIFIED` flags (all false). Once a harness passes a preview-only startup/inventory run, ordinary desktop sessions can install tools lazily after negotiation, with
+an unguessable server name and one credential per runtime. New, load, resume and
+fallback payloads use the same memoized list. Read-only workflows, synthetic turns
+and external runtimes do not install these catalogs. Browser access is checked on
+every call, so enabling it requires no restart. Computer policy and execution-mode
+changes also never trigger an ACP conversation restart.
+
+The [control run](computer-certification/2026-10-18-acp-preview-review-control.json) and
+[preview-only run](computer-certification/2026-10-18-acp-preview-review-preview.json)
+both timed out during `authenticate`, before `session/new` sent any MCP configuration.
+This identifies a startup blocker independent of MCP installation, but proves no live
+preview compatibility. The opt-in `F5_ACP_PREVIEW_LIVE=cursor` suite in
+`integration/acpPreviewMcp.live.test.ts` compares both paths and lists the model's preview
+inventory only after startup succeeds. Tests inject verification overrides; production
+verification records are frozen and cannot be changed by the live suite.
+
+Every ACP log boundary structurally redacts nested MCP header/env values, including
+serialized frames. Unparseable frames become a fixed marker. Session-owned exact
+credential scrubbers also remove echoed credentials from diagnostics and remain
+alive for late producer callbacks after token revocation. Credentials are revoked
+immediately on disposal; retaining a scrubber confers no execution authority.
+
+Computer catalogs remain closed by `ACP_COMPUTER_CATALOG_VERIFIED` (all false).
+Installing one additionally requires a desktop that negotiated
+`computer-agent-identity-v1`. F5 never impersonates Claude or Codex for an old desktop.
+`computer-activity-correlation-v1` is independent of identity and background execution;
+old desktops retain summaries but their uncorrelated native thumbnails are suppressed.
+
+When the computer integration is exercised in tests, exact identity can only be
+established by captured, verified harness metadata. No such parser has been certified.
+Otherwise classification fails closed: tool inputs must be provably native to remain
+visible. Unknown IDs, update-only events, permissions and replayed tool calls are
+redacted. A persistent boolean records computer-capable session lineage; no inventory
+of screen content or typed strings is persisted. Raw/decoded logs and adapter mapping
+use the same classifier. Computer-session prompts are hidden from native logs too.
+
+Unknown permissions always ask with hidden inputs, including in full-access mode.
+They never inherit an F5 exemption from their title, kind or a look-alike server name.
+A future exact-identity parser may allow only the harness's allow-once option; F5's
+broker still owns live policy, session consent, per-app grants and plan-mode vetoes.
+Harness plan-mode limitations must be reported, never worked around by relaxing mode.
+
+Adapters retain provenance synchronously at admission, prepare/sanitize events before
+enqueueing them, then release it. Only the existing recognized image-result shapes can
+be persisted; other image/content shapes are dropped. Authenticated `computer.activity`
+events supply detailed activity and thumbnails independently of provider tool output.
+Cleanup finalizers run after runtime shutdown, including failed authentication,
+startup interruption, failed session creation and failed configuration.
+
+`F5_ACP_COMPUTER_LIVE=cursor|grok|antigravity bun run --cwd apps/server test:file integration/acpComputerMcp.live.test.ts`
+is an explicit opt-in transport/privacy probe using simulated input and delayed fixture
+consent. The [Cursor startup attempt](computer-certification/2026-10-18-acp-cursor-live.json) timed out and is not eligible to open a gate. `F5_ACP_COMPUTER_REPORT` saves its bounded result. It does **not** constitute
+complete harness certification: held takeovers, harness-native plan-mode behavior and
+unrelated-session attribution also need live evidence. A separate PR per harness must
+attach complete passing conformance/privacy evidence before flipping its flag.
 
 ## F5 preview
 
@@ -137,8 +203,8 @@ mutation and observation queues, replay protection and capture-excluded overlays
 session chooses one backend. **Automatic** prefers a built-in only when its provider,
 platform and version have certified consent, per-call veto, stop, observation, F5
 isolation and profile isolation. **F5 only** forces the native implementation. This
-preference is user-level and cannot come from a checked-in project file. Settings and
-availability changes restart the provider session at the next turn. Session bindings record
+preference is user-level and cannot come from a checked-in project file. Claude/Codex backend selection changes can restart the provider session at the next turn;
+ACP policy changes apply live and never restart its conversation. Session bindings record
 the selection, installed-tool state and configuration fingerprint; replaced Codex
 processes cannot deliver lifecycle or tool events into their replacement session.
 
@@ -179,6 +245,49 @@ the availability probe can return true. That runtime wiring is still pending.
 | Stop under 100 ms                             | Required                   | Current provider action may finish |
 | Per-event hit testing and secure focus checks | Required                   | No F5 guarantee                    |
 | Persistence sanitization                      | Required                   | Required                           |
+
+### Observation, controls and history
+
+`computer_wait` replaces repeated screenshot polling. With no condition it settles
+for 2 seconds by default; with `app` and an exact `role` and/or `name`, it waits up to
+5 seconds for presence. `timeoutMs` is 100–10,000 ms. Presence attempts inspect at
+most 100 nodes and back off 250 ms, 500 ms, then 1 second. Partial trees can prove
+presence, never absence. One monotonic deadline covers resolution, IPC and sleep;
+pause, turn end, session replacement, policy and grant changes interrupt the wait.
+Only one wait runs per session. `screenshot: true` captures afterwards; a failed
+capture still returns the wait metadata. Status carries the full guidance; actions
+carry a short safety clause. The 17 descriptions total 4,368 characters (4,424 when
+serialized as a JSON array), below 6,000 and over 50% below the old repeated guidance.
+MCP initialization and Claude SDK registration additionally carry server instructions.
+The macOS 300 ms settling delay is unchanged; no new native timing certification is claimed.
+
+Captures are invalidated at mutation admission and on pause, grant/policy changes,
+session replacement and reconnect. The broker admits images only for the current
+request, generation and observation epoch. Late completions never restore an old
+thumbnail. Success without a capture and failed captures clear it as well.
+
+Pause all snapshots its targets and sets every one to paused. Stop independently
+attempts suspension and turn interruption for each target, retaining failures from
+both stages. Failed or unconfirmed targets remain **Stop unconfirmed** with an
+explicit Retry Stop; there is no automatic retry. Retained pause/recovery summaries
+carry `leaseHeld: false` only after authoritative host release. Check the app after
+`OutcomeUnknown`, then observe before another action. Resume requires the trusted
+local confirmation; remote clients explain where to resume. The stop shortcut is
+**⌃⌘Esc** for the Mac host, including when operated remotely.
+
+Pending computer consent participates in existing badge, sound, toast and system
+notification attention. The dialog identifies the project/thread, shows its actual
+deadline and counts other waiting requests. Sidebar and home status pills are unchanged.
+Only the WebSocket push carries `expiresAtMs`; the native consent request is unchanged.
+
+The live card's Actions popover keeps the last 30 tool outcomes per thread. The
+server tool layer alone publishes history via `source: "tool"`, so desktop and tool
+failure notifications cannot duplicate a row. Successful tool summaries do not touch
+the current capture. Access-request storage keeps at most 20 settled entries per
+thread and 200 globally; pending requests survive pruning. Both histories reset on
+connection replacement. Idle cards have no timer; completed activity and lease-release
+feedback schedule only the next expiry. Computer timeline headings require authenticated
+provenance, carried as `computerTool`; server names alone never create that heading.
 
 ### App consent and protection tiers
 
@@ -2156,3 +2265,22 @@ without opening a consent card. The user must explicitly allow the displayed sel
 Resume requires a trusted gesture in a local F5 window; remote clients can pause but
 cannot re-arm native or Chrome control. The server mirrors resume only after main's
 successful acknowledgement.
+
+## Claude in Chrome discovery follow-up (2026-10-18)
+
+The [native-host discovery attempt](computer-certification/2026-10-18-claude-chrome-native-host-discovery.json)
+identified SDK `0.3.295`, darwin arm64, and executable SHA-256
+`0116ee2e0a513900b633d9951367f18747686478e2b462805b8c31609f047f70`.
+The macOS sandbox rejected the isolated launch before any registration was observed.
+The operator's Chrome-family native-host snapshots were identical. No host names,
+allowed origins, target paths, candidate descriptor or certification are inferred.
+
+The server master switch is now enforced. Certified descriptors must pin SDK version,
+architecture and executable hash; reporting distinguishes not-certified, platform,
+executable drift and unverifiable executables. A test guards SDK-version drift for
+any future certified Claude descriptor. Production never loads a candidate descriptor.
+The candidate and real Chrome runner remain blocked on successful C1 discovery;
+the signed installed-build run and C5 gate flip have not occurred. Existing gates
+remain closed and Claude always keeps `--no-chrome` in these unavailable cases.
+
+Implementation checks and remaining prerequisites are recorded in the [follow-up verification record](computer-certification/2026-10-18-computer-followups-verification.md).

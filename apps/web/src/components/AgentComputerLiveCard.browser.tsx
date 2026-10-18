@@ -1,3 +1,4 @@
+import { ComputerUseBanner } from "./ComputerUseBanner";
 import "../index.css";
 import { ThreadId } from "@t3tools/contracts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -8,9 +9,19 @@ import { AgentComputerLiveCard } from "./AgentComputerLiveCard";
 import { ComputerAccessInbox } from "./ComputerAccessCard";
 
 // Component regression only: no desktop host, grants or OS input are executed.
-vi.mock("../nativeApi", () => ({ readNativeApi: () => undefined }));
+const nativeMock = vi.hoisted(() => ({
+  api: undefined as import("@t3tools/contracts").NativeApi | undefined,
+}));
+vi.mock("../nativeApi", () => ({ readNativeApi: () => nativeMock.api }));
+vi.mock("@tanstack/react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-router")>()),
+  useNavigate: () => async () => {},
+}));
 const threadId = ThreadId.makeUnsafe("computer-ui-fixture");
-beforeEach(() => useAgentComputerActivityStore.getState().resetConnection());
+beforeEach(() => {
+  nativeMock.api = undefined;
+  useAgentComputerActivityStore.getState().resetConnection();
+});
 afterEach(() => {
   vi.restoreAllMocks();
   delete window.desktopBridge;
@@ -98,7 +109,7 @@ it("retains idle controls while apps are granted and removes them after access i
   }
 });
 
-it("renders an earlier capture after no-image actions and clears it on revoke", async () => {
+it("clears an earlier capture after a no-image action", async () => {
   const store = useAgentComputerActivityStore.getState();
   store.setGrants(threadId, [{ appId: "fixture", tier: "full", allowTyping: false }]);
   store.record({
@@ -115,8 +126,10 @@ it("renders an earlier capture after no-image actions and clears it on revoke", 
     const image = page.getByAltText("Last captured computer action");
     await expect.element(image).toBeVisible();
     store.record({ threadId, op: "type", status: "completed", backend: "native" });
-    await expect.element(image).toBeVisible();
-    await expect.element(page.getByTitle("Last capture · Synthetic fixture")).toBeVisible();
+    await expect.element(image).not.toBeInTheDocument();
+    await expect
+      .element(page.getByTitle("Last capture · Synthetic fixture"))
+      .not.toBeInTheDocument();
     await expect.element(page.getByText("Typed", { exact: true })).toBeVisible();
     store.setGrants(threadId, []);
     await expect.element(image).not.toBeInTheDocument();
@@ -243,6 +256,119 @@ it("shows the tier badge and browser warning in the consent dialog", async () =>
       .element(dialog.getByText("Can act on sites you're signed in to", { exact: true }))
       .toBeVisible();
     await expect.element(dialog.getByText("Open the dashboard", { exact: true })).toBeVisible();
+  } finally {
+    await screen.unmount();
+  }
+});
+
+it("shows consent deadlines and the number waiting, and records tool actions only once", async () => {
+  const store = useAgentComputerActivityStore.getState();
+  window.desktopBridge = { computerAutomation: { answerAccess: vi.fn() } } as never;
+  store.request({ ...accessRequest("deadline", "Review"), expiresAtMs: Date.now() + 65_000 });
+  store.request(accessRequest("waiting", "Other"));
+  const screen = await render(<ComputerAccessInbox />);
+  try {
+    await expect.element(page.getByText(/Expires in 1:0[45]/)).toBeVisible();
+    await expect.element(page.getByText("1 more requests waiting")).toBeVisible();
+  } finally {
+    await screen.unmount();
+  }
+  store.settle({ requestId: "deadline", threadId, allowed: true });
+  store.settle({ requestId: "waiting", threadId, allowed: true });
+  store.record({ threadId, backend: "native", op: "type", status: "interrupted" });
+  store.record({
+    threadId,
+    source: "tool",
+    backend: "native",
+    op: "type",
+    status: "failed",
+    outcome: "OutcomeUnknown",
+  });
+  const card = await render(<AgentComputerLiveCard threadId={threadId} />);
+  try {
+    await page.getByRole("button", { name: "Actions (1)" }).click();
+    await expect.element(page.getByText("OutcomeUnknown · 0s ago")).toBeVisible();
+  } finally {
+    await card.unmount();
+  }
+});
+it("expires staggered activity and lease feedback without an interval", async () => {
+  const store = useAgentComputerActivityStore.getState();
+  const now = Date.now();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(now - 14_800);
+  store.record({ threadId, backend: "native", op: "wait", status: "completed" });
+  store.setLeases({ holders: [{ threadId, delivery: "foreground", state: "active" }] });
+  clock.mockReturnValue(now - 14_200);
+  store.setLeases({ holders: [] });
+  clock.mockRestore();
+  const interval = vi.spyOn(globalThis, "setInterval");
+  const screen = await render(<AgentComputerLiveCard threadId={threadId} />);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await expect.element(page.getByTestId("computer-live-card")).toBeVisible();
+    await expect.element(page.getByTestId("computer-live-card")).not.toBeInTheDocument();
+    expect(interval).not.toHaveBeenCalled();
+  } finally {
+    await screen.unmount();
+  }
+});
+
+it("Pause all always pauses its snapshot and a partial failure never resumes another target", async () => {
+  const store = useAgentComputerActivityStore.getState();
+  const other = ThreadId.makeUnsafe("other-computer");
+  const pause = vi.fn(async (id: string, paused: boolean) => {
+    if (id === other) throw new Error("fixture refusal");
+    store.setPaused(id, paused);
+  });
+  nativeMock.api = { preview: { automation: { setPaused: async () => {} } } } as never;
+  window.desktopBridge = { computerAutomation: { setPaused: pause } } as never;
+  store.setLeases({
+    holders: [
+      { threadId, delivery: "background", state: "active" },
+      { threadId: other, delivery: "background", state: "active" },
+    ],
+  });
+  const screen = await render(<ComputerUseBanner />);
+  try {
+    await page.getByRole("button", { name: "Pause all" }).click();
+    await vi.waitFor(() => expect(pause).toHaveBeenCalledTimes(2));
+    expect(pause.mock.calls).toEqual([
+      [threadId, true],
+      [other, true],
+    ]);
+    expect(useAgentComputerActivityStore.getState().paused[threadId]).toBe(true);
+    await expect.element(page.getByRole("button", { name: "Stop all" })).toBeVisible();
+  } finally {
+    await screen.unmount();
+  }
+});
+it("keeps a failed suspension unconfirmed after successful interruption and exposes an explicit retry", async () => {
+  const store = useAgentComputerActivityStore.getState();
+  const dispatch = vi.fn(async () => {});
+  nativeMock.api = {
+    orchestration: { dispatchCommand: dispatch },
+    preview: { automation: { setPaused: async () => {} } },
+  } as never;
+  window.desktopBridge = {
+    computerAutomation: {
+      setPaused: vi.fn(async () => {
+        throw new Error("fixture refusal");
+      }),
+    },
+  } as never;
+  store.setLeases({ holders: [{ threadId, delivery: "foreground", state: "active" }] });
+  const screen = await render(<ComputerUseBanner />);
+  try {
+    await page.getByRole("button", { name: "Stop", exact: true }).click();
+    await expect.element(page.getByText(/Stop unconfirmed/)).toBeVisible();
+    await expect.element(page.getByRole("button", { name: "Retry Stop" })).toBeVisible();
+    expect(dispatch).toHaveBeenCalledOnce();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(dispatch).toHaveBeenCalledOnce();
+    store.setLeases({
+      holders: [{ threadId, delivery: "foreground", state: "paused", leaseHeld: false }],
+    });
+    await expect.element(page.getByRole("button", { name: "Retry Stop" })).not.toBeInTheDocument();
   } finally {
     await screen.unmount();
   }

@@ -1,3 +1,4 @@
+import { COMPUTER_AGENT_DISPLAY } from "@t3tools/shared/agentAutomationSupport";
 import { BrowserWindow, screen } from "electron";
 import type {
   ComputerAutomationRequest,
@@ -11,7 +12,7 @@ const DOCUMENT = `<!doctype html><html><head><meta http-equiv="Content-Security-
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;pointer-events:none}body{box-sizing:border-box;border:2px solid var(--accent);box-shadow:inset 0 0 14px var(--accent)}#cursor{position:absolute;left:0;top:0;transition:transform 180ms ease-out;color:var(--accent);font:12px system-ui}#label{color:white;background:var(--accent);border-radius:8px;padding:4px 8px;white-space:nowrap;margin:3px 0 0 15px}#point{font-size:25px;text-shadow:0 1px 3px black}#ripple{position:absolute;width:30px;height:30px;border:2px solid var(--accent);border-radius:50%;transform:translate(-50%,-50%);animation:ripple .5s ease-out forwards}@keyframes ripple{to{opacity:0;scale:1.8}}@media(prefers-reduced-motion:reduce){#cursor{transition:none}#ripple{animation:none}}
 #outline{position:absolute;border:2px dashed var(--accent);border-radius:4px;box-sizing:border-box}svg{position:absolute;inset:0;width:100%;height:100%}line{stroke:var(--accent);stroke-width:3;stroke-dasharray:5 5;opacity:.7}
 </style></head><body><div id="outline" hidden></div><svg><line id="trail"/></svg><div id="cursor"><div id="point">➤</div><div id="label"></div></div><script>
-window.drawComputerAction=(action)=>{document.body.style.setProperty('--accent',action.provider==='claude'?'#D97757':'#10A37F');document.getElementById('label').textContent=action.label;const cursor=document.getElementById('cursor');cursor.style.transform='translate('+action.x+'px,'+action.y+'px)';document.getElementById('point').style.display=action.point?'block':'none';cursor.style.transition=action.animate?'transform 180ms ease-out':'none';const outline=document.getElementById('outline');outline.hidden=!action.outline;if(action.outline){for(const key of ['left','top','width','height'])outline.style[key]=action.outline[key]+'px'}const trail=document.getElementById('trail');trail.style.display=action.from?'block':'none';if(action.from){trail.setAttribute('x1',action.from.x);trail.setAttribute('y1',action.from.y);trail.setAttribute('x2',action.x);trail.setAttribute('y2',action.y)}if(action.click){const ripple=document.createElement('div');ripple.id='ripple';ripple.style.left=action.x+'px';ripple.style.top=action.y+'px';document.body.append(ripple);setTimeout(()=>ripple.remove(),550)}};
+window.drawComputerAction=(action)=>{document.body.style.setProperty('--accent',action.accent);document.getElementById('label').textContent=action.label;const cursor=document.getElementById('cursor');cursor.style.transform='translate('+action.x+'px,'+action.y+'px)';document.getElementById('point').style.display=action.point?'block':'none';cursor.style.transition=action.animate?'transform 180ms ease-out':'none';const outline=document.getElementById('outline');outline.hidden=!action.outline;if(action.outline){for(const key of ['left','top','width','height'])outline.style[key]=action.outline[key]+'px'}const trail=document.getElementById('trail');trail.style.display=action.from?'block':'none';if(action.from){trail.setAttribute('x1',action.from.x);trail.setAttribute('y1',action.from.y);trail.setAttribute('x2',action.x);trail.setAttribute('y2',action.y)}if(action.click){const ripple=document.createElement('div');ripple.id='ripple';ripple.style.left=action.x+'px';ripple.style.top=action.y+'px';document.body.append(ripple);setTimeout(()=>ripple.remove(),550)}};
 </script></body></html>`;
 export class ComputerOverlay implements ComputerOverlaySurface {
   private readonly windows = new Map<string, BrowserWindow>();
@@ -126,8 +127,8 @@ export class ComputerOverlay implements ComputerOverlaySurface {
         point.y >= bounds.y &&
         point.y < bounds.y + bounds.height;
       const action = {
-        provider: request.agent.provider,
-        label: `${request.agent.provider === "claude" ? "Claude" : "Codex"}${target?.appName ? ` · ${target.appName}` : ""} · ${request.op === "type" ? `Typing ${request.text.length} characters` : request.op === "key" ? request.chords.join(" → ").slice(0, 80) : request.op === "elementAction" ? request.action : request.op}`,
+        accent: COMPUTER_AGENT_DISPLAY[request.agent.provider].accent,
+        label: `${COMPUTER_AGENT_DISPLAY[request.agent.provider].label}${target?.appName ? ` · ${target.appName}` : ""} · ${request.op === "type" ? `Typing ${request.text.length} characters` : request.op === "key" ? request.chords.join(" → ").slice(0, 80) : request.op === "elementAction" ? request.action : request.op}`,
         point: !!here,
         x: here && point ? point.x - bounds.x : 16,
         y: here && point ? point.y - bounds.y : 16,

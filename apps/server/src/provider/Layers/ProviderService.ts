@@ -1,3 +1,4 @@
+import { carryPreparedComputerEvidence } from "../prepareAutomationRuntimeEvent";
 import { withWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import { canonicalWorktreePath } from "../../git/worktreePaths.ts";
 import { assertWorktreeReady } from "../../project/worktreeReadiness.ts";
@@ -650,6 +651,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           ...item.event,
           providerInstanceId: item.event.providerInstanceId ?? item.source.instanceId,
         };
+        carryPreparedComputerEvidence(item.event, event);
         if (event.provider !== item.source.provider) {
           yield* Effect.logWarning("provider runtime event provider mismatch", {
             sourceProvider: item.source.provider,

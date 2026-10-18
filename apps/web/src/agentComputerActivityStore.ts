@@ -8,7 +8,65 @@ import type {
   AgentComputerUseHolder,
 } from "@t3tools/contracts";
 import { isAgentActivityRecent } from "./agentActivityWindow";
+export const COMPUTER_ACCESS_HISTORY_LIMIT = 20;
+export const COMPUTER_ACTION_HISTORY_LIMIT = 30;
+type AccessRequest = typeof ComputerAccessPush.Type & { settled?: boolean; allowed?: boolean };
+type Activity = ComputerActivity & { at: number };
+const EMPTY_REQUESTS: ReadonlyArray<AccessRequest> = [];
+
+/** Object insertion order defines age, including after reconnect restoration. */
+function pruneRequests(requests: Record<string, AccessRequest | undefined>) {
+  const counts = new Map<string, number>();
+  const settled = Object.values(requests).filter(
+    (request): request is AccessRequest => !!request?.settled,
+  );
+  for (const request of settled)
+    counts.set(request.threadId, (counts.get(request.threadId) ?? 0) + 1);
+  let total = settled.length;
+  for (const request of settled) {
+    const count = counts.get(request.threadId)!;
+    if (count > COMPUTER_ACCESS_HISTORY_LIMIT) {
+      delete requests[request.requestId];
+      counts.set(request.threadId, count - 1);
+      --total;
+    }
+  }
+  for (const request of settled) {
+    if (total <= 200) break;
+    if (Object.hasOwn(requests, request.requestId)) {
+      delete requests[request.requestId];
+      --total;
+    }
+  }
+  return requests;
+}
+function indexRequests(
+  requests: Record<string, AccessRequest | undefined>,
+  previous: ComputerState["requestsByThread"],
+) {
+  const next: ComputerState["requestsByThread"] = {};
+  for (const request of Object.values(requests)) {
+    if (request) (next[request.threadId] ??= []).push(request);
+  }
+  for (const [threadId, entries] of Object.entries(next)) {
+    const old = previous[threadId];
+    if (
+      old &&
+      old.length === entries?.length &&
+      entries?.every((entry, index) => old[index] === entry)
+    )
+      next[threadId] = old;
+  }
+  return next;
+}
+export { EMPTY_REQUESTS as EMPTY_COMPUTER_REQUESTS };
 interface ComputerState {
+  requestsByThread: Record<string, AccessRequest[] | undefined>;
+  history: Record<string, Activity[] | undefined>;
+  stopUnconfirmed: Record<string, boolean | undefined>;
+  invalidate: (threadId: string) => void;
+  markStopUnconfirmed: (threadId: string) => void;
+  confirmStopIfReleased: (threadId: string) => void;
   appNames: Record<string, string | undefined>;
   activity: Record<string, (ComputerActivity & { at: number }) | undefined>;
   lastCapture: Record<string, (ComputerActivity & { at: number }) | undefined>;
@@ -33,6 +91,9 @@ const NO_LEASES: typeof AgentComputerUseChanged.Type = { holders: [] };
 export const useAgentComputerActivityStore = create<ComputerState>((set) => ({
   resetConnection: () =>
     set({
+      requestsByThread: {},
+      history: {},
+      stopUnconfirmed: {},
       appNames: {},
       activity: {},
       lastCapture: {},
@@ -50,43 +111,79 @@ export const useAgentComputerActivityStore = create<ComputerState>((set) => ({
   paused: {},
   leases: NO_LEASES,
   lastLeaseAt: {},
+  requestsByThread: {},
+  history: {},
+  stopUnconfirmed: {},
+  invalidate: (threadId) =>
+    set((state) => ({ lastCapture: { ...state.lastCapture, [threadId]: undefined } })),
+  markStopUnconfirmed: (threadId) =>
+    set((state) => ({
+      stopUnconfirmed: { ...state.stopUnconfirmed, [threadId]: true },
+      lastCapture: { ...state.lastCapture, [threadId]: undefined },
+    })),
+  confirmStopIfReleased: (threadId) =>
+    set((state) => {
+      if (
+        state.leases.holders.some(
+          (holder) => holder.threadId === threadId && holder.leaseHeld !== false,
+        ) ||
+        state.leases.pendingTakeover?.threadId === threadId
+      )
+        return state;
+      return { stopUnconfirmed: { ...state.stopUnconfirmed, [threadId]: undefined } };
+    }),
   record: (activity) =>
     set((state) => {
       const { thumbnailDataUrl, ...summary } = activity;
       const at = Date.now();
-      const previous = state.lastCapture[activity.threadId];
+      const toolHistory =
+        activity.source === "tool"
+          ? {
+              history: {
+                ...state.history,
+                [activity.threadId]: [
+                  ...(state.history[activity.threadId] ?? []),
+                  { ...summary, at },
+                ].slice(-COMPUTER_ACTION_HISTORY_LIMIT),
+              },
+            }
+          : {};
+      if (activity.source === "tool" && activity.status === "completed") return toolHistory;
       return {
+        ...toolHistory,
         activity: { ...state.activity, [activity.threadId]: { ...summary, at } },
         lastCapture: {
           ...state.lastCapture,
           [activity.threadId]:
             activity.status === "completed" && thumbnailDataUrl
               ? { ...activity, at }
-              : previous?.backend === activity.backend
-                ? previous
+              : activity.op === "wait" && ["started", "completed"].includes(activity.status)
+                ? state.lastCapture[activity.threadId]
                 : undefined,
         },
       };
     }),
   request: (request) =>
-    set((state) => ({
-      requests: { ...state.requests, [request.requestId]: request },
-      appNames: {
-        ...state.appNames,
-        ...Object.fromEntries(request.apps.map((app) => [app.appId, app.name])),
-      },
-    })),
+    set((state) => {
+      const requests = pruneRequests({ ...state.requests, [request.requestId]: request });
+      return {
+        requests,
+        requestsByThread: indexRequests(requests, state.requestsByThread),
+        appNames: {
+          ...state.appNames,
+          ...Object.fromEntries(request.apps.map((app) => [app.appId, app.name])),
+        },
+      };
+    }),
   settle: (event) =>
     set((state) => {
       const request = state.requests[event.requestId];
-      return request
-        ? {
-            requests: {
-              ...state.requests,
-              [event.requestId]: { ...request, settled: true, allowed: event.allowed },
-            },
-          }
-        : state;
+      if (!request) return state;
+      const requests = pruneRequests({
+        ...state.requests,
+        [event.requestId]: { ...request, settled: true, allowed: event.allowed },
+      });
+      return { requests, requestsByThread: indexRequests(requests, state.requestsByThread) };
     }),
   setGrants: (threadId, grants) =>
     set((state) => ({
@@ -95,7 +192,10 @@ export const useAgentComputerActivityStore = create<ComputerState>((set) => ({
       lastCapture: { ...state.lastCapture, [threadId]: undefined },
     })),
   setPaused: (threadId, paused) =>
-    set((state) => ({ paused: { ...state.paused, [threadId]: paused } })),
+    set((state) => ({
+      paused: { ...state.paused, [threadId]: paused },
+      lastCapture: { ...state.lastCapture, [threadId]: undefined },
+    })),
   setLeases: (leases) =>
     set((state) => {
       const now = Date.now();
@@ -104,6 +204,14 @@ export const useAgentComputerActivityStore = create<ComputerState>((set) => ({
       );
       return {
         leases,
+        stopUnconfirmed: Object.fromEntries(
+          Object.entries(state.stopUnconfirmed).filter(
+            ([threadId]) =>
+              leases.holders.some(
+                (holder) => holder.threadId === threadId && holder.leaseHeld !== false,
+              ) || leases.pendingTakeover?.threadId === threadId,
+          ),
+        ),
         appNames: {
           ...state.appNames,
           ...Object.fromEntries(

@@ -1,3 +1,4 @@
+import { AGENT_AUTOMATION_SUPPORT } from "@t3tools/shared/agentAutomationSupport";
 import { probeCodexBundledRuntime } from "./codexBundledRuntime";
 
 export interface BuiltinAvailability {
@@ -23,8 +24,7 @@ export async function probeComputerBuiltin(input: {
   if (input.provider === "claude")
     return {
       available: false,
-      reason:
-        "Claude's built-in computer use requires an interactive CLI session; the Agent SDK uses non-interactive mode",
+      reason: AGENT_AUTOMATION_SUPPORT.claudeAgent.builtin!,
     };
   return probeCodexBundledRuntime({ ...input, capability: "computer" });
 }

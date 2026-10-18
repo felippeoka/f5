@@ -1,3 +1,4 @@
+import { useStore } from "../store";
 import { useEffect, useState } from "react";
 import type { ComputerAccessPush, ComputerAppTier } from "@t3tools/contracts";
 import { AppWindowIcon, GlobeIcon, KeyboardIcon } from "lucide-react";
@@ -124,6 +125,15 @@ function SignedInWarning() {
 /** Mounted once per app window. Consent stays visible even when its thread is not selected. */
 export function ComputerAccessInbox() {
   const requests = useAgentComputerActivityStore((state) => state.requests);
+  const pending = Object.values(requests).filter((entry) => entry && !entry.settled);
+  const request = pending[0];
+  const title = useStore(
+    (store) => store.threads.find((thread) => thread.id === request?.threadId)?.title,
+  );
+  const projectName = useStore((store) => {
+    const thread = store.threads.find((entry) => entry.id === request?.threadId);
+    return store.projects.find((entry) => entry.id === thread?.projectId)?.name;
+  });
   useEffect(() => {
     const api = readNativeApi();
     if (!api?.computer) return;
@@ -135,6 +145,7 @@ export function ComputerAccessInbox() {
         store.setGrants(event.threadId, event.grants),
       ),
       api?.computer?.onActivity(store.record),
+      api?.computer?.onObservationsInvalidated?.((event) => store.invalidate(event.threadId)),
       api?.computer?.onLeaseChanged(store.setLeases),
       api?.preview.automation.onPauseChanged((event) =>
         store.setPaused(event.threadId, event.paused),
@@ -142,7 +153,6 @@ export function ComputerAccessInbox() {
     ];
     return () => off.forEach((unsubscribe) => unsubscribe?.());
   }, []);
-  const request = Object.values(requests).find((entry) => entry && !entry.settled);
   if (!request || !window.desktopBridge?.computerAutomation) return null;
   return (
     <Dialog open>
@@ -165,8 +175,29 @@ export function ComputerAccessInbox() {
                   : "Choose which apps the agent can use for this session."}
           </DialogDescription>
         </DialogHeader>
+        <div className="space-y-1 px-6 pb-3 text-muted-foreground text-sm">
+          <p>{[projectName, title].filter(Boolean).join(" · ")}</p>
+          {request.expiresAtMs !== undefined ? (
+            <AccessDeadline expiresAtMs={request.expiresAtMs} />
+          ) : null}
+          {pending.length > 1 ? <p>{pending.length - 1} more requests waiting</p> : null}
+        </div>
         <ComputerAccessCard key={request.requestId} request={request} />
       </DialogPopup>
     </Dialog>
+  );
+}
+
+function AccessDeadline({ expiresAtMs }: { expiresAtMs: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const seconds = Math.max(0, Math.ceil((expiresAtMs - now) / 1000));
+  return (
+    <p>
+      Expires in {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}
+    </p>
   );
 }

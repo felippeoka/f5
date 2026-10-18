@@ -1,3 +1,5 @@
+import { rememberAcpSetupFailure } from "./AcpAdapterSupport";
+import { redactAcpLogPayload } from "./AcpNativeLogging";
 import {
   Cause,
   Clock,
@@ -9,6 +11,7 @@ import {
   Queue,
   Ref,
   Scope,
+  Schema,
   ServiceMap,
   Stream,
 } from "effect";
@@ -61,6 +64,11 @@ export interface AcpSessionRuntimeOptions {
   readonly onStderr?: (chunk: string) => void;
   readonly sanitizeStderr?: (text: string) => string;
   readonly resumeMethod?: "resume" | "load";
+  readonly mcpServers?: (
+    init: EffectAcpSchema.InitializeResponse,
+  ) => ReadonlyArray<EffectAcpSchema.McpServer>;
+  /** Native logger factory owns the single redaction boundary when true. */
+  readonly logWritersRedact?: boolean;
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
     readonly logIncoming?: boolean;
@@ -83,6 +91,7 @@ export interface AcpSessionRequestLogEvent {
   readonly status: "started" | "succeeded" | "failed";
   readonly result?: unknown;
   readonly cause?: Cause.Cause<EffectAcpErrors.AcpError>;
+  readonly failure?: { code?: number; message: string };
 }
 
 export interface AcpSessionRuntimeStartResult {
@@ -254,8 +263,39 @@ const makeAcpSessionRuntime = (
       eventCount: 0,
       lastActivityAt: 0,
     });
+    const redactLog = (value: unknown) =>
+      options.logWritersRedact ? value : redactAcpLogPayload(value);
     const logRequest = (event: AcpSessionRequestLogEvent) =>
-      options.requestLogger ? options.requestLogger(event) : Effect.void;
+      options.requestLogger
+        ? options.requestLogger({
+            method: event.method,
+            status: event.status,
+            payload: redactLog(event.payload),
+            ...(event.result !== undefined ? { result: redactLog(event.result) } : {}),
+            ...(event.cause !== undefined
+              ? {
+                  failure: (() => {
+                    const error = Cause.squash(event.cause);
+                    const setup = ["session/new", "session/load", "session/resume"].includes(
+                      event.method,
+                    );
+                    return {
+                      ...(Schema.is(EffectAcpErrors.AcpRequestError)(error)
+                        ? { code: error.code }
+                        : {}),
+                      message: setup
+                        ? "ACP_REQUEST_FAILED"
+                        : (
+                            options.sanitizeStderr?.(
+                              String(error instanceof Error ? error.message : "ACP_REQUEST_FAILED"),
+                            ) ?? "ACP_REQUEST_FAILED"
+                          ).slice(0, 2000),
+                    };
+                  })(),
+                }
+              : {}),
+          })
+        : Effect.void;
 
     const runLoggedRequest = <A>(
       method: string,
@@ -265,6 +305,12 @@ const makeAcpSessionRuntime = (
       logRequest({ method, payload, status: "started" }).pipe(
         Effect.flatMap(() =>
           effect.pipe(
+            Effect.tapError((error) =>
+              Effect.sync(() => {
+                if (["session/new", "session/load", "session/resume"].includes(method))
+                  rememberAcpSetupFailure(error);
+              }),
+            ),
             Effect.tap((result) =>
               logRequest({
                 method,
@@ -332,7 +378,15 @@ const makeAcpSessionRuntime = (
         ...(options.protocolLogging?.logOutgoing !== undefined
           ? { logOutgoing: options.protocolLogging.logOutgoing }
           : {}),
-        ...(options.protocolLogging?.logger ? { logger: options.protocolLogging.logger } : {}),
+        ...(options.protocolLogging?.logger
+          ? {
+              logger: (event: EffectAcpProtocol.AcpProtocolLogEvent) =>
+                options.protocolLogging!.logger!({
+                  ...event,
+                  payload: redactLog(event.payload),
+                }),
+            }
+          : {}),
       }),
     ).pipe(Effect.provideService(Scope.Scope, runtimeScope));
 
@@ -649,6 +703,7 @@ const makeAcpSessionRuntime = (
         );
       });
 
+    let memoizedMcpServers: ReadonlyArray<EffectAcpSchema.McpServer> | undefined;
     const startOnce = Effect.gen(function* () {
       const initializePayload = {
         protocolVersion: 1,
@@ -661,6 +716,11 @@ const makeAcpSessionRuntime = (
         initializePayload,
         acp.agent.initialize(initializePayload),
       );
+
+      const mcpServers = yield* Effect.try({
+        try: () => (memoizedMcpServers ??= options.mcpServers?.(initializeResult) ?? []),
+        catch: () => EffectAcpErrors.AcpRequestError.internalError("ACP_MCP_CONFIGURATION_FAILED"),
+      });
 
       const authenticatePayload = {
         methodId: options.authMethodId,
@@ -681,7 +741,7 @@ const makeAcpSessionRuntime = (
         const loadPayload = {
           sessionId: options.resumeSessionId,
           cwd: options.cwd,
-          mcpServers: [],
+          mcpServers: [...mcpServers],
         } satisfies EffectAcpSchema.LoadSessionRequest;
         if (options.resumeMethod === "resume") {
           const resumed = yield* runLoggedRequest(
@@ -697,7 +757,7 @@ const makeAcpSessionRuntime = (
             yield* Ref.set(acceptedSessionIdRef, null);
             const createPayload = {
               cwd: options.cwd,
-              mcpServers: [],
+              mcpServers: [...mcpServers],
             } satisfies EffectAcpSchema.NewSessionRequest;
             const created = yield* runLoggedRequest(
               "session/new",
@@ -732,7 +792,7 @@ const makeAcpSessionRuntime = (
             yield* Ref.set(acceptedSessionIdRef, null);
             const createPayload = {
               cwd: options.cwd,
-              mcpServers: [],
+              mcpServers: [...mcpServers],
             } satisfies EffectAcpSchema.NewSessionRequest;
             const created = yield* runLoggedRequest(
               "session/new",
@@ -758,7 +818,7 @@ const makeAcpSessionRuntime = (
           } else {
             const createPayload = {
               cwd: options.cwd,
-              mcpServers: [],
+              mcpServers: [...mcpServers],
             } satisfies EffectAcpSchema.NewSessionRequest;
             const created = yield* runLoggedRequest(
               "session/new",
@@ -772,7 +832,7 @@ const makeAcpSessionRuntime = (
       } else {
         const createPayload = {
           cwd: options.cwd,
-          mcpServers: [],
+          mcpServers: [...mcpServers],
         } satisfies EffectAcpSchema.NewSessionRequest;
         const created = yield* runLoggedRequest(
           "session/new",

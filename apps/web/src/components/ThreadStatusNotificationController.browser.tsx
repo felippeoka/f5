@@ -384,3 +384,42 @@ it("unlocks controller audio synchronously in the sound settings gesture", async
   }
   expect(close).toHaveBeenCalled();
 });
+
+import { useAgentComputerActivityStore } from "../agentComputerActivityStore";
+it("raises notification attention and the badge for unsettled computer consent and clears it on settlement", async () => {
+  localStorage.setItem(
+    APP_SETTINGS_STORAGE_KEY,
+    JSON.stringify({
+      notificationMode: "off",
+      inAppThreadNotifications: true,
+      showAttentionBadge: true,
+    }),
+  );
+  useStore.setState({ projects: [], threads: [], threadsHydrated: false });
+  const badge = vi.fn().mockResolvedValue(undefined);
+  const clear = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "setAppBadge", { configurable: true, value: badge });
+  Object.defineProperty(navigator, "clearAppBadge", { configurable: true, value: clear });
+  const mounted = await mountController();
+  const store = useAgentComputerActivityStore.getState();
+  try {
+    setStoreThread(createThread(), true);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    store.request({
+      requestId: "computer-attention",
+      backendIncarnation: "b",
+      threadId: THREAD_ID,
+      kind: "apps",
+      apps: [],
+      reason: "Test",
+    });
+    await vi.waitFor(() => expect(badge).toHaveBeenLastCalledWith(1));
+    store.settle({ requestId: "computer-attention", threadId: THREAD_ID, allowed: false });
+    await vi.waitFor(() => expect(clear).toHaveBeenCalled());
+  } finally {
+    store.resetConnection();
+    await mounted.cleanup();
+    Object.defineProperty(navigator, "setAppBadge", { configurable: true, value: undefined });
+    Object.defineProperty(navigator, "clearAppBadge", { configurable: true, value: undefined });
+  }
+});

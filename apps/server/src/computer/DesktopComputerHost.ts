@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { Schema } from "effect";
 import {
   COMPUTER_BACKGROUND_CAPABILITY,
+  COMPUTER_AGENT_IDENTITY_CAPABILITY,
+  COMPUTER_ACTIVITY_CORRELATION_CAPABILITY,
   DesktopComputerHostMessage,
   type ComputerAutomationBackendStatus,
   type ComputerAutomationRequest,
@@ -46,7 +48,11 @@ export class DesktopComputerHost {
       profileId,
       backendIncarnation,
       protocolVersion: 1,
-      capabilities: [COMPUTER_BACKGROUND_CAPABILITY],
+      capabilities: [
+        COMPUTER_BACKGROUND_CAPABILITY,
+        COMPUTER_AGENT_IDENTITY_CAPABILITY,
+        COMPUTER_ACTIVITY_CORRELATION_CAPABILITY,
+      ],
     });
   }
   status(): ComputerAutomationBackendStatus {
@@ -55,6 +61,12 @@ export class DesktopComputerHost {
   /** Background delivery needs the desktop to have answered with the same capability. */
   backgroundCapable(): boolean {
     return this.connected && this.hostCapabilities.has(COMPUTER_BACKGROUND_CAPABILITY);
+  }
+  supportsAgentIdentity(): boolean {
+    return this.connected && this.hostCapabilities.has(COMPUTER_AGENT_IDENTITY_CAPABILITY);
+  }
+  supportsActivityCorrelation(): boolean {
+    return this.connected && this.hostCapabilities.has(COMPUTER_ACTIVITY_CORRELATION_CAPABILITY);
   }
   hasHost(): boolean {
     return this.connected;

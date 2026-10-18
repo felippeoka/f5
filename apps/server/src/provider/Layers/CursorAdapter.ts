@@ -1,3 +1,13 @@
+import { isSyntheticOneOffThreadId } from "../../codexAppServerManager";
+import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
+import {
+  prepareAcpAutomationCatalogs,
+  classifyAcpToolEvent,
+  type AcpAutomationCatalogs,
+} from "../acp/AcpAutomationCatalogs";
+import type { PreviewMcpHttpServerShape } from "../../mcp/PreviewMcpHttpServer";
+import type { ComputerAutomationBrokerRuntime } from "../../computer/ComputerAutomationBroker";
+import { makeAutomationRuntimeEventPreparer } from "../prepareAutomationRuntimeEvent";
 import { providerRuntimeCapabilities } from "@t3tools/shared/providerRuntimeCapabilities";
 import { normalizeSupportedSlashCommands } from "../supportedSlashCommands.ts";
 /**
@@ -73,7 +83,7 @@ import {
   type AcpSessionModeState,
   parsePermissionRequest,
 } from "../acp/AcpRuntimeModel.ts";
-import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
+import { makeAcpNativeLoggers, redactAcpLogPayload } from "../acp/AcpNativeLogging.ts";
 import { applyCursorAcpModelSelection, makeCursorAcpRuntime } from "../acp/CursorAcpSupport.ts";
 import {
   CursorAskQuestionRequest,
@@ -97,6 +107,10 @@ const ACP_IMPLEMENT_MODE_ALIASES = ["code", "agent", "default", "chat", "impleme
 const ACP_APPROVAL_MODE_ALIASES = ["ask"];
 
 export interface CursorAdapterLiveOptions {
+  /** Certification/test seam; production drivers leave this unset. */
+  readonly automationCatalogVerification?: { preview?: boolean; computer?: boolean };
+  readonly previewMcpHttpServer?: PreviewMcpHttpServerShape;
+  readonly computerAutomationBroker?: ComputerAutomationBrokerRuntime;
   readonly environment?: NodeJS.ProcessEnv;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
@@ -423,8 +437,51 @@ export function makeCursorAdapter(
     const nextEventId = Effect.map(Random.nextUUIDv4, (id) => EventId.make(id));
     const makeEventStamp = () => Effect.all({ eventId: nextEventId, createdAt: nowIso });
 
-    const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
-      PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid);
+    const automationCatalogs = new Map<string, AcpAutomationCatalogs>();
+    const prepareRuntimeEvent = yield* makeAutomationRuntimeEventPreparer;
+    const offerRuntimeEvent = (event: ProviderRuntimeEvent) => {
+      const release = automationEventSanitizer.retain(event.threadId);
+      const catalogs = automationCatalogs.get(event.threadId);
+      if (event.type === "turn.completed" && event.turnId) catalogs?.endTurn(event.turnId);
+      const hiddenPermission =
+        event.type === "request.opened" &&
+        event.payload.detail === "Tool inputs hidden while computer control is enabled";
+      return (
+        event.type === "session.configured" && catalogs
+          ? Effect.promise(catalogs.refresh)
+          : Effect.void
+      ).pipe(
+        Effect.andThen(
+          Effect.suspend(() => {
+            if (event.type === "session.configured" && catalogs)
+              event = {
+                ...event,
+                payload: {
+                  ...event.payload,
+                  config: { ...event.payload.config, agentBrowser: catalogs.agentBrowser() },
+                },
+              };
+            return prepareRuntimeEvent(event);
+          }),
+        ),
+        Effect.map((prepared) =>
+          hiddenPermission && prepared.type === "request.opened"
+            ? {
+                ...prepared,
+                payload: {
+                  ...prepared.payload,
+                  detail: "Tool inputs hidden while computer control is enabled",
+                },
+              }
+            : prepared,
+        ),
+        Effect.flatMap((prepared) =>
+          PubSub.publish(runtimeEventPubSub, catalogs?.sanitizeEvent(prepared) ?? prepared),
+        ),
+        Effect.asVoid,
+        Effect.ensuring(Effect.sync(release)),
+      );
+    };
 
     const getThreadSemaphore = (threadId: string, locks = threadLocksRef) =>
       SynchronizedRef.modifyEffect(locks, (current) => {
@@ -471,7 +528,9 @@ export function makeCursorAdapter(
               createdAt: observedAt,
               method,
               threadId,
-              payload,
+              payload: (automationCatalogs.get(threadId)?.redactForLog ?? redactAcpLogPayload)(
+                payload,
+              ),
             },
           },
           threadId,
@@ -584,10 +643,41 @@ export function makeCursorAdapter(
           let ctx!: CursorSessionContext;
 
           const resumeSessionId = parseCursorResume(input.resumeCursor)?.sessionId;
+          const catalogs = yield* prepareAcpAutomationCatalogs({
+            threadId: input.threadId,
+            provider: PROVIDER as "cursor" | "grok" | "antigravity",
+            scope: sessionScope,
+            ...(options?.previewMcpHttpServer ? { preview: options.previewMcpHttpServer } : {}),
+            ...(options?.computerAutomationBroker
+              ? { computer: options.computerAutomationBroker }
+              : {}),
+            ...(options?.automationCatalogVerification
+              ? { verification: options.automationCatalogVerification }
+              : {}),
+            readOnlyWorkflow: !!input.workflowExecutionProfile,
+            ordinarySession:
+              serverConfig.mode === "desktop" &&
+              !isSyntheticOneOffThreadId(input.threadId) &&
+              !input.workflowExecutionProfile,
+            computerCapableLineage: !!(
+              input.resumeCursor &&
+              typeof input.resumeCursor === "object" &&
+              "computerCapable" in input.resumeCursor &&
+              input.resumeCursor.computerCapable === true
+            ),
+          });
+          automationCatalogs.set(input.threadId, catalogs);
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              if (automationCatalogs.get(input.threadId) === catalogs)
+                automationCatalogs.delete(input.threadId);
+            }),
+          ).pipe(Effect.provideService(Scope.Scope, sessionScope));
           const acpNativeLoggers = makeAcpNativeLoggers({
             nativeEventLogger,
             provider: PROVIDER,
             threadId: input.threadId,
+            redactForLog: catalogs.redactForLog,
           });
 
           // Resolve the CursorSettings used to spawn the ACP child. Production
@@ -615,15 +705,17 @@ export function makeCursorAdapter(
               provider: PROVIDER,
             },
             ...acpNativeLoggers,
+            mcpServers: catalogs.mcpServers,
+            sanitizeStderr: catalogs.scrubDiagnostic,
           }).pipe(
             Effect.provideService(Scope.Scope, sessionScope),
             Effect.mapError(
-              (cause) =>
+              (error) =>
                 new ProviderAdapterProcessError({
                   provider: PROVIDER,
                   threadId: input.threadId,
-                  detail: cause.message,
-                  cause,
+                  detail: catalogs.scrubDiagnostic(error.message).slice(0, 2000),
+                  cause: undefined,
                 }),
             ),
           );
@@ -769,7 +861,9 @@ export function makeCursorAdapter(
                       turnId: ctx?.activeTurnId,
                       requestId: RuntimeRequestId.make(crypto.randomUUID()),
                       permissionRequest,
-                      detail: permissionRequest.detail ?? JSON.stringify(params).slice(0, 2000),
+                      detail: catalogs.classify(params.toolCall)
+                        ? "Tool inputs hidden while computer control is enabled"
+                        : (permissionRequest.detail ?? JSON.stringify(params).slice(0, 2000)),
                       args: params,
                       source: "acp.jsonrpc",
                       method: "session/request_permission",
@@ -778,10 +872,16 @@ export function makeCursorAdapter(
                   );
                   return { outcome: { outcome: "cancelled" as const } };
                 }
+                const computerRequest = catalogs.classify(params.toolCall);
+                if (computerRequest)
+                  params = {
+                    ...params,
+                    toolCall: { toolCallId: params.toolCall.toolCallId, title: "Tool activity" },
+                  };
                 switch (input.runtimeMode) {
                   case "full-access": {
                     const autoApprovedOptionId = selectAutoApprovedPermissionOption(params);
-                    if (autoApprovedOptionId !== undefined) {
+                    if (!computerRequest && autoApprovedOptionId !== undefined) {
                       return {
                         outcome: {
                           outcome: "selected" as const,
@@ -815,7 +915,9 @@ export function makeCursorAdapter(
                     turnId: ctx?.activeTurnId,
                     requestId: runtimeRequestId,
                     permissionRequest,
-                    detail: permissionRequest.detail ?? JSON.stringify(params).slice(0, 2000),
+                    detail: catalogs.classify(params.toolCall)
+                      ? "Tool inputs hidden while computer control is enabled"
+                      : (permissionRequest.detail ?? JSON.stringify(params).slice(0, 2000)),
                     args: params,
                     source: "acp.jsonrpc",
                     method: "session/request_permission",
@@ -849,7 +951,13 @@ export function makeCursorAdapter(
             return yield* acp.start();
           }).pipe(
             Effect.mapError((error) =>
-              mapAcpToAdapterError(PROVIDER, input.threadId, "session/start", error),
+              mapAcpToAdapterError(
+                PROVIDER,
+                input.threadId,
+                "session/start",
+                error,
+                automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+              ),
             ),
           );
 
@@ -859,7 +967,13 @@ export function makeCursorAdapter(
             interactionMode: undefined,
             modelSelection: cursorModelSelection,
             mapError: ({ cause, method }) =>
-              mapAcpToAdapterError(PROVIDER, input.threadId, method, cause),
+              mapAcpToAdapterError(
+                PROVIDER,
+                input.threadId,
+                method,
+                cause,
+                automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+              ),
           });
 
           const now = yield* nowIso;
@@ -874,6 +988,7 @@ export function makeCursorAdapter(
             resumeCursor: {
               schemaVersion: CURSOR_RESUME_VERSION,
               sessionId: started.sessionId,
+              ...(catalogs.computerCapable() ? { computerCapable: true } : {}),
             },
             createdAt: now,
             updatedAt: now,
@@ -902,9 +1017,26 @@ export function makeCursorAdapter(
             stopped: false,
           };
 
+          const offCatalogStatus = catalogs.onChanged(() => {
+            void Effect.runPromise(
+              Effect.gen(function* () {
+                yield* offerRuntimeEvent({
+                  type: "session.configured",
+                  ...(yield* makeEventStamp()),
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  payload: { config: {} },
+                });
+              }),
+            );
+          });
+          yield* Effect.addFinalizer(() => Effect.sync(offCatalogStatus)).pipe(
+            Effect.provideService(Scope.Scope, sessionScope),
+          );
           const nf = yield* Stream.runDrain(
             Stream.mapEffect(acp.getEvents(), (event) =>
               Effect.gen(function* () {
+                if (event._tag === "ToolCallUpdated") classifyAcpToolEvent(catalogs, event);
                 switch (event._tag) {
                   case "ModeChanged":
                     return;
@@ -1119,7 +1251,13 @@ export function makeCursorAdapter(
                         options: turnModelSelection?.options,
                       },
                 mapError: ({ cause, method }) =>
-                  mapAcpToAdapterError(PROVIDER, input.threadId, method, cause),
+                  mapAcpToAdapterError(
+                    PROVIDER,
+                    input.threadId,
+                    method,
+                    cause,
+                    automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+                  ),
               });
             ctx.activeTurnId = turnId;
             if (!steering) {
@@ -1239,7 +1377,13 @@ export function makeCursorAdapter(
           })
           .pipe(
             Effect.mapError((error) =>
-              mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
+              mapAcpToAdapterError(
+                PROVIDER,
+                input.threadId,
+                "session/prompt",
+                error,
+                automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+              ),
             ),
             Effect.ensuring(
               Effect.sync(() => {
@@ -1349,7 +1493,13 @@ export function makeCursorAdapter(
         yield* Effect.ignore(
           ctx.acp.cancel.pipe(
             Effect.mapError((error) =>
-              mapAcpToAdapterError(PROVIDER, threadId, "session/cancel", error),
+              mapAcpToAdapterError(
+                PROVIDER,
+                threadId,
+                "session/cancel",
+                error,
+                automationCatalogs.get(threadId)?.scrubDiagnostic,
+              ),
             ),
           ),
         );

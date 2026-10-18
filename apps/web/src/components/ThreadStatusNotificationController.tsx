@@ -1,3 +1,4 @@
+import { useAgentComputerActivityStore } from "../agentComputerActivityStore";
 import {
   createNotificationSound,
   needsThreadAttention,
@@ -38,6 +39,17 @@ export function ThreadStatusNotificationControllerContent({
 }) {
   const threadsHydrated = useStore((store) => store.threadsHydrated);
   const threads = useThreadSummaries();
+  const computerPending = useAgentComputerActivityStore((state) =>
+    [
+      ...new Set(
+        Object.values(state.requests).flatMap((request) =>
+          request && !request.settled ? [request.threadId] : [],
+        ),
+      ),
+    ]
+      .sort()
+      .join(","),
+  );
   const projects = useStore((store) => store.projects);
   const { settings } = useAppSettings();
   const systemEnabled =
@@ -80,16 +92,17 @@ export function ThreadStatusNotificationControllerContent({
   const [promptVisible, setPromptVisible] = useState(false);
 
   const threadStatusSnapshots = useMemo(() => {
+    const computerThreads = new Set(computerPending.split(","));
     const projectNameById = new Map(projects.map((project) => [project.id, project.name] as const));
 
     return threads.map((thread) => ({
       threadId: thread.id,
       threadTitle: thread.title,
       projectName: projectNameById.get(thread.projectId) ?? null,
-      status: thread.status,
+      status: computerThreads.has(thread.id) ? ("pending-approval" as const) : thread.status,
       snoozed: isSnoozedThread(thread) || Boolean(thread.archivedAt),
     }));
-  }, [projects, threads]);
+  }, [projects, threads, computerPending]);
 
   useEffect(() => {
     const syncFocusState = () => {
