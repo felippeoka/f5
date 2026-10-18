@@ -134,5 +134,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-update-rehearsal-logs
-          path: rehearsal-logs/*.log
+          path: rehearsal-logs/**
           if-no-files-found: ignore

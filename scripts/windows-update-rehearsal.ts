@@ -11,6 +11,7 @@
  */
 import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
+  cpSync,
   createWriteStream,
   existsSync,
   mkdirSync,
@@ -546,7 +547,9 @@ try {
       return current.errorContext === "install" ? current : undefined;
     },
     180_000,
-  );
+  ).catch((error: unknown) => {
+    throw new Error(`${String(error)} (F5 processes running: ${f5ProcessIds().length})`);
+  });
   assert(failed.status === "downloaded" && failed.canRetry, JSON.stringify(failed));
   renameSync(stashed, join(pending, installer));
 
@@ -614,6 +617,9 @@ try {
 } finally {
   if (app) stopApplication();
   restoreRuntimes?.();
+  // Packaged builds log to files rather than stdout.
+  const appLogs = join(stateDir, "userdata", "logs");
+  if (existsSync(appLogs)) cpSync(appLogs, join(logDir, "app"), { recursive: true });
   writeFileSync(join(logDir, "feed-requests.log"), feed.requests.join("\n") + "\n");
   await feed.close();
 }
