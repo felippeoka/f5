@@ -71,6 +71,7 @@ export function redactAcpLogPayload(
   scrubber?: AcpCredentialScrubber,
   depth = 0,
   configuration = false,
+  maskErrors = false,
 ): unknown {
   if (depth > 32) return "[redacted]";
   if (typeof value === "string") {
@@ -81,7 +82,15 @@ export function redactAcpLogPayload(
           .trim()
           .split(/\r?\n/)
           .map((frame) =>
-            JSON.stringify(redactAcpLogPayload(JSON.parse(frame), scrubber, depth + 1)),
+            JSON.stringify(
+              redactAcpLogPayload(
+                JSON.parse(frame),
+                scrubber,
+                depth + 1,
+                configuration,
+                maskErrors,
+              ),
+            ),
           )
           .join("\n");
       } catch {
@@ -92,7 +101,9 @@ export function redactAcpLogPayload(
   }
   if (value === null || typeof value !== "object") return value;
   if (Array.isArray(value))
-    return value.map((entry) => redactAcpLogPayload(entry, scrubber, depth + 1, configuration));
+    return value.map((entry) =>
+      redactAcpLogPayload(entry, scrubber, depth + 1, configuration, maskErrors),
+    );
   const record = value as Record<string, unknown>;
   return Object.fromEntries(
     Object.entries(record).map(([key, entry]) => {
@@ -110,7 +121,7 @@ export function redactAcpLogPayload(
         ];
       }
       if (key === "content" && record.action === "accept") return [key, REDACTED];
-      if (key === "cause" || key === "error") {
+      if (maskErrors && ["cause", "error", "failure"].includes(key)) {
         const error =
           entry && typeof entry === "object" ? (entry as Record<string, unknown>) : undefined;
         return [
@@ -123,7 +134,13 @@ export function redactAcpLogPayload(
       }
       return [
         key,
-        redactAcpLogPayload(entry, scrubber, depth + 1, configuration || key === "mcpServers"),
+        redactAcpLogPayload(
+          entry,
+          scrubber,
+          depth + 1,
+          configuration || key === "mcpServers",
+          maskErrors,
+        ),
       ];
     }),
   );

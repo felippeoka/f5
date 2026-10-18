@@ -218,6 +218,9 @@ export const prepareAcpAutomationCatalogs = (input: {
       return redactAcpLogPayload(
         automationEventSanitizer.sanitize(input.threadId, visit(value)),
         scrubber,
+        0,
+        false,
+        computerCapable,
       );
     };
     const refresh = async () => {
@@ -318,6 +321,7 @@ export const prepareAcpAutomationCatalogs = (input: {
         return event;
       },
       computerCapable: () => computerCapable,
+      hasSensitiveConfiguration: () => computerCapable || configs.length > 0,
       agentBrowser: () => agentBrowserConfigPayload(state),
       endTurn: (turnId: string) => {
         for (const config of configs) config.endTurn?.(turnId);
@@ -343,7 +347,12 @@ export const prepareAcpAutomationCatalogs = (input: {
         }
         let detail = `Computer control for ${COMPUTER_AGENT_DISPLAY[input.provider].label} is awaiting verification`;
         if (input.verification?.computer ?? ACP_COMPUTER_CATALOG_VERIFIED[input.provider]) {
-          if (!http) detail = "This agent can't connect to F5's tools";
+          if (input.readOnlyWorkflow)
+            detail = "Computer control is unavailable in read-only workflows";
+          else if (!input.ordinarySession)
+            detail = "Computer control requires an ordinary F5 desktop session";
+          else if (!input.preview) detail = "F5 automation tools are unavailable in this runtime";
+          else if (!http) detail = "This agent can't connect to F5's tools";
           else if (!input.computer?.host.supportsAgentIdentity())
             detail = "Desktop update required";
           else if (allowed) {

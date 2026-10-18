@@ -96,6 +96,7 @@ export function chromeCertificationAvailability(input: {
   arch: string;
   executableSha256?: string;
 }): { descriptor: ChromeNativeHostDescriptor } | { unavailable: ChromeUnavailableReason } {
+  const label = input.provider === "claude" ? "Claude" : "Codex";
   const certified = input.descriptors.filter(
     (entry) =>
       entry.provider === input.provider &&
@@ -120,12 +121,18 @@ export function chromeCertificationAvailability(input: {
     return {
       unavailable: {
         reason: "platform",
-        detail: "Claude in Chrome isn't certified on this Mac's architecture yet.",
+        detail:
+          input.provider === "claude" && input.platform === "darwin"
+            ? "Claude in Chrome isn't certified on this Mac's architecture yet."
+            : `${label} Chrome control is not certified on this platform or architecture yet.`,
       },
     };
   if (!input.executableSha256)
     return {
-      unavailable: { reason: "unverifiable", detail: "F5 couldn't verify the Claude executable." },
+      unavailable: {
+        reason: "unverifiable",
+        detail: `F5 couldn't verify the ${label} executable.`,
+      },
     };
   const descriptor = matchingPlatform.find(
     (entry) => entry.runtime!.executableSha256 === input.executableSha256,
@@ -135,8 +142,7 @@ export function chromeCertificationAvailability(input: {
     : {
         unavailable: {
           reason: "executable-drift",
-          detail:
-            "This Claude build isn't certified for Chrome. Update F5 or remove the custom Claude executable.",
+          detail: `This ${label} build isn't certified for Chrome. Update F5 or remove the custom ${label} executable.`,
         },
       };
 }

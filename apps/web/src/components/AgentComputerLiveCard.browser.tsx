@@ -209,9 +209,17 @@ it("keeps Stop visible and clickable at a narrow width", async () => {
   store.request(accessRequest("a", "Only reason"));
   store.settle({ requestId: "a", threadId, allowed: true });
   store.setGrants(threadId, [{ appId: "a", tier: "click", allowTyping: true }]);
-  store.record({ threadId, op: "activateApp", status: "failed", backend: "native" });
+  store.record({
+    threadId,
+    op: "activateApp",
+    status: "failed",
+    backend: "native",
+    source: "tool",
+  });
   const screen = await render(<AgentComputerLiveCard threadId={threadId} />);
   try {
+    await expect.element(page.getByRole("button", { name: "Actions (1)" })).toBeVisible();
+    await expect.element(page.getByRole("button", { name: "History (1)" })).toBeVisible();
     const stop = page.getByRole("button", { name: "Stop", exact: true });
     await expect.element(stop).toBeVisible();
     const rect = stop.element().getBoundingClientRect();

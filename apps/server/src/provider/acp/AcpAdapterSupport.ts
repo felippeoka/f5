@@ -17,20 +17,32 @@ export function rememberAcpSetupFailure(error: EffectAcpErrors.AcpError): void {
   setupFailures.add(error);
 }
 
+/** Preserve scrubbed diagnostics unless setup could echo an installed private catalog. */
 export function mapAcpToAdapterError(
   provider: ProviderKind,
   threadId: ThreadId,
   method: string,
   error: EffectAcpErrors.AcpError,
   scrubDiagnostic: (value: string) => string = (value) => value,
+  sensitiveConfiguration = false,
 ): ProviderAdapterError {
   const setup =
-    ["session/new", "session/load", "session/resume"].includes(method) || setupFailures.has(error);
+    sensitiveConfiguration &&
+    (["session/new", "session/load", "session/resume"].includes(method) ||
+      setupFailures.has(error));
   const detail = scrubDiagnostic(error.message).slice(0, 2000);
+  const cause = setup
+    ? undefined
+    : {
+        _tag: error._tag,
+        message: detail,
+        ...(Schema.is(EffectAcpErrors.AcpRequestError)(error) ? { code: error.code } : {}),
+      };
   if (Schema.is(EffectAcpErrors.AcpProcessExitedError)(error)) {
     return new ProviderAdapterProcessError({
       provider,
       threadId,
+      ...(cause ? { cause } : {}),
       detail: setup ? "ACP_PROCESS_EXITED" : detail,
     });
   }
@@ -38,12 +50,14 @@ export function mapAcpToAdapterError(
     return new ProviderAdapterRequestError({
       provider,
       method,
+      ...(cause ? { cause } : {}),
       detail: setup ? `ACP_REQUEST_FAILED (${error.code})` : detail,
     });
   }
   return new ProviderAdapterRequestError({
     provider,
     method,
+    ...(cause ? { cause } : {}),
     detail: setup ? "ACP_TRANSPORT_FAILED" : detail,
   });
 }

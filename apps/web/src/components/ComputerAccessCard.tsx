@@ -1,3 +1,4 @@
+import { usePendingComputerAccessRequests } from "../hooks/usePendingComputerAccessRequests";
 import { useStore } from "../store";
 import { useEffect, useState } from "react";
 import type { ComputerAccessPush, ComputerAppTier } from "@t3tools/contracts";
@@ -124,8 +125,7 @@ function SignedInWarning() {
 }
 /** Mounted once per app window. Consent stays visible even when its thread is not selected. */
 export function ComputerAccessInbox() {
-  const requests = useAgentComputerActivityStore((state) => state.requests);
-  const pending = Object.values(requests).filter((entry) => entry && !entry.settled);
+  const pending = usePendingComputerAccessRequests();
   const request = pending[0];
   const title = useStore(
     (store) => store.threads.find((thread) => thread.id === request?.threadId)?.title,

@@ -25,8 +25,10 @@ export function createComputerSessionScope(input: {
   });
   let geometry = new ComputerToolGeometry();
   let disposed = false;
-  const off = subscribeComputerObservationInvalidation(input.broker, input.threadId, () =>
-    geometry.clear(),
+  const off = subscribeComputerObservationInvalidation(
+    input.broker,
+    input.threadId,
+    (preserveApps) => geometry.clear(preserveApps),
   );
   return {
     generation,
@@ -34,6 +36,7 @@ export function createComputerSessionScope(input: {
       return geometry;
     },
     resetConnection() {
+      geometry.dispatcher.invalidate();
       geometry.clear();
       geometry = new ComputerToolGeometry();
     },
@@ -57,6 +60,7 @@ export function createComputerSessionScope(input: {
       if (disposed) return;
       disposed = true;
       input.broker.releaseSession(input.threadId, generation);
+      geometry.dispatcher.invalidate();
       geometry.clear();
       off();
       automationEventSanitizer.clear(input.threadId);

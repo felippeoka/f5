@@ -614,6 +614,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             ...acpNativeLoggers,
             mcpServers: catalogs.mcpServers,
             sanitizeStderr: catalogs.scrubDiagnostic,
+            hasSensitiveConfiguration: catalogs.hasSensitiveConfiguration,
           }).pipe(
             Effect.provideService(Scope.Scope, sessionScope),
             Effect.mapError(
@@ -895,6 +896,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 "session/start",
                 error,
                 automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+                automationCatalogs.get(input.threadId)?.hasSensitiveConfiguration() ?? false,
               ),
             ),
           );
@@ -910,6 +912,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     "session/configure",
                     cause,
                     automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+                    automationCatalogs.get(input.threadId)?.hasSensitiveConfiguration() ?? false,
                   ),
                 ),
               );
@@ -931,6 +934,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 "session/set_model",
                 cause,
                 automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+                automationCatalogs.get(input.threadId)?.hasSensitiveConfiguration() ?? false,
               ),
           });
 
@@ -1208,6 +1212,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     "session/set_model",
                     cause,
                     automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+                    automationCatalogs.get(input.threadId)?.hasSensitiveConfiguration() ?? false,
                   ),
               });
 
@@ -1338,6 +1343,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   "session/prompt",
                   error,
                   automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+                  automationCatalogs.get(input.threadId)?.hasSensitiveConfiguration() ?? false,
                 ),
               ),
             );

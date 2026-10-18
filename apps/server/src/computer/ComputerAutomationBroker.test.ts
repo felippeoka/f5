@@ -937,3 +937,71 @@ it("preserves observations on an idle turn completion", async () => {
     h.broker.close();
   }
 });
+
+it("ignores a late previous turn completion while the next wait is resolving context", async () => {
+  const h = await harness();
+  const original = h.broker.context.bind(h.broker);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  try {
+    h.broker.beginTurn("t", "previous");
+    h.broker.beginTurn("t", "next");
+    h.set({ turnId: "next" });
+    vi.spyOn(h.broker, "context").mockImplementation(async (...args) => {
+      await held;
+      return original(...args);
+    });
+    const pending = h.broker.wait("t", "s", { deadlineMs: performance.now() + 100 });
+    h.broker.endTurn("t", "previous", "s");
+    release();
+    await expect(pending).resolves.toMatchObject({ waitedMs: expect.any(Number) });
+  } finally {
+    release();
+    h.broker.close();
+  }
+});
+
+it("rejects a lease acquisition that outlives two turn transitions", async () => {
+  const h = await harness();
+  let release!: () => void;
+  let acquired!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    acquired = resolve;
+  });
+  const original = h.broker.host.correlated.bind(h.broker.host);
+  const spy = vi
+    .spyOn(h.broker.host, "correlated")
+    .mockImplementation(async (message, timeout, mutating) => {
+      const result = await original(message, timeout, mutating);
+      if (message.type === "leaseAcquire") {
+        acquired();
+        await held;
+      }
+      return result;
+    });
+  try {
+    h.broker.beginTurn("t", "turn");
+    const pending = h.broker.invoke("t", "s", { op: "type", text: "must not dispatch" });
+    const rejected = expect(pending).rejects.toMatchObject({
+      error: { _tag: "Interrupted", cause: "turn-ended" },
+    });
+    await started;
+    h.broker.beginTurn("t", "next");
+    h.broker.endTurn("t", "next", "s");
+    release();
+    await rejected;
+    expect(
+      h.ipc.messages.some((message) => message.type === "request" && message.request.op === "type"),
+    ).toBe(false);
+    expect(h.ipc.messages.some((message) => message.type === "leaseRelease")).toBe(true);
+  } finally {
+    release();
+    spy.mockRestore();
+    h.broker.close();
+  }
+});

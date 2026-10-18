@@ -4235,6 +4235,13 @@ const make = Effect.gen(function* () {
             return true;
         }
       })();
+      if (
+        event.type === "turn.started" &&
+        event.turnId &&
+        shouldApplyThreadLifecycle &&
+        Option.isSome(computerAutomationBroker)
+      )
+        computerAutomationBroker.value.beginTurn(thread.id, event.turnId);
       const acceptedTurnStartedSourcePlan =
         event.type === "turn.started" && shouldApplyThreadLifecycle
           ? yield* getSourceProposedPlanReferenceForAcceptedTurnStart(thread.id, eventTurnId)

@@ -62,6 +62,7 @@ export interface AcpSessionRuntimeOptions {
   readonly authMethodId: string;
   readonly transformStdoutLine?: (line: string) => string;
   readonly onStderr?: (chunk: string) => void;
+  readonly hasSensitiveConfiguration?: () => boolean;
   readonly sanitizeStderr?: (text: string) => string;
   readonly resumeMethod?: "resume" | "load";
   readonly mcpServers?: (
@@ -263,6 +264,7 @@ const makeAcpSessionRuntime = (
       eventCount: 0,
       lastActivityAt: 0,
     });
+    let memoizedMcpServers: ReadonlyArray<EffectAcpSchema.McpServer> | undefined;
     const redactLog = (value: unknown) =>
       options.logWritersRedact ? value : redactAcpLogPayload(value);
     const logRequest = (event: AcpSessionRequestLogEvent) =>
@@ -276,9 +278,9 @@ const makeAcpSessionRuntime = (
               ? {
                   failure: (() => {
                     const error = Cause.squash(event.cause);
-                    const setup = ["session/new", "session/load", "session/resume"].includes(
-                      event.method,
-                    );
+                    const setup =
+                      (options.hasSensitiveConfiguration?.() ?? !!memoizedMcpServers?.length) &&
+                      ["session/new", "session/load", "session/resume"].includes(event.method);
                     return {
                       ...(Schema.is(EffectAcpErrors.AcpRequestError)(error)
                         ? { code: error.code }
@@ -288,7 +290,7 @@ const makeAcpSessionRuntime = (
                         : (
                             options.sanitizeStderr?.(
                               String(error instanceof Error ? error.message : "ACP_REQUEST_FAILED"),
-                            ) ?? "ACP_REQUEST_FAILED"
+                            ) ?? (error instanceof Error ? error.message : "ACP_REQUEST_FAILED")
                           ).slice(0, 2000),
                     };
                   })(),
@@ -703,7 +705,6 @@ const makeAcpSessionRuntime = (
         );
       });
 
-    let memoizedMcpServers: ReadonlyArray<EffectAcpSchema.McpServer> | undefined;
     const startOnce = Effect.gen(function* () {
       const initializePayload = {
         protocolVersion: 1,

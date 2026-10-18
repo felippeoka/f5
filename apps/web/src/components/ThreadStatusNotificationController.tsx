@@ -1,4 +1,4 @@
-import { useAgentComputerActivityStore } from "../agentComputerActivityStore";
+import { usePendingComputerAccessRequests } from "../hooks/usePendingComputerAccessRequests";
 import {
   createNotificationSound,
   needsThreadAttention,
@@ -39,17 +39,10 @@ export function ThreadStatusNotificationControllerContent({
 }) {
   const threadsHydrated = useStore((store) => store.threadsHydrated);
   const threads = useThreadSummaries();
-  const computerPending = useAgentComputerActivityStore((state) =>
-    [
-      ...new Set(
-        Object.values(state.requests).flatMap((request) =>
-          request && !request.settled ? [request.threadId] : [],
-        ),
-      ),
-    ]
-      .sort()
-      .join(","),
-  );
+  const pendingComputerRequests = usePendingComputerAccessRequests();
+  const computerPending = [...new Set(pendingComputerRequests.map((request) => request.threadId))]
+    .sort()
+    .join(",");
   const projects = useStore((store) => store.projects);
   const { settings } = useAppSettings();
   const systemEnabled =

@@ -84,7 +84,11 @@ Every ACP log boundary structurally redacts nested MCP header/env values, includ
 serialized frames. Unparseable frames become a fixed marker. Session-owned exact
 credential scrubbers also remove echoed credentials from diagnostics and remain
 alive for late producer callbacks after token revocation. Credentials are revoked
-immediately on disposal; retaining a scrubber confers no execution authority.
+immediately on disposal; retaining a scrubber confers no execution authority. Ordinary
+sessions keep readable setup, authentication and transport diagnostics with scrubbed
+causes. Fixed setup codes apply only when a computer-capable lineage or installed F5
+catalog could expose private configuration. Computer-capable logs additionally mask
+error/cause details; structural credential redaction applies to every ACP session.
 
 Computer catalogs remain closed by `ACP_COMPUTER_CATALOG_VERIFIED` (all false).
 Installing one additionally requires a desktop that negotiated
@@ -2284,3 +2288,17 @@ the signed installed-build run and C5 gate flip have not occurred. Existing gate
 remain closed and Claude always keeps `--no-chrome` in these unavailable cases.
 
 Implementation checks and remaining prerequisites are recorded in the [follow-up verification record](computer-certification/2026-10-18-computer-followups-verification.md).
+
+### PR #162 review corrections
+
+Observation invalidation preserves in-flight invocation admission, so a retry with the
+same ID joins the original result and cannot repeat input. Action invalidation also
+preserves granted app-name resolutions. Connection replacement and session disposal
+still invalidate invocation admission. Actions without a screenshot discard coordinate
+evidence; capture again before using coordinates.
+
+The active lifecycle turn is pinned before context lookup. Turn revisions reject stale
+context and lease completions, and each binding stores only its latest ended turn.
+Expired consent stops raising attention and leaves the pending dialog; its request is
+retained until authoritative settlement or connection replacement. Remote clients still
+receive attention because approval must be completed on the host desktop.

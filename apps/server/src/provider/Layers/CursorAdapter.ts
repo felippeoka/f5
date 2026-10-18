@@ -147,6 +147,7 @@ interface CursorSessionContext {
   promptsInFlight: number;
   readonly threadId: ThreadId;
   session: ProviderSession;
+  configuredConfig: Record<string, unknown>;
   readonly scope: Scope.Closeable;
   readonly acp: AcpSessionRuntimeShape;
   notificationFiber: Fiber.Fiber<void, never> | undefined;
@@ -442,6 +443,13 @@ export function makeCursorAdapter(
     const offerRuntimeEvent = (event: ProviderRuntimeEvent) => {
       const release = automationEventSanitizer.retain(event.threadId);
       const catalogs = automationCatalogs.get(event.threadId);
+      if (event.type === "session.configured") {
+        const context = sessions.get(event.threadId);
+        if (context) {
+          context.configuredConfig = { ...context.configuredConfig, ...event.payload.config };
+          event = { ...event, payload: { ...event.payload, config: context.configuredConfig } };
+        }
+      }
       if (event.type === "turn.completed" && event.turnId) catalogs?.endTurn(event.turnId);
       const hiddenPermission =
         event.type === "request.opened" &&
@@ -669,8 +677,9 @@ export function makeCursorAdapter(
           automationCatalogs.set(input.threadId, catalogs);
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
-              if (automationCatalogs.get(input.threadId) === catalogs)
+              if (automationCatalogs.get(input.threadId) === catalogs) {
                 automationCatalogs.delete(input.threadId);
+              }
             }),
           ).pipe(Effect.provideService(Scope.Scope, sessionScope));
           const acpNativeLoggers = makeAcpNativeLoggers({
@@ -707,6 +716,7 @@ export function makeCursorAdapter(
             ...acpNativeLoggers,
             mcpServers: catalogs.mcpServers,
             sanitizeStderr: catalogs.scrubDiagnostic,
+            hasSensitiveConfiguration: catalogs.hasSensitiveConfiguration,
           }).pipe(
             Effect.provideService(Scope.Scope, sessionScope),
             Effect.mapError(
@@ -957,6 +967,7 @@ export function makeCursorAdapter(
                 "session/start",
                 error,
                 automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+                automationCatalogs.get(input.threadId)?.hasSensitiveConfiguration() ?? false,
               ),
             ),
           );
@@ -973,6 +984,7 @@ export function makeCursorAdapter(
                 method,
                 cause,
                 automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+                automationCatalogs.get(input.threadId)?.hasSensitiveConfiguration() ?? false,
               ),
           });
 
@@ -998,6 +1010,7 @@ export function makeCursorAdapter(
             historySessionOrigin: "sessionId" in started.sessionSetupResult ? "fresh" : "resumed",
             threadId: input.threadId,
             session,
+            configuredConfig: {},
             scope: sessionScope,
             acp,
             notificationFiber: undefined,
@@ -1025,7 +1038,7 @@ export function makeCursorAdapter(
                   ...(yield* makeEventStamp()),
                   provider: PROVIDER,
                   threadId: input.threadId,
-                  payload: { config: {} },
+                  payload: { config: ctx.configuredConfig },
                 });
               }),
             );
@@ -1257,6 +1270,7 @@ export function makeCursorAdapter(
                     method,
                     cause,
                     automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+                    automationCatalogs.get(input.threadId)?.hasSensitiveConfiguration() ?? false,
                   ),
               });
             ctx.activeTurnId = turnId;
@@ -1383,6 +1397,7 @@ export function makeCursorAdapter(
                 "session/prompt",
                 error,
                 automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+                automationCatalogs.get(input.threadId)?.hasSensitiveConfiguration() ?? false,
               ),
             ),
             Effect.ensuring(
@@ -1499,6 +1514,7 @@ export function makeCursorAdapter(
                 "session/cancel",
                 error,
                 automationCatalogs.get(threadId)?.scrubDiagnostic,
+                automationCatalogs.get(threadId)?.hasSensitiveConfiguration() ?? false,
               ),
             ),
           ),

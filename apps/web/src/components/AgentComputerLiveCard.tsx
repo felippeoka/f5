@@ -196,8 +196,8 @@ export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
           </p>
         ) : null}
       </div>
-      {/* Kept unshrinkable so Stop stays reachable; wraps to its own row on narrow widths. */}
-      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+      {/* Controls wrap onto another row so Stop remains reachable at narrow widths. */}
+      <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1.5">
         {actions?.length ? <ComputerActionsHistory history={actions} /> : null}
         {history.length > 0 ? <ComputerAccessHistory history={history} /> : null}
         <Button

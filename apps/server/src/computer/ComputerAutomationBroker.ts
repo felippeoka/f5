@@ -66,6 +66,8 @@ interface ComputerBinding {
   provider: ComputerAgentProvider;
   holder?: ComputerLeaseHolder;
   turnId?: string;
+  turnRevision: number;
+  endedTurnId?: string;
   /** Monotonic; every policy transition bumps it before any async work. */
   policyRevision: number;
   /** The policy last applied to this binding, compared on settings changes. */
@@ -128,7 +130,7 @@ export type ComputerBrokerEvent =
   | { channel: "computer.activity"; data: ComputerActivity }
   | { channel: "computer.host"; data: DesktopComputerHostMessage }
   /** Observations (screenshots, geometry, app records) for this thread are no longer valid. */
-  | { channel: "computer.observations.invalidated"; data: { threadId: string } }
+  | { channel: "computer.observations.invalidated"; data: { threadId: string; cause?: "action" } }
   /** The merged lease/execution state changed; republish the banner. */
   | { channel: "computer.use.changed"; data: ComputerUseSnapshot };
 export class ComputerAutomationBroker extends ServiceMap.Service<
@@ -189,7 +191,6 @@ export class ComputerAutomationBrokerRuntime {
   >();
   private readonly observationEpochs = new Map<string, number>();
   private readonly listeners = new Set<(event: ComputerBrokerEvent) => void>();
-  private readonly endedTurns = new Set<string>();
   private readonly nativePaused = new Set<string>();
   private mainHolders: ReadonlyArray<ComputerLeaseHolder> = [];
   private chromeHolder: ChromeLeaseHolder | null = null;
@@ -371,7 +372,7 @@ export class ComputerAutomationBrokerRuntime {
     if (previous?.generation === generation) return;
     if (previous) this.releaseSession(threadId, previous.generation);
     const policyRevision = Math.max(1, this.threadRevisions.get(threadId) ?? 0);
-    this.bindings.set(threadId, { generation, provider, policyRevision });
+    this.bindings.set(threadId, { generation, provider, policyRevision, turnRevision: 0 });
     this.invalidateObservations(threadId);
   }
   /** Lease holders changed on the desktop: track takeovers and clear stale observations. */
@@ -398,9 +399,12 @@ export class ComputerAutomationBrokerRuntime {
         this.executionStates.delete(threadId);
     this.publishUse();
   }
-  private invalidateObservations(threadId: string): void {
+  private invalidateObservations(threadId: string, cause?: "action"): void {
     this.observationEpochs.set(threadId, (this.observationEpochs.get(threadId) ?? 0) + 1);
-    this.publish({ channel: "computer.observations.invalidated", data: { threadId } });
+    this.publish({
+      channel: "computer.observations.invalidated",
+      data: { threadId, ...(cause ? { cause } : {}) },
+    });
   }
   /** Merged native and Chrome holders; other profiles stay anonymous. */
   computerUse(): ComputerUseSnapshot {
@@ -522,7 +526,7 @@ export class ComputerAutomationBrokerRuntime {
     return (
       binding?.generation === generation &&
       binding.turnId === turnId &&
-      !this.endedTurns.has(`${generation}\0${turnId}`)
+      binding.endedTurnId !== turnId
     );
   }
   snapshot() {
@@ -587,8 +591,9 @@ export class ComputerAutomationBrokerRuntime {
     const binding = this.bindings.get(threadId);
     if (!binding || binding.generation !== sessionGeneration)
       throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
+    const turnRevision = binding.turnRevision;
     const ctx = await this.options.resolve(threadId, sessionGeneration, binding.provider);
-    if (this.bindings.get(threadId) !== binding)
+    if (this.bindings.get(threadId) !== binding || binding.turnRevision !== turnRevision)
       throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
     this.access.bind(threadId, ctx.projectId, sessionGeneration);
     binding.appliedPolicy ??= JSON.stringify({
@@ -666,6 +671,7 @@ export class ComputerAutomationBrokerRuntime {
     if (!binding || binding.generation !== generation)
       throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
     const revision = binding.policyRevision;
+    const turnRevision = binding.turnRevision;
     if (ctx.turnId !== "observation") binding.turnId = ctx.turnId;
     const appId = typeof input.appId === "string" ? input.appId : undefined;
     const delivery = this.selectDelivery(ctx, binding, input.op, appId, {
@@ -684,7 +690,7 @@ export class ComputerAutomationBrokerRuntime {
     if (this.pause.has(threadId) && !["status", "listApps", "resolveApps"].includes(input.op))
       throw new ComputerControlError({ _tag: "Interrupted", cause: "paused" });
     if (mutation) {
-      if (ctx.turnId === "observation" || this.endedTurns.has(`${generation}\0${ctx.turnId}`))
+      if (ctx.turnId === "observation" || binding.endedTurnId === ctx.turnId)
         throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
       if (this.pause.has(threadId))
         throw new ComputerControlError({ _tag: "Interrupted", cause: "paused" });
@@ -728,7 +734,7 @@ export class ComputerAutomationBrokerRuntime {
       if (!live.policy.computerUse)
         throw new ComputerControlError({ _tag: "Unavailable", reason: "disabled" });
       // Revision checkpoint after context resolution and queue admission.
-      this.assertRevision(binding, revision);
+      this.assertRevision(binding, revision, turnRevision);
       if (
         mutation &&
         delivery === "background" &&
@@ -741,7 +747,7 @@ export class ComputerAutomationBrokerRuntime {
         mutation &&
         (this.pause.has(threadId) ||
           live.turnId !== ctx.turnId ||
-          this.endedTurns.has(`${generation}\0${ctx.turnId}`))
+          binding.endedTurnId === ctx.turnId)
       )
         throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
       if (mutation && live.interactionMode === "plan")
@@ -798,8 +804,9 @@ export class ComputerAutomationBrokerRuntime {
         if (
           this.bindings.get(threadId) !== binding ||
           this.pause.has(threadId) ||
-          this.endedTurns.has(`${generation}\0${ctx.turnId}`) ||
-          binding.policyRevision !== revision
+          binding.endedTurnId === ctx.turnId ||
+          binding.policyRevision !== revision ||
+          binding.turnRevision !== turnRevision
         ) {
           this.host.send({ type: "leaseRelease", requestId: randomUUID(), holder });
           throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
@@ -810,7 +817,7 @@ export class ComputerAutomationBrokerRuntime {
       await options?.beforeDispatch?.();
       if (options?.signal?.aborted) throw options.signal.reason;
       // Revision checkpoint immediately before dispatch.
-      this.assertRevision(binding, revision);
+      this.assertRevision(binding, revision, turnRevision);
       this.pushGrants(threadId, generation, live.turnId, executionGeneration);
       const envelope = {
         ...input,
@@ -825,7 +832,7 @@ export class ComputerAutomationBrokerRuntime {
       const request = Schema.decodeUnknownSync(
         (await import("@t3tools/contracts")).ComputerAutomationRequest,
       )({ ...envelope, payloadHash });
-      if (mutation) this.invalidateObservations(threadId);
+      if (mutation) this.invalidateObservations(threadId, "action");
       options?.onDispatch?.(delivery);
       this.inFlight.set(requestId, {
         threadId,
@@ -856,7 +863,9 @@ export class ComputerAutomationBrokerRuntime {
       slot.release();
     }
   }
-  private assertRevision(binding: ComputerBinding, revision: number): void {
+  private assertRevision(binding: ComputerBinding, revision: number, turnRevision: number): void {
+    if (binding.turnRevision !== turnRevision)
+      throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
     if (binding.policyRevision !== revision)
       throw new ComputerControlError({ _tag: "Interrupted", cause: "access-changed" });
   }
@@ -947,7 +956,7 @@ export class ComputerAutomationBrokerRuntime {
       throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
     if (!ctx.policy.computerUse)
       throw new ComputerControlError({ _tag: "Unavailable", reason: "disabled" });
-    if (ctx.turnId === "observation" || this.endedTurns.has(`${generation}\0${ctx.turnId}`))
+    if (ctx.turnId === "observation" || binding.endedTurnId === ctx.turnId)
       throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
     if (ctx.interactionMode === "plan")
       throw new ComputerControlError({
@@ -967,6 +976,7 @@ export class ComputerAutomationBrokerRuntime {
         _tag: "Execution",
         message: `Background computer control is unavailable (${background.reason ?? "unknown"}).`,
       });
+    const turnRevision = binding.turnRevision;
     binding.turnId = ctx.turnId;
     const resolved = (await this.invoke(threadId, generation, {
       op: "resolveApps",
@@ -995,6 +1005,7 @@ export class ComputerAutomationBrokerRuntime {
       if (!this.access.backgroundApproved(threadId))
         throw new ComputerControlError({ _tag: "NotGranted", needed: "click" });
     }
+    this.assertRevision(binding, binding.policyRevision, turnRevision);
     if (binding.holder?.scope.kind === "takeover" && binding.holder.scope.appId === app.appId)
       return { foreground: true, appId: app.appId, name: app.name };
     const revision = binding.policyRevision;
@@ -1054,7 +1065,8 @@ export class ComputerAutomationBrokerRuntime {
         current?.turnId !== holder.turnId ||
         this.access.version(threadId) !== holder.grantVersion ||
         this.pause.has(threadId) ||
-        this.endedTurns.has(`${generation}\0${holder.turnId}`)
+        binding.endedTurnId === holder.turnId ||
+        binding.turnRevision !== turnRevision
       ) {
         this.host.send({ type: "leaseRelease", requestId: randomUUID(), holder });
         throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
@@ -1081,10 +1093,13 @@ export class ComputerAutomationBrokerRuntime {
     typing = false,
   ): Promise<unknown> {
     const ctx = await this.context(threadId, generation);
+    const binding = this.bindings.get(threadId)!;
+    const turnRevision = binding.turnRevision;
     const apps = (await this.invoke(threadId, generation, {
       op: "resolveApps",
       queries,
     })) as ReadonlyArray<import("@t3tools/contracts").ComputerApp>;
+    this.assertRevision(binding, binding.policyRevision, turnRevision);
     const before = this.access.grants(threadId);
     const resolutions = queries.map((query) => {
       const matches = selectComputerApp(apps, query);
@@ -1203,11 +1218,26 @@ export class ComputerAutomationBrokerRuntime {
     }
     if (turnId && finishAccessTurn) this.access.endTurn(threadId, turnId);
   }
+  /** Pin lifecycle ownership before tool context resolution; retain no completed-turn history. */
+  beginTurn(threadId: string, turnId: string): void {
+    const binding = this.bindings.get(threadId);
+    if (!binding || binding.turnId === turnId || binding.endedTurnId === turnId) return;
+    if (binding.turnId) this.cancelTurn(threadId, binding.generation, binding.turnId, "turn-ended");
+    binding.turnId = turnId;
+    ++binding.turnRevision;
+  }
   endTurn(threadId: string, turnId: string, generation?: string): void {
     const binding = this.bindings.get(threadId);
-    if (!binding || (generation && binding.generation !== generation)) return;
-    this.endedTurns.add(`${binding.generation}\0${turnId}`);
-    // A wait reserves its slot before asynchronous context resolution pins the turn.
+    if (
+      !binding ||
+      (generation && binding.generation !== generation) ||
+      (binding.turnId && binding.turnId !== turnId) ||
+      binding.endedTurnId === turnId
+    )
+      return;
+    binding.endedTurnId = turnId;
+    ++binding.turnRevision;
+    // Startup waiters are pinned to the lifecycle turn before resolving context.
     const waiter = this.waits.get(threadId);
     if (waiter?.generation === binding.generation && (!waiter.turnId || waiter.turnId === turnId))
       waiter.cancel("turn-ended");
@@ -1250,8 +1280,6 @@ export class ComputerAutomationBrokerRuntime {
     this.invalidateObservations(threadId);
     this.bindings.delete(threadId);
     this.observationEpochs.delete(threadId);
-    for (const key of this.endedTurns)
-      if (key.startsWith(`${generation}\0`)) this.endedTurns.delete(key);
   }
   async refreshPolicies(): Promise<void> {
     for (const [threadId, binding] of this.bindings) {
@@ -1345,6 +1373,9 @@ export class ComputerAutomationBrokerRuntime {
       cancel: (cause: "paused" | "turn-ended" | "policy-changed") => void;
     } = {
       generation,
+      ...(this.bindings.get(threadId)?.turnId
+        ? { turnId: this.bindings.get(threadId)!.turnId! }
+        : {}),
       cancel: (cause: "paused" | "turn-ended" | "policy-changed") =>
         abort(new ComputerControlError({ _tag: "Interrupted", cause })),
     };
@@ -1363,7 +1394,7 @@ export class ComputerAutomationBrokerRuntime {
         !binding ||
         binding.generation !== generation ||
         ctx.turnId === "observation" ||
-        this.endedTurns.has(`${generation}\0${ctx.turnId}`)
+        binding.endedTurnId === ctx.turnId
       )
         throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
       binding.turnId = ctx.turnId;
@@ -1376,7 +1407,7 @@ export class ComputerAutomationBrokerRuntime {
         if (
           this.bindings.get(threadId) !== binding ||
           binding.turnId !== ctx.turnId ||
-          this.endedTurns.has(`${generation}\0${ctx.turnId}`)
+          binding.endedTurnId === ctx.turnId
         )
           throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
         if (binding.policyRevision !== revision || this.access.version(threadId) !== grants)
@@ -1386,7 +1417,7 @@ export class ComputerAutomationBrokerRuntime {
         if (
           this.bindings.get(threadId) !== binding ||
           binding.turnId !== ctx.turnId ||
-          this.endedTurns.has(`${generation}\0${ctx.turnId}`)
+          binding.endedTurnId === ctx.turnId
         )
           throw new ComputerControlError({ _tag: "Interrupted", cause: "turn-ended" });
         if (live.turnId !== ctx.turnId)

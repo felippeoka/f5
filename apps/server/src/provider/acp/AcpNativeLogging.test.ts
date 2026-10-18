@@ -103,6 +103,9 @@ it("retains protocol error codes and human diagnostics beginning with brackets",
     redactAcpLogPayload(
       { message: "[auth] sign in: secret", error: { code: -32000, message: "secret" } },
       scrubber,
+      0,
+      false,
+      true,
     ),
   ).toEqual({
     message: "[auth] sign in: [redacted]",
@@ -144,4 +147,27 @@ it("redacts once per native log sink and retains failures as failures", async ()
     failure: { code: -32000, message: "Usage limit" },
   });
   expect(logged.event.payload).not.toHaveProperty("result");
+});
+
+it("preserves non-computer error details while always scrubbing credentials and MCP config", () => {
+  const scrubber = new AcpCredentialScrubber();
+  scrubber.register("issued-credential");
+  const payload = {
+    error: {
+      code: -32000,
+      message: "Authentication required: issued-credential",
+      data: { mcpServers: { f5: { headers: { Authorization: "issued-credential" } } } },
+    },
+    cause: "Sign in again",
+  };
+  const safe = redactAcpLogPayload(payload, scrubber);
+  expect(safe).toMatchObject({
+    error: { code: -32000, message: "Authentication required: [redacted]" },
+    cause: "Sign in again",
+  });
+  expect(JSON.stringify(safe)).not.toContain("issued-credential");
+  expect(redactAcpLogPayload(payload, scrubber, 0, false, true)).toMatchObject({
+    error: { code: -32000, message: "ACP_REQUEST_FAILED" },
+    cause: { message: "ACP_REQUEST_FAILED" },
+  });
 });

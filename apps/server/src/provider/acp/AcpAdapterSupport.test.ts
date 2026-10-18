@@ -31,9 +31,22 @@ it("bounds setup errors but preserves scrubbed runtime diagnostics", () => {
   const error = EffectAcpErrors.AcpRequestError.authRequired("Usage limit: secret");
   const scrub = (value: string) => value.replaceAll("secret", "[redacted]");
   expect(
-    mapAcpToAdapterError("cursor", "t" as never, "session/new", error, scrub).message,
+    mapAcpToAdapterError("cursor", "t" as never, "session/new", error, scrub, true).message,
   ).toContain("ACP_REQUEST_FAILED (-32000)");
   expect(
     mapAcpToAdapterError("cursor", "t" as never, "session/prompt", error, scrub).message,
   ).toContain("Usage limit: [redacted]");
+});
+
+it("keeps non-catalog setup failures readable with a scrubbed diagnostic cause", () => {
+  const error = EffectAcpErrors.AcpRequestError.authRequired("Authentication required: secret");
+  const mapped = mapAcpToAdapterError("cursor", "t" as never, "session/new", error, (value) =>
+    value.replaceAll("secret", "[redacted]"),
+  );
+  expect(mapped.message).toContain("Authentication required: [redacted]");
+  expect(mapped.cause).toMatchObject({
+    code: -32000,
+    message: "Authentication required: [redacted]",
+  });
+  expect(JSON.stringify(mapped)).not.toContain("secret");
 });

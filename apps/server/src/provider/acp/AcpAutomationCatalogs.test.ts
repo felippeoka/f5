@@ -202,3 +202,28 @@ it("installs no preview catalog before harness verification", async () => {
     await Effect.runPromise(Scope.close(scope, Exit.void));
   }
 });
+
+it.each([
+  [{ readOnlyWorkflow: true, ordinarySession: true }, "read-only workflows"],
+  [{ readOnlyWorkflow: false, ordinarySession: false }, "ordinary F5 desktop session"],
+])("reports ineligible verified sessions accurately (%s)", async (eligibility, reason) => {
+  const scope = await Effect.runPromise(Scope.make());
+  const createSessionConfig = vi.fn();
+  try {
+    const catalogs = await Effect.runPromise(
+      prepareAcpAutomationCatalogs({
+        threadId,
+        provider: "cursor",
+        scope,
+        ...eligibility,
+        verification: { computer: true },
+        preview: { createSessionConfig } as never,
+      }),
+    );
+    expect(catalogs.mcpServers(init)).toEqual([]);
+    expect(createSessionConfig).not.toHaveBeenCalled();
+    expect(JSON.stringify(catalogs.agentBrowser())).toContain(reason);
+  } finally {
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  }
+});

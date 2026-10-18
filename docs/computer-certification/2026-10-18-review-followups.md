@@ -97,3 +97,37 @@ Schema `instanceof` diagnostic. Both were corrected; the final full typecheck pa
 Local final logs use `/tmp/f5-review-`: `typecheck-pass.log`, `lint-final.log`,
 `workspace.log`, `integration-final.log`, `git-extended.log`, `browser.log`,
 `focused-final.log` and `last-regressions.log`.
+
+## PR #162 comment follow-up
+
+The next review found production regressions beyond the earlier fixes. Setup masking is
+now conditional on an installed private catalog or computer-capable lineage; ordinary
+ACP sessions retain readable, credential-scrubbed details and diagnostic causes. Log
+error/cause masking is likewise restricted to computer-capable sessions, while structural
+MCP credential redaction and malformed-frame suppression stay universal.
+
+Observation invalidation no longer clears pending invocation admission. A held mutation's
+retry joins its result, and action invalidation preserves app resolutions. Connection
+replacement and scope disposal invalidate admission explicitly. Screenshot-less actions
+still invalidate coordinate evidence, now documented in model guidance.
+
+The live-card controls wrap with both histories visible at 320 px. Cursor retains its full
+configuration snapshot, including session slash commands, during catalog-status refreshes.
+Lifecycle turn starts pin wait ownership; turn revisions reject work spanning transitions,
+and only the latest ended turn is retained per binding. Expired requests stop raising
+attention or blocking the inbox without deleting unsettled history. Ineligible ACP
+sessions and non-Claude/non-Mac Chrome checks report accurate reasons.
+
+Two requested behavior changes are intentionally declined: a failed trailing capture keeps
+`computer_wait`'s `isError` result and its wait metadata, as explicitly specified in the
+approved plan; remote consent attention remains available while only the host can grant
+access. The broader PR scope and selective docstrings are retained; no certification gate
+is opened by these fixes.
+
+Validation for these PR-comment corrections: `bun fmt`, `bun lint` (28 warnings,
+zero errors), and all eight `bun typecheck` packages passed. The focused server run
+passed 301 tests across 15 files; Chromium passed 22 tests, web units passed 24,
+and the exhaustive real-Git matrix passed all 140. `bun run test:full` was repeated
+under `env -i HOME="$HOME" PATH="$PATH"` and stopped at the same two baseline
+`upstream-port-migration.test.ts` recovery failures before reaching its Git stage;
+the exhaustive matrix was therefore run separately. Logs are in `/tmp/f5-pr162-*`.

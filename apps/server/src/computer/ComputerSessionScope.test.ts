@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { computerHostFixture } from "../../integration/computer/hostFixture";
 import { createComputerSessionScope } from "./ComputerSessionScope";
 
@@ -49,4 +49,68 @@ describe("shared computer session scope", () => {
       fixture.broker.close();
     }
   });
+});
+
+it("joins a mutation retry after its own invalidation and preserves resolved apps", async () => {
+  const fixture = await computerHostFixture();
+  let release!: () => void;
+  let admitted!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    admitted = resolve;
+  });
+  const scope = createComputerSessionScope({
+    broker: fixture.broker,
+    threadId: "scope-thread",
+    provider: "codex",
+    serverName: "retry-scope",
+  });
+  const original = fixture.broker.host.request.bind(fixture.broker.host);
+  const spy = vi.spyOn(fixture.broker.host, "request").mockImplementation(async (request) => {
+    const result = await original(request);
+    if (request.op === "click") {
+      admitted();
+      await held;
+    }
+    return result;
+  });
+  try {
+    await scope.call("computer_request_access", {
+      apps: ["F5 transport test app"],
+      reason: "Protocol integration",
+    });
+    await scope.call("computer_screenshot", {});
+    const input = { x: 0, y: 0 };
+    const first = scope.call("computer_click", input, "one-invocation");
+    await Promise.race([
+      started,
+      first.then((result) => {
+        throw new Error(JSON.stringify(result));
+      }),
+    ]);
+    const retry = scope.call("computer_click", input, "one-invocation");
+    release();
+    const [result, duplicate] = await Promise.all([first, retry]);
+    expect(result.isError).toBeFalsy();
+    expect(duplicate).toEqual(result);
+    expect(fixture.seen.filter((request) => request.op === "click")).toHaveLength(1);
+    spy.mockRestore();
+    const next = await scope.call("computer_click", input, "next-invocation");
+    expect(next.isError).toBeFalsy();
+    expect(
+      (await scope.call("computer_type", { app: "F5 transport test app", text: "first" })).isError,
+    ).toBeFalsy();
+    expect(
+      (await scope.call("computer_type", { app: "F5 transport test app", text: "second" })).isError,
+    ).toBeFalsy();
+    // One resolution for access, one for the first named call; none after action invalidation.
+    expect(fixture.seen.filter((request) => request.op === "resolveApps")).toHaveLength(2);
+  } finally {
+    release();
+    spy.mockRestore();
+    scope.dispose();
+    fixture.broker.close();
+  }
 });
