@@ -13,8 +13,8 @@ describe("composeNativeWindowTitle", () => {
   });
 
   it("falls back to the app name for an empty page title", () => {
-    expect(composeNativeWindowTitle({ pageTitle: " ", appName: "F5 (Alpha)", profile: work })).toBe(
-      "F5 (Alpha) · Work",
+    expect(composeNativeWindowTitle({ pageTitle: " ", appName: "F5 (Dev)", profile: work })).toBe(
+      "F5 (Dev) · Work",
     );
   });
 
