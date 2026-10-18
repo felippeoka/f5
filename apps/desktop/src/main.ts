@@ -119,7 +119,7 @@ import {
   normalizePreviewUrl,
   validatePreviewHostPatterns,
 } from "@t3tools/shared/preview";
-import { killProcessTree } from "@t3tools/shared/processTree";
+import { killProcessTreeAsync } from "@t3tools/shared/processTree";
 import { buildDesktopBackendEnv, resolveDesktopStateDirConfig } from "./backendEnv";
 import {
   authorizeDesktopBackendRequestHeaders,
@@ -3059,10 +3059,10 @@ function stopBackend(runtime: BackendRuntime = defaultBackend): void {
   if (!child) return;
 
   if (child.exitCode === null && child.signalCode === null) {
-    killProcessTree(child, { isGroupLeader: false, graceful: true });
+    void killProcessTreeAsync(child, { isGroupLeader: false, graceful: true });
     setTimeout(() => {
       if (child.exitCode === null && child.signalCode === null) {
-        killProcessTree(child, { isGroupLeader: false, graceful: false });
+        void killProcessTreeAsync(child, { isGroupLeader: false, graceful: false });
       }
     }, 2_000).unref();
   }
@@ -3110,13 +3110,19 @@ async function stopBackendAndWaitForExit(
     }
 
     backendChild.once("exit", onExit);
-    writeDesktopLogHeader(`backend stop: killing process tree pid=${backendChild.pid}`);
-    const killed = killProcessTree(backendChild, { isGroupLeader: false, graceful: true });
-    writeDesktopLogHeader(`backend stop: kill returned ${JSON.stringify(killed)}`);
+    // Asynchronous: a blocking taskkill once froze the main thread during update installs.
+    void killProcessTreeAsync(backendChild, { isGroupLeader: false, graceful: true }).then(
+      (result) => {
+        if (!result.terminated || result.usedFallback)
+          writeDesktopLogHeader(
+            `backend stop: process tree kill pid=${backendChild.pid} ${JSON.stringify(result)}`,
+          );
+      },
+    );
 
     forceKillTimer = setTimeout(() => {
       if (backendChild.exitCode === null && backendChild.signalCode === null) {
-        killProcessTree(backendChild, { isGroupLeader: false, graceful: false });
+        void killProcessTreeAsync(backendChild, { isGroupLeader: false, graceful: false });
       }
     }, 2_000);
     forceKillTimer.unref();
