@@ -454,25 +454,30 @@ export function createWsNativeApi(): NativeApi {
     }
   });
 
+  const requestMethod =
+    <Input, Result>(method: string) =>
+    (input: Input): Promise<Result> =>
+      transport.request(method, input);
+
   const api: NativeApi = {
     profiles: {
       githubLoginStart: () => transport.request(WS_METHODS.githubLoginStart, {}),
-      githubLoginStatus: (input) => transport.request(WS_METHODS.githubLoginStatus, input),
-      githubLoginCancel: (input) => transport.request(WS_METHODS.githubLoginCancel, input),
-      githubSet: (input) => transport.request(WS_METHODS.githubAccountSet, input),
-      githubRemove: (input) => transport.request(WS_METHODS.githubAccountRemove, input),
-      githubStatus: (input) => transport.request(WS_METHODS.githubAccountStatus, input),
+      githubLoginStatus: requestMethod(WS_METHODS.githubLoginStatus),
+      githubLoginCancel: requestMethod(WS_METHODS.githubLoginCancel),
+      githubSet: requestMethod(WS_METHODS.githubAccountSet),
+      githubRemove: requestMethod(WS_METHODS.githubAccountRemove),
+      githubStatus: requestMethod(WS_METHODS.githubAccountStatus),
       githubCliCandidates: () => transport.request(WS_METHODS.githubAccountCliCandidates, {}),
-      githubCliImport: (input) => transport.request(WS_METHODS.githubAccountCliImport, input),
+      githubCliImport: requestMethod(WS_METHODS.githubAccountCliImport),
       list: () => transport.request(WS_METHODS.profilesList),
-      create: (input) => transport.request(WS_METHODS.profilesCreate, input),
-      update: (input) => transport.request(WS_METHODS.profilesUpdate, input),
-      remove: (input) => transport.request(WS_METHODS.profilesDelete, input),
-      loginStart: (input) => transport.request(WS_METHODS.providerAccountLoginStart, input),
-      input: (input) => transport.request(WS_METHODS.providerAccountInput, input),
-      cancel: (input) => transport.request(WS_METHODS.providerAccountCancel, input),
-      logout: (input) => transport.request(WS_METHODS.providerAccountLogout, input),
-      accountStatus: (input) => transport.request(WS_METHODS.providerAccountStatus, input),
+      create: requestMethod(WS_METHODS.profilesCreate),
+      update: requestMethod(WS_METHODS.profilesUpdate),
+      remove: requestMethod(WS_METHODS.profilesDelete),
+      loginStart: requestMethod(WS_METHODS.providerAccountLoginStart),
+      input: requestMethod(WS_METHODS.providerAccountInput),
+      cancel: requestMethod(WS_METHODS.providerAccountCancel),
+      logout: requestMethod(WS_METHODS.providerAccountLogout),
+      accountStatus: requestMethod(WS_METHODS.providerAccountStatus),
     },
     dialogs: {
       pickFolder: async () => {
@@ -487,13 +492,13 @@ export function createWsNativeApi(): NativeApi {
       },
     },
     terminal: {
-      snapshot: (input) => transport.request(WS_METHODS.terminalSnapshot, input),
-      open: (input) => transport.request(WS_METHODS.terminalOpen, input),
-      write: (input) => transport.request(WS_METHODS.terminalWrite, input),
-      resize: (input) => transport.request(WS_METHODS.terminalResize, input),
-      clear: (input) => transport.request(WS_METHODS.terminalClear, input),
-      restart: (input) => transport.request(WS_METHODS.terminalRestart, input),
-      close: (input) => transport.request(WS_METHODS.terminalClose, input),
+      snapshot: requestMethod(WS_METHODS.terminalSnapshot),
+      open: requestMethod(WS_METHODS.terminalOpen),
+      write: requestMethod(WS_METHODS.terminalWrite),
+      resize: requestMethod(WS_METHODS.terminalResize),
+      clear: requestMethod(WS_METHODS.terminalClear),
+      restart: requestMethod(WS_METHODS.terminalRestart),
+      close: requestMethod(WS_METHODS.terminalClose),
       onEvent: (callback) =>
         transport.subscribe(WS_CHANNELS.terminalEvent, (message) => callback(message.data)),
     },
@@ -510,8 +515,8 @@ export function createWsNativeApi(): NativeApi {
     },
     computer: {
       access: {
-        revoke: (input) => transport.request(WS_METHODS.computerAccessRevoke, input),
-        list: (input) => transport.request(WS_METHODS.computerAccessList, input),
+        revoke: requestMethod(WS_METHODS.computerAccessRevoke),
+        list: requestMethod(WS_METHODS.computerAccessList),
         listRemembered: (input) =>
           transport.request(WS_METHODS.computerAccessListRemembered, input),
         forgetRemembered: (input) =>
@@ -541,27 +546,27 @@ export function createWsNativeApi(): NativeApi {
         ),
     },
     preview: {
-      open: (input) => transport.request(WS_METHODS.previewOpen, input),
-      navigate: (input) => transport.request(WS_METHODS.previewNavigate, input),
-      reportStatus: (input) => transport.request(WS_METHODS.previewReportStatus, input),
+      open: requestMethod(WS_METHODS.previewOpen),
+      navigate: requestMethod(WS_METHODS.previewNavigate),
+      reportStatus: requestMethod(WS_METHODS.previewReportStatus),
       reportRecordingMetrics: (input) =>
         transport.request(WS_METHODS.previewReportRecordingMetrics, input),
-      refresh: (input) => transport.request(WS_METHODS.previewRefresh, input),
-      close: (input) => transport.request(WS_METHODS.previewClose, input),
-      list: (input) => transport.request(WS_METHODS.previewList, input),
+      refresh: requestMethod(WS_METHODS.previewRefresh),
+      close: requestMethod(WS_METHODS.previewClose),
+      list: requestMethod(WS_METHODS.previewList),
       listLocalServers: (input = {}) =>
         transport.request(WS_METHODS.previewListLocalServers, input),
       automation: {
         respond: (response) => transport.request(WS_METHODS.previewAutomationRespond, response),
         reportOwner: (owner) => transport.request(WS_METHODS.previewAutomationReportOwner, owner),
-        clearOwner: (input) => transport.request(WS_METHODS.previewAutomationClearOwner, input),
+        clearOwner: requestMethod(WS_METHODS.previewAutomationClearOwner),
         onRequest: (callback) => {
           previewAutomationRequestListeners.add(callback);
           return () => {
             previewAutomationRequestListeners.delete(callback);
           };
         },
-        setPaused: (input) => transport.request(WS_METHODS.previewAutomationSetPaused, input),
+        setPaused: requestMethod(WS_METHODS.previewAutomationSetPaused),
         onOwnerRequested: (callback) =>
           transport.subscribe(WS_CHANNELS.previewAutomationOwnerRequested, (message) =>
             callback(message.data),
@@ -593,45 +598,45 @@ export function createWsNativeApi(): NativeApi {
       },
     },
     attachments: {
-      getUploads: (input) => transport.request(WS_METHODS.attachmentsGetUploads, input),
-      releaseUploads: (input) => transport.request(WS_METHODS.attachmentsReleaseUploads, input),
-      cloneToUpload: (input) => transport.request(WS_METHODS.attachmentsCloneToUpload, input),
+      getUploads: requestMethod(WS_METHODS.attachmentsGetUploads),
+      releaseUploads: requestMethod(WS_METHODS.attachmentsReleaseUploads),
+      cloneToUpload: requestMethod(WS_METHODS.attachmentsCloneToUpload),
     },
     projects: {
-      clone: (input) => transport.request(WS_METHODS.projectsClone, input),
+      clone: requestMethod(WS_METHODS.projectsClone),
       cloneList: async () =>
         Schema.decodeUnknownSync(Schema.Array(ProjectCloneJob))(
           await transport.request(WS_METHODS.projectsCloneList, {}),
         ),
-      cloneCancel: (input) => transport.request(WS_METHODS.projectsCloneCancel, input),
+      cloneCancel: requestMethod(WS_METHODS.projectsCloneCancel),
       getCheckedInConfig: (input) =>
         transport.request(WS_METHODS.projectsGetCheckedInConfig, input),
-      authorizeEntry: (input) => transport.request(WS_METHODS.projectsAuthorizeEntry, input),
-      listDirectory: (input) => transport.request(WS_METHODS.projectsListDirectory, input),
-      listEntries: (input) => transport.request(WS_METHODS.projectsListEntries, input),
-      searchEntries: (input) => transport.request(WS_METHODS.projectsSearchEntries, input),
-      searchContents: (input) => transport.request(WS_METHODS.projectsSearchContents, input),
+      authorizeEntry: requestMethod(WS_METHODS.projectsAuthorizeEntry),
+      listDirectory: requestMethod(WS_METHODS.projectsListDirectory),
+      listEntries: requestMethod(WS_METHODS.projectsListEntries),
+      searchEntries: requestMethod(WS_METHODS.projectsSearchEntries),
+      searchContents: requestMethod(WS_METHODS.projectsSearchContents),
       cancelContentSearch: (input) =>
         transport.request(WS_METHODS.projectsCancelContentSearch, input),
-      writeFile: (input) => transport.request(WS_METHODS.projectsWriteFile, input),
-      readFile: (input) => transport.request(WS_METHODS.projectsReadFile, input),
-      setWatchedPaths: (input) => transport.request(WS_METHODS.projectsSetWatchedPaths, input),
+      writeFile: requestMethod(WS_METHODS.projectsWriteFile),
+      readFile: requestMethod(WS_METHODS.projectsReadFile),
+      setWatchedPaths: requestMethod(WS_METHODS.projectsSetWatchedPaths),
       onWatchedPathsChanged: (callback) => {
         watchedPathsChangedListeners.add(callback);
         return () => {
           watchedPathsChangedListeners.delete(callback);
         };
       },
-      openHtmlPreview: (input) => transport.request(WS_METHODS.projectsOpenHtmlPreview, input),
-      issueAssetUrl: (input) => transport.request(WS_METHODS.projectsIssueAssetUrl, input),
+      openHtmlPreview: requestMethod(WS_METHODS.projectsOpenHtmlPreview),
+      issueAssetUrl: requestMethod(WS_METHODS.projectsIssueAssetUrl),
     },
     filesystem: {
-      browse: (input) => transport.request(WS_METHODS.filesystemBrowse, input),
+      browse: requestMethod(WS_METHODS.filesystemBrowse),
     },
     shell: {
       openInEditor: (cwd, editor) =>
         transport.request(WS_METHODS.shellOpenInEditor, { cwd, editor }),
-      revealInFileManager: (input) => transport.request(WS_METHODS.shellRevealInFileManager, input),
+      revealInFileManager: requestMethod(WS_METHODS.shellRevealInFileManager),
       openExternal: async (url) => {
         if (window.desktopBridge) {
           const opened = await window.desktopBridge.openExternal(url);
@@ -647,19 +652,19 @@ export function createWsNativeApi(): NativeApi {
       },
     },
     git: {
-      pull: (input) => transport.request(WS_METHODS.gitPull, input),
-      status: (input) => transport.request(WS_METHODS.gitStatus, input),
+      pull: requestMethod(WS_METHODS.gitPull),
+      status: requestMethod(WS_METHODS.gitStatus),
       runStackedAction: (input) =>
         transport.request(WS_METHODS.gitRunStackedAction, input, { timeoutMs: null }),
-      listBranches: (input) => transport.request(WS_METHODS.gitListBranches, input),
-      createWorktree: (input) => transport.request(WS_METHODS.gitCreateWorktree, input),
+      listBranches: requestMethod(WS_METHODS.gitListBranches),
+      createWorktree: requestMethod(WS_METHODS.gitCreateWorktree),
       prepareWorktree: (input) =>
         transport.request(WS_METHODS.gitPrepareWorktree, input, { timeoutMs: null }),
-      removeWorktree: (input) => transport.request(WS_METHODS.gitRemoveWorktree, input),
-      createBranch: (input) => transport.request(WS_METHODS.gitCreateBranch, input),
-      checkout: (input) => transport.request(WS_METHODS.gitCheckout, input),
-      init: (input) => transport.request(WS_METHODS.gitInit, input),
-      resolvePullRequest: (input) => transport.request(WS_METHODS.gitResolvePullRequest, input),
+      removeWorktree: requestMethod(WS_METHODS.gitRemoveWorktree),
+      createBranch: requestMethod(WS_METHODS.gitCreateBranch),
+      checkout: requestMethod(WS_METHODS.gitCheckout),
+      init: requestMethod(WS_METHODS.gitInit),
+      resolvePullRequest: requestMethod(WS_METHODS.gitResolvePullRequest),
       preparePullRequestThread: (input) =>
         transport.request(WS_METHODS.gitPreparePullRequestThread, input),
       onActionProgress: (callback) => {
@@ -676,7 +681,7 @@ export function createWsNativeApi(): NativeApi {
       },
     },
     review: {
-      previewDiff: (input) => transport.request(WS_METHODS.reviewPreviewDiff, input),
+      previewDiff: requestMethod(WS_METHODS.reviewPreviewDiff),
     },
     contextMenu: {
       show: async <T extends string>(
@@ -697,10 +702,10 @@ export function createWsNativeApi(): NativeApi {
       undoClaudeTranscriptRepair: (input) =>
         transport.request(WS_METHODS.serverUndoClaudeTranscriptRepair, input),
       getConfig: () => transport.request(WS_METHODS.serverGetConfig),
-      getProjectSettings: (input) => transport.request(WS_METHODS.serverGetProjectSettings, input),
+      getProjectSettings: requestMethod(WS_METHODS.serverGetProjectSettings),
       migrateClientSetting: (input) =>
         transport.request(WS_METHODS.serverMigrateClientSetting, input),
-      updateSettings: (input) => transport.request(WS_METHODS.serverUpdateSettings, input),
+      updateSettings: requestMethod(WS_METHODS.serverUpdateSettings),
       refreshProviders: (input = {}) => transport.request(WS_METHODS.serverRefreshProviders, input),
       checkProviderUpdates: (input = {}) =>
         transport.request(WS_METHODS.serverCheckProviderUpdates, input),
@@ -708,23 +713,27 @@ export function createWsNativeApi(): NativeApi {
         transport.request(WS_METHODS.serverRunProviderUpdate, input, { timeoutMs: 660_000 }),
       getProviderInventory: (input) =>
         transport.request(WS_METHODS.serverGetProviderInventory, input),
-      validateHarnesses: (input) => transport.request(WS_METHODS.serverValidateHarnesses, input),
-      upsertKeybinding: (input) => transport.request(WS_METHODS.serverUpsertKeybinding, input),
-      addKeybinding: (input) => transport.request(WS_METHODS.serverAddKeybinding, input),
-      updateKeybinding: (input) => transport.request(WS_METHODS.serverUpdateKeybinding, input),
-      removeKeybinding: (input) => transport.request(WS_METHODS.serverRemoveKeybinding, input),
+      validateHarnesses: requestMethod(WS_METHODS.serverValidateHarnesses),
+      upsertKeybinding: requestMethod(WS_METHODS.serverUpsertKeybinding),
+      addKeybinding: requestMethod(WS_METHODS.serverAddKeybinding),
+      updateKeybinding: requestMethod(WS_METHODS.serverUpdateKeybinding),
+      removeKeybinding: requestMethod(WS_METHODS.serverRemoveKeybinding),
       resetKeybindings: (input = {}) => transport.request(WS_METHODS.serverResetKeybindings, input),
     },
     mcp: {
-      getCommonConfig: (input) => transport.request(WS_METHODS.mcpGetCommonConfig, input),
-      getProjectConfig: (input) => transport.request(WS_METHODS.mcpGetProjectConfig, input),
-      replaceCommonConfig: (input) => transport.request(WS_METHODS.mcpReplaceCommonConfig, input),
-      replaceProjectConfig: (input) => transport.request(WS_METHODS.mcpReplaceProjectConfig, input),
-      getEffectiveConfig: (input) => transport.request(WS_METHODS.mcpGetEffectiveConfig, input),
-      getProviderStatus: (input) => transport.request(WS_METHODS.mcpGetProviderStatus, input),
-      getServerStatuses: (input) => transport.request(WS_METHODS.mcpGetServerStatuses, input),
-      inspectServer: (input) => transport.request(WS_METHODS.mcpInspectServer, input),
-      reconnectServer: (input) => transport.request(WS_METHODS.mcpReconnectServer, input),
+      getCommonConfig: requestMethod(WS_METHODS.mcpGetCommonConfig),
+      getProjectConfig: requestMethod(WS_METHODS.mcpGetProjectConfig),
+      replaceCommonConfig: requestMethod(WS_METHODS.mcpReplaceCommonConfig),
+      replaceProjectConfig: requestMethod(WS_METHODS.mcpReplaceProjectConfig),
+      getEffectiveConfig: requestMethod(WS_METHODS.mcpGetEffectiveConfig),
+      getProviderStatus: requestMethod(WS_METHODS.mcpGetProviderStatus),
+      getServerStatuses: requestMethod(WS_METHODS.mcpGetServerStatuses),
+      listImportCandidates: requestMethod(WS_METHODS.mcpListImportCandidates),
+      probeServer: (input) =>
+        transport.request(WS_METHODS.mcpProbeServer, input, { timeoutMs: 75_000 }),
+      storeSecret: requestMethod(WS_METHODS.mcpStoreSecret),
+      inspectServer: requestMethod(WS_METHODS.mcpInspectServer),
+      reconnectServer: requestMethod(WS_METHODS.mcpReconnectServer),
       startLogin: (input) =>
         transport.request(
           WS_METHODS.mcpStartLogin,
@@ -733,15 +742,15 @@ export function createWsNativeApi(): NativeApi {
             ? { timeoutMs: CODEX_MCP_OAUTH_LOGIN_REQUEST_TIMEOUT_MS }
             : undefined,
         ),
-      getLoginStatus: (input) => transport.request(WS_METHODS.mcpGetLoginStatus, input),
-      getCodexStatus: (input) => transport.request(WS_METHODS.mcpGetCodexStatus, input),
-      reloadProject: (input) => transport.request(WS_METHODS.mcpReloadProject, input),
-      applyToLiveSessions: (input) => transport.request(WS_METHODS.mcpApplyToLiveSessions, input),
+      getLoginStatus: requestMethod(WS_METHODS.mcpGetLoginStatus),
+      getCodexStatus: requestMethod(WS_METHODS.mcpGetCodexStatus),
+      reloadProject: requestMethod(WS_METHODS.mcpReloadProject),
+      applyToLiveSessions: requestMethod(WS_METHODS.mcpApplyToLiveSessions),
       startOAuthLogin: (input) =>
         transport.request(WS_METHODS.mcpStartOAuthLogin, input, {
           timeoutMs: CODEX_MCP_OAUTH_LOGIN_REQUEST_TIMEOUT_MS,
         }),
-      getOAuthStatus: (input) => transport.request(WS_METHODS.mcpGetOAuthStatus, input),
+      getOAuthStatus: requestMethod(WS_METHODS.mcpGetOAuthStatus),
       onStatusUpdated: (callback) => {
         mcpStatusUpdatedListeners.add(callback);
         return () => {
@@ -752,7 +761,7 @@ export function createWsNativeApi(): NativeApi {
     storage: {
       getUsage: (input = {}) => transport.request(WS_METHODS.storageGetUsage, input),
       cleanup: (input) => transport.request(WS_METHODS.storageCleanup, input, { timeoutMs: null }),
-      cancelCleanup: (input) => transport.request(WS_METHODS.storageCancelCleanup, input),
+      cancelCleanup: requestMethod(WS_METHODS.storageCancelCleanup),
       automationDryRun: () => transport.request(WS_METHODS.storageAutomationDryRun, {}),
       automationAudit: (input = {}) => transport.request(WS_METHODS.storageAutomationAudit, input),
       onInvalidated: (callback) => {
@@ -771,22 +780,22 @@ export function createWsNativeApi(): NativeApi {
       onDiskSpaceUpdated: (callback) => onStorageDiskSpaceUpdated(callback),
     },
     worktrees: {
-      switchWorkspace: (input) => transport.request(WS_METHODS.worktreesSwitchWorkspace, input),
-      getTransition: (input) => transport.request(WS_METHODS.worktreesGetTransition, input),
+      switchWorkspace: requestMethod(WS_METHODS.worktreesSwitchWorkspace),
+      getTransition: requestMethod(WS_METHODS.worktreesGetTransition),
       previewTransitionRecovery: (input) =>
         transport.request(WS_METHODS.worktreesPreviewTransitionRecovery, input),
-      resolveTransition: (input) => transport.request(WS_METHODS.worktreesResolveTransition, input),
+      resolveTransition: requestMethod(WS_METHODS.worktreesResolveTransition),
 
-      inspect: (input) => transport.request(WS_METHODS.worktreesInspect, input),
-      remove: (input) => transport.request(WS_METHODS.worktreesRemove, input),
-      threadState: (input) => transport.request(WS_METHODS.worktreesThreadState, input),
-      recover: (input) => transport.request(WS_METHODS.worktreesRecover, input),
+      inspect: requestMethod(WS_METHODS.worktreesInspect),
+      remove: requestMethod(WS_METHODS.worktreesRemove),
+      threadState: requestMethod(WS_METHODS.worktreesThreadState),
+      recover: requestMethod(WS_METHODS.worktreesRecover),
     },
     worktreeSetup: {
-      subscribe: (input) => transport.request(WS_METHODS.worktreeSetupSubscribe, input),
-      cancel: (input) => transport.request(WS_METHODS.worktreeSetupCancel, input),
-      retry: (input) => transport.request(WS_METHODS.worktreeSetupRetry, input),
-      workLocally: (input) => transport.request(WS_METHODS.worktreeSetupWorkLocally, input),
+      subscribe: requestMethod(WS_METHODS.worktreeSetupSubscribe),
+      cancel: requestMethod(WS_METHODS.worktreeSetupCancel),
+      retry: requestMethod(WS_METHODS.worktreeSetupRetry),
+      workLocally: requestMethod(WS_METHODS.worktreeSetupWorkLocally),
       onUpdated: (callback) => {
         worktreeSetupUpdatedListeners.add(callback);
         return () => {
@@ -795,29 +804,29 @@ export function createWsNativeApi(): NativeApi {
       },
     },
     nextTurnQueue: {
-      list: (input) => transport.request(WS_METHODS.nextTurnQueueList, input),
-      submit: (input) => transport.request(WS_METHODS.nextTurnQueueSubmit, input),
+      list: requestMethod(WS_METHODS.nextTurnQueueList),
+      submit: requestMethod(WS_METHODS.nextTurnQueueSubmit),
       summary: () => transport.request(WS_METHODS.nextTurnQueueSummary),
-      update: (input) => transport.request(WS_METHODS.nextTurnQueueUpdate, input),
-      cancel: (input) => transport.request(WS_METHODS.nextTurnQueueCancel, input),
-      reorder: (input) => transport.request(WS_METHODS.nextTurnQueueReorder, input),
-      retry: (input) => transport.request(WS_METHODS.nextTurnQueueRetry, input),
-      promote: (input) => transport.request(WS_METHODS.nextTurnQueuePromote, input),
-      steer: (input) => transport.request(WS_METHODS.nextTurnQueueSteer, input),
-      setPaused: (input) => transport.request(WS_METHODS.nextTurnQueueSetPaused, input),
+      update: requestMethod(WS_METHODS.nextTurnQueueUpdate),
+      cancel: requestMethod(WS_METHODS.nextTurnQueueCancel),
+      reorder: requestMethod(WS_METHODS.nextTurnQueueReorder),
+      retry: requestMethod(WS_METHODS.nextTurnQueueRetry),
+      promote: requestMethod(WS_METHODS.nextTurnQueuePromote),
+      steer: requestMethod(WS_METHODS.nextTurnQueueSteer),
+      setPaused: requestMethod(WS_METHODS.nextTurnQueueSetPaused),
       scheduleUsageLimitResume: (input) =>
         transport.request(WS_METHODS.nextTurnQueueScheduleUsageLimitResume, input),
       cancelUsageLimitResume: (input) =>
         transport.request(WS_METHODS.nextTurnQueueCancelUsageLimitResume, input),
       refreshUsageLimitResume: (input) =>
         transport.request(WS_METHODS.nextTurnQueueRefreshUsageLimitResume, input),
-      duplicate: (input) => transport.request(WS_METHODS.nextTurnQueueDuplicate, input),
-      refreshGate: (input) => transport.request(WS_METHODS.nextTurnQueueRefreshGate, input),
-      clear: (input) => transport.request(WS_METHODS.nextTurnQueueClear, input),
-      restore: (input) => transport.request(WS_METHODS.nextTurnQueueRestore, input),
-      recheckDelivery: (input) => transport.request(WS_METHODS.nextTurnQueueRecheckDelivery, input),
-      retryDelivery: (input) => transport.request(WS_METHODS.nextTurnQueueRetryDelivery, input),
-      discardDelivery: (input) => transport.request(WS_METHODS.nextTurnQueueDiscardDelivery, input),
+      duplicate: requestMethod(WS_METHODS.nextTurnQueueDuplicate),
+      refreshGate: requestMethod(WS_METHODS.nextTurnQueueRefreshGate),
+      clear: requestMethod(WS_METHODS.nextTurnQueueClear),
+      restore: requestMethod(WS_METHODS.nextTurnQueueRestore),
+      recheckDelivery: requestMethod(WS_METHODS.nextTurnQueueRecheckDelivery),
+      retryDelivery: requestMethod(WS_METHODS.nextTurnQueueRetryDelivery),
+      discardDelivery: requestMethod(WS_METHODS.nextTurnQueueDiscardDelivery),
       onUpdated: (callback) => {
         nextTurnQueueUpdatedListeners.add(callback);
         return () => {
@@ -832,7 +841,7 @@ export function createWsNativeApi(): NativeApi {
       },
     },
     globalSearch: {
-      query: (input) => transport.request(WS_METHODS.globalSearchQuery, input),
+      query: requestMethod(WS_METHODS.globalSearchQuery),
     },
     agentBridge: {
       getState: () => transport.request(AGENT_BRIDGE_WS_METHODS.getState, {}),
@@ -882,8 +891,8 @@ export function createWsNativeApi(): NativeApi {
     },
     workflowPlatform: {
       listTemplates: () => transport.request(WS_METHODS.workflowPlatformListTemplates),
-      createRun: (input) => transport.request(WS_METHODS.workflowPlatformCreateRun, input),
-      inspectRun: (input) => transport.request(WS_METHODS.workflowPlatformInspectRun, input),
+      createRun: requestMethod(WS_METHODS.workflowPlatformCreateRun),
+      inspectRun: requestMethod(WS_METHODS.workflowPlatformInspectRun),
     },
     prHub: {
       listAccounts: () => transport.request(PR_HUB_WS_METHODS.listAccounts, {}),

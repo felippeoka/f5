@@ -27,9 +27,15 @@ export function stableMcpServersJson(servers: McpProjectServersConfig): string {
 export function mergeMcpServerLayers(input: {
   readonly common?: McpProjectServersConfig | null;
   readonly project?: McpProjectServersConfig | null;
+  readonly disabledCommon?: ReadonlyArray<string> | undefined;
 }): McpProjectServersConfig {
   return {
-    ...input.common,
+    ...Object.fromEntries(
+      Object.entries(input.common ?? {}).map(([name, server]) => [
+        name,
+        input.disabledCommon?.includes(name) ? { ...server, enabled: false } : server,
+      ]),
+    ),
     ...input.project,
   };
 }

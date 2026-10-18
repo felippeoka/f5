@@ -1,3 +1,6 @@
+import { McpKeyValueFields } from "./McpKeyValueFields";
+import { McpTestConnection } from "./McpTestConnection";
+import { decodeDraftServer } from "./mcpDraft";
 import { CODEX_SSE_TRANSPORT_HINT } from "@t3tools/shared/mcpTranslation";
 import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
@@ -9,6 +12,8 @@ import { Textarea } from "../../ui/textarea";
 import type { ServerDraft } from "./mcpDraft";
 
 export function McpServerEditor({
+  projectId,
+  instanceId,
   editingServerName,
   draft,
   onDraftChange,
@@ -20,6 +25,8 @@ export function McpServerEditor({
   beginCreate,
   saveDraft,
 }: {
+  readonly projectId: import("@t3tools/contracts").ProjectId | null;
+  readonly instanceId: import("@t3tools/contracts").ProviderInstanceId;
   readonly editingServerName: string | null;
   readonly draft: ServerDraft;
   readonly onDraftChange: (patch: Partial<ServerDraft>) => void;
@@ -146,18 +153,12 @@ export function McpServerEditor({
             </span>
           </label>
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="space-y-1">
-              <span className="text-xs font-medium text-foreground">Environment</span>
-              <Textarea
-                value={draft.env}
-                onChange={(event) => {
-                  onDraftChange({ env: event.target.value });
-                }}
-                className="min-h-24 font-mono"
-                placeholder="API_KEY=secret"
-              />
-              <span className="text-xs text-muted-foreground">Use KEY=value per line.</span>
-            </label>
+            <McpKeyValueFields
+              key={`${editingServerName}:${draft.original?.name}:env`}
+              label="Environment"
+              value={draft.env}
+              onChange={(value) => onDraftChange({ env: value })}
+            />
             <label className="space-y-1">
               <span className="text-xs font-medium text-foreground">Working directory</span>
               <Input
@@ -184,18 +185,12 @@ export function McpServerEditor({
               placeholder="https://example.com/mcp"
             />
           </label>
-          <label className="space-y-1">
-            <span className="text-xs font-medium text-foreground">Headers</span>
-            <Textarea
-              value={draft.headers}
-              onChange={(event) => {
-                onDraftChange({ headers: event.target.value });
-              }}
-              className="min-h-24 font-mono"
-              placeholder="Authorization=Bearer ..."
-            />
-            <span className="text-xs text-muted-foreground">Use KEY=value per line.</span>
-          </label>
+          <McpKeyValueFields
+            key={`${editingServerName}:${draft.original?.name}:headers`}
+            label="Headers"
+            value={draft.headers}
+            onChange={(value) => onDraftChange({ headers: value })}
+          />
         </div>
       )}
 
@@ -347,6 +342,11 @@ export function McpServerEditor({
         </CollapsiblePanel>
       </Collapsible>
 
+      <McpTestConnection
+        projectId={projectId}
+        instanceId={instanceId}
+        getServer={() => decodeDraftServer(draft)}
+      />
       <div className="flex items-center justify-between gap-3">
         {formError ? (
           <p className="text-xs text-destructive">{formError}</p>

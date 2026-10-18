@@ -74,6 +74,12 @@ function formatStringRecord(values: Record<string, string> | undefined): string 
   if (!values) {
     return "";
   }
+  if (
+    Object.values(values).some(
+      (value) => value.includes("\n") || value !== value.trim() || value.includes("${f5-secret:"),
+    )
+  )
+    return JSON.stringify(values);
   return Object.entries(values)
     .map(([key, value]) => `${key}=${value}`)
     .join("\n");
@@ -88,6 +94,25 @@ function parseStringArrayInput(value: string): string[] | undefined {
 }
 
 function parseStringRecordInput(value: string, label: string): Record<string, string> | undefined {
+  if (value.trim().startsWith("[") || value.trim().startsWith("{")) {
+    const json: unknown = JSON.parse(value);
+    const rows: { key: string; value: string; secret?: boolean }[] = Array.isArray(json)
+      ? json
+      : Object.entries(json as Record<string, string>).map(([key, entry]) => ({
+          key,
+          value: entry,
+        }));
+    const result: Record<string, string> = Object.create(null);
+    for (const row of rows) {
+      if (typeof row.key !== "string" || !row.key.trim() || typeof row.value !== "string")
+        throw new Error(`${label} requires keys and string values.`);
+      if (row.secret) throw new Error(`Store the ${label.toLowerCase()} secret before saving.`);
+      const key = row.key.trim();
+      if (Object.hasOwn(result, key)) throw new Error(`${label} contains a duplicate key: ${key}.`);
+      result[key] = row.value;
+    }
+    return result;
+  }
   const lines = value
     .split(/\r?\n/u)
     .map((entry) => entry.trim())
@@ -107,6 +132,7 @@ function parseStringRecordInput(value: string, label: string): Record<string, st
     if (!key) {
       throw new Error(`${label} entries must include a non-empty key.`);
     }
+    if (Object.hasOwn(parsed, key)) throw new Error(`${label} contains a duplicate key: ${key}.`);
     parsed[key] = entryValue;
   }
   return Object.keys(parsed).length > 0 ? { ...parsed } : undefined;

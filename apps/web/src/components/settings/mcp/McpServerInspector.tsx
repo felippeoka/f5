@@ -1,3 +1,5 @@
+import { mcpToolSwitchState, summarizeMcpTools } from "@t3tools/shared/mcpTools";
+import { Switch } from "../../ui/switch";
 import type {
   McpServerStatusesResult,
   McpSessionReloadOutcome,
@@ -17,6 +19,10 @@ import { readErrorMessage } from "./mcpSettingsHelpers";
 type InspectorTab = "Overview" | "Tools" | "Resources" | "Diagnostics";
 
 export function McpServerInspector(props: {
+  initialTab?: InspectorTab | undefined;
+  configuredServer?: import("@t3tools/contracts").McpServerDefinition | undefined;
+  fallbackTools?: ReadonlyArray<import("@t3tools/contracts").McpToolSummary> | undefined;
+  onToolToggle?: ((name: string, enabled: boolean) => Promise<void>) | undefined;
   provider: ProviderKind;
   instanceId: ProviderInstanceId;
   projectId: ProjectId;
@@ -26,7 +32,9 @@ export function McpServerInspector(props: {
   outcomes?: ReadonlyArray<McpSessionReloadOutcome> | undefined;
   outcomeAction?: "apply" | "reconnect";
 }) {
-  const [tab, setTab] = useState<InspectorTab>("Overview");
+  const [savingTool, setSavingTool] = useState<string | null>(null);
+  const [toolError, setToolError] = useState<string | null>(null);
+  const [tab, setTab] = useState<InspectorTab>(props.initialTab ?? "Overview");
   const [retryError, setRetryError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [retryOutcomes, setRetryOutcomes] = useState<ReadonlyArray<McpSessionReloadOutcome>>();
@@ -39,6 +47,9 @@ export function McpServerInspector(props: {
       entry.name === props.serverName &&
       (entry.ownership ?? "managed") === (props.ownership ?? "managed"),
   );
+  const toolSummaries = data?.tools.length
+    ? summarizeMcpTools(data.tools)
+    : (props.fallbackTools ?? []);
   return (
     <section
       className="space-y-3 rounded-md border border-border p-3"
@@ -71,6 +82,66 @@ export function McpServerInspector(props: {
         <p className="text-xs text-destructive">
           {readErrorMessage(query.error, "Could not inspect this server.")}
         </p>
+      ) : null}
+      {tab === "Tools" ? (
+        <div className="space-y-2 text-xs">
+          {" "}
+          {toolSummaries.length ? (
+            toolSummaries.map((tool) => {
+              const state = props.configuredServer
+                ? mcpToolSwitchState(props.configuredServer, tool.name)
+                : undefined;
+              return (
+                <div
+                  key={tool.name}
+                  className="flex items-center justify-between gap-3 rounded border p-2"
+                >
+                  <div>
+                    <p>
+                      {tool.name}
+                      {tool.readOnly ? " · read only" : ""}
+                      {tool.destructive ? " · destructive" : ""}
+                    </p>
+                    {tool.description ? <p>{tool.description}</p> : null}
+                  </div>
+                  {state && props.onToolToggle ? (
+                    <span
+                      title={
+                        state.excluded
+                          ? "Excluded by this server's enabled-tools list. Edit it under Advanced."
+                          : undefined
+                      }
+                    >
+                      <Switch
+                        aria-label={`Enable tool ${tool.name}`}
+                        checked={state.checked}
+                        disabled={state.excluded || savingTool !== null}
+                        onCheckedChange={(enabled) => {
+                          setSavingTool(tool.name);
+                          setToolError(null);
+                          void props.onToolToggle!(tool.name, !!enabled)
+                            .catch((cause) =>
+                              setToolError(
+                                readErrorMessage(cause, "Could not save tool settings."),
+                              ),
+                            )
+                            .finally(() => setSavingTool(null));
+                        }}
+                      />
+                    </span>
+                  ) : null}
+                </div>
+              );
+            })
+          ) : (
+            <p>Tools appear once the server connects.</p>
+          )}
+          {toolError ? (
+            <p role="alert" className="text-destructive">
+              {toolError}
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {data ? (
         <div role="tabpanel" className="space-y-2 text-xs">

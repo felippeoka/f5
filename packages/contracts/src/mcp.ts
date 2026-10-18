@@ -6,7 +6,7 @@ import { Schema } from "effect";
 
 import { ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 import { ProviderKind } from "./orchestration";
-import { McpProjectServersConfig } from "./mcpServer";
+import { McpServerDefinition, McpProjectServersConfig } from "./mcpServer";
 
 export const McpGetCommonConfigRequest = Schema.Struct({});
 export type McpGetCommonConfigRequest = typeof McpGetCommonConfigRequest.Type;
@@ -23,6 +23,7 @@ export const McpGetProjectConfigRequest = Schema.Struct({
 export type McpGetProjectConfigRequest = typeof McpGetProjectConfigRequest.Type;
 
 export const McpReplaceProjectConfigRequest = Schema.Struct({
+  disabledCommonServers: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   projectId: ProjectId,
   expectedVersion: Schema.optional(TrimmedNonEmptyString),
   servers: McpProjectServersConfig,
@@ -145,3 +146,19 @@ export const McpReconnectServerRequest = Schema.Struct({
   threadIds: Schema.optional(Schema.Array(ThreadId)),
 });
 export type McpReconnectServerRequest = typeof McpReconnectServerRequest.Type;
+
+export const McpListImportCandidatesRequest = Schema.Struct({
+  projectId: Schema.optional(ProjectId),
+  instanceId: Schema.optional(ProviderInstanceId),
+});
+export type McpListImportCandidatesRequest = typeof McpListImportCandidatesRequest.Type;
+export const McpProbeServerRequest = Schema.Struct({
+  ...McpListImportCandidatesRequest.fields,
+  serverName: TrimmedNonEmptyString,
+  server: McpServerDefinition,
+});
+export type McpProbeServerRequest = typeof McpProbeServerRequest.Type;
+export const McpStoreSecretRequest = Schema.Struct({
+  value: Schema.String.check(Schema.isMaxLength(16384)),
+});
+export type McpStoreSecretRequest = typeof McpStoreSecretRequest.Type;

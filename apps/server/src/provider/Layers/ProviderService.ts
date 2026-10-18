@@ -946,7 +946,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         const resolvedProjectMcp =
           input.binding.projectId !== undefined && input.binding.projectId !== null
             ? yield* projectMcpConfigService
-                .readEffectiveStoredConfig(input.binding.projectId)
+                .readEffectiveRuntimeConfig(input.binding.projectId)
                 .pipe(
                   Effect.mapError(
                     toProjectMcpProviderError(
@@ -1448,7 +1448,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           const resolvedProjectMcp =
             input.projectId !== undefined
               ? yield* projectMcpConfigService
-                  .readEffectiveStoredConfig(input.projectId)
+                  .readEffectiveRuntimeConfig(input.projectId)
                   .pipe(
                     Effect.mapError(
                       toProjectMcpProviderError("ProviderService.startSession", input.projectId),
@@ -3081,7 +3081,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 );
                 if (!adapter?.reloadMcpConfig) return { sessions: [] };
                 const config = yield* projectMcpConfigService
-                  .readEffectiveStoredConfig(input.projectId)
+                  .readEffectiveRuntimeConfig(input.projectId)
                   .pipe(Effect.result);
                 if (config._tag === "Failure")
                   return {

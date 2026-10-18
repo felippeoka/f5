@@ -1,3 +1,9 @@
+import { ServerSecretStore } from "../auth/Services/ServerSecretStore.ts";
+import {
+  collectMcpSecrets,
+  resolveMcpSecrets,
+  validateStoredMcpSecrets,
+} from "./McpSecretResolver.ts";
 import {
   type CodexMcpServerEntry,
   type McpConfigIssue,
@@ -36,6 +42,7 @@ export interface StoredCommonMcpConfig {
 }
 
 export interface StoredProjectMcpConfig {
+  readonly disabledCommonServers?: ReadonlyArray<string>;
   readonly scope: "project";
   readonly projectName?: string;
   readonly projectId: ProjectId;
@@ -94,6 +101,9 @@ export interface ProjectMcpConfigServiceShape {
   readonly readProjectStoredConfig: (
     projectId: ProjectId,
   ) => Effect.Effect<StoredProjectMcpConfig, ProjectMcpConfigServiceError>;
+  readonly readEffectiveRuntimeConfig: (
+    projectId: ProjectId,
+  ) => Effect.Effect<StoredEffectiveMcpConfig, ProjectMcpConfigServiceError>;
   readonly readEffectiveStoredConfig: (
     projectId: ProjectId,
   ) => Effect.Effect<StoredEffectiveMcpConfig, ProjectMcpConfigServiceError>;
@@ -144,6 +154,7 @@ function rowToStoredProjectConfig(
 ): StoredProjectMcpConfig {
   return {
     scope: "project",
+    disabledCommonServers: row?.disabledCommonServers ?? [],
     projectId,
     ...(row?.projectName ? { projectName: row.projectName } : {}),
     ...(row?.version ? { version: row.version } : {}),
@@ -153,6 +164,8 @@ function rowToStoredProjectConfig(
 
 const makeProjectMcpConfigService = Effect.gen(function* () {
   const repository = yield* ProjectMcpConfigRepository;
+  const secrets = yield* Effect.serviceOption(ServerSecretStore);
+  const secretStore = Option.getOrUndefined(secrets);
 
   const toStorageError = (operation: string) => (cause: unknown) =>
     new ProjectMcpConfigServiceError({
@@ -199,8 +212,14 @@ const makeProjectMcpConfigService = Effect.gen(function* () {
       const projects = yield* listProjects();
       const affectedRows = projects.filter(
         (row) =>
-          callbackIssue(mergeMcpServerLayers({ common: servers, project: row.servers }), [])
-            .length > 0,
+          callbackIssue(
+            mergeMcpServerLayers({
+              common: servers,
+              project: row.servers,
+              disabledCommon: row.disabledCommonServers,
+            }),
+            [],
+          ).length > 0,
       );
       const affected = affectedRows.flatMap((row) => (row.projectId ? [row.projectId] : []));
       const affectedNames = affectedRows.flatMap((row) =>
@@ -256,6 +275,7 @@ const makeProjectMcpConfigService = Effect.gen(function* () {
           const servers = mergeMcpServerLayers({
             common: commonConfig.servers,
             project: projectConfig.servers,
+            disabledCommon: projectConfig.disabledCommonServers,
           });
           return {
             projectId,
@@ -294,9 +314,14 @@ const makeProjectMcpConfigService = Effect.gen(function* () {
     Effect.gen(function* () {
       const stored = yield* readProjectStoredConfig(projectId);
       const common = yield* readCommonStoredConfig();
-      const merged = mergeMcpServerLayers({ common: common.servers, project: stored.servers });
+      const merged = mergeMcpServerLayers({
+        common: common.servers,
+        project: stored.servers,
+        disabledCommon: stored.disabledCommonServers,
+      });
       return {
         projectId,
+        disabledCommonServers: stored.disabledCommonServers ?? [],
         ...(stored.version ? { version: stored.version } : {}),
         servers: stored.servers,
         issues: [
@@ -321,10 +346,25 @@ const makeProjectMcpConfigService = Effect.gen(function* () {
                 code: "conflict",
                 message: "MCP configuration changed since this page loaded. Refresh and try again.",
               });
+            const disabledCommonServers = projectId
+              ? (("disabledCommonServers" in input ? input.disabledCommonServers : undefined) ??
+                ("disabledCommonServers" in base ? base.disabledCommonServers : []) ??
+                [])
+              : [];
+            if (
+              disabledCommonServers.length > 256 ||
+              disabledCommonServers.some(
+                (name) => !name.trim() || name !== name.trim() || name.length > 128,
+              )
+            )
+              return yield* validationError(new Error("Invalid disabled common server names."));
             const servers = yield* Effect.try({
               try: () => validateMcpLayerWrite(base.servers, input.servers),
               catch: validationError,
             });
+            yield* validateStoredMcpSecrets(servers, secretStore).pipe(
+              Effect.mapError(validationError),
+            );
             if (projectId) {
               const common = yield* readCommonStoredConfig();
               yield* Effect.try({
@@ -358,6 +398,7 @@ const makeProjectMcpConfigService = Effect.gen(function* () {
                 expectedVersion: input.expectedVersion ?? null,
                 nextVersion: crypto.randomUUID(),
                 servers,
+                disabledCommonServers: [...new Set(disabledCommonServers)],
                 updatedAt: new Date().toISOString(),
               })
               .pipe(Effect.mapError(toStorageError("Failed to save MCP config")));
@@ -385,8 +426,53 @@ const makeProjectMcpConfigService = Effect.gen(function* () {
   const readEffectiveConfig: ProjectMcpConfigServiceShape["readEffectiveConfig"] = (projectId) =>
     readEffectiveStoredConfig(projectId);
 
-  const readCodexServers: ProjectMcpConfigServiceShape["readCodexServers"] = (projectId) =>
+  const readEffectiveRuntimeConfig = (projectId: ProjectId) =>
     readEffectiveStoredConfig(projectId).pipe(
+      Effect.flatMap((stored) =>
+        resolveMcpSecrets(stored.servers, secretStore).pipe(
+          Effect.tap((resolved) =>
+            resolved.issues.length
+              ? Effect.logWarning("MCP servers skipped because stored secrets are unavailable", {
+                  projectId,
+                  servers: resolved.issues.map((issue) => issue.serverName),
+                })
+              : Effect.void,
+          ),
+          Effect.map((resolved) => ({
+            ...stored,
+            servers: resolved.servers,
+            issues: [...(stored.issues ?? []), ...resolved.issues],
+          })),
+        ),
+      ),
+    );
+
+  // Startup collection shares the writer lock; saves never remove secrets.
+  if (secretStore)
+    yield* writeLock
+      .withPermits(1)(
+        Effect.gen(function* () {
+          const rows = [
+            ...(yield* repository.listByScope("common")),
+            ...(yield* repository.listByScope("project", { includeDeleted: true })),
+          ];
+          // Distinct layers can reuse names, so references must be collected before flattening.
+          const all = Object.fromEntries(
+            rows.flatMap((row, index) =>
+              Object.entries(row.servers).map(([name, server]) => [`${index}:${name}`, server]),
+            ),
+          );
+          yield* collectMcpSecrets(secretStore, all);
+        }),
+      )
+      .pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("MCP secret cleanup failed", { error: String(error) }),
+        ),
+      );
+
+  const readCodexServers: ProjectMcpConfigServiceShape["readCodexServers"] = (projectId) =>
+    readEffectiveRuntimeConfig(projectId).pipe(
       Effect.flatMap((stored) =>
         readCodexMcpOAuthCallbackConfigOrError(stored.servers).pipe(
           Effect.map((oauthCallbackConfig) => ({
@@ -404,6 +490,7 @@ const makeProjectMcpConfigService = Effect.gen(function* () {
     readCommonStoredConfig,
     readProjectStoredConfig,
     readEffectiveStoredConfig,
+    readEffectiveRuntimeConfig,
     readCommonConfig,
     replaceCommonConfig,
     readProjectConfig,

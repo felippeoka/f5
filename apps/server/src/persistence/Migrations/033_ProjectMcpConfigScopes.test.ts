@@ -171,6 +171,7 @@ const expectScopedProjectMcpConfigsTable = (
     readonly serversJson: string;
     readonly updatedAt: string;
   }> = [],
+  includesProjectOptOuts = false,
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -188,6 +189,7 @@ const expectScopedProjectMcpConfigsTable = (
       { name: "version", type: "TEXT" },
       { name: "servers_json", type: "TEXT" },
       { name: "updated_at", type: "TEXT" },
+      ...(includesProjectOptOuts ? [{ name: "disabled_common_servers_json", type: "TEXT" }] : []),
     ]);
 
     const indexes = yield* sql<{ readonly name: string }>`
@@ -272,7 +274,7 @@ layer("033_ProjectMcpConfigScopes", (it) => {
 
       yield* runMigrations;
 
-      yield* expectScopedProjectMcpConfigsTable();
+      yield* expectScopedProjectMcpConfigsTable([], true);
 
       const latestMigration = yield* sql<{ readonly migrationId: number; readonly name: string }>`
         SELECT migration_id AS "migrationId", name
@@ -292,7 +294,7 @@ layer("033_ProjectMcpConfigScopes", (it) => {
 
       yield* runMigrations;
 
-      yield* expectScopedProjectMcpConfigsTable();
+      yield* expectScopedProjectMcpConfigsTable([], true);
     }),
   );
 
@@ -304,16 +306,19 @@ layer("033_ProjectMcpConfigScopes", (it) => {
 
       yield* runMigrations;
 
-      yield* expectScopedProjectMcpConfigsTable([
-        {
-          scopeKey: "project:project-1",
-          scope: "project",
-          projectId: "project-1",
-          version: "version-1",
-          serversJson: '{"filesystem":{"type":"stdio","command":"npx"}}',
-          updatedAt: "2026-04-15T00:00:00.000Z",
-        },
-      ]);
+      yield* expectScopedProjectMcpConfigsTable(
+        [
+          {
+            scopeKey: "project:project-1",
+            scope: "project",
+            projectId: "project-1",
+            version: "version-1",
+            serversJson: '{"filesystem":{"type":"stdio","command":"npx"}}',
+            updatedAt: "2026-04-15T00:00:00.000Z",
+          },
+        ],
+        true,
+      );
     }),
   );
 
