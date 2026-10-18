@@ -29,8 +29,12 @@ try {
   await fs.mkdir(emptyPath);
   const home = path.join(directory, "home");
   await fs.mkdir(home);
+  // Windows names it `Path`; drop every casing so the child cannot inherit the real one.
+  const inherited = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => key.toUpperCase() !== "PATH"),
+  );
   const env = {
-    ...process.env,
+    ...inherited,
     PATH: emptyPath,
     SHELL: path.join(emptyPath, "no-login-shell"),
     HOME: home,

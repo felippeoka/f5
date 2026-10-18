@@ -23,7 +23,9 @@ Apply a tag ruleset restricting create/update/delete of `refs/tags/v*` to admins
 
 ## Prepare and publish
 
-First public release: Windows-only `v0.1.0` stable. It is rehearsed without publishing anything: by the `windows-update-rehearsal` job (on every dry run and tag) and by the manual acceptance checks below. No public beta precedes it.
+First public release: Windows-only `v0.1.0` stable. It is rehearsed without publishing anything: by the Windows update rehearsal (on every dry run and tag) and by the manual acceptance checks below. No public beta precedes it.
+
+The Windows CLI archives and the rehearsal live in `.github/workflows/windows-release-checks.yml`. The release workflow calls it, and pull requests that touch packaging, distribution, desktop or release files run it as well, with no secrets or environment approval. Get it green on the pull request before merging; a release dry run then only has to confirm the signed and cross-platform parts.
 
 The rehearsal job builds two unpublished installers from the release commit, on the release channel. Stable pairs are the base version and its next patch; beta pairs are `<base>-beta.1` and `<base>-beta.2`, which resolve through the Atom feed. It then runs `scripts/windows-update-rehearsal.ts` on a fresh Windows runner, which:
 
@@ -57,7 +59,7 @@ Releases across both channels must increase globally. If a higher beta is alread
 
 ## Windows-only checklist (`windows` profile; record results in the PR)
 
-- Dry run on main with `profile=windows`: the Windows installer, blockmap and `latest.yml`, five CLI archives, the CLI manifest and `SHA256SUMS` assemble, `windows-update-rehearsal` passes, and no release is created.
+- Dry run on main with `profile=windows`: the Windows installer, blockmap and `latest.yml`, five CLI archives, the CLI manifest and `SHA256SUMS` assemble, the `windows / update-rehearsal` job passes, and no release is created.
 - Confirm that the `refs/tags/v*` tag ruleset is active and release immutability is enabled. With unsigned Windows updates, these controls, plus the sha512 in the release's `latest.yml`, are the only protection for installed clients until a signed release embeds `publisherName`.
 - Before publishing, confirm the macOS preview app has no `resources/app-update.yml`, so it shows no update errors once a Windows-only release becomes latest.
 - On clean Windows 10 and Windows 11 x64 VMs, using the **draft's** installer:

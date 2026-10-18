@@ -295,7 +295,11 @@ async function download(mode: FeedMode): Promise<DesktopUpdateState> {
   await evaluate("window.desktopBridge.downloadUpdate().catch(() => null)");
   return settled(`${mode} download`, ["downloading"]);
 }
-/** Invokes a button in a native dialog owned by an F5 process via UI Automation. */
+/**
+ * Invokes a button in a native dialog owned by an F5 process via UI Automation.
+ * Only message boxes (window class #32770) are searched, so a same-named button
+ * in the renderer's accessibility tree can never be pressed instead.
+ */
 function pressDialogButton(name: string, timeoutSeconds: number): boolean {
   const result = spawnSync(
     "powershell.exe",
@@ -309,7 +313,7 @@ $deadline = (Get-Date).AddSeconds(${timeoutSeconds})
 while ((Get-Date) -lt $deadline) {
   $ids = @(Get-Process -Name F5 -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
   foreach ($window in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
-    if ($ids -notcontains $window.Current.ProcessId) { continue }
+    if ($ids -notcontains $window.Current.ProcessId -or $window.Current.ClassName -ne '#32770') { continue }
     foreach ($button in $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)))) {
       if ($button.Current.Name -like '${name}*') {
         $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -391,7 +395,10 @@ try {
     join(stateDir, "userdata", "settings.json"),
     JSON.stringify({
       providers: Object.fromEntries(
-        ["codex", "claude", "cursor", "opencode", "grok"].map((id) => [id, { enabled: false }]),
+        ["codex", "claudeAgent", "cursor", "opencode", "grok", "antigravity", "muse"].map((id) => [
+          id,
+          { enabled: false },
+        ]),
       ),
       prHub: { pollIntervalSeconds: 0, discoverNotifications: false },
     }),
