@@ -2656,7 +2656,10 @@ function restoreInstallWindows(): void {
 const updaterInstallerAdapter = createUpdaterInstallerAdapter(autoUpdater, process.platform);
 const updateInstaller = createUpdateInstaller({
   stage: () => updaterInstallerAdapter.stage(),
-  onStageStart: () => setUpdateState({ status: "preparing", message: null }),
+  onStageStart: () => {
+    writeDesktopLogHeader("update install confirmed");
+    setUpdateState({ status: "preparing", message: null });
+  },
   onCancel: () => setUpdateState({ status: "downloaded" }),
   resetAttempt: () => updaterInstallerAdapter.resetAttempt(),
   watchdogEnabled: updaterInstallerAdapter.watchdogEnabled,
@@ -2701,14 +2704,21 @@ const updateInstaller = createUpdateInstaller({
       restoreInstallWindows();
       return false;
     }
+    writeDesktopLogHeader("update install: windows closed");
     installCleanupStarted = true;
     await cleanupBeforeExit();
+    writeDesktopLogHeader("update install: cleanup complete");
     shutdownComplete = true;
     restoreStdIoCapture?.();
     return true;
   },
-  install: () => updaterInstallerAdapter.install(),
+  install: async () => {
+    writeDesktopLogHeader("update install: launching installer");
+    await updaterInstallerAdapter.install();
+    writeDesktopLogHeader("update install: installer launched");
+  },
   recover: async (message) => {
+    writeDesktopLogHeader(`update install recovery: ${message}`);
     cancelQuit();
     try {
       const errors = await recoverUpdateSession<BackendRuntime>({

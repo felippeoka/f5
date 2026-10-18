@@ -408,6 +408,16 @@ function writeDiagnostics(): void {
 $ErrorActionPreference = 'Continue'
 '== F5 processes'
 Get-CimInstance Win32_Process -Filter "Name = 'F5.exe'" | ForEach-Object { "$($_.ProcessId) parent=$($_.ParentProcessId) $($_.CommandLine)" }
+'== F5 windows'
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+$f5 = @(Get-Process | Where-Object { $_.ProcessName -eq 'F5' } | ForEach-Object { $_.Id })
+foreach ($window in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+  if ($f5 -notcontains $window.Current.ProcessId) { continue }
+  "pid=$($window.Current.ProcessId) class=$($window.Current.ClassName) name=$($window.Current.Name)"
+  if ($window.Current.ClassName -eq '#32770') {
+    foreach ($child in $window.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) { "  $($child.Current.Name)" }
+  }
+}
 '== Port ${debugPort}'
 Get-NetTCPConnection -LocalPort ${debugPort} -ErrorAction SilentlyContinue | ForEach-Object { "$($_.State) pid=$($_.OwningProcess)" }
 '== Application errors (last 30 minutes)'
