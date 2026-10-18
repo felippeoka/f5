@@ -222,6 +222,7 @@ export function makeServerProviderLayer(): Layer.Layer<
     const codexMcpEventBusLayer = CodexMcpEventBusLive;
     const codexControlClientRegistryLayer = CodexControlClientRegistryLive.pipe(
       Layer.provide(serverSettingsLayer),
+      Layer.provide(ProjectionProjectRepositoryLive),
     );
     const codexMcpSyncServiceLayer = CodexMcpSyncServiceLive.pipe(
       Layer.provide(codexControlClientRegistryLayer),
@@ -263,6 +264,7 @@ export function makeServerProviderLayer(): Layer.Layer<
       Layer.provide(projectMcpConfigServiceLayer),
     );
     const mcpRuntimeServiceLayer = McpRuntimeServiceLive.pipe(
+      Layer.provide(ProjectionProjectRepositoryLive),
       Layer.provide(serverSettingsLayer),
       Layer.provide(McpRuntimeDiagnosticsLive),
       Layer.provide(providerServiceLayer),

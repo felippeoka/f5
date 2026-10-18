@@ -93,6 +93,7 @@ function makeProviderServiceStub(): ProviderServiceShape {
 
   return {
     startSession: (_threadId, _input) => unused(),
+    replaceSession: () => unused(),
     sendTurn: (_input) => unused(),
     interruptTurn: (_input) => unused(),
     respondToRequest: (_input) => unused(),

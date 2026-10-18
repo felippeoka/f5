@@ -229,6 +229,7 @@ const unsupportedProviderCall = () =>
 
 const defaultProviderService: ProviderServiceShape = {
   startSession: () => unsupportedProviderCall(),
+  replaceSession: () => unsupportedProviderCall(),
   sendTurn: () => unsupportedProviderCall(),
   interruptTurn: () => unsupportedProviderCall(),
   respondToRequest: () => unsupportedProviderCall(),
@@ -5046,6 +5047,7 @@ describe("WebSocket Server", () => {
     };
     const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
     const providerService: ProviderServiceShape = {
+      replaceSession: () => unsupported(),
       startSession: (threadId) =>
         Effect.succeed({
           provider: "codex",

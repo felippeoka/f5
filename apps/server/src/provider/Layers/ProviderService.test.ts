@@ -1,6 +1,9 @@
+import { readPersistedSessionGeneration } from "../sessionCapabilities.ts";
+import { reloadCodexMcpConfigAfterLogin } from "../../mcp/reloadCodexMcpConfigAfterLogin.ts";
 import { withWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import { withProviderThreadAccess } from "../providerThreadAccess.ts";
 import { Deferred } from "effect";
+import { TestClock } from "effect/testing";
 import { ServerSettingsService } from "../../serverSettings";
 import { beginAccountChange, beginProviderUpdate } from "../../profiles/ProviderAccountGuard.ts";
 import fs from "node:fs";
@@ -263,7 +266,7 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
       threadId,
     }: {
       readonly threadId: ThreadId;
-      readonly mcpServers: unknown;
+      readonly mcpServers: import("@t3tools/contracts").McpProjectServersConfig | undefined;
     }): Effect.Effect<McpReloadResult, ProviderAdapterError> =>
       sessions.has(threadId)
         ? Effect.succeed({ converged: true, restartRequired: false, servers: [], errors: [] })
@@ -391,6 +394,9 @@ function makeProviderServiceLayerForAdapters(
   adaptersByProvider: ReadonlyMap<ProviderKind, ProviderAdapterShape<ProviderAdapterError>>,
   overrides: Partial<ProviderAdapterRegistryShape> = {},
   servers: import("@t3tools/contracts").McpProjectServersConfig = {},
+  mcpConfigLayer: Layer.Layer<ProjectMcpConfigService> = makeProjectMcpConfigServiceTestLayer(
+    servers,
+  ),
 ) {
   const registry = {
     ...makeAdapterRegistryMock(Object.fromEntries(adaptersByProvider) as KindAdapterMap),
@@ -407,7 +413,7 @@ function makeProviderServiceLayerForAdapters(
       Layer.provide(providerServiceConfigLayer),
       Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
       Layer.provide(directoryLayer),
-      Layer.provide(makeProjectMcpConfigServiceTestLayer(servers)),
+      Layer.provide(mcpConfigLayer),
       Layer.provideMerge(AnalyticsService.layerTest),
     ),
     directoryLayer,
@@ -3165,6 +3171,189 @@ it.effect(
               resolveInstallTarget: () => (targetAvailable ? physical : null),
             }),
         }),
+      ),
+    );
+  },
+);
+
+it.effect("fences a late MCP reload against an externally replaced generation", () => {
+  const fake = makeFakeCodexAdapter();
+  return Effect.gen(function* () {
+    const service = yield* ProviderService;
+    const directory = yield* ProviderSessionDirectory;
+    const threadId = asThreadId("late-mcp"),
+      projectId = ProjectId.makeUnsafe("late-project");
+    const instanceId = ProviderInstanceId.make("codex");
+    const entered = yield* Deferred.make<void>(),
+      release = yield* Deferred.make<void>();
+    fake.hasSession.mockImplementation(() => Effect.succeed(true));
+    fake.reloadMcpConfig.mockImplementation(() =>
+      Effect.gen(function* () {
+        yield* Deferred.succeed(entered, undefined);
+        yield* Deferred.await(release);
+        return { converged: true, restartRequired: false, servers: [], errors: [] };
+      }),
+    );
+    yield* directory.upsert({
+      threadId,
+      projectId,
+      provider: "codex",
+      providerInstanceId: instanceId,
+      runtimePayload: { sessionGeneration: 1 },
+      mcpEffectiveConfigVersion: "old",
+    });
+    const pending = yield* service
+      .reloadMcpConfigForProject({ provider: "codex", projectId, retry: false })
+      .pipe(Effect.forkChild);
+    yield* Deferred.await(entered);
+    yield* directory.upsert({
+      threadId,
+      provider: "codex",
+      providerInstanceId: instanceId,
+      runtimePayload: { sessionGeneration: 2 },
+      mcpEffectiveConfigVersion: "replacement",
+    });
+    yield* Deferred.succeed(release, undefined);
+    const outcome = yield* Fiber.join(pending);
+    assert.equal(outcome.sessions[0]?.disposition, "superseded");
+    assert.equal(outcome.sessions[0]?.generation, 1);
+    assert.equal(outcome.sessions[0]?.attemptedVersion, "mcp-version-test");
+    assert.equal(
+      Option.getOrThrow(yield* directory.getBinding(threadId)).mcpEffectiveConfigVersion,
+      "replacement",
+    );
+  }).pipe(Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]))));
+});
+
+it.effect("serializes Apply and post-login reloads with lifecycle replacement", () => {
+  const fake = makeFakeCodexAdapter();
+  return Effect.gen(function* () {
+    const service = yield* ProviderService;
+    const directory = yield* ProviderSessionDirectory;
+    const threadId = asThreadId("serialized-mcp"),
+      projectId = ProjectId.makeUnsafe("serialized-project");
+    const instanceId = ProviderInstanceId.make("codex");
+    const entered = yield* Deferred.make<void>(),
+      release = yield* Deferred.make<void>();
+    let active = 0,
+      maximum = 0;
+    fake.hasSession.mockImplementation(() => Effect.succeed(true));
+    fake.reloadMcpConfig.mockImplementation(() =>
+      Effect.gen(function* () {
+        active++;
+        maximum = Math.max(maximum, active);
+        yield* Deferred.succeed(entered, undefined);
+        yield* Deferred.await(release);
+        active--;
+        return { converged: true, restartRequired: false, servers: [], errors: [] };
+      }),
+    );
+    yield* directory.upsert({
+      threadId,
+      projectId,
+      provider: "codex",
+      providerInstanceId: instanceId,
+      runtimePayload: { sessionGeneration: 1 },
+      mcpEffectiveConfigVersion: "old",
+    });
+    const first = yield* service
+      .reloadMcpConfigForProject({ provider: "codex", projectId, retry: false })
+      .pipe(Effect.forkChild);
+    yield* Deferred.await(entered);
+    const second = yield* reloadCodexMcpConfigAfterLogin({
+      providerService: service,
+      projectId,
+      instanceId,
+      retryDelaysMs: [],
+    }).pipe(Effect.forkChild);
+    const replacement = yield* service
+      .replaceSession(
+        threadId,
+        { threadId, projectId, provider: "codex", runtimeMode: "full-access" },
+        { instanceId, generation: 1 },
+      )
+      .pipe(Effect.forkChild);
+    yield* Effect.yieldNow;
+    assert.equal(fake.startSession.mock.calls.length, 0);
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(first);
+    yield* Fiber.join(second);
+    assert.isNotNull(yield* Fiber.join(replacement));
+    assert.equal(maximum, 1);
+    assert.equal(
+      Option.getOrThrow(yield* directory.getBinding(threadId)).runtimePayload &&
+        readPersistedSessionGeneration(
+          Option.getOrThrow(yield* directory.getBinding(threadId)).runtimePayload,
+        ),
+      2,
+    );
+  }).pipe(Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]))));
+});
+
+it.effect(
+  "keeps one effective snapshot across retries when a newer save lands during Apply",
+  () => {
+    const fake = makeFakeCodexAdapter();
+    let version = "v1";
+    const servers = { docs: { type: "stdio" as const, command: "old-command" } };
+    let reads = 0;
+    const config = Layer.effect(
+      ProjectMcpConfigService,
+      Effect.gen(function* () {
+        const service = yield* ProjectMcpConfigService;
+        return {
+          ...service,
+          readEffectiveStoredConfig: (projectId: ProjectId) =>
+            Effect.sync(() => {
+              reads++;
+              return { projectId, effectiveVersion: version, servers };
+            }),
+        };
+      }),
+    ).pipe(Layer.provide(makeProjectMcpConfigServiceTestLayer()));
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const directory = yield* ProviderSessionDirectory;
+      const threadId = asThreadId("snapshot-mcp"),
+        projectId = ProjectId.makeUnsafe("snapshot-project");
+      fake.hasSession.mockImplementation(() => Effect.succeed(true));
+      fake.reloadMcpConfig.mockImplementation(({ mcpServers }) =>
+        Effect.sync(() => {
+          assert.equal(
+            mcpServers?.docs?.type === "stdio" && mcpServers.docs.command,
+            "old-command",
+          );
+          version = "v2";
+          servers.docs.command = "new-command";
+          return {
+            converged: fake.reloadMcpConfig.mock.calls.length >= 2,
+            restartRequired: false,
+            servers: [],
+            errors: [],
+          };
+        }),
+      );
+      yield* directory.upsert({
+        threadId,
+        projectId,
+        provider: "codex",
+        mcpEffectiveConfigVersion: "old",
+      });
+      const pending = yield* service
+        .reloadMcpConfigForProject({ provider: "codex", projectId, requestedVersion: "v1" })
+        .pipe(Effect.forkChild);
+      yield* TestClock.adjust("10 seconds");
+      const outcome = yield* Fiber.join(pending);
+      assert.equal(reads, 1);
+      assert.equal(outcome.sessions[0]?.attemptedVersion, "v1");
+      assert.equal(
+        Option.getOrThrow(yield* directory.getBinding(threadId)).mcpEffectiveConfigVersion,
+        "v1",
+      );
+      assert.equal(version, "v2");
+    }).pipe(
+      Effect.provide(
+        makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]), {}, {}, config),
       ),
     );
   },

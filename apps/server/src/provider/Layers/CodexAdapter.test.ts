@@ -243,6 +243,7 @@ const providerSessionDirectoryTestLayer = Layer.succeed(ProviderSessionDirectory
   getBinding: () => Effect.succeed(Option.none()),
   listThreadIds: () => Effect.succeed([]),
   listBindings: () => Effect.succeed([]),
+  updateMcpStateIfCurrent: () => Effect.succeed(true),
   listBindingsByProject: () => Effect.succeed([]),
 });
 const validationManager = new FakeCodexManager();
@@ -281,6 +282,29 @@ validationLayer("CodexAdapterLive validation", (it) => {
           mcpServers,
         }).pipe(Effect.result);
         assert.equal(reloaded._tag, "Failure");
+        assert.equal(reload.mock.calls.length, 0);
+      } finally {
+        reload.mockRestore();
+      }
+    }),
+  );
+
+  it.effect("requires a restart before sending a reload RPC when launch MCP config differs", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const threadId = asThreadId("mcp-launch-key");
+      yield* adapter.startSession({
+        threadId,
+        runtimeMode: "approval-required",
+        providerOptions: { mcpServers: { docs: { type: "stdio", command: "old-command" } } },
+      });
+      const reload = vi.spyOn(validationManager, "reloadMcpConfig");
+      try {
+        const result = yield* adapter.reloadMcpConfig!({
+          threadId,
+          mcpServers: { docs: { type: "stdio", command: "new-command" } },
+        });
+        assert.equal(result.restartRequired, true);
         assert.equal(reload.mock.calls.length, 0);
       } finally {
         reload.mockRestore();

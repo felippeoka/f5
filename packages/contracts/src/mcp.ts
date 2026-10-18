@@ -1,7 +1,13 @@
 import { ProviderInstanceId } from "./providerInstance";
 import { Schema } from "effect";
 
-import { IsoDateTime, NonNegativeInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas";
+import {
+  IsoDateTime,
+  NonNegativeInt,
+  ProjectId,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas";
 import { ProviderKind } from "./orchestration";
 import { McpProjectServersConfig } from "./mcpServer";
 import { ServerProviderAuthStatus } from "./server";
@@ -155,6 +161,8 @@ export const McpApplyToLiveSessionsRequest = Schema.Struct({
   scope: McpConfigScope,
   projectId: Schema.optional(ProjectId),
   instanceId: Schema.optional(ProviderInstanceId),
+  threadIds: Schema.optional(Schema.Array(ThreadId)),
+  retryUnchanged: Schema.optional(Schema.Boolean),
   binaryPath: Schema.optional(TrimmedNonEmptyString),
   homePath: Schema.optional(TrimmedNonEmptyString),
 });
@@ -207,9 +215,21 @@ export const McpLiveSessionReloadFailure = Schema.Struct({
 });
 export type McpLiveSessionReloadFailure = typeof McpLiveSessionReloadFailure.Type;
 
+export const McpSessionReloadOutcome = Schema.Struct({
+  threadId: ThreadId,
+  instanceId: ProviderInstanceId,
+  generation: NonNegativeInt,
+  requestedVersion: Schema.String,
+  attemptedVersion: Schema.String,
+  disposition: Schema.Literals(["applied", "restart-required", "deferred", "failed", "superseded"]),
+  result: McpReloadResult,
+});
+export type McpSessionReloadOutcome = typeof McpSessionReloadOutcome.Type;
+
 export const McpApplyToLiveSessionsResult = Schema.Struct({
   scope: McpConfigScope,
   projectId: Schema.optional(ProjectId),
+  sessions: Schema.optional(Schema.Array(McpSessionReloadOutcome)),
   codexReloaded: NonNegativeInt,
   claudeRestarted: NonNegativeInt,
   /** Claude sessions reconciled in place without a restart. */
@@ -302,6 +322,7 @@ export const McpStatusUpdatedReason = Schema.Literals([
 export type McpStatusUpdatedReason = typeof McpStatusUpdatedReason.Type;
 
 export const McpStatusUpdatedPayload = Schema.Struct({
+  instanceId: Schema.optional(ProviderInstanceId),
   provider: Schema.optional(ProviderKind),
   scope: McpConfigScope,
   projectId: Schema.optional(ProjectId),

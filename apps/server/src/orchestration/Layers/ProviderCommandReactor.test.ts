@@ -505,13 +505,27 @@ describe("ProviderCommandReactor", () => {
                 session.provider === input.provider &&
                 (!input.threadIds || input.threadIds.includes(session.threadId)),
             )
-            .map((session) => ({ threadId: session.threadId, result: mcpReload.result })),
+            .map((session) => ({
+              threadId: session.threadId,
+              result: mcpReload.result,
+              instanceId: session.providerInstanceId ?? ProviderInstanceId.make(session.provider),
+              generation: 0,
+              requestedVersion: "mcp-version-test",
+              attemptedVersion: "mcp-version-test",
+              disposition: mcpReload.result.restartRequired
+                ? ("restart-required" as const)
+                : ("applied" as const),
+            })),
         }),
     );
     const runOneOffPrompt = vi.fn(() =>
       recoverySummary === undefined ? unsupported() : Effect.succeed({ text: recoverySummary }),
     );
     const service: ProviderServiceShape = {
+      replaceSession: (threadId, input) =>
+        stopSession({ threadId }).pipe(
+          Effect.andThen(Effect.suspend(() => startSession(threadId, input))),
+        ),
       startSession: startSession as ProviderServiceShape["startSession"],
       sendTurn: sendTurn as ProviderServiceShape["sendTurn"],
       interruptTurn: interruptTurn as ProviderServiceShape["interruptTurn"],
@@ -558,6 +572,7 @@ describe("ProviderCommandReactor", () => {
             lastSeenAt: "2026-01-01T00:00:00.000Z",
           })),
         ),
+      updateMcpStateIfCurrent: () => Effect.succeed(true),
       listBindingsByProject: (projectId) =>
         Effect.sync(() =>
           [...persistedBindings.values()]
@@ -2575,6 +2590,11 @@ describe("ProviderCommandReactor", () => {
         : Effect.succeed({
             sessions: input.threadIds!.map((threadId) => ({
               threadId,
+              instanceId: ProviderInstanceId.make(input.provider),
+              generation: 0,
+              requestedVersion: "mcp-version-test",
+              attemptedVersion: "mcp-version-test",
+              disposition: "applied" as const,
               result: { converged: true, restartRequired: false, servers: [], errors: [] },
             })),
           }),
@@ -2622,6 +2642,133 @@ describe("ProviderCommandReactor", () => {
     ]);
     expect(harness.reloadMcpConfigForProject).toHaveBeenCalledTimes(1);
     expect(harness.reloadMcpConfigForProject.mock.calls[0]?.[0].provider).toBe("claudeAgent");
+  });
+
+  it("applies to both providers across accounts by default, narrowing only for explicit targets", async () => {
+    const harness = await createHarness();
+    harness.mcpReload.result = { converged: true, restartRequired: false, servers: [], errors: [] };
+    const projectId = asProjectId("project-1");
+    for (const provider of ["codex", "claudeAgent"] as const) {
+      for (const suffix of ["personal", "work"]) {
+        const threadId = ThreadId.makeUnsafe(`${provider}-${suffix}`);
+        await Effect.runPromise(
+          harness.startSession(threadId, {
+            threadId,
+            projectId,
+            provider,
+            providerInstanceId: ProviderInstanceId.make(`${provider}-${suffix}`),
+          }),
+        );
+        harness.upsertBinding({
+          ...harness.getBinding(threadId)!,
+          mcpEffectiveConfigVersion: "old",
+        });
+      }
+    }
+    const all = await Effect.runPromise(
+      harness.reactor.applyMcpConfigToLiveSessions({ scope: "common" }),
+    );
+    expect(all).toMatchObject({ codexReloaded: 2, claudeReconciled: 2 });
+    expect(all.sessions).toHaveLength(4);
+    harness.reloadMcpConfigForProject.mockClear();
+    const work = await Effect.runPromise(
+      harness.reactor.applyMcpConfigToLiveSessions({
+        scope: "project",
+        projectId,
+        instanceId: ProviderInstanceId.make("claudeAgent-work"),
+      }),
+    );
+    expect(work).toMatchObject({ codexReloaded: 0, claudeReconciled: 1 });
+    expect(harness.reloadMcpConfigForProject).toHaveBeenCalledTimes(1);
+    expect(harness.reloadMcpConfigForProject.mock.calls[0]?.[0]).toMatchObject({
+      instanceId: "claudeAgent-work",
+      threadIds: ["claudeAgent-work"],
+    });
+  });
+
+  it("validates every requested conversation before mutation and supports forced targeted retries", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.makeUnsafe("thread-1"),
+      projectId = asProjectId("project-1");
+    await Effect.runPromise(
+      harness.startSession(threadId, { threadId, projectId, provider: "codex" }),
+    );
+    harness.mcpReload.result = { converged: true, restartRequired: false, servers: [], errors: [] };
+    for (const request of [
+      { threadIds: [threadId, ThreadId.makeUnsafe("missing")] },
+      { threadIds: [threadId], instanceId: ProviderInstanceId.make("wrong-account") },
+      { retryUnchanged: true },
+      { retryUnchanged: false },
+    ]) {
+      const result = await Effect.runPromise(
+        harness.reactor
+          .applyMcpConfigToLiveSessions({ scope: "project", projectId, ...request })
+          .pipe(Effect.result),
+      );
+      expect(result._tag).toBe("Failure");
+      expect(harness.reloadMcpConfigForProject).not.toHaveBeenCalled();
+    }
+    const unchanged = await Effect.runPromise(
+      harness.reactor.applyMcpConfigToLiveSessions({
+        scope: "project",
+        projectId,
+        threadIds: [threadId],
+      }),
+    );
+    expect(unchanged.codexReloaded).toBe(0);
+    const retry = await Effect.runPromise(
+      harness.reactor.applyMcpConfigToLiveSessions({
+        scope: "project",
+        projectId,
+        threadIds: [threadId],
+        retryUnchanged: true,
+      }),
+    );
+    expect(retry.codexReloaded).toBe(1);
+  });
+
+  it("reports the attempted version separately when another save lands during Apply", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.makeUnsafe("thread-1"),
+      projectId = asProjectId("project-1");
+    await Effect.runPromise(
+      harness.startSession(threadId, { threadId, projectId, provider: "codex" }),
+    );
+    harness.upsertBinding({ ...harness.getBinding(threadId)!, mcpEffectiveConfigVersion: "older" });
+    harness.reloadMcpConfigForProject.mockImplementation((input) =>
+      Effect.sync(() => {
+        harness.readEffectiveStoredConfig.mockImplementation(() =>
+          Effect.succeed({
+            projectId,
+            commonVersion: "common-v1",
+            projectVersion: "project-v2",
+            effectiveVersion: "saved-during-apply",
+            servers: {},
+          }),
+        );
+        return {
+          sessions: [
+            {
+              threadId,
+              instanceId: ProviderInstanceId.make("codex"),
+              generation: 0,
+              requestedVersion: input.requestedVersion!,
+              attemptedVersion: input.requestedVersion!,
+              disposition: "applied" as const,
+              result: { converged: true, restartRequired: false, servers: [], errors: [] },
+            },
+          ],
+        };
+      }),
+    );
+    const result = await Effect.runPromise(
+      harness.reactor.applyMcpConfigToLiveSessions({ scope: "project", projectId }),
+    );
+    expect(result.configVersion).toBe("saved-during-apply");
+    expect(result.sessions?.[0]).toMatchObject({
+      requestedVersion: "mcp-version-test",
+      attemptedVersion: "mcp-version-test",
+    });
   });
 
   describe("Claude MCP apply", () => {
@@ -2734,7 +2881,19 @@ describe("ProviderCommandReactor", () => {
           };
           return {
             sessions:
-              input.provider === "claudeAgent" ? [{ threadId, result: restartRequired }] : [],
+              input.provider === "claudeAgent"
+                ? [
+                    {
+                      threadId,
+                      result: restartRequired,
+                      instanceId: ProviderInstanceId.make(input.provider),
+                      generation: 0,
+                      requestedVersion: "mcp-version-test",
+                      attemptedVersion: "mcp-version-test",
+                      disposition: "restart-required" as const,
+                    },
+                  ]
+                : [],
           };
         }),
       );
