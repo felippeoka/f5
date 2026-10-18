@@ -723,6 +723,8 @@ export function createWsNativeApi(): NativeApi {
       getEffectiveConfig: (input) => transport.request(WS_METHODS.mcpGetEffectiveConfig, input),
       getProviderStatus: (input) => transport.request(WS_METHODS.mcpGetProviderStatus, input),
       getServerStatuses: (input) => transport.request(WS_METHODS.mcpGetServerStatuses, input),
+      inspectServer: (input) => transport.request(WS_METHODS.mcpInspectServer, input),
+      reconnectServer: (input) => transport.request(WS_METHODS.mcpReconnectServer, input),
       startLogin: (input) =>
         transport.request(
           WS_METHODS.mcpStartLogin,

@@ -8,7 +8,13 @@ import { spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import serverPackage from "../apps/server/package.json" with { type: "json" };
 import { selectCliRuntimeExternalDependencies } from "./lib/cli-external-packages.ts";
-import { cliTarget, sha256File, versionToken, type CliRelease } from "@t3tools/shared/cliRelease";
+import {
+  cliTarget,
+  sha256File,
+  tarExecutable,
+  versionToken,
+  type CliRelease,
+} from "@t3tools/shared/cliRelease";
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const CLI_NODE_VERSION = "26.10.0";
 export async function buildCliArchive(options: {
@@ -206,7 +212,7 @@ export async function buildCliArchive(options: {
     await fs.rm(path.join(stage, "node_modules/.bin"), { recursive: true, force: true });
     const archive = path.join(output, `${stem}.tar.gz`);
     // Dereference build-store links. Runtime extraction permits regular files/directories only.
-    run("tar", ["-czhf", archive, "-C", temporary, stem]);
+    run(tarExecutable(), ["-czhf", archive, "-C", temporary, stem]);
     const size = (await fs.stat(archive)).size;
     const manifest: CliRelease = {
       schemaVersion: 1,

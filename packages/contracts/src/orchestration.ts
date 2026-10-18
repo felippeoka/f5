@@ -867,6 +867,7 @@ export type CompactRuntimeConfiguredActivityPayload =
   typeof CompactRuntimeConfiguredActivityPayload.Type;
 
 export const CompactMcpStatusActivityStatus = Schema.Literals([
+  "needs-auth",
   "starting",
   "ready",
   "failed",
@@ -878,6 +879,8 @@ export const CompactMcpStatusActivityPayload = Schema.Struct({
   name: Schema.optional(TrimmedNonEmptyString),
   status: CompactMcpStatusActivityStatus,
   error: Schema.optional(Schema.String),
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+  sessionGeneration: Schema.optional(NonNegativeInt),
   toolCount: Schema.optional(NonNegativeInt),
 });
 export type CompactMcpStatusActivityPayload = typeof CompactMcpStatusActivityPayload.Type;

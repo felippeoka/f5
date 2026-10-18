@@ -361,6 +361,15 @@ function makeProviderRuntimeTestLayer(providerLayer: Layer.Layer<ProviderService
         }),
     }),
     Layer.succeed(McpRuntimeService, {
+      sanitizeReconnectResult: (_input, result) => Effect.succeed(result),
+      inspectServer: () => Effect.die("unused inspector"),
+      reconnectServer: () =>
+        Effect.succeed({
+          settingsConnectionReloaded: true,
+          sessionsMatched: 0,
+          sessionsReconnected: 0,
+          failures: [],
+        }),
       getProviderStatus: ({ provider, projectId }) =>
         Effect.succeed({
           provider,
@@ -1211,6 +1220,53 @@ describe("WebSocket Server", () => {
     expect(response.error?.message).toContain(`["body"]["${field}"]`);
     expect(response.result).toBeUndefined();
   });
+
+  it.each(["claudeAgent", "codex"] as const)(
+    "discovers MCP reconnect targets only for Codex: %s",
+    async (provider) => {
+      const getMcpReconnectTargets = vi.fn(() =>
+        Effect.succeed({
+          threadIds: [],
+          failures: [
+            {
+              threadId: ThreadId.make("stale-conversation"),
+              message: "The provider session no longer exists.",
+            },
+          ],
+        }),
+      );
+      server = await createTestServer({
+        providerLayer: Layer.succeed(ProviderService, {
+          ...defaultProviderService,
+          getMcpReconnectTargets,
+        }),
+      });
+      const addr = server.address();
+      const [ws] = await connectAndAwaitWelcome(typeof addr === "object" && addr ? addr.port : 0);
+      connections.push(ws);
+      const response = await sendRequest(ws, WS_METHODS.mcpReconnectServer, {
+        provider,
+        instanceId: provider,
+        projectId: "reconnect-project",
+        serverName: "docs",
+      });
+      expect(response.error).toBeUndefined();
+      expect(getMcpReconnectTargets).toHaveBeenCalledTimes(provider === "codex" ? 1 : 0);
+      expect(response.result).toMatchObject({
+        settingsConnectionReloaded: true,
+        sessionsReconnected: 0,
+        failures:
+          provider === "codex"
+            ? [
+                {
+                  threadId: "stale-conversation",
+                  message: "The provider session no longer exists.",
+                },
+              ]
+            : [],
+      });
+    },
+  );
 
   it("returns a bounded usage summary with explicit coverage", async () => {
     server = await createTestServer({ cwd: "/test/project" });

@@ -1,4 +1,3 @@
-import { mergeCodexMcpStartupStatuses } from "./codexMcpServerStatus.ts";
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import readline from "node:readline";
@@ -170,6 +169,7 @@ function asMcpServerStartupStatus(value: unknown): McpServerStartupStatus | unde
     case "starting":
     case "ready":
     case "failed":
+    case "needs-auth":
     case "cancelled":
       return value;
     default:
@@ -194,6 +194,10 @@ export class CodexControlClient extends EventEmitter<{
   private readonly output: readline.Interface;
   private readonly writer: JsonRpcStdinWriter;
   private readonly pending = new Map<string, PendingRequest>();
+  private mcpObservationContext: object = {};
+  getMcpObservationContext(): object {
+    return this.mcpObservationContext;
+  }
   private readonly mcpStartupStatuses = new Map<
     string,
     {
@@ -514,26 +518,32 @@ export class CodexControlClient extends EventEmitter<{
     };
   }
 
+  getMcpStartupStatuses(): ReadonlyArray<CodexControlMcpServerStatus> {
+    return [...this.mcpStartupStatuses.values()];
+  }
+
   async listMcpServerStatus(
     cursor?: string,
     limit?: number,
+    timeoutMs?: number,
   ): Promise<CodexControlListMcpServerStatusResult> {
     if (!this.capabilities.listMcpServerStatus) {
       throw new Error("Codex control mcpServerStatus/list is unsupported.");
     }
 
-    const result = await this.sendRequest<Record<string, unknown>>("mcpServerStatus/list", {
-      ...(cursor ? { cursor } : {}),
-      ...(typeof limit === "number" ? { limit } : {}),
-    });
-    const data = Array.isArray(result.data)
-      ? (result.data.filter((entry): entry is CodexControlMcpServerStatus =>
-          isObject(entry),
-        ) as ReadonlyArray<CodexControlMcpServerStatus>)
-      : [];
+    const result = await this.sendRequest<Record<string, unknown>>(
+      "mcpServerStatus/list",
+      {
+        ...(cursor ? { cursor } : {}),
+        ...(typeof limit === "number" ? { limit } : {}),
+      },
+      Number.isFinite(timeoutMs) ? timeoutMs : undefined,
+    );
+    if (!Array.isArray(result.data)) throw new Error("Malformed mcpServerStatus/list data.");
     return {
-      data: mergeCodexMcpStartupStatuses(data, [...this.mcpStartupStatuses.values()]),
-      nextCursor: result.nextCursor === null ? null : (asTrimmedString(result.nextCursor) ?? null),
+      // Preserve malformed rows/cursors for the bounded traversal to report as partial.
+      data: result.data as ReadonlyArray<CodexControlMcpServerStatus>,
+      nextCursor: result.nextCursor as string | null,
     };
   }
 
@@ -603,6 +613,8 @@ export class CodexControlClient extends EventEmitter<{
   }
 
   async reloadMcpServer(): Promise<void> {
+    this.mcpObservationContext = {};
+    this.mcpStartupStatuses.clear();
     await this.sendRequest<Record<string, never>>("config/mcpServer/reload", undefined);
   }
 

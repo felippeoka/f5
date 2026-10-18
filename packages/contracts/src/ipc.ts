@@ -181,6 +181,10 @@ import type {
   McpGetEffectiveConfigRequest,
   McpGetProjectConfigRequest,
   McpGetServerStatusesRequest,
+  McpInspectServerRequest,
+  McpInspectServerResult,
+  McpReconnectServerRequest,
+  McpReconnectServerResult,
   McpLoginStatusResult,
   McpOauthLoginStatusRequest,
   McpOauthLoginStatusResult,
@@ -887,6 +891,8 @@ export interface NativeApi {
     getEffectiveConfig: (input: McpGetEffectiveConfigRequest) => Promise<McpEffectiveConfigResult>;
     getProviderStatus: (input: McpGetProviderStatusRequest) => Promise<McpProviderStatusResult>;
     getServerStatuses: (input: McpGetServerStatusesRequest) => Promise<McpServerStatusesResult>;
+    inspectServer: (input: McpInspectServerRequest) => Promise<McpInspectServerResult>;
+    reconnectServer: (input: McpReconnectServerRequest) => Promise<McpReconnectServerResult>;
     startLogin: (input: McpStartLoginRequest) => Promise<McpLoginStatusResult>;
     getLoginStatus: (input: McpGetLoginStatusRequest) => Promise<McpLoginStatusResult>;
     getCodexStatus: (input: McpGetCodexStatusRequest) => Promise<McpCodexStatusResult>;

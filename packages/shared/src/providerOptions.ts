@@ -1,4 +1,4 @@
-import { normalizeServerName } from "./mcpValidation";
+import { normalizeServerName } from "./mcpServerName";
 import { McpProjectServersConfig as McpServersSchema } from "@t3tools/contracts";
 import { Schema } from "effect";
 import type {

@@ -1,5 +1,6 @@
 import type {
   McpCodexStatusResult,
+  ThreadId,
   McpStatusUpdatedPayload,
   McpCommonConfigResult,
   McpEffectiveConfigResult,
@@ -13,6 +14,7 @@ import type {
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import { queryOptions } from "@tanstack/react-query";
+import { getWsConnectionState } from "../wsConnectionState";
 import { ensureNativeApi } from "../nativeApi";
 
 type CodexEnvironmentKeyPart = string | null;
@@ -64,6 +66,7 @@ export function isMcpQueryAffected(
   const accountScoped = [
     "providerStatus",
     "serverStatuses",
+    "inspectServer",
     "loginStatus",
     "codexStatus",
     "oauthStatus",
@@ -187,21 +190,54 @@ export function mcpServerStatusesQueryOptions(input: {
   readonly binaryPath?: string;
   readonly homePath?: string;
   readonly enabled?: boolean;
+  readonly threadId?: ThreadId;
+  readonly fingerprint?: string;
+  readonly generation?: number;
+  readonly desiredVersion?: string;
+  readonly appliedVersion?: string;
 }) {
   return queryOptions<McpServerStatusesResult>({
-    queryKey: mcpQueryKeys.serverStatuses(
-      input.provider,
-      input.projectId,
-      input.instanceId ?? input.binaryPath ?? null,
-      input.homePath ?? null,
-    ),
+    queryKey: [
+      ...mcpQueryKeys.serverStatuses(
+        input.provider,
+        input.projectId,
+        input.instanceId ?? input.binaryPath ?? null,
+        input.homePath ?? null,
+      ),
+      input.threadId ? "conversation" : "automatic",
+      input.fingerprint ?? null,
+      input.threadId ?? null,
+      input.generation ?? null,
+      input.desiredVersion ?? null,
+      input.appliedVersion ?? null,
+    ],
+    placeholderData: (previous, previousQuery) => {
+      const key = previousQuery?.queryKey;
+      return key?.[2] === input.provider &&
+        key[3] === input.projectId &&
+        key[4] === (input.instanceId ?? input.binaryPath ?? null) &&
+        key[5] === (input.homePath ?? null) &&
+        key[8] === (input.threadId ?? null)
+        ? previous
+        : undefined;
+    },
     enabled: (input.enabled ?? true) && Boolean(input.projectId),
+    refetchInterval: (query) => {
+      if (!query.state.data?.statuses.some((server) => server.state === "starting")) {
+        runtimePollWindows.delete(query);
+        return false;
+      }
+      const started = runtimePollWindows.get(query) ?? Date.now();
+      runtimePollWindows.set(query, started);
+      return shouldPollMcpRuntime(query.state.data, started) ? 2_000 : false;
+    },
     queryFn: async () => {
       if (!input.projectId) {
         throw new Error("MCP server statuses are unavailable.");
       }
       return ensureNativeApi().mcp.getServerStatuses({
         provider: input.provider,
+        ...(input.threadId ? { threadId: input.threadId } : {}),
         projectId: input.projectId,
         ...(input.instanceId ? { instanceId: input.instanceId } : {}),
       });
@@ -274,4 +310,24 @@ export function mcpOAuthStatusQueryOptions(input: {
       });
     },
   });
+}
+
+const runtimePollWindows = new WeakMap<object, number>();
+
+// The poll budget is per identity, and is not extended by each successful refresh.
+export function shouldPollMcpRuntime(
+  data: McpServerStatusesResult | undefined,
+  startedAt: number,
+  now = Date.now(),
+): boolean {
+  return (
+    getWsConnectionState().phase === "connected" &&
+    Boolean(data?.statuses.some((server) => server.state === "starting")) &&
+    now - startedAt < 30_000
+  );
+}
+
+export function resetMcpRuntimePolling(queryClient: import("@tanstack/react-query").QueryClient) {
+  for (const query of queryClient.getQueryCache().findAll({ queryKey: mcpQueryKeys.all }))
+    runtimePollWindows.delete(query);
 }

@@ -1,3 +1,4 @@
+import { CodexMcpEventBus } from "../../codex/CodexMcpEventBus.ts";
 import { withFixtureWorkspaceWrites } from "../testUtils/workspaceWrites.ts";
 import { NextTurnQueueStore } from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { ServerSettingsService } from "../../serverSettings";
@@ -273,6 +274,9 @@ describe("ProviderRuntimeIngestion", () => {
 
   async function createHarness(options?: {
     readonly startIngestion?: boolean;
+    readonly onMcpStatusUpdated?: (
+      payload: import("@t3tools/contracts").McpStatusUpdatedPayload,
+    ) => void;
     readonly seedSession?: boolean;
     readonly refreshAccount?: UsageServiceShape["refreshAccount"];
     readonly settings?: Partial<import("@t3tools/contracts").ServerSettings>;
@@ -334,6 +338,13 @@ describe("ProviderRuntimeIngestion", () => {
         )
       : Layer.empty;
     const layer = ProviderRuntimeIngestionLive.pipe(
+      Layer.provide(
+        Layer.succeed(CodexMcpEventBus, {
+          publishStatusUpdated: (payload) =>
+            Effect.sync(() => options?.onMcpStatusUpdated?.(payload)),
+          streamStatusUpdates: Stream.empty,
+        }),
+      ),
       Layer.provide(faultyEngineLayer),
       Layer.provide(ServerSettingsService.layerTest(options?.settings)),
       Layer.provide(
@@ -5390,6 +5401,39 @@ describe("ProviderRuntimeIngestion", () => {
     });
   });
 
+  it("pushes one runtime invalidation after committed MCP activities, debounced per project", async () => {
+    const pushes = vi.fn();
+    const harness = await createHarness({ onMcpStatusUpdated: pushes });
+    for (let index = 0; index < 3; index++)
+      harness.emit({
+        type: "mcp.status.updated",
+        eventId: asEventId(`mcp-push-${index}`),
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        createdAt: new Date().toISOString(),
+        payload: {
+          status: {
+            name: "docs",
+            status: "ready",
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            sessionGeneration: 1,
+            toolCount: index,
+          },
+        },
+      });
+    await waitForThread(harness.engine, (entry) =>
+      entry.activities.some((activity) => activity.id === "mcp-push-2"),
+    );
+    expect(pushes).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(pushes).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    expect(pushes).toHaveBeenCalledWith({
+      scope: "project",
+      projectId: "project-1",
+      instanceId: "codex",
+      reason: "runtime",
+    });
+  });
+
   it("projects MCP, config, and deprecation diagnostics into thread activities", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
@@ -5405,6 +5449,9 @@ describe("ProviderRuntimeIngestion", () => {
           name: "filesystem",
           status: "failed",
           error: "connection refused",
+          toolCount: 7,
+          providerInstanceId: ProviderInstanceId.make("codex-work"),
+          sessionGeneration: 3,
         },
       },
     });
@@ -5465,6 +5512,9 @@ describe("ProviderRuntimeIngestion", () => {
       payload: {
         error: "connection refused",
         detail: "connection refused",
+        toolCount: 7,
+        providerInstanceId: "codex-work",
+        sessionGeneration: 3,
       },
     });
     expect(thread.activities.find((activity) => activity.id === "evt-mcp-oauth")).toMatchObject({
