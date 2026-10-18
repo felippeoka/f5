@@ -32,10 +32,6 @@ const browserConfig = mergeConfig(
           process.env.F5_CI_ARTIFACT_DIR || "./.playwright",
           "screenshots",
         ),
-        trace: {
-          mode: "retain-on-failure",
-          tracesDir: resolve(process.env.F5_CI_ARTIFACT_DIR || "./.playwright", "traces"),
-        },
         // Composer tests assert CSS transitions; don't inherit a host reduce setting.
         provider: playwright({ contextOptions: { reducedMotion: "no-preference" } }),
         instances: [{ browser: "chromium" }],

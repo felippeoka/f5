@@ -285,7 +285,7 @@ jobs:
         env:
           F5_CI_SUITE_ID: "web-browser"
         run: |
-          bun run --cwd apps/web test:browser
+          timeout --signal=TERM --kill-after=20s 8m bun run --cwd apps/web test:browser
       - name: Summarize test reports
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: node scripts/ci-test-summary.ts browser
@@ -297,12 +297,22 @@ jobs:
           path: ${{ env.F5_CI_REPORT_DIR || format('{0}/ci-reports/{1}', runner.temp, github.job) }}
           retention-days: 7
           if-no-files-found: ignore
+      - name: Stage browser diagnostics
+        if: always()
+        env:
+          ARTIFACT_SOURCE: ${{ env.F5_CI_ARTIFACT_DIR || format('{0}/ci-artifacts/{1}', runner.temp, github.job) }}
+          ARTIFACT_STAGING: ${{ runner.temp }}/ci-upload/browser
+        run: |
+          mkdir -p "$ARTIFACT_STAGING"
+          if [[ -d "$ARTIFACT_SOURCE" ]]; then
+            cp -R "$ARTIFACT_SOURCE/." "$ARTIFACT_STAGING/"
+          fi
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: diagnostics-${{ github.job }}-${{ runner.os }}-${{ github.run_attempt }}
-          path: ${{ env.F5_CI_ARTIFACT_DIR || format('{0}/ci-artifacts/{1}', runner.temp, github.job) }}
+          path: ${{ runner.temp }}/ci-upload/browser
           retention-days: 7
           if-no-files-found: ignore
       - uses: ./.github/actions/assert-clean-worktree
@@ -521,7 +531,8 @@ jobs:
   macos-suite:
     runs-on: macos-latest
     timeout-minutes: 60
-    if: github.event_name != 'pull_request'
+    # TEMP: PR #163 hosted rehearsal; restore the non-PR condition after validation.
+    if: always()
     defaults:
       run:
         shell: bash
@@ -664,7 +675,7 @@ jobs:
             echo "Stale result for $GITHUB_SHA; main is $head_sha"
             exit 0
           fi
-          issue="$(gh issue list --state open --label ci-main-red --json number --jq '.[0].number // empty')"
+          issue="$(gh issue list --state open --label ci-main-red --json number,title --jq '[.[] | select(.title == "CI failing on main")][0].number // empty')"
           if [[ "$RESULT" == success ]]; then
             if [[ -n "$issue" ]]; then
               gh issue close "$issue" --comment "Green again at $GITHUB_SHA: $RUN_URL"

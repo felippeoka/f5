@@ -27,7 +27,10 @@ drift tests. Main pushes, nightly runs and dispatches always run heavy jobs.
 The full macOS suite never runs on PRs. It feeds `CI result`, adding approximately
 45 to 60 minutes of release-gate latency after a merge. Hosted timing targets for
 non-packaging PRs are at most 10 minutes on Linux and 12 minutes on Windows;
-measure these on Actions before treating them as achieved.
+measure these on Actions before treating them as achieved. TypeScript is checked once
+on Linux, whose case-sensitive filesystem catches import-casing errors. TypeScript
+output is host-independent; Windows and macOS still run their native build and
+runtime checks.
 
 Only superseded PR runs are cancelled. Main commits use separate concurrency groups
 by SHA, so a later merge cannot cancel an earlier commit's release-eligibility run.
@@ -43,7 +46,8 @@ notifications may rarely create duplicate issues; preserving each push verdict t
 priority over serializing issue updates.
 
 A failed current main run creates or comments on `CI failing on main`, labelled
-`ci-main-red`, once per run attempt. A successful current-main run closes it with
+`ci-main-red`, once per run attempt. The notifier only selects an issue with that
+exact title; other issues carrying the label are left alone. A successful current-main run closes it with
 the green SHA and run URL. API errors do not change the CI verdict. Nightly
 failures use the same issue. GitHub can disable schedules after 60 days without
 repository activity; the maintainer checks schedule activity monthly.
@@ -98,9 +102,15 @@ files. The larger count in the planning inventory included screenshot directorie
 The glob automatically discovers future files; this change adds no existing test
 coverage.
 
-Browser tests discover `src/**/*.browser.{ts,tsx}` and keep failure screenshots and
-Playwright traces in `F5_CI_ARTIFACT_DIR`; local artifacts stay in the ignored
-`apps/web/.playwright/` directory. Desktop/profile harnesses read the artifact
+Browser tests discover `src/**/*.browser.{ts,tsx}` and keep failure
+screenshots in `F5_CI_ARTIFACT_DIR`; local artifacts stay in the ignored
+`apps/web/.playwright/` directory. Routine Playwright tracing is disabled because
+recording every test slowed the suite beyond the job timeout. Browser execution
+has an eight-minute process limit inside the fifteen-minute job, leaving time to
+summarize and upload diagnostics. Uploads read a staging copy after execution ends,
+so writers cannot remove files from underneath the uploader. Screenshot directories
+under source are not globally ignored, allowing future golden baselines to be tracked.
+Desktop/profile harnesses read the artifact
 variable themselves and do not pass it into the app. They export bounded sanitized
 process logs, fixture screenshots and lifecycle failure details before cleanup.
 Local desktop smoke runs retain their temporary state and print its path for
@@ -111,11 +121,12 @@ homes, auth files and cookies must never be uploaded.
 
 ## Maintainer rollout
 
-Keep the rollout staged. Land the two-file Agent Bridge listener fix first. Land
-any fixture/install corrections separately, then the workflow restructure. Validate
-the restructure on hosted runners before adding the reports/diagnostics and
-Dependabot stages. Local checks do not establish hosted macOS/Windows behavior,
-cache hits or wall-clock targets.
+PR #163 combines the Agent Bridge fix, workflow restructure, reports/diagnostics
+and dependency maintenance. The original staged rollout was not followed. Review
+corrections use focused additive commits, and all included CI jobs must pass on
+hosted runners before merge. Muse auditing, the marketing build, Dependabot and
+main-status reconciliation are part of the approved CI scope. Local checks do not
+establish hosted macOS/Windows behavior, cache hits or wall-clock targets.
 
 Before merging the restructure, temporarily run `macos-suite` on the PR with
 `if: always()`. After a successful hosted run, restore its non-PR condition in a

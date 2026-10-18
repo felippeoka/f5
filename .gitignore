@@ -16,7 +16,6 @@ release/
 .idea/
 apps/web/.playwright
 apps/web/playwright-report
-**/__screenshots__/
 .vitest-*
 
 # Keep repository-wide agent instructions under version control even when a
