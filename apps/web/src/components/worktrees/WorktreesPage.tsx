@@ -2,7 +2,7 @@ import type { ProjectId, ThreadId, WorktreeListEntry } from "@t3tools/contracts"
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { GitForkIcon, RefreshCwIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { openInPreferredEditor } from "../../editorPreferences";
 import { writeTextToClipboard } from "../../hooks/useCopyToClipboard";
@@ -215,13 +215,22 @@ export function WorktreesPage({
   const projects = useStore((s) => s.projects);
   const threads = useThreadSummaries();
   const drafts = useComposerDraftStore((s) => s.draftThreadsByThreadId);
+  useEffect(() => setSelectedThread(search.threadId ?? null), [search.threadId]);
   const { handleNewThread } = useHandleNewThread();
   const client = useQueryClient();
   const query = useQuery(worktreesListQueryOptions(search.projectId ?? null));
-  const targetThread = selectedThread
-    ? (threads.find((t) => t.id === selectedThread) ?? drafts[selectedThread])
+  const candidateThread = selectedThread
+    ? (threads.find((t) => t.id === selectedThread && !t.archivedAt) ?? drafts[selectedThread])
     : null;
+  const targetThread =
+    candidateThread && (!search.projectId || candidateThread.projectId === search.projectId)
+      ? candidateThread
+      : null;
   const confirmSharing = async (row: WorktreeListEntry, own: ThreadId | null = null) => {
+    // New local drafts already share the project checkout. A transition from
+    // another checkout still needs the server's explicit sharing acknowledgment.
+    if (row.classification === "projectCheckout" && (!own || !targetThread?.worktreePath))
+      return false;
     if (!row.linkedThreads.some((t) => t.threadId !== own)) return false;
     const confirmed = await ensureNativeApi().dialogs.confirm(
       "Other conversations use this checkout. They will share files and uncommitted changes. Continue?",
@@ -238,6 +247,7 @@ export function WorktreesPage({
         useComposerDraftStore.getState().setDraftThreadContext(selectedThread, {
           branch: row.branch,
           worktreePath: row.classification === "projectCheckout" ? null : row.path,
+          envMode: row.classification === "projectCheckout" ? "local" : "worktree",
           sharedFilesystemConfirmed,
         });
       } else {
@@ -305,7 +315,7 @@ export function WorktreesPage({
         <select
           aria-label="Conversation to switch"
           className="max-w-full rounded border bg-background p-2 text-sm"
-          value={selectedThread ?? ""}
+          value={targetThread ? (selectedThread ?? "") : ""}
           onChange={(e) => setSelectedThread((e.target.value as ThreadId) || null)}
         >
           <option value="">Choose conversation to switch</option>
@@ -318,9 +328,10 @@ export function WorktreesPage({
             ))}
           {Object.entries(drafts)
             .filter(([, d]) => !search.projectId || d.projectId === search.projectId)
-            .map(([id]) => (
+            .map(([id, draft]) => (
               <option key={id} value={id}>
-                New conversation draft
+                New draft · {projects.find((p) => p.id === draft.projectId)?.name} ·{" "}
+                {draft.branch ?? "auto"} · {id.slice(-8)}
               </option>
             ))}
         </select>

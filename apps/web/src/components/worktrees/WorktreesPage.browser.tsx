@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
+import { useComposerDraftStore } from "../../composerDraftStore";
 import { WorktreesPage } from "./WorktreesPage";
 import { useWorktreeRemovalDialogStore } from "../../worktreeRemovalDialogStore";
 const mocks = vi.hoisted(() => ({
@@ -78,6 +79,11 @@ let screen: Awaited<ReturnType<typeof render>> | undefined;
 let client: QueryClient;
 beforeEach(() => {
   vi.resetAllMocks();
+  useComposerDraftStore.setState({
+    draftThreadsByThreadId: {},
+    projectDraftThreadIdByProjectId: {},
+    draftsByThreadId: {},
+  });
   mocks.list.mockResolvedValue({
     projects: [
       {
@@ -86,7 +92,16 @@ beforeEach(() => {
         workspaceRoot: "/repo",
         error: null,
         entries: [
-          row("/repo", "main", { classification: "projectCheckout" }),
+          row("/repo", "main", {
+            classification: "projectCheckout",
+            linkedThreads: [
+              {
+                threadId: ThreadId.makeUnsafe("local-other"),
+                title: "Local conversation",
+                archived: false,
+              },
+            ],
+          }),
           linked,
           row("/external", "external", { classification: "external" }),
           row("/other-profile", "other", { classification: "otherProfile" }),
@@ -109,10 +124,10 @@ afterEach(async () => {
   client.clear();
   useWorktreeRemovalDialogStore.setState({ requests: [] });
 });
-async function mount() {
+async function mount(selectedThread = threadId) {
   screen = await render(
     <QueryClientProvider client={client}>
-      <WorktreesPage search={{ projectId, threadId }} onProjectChange={vi.fn()} />
+      <WorktreesPage search={{ projectId, threadId: selectedThread }} onProjectChange={vi.fn()} />
     </QueryClientProvider>,
   );
   await expect.element(page.getByRole("heading", { name: "Repository" })).toBeVisible();
@@ -194,4 +209,105 @@ it("keeps full paths and actions inside a narrow viewport", async () => {
   } finally {
     await page.viewport(1280, 800);
   }
+});
+
+it("uses the project checkout for a worktree-mode draft instead of preparing a new worktree", async () => {
+  const draftId = ThreadId.makeUnsafe("draft-current");
+  useComposerDraftStore
+    .getState()
+    .setProjectDraftThreadId(projectId, draftId, { envMode: "worktree", branch: "topic" });
+  await mount(draftId);
+  await page
+    .getByRole("article", { name: "main /repo", exact: true })
+    .getByRole("button", { name: "Use for this conversation" })
+    .click();
+  await expect
+    .poll(() => useComposerDraftStore.getState().getDraftThread(draftId))
+    .toMatchObject({ envMode: "local", worktreePath: null, branch: "main" });
+  expect(mocks.switchWorkspace).not.toHaveBeenCalled();
+});
+it("attaches a new draft to the selected worktree after confirming sharing", async () => {
+  const draftId = ThreadId.makeUnsafe("new-draft");
+  mocks.confirm.mockResolvedValue(true);
+  mocks.newThread.mockImplementation(async () => {
+    useComposerDraftStore.getState().setProjectDraftThreadId(projectId, draftId, {
+      envMode: "worktree",
+      branch: "topic",
+      worktreePath: linked.path,
+    });
+    return { threadId: draftId };
+  });
+  await mount();
+  await page
+    .getByRole("article", { name: "topic /managed/shared" })
+    .getByRole("button", { name: "New conversation here" })
+    .click();
+  await expect
+    .poll(() => useComposerDraftStore.getState().getDraftThread(draftId))
+    .toMatchObject({
+      envMode: "worktree",
+      branch: "topic",
+      worktreePath: linked.path,
+      sharedFilesystemConfirmed: true,
+    });
+  expect(mocks.newThread).toHaveBeenCalledWith(projectId, {
+    branch: "topic",
+    worktreePath: linked.path,
+    envMode: "worktree",
+    forceNonDefaultEnvMode: true,
+  });
+});
+it("follows the conversation URL and clears the visible selection for another project", async () => {
+  const draftId = ThreadId.makeUnsafe("draft-url");
+  useComposerDraftStore
+    .getState()
+    .setProjectDraftThreadId(projectId, draftId, { envMode: "local", branch: "main" });
+  await mount();
+  await screen!.rerender(
+    <QueryClientProvider client={client}>
+      <WorktreesPage search={{ projectId, threadId: draftId }} onProjectChange={vi.fn()} />
+    </QueryClientProvider>,
+  );
+  await expect
+    .element(page.getByRole("combobox", { name: "Conversation to switch" }))
+    .toHaveValue(draftId);
+  await screen!.rerender(
+    <QueryClientProvider client={client}>
+      <WorktreesPage
+        search={{ projectId: ProjectId.makeUnsafe("other-project"), threadId: draftId }}
+        onProjectChange={vi.fn()}
+      />
+    </QueryClientProvider>,
+  );
+  await expect
+    .element(page.getByRole("combobox", { name: "Conversation to switch" }))
+    .toHaveValue("");
+});
+
+it("does not ask a local conversation to confirm the project checkout it already shares", async () => {
+  await mount();
+  await page
+    .getByRole("article", { name: "main /repo", exact: true })
+    .getByRole("button", { name: "Use for this conversation" })
+    .click();
+  await expect.poll(() => mocks.switchWorkspace.mock.calls.length).toBe(1);
+  expect(mocks.confirm).not.toHaveBeenCalled();
+});
+it("still confirms shared project files when a draft leaves a different checkout", async () => {
+  const draftId = ThreadId.makeUnsafe("shared-project-draft");
+  useComposerDraftStore.getState().setProjectDraftThreadId(projectId, draftId, {
+    envMode: "worktree",
+    branch: "topic",
+    worktreePath: "/managed/original",
+  });
+  mocks.confirm.mockResolvedValue(true);
+  await mount(draftId);
+  await page
+    .getByRole("article", { name: "main /repo", exact: true })
+    .getByRole("button", { name: "Use for this conversation" })
+    .click();
+  await expect
+    .poll(() => useComposerDraftStore.getState().getDraftThread(draftId)?.envMode)
+    .toBe("local");
+  expect(mocks.confirm).toHaveBeenCalledOnce();
 });

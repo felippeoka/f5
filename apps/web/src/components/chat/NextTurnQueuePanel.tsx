@@ -247,7 +247,8 @@ export function NextTurnQueuePanel({
     !snapshot.paused &&
     !state.syncError &&
     snapshot.quarantinedCount === 0 &&
-    !snapshot.workspaceTransition
+    (!snapshot.workspaceTransition ||
+      ["completed", "cancelled"].includes(snapshot.workspaceTransition.phase))
   ) {
     return null;
   }

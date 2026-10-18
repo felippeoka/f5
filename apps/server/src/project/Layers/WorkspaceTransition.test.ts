@@ -362,7 +362,9 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
   it("recovers a partial Git outcome only after preview and rejects stale acceptance tokens", async () => {
     const f = await fixture();
     const request = await f.request("checkout_branch", { branch: "topic" });
-    const repository = git(f.repo.root, "rev-parse", "--path-format=absolute", "--git-common-dir");
+    const repository = await fs.realpath(
+      git(f.repo.root, "rev-parse", "--path-format=absolute", "--git-common-dir"),
+    );
     const source = {
       path: await fs.realpath(f.repo.root),
       repository,

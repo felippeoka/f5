@@ -117,7 +117,10 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
     const { repo, world, projectId, run } = await fixture();
     await run((manager, root) =>
       Effect.gen(function* () {
-        const target = path.join(root, "referenced ");
+        const target = path.join(
+          root,
+          process.platform === "win32" ? "referenced space" : "referenced ",
+        );
         const unused = path.join(root, "unused");
         const missing = path.join(root, "recorded-only");
         const external = path.join(repo.dir, "external");
@@ -170,6 +173,21 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
       }),
     );
   });
+  it("reports nested project folders without fabricating an attachable checkout", async () => {
+    const { repo, world, projectId, run } = await fixture();
+    const nested = path.join(repo.root, "subproject");
+    await fs.mkdir(nested);
+    world.projects[0] = project("p", nested);
+    world.threads.push(thread({ id: "nested", projectId, branch: null, worktreePath: null }));
+    await run((manager) =>
+      Effect.gen(function* () {
+        const result = yield* manager.list({ projectId });
+        expect(result.projects[0]!.entries).toEqual([]);
+        expect(result.projects[0]!.error).toContain(`checkout root: ${repo.root}`);
+      }),
+    );
+  });
+
   it("isolates project failures, skips non-Git/deleted projects, and reports unknown dirty status", async () => {
     const { repo, world, projectId, run } = await fixture();
     world.projects.push(

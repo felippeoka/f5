@@ -26,41 +26,48 @@ afterEach(async () => {
 });
 
 describe("NextTurnQueuePanel", () => {
-  it("shows a transition snapshot even with no queued turns and no manual pause", async () => {
-    const threadId = ThreadId.makeUnsafe("switch-queue");
-    const source = { path: "/repo", repository: "/repo/.git", branch: "main", headSha: "base" };
-    useNextTurnQueueStore.getState().applySnapshot({
-      threadId,
-      revision: 2,
-      paused: false,
-      blockedKind: "waiting",
-      reasonCode: "workspace_switch",
-      reasonDetail: null,
-      maxItems: 20,
-      quarantinedCount: 0,
-      items: [],
-      workspaceTransition: {
-        operationId: "switch",
+  it.each(["stopping", "needs_recovery", "failed", "completed", "cancelled"] as const)(
+    "handles an empty queue with a %s transition",
+    async (phase) => {
+      const threadId = ThreadId.makeUnsafe("switch-queue");
+      const source = { path: "/repo", repository: "/repo/.git", branch: "main", headSha: "base" };
+      useNextTurnQueueStore.getState().applySnapshot({
         threadId,
-        version: 1,
-        intent: "attach_existing",
-        phase: "stopping",
-        source,
-        target: { ...source, path: "/managed/topic", branch: "topic" },
-        observed: null,
-        error: null,
-        result: null,
-        createdAt: "2026-01-01",
-        updatedAt: "2026-01-01",
-      },
-    });
-    active = await render(<NextTurnQueuePanel threadId={threadId} />);
-    await expect
-      .element(page.getByText("Switching workspace. Queued turns will wait."))
-      .toBeVisible();
-    await expect.element(page.getByText("Workspace switch: stopping")).toBeVisible();
-    await expect.element(page.getByText("/repo → /managed/topic")).toBeVisible();
-  });
+        revision: 2,
+        paused: false,
+        blockedKind: "waiting",
+        reasonCode: "workspace_switch",
+        reasonDetail: null,
+        maxItems: 20,
+        quarantinedCount: 0,
+        items: [],
+        workspaceTransition: {
+          operationId: "switch",
+          threadId,
+          version: 1,
+          intent: "attach_existing",
+          phase,
+          source,
+          target: { ...source, path: "/managed/topic", branch: "topic" },
+          observed: null,
+          error: null,
+          result: null,
+          createdAt: "2026-01-01",
+          updatedAt: "2026-01-01",
+        },
+      });
+      active = await render(<NextTurnQueuePanel threadId={threadId} />);
+      if (phase === "completed" || phase === "cancelled") {
+        await expect.element(page.getByText(/Workspace switch:/)).not.toBeInTheDocument();
+        expect(document.getElementById("next-turn-queue-panel")).toBeNull();
+      } else {
+        await expect
+          .element(page.getByText(`Workspace switch: ${phase.replaceAll("_", " ")}`))
+          .toBeVisible();
+        await expect.element(page.getByText("/repo → /managed/topic")).toBeVisible();
+      }
+    },
+  );
 
   it("shows a queued turn from the durable snapshot", async () => {
     const threadId = ThreadId.makeUnsafe("queue-thread");

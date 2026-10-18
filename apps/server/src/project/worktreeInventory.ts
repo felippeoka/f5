@@ -97,6 +97,15 @@ export const listWorktreeInventory = (
             );
           if (registrations === null) return null;
           const root = yield* canonical(project.workspaceRoot);
+          if (!registrations.some((entry) => entry.canonicalPath === root)) {
+            const checkout = registrations.find((entry) => pathContains(entry.canonicalPath, root));
+            if (checkout)
+              return yield* Effect.fail(
+                new Error(
+                  `Project folder is inside a Git checkout. Manage worktrees from its checkout root: ${checkout.path}`,
+                ),
+              );
+          }
           const entries = new Map<
             string,
             { path: string; registration: WorktreeListEntry["registration"]; branch: string | null }

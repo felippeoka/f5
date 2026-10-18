@@ -85,17 +85,7 @@ import {
   type ThreadWorkspace,
 } from "../lib/workspaceInvalidation";
 import { startWorkspaceWatchSync } from "../lib/workspaceWatch";
-
-const WORKTREE_INVENTORY_EVENT_TYPES = new Set<OrchestrationEvent["type"]>([
-  "thread.created",
-  "thread.meta-updated",
-  "thread.deleted",
-  "thread.archived",
-  "thread.unarchived",
-  "project.created",
-  "project.meta-updated",
-  "project.deleted",
-]);
+import { affectsWorktreeInventory } from "../lib/worktreeInventoryInvalidation";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -669,6 +659,8 @@ function EventRouter() {
         removeOrphanedTerminalsForCurrentStoreThreads();
       }
       void invalidateWorkflowQueries(queryClient, batch);
+      if (batch.some(affectsWorktreeInventory))
+        void queryClient.invalidateQueries({ queryKey: ["worktrees"] });
       invalidateWorkspaceQueriesForEvents(batch);
       if (import.meta.env.DEV && batch.length >= 64) {
         console.info("EventRouter coalesced a large batch", {
@@ -1091,8 +1083,6 @@ function EventRouter() {
 
     const unsubDomainEvent = api.orchestration.onDomainEvent((event) => {
       if (event.sequence <= latestSequence) return;
-      if (WORKTREE_INVENTORY_EVENT_TYPES.has(event.type))
-        void queryClient.invalidateQueries({ queryKey: ["worktrees"] });
       if (event.type === "project.created" || event.type === "project.meta-updated")
         void refreshProfiles()
           .then(() => {

@@ -159,6 +159,8 @@ also links to this page through **Manage worktrees**. Filter by project or searc
 full path, or linked conversation. The project checkout appears first, followed by
 referenced and unreferenced checkouts. **Refresh** rechecks local state; there is no polling.
 Unreadable projects report an error, and an unavailable status is shown as unknown.
+Projects opened at a subfolder of a Git checkout report its checkout root instead of
+offering an attachment to that subfolder. Add the checkout root as a project to manage its worktrees.
 
 Rows show missing directories, local changes, locked registrations, and detached HEADs.
 Choose **Inspect** for current removal blockers and branch deletion eligibility. **Remove…**
@@ -168,8 +170,9 @@ detached checkouts are inspect-only; paths can still be copied, revealed, or ope
 
 Use **New conversation here** to attach a new draft to an eligible checkout. Select an
 existing conversation and choose **Use for this conversation** to switch it through the durable
-workspace transition. Sharing prompts for confirmation because conversations see the same
-files and uncommitted changes. The server rechecks eligibility when attaching or switching,
+workspace transition. Joining a different checkout used by other conversations prompts for
+confirmation because they see the same files and uncommitted changes. New local conversations
+already share the project checkout. The server rechecks eligibility when attaching or switching,
 so a list entry never grants permission to mutate a checkout.
 
 The conversation's worktree chip shows its branch and shortened path. Open it with a mouse

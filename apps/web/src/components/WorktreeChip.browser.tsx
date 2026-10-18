@@ -16,7 +16,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
   useNavigate: () => mocks.navigate,
 }));
 vi.mock("../nativeApi", () => ({
-  ensureNativeApi: () => ({ shell: { revealInFileManager: mocks.reveal } }),
+  ensureNativeApi: () => ({ shell: { openInEditor: mocks.reveal } }),
 }));
 vi.mock("../hooks/useCopyToClipboard", () => ({ writeTextToClipboard: mocks.copy }));
 vi.mock("../editorPreferences", () => ({ openInPreferredEditor: mocks.editor }));
@@ -31,7 +31,7 @@ afterEach(async () => {
 const threadId = ThreadId.makeUnsafe("chip");
 const projectId = ProjectId.makeUnsafe("project");
 const path = "/managed/topic with spaces ";
-it("exposes the exact path accessibly and reveals the workspace root", async () => {
+it("reveals the displayed checkout path for an unsent draft", async () => {
   mocks.reveal.mockResolvedValue(undefined);
   mocks.copy.mockResolvedValue(undefined);
   screen = await render(
@@ -49,12 +49,7 @@ it("exposes the exact path accessibly and reveals the workspace root", async () 
   expect(mocks.copy).toHaveBeenCalledWith(path);
   await trigger.click();
   await page.getByRole("menuitem", { name: "Reveal", exact: true }).click();
-  expect(mocks.reveal).toHaveBeenCalledWith({
-    threadId,
-    projectId,
-    relativePath: ".",
-    kind: "directory",
-  });
+  expect(mocks.reveal).toHaveBeenCalledWith(path, "file-manager");
   await trigger.click();
   await page.getByRole("menuitem", { name: "Remove worktree…" }).click();
   expect(useWorktreeRemovalDialogStore.getState().requests[0]?.rows).toEqual([{ projectId, path }]);

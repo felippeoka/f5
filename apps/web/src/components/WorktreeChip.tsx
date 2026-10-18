@@ -69,16 +69,7 @@ export function WorktreeChip({
           Open in editor
         </MenuItem>
         <MenuItem
-          onClick={() =>
-            run(() =>
-              ensureNativeApi().shell.revealInFileManager({
-                threadId,
-                projectId,
-                relativePath: ".",
-                kind: "directory",
-              }),
-            )
-          }
+          onClick={() => run(() => ensureNativeApi().shell.openInEditor(path, "file-manager"))}
         >
           Reveal
         </MenuItem>
