@@ -1206,6 +1206,21 @@ describe("composerDraftStore project draft thread mapping", () => {
     });
   });
 
+  it("binds explicit sharing confirmation to the selected draft workspace", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectId, threadId);
+    store.setDraftThreadContext(threadId, {
+      branch: "topic",
+      worktreePath: "/managed/topic",
+      sharedFilesystemConfirmed: true,
+    });
+    expect(store.getDraftThread(threadId)?.sharedFilesystemConfirmed).toBe(true);
+    store.setDraftThreadContext(threadId, { runtimeMode: "full-access" });
+    expect(store.getDraftThread(threadId)?.sharedFilesystemConfirmed).toBe(true);
+    store.setDraftThreadContext(threadId, { branch: "another", worktreePath: "/managed/another" });
+    expect(store.getDraftThread(threadId)?.sharedFilesystemConfirmed).toBeUndefined();
+  });
+
   it("preserves existing branch and worktree when setProjectDraftThreadId receives undefined", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectId, threadId, {

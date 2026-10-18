@@ -1,3 +1,5 @@
+import { dispatchVerifiedWorkspace } from "../../project/workspaceTransitionContext.ts";
+import { GitCore } from "../../git/Services/GitCore.ts";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { makeConversationRewind } from "../rewind.ts";
 import { canonicalWorktreePath, isTemporaryWorktreeBranch } from "../../git/worktreePaths.ts";
@@ -71,6 +73,7 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const checkpointStore = yield* CheckpointStore;
   const git = yield* GitService;
+  const workspaceGit = yield* Effect.serviceOption(GitCore);
   const receiptBus = yield* RuntimeReceiptBus;
   const turns = yield* ProjectionTurnRepository;
   const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
@@ -316,25 +319,27 @@ const make = Effect.gen(function* () {
         const current = yield* orchestrationEngine.getReadModel();
         const canonical = yield* Effect.tryPromise(() => canonicalWorktreePath(input.cwd));
         for (const other of current.threads) {
-          if (
-            other.id === input.threadId ||
-            other.deletedAt !== null ||
-            other.worktreePath === null
-          )
-            continue;
-          const otherPath = yield* Effect.tryPromise(() =>
-            canonicalWorktreePath(other.worktreePath!),
-          );
+          if (other.id === input.threadId || other.deletedAt !== null) continue;
+          const owner = current.projects.find((project) => project.id === other.projectId);
+          const effective = other.worktreePath ?? owner?.workspaceRoot;
+          if (!effective) return;
+          const otherPath = yield* Effect.tryPromise(() => canonicalWorktreePath(effective));
           if (otherPath === canonical) return;
         }
-        yield* orchestrationEngine.dispatch({
-          type: "thread.meta.update",
-          commandId: serverCommandId("checkpoint-branch"),
-          threadId: input.threadId,
-          branch,
-          expectedBranch: input.thread.branch,
-          expectedWorktreePath: input.thread.worktreePath,
-        });
+        if (Option.isNone(workspaceGit)) return;
+        yield* dispatchVerifiedWorkspace(
+          orchestrationEngine,
+          workspaceGit.value,
+          {
+            type: "thread.meta.update",
+            commandId: serverCommandId("checkpoint-branch"),
+            threadId: input.threadId,
+            branch,
+            expectedBranch: input.thread.branch,
+            expectedWorktreePath: input.thread.worktreePath,
+          },
+          { observation: true },
+        );
       }).pipe(Effect.catch(() => Effect.void));
     }
 

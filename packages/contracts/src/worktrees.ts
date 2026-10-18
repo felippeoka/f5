@@ -1,3 +1,4 @@
+import { GitCheckoutConflict } from "./git";
 import { Schema } from "effect";
 import { FilesystemPath, NonNegativeInt, ProjectId, ThreadId } from "./baseSchemas";
 
@@ -64,3 +65,84 @@ export const WorktreesRecoverInput = Schema.Struct({
 export type WorktreesRecoverInput = typeof WorktreesRecoverInput.Type;
 export const WorktreesRecoverResult = WorktreesThreadStateResult;
 export type WorktreesRecoverResult = typeof WorktreesRecoverResult.Type;
+
+export const WorkspaceTransitionIntent = Schema.Literals([
+  "attach_existing",
+  "checkout_branch",
+  "create_branch_and_checkout",
+  "use_project_checkout",
+  "recreate",
+  "recreate_from_base",
+]);
+export const WorkspaceTransitionPhase = Schema.Literals([
+  "reserved",
+  "stopping",
+  "applying",
+  "applied",
+  "needs_recovery",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+export const WorkspaceExpectedContext = Schema.Struct({
+  branch: Schema.NullOr(Schema.String),
+  worktreePath: Schema.NullOr(FilesystemPath),
+  sessionUpdatedAt: Schema.NullOr(Schema.String),
+});
+export const WorktreesSwitchWorkspaceInput = Schema.Struct({
+  operationId: Schema.NonEmptyString.check(Schema.isMaxLength(200)),
+  threadId: ThreadId,
+  expected: WorkspaceExpectedContext,
+  intent: WorkspaceTransitionIntent,
+  targetPath: Schema.optional(FilesystemPath),
+  branch: Schema.optional(Schema.NonEmptyString),
+  sharedFilesystemConfirmed: Schema.optional(Schema.Boolean),
+});
+export type WorktreesSwitchWorkspaceInput = typeof WorktreesSwitchWorkspaceInput.Type;
+export const WorkspaceCheckoutIdentity = Schema.Struct({
+  path: FilesystemPath,
+  repository: FilesystemPath,
+  branch: Schema.NullOr(Schema.String),
+  headSha: Schema.NullOr(Schema.String),
+});
+export type WorkspaceCheckoutIdentity = typeof WorkspaceCheckoutIdentity.Type;
+export const WorkspaceTransitionSnapshot = Schema.Struct({
+  checkoutConflict: Schema.optional(GitCheckoutConflict),
+  operationId: Schema.String,
+  threadId: ThreadId,
+  version: NonNegativeInt,
+  intent: WorkspaceTransitionIntent,
+  phase: WorkspaceTransitionPhase,
+  source: WorkspaceCheckoutIdentity,
+  target: WorkspaceCheckoutIdentity,
+  observed: Schema.NullOr(WorkspaceCheckoutIdentity),
+  error: Schema.NullOr(Schema.String),
+  result: Schema.NullOr(WorkspaceExpectedContext),
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+export type WorkspaceTransitionSnapshot = typeof WorkspaceTransitionSnapshot.Type;
+export const WorktreesGetTransitionInput = WorktreesThreadStateInput;
+export type WorktreesGetTransitionInput = typeof WorktreesGetTransitionInput.Type;
+export const WorktreesGetTransitionResult = Schema.NullOr(WorkspaceTransitionSnapshot);
+export const WorktreesPreviewTransitionRecoveryInput = Schema.Struct({
+  operationId: Schema.String,
+});
+export type WorktreesPreviewTransitionRecoveryInput =
+  typeof WorktreesPreviewTransitionRecoveryInput.Type;
+export const WorkspaceTransitionRecoveryPreview = Schema.Struct({
+  transition: WorkspaceTransitionSnapshot,
+  actual: Schema.NullOr(WorkspaceCheckoutIdentity),
+  original: Schema.NullOr(WorkspaceCheckoutIdentity),
+  acceptanceToken: Schema.String,
+  canRetry: Schema.Boolean,
+  blockedReasons: Schema.Array(Schema.String),
+});
+export type WorkspaceTransitionRecoveryPreview = typeof WorkspaceTransitionRecoveryPreview.Type;
+export const WorktreesResolveTransitionInput = Schema.Struct({
+  operationId: Schema.String,
+  version: NonNegativeInt,
+  acceptanceToken: Schema.String,
+  action: Schema.Literals(["accept_inspected_workspace", "keep_original_workspace", "retry"]),
+});
+export type WorktreesResolveTransitionInput = typeof WorktreesResolveTransitionInput.Type;

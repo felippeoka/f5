@@ -1,3 +1,4 @@
+import { withFixtureWorkspaceWrites } from "../testUtils/workspaceWrites.ts";
 import { makeFakeGitCore } from "../../git/testDoubles.ts";
 import { canonicalWorktreePath } from "../../git/worktreePaths.ts";
 import { makeProviderServiceLive } from "../../provider/Layers/ProviderService";
@@ -459,6 +460,7 @@ describe("ProviderCommandReactor", () => {
         return { recreated: true };
       }),
     );
+    const renamedBranches = new Map<string, string>();
     const renameBranch = vi.fn((input: unknown) =>
       Effect.succeed({
         branch:
@@ -468,7 +470,19 @@ describe("ProviderCommandReactor", () => {
           typeof input.newBranch === "string"
             ? input.newBranch
             : "renamed-branch",
-      }),
+      }).pipe(
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            if (
+              typeof input === "object" &&
+              input !== null &&
+              "cwd" in input &&
+              typeof input.cwd === "string"
+            )
+              renamedBranches.set(input.cwd, result.branch);
+          }),
+        ),
+      ),
     );
     const generateBranchName = vi.fn<TextGenerationShape["generateBranchName"]>(() =>
       Effect.fail(
@@ -631,7 +645,7 @@ describe("ProviderCommandReactor", () => {
             commonDir: yield* Effect.promise(() => canonicalWorktreePath(workspaceRoot)),
             registration: null,
             headSha: "abc",
-            branch: thread?.branch ?? null,
+            branch: renamedBranches.get(cwd) ?? thread?.branch ?? null,
             operation: null,
             hasInitializedSubmodules: false,
             hasTrackedChanges: false,
@@ -753,7 +767,9 @@ describe("ProviderCommandReactor", () => {
     );
     const runtime = ManagedRuntime.make(layer);
 
-    const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    const engine = withFixtureWorkspaceWrites(
+      await runtime.runPromise(Effect.service(OrchestrationEngineService)),
+    );
     readWorkspaceModel = engine.getReadModel;
     const reactor = await runtime.runPromise(Effect.service(ProviderCommandReactor));
     if (input?.orphanedTitleRegenerationBeforeStart) {
@@ -3814,6 +3830,7 @@ describe("ProviderCommandReactor", () => {
         orchestrationEngine: harness.engine,
         rollbackWorktree: () => Effect.die("unexpected rollback"),
         git: {
+          inspectCheckoutIdentity: () => Effect.die("unused"),
           resolveCommit: () => Effect.die("unexpected resolve"),
           resolveCommonDir: () => Effect.die("unexpected resolve"),
           allocateWorktreePath: () => Effect.die("unused"),

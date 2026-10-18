@@ -1,3 +1,16 @@
+import { OrchestrationCommandInvariantError } from "./orchestration/Errors.ts";
+import { GitWorkspaceSwitch, type GitWorkspaceSwitchHandler } from "./git/workspaceSwitch.ts";
+import { inspectAttachableWorkspace } from "./project/workspaceAttachment.ts";
+import { readWorktreeClaims } from "./project/worktreeClaims.ts";
+import { withRepositoryLifecycleLock } from "./project/Layers/WorktreeLifecycleCoordinator.ts";
+import {
+  assertExclusiveProfileCheckout,
+  assertNotOtherProfileManagedCheckout,
+} from "./profiles/RepositorySharing.ts";
+import {
+  WorkspaceTransition,
+  type WorkspaceTransitionShape,
+} from "./project/Services/WorkspaceTransition.ts";
 import { setupProjectScript } from "@t3tools/shared/projectScripts";
 import { WorktreePreparations } from "./persistence/Services/WorktreePreparations.ts";
 import { WorktreePreparationsLive } from "./persistence/Layers/WorktreePreparations.ts";
@@ -887,6 +900,7 @@ interface OrchestrationRuntimeServices {
   readonly worktreeSetup: WorktreeSetupShape;
   readonly worktreePreparation: WorktreePreparationShape;
   readonly worktreeManager: WorktreeManagerShape;
+  readonly workspaceTransition: WorkspaceTransitionShape;
   readonly storageCleanupWorker: StorageCleanupWorkerShape;
   readonly defaultBranchAutoPull: DefaultBranchAutoPullShape;
 }
@@ -1547,6 +1561,83 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       return result.result;
     });
 
+  const validateCreationAttachment = (input: {
+    projectId: ProjectId;
+    worktreePath: string | null;
+    branch: string | null;
+    sharedFilesystemConfirmed?: boolean | undefined;
+    threadId?: ThreadId | undefined;
+  }) =>
+    Effect.gen(function* () {
+      const { orchestrationEngine } = yield* awaitOrchestrationRuntimeForRoute;
+      const model = yield* orchestrationEngine.getReadModel();
+      const project = model.projects.find(
+        (entry) => entry.id === input.projectId && entry.deletedAt === null,
+      );
+      if (!project) return yield* new RouteRequestError({ message: "Unknown project." });
+      if (!input.worktreePath) {
+        yield* Effect.tryPromise(() =>
+          assertNotOtherProfileManagedCheckout(serverConfig, project.workspaceRoot),
+        ).pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+        return;
+      }
+      yield* withWorktreeLifecycleLock(
+        input.worktreePath,
+        Effect.gen(function* () {
+          const target = yield* inspectAttachableWorkspace(
+            git,
+            serverConfig,
+            project.workspaceRoot,
+            input.worktreePath!,
+            input.branch,
+          ).pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+          const usage = yield* readWorktreeClaims(target.canonicalRoot).pipe(
+            Effect.provideService(OrchestrationEngineService, orchestrationEngine),
+            Effect.provideService(ProviderService, providerService),
+            Effect.provideService(TerminalManager, terminalManager),
+            Effect.provideService(NextTurnQueueStore, nextTurnQueueStore),
+          );
+          if (usage.unknown || usage.setupThreadIds.some((id) => id !== input.threadId))
+            return yield* new RouteRequestError({
+              message: "Workspace ownership could not be verified or another operation owns it.",
+            });
+          if (
+            usage.threadIds.some((id) => id !== input.threadId) &&
+            !input.sharedFilesystemConfirmed
+          )
+            return yield* new RouteRequestError({
+              message: "Confirm sharing this checkout's filesystem with the linked conversations.",
+            });
+        }),
+      );
+    });
+
+  const dispatchWithCreationAttachment = (
+    engine: OrchestrationEngineShape,
+    command: OrchestrationCommand,
+  ) => {
+    if (command.type !== "thread.create") return engine.dispatch(command);
+    return Effect.gen(function* () {
+      const model = yield* engine.getReadModel();
+      const project = model.projects.find((entry) => entry.id === command.projectId);
+      const workspace = command.worktreePath ?? project?.workspaceRoot;
+      if (!workspace)
+        return yield* new RouteRequestError({ message: "Unknown project workspace." });
+      return yield* withWorktreeLifecycleLock(
+        workspace,
+        validateCreationAttachment(command).pipe(Effect.andThen(engine.dispatch(command))),
+      );
+    }).pipe(
+      Effect.mapError(
+        (error) =>
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: error.message,
+          }),
+      ),
+    );
+  };
+
   const runBootstrapTurnStart = Effect.fnUntraced(function* (input: {
     readonly command: Extract<ClientOrchestrationCommand, { type: "thread.turn.start" }>;
     readonly orchestrationEngine: OrchestrationEngineShape;
@@ -1562,7 +1653,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     let rolledBack: BootstrapThreadDisposition | null = null;
     return yield* dispatchBootstrapTurnStart({
       command: prepared.command,
-      orchestrationEngine: input.orchestrationEngine,
+      orchestrationEngine: {
+        ...input.orchestrationEngine,
+        dispatch: (command) => dispatchWithCreationAttachment(input.orchestrationEngine, command),
+      },
       git: { ...git, createWorktree: createConfiguredWorktree },
       rollbackWorktree: (receipt, ownedTerminalId) =>
         Effect.gen(function* () {
@@ -2585,6 +2679,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         NextTurnQueueDispatcher,
       );
       const worktreeManager = ServiceMap.get(orchestrationRuntimeServices, WorktreeManager);
+      const workspaceTransition = ServiceMap.get(orchestrationRuntimeServices, WorkspaceTransition);
       const worktreeSetup = ServiceMap.get(orchestrationRuntimeServices, WorktreeSetup);
       const worktreePreparation = ServiceMap.get(orchestrationRuntimeServices, WorktreePreparation);
       const storageCleanupWorker = ServiceMap.get(
@@ -2723,6 +2818,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         worktreePreparation,
         storageCleanupWorker,
         worktreeManager,
+        workspaceTransition,
         projectSkillSyncService,
         defaultBranchAutoPull,
       }).pipe(Effect.orDie);
@@ -3427,6 +3523,104 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       }),
   });
 
+  const switchGitWorkspace =
+    (threadId?: ThreadId, operationId?: string): GitWorkspaceSwitchHandler =>
+    (input) =>
+      Effect.gen(function* () {
+        const { orchestrationEngine, workspaceTransition } =
+          yield* awaitOrchestrationRuntimeForRoute;
+        if (threadId) {
+          const model = yield* orchestrationEngine.getReadModel();
+          const thread = model.threads.find(
+            (entry) => entry.id === threadId && entry.deletedAt === null,
+          );
+          const project = model.projects.find((entry) => entry.id === thread?.projectId);
+          if (
+            !thread ||
+            !project ||
+            (yield* Effect.tryPromise(() => canonicalWorktreePath(input.cwd))) !==
+              (yield* Effect.tryPromise(() =>
+                canonicalWorktreePath(thread.worktreePath ?? project.workspaceRoot),
+              ))
+          )
+            return yield* Effect.fail(
+              new Error("The checkout does not match this conversation's workspace."),
+            );
+          const result = yield* workspaceTransition.switchWorkspace({
+            operationId: operationId ?? crypto.randomUUID(),
+            threadId,
+            intent: input.create ? "create_branch_and_checkout" : "checkout_branch",
+            branch: input.branch,
+            expected: {
+              branch: thread.branch,
+              worktreePath: thread.worktreePath,
+              sessionUpdatedAt: thread.session?.updatedAt ?? null,
+            },
+          });
+          if (result.phase !== "completed") {
+            if (result.checkoutConflict)
+              return yield* new GitCommandError({
+                operation: "GitCore.checkoutBranch.checkout",
+                cwd: input.cwd,
+                command: "git checkout",
+                detail: result.error ?? "Local changes block branch switching.",
+                checkoutConflict: result.checkoutConflict,
+              });
+            return yield* Effect.fail(
+              new Error(result.error ?? "Inspect and resolve the workspace transition."),
+            );
+          }
+          return;
+        }
+        const checkout = yield* git.inspectCheckoutIdentity(input.cwd);
+        yield* withWorktreeLifecycleLock(
+          checkout.canonicalRoot,
+          withRepositoryLifecycleLock(
+            serverConfig.baseDir,
+            checkout.commonDir,
+            Effect.gen(function* () {
+              const current = yield* git.inspectCheckoutIdentity(input.cwd);
+              if (
+                current.canonicalRoot !== checkout.canonicalRoot ||
+                current.commonDir !== checkout.commonDir ||
+                current.branch !== checkout.branch
+              )
+                return yield* Effect.fail(
+                  new Error("The checkout identity changed. Inspect it before switching branches."),
+                );
+              const usage = yield* readWorktreeClaims(checkout.canonicalRoot).pipe(
+                Effect.provideService(OrchestrationEngineService, orchestrationEngine),
+                Effect.provideService(ProviderService, providerService),
+                Effect.provideService(TerminalManager, terminalManager),
+                Effect.provideService(NextTurnQueueStore, nextTurnQueueStore),
+              );
+              if (
+                usage.unknown ||
+                usage.threadIds.length ||
+                usage.sessions.length ||
+                usage.terminals.length ||
+                usage.setupThreadIds.length
+              )
+                return yield* Effect.fail(
+                  new Error(
+                    "This checkout is referenced by a conversation or process. Switch it through that conversation.",
+                  ),
+                );
+              yield* Effect.tryPromise(() =>
+                assertExclusiveProfileCheckout(serverConfig, checkout.canonicalRoot),
+              );
+              if (input.create) yield* git.createBranch({ cwd: input.cwd, branch: input.branch });
+              yield* Effect.scoped(
+                git.checkoutBranch(
+                  { cwd: input.cwd, branch: input.branch },
+                  { refreshUpstream: false },
+                ),
+              );
+            }),
+          ),
+        );
+      });
+
   const routeRequest = Effect.fnUntraced(function* (ws: WebSocket, request: WebSocketRequest) {
     switch (request.body._tag) {
       case WS_METHODS.githubLoginStart:
@@ -3913,7 +4107,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       }
 
       case ORCHESTRATION_WS_METHODS.dispatchCommand: {
-        const { orchestrationEngine, projectSetupScriptRunner } =
+        const { orchestrationEngine, projectSetupScriptRunner, workspaceTransition } =
           yield* awaitOrchestrationRuntimeForRoute;
         const rawCommand = request.body.command;
         const command =
@@ -3930,6 +4124,58 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           yield* releaseSentUploads(command.threadId, command.message.attachments);
           return dispatched;
         }
+        if (
+          command.type === "thread.meta.update" &&
+          (command.branch !== undefined || command.worktreePath !== undefined)
+        ) {
+          const thread = (yield* orchestrationEngine.getReadModel()).threads.find(
+            (entry) => entry.id === command.threadId && entry.deletedAt === null,
+          );
+          if (!thread) return yield* new RouteRequestError({ message: "Unknown conversation." });
+          if (
+            (command.expectedBranch !== undefined && command.expectedBranch !== thread.branch) ||
+            (command.expectedWorktreePath !== undefined &&
+              command.expectedWorktreePath !== thread.worktreePath)
+          )
+            return yield* new RouteRequestError({
+              message: "The conversation workspace changed. Refresh and try again.",
+            });
+          const path =
+            command.worktreePath === undefined ? thread.worktreePath : command.worktreePath;
+          const branch = command.branch === undefined ? thread.branch : command.branch;
+          if (path !== thread.worktreePath || branch !== thread.branch) {
+            const project = (yield* orchestrationEngine.getReadModel()).projects.find(
+              (entry) => entry.id === thread.projectId,
+            );
+            if (!project) return yield* new RouteRequestError({ message: "Unknown project." });
+            const result = yield* workspaceTransition
+              .switchWorkspace({
+                operationId: command.commandId,
+                threadId: thread.id,
+                intent: "attach_existing",
+                targetPath: path ?? project.workspaceRoot,
+                ...(branch ? { branch } : {}),
+                expected: {
+                  branch: thread.branch,
+                  worktreePath: thread.worktreePath,
+                  sessionUpdatedAt: thread.session?.updatedAt ?? null,
+                },
+              })
+              .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+            if (result.phase !== "completed")
+              return yield* new RouteRequestError({
+                message: result.error ?? "Resolve the workspace transition before continuing.",
+              });
+          }
+          const {
+            branch: _branch,
+            worktreePath: _path,
+            expectedBranch: _expectedBranch,
+            expectedWorktreePath: _expectedPath,
+            ...metadata
+          } = command;
+          return yield* orchestrationEngine.dispatch(metadata);
+        }
         const normalizedCommand = yield* normalizeDispatchCommand({
           command,
           submissionSource: "human",
@@ -3942,7 +4188,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
               "Established-thread turns must be submitted through nextTurnQueue.submit so ordering is enforced by the server.",
           });
         }
-        const result = yield* orchestrationEngine.dispatch(normalizedCommand).pipe(
+        const result = yield* dispatchWithCreationAttachment(
+          orchestrationEngine,
+          normalizedCommand,
+        ).pipe(
           Effect.tapError(() =>
             normalizedCommand.type === "thread.user-input.respond"
               ? discardAttachmentIngress({
@@ -4729,6 +4978,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             },
           })
           .pipe(
+            Effect.provideService(
+              GitWorkspaceSwitch,
+              switchGitWorkspace(body.threadId, `git-action:${actionId}`),
+            ),
             Effect.tap((result) =>
               pushBus
                 .publishClient(ws, WS_CHANNELS.gitActionProgress, {
@@ -4763,7 +5016,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.gitPreparePullRequestThread: {
         const body = stripRequestTag(request.body);
-        return yield* gitManager.preparePullRequestThread(body);
+        return yield* gitManager
+          .preparePullRequestThread(body)
+          .pipe(Effect.provideService(GitWorkspaceSwitch, switchGitWorkspace(body.threadId)));
       }
 
       case WS_METHODS.gitListBranches: {
@@ -4857,15 +5112,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.gitCheckout: {
         const body = stripRequestTag(request.body);
-        return yield* Effect.scoped(git.checkoutBranch(body)).pipe(
-          Effect.tapError((error) =>
-            Effect.logWarning("Branch checkout failed", {
-              cwd: body.cwd,
-              branch: body.branch,
-              detail: error.detail,
-            }),
-          ),
-        );
+        return yield* switchGitWorkspace(
+          body.threadId,
+          body.operationId,
+        )({ cwd: body.cwd, branch: body.branch, create: false });
       }
 
       case WS_METHODS.gitInit: {
@@ -5766,6 +6016,30 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return { entries, scheduledBackupStatus };
       }
 
+      case WS_METHODS.worktreesSwitchWorkspace: {
+        const { workspaceTransition } = yield* awaitOrchestrationRuntimeForRoute;
+        return yield* workspaceTransition
+          .switchWorkspace(stripRequestTag(request.body))
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+      }
+      case WS_METHODS.worktreesGetTransition: {
+        const { workspaceTransition } = yield* awaitOrchestrationRuntimeForRoute;
+        return yield* workspaceTransition
+          .getTransition(stripRequestTag(request.body))
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+      }
+      case WS_METHODS.worktreesPreviewTransitionRecovery: {
+        const { workspaceTransition } = yield* awaitOrchestrationRuntimeForRoute;
+        return yield* workspaceTransition
+          .previewRecovery(stripRequestTag(request.body))
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+      }
+      case WS_METHODS.worktreesResolveTransition: {
+        const { workspaceTransition } = yield* awaitOrchestrationRuntimeForRoute;
+        return yield* workspaceTransition
+          .resolve(stripRequestTag(request.body))
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+      }
       case WS_METHODS.worktreesInspect: {
         const { worktreeManager } = yield* awaitOrchestrationRuntimeForRoute;
         return yield* worktreeManager

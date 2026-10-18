@@ -5,12 +5,10 @@ import { OrchestrationEngineService } from "../../orchestration/Services/Orchest
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { NextTurnQueueStore } from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { NextTurnQueueStorageError } from "../../nextTurnQueue/Errors.ts";
-import { holdsWorktreeLifecycleLock } from "./WorktreeLifecycleCoordinator.ts";
 import type { OrchestrationCommand } from "@t3tools/contracts";
-import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { Effect, Fiber } from "effect";
+import { Effect } from "effect";
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { ServerConfig } from "../../config.ts";
 import { NextTurnQueueDispatcher } from "../../nextTurnQueue/Services/NextTurnQueueDispatcher.ts";
@@ -23,7 +21,6 @@ import {
   thread,
 } from "../../storage/storageAutomation.testHarness.ts";
 import { GitCore, type GitCoreShape } from "../../git/Services/GitCore.ts";
-import { GitCommandError } from "../../git/Errors.ts";
 import { WorktreeSetupGate, WorktreeSetupGateLive } from "../Services/WorktreeSetupGate.ts";
 import { makeWorktreeManager } from "./WorktreeManager.ts";
 
@@ -202,82 +199,6 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
       }),
     );
   });
-  it("recreates stale registrations and resumes only a missing-worktree pause", async () => {
-    const { repo, world, run, notified } = await fixture();
-    const threadId = ThreadId.makeUnsafe("recover");
-    await run((manager, root) =>
-      Effect.gen(function* () {
-        const target = path.join(root, "missing");
-        git(repo.root, "worktree", "add", "-q", "-b", "recovery", target, "main");
-        yield* Effect.promise(() => fs.rm(target, { recursive: true }));
-        world.threads.push(
-          thread({ id: threadId, projectId: "p", worktreePath: target, branch: "recovery" }),
-        );
-        world.queueStates.set(threadId, {
-          revision: 1,
-          paused: true,
-          pauseReasonCode: "worktree_missing",
-          worktreeBlockToken: null,
-        });
-        expect((yield* manager.threadState({ threadId })).registration).toBe("stale");
-        expect(
-          (yield* manager.recover({ threadId, action: "recreate", expectedQueueRevision: 1 }))
-            .directoryExists,
-        ).toBe(true);
-        expect(world.queueStates.get(threadId)?.paused).toBe(false);
-        yield* Effect.promise(() => fs.rm(target, { recursive: true }));
-        world.queueStates.set(threadId, {
-          revision: 10,
-          paused: true,
-          pauseReasonCode: "manual_pause",
-          worktreeBlockToken: null,
-        });
-        const recovered = yield* manager.recover({
-          threadId,
-          action: "recreateFromBase",
-          expectedQueueRevision: 10,
-        });
-        expect(recovered.directoryExists).toBe(true);
-        expect(recovered.registration).toBe("matching");
-        expect(recovered.branch).not.toBe("recovery");
-        expect(world.queueStates.get(threadId)?.pauseReasonCode).toBe("manual_pause");
-        expect(notified).toEqual([threadId, threadId]);
-      }),
-    );
-  });
-  it("rejects pending turns and stale revisions before changing workspace", async () => {
-    const { repo, world, run } = await fixture();
-    const threadId = ThreadId.makeUnsafe("blocked");
-    await run((manager, root) =>
-      Effect.gen(function* () {
-        const target = path.join(root, "absent");
-        world.threads.push(thread({ id: threadId, projectId: "p", worktreePath: target }));
-        world.pendingTurnStarts.add(threadId);
-        expect(
-          (yield* manager
-            .recover({ threadId, action: "useProjectCheckout", expectedQueueRevision: 0 })
-            .pipe(Effect.exit))._tag,
-        ).toBe("Failure");
-        world.pendingTurnStarts.clear();
-        expect(
-          (yield* manager
-            .recover({ threadId, action: "useProjectCheckout", expectedQueueRevision: 9 })
-            .pipe(Effect.exit))._tag,
-        ).toBe("Failure");
-        expect(world.threads[0]?.worktreePath).toBe(target);
-        world.sessions.push({ threadId, cwd: target, status: "ready" });
-        expect(
-          (yield* manager.recover({
-            threadId,
-            action: "useProjectCheckout",
-            expectedQueueRevision: 0,
-          })).worktreePath,
-        ).toBe(null);
-        expect(world.sessions).toEqual([]);
-        expect(git(repo.root, "branch", "--show-current")).toBe("main");
-      }),
-    );
-  });
   it("does not claim an equal branch name in a different repository", async () => {
     const { repo, world, projectId, run } = await fixture();
     const other = await makeClonedRepo("f5-manager-other-");
@@ -300,274 +221,27 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
     );
   });
 
-  it("leaves a failed post-checkout recovery retryable without restarting", async () => {
-    const { repo, world, run } = await fixture();
-    let fail = true;
-    const threadId = ThreadId.makeUnsafe("failed-recovery");
-    await run(
-      (manager, root, gate) =>
-        Effect.gen(function* () {
-          const target = path.join(root, "retry");
-          git(repo.root, "worktree", "add", "-q", "-b", "retry", target, "main");
-          yield* Effect.promise(() => fs.rm(target, { recursive: true }));
-          world.threads.push(
-            thread({ id: threadId, projectId: "p", branch: "retry", worktreePath: target }),
-          );
-          expect(
-            (yield* manager
-              .recover({ threadId, action: "recreate", expectedQueueRevision: 0 })
-              .pipe(Effect.exit))._tag,
-          ).toBe("Failure");
-          const state = world.queueStates.get(threadId)!;
-          expect(state.worktreeBlockToken).toMatch(/^recovery:/);
-          expect(yield* gate.check(threadId, state.worktreeBlockToken)).toBe("orphaned");
-          expect((yield* manager.threadState({ threadId })).recovery).toBe("interrupted");
-          // The dispatcher reconciles a durable orphan after a restart this way.
-          world.queueStates.set(threadId, {
-            ...state,
-            paused: true,
-            pauseReasonCode: "worktree_setup_failed",
-          });
-          fail = false;
-          yield* manager.recover({
-            threadId,
-            action: "recreate",
-            expectedQueueRevision: state.revision,
-          });
-          expect(world.queueStates.get(threadId)?.worktreeBlockToken).toBeNull();
-          expect(world.queueStates.get(threadId)?.paused).toBe(false);
-          expect((yield* manager.threadState({ threadId })).recovery).toBe("none");
-        }),
-      {
-        initializeWorktreeSubmodules: () =>
-          Effect.suspend(() =>
-            fail
-              ? Effect.fail(
-                  new GitCommandError({
-                    operation: "test",
-                    command: "submodule",
-                    cwd: repo.root,
-                    detail: "network unavailable",
-                  }),
-                )
-              : Effect.void,
-          ),
-      },
+  it("requires the durable transition service for recovery and keeps queue pauses intact", async () => {
+    const { world, run } = await fixture();
+    const threadId = ThreadId.makeUnsafe("recovery-owner");
+    world.threads.push(
+      thread({ id: threadId, projectId: "p", branch: "main", worktreePath: null }),
     );
-  });
-
-  it("recovers an orphaned preparation token on an existing checkout and resumes its setup pause", async () => {
-    const { repo, world, run, notified } = await fixture();
-    const threadId = ThreadId.makeUnsafe("orphan-preparation");
-    await run((manager, root) =>
+    world.queueStates.set(threadId, {
+      revision: 7,
+      paused: true,
+      pauseReasonCode: "manual_pause",
+      worktreeBlockToken: null,
+    });
+    await run((manager) =>
       Effect.gen(function* () {
-        const target = path.join(root, "orphan-preparation");
-        git(repo.root, "worktree", "add", "-q", "-b", "orphan-preparation", target, "main");
-        world.threads.push(
-          thread({
-            id: threadId,
-            projectId: "p",
-            branch: "orphan-preparation",
-            worktreePath: target,
-          }),
-        );
-        world.queueStates.set(threadId, {
-          revision: 5,
-          paused: true,
-          pauseReasonCode: "worktree_setup_failed",
-          worktreeBlockToken: "preparation:interrupted",
-        });
-        expect((yield* manager.threadState({ threadId })).recovery).toBe("interrupted");
-        const recovered = yield* manager.recover({
-          threadId,
-          action: "recreate",
-          expectedQueueRevision: 5,
-        });
-        expect(recovered.recovery).toBe("none");
-        expect(world.queueStates.get(threadId)?.paused).toBe(false);
-        expect(notified).toContain(threadId);
+        expect(
+          (yield* manager
+            .recover({ threadId, action: "useProjectCheckout", expectedQueueRevision: 7 })
+            .pipe(Effect.exit))._tag,
+        ).toBe("Failure");
+        expect(world.queueStates.get(threadId)?.pauseReasonCode).toBe("manual_pause");
       }),
     );
   });
-
-  it("exposes and retries an indeterminate async preparation after its queue token was cleared", async () => {
-    const { repo, world, run } = await fixture();
-    const threadId = ThreadId.makeUnsafe("async-restart");
-    await run((manager, root) =>
-      Effect.gen(function* () {
-        const gitCore = yield* GitCore;
-        const receipts = yield* WorktreePreparations;
-        const target = path.join(root, "async-restart");
-        yield* gitCore.createWorktree({
-          cwd: repo.root,
-          branch: "main",
-          newBranch: "async-restart",
-          path: target,
-          preparation: { owner: "workflow:async", runSetupScript: true },
-        });
-        const receipt = (yield* gitCore.readWorktreePreparation(target))!;
-        yield* receipts.update(receipt, { phase: "setup_running", result: '{"async":true}' });
-        yield* receipts.reconcile;
-        world.threads.push(
-          thread({ id: threadId, projectId: "p", branch: "async-restart", worktreePath: target }),
-        );
-        world.queueStates.set(threadId, {
-          revision: 3,
-          paused: true,
-          pauseReasonCode: "worktree_setup_failed",
-          worktreeBlockToken: null,
-        });
-        expect((yield* manager.threadState({ threadId })).recovery).toBe("interrupted");
-        const recovered = yield* manager.recover({
-          threadId,
-          action: "recreate",
-          expectedQueueRevision: 3,
-        });
-        expect(recovered.recovery).toBe("none");
-        expect((yield* gitCore.readWorktreePreparation(target))?.phase).toBe("completed");
-        expect(world.queueStates.get(threadId)?.paused).toBe(false);
-      }),
-    );
-  });
-
-  it.each([false, true])(
-    "reserves before stopping and detects a just-accepted turn (race: %s)",
-    async (raced) => {
-      const { repo, world, run } = await fixture();
-      const threadId = ThreadId.makeUnsafe("reserve-recovery");
-      let target = "";
-      let stops = 0;
-      await run(
-        (manager, root) =>
-          Effect.gen(function* () {
-            target = path.join(root, "reserve");
-            git(repo.root, "worktree", "add", "-q", "-b", "reserve", target, "main");
-            world.threads.push(
-              thread({ id: threadId, projectId: "p", branch: "reserve", worktreePath: target }),
-            );
-            world.sessions.push({ threadId, cwd: target, status: "ready" });
-            const result = yield* manager
-              .recover({ threadId, action: "useProjectCheckout", expectedQueueRevision: 0 })
-              .pipe(Effect.exit);
-            expect(result._tag).toBe(raced ? "Failure" : "Success");
-            expect(stops).toBe(raced ? 0 : 1);
-          }),
-        {},
-        {
-          onDispatch: (command) => {
-            if (
-              raced &&
-              command.type === "thread.activity.append" &&
-              (command.activity.payload as { phase?: string } | null)?.phase === "reserved"
-            )
-              world.pendingTurnStarts.add(threadId);
-          },
-          beforeStop: () =>
-            Effect.gen(function* () {
-              stops++;
-              expect(world.queueStates.get(threadId)?.worktreeBlockToken).toMatch(/^recovery:/);
-              expect(yield* holdsWorktreeLifecycleLock(target)).toBe(false);
-            }).pipe(Effect.orDie),
-        },
-      );
-    },
-  );
-
-  it("retries after local metadata commits but clearing the recovery token fails", async () => {
-    const { repo, world, run } = await fixture();
-    const threadId = ThreadId.makeUnsafe("local-retry");
-    let fail = true;
-    await run(
-      (manager, root) =>
-        Effect.gen(function* () {
-          const target = path.join(root, "local-retry");
-          git(repo.root, "worktree", "add", "-q", "-b", "local-retry", target, "main");
-          world.threads.push(
-            thread({ id: threadId, projectId: "p", branch: "local-retry", worktreePath: target }),
-          );
-          expect(
-            (yield* manager
-              .recover({ threadId, action: "useProjectCheckout", expectedQueueRevision: 0 })
-              .pipe(Effect.exit))._tag,
-          ).toBe("Failure");
-          expect(yield* manager.threadState({ threadId })).toMatchObject({
-            worktreePath: null,
-            recovery: "interrupted",
-          });
-          fail = false;
-          yield* manager.recover({
-            threadId,
-            action: "useProjectCheckout",
-            expectedQueueRevision: world.queueStates.get(threadId)!.revision,
-          });
-          expect((yield* manager.threadState({ threadId })).recovery).toBe("none");
-        }),
-      { inspectCheckout: () => Effect.die("Switching to the root must use identity only") },
-      { failTokenClear: () => fail },
-    );
-  });
-
-  it.each([false, true])(
-    "unregisters recovery and retains retry state after interruption (cancel RPC: %s)",
-    async (cancelRpc) => {
-      const { repo, world, run } = await fixture();
-      const threadId = ThreadId.makeUnsafe("interrupted-recovery");
-      world.projects[0] = {
-        ...world.projects[0]!,
-        scripts: [
-          {
-            id: "setup",
-            name: "setup",
-            command: "echo diagnostic; echo started > setup-started; sleep 30",
-            async: false,
-            icon: "play",
-            runOnWorktreeCreate: true,
-          },
-        ],
-      };
-      await run((manager, root, gate) =>
-        Effect.gen(function* () {
-          const target = path.join(root, "interrupt");
-          git(repo.root, "worktree", "add", "-q", "-b", "interrupt", target, "main");
-          yield* Effect.promise(() => fs.rm(target, { recursive: true }));
-          world.threads.push(
-            thread({ id: threadId, projectId: "p", branch: "interrupt", worktreePath: target }),
-          );
-          const fiber = yield* manager
-            .recover({ threadId, action: "recreate", expectedQueueRevision: 0 })
-            .pipe(Effect.forkChild);
-          yield* Effect.promise(async () => {
-            for (let i = 0; i < 200; i++) {
-              if (
-                await fs.access(path.join(target, "setup-started")).then(
-                  () => true,
-                  () => false,
-                )
-              )
-                return;
-              await new Promise((resolve) => setTimeout(resolve, 25));
-            }
-            throw new Error("setup script did not start");
-          });
-          if (cancelRpc) {
-            const cancelled = yield* manager.recover({
-              threadId,
-              action: "cancel",
-              expectedQueueRevision: world.queueStates.get(threadId)!.revision,
-            });
-            expect(cancelled.recovery).toBe("interrupted");
-          } else yield* Fiber.interrupt(fiber);
-          const state = world.queueStates.get(threadId)!;
-          expect(yield* gate.check(threadId, state.worktreeBlockToken)).toBe("orphaned");
-          // An explicit retry can safely choose the project checkout after interruption.
-          yield* manager.recover({
-            threadId,
-            action: "useProjectCheckout",
-            expectedQueueRevision: state.revision,
-          });
-          expect(world.queueStates.get(threadId)?.worktreeBlockToken).toBeNull();
-        }),
-      );
-    },
-  );
 });

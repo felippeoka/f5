@@ -1,9 +1,9 @@
+import { switchConversationWorkspace } from "../lib/workspaceTransitions";
 import type { ThreadId } from "@t3tools/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { invalidateGitQueries } from "~/lib/gitReactQuery";
-import { newCommandId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import { detectBranchDrift, type BranchDrift } from "./ChatView.branchDrift.logic";
 import { Button } from "./ui/button";
@@ -113,18 +113,19 @@ export function useChatViewBranchDriftGuard(scopeThreadId: ThreadId): {
       setDecisionError(null);
       try {
         if (decision === "switch") {
-          await api.git.checkout({ cwd: request.cwd, branch: request.recordedBranch });
+          await switchConversationWorkspace(request.threadId, {
+            intent: "checkout_branch",
+            branch: request.recordedBranch,
+          });
           const verified = await api.git.listBranches({ cwd: request.cwd });
           if (verified.branches.find((branch) => branch.current)?.name !== request.recordedBranch) {
             throw new Error(`Git did not switch to '${request.recordedBranch}'.`);
           }
         } else {
-          await api.orchestration.dispatchCommand({
-            type: "thread.meta.update",
-            commandId: newCommandId(),
-            threadId: request.threadId,
-            branch: request.currentBranch,
-            expectedBranch: request.recordedBranch,
+          await switchConversationWorkspace(request.threadId, {
+            intent: "attach_existing",
+            targetPath: request.cwd,
+            ...(request.currentBranch ? { branch: request.currentBranch } : {}),
           });
         }
         await invalidateGitQueries(queryClient, { cwd: request.cwd });

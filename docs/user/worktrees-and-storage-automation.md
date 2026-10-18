@@ -196,3 +196,27 @@ Interrupted recovery remains visible even after switching the conversation to th
 Idle linked conversations alone do not block removal, but an open provider session does, including
 a ready session between turns. Stop that session before retrying removal. Legacy setup snapshots
 without a verified checkout commit cannot prove rollback ownership, so their checkout is retained.
+
+## Durable workspace switching
+
+Changing an established conversation's workspace stops its idle provider session before
+switching. Active or pending turns, queued work, native operations, and setup owners block
+switching. A paused missing-worktree message can still use recovery. Switching has its own
+durable barrier: queue resume, promotion, setup retry, and reconnect cannot bypass it.
+Manual pauses remain paused after switching.
+
+Only the current project checkout and registered, attached-branch worktrees inside the
+current profile's managed root can be attached. Other profiles' managed checkouts and
+external or detached checkouts cannot be attached. Sharing a checkout with other
+conversations requires explicit confirmation because they share the same files.
+Changing a branch in place is stricter: any other surviving conversation reference,
+including archived conversations, blocks it. Terminals, sessions, queued operations, and
+other profiles' references also block an in-place change. Use a separate worktree instead.
+
+Interrupted switches keep their checkout and block sending until resolved. Choose
+**Inspect workspace** to see the actual branch, commit, and path. **Accept inspected
+workspace** adopts that verified checkout; **Keep original workspace** works only when
+the original checkout still matches its recorded identity. Neither action restores or
+discards files. **Retry** is available only when no Git mutation could have occurred.
+If the checkout changes after inspection, inspect again before accepting it.
+Archiving or deleting the conversation cancels its switch and keeps checkout files.

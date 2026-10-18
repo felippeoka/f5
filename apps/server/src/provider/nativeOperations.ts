@@ -48,12 +48,28 @@ export function nativeOperationSqlRepository(sql: SqlClient.SqlClient): NativeOp
           }>`SELECT record_json FROM native_operations WHERE state IN ('requested', 'dispatched', 'running', 'indeterminate') ORDER BY created_at`
       ).pipe(Effect.map(decode), Effect.mapError(error)),
     save: (record) =>
-      sql`INSERT INTO native_operations(operation_id, thread_id, generation, state, record_json, created_at, updated_at)
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            if (
+              active(record.state) &&
+              (yield* sql`SELECT 1 FROM workspace_transitions WHERE thread_id=${record.threadId} AND phase IN ('reserved','stopping','applying','applied','needs_recovery') LIMIT 1`)
+                .length
+            )
+              return yield* Effect.fail(
+                new NativeOperationError(
+                  "Resolve the workspace transition before a native operation.",
+                ),
+              );
+            yield* sql`INSERT INTO native_operations(operation_id, thread_id, generation, state, record_json, created_at, updated_at)
       VALUES (${record.operationId}, ${record.threadId}, ${record.generation}, ${record.state}, ${JSON.stringify(record)}, ${record.createdAt}, ${record.updatedAt})
       ON CONFLICT(operation_id) DO UPDATE SET state = excluded.state, record_json = excluded.record_json, updated_at = excluded.updated_at`.pipe(
-        Effect.asVoid,
-        Effect.mapError(error),
-      ),
+              Effect.asVoid,
+              Effect.mapError(error),
+            );
+          }),
+        )
+        .pipe(Effect.mapError(error)),
   };
 }
 

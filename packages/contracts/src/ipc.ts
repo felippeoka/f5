@@ -1,4 +1,10 @@
 import type {
+  WorktreesSwitchWorkspaceInput,
+  WorktreesGetTransitionInput,
+  WorktreesPreviewTransitionRecoveryInput,
+  WorktreesResolveTransitionInput,
+  WorkspaceTransitionSnapshot,
+  WorkspaceTransitionRecoveryPreview,
   WorktreesInspectInput,
   WorktreesInspectResult,
   WorktreesRemoveInput,
@@ -934,6 +940,17 @@ export interface NativeApi {
     onSummaryUpdated: (callback: (payload: NextTurnQueueSummary) => void) => () => void;
   };
   worktrees: {
+    switchWorkspace: (input: WorktreesSwitchWorkspaceInput) => Promise<WorkspaceTransitionSnapshot>;
+    getTransition: (
+      input: WorktreesGetTransitionInput,
+    ) => Promise<WorkspaceTransitionSnapshot | null>;
+    previewTransitionRecovery: (
+      input: WorktreesPreviewTransitionRecoveryInput,
+    ) => Promise<WorkspaceTransitionRecoveryPreview>;
+    resolveTransition: (
+      input: WorktreesResolveTransitionInput,
+    ) => Promise<WorkspaceTransitionSnapshot>;
+
     inspect: (input: WorktreesInspectInput) => Promise<WorktreesInspectResult>;
     remove: (input: WorktreesRemoveInput) => Promise<WorktreesRemoveResult>;
     threadState: (input: WorktreesThreadStateInput) => Promise<WorktreesThreadStateResult>;

@@ -1,3 +1,4 @@
+import Migration0119 from "./Migrations/119_WorkspaceTransitions.ts";
 import Migration0118 from "./Migrations/118_WorktreePreparations.ts";
 import Migration0117 from "./Migrations/117_WorkflowSummaries.ts";
 import Migration0116 from "./Migrations/116_UsageAccountHistory.ts";
@@ -151,6 +152,7 @@ import Migration0102 from "./Migrations/102_ForgeAccounts.ts";
 import Migration0101 from "./Migrations/101_UsageResetCreditRequests.ts";
 
 export const MIGRATIONS = {
+  "119_WorkspaceTransitions": Migration0119,
   "118_WorktreePreparations": Migration0118,
   "116_UsageAccountHistory": Migration0116,
   "117_WorkflowSummaries": Migration0117,

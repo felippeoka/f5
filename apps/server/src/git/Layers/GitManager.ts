@@ -1,3 +1,4 @@
+import { GitWorkspaceSwitch } from "../workspaceSwitch.ts";
 import { setupProjectScript } from "@t3tools/shared/projectScripts";
 import { readProjectSettings, isInsideProjectWorkspace } from "../../project/projectSettings";
 import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects";
@@ -676,7 +677,7 @@ export const makeGitManager = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const repositoryNameWithOwner = resolveHeadRepositoryNameWithOwner(pullRequest) ?? "";
-      if (provider.kind !== "github") {
+      {
         if ((yield* gitCore.listLocalBranchNames(cwd)).includes(localBranch)) {
           const existing = yield* gitCore.resolveCommit(cwd, localBranch);
           if (pullRequest.headOid && existing !== pullRequest.headOid)
@@ -686,6 +687,8 @@ export const makeGitManager = Effect.gen(function* () {
             );
           return;
         }
+      }
+      if (provider.kind !== "github") {
         const identity = yield* resolveSourceControlProviderIdentity(cwd);
         let remoteName = identity.remoteName ?? "origin";
         if (pullRequest.isCrossRepository && !repositoryNameWithOwner)
@@ -718,7 +721,6 @@ export const makeGitManager = Effect.gen(function* () {
               ? { remoteRef: `refs/pull/${pullRequest.number}/head` }
               : {}),
         });
-        yield* gitCore.setBranchUpstream({ cwd, branch: localBranch, remoteName, remoteBranch });
         return;
       }
 
@@ -727,6 +729,7 @@ export const makeGitManager = Effect.gen(function* () {
           cwd,
           prNumber: pullRequest.number,
           branch: localBranch,
+          preserveExisting: true,
         });
         return;
       }
@@ -752,12 +755,7 @@ export const makeGitManager = Effect.gen(function* () {
         remoteName,
         remoteBranch: pullRequest.headBranch,
         localBranch,
-      });
-      yield* gitCore.setBranchUpstream({
-        cwd,
-        branch: localBranch,
-        remoteName,
-        remoteBranch: pullRequest.headBranch,
+        preserveExisting: true,
       });
     }).pipe(
       Effect.catch((cause) =>
@@ -767,6 +765,7 @@ export const makeGitManager = Effect.gen(function* () {
               cwd,
               prNumber: pullRequest.number,
               branch: localBranch,
+              preserveExisting: true,
             }),
       ),
     );
@@ -1364,22 +1363,32 @@ export const makeGitManager = Effect.gen(function* () {
 
       if (input.mode === "local") {
         const initialStatus = yield* gitCore.statusDetails(input.cwd);
-        if (provider.kind !== "github") {
-          if (initialStatus.hasWorkingTreeChanges)
-            return yield* gitManagerError(
-              "preparePullRequestThread",
-              "Commit or stash working tree changes before checking out a pull request.",
-            );
-          yield* materializePullRequestHeadBranch(input.cwd, pullRequestWithRemoteInfo, provider);
+        if (initialStatus.hasWorkingTreeChanges)
+          return yield* gitManagerError(
+            "preparePullRequestThread",
+            "Commit or stash working tree changes before checking out a pull request.",
+          );
+        // Fetch/materialize before transition locking. Never force-checkout a user's files.
+        yield* materializePullRequestHeadBranch(input.cwd, pullRequestWithRemoteInfo, provider);
+        const switchWorkspace = yield* GitWorkspaceSwitch;
+        if (switchWorkspace)
+          yield* switchWorkspace({
+            cwd: input.cwd,
+            branch: pullRequest.headBranch,
+            create: false,
+          }).pipe(
+            Effect.mapError(
+              (error) =>
+                new GitManagerError({
+                  operation: "preparePullRequestThread",
+                  detail: error.message,
+                }),
+            ),
+          );
+        else
           yield* Effect.scoped(
             gitCore.checkoutBranch({ cwd: input.cwd, branch: pullRequest.headBranch }),
           );
-        } else
-          yield* provider.checkoutPullRequest({
-            cwd: input.cwd,
-            reference: normalizedReference,
-            force: true,
-          });
         const details = yield* gitCore.statusDetails(input.cwd);
         yield* configurePullRequestHeadUpstream(
           input.cwd,
@@ -1546,8 +1555,18 @@ export const makeGitManager = Effect.gen(function* () {
       const existingBranchNames = yield* gitCore.listLocalBranchNames(cwd);
       const resolvedBranch = resolveAutoFeatureBranchName(existingBranchNames, preferredBranch);
 
-      yield* gitCore.createBranch({ cwd, branch: resolvedBranch });
-      yield* Effect.scoped(gitCore.checkoutBranch({ cwd, branch: resolvedBranch }));
+      const switchWorkspace = yield* GitWorkspaceSwitch;
+      if (switchWorkspace)
+        yield* switchWorkspace({ cwd, branch: resolvedBranch, create: true }).pipe(
+          Effect.mapError(
+            (error) =>
+              new GitManagerError({ operation: "runFeatureBranchStep", detail: error.message }),
+          ),
+        );
+      else {
+        yield* gitCore.createBranch({ cwd, branch: resolvedBranch });
+        yield* Effect.scoped(gitCore.checkoutBranch({ cwd, branch: resolvedBranch }));
+      }
 
       return {
         branchStep: { status: "created" as const, name: resolvedBranch },

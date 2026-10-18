@@ -1,3 +1,4 @@
+import { WorkspaceTransitionSnapshot } from "./worktrees";
 import { Schema } from "effect";
 
 import {
@@ -53,6 +54,8 @@ export const QueueReasonCode = Schema.Literals([
   "thread_compacted",
   "thread_deleted",
   "worktree_missing",
+  "workspace_switch",
+  "workspace_switch_failed",
   "dispatch_rejected",
   "worktree_setup",
   "worktree_setup_failed",
@@ -82,6 +85,7 @@ export const NextTurnQueueItem = Schema.Struct({
 export type NextTurnQueueItem = typeof NextTurnQueueItem.Type;
 
 export const NextTurnQueueSnapshot = Schema.Struct({
+  workspaceTransition: Schema.optional(Schema.NullOr(WorkspaceTransitionSnapshot)),
   threadId: ThreadId,
   items: Schema.Array(NextTurnQueueItem),
   revision: NonNegativeInt,

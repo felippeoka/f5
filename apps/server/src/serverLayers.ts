@@ -1,3 +1,5 @@
+import { WorkspaceTransitionsLive } from "./persistence/Layers/WorkspaceTransitions.ts";
+import { WorkspaceTransitionLive } from "./project/Layers/WorkspaceTransition.ts";
 import { WorktreePreparationsLive } from "./persistence/Layers/WorktreePreparations.ts";
 import { WorktreePreparationLive } from "./project/Layers/WorktreePreparation.ts";
 import { WorktreeManagerLive } from "./project/Layers/WorktreeManager.ts";
@@ -373,6 +375,7 @@ export function makeServerOrchestrationRuntimeLayer() {
   const usageServiceLayer = UsageServiceLive.pipe(Layer.provide(ServerSecretStoreLive));
   const { gitLayer, checkpointDiffQueryLayer } = makeServerGitLayers();
   const orchestrationLayer = OrchestrationEngineLive.pipe(
+    Layer.provideMerge(WorkspaceTransitionsLive),
     Layer.provideMerge(gitLayer),
     Layer.provide(NextTurnQueueStoreLive),
     Layer.provide(projectionSnapshotQueryLayer),
@@ -403,6 +406,7 @@ export function makeServerOrchestrationRuntimeLayer() {
     Layer.provideMerge(runtimeServicesLayer),
   );
   const nextTurnQueueDispatcherLayer = NextTurnQueueDispatcherLive.pipe(
+    Layer.provideMerge(WorkspaceTransitionsLive),
     Layer.provideMerge(worktreePreparationLayer),
     Layer.provideMerge(ServerSecretStoreLive),
     Layer.provideMerge(usageServiceLayer),
@@ -486,7 +490,15 @@ export function makeServerOrchestrationRuntimeLayer() {
   const projectSetupScriptRunnerLayer = ProjectSetupScriptRunnerLive.pipe(
     Layer.provideMerge(orchestrationLayer),
   );
+  const workspaceTransitionLayer = WorkspaceTransitionLive.pipe(
+    Layer.provideMerge(WorkspaceTransitionsLive),
+    Layer.provideMerge(worktreePreparationLayer),
+    Layer.provideMerge(nextTurnQueueDispatcherLayer),
+    Layer.provideMerge(worktreeSetupGateLayer),
+    Layer.provideMerge(gitLayer),
+  );
   const worktreeSetupLayer = WorktreeSetupLive.pipe(
+    Layer.provideMerge(workspaceTransitionLayer),
     Layer.provideMerge(textGenerationLayer),
     Layer.provideMerge(worktreePreparationLayer),
     Layer.provideMerge(worktreeSetupGateLayer),
@@ -494,6 +506,7 @@ export function makeServerOrchestrationRuntimeLayer() {
     Layer.provideMerge(gitLayer),
   );
   const worktreeManagerLayer = WorktreeManagerLive.pipe(
+    Layer.provideMerge(workspaceTransitionLayer),
     Layer.provideMerge(worktreePreparationLayer),
     Layer.provideMerge(nextTurnQueueDispatcherLayer),
     Layer.provideMerge(worktreeSetupGateLayer),
@@ -523,6 +536,7 @@ export function makeServerOrchestrationRuntimeLayer() {
     worktreeSetupLayer,
     storageCleanupWorkerLayer,
     worktreeManagerLayer,
+    workspaceTransitionLayer,
     defaultBranchAutoPullLayer,
   ).pipe(Layer.provideMerge(NodeServices.layer));
 }

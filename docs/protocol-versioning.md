@@ -38,6 +38,13 @@ carry a persisted `(generation, sequence)` ordering. Setup mutation requests req
 operation ID. Bootstrap preparation accepts explicit naming intent and a setup-script override;
 raw preparation accepts an acknowledgment for retrying interrupted scripts.
 
+Worktree switching Release 3 uses version 25. It adds `worktrees.switchWorkspace`,
+`worktrees.getTransition`, `worktrees.previewTransitionRecovery`, and
+`worktrees.resolveTransition`, plus derived `workspace_switch` / `workspace_switch_failed`
+queue reasons and transition snapshots. Raw checkout accepts conversation context;
+initial attachment accepts explicit shared-filesystem confirmation. Recovery delegates to
+transitions. An active transition is independent of queue pauses and cannot be cleared by resume.
+
 The authenticated `GET /api/bootstrap` response and WebSocket welcome advertise
 current capabilities, upload support, and global send limits. Today
 image attachments retain the existing eight-image, 10 MiB/image and 120,000-character

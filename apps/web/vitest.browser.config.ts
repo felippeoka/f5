@@ -24,6 +24,7 @@ export default mergeConfig(
     },
     test: {
       include: [
+        "src/components/chat/WorkspaceTransitionBanner.browser.tsx",
         "src/components/WorktreeRemovalDialog.browser.tsx",
         "src/components/settings/categories/AboutSettings.browser.tsx",
         "src/editorDrafts.browser.ts",
