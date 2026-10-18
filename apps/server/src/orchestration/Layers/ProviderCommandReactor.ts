@@ -1,3 +1,7 @@
+import { deriveProviderInstanceConfigMap } from "../../provider/Layers/ProviderInstanceRegistryHydration.ts";
+import { makeOperationGate } from "../../provider/operationGate.ts";
+import { resolveBindingInstanceId } from "../../provider/bindingIdentity.ts";
+import { readPersistedSessionGeneration } from "../../provider/sessionCapabilities.ts";
 import { withWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import {
   assertWorktreeReady,
@@ -22,6 +26,7 @@ import {
   type McpApplyToLiveSessionsResult,
   type McpLiveSessionReloadFailure,
   type McpReloadResult,
+  type McpSessionReloadOutcome,
   type OrchestrationEvent,
   ProjectId,
   ProviderDriverKind,
@@ -38,7 +43,7 @@ import {
   type TurnId,
   type WorkflowTurnExecutionProfile,
 } from "@t3tools/contracts";
-import { Cause, Effect, Layer, Option, Schema, Semaphore, Stream } from "effect";
+import { Cause, Effect, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { estimateMessageContextCharacters, inferProviderForModel } from "@t3tools/shared/model";
 import { getProviderTurnInputLengthIssue } from "@t3tools/shared/providerInput";
@@ -390,24 +395,7 @@ const make = Effect.gen(function* () {
   // never stops a session between its idle check and a new turn. Separate
   // from `withProviderThreadAccess`, which startSession takes itself.
   const activeSubmissions = new Map<ThreadId, number>();
-  const threadTurnGates = new Map<ThreadId, { gate: Semaphore.Semaphore; users: number }>();
-  const withThreadTurnGate = <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
-    Effect.acquireUseRelease(
-      Effect.sync(() => {
-        const entry = threadTurnGates.get(threadId) ?? {
-          gate: Semaphore.makeUnsafe(1),
-          users: 0,
-        };
-        entry.users++;
-        threadTurnGates.set(threadId, entry);
-        return entry;
-      }),
-      (entry) => entry.gate.withPermit(effect),
-      (entry) =>
-        Effect.sync(() => {
-          if (--entry.users === 0) threadTurnGates.delete(threadId);
-        }),
-    );
+  const withThreadTurnGate = makeOperationGate<ThreadId>();
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
   const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
@@ -2105,31 +2093,30 @@ const make = Effect.gen(function* () {
       persisted: readPersistedStartConfig(binding.runtimePayload),
     });
 
-    yield* providerService.stopSession({ threadId: binding.threadId }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("provider command reactor could not stop Claude session for MCP apply", {
-          threadId: binding.threadId,
-          cause: Cause.pretty(cause),
-        }),
-      ),
+    const restartedSession = yield* providerService.replaceSession(
+      binding.threadId,
+      {
+        threadId: binding.threadId,
+        projectId: activeThread.projectId,
+        provider: "claudeAgent",
+        providerInstanceId: binding.providerInstanceId ?? defaultInstanceForProvider("claudeAgent"),
+        ...sessionContext.instructionContext,
+        ...(effectiveStartConfig.model ? { model: effectiveStartConfig.model } : {}),
+        ...(effectiveStartConfig.modelOptions !== undefined
+          ? { modelOptions: effectiveStartConfig.modelOptions }
+          : {}),
+        ...(effectiveStartConfig.providerOptions !== undefined
+          ? { providerOptions: effectiveStartConfig.providerOptions }
+          : {}),
+        ...(resumeCursor !== undefined && resumeCursor !== null ? { resumeCursor } : {}),
+        runtimeMode: sessionContext.desiredRuntimeMode,
+      },
+      {
+        instanceId: resolveBindingInstanceId(binding),
+        generation: readPersistedSessionGeneration(binding.runtimePayload),
+      },
     );
-
-    const restartedSession = yield* providerService.startSession(binding.threadId, {
-      threadId: binding.threadId,
-      projectId: activeThread.projectId,
-      provider: "claudeAgent",
-      providerInstanceId: binding.providerInstanceId ?? defaultInstanceForProvider("claudeAgent"),
-      ...sessionContext.instructionContext,
-      ...(effectiveStartConfig.model ? { model: effectiveStartConfig.model } : {}),
-      ...(effectiveStartConfig.modelOptions !== undefined
-        ? { modelOptions: effectiveStartConfig.modelOptions }
-        : {}),
-      ...(effectiveStartConfig.providerOptions !== undefined
-        ? { providerOptions: effectiveStartConfig.providerOptions }
-        : {}),
-      ...(resumeCursor !== undefined && resumeCursor !== null ? { resumeCursor } : {}),
-      runtimeMode: sessionContext.desiredRuntimeMode,
-    });
+    if (!restartedSession) return false;
 
     yield* bindSessionToThreadWithContext({
       thread: sessionContext.thread,
@@ -2169,6 +2156,24 @@ const make = Effect.gen(function* () {
           });
         }
 
+        const selectedInstance = input.instanceId
+          ? deriveProviderInstanceConfigMap(yield* serverSettings.getSettings)[input.instanceId]
+          : undefined;
+        if (
+          input.instanceId &&
+          (!selectedInstance ||
+            selectedInstance.enabled === false ||
+            (selectedInstance.driver !== "codex" && selectedInstance.driver !== "claudeAgent") ||
+            (typeof selectedInstance.config === "object" &&
+              selectedInstance.config !== null &&
+              "enabled" in selectedInstance.config &&
+              selectedInstance.config.enabled === false))
+        ) {
+          return yield* new ProjectMcpConfigServiceError({
+            code: "validation",
+            message: "Select an enabled Codex or Claude instance for MCP Apply.",
+          });
+        }
         const codexProviderOptions = toCodexProviderStartOptions({
           binaryPath: input.binaryPath,
           homePath: input.homePath,
@@ -2177,6 +2182,46 @@ const make = Effect.gen(function* () {
           projectScopeProjectId !== null
             ? yield* providerSessionDirectory.listBindingsByProject(projectScopeProjectId)
             : yield* providerSessionDirectory.listBindings();
+        if (
+          selectedInstance &&
+          bindings.some(
+            (binding) =>
+              binding.status !== "stopped" &&
+              resolveBindingInstanceId(binding) === input.instanceId &&
+              (!input.threadIds || input.threadIds.includes(binding.threadId)) &&
+              binding.provider !== selectedInstance.driver,
+          )
+        ) {
+          return yield* new ProjectMcpConfigServiceError({
+            code: "validation",
+            message:
+              "A selected MCP session belongs to a different provider driver. Restart it before applying.",
+          });
+        }
+        if (input.retryUnchanged !== undefined && input.threadIds === undefined) {
+          return yield* new ProjectMcpConfigServiceError({
+            code: "validation",
+            message: "retryUnchanged requires threadIds.",
+          });
+        }
+        // Validate the complete request before invoking any provider, including mixed valid/invalid sets.
+        for (const threadId of input.threadIds ?? []) {
+          const thread = yield* resolveThread(threadId);
+          const binding = bindings.find((entry) => entry.threadId === threadId);
+          if (
+            !thread ||
+            (projectScopeProjectId !== null && thread.projectId !== projectScopeProjectId) ||
+            (input.instanceId &&
+              (!binding ||
+                resolveBindingInstanceId(binding) !== input.instanceId ||
+                binding.provider !== selectedInstance?.driver))
+          ) {
+            return yield* new ProjectMcpConfigServiceError({
+              code: "validation",
+              message: `Conversation '${threadId}' is outside the requested MCP scope or instance.`,
+            });
+          }
+        }
         const createdAt = new Date().toISOString();
         const effectiveConfigCache = new Map<ProjectId, StoredEffectiveMcpConfig>();
         const codexGroups = new Map<
@@ -2190,6 +2235,7 @@ const make = Effect.gen(function* () {
         const claudeThreadsByProject = new Map<ProjectId, ThreadId[]>();
         const claudeBindings = new Map<ThreadId, ProviderRuntimeBinding>();
         const failures: Array<McpLiveSessionReloadFailure> = [];
+        const sessionOutcomes: McpSessionReloadOutcome[] = [];
         let codexReloaded = 0;
         let claudeRestarted = 0;
         let claudeReconciled = 0;
@@ -2199,7 +2245,19 @@ const make = Effect.gen(function* () {
           threadId: ThreadId,
           provider: ProviderKind,
           result: McpReloadResult,
+          binding?: ProviderRuntimeBinding,
+          version = "",
         ) => {
+          if (binding)
+            sessionOutcomes.push({
+              threadId,
+              instanceId: resolveBindingInstanceId(binding),
+              generation: readPersistedSessionGeneration(binding.runtimePayload),
+              requestedVersion: version,
+              attemptedVersion: version,
+              disposition: "failed",
+              result,
+            });
           failures.push({
             threadId,
             provider,
@@ -2224,6 +2282,11 @@ const make = Effect.gen(function* () {
 
         for (const binding of bindings) {
           if (
+            (input.instanceId && resolveBindingInstanceId(binding) !== input.instanceId) ||
+            (input.threadIds && !input.threadIds.includes(binding.threadId))
+          )
+            continue;
+          if (
             binding.status === "stopped" ||
             binding.projectId === undefined ||
             binding.projectId === null
@@ -2236,12 +2299,17 @@ const make = Effect.gen(function* () {
             Effect.result,
           );
           if (snapshot._tag === "Failure") {
-            recordFailure(binding.threadId, binding.provider, {
-              converged: false,
-              restartRequired: false,
-              servers: [],
-              errors: [{ message: mcpConfigErrorMessage(snapshot.failure) }],
-            });
+            recordFailure(
+              binding.threadId,
+              binding.provider,
+              {
+                converged: false,
+                restartRequired: false,
+                servers: [],
+                errors: [{ message: mcpConfigErrorMessage(snapshot.failure) }],
+              },
+              binding,
+            );
             continue;
           }
           const effectiveConfig = snapshot.success;
@@ -2251,18 +2319,25 @@ const make = Effect.gen(function* () {
               catch: mcpConfigErrorMessage,
             }).pipe(Effect.result);
             if (compatibility._tag === "Failure") {
-              recordFailure(binding.threadId, "codex", {
-                converged: false,
-                restartRequired: false,
-                servers: [],
-                errors: [{ message: compatibility.failure }],
-              });
+              recordFailure(
+                binding.threadId,
+                "codex",
+                {
+                  converged: false,
+                  restartRequired: false,
+                  servers: [],
+                  errors: [{ message: compatibility.failure }],
+                },
+                binding,
+                effectiveConfig.effectiveVersion,
+              );
               continue;
             }
           }
           // A session whose last reload of this version did not converge is
           // retried: the user may have fixed the server since.
           if (
+            !input.retryUnchanged &&
             binding.mcpEffectiveConfigVersion === effectiveConfig.effectiveVersion &&
             readPersistedUnconvergedMcpConfigVersion(binding.runtimePayload) !==
               effectiveConfig.effectiveVersion
@@ -2283,7 +2358,7 @@ const make = Effect.gen(function* () {
             }
 
             const providerOptions = codexProviderOptions ?? persistedProviderOptions;
-            const groupKey = `${binding.projectId}\u0000${getProviderEnvironmentKey("codex", providerOptions)}`;
+            const groupKey = `${binding.projectId}\u0000${resolveBindingInstanceId(binding)}\u0000${getProviderEnvironmentKey("codex", providerOptions)}`;
             const existingGroup = codexGroups.get(groupKey);
             if (existingGroup) {
               existingGroup.threadIds.push(binding.threadId);
@@ -2313,20 +2388,45 @@ const make = Effect.gen(function* () {
             threadIds: readonly ThreadId[];
           },
         ) =>
-          providerService.reloadMcpConfigForProject(request).pipe(
-            Effect.catch((error) =>
-              Effect.succeed({
-                sessions: request.threadIds.map((threadId) => ({
-                  threadId,
-                  result: {
-                    converged: false,
-                    restartRequired: false,
-                    servers: [],
-                    errors: [{ message: mcpConfigErrorMessage(error) }],
-                  } satisfies McpReloadResult,
-                })),
-              }),
-            ),
+          Effect.forEach(
+            request.threadIds,
+            (threadId) =>
+              providerService
+                .reloadMcpConfigForProject({
+                  ...request,
+                  threadIds: [threadId],
+                  ...(input.instanceId ? { instanceId: input.instanceId } : {}),
+                  requestedVersion:
+                    effectiveConfigCache.get(request.projectId)?.effectiveVersion ?? "",
+                })
+                .pipe(
+                  Effect.catch((error) => {
+                    const binding = bindings.find((entry) => entry.threadId === threadId)!;
+                    return Effect.succeed({
+                      sessions: [
+                        {
+                          threadId,
+                          instanceId: resolveBindingInstanceId(binding),
+                          generation: readPersistedSessionGeneration(binding.runtimePayload),
+                          requestedVersion:
+                            effectiveConfigCache.get(request.projectId)?.effectiveVersion ?? "",
+                          attemptedVersion:
+                            effectiveConfigCache.get(request.projectId)?.effectiveVersion ?? "",
+                          disposition: "failed" as const,
+                          result: {
+                            converged: false,
+                            restartRequired: false,
+                            servers: [],
+                            errors: [{ message: mcpConfigErrorMessage(error) }],
+                          },
+                        },
+                      ],
+                    });
+                  }),
+                ),
+            { concurrency: 4 },
+          ).pipe(
+            Effect.map((outcomes) => ({ sessions: outcomes.flatMap((entry) => entry.sessions) })),
           );
         for (const group of codexGroups.values()) {
           const outcome = yield* reloadGroup({
@@ -2340,11 +2440,19 @@ const make = Effect.gen(function* () {
           });
           // Codex pins MCP servers at launch; a changed set restarts at the next turn.
           for (const session of outcome.sessions) {
+            sessionOutcomes.push(session);
+            if (session.disposition === "superseded") {
+              skipped += 1;
+              continue;
+            }
             if (session.result.converged) {
               codexReloaded += 1;
               continue;
             }
-            if (session.result.restartRequired) deferred += 1;
+            if (session.result.restartRequired) {
+              deferred += 1;
+              sessionOutcomes[sessionOutcomes.length - 1] = { ...session, disposition: "deferred" };
+            }
             recordFailure(session.threadId, "codex", session.result);
           }
           skipped += Math.max(0, group.threadIds.length - outcome.sessions.length);
@@ -2359,6 +2467,16 @@ const make = Effect.gen(function* () {
           withThreadTurnGate(
             binding.threadId,
             Effect.gen(function* () {
+              const current = Option.getOrUndefined(
+                yield* providerSessionDirectory.getBinding(binding.threadId),
+              );
+              if (
+                !current ||
+                resolveBindingInstanceId(current) !== resolveBindingInstanceId(binding) ||
+                readPersistedSessionGeneration(current.runtimePayload) !==
+                  readPersistedSessionGeneration(binding.runtimePayload)
+              )
+                return false;
               const live = (yield* providerService.listSessions()).find(
                 (entry) => entry.threadId === binding.threadId,
               );
@@ -2381,19 +2499,69 @@ const make = Effect.gen(function* () {
           const reached = new Set(outcome.sessions.map((session) => session.threadId));
           skipped += threadIds.filter((threadId) => !reached.has(threadId)).length;
           for (const session of outcome.sessions) {
+            sessionOutcomes.push(session);
+            if (session.disposition === "superseded") {
+              skipped += 1;
+              continue;
+            }
             if (session.result.converged) {
               claudeReconciled += 1;
               continue;
             }
             const binding = claudeBindings.get(session.threadId);
             if (session.result.restartRequired && binding) {
-              const restarted = yield* restartIfStillIdle(binding);
-              if (restarted) {
+              const restart = yield* restartIfStillIdle(binding).pipe(Effect.result);
+              if (restart._tag === "Failure") {
+                const result = {
+                  converged: false,
+                  restartRequired: true,
+                  servers: [],
+                  errors: [{ message: mcpConfigErrorMessage(restart.failure) }],
+                };
+                sessionOutcomes[sessionOutcomes.length - 1] = {
+                  ...session,
+                  disposition: "failed",
+                  result,
+                };
+                recordFailure(session.threadId, "claudeAgent", result);
+                continue;
+              }
+              if (restart.success) {
                 claudeRestarted += 1;
+                const started = Option.getOrUndefined(
+                  yield* providerSessionDirectory.getBinding(session.threadId),
+                );
+                if (started)
+                  sessionOutcomes[sessionOutcomes.length - 1] = {
+                    ...session,
+                    instanceId: resolveBindingInstanceId(started),
+                    generation: readPersistedSessionGeneration(started.runtimePayload),
+                    attemptedVersion: started.mcpEffectiveConfigVersion ?? session.attemptedVersion,
+                    disposition: "applied",
+                    result: { converged: true, restartRequired: false, servers: [], errors: [] },
+                  };
                 continue;
               }
             }
-            if (session.result.restartRequired) deferred += 1;
+            const current = Option.getOrUndefined(
+              yield* providerSessionDirectory.getBinding(session.threadId),
+            );
+            if (
+              !current ||
+              resolveBindingInstanceId(current) !== session.instanceId ||
+              readPersistedSessionGeneration(current.runtimePayload) !== session.generation
+            ) {
+              sessionOutcomes[sessionOutcomes.length - 1] = {
+                ...session,
+                disposition: "superseded",
+              };
+              skipped += 1;
+              continue;
+            }
+            if (session.result.restartRequired) {
+              deferred += 1;
+              sessionOutcomes[sessionOutcomes.length - 1] = { ...session, disposition: "deferred" };
+            }
             recordFailure(session.threadId, "claudeAgent", session.result);
           }
         }
@@ -2409,6 +2577,7 @@ const make = Effect.gen(function* () {
         return {
           scope: input.scope,
           ...(responseProjectId !== undefined ? { projectId: responseProjectId } : {}),
+          sessions: sessionOutcomes,
           codexReloaded,
           claudeRestarted,
           claudeReconciled,

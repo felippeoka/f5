@@ -229,6 +229,7 @@ const unsupportedProviderCall = () =>
 
 const defaultProviderService: ProviderServiceShape = {
   startSession: () => unsupportedProviderCall(),
+  replaceSession: () => unsupportedProviderCall(),
   sendTurn: () => unsupportedProviderCall(),
   interruptTurn: () => unsupportedProviderCall(),
   respondToRequest: () => unsupportedProviderCall(),
@@ -1190,6 +1191,21 @@ describe("WebSocket Server", () => {
       projectName: "project",
       profile: { isDefault: true, slug: "default", isActive: true },
     });
+  });
+
+  it.each(["binaryPath", "homePath"])("rejects client-supplied %s in MCP Apply", async (field) => {
+    server = await createTestServer({ cwd: "/test/project" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+    const response = await sendRequest(ws, WS_METHODS.mcpApplyToLiveSessions, {
+      scope: "common",
+      [field]: "/tmp/untrusted",
+    });
+    expect(response.error?.message).toContain("Invalid request format");
+    expect(response.error?.message).toContain(`["body"]["${field}"]`);
+    expect(response.result).toBeUndefined();
   });
 
   it("returns a bounded usage summary with explicit coverage", async () => {
@@ -5046,6 +5062,7 @@ describe("WebSocket Server", () => {
     };
     const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
     const providerService: ProviderServiceShape = {
+      replaceSession: () => unsupported(),
       startSession: (threadId) =>
         Effect.succeed({
           provider: "codex",

@@ -1,3 +1,4 @@
+import { isMcpQueryAffected } from "../../../lib/mcpReactQuery";
 import { useProfileState } from "../../../profileState";
 import {
   type McpConfigScope,
@@ -196,8 +197,10 @@ export function McpServersSettings(props: {
 
   useEffect(
     () =>
-      ensureNativeApi().mcp.onStatusUpdated(() => {
-        void queryClient.invalidateQueries({ queryKey: mcpQueryKeys.all });
+      ensureNativeApi().mcp.onStatusUpdated((event) => {
+        void queryClient.invalidateQueries({
+          predicate: (query) => isMcpQueryAffected(query.queryKey, event),
+        });
       }),
     [queryClient],
   );
@@ -427,6 +430,11 @@ export function McpServersSettings(props: {
           <Button
             size="xs"
             variant="outline"
+            title={
+              selectedScope === "common"
+                ? "Apply common MCP configuration across all projects and accounts"
+                : `Apply MCP configuration to all live sessions in ${selectedProject?.name ?? "this project"}`
+            }
             disabled={(selectedScope === "project" && !selectedProject) || isApplying}
             onClick={() => {
               if (selectedScope === "project" && !selectedProject) {
@@ -456,7 +464,7 @@ export function McpServersSettings(props: {
                 });
             }}
           >
-            Apply to live sessions
+            Apply to all live sessions
           </Button>
         </div>
       </div>

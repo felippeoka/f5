@@ -390,7 +390,7 @@ describe("McpServersSettings", () => {
         expect(document.body.textContent).toContain("Common servers (1/16)");
       });
 
-      await page.getByRole("button", { name: "Apply to live sessions" }).click();
+      await page.getByRole("button", { name: "Apply to all live sessions" }).click();
 
       await vi.waitFor(() => {
         expect(mocks.applyToLiveSessions).toHaveBeenCalledWith({
@@ -404,7 +404,7 @@ describe("McpServersSettings", () => {
         expect(document.body.textContent).toContain("Project servers (1/16)");
       });
 
-      await page.getByRole("button", { name: "Apply to live sessions" }).click();
+      await page.getByRole("button", { name: "Apply to all live sessions" }).click();
 
       await vi.waitFor(() => {
         expect(mocks.applyToLiveSessions).toHaveBeenCalledWith({
