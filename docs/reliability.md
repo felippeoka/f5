@@ -1,5 +1,7 @@
 # Reliability and recovery
 
+> Contributors: how provider deliveries, retries and recovery stay safe across crashes and reconnects.
+
 Provider prompt transports belong to the server service scope. Disconnecting an RPC caller does not cancel a dispatched transport. Lifecycle locks protect preparation and settlement; stop, approval answers, user-input answers and supported steering can reach the live adapter while a prompt remains unresolved. A stopped or replaced generation cannot be restored by its old dispatch result.
 
 The delivery database is the backlog. Sweeps load at most 64 candidate ids in thread order, rotating through thread ids. Payloads are loaded individually and claims are conditional. Ordinary dispatch ownership is per thread; controls have their own path. Terminal completion, interruption, error and rewind durably release accepted reservations; deleting turn projections cannot restore them. Native receipts identify accepted deliveries. Unavailable, local-only or legacy history does not establish absence. A new history turn alone does not correlate a delivery, so uncertain sends remain ambiguous and require explicit recovery rather than automatic resend. History identity, provenance, session origin and coverage are retained with the dispatch baseline for diagnostics and future provider correlation. They do not themselves correlate a request with a native turn or resolve ambiguity. Local history carries a backend runtime identity; Codex pagination identifies complete provider-persisted coverage.

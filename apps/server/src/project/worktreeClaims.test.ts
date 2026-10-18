@@ -1,3 +1,5 @@
+import { WorktreePreparations } from "../persistence/Services/WorktreePreparations.ts";
+import { ThreadId } from "@t3tools/contracts";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -93,6 +95,77 @@ describe("effective workspace claims and removal gate", () => {
       }).pipe(Effect.provide(automationLayer(world, {}, "f5-removal-state-")), Effect.scoped),
     );
   });
+  it.each(["pr:feature", "workflow:implementation"])(
+    "removes idle pending preparation owned by %s and releases its reservation",
+    async (owner) => {
+      const repo = await makeClonedRepo("f5-pending-removal-");
+      cleanups.push(repo.cleanup);
+      const world = makeWorld();
+      world.projects.push(project("p", repo.root));
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const gitCore = yield* GitCore;
+          const target = path.join((yield* ServerConfig).worktreesDir, "pending");
+          yield* gitCore.createWorktree({
+            cwd: repo.root,
+            branch: "main",
+            newBranch: "pending",
+            path: target,
+            preparation: { owner, runSetupScript: true },
+          });
+          expect((yield* gitCore.readWorktreePreparation(target))?.phase).toBe("checkout_created");
+          const receipts = yield* WorktreePreparations;
+          const pending = (yield* gitCore.readWorktreePreparation(target))!;
+          const interrupted = yield* receipts.update(pending, { phase: "setup_indeterminate" });
+          expect(
+            (yield* evaluateWorktreeRemoval({
+              projectCwd: repo.root,
+              path: target,
+              policy: { kind: "manual", ownThreadId: null },
+            })).blockedReasons.join(" "),
+          ).toContain("preparation operation owns");
+          yield* receipts.update(interrupted, { phase: "checkout_created" });
+          const result = yield* removeWorktreeSafely({
+            projectCwd: repo.root,
+            path: target,
+            policy: { kind: "manual", ownThreadId: null },
+          });
+          expect(result.blockedReasons).toEqual([]);
+          expect((yield* gitCore.readWorktreePreparation(target))?.phase).toBe("skipped");
+          yield* gitCore.createWorktree({
+            cwd: repo.root,
+            branch: "pending",
+            path: target,
+            preparation: { owner, runSetupScript: true },
+          });
+          expect((yield* gitCore.readWorktreePreparation(target))?.phase).toBe("checkout_created");
+        }).pipe(
+          Effect.provide(automationLayer(world, {}, "f5-pending-removal-state-")),
+          Effect.scoped,
+        ),
+      );
+    },
+  );
+  it("releases a failed add only after proving no checkout or registration was created", async () => {
+    const repo = await makeClonedRepo("f5-add-failure-");
+    cleanups.push(repo.cleanup);
+    const world = makeWorld();
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const gitCore = yield* GitCore;
+        const target = path.join((yield* ServerConfig).worktreesDir, "failed-add");
+        git(repo.root, "branch", "existing");
+        const failed = yield* gitCore
+          .createWorktree({ cwd: repo.root, branch: "main", newBranch: "existing", path: target })
+          .pipe(Effect.exit);
+        expect(failed._tag).toBe("Failure");
+        expect((yield* gitCore.readWorktreePreparation(target))?.phase).toBe("skipped");
+        yield* gitCore.createWorktree({ cwd: repo.root, branch: "existing", path: target });
+        expect(git(target, "branch", "--show-current")).toBe("existing");
+      }).pipe(Effect.provide(automationLayer(world, {}, "f5-add-failure-state-")), Effect.scoped),
+    );
+  });
+
   it("blocks initialized submodules in both preview and removal, preserving their files", async () => {
     const repo = await makeClonedRepo("f5-submodule-removal-");
     cleanups.push(repo.cleanup);
@@ -179,7 +252,13 @@ describe("effective workspace claims and removal gate", () => {
       Effect.gen(function* () {
         const core = yield* GitCore;
         const target = path.join((yield* ServerConfig).worktreesDir, "owned");
-        git(repo.root, "worktree", "add", "-q", "-b", "owned", target, "main");
+        yield* core.createWorktree({
+          cwd: repo.root,
+          branch: "main",
+          newBranch: "owned",
+          path: target,
+          preparation: { owner: "thread:owner" },
+        });
         const owner = thread({
           id: "owner",
           projectId: "p",
@@ -193,17 +272,20 @@ describe("effective workspace claims and removal gate", () => {
           baseSha: git(target, "rev-parse", "HEAD"),
           created: true,
         };
-        const remove = (created = true) =>
+        const remove = (created = true, ownThreadId = owner.id) =>
           removeWorktreeSafely({
             projectCwd: repo.root,
             path: target,
             policy: {
               kind: "ownedRollback",
-              ownThreadId: owner.id,
+              ownThreadId,
               ownedCreation: { ...proof, created },
             },
           });
         expect((yield* remove(false)).blockedReasons.join(" ")).toContain("ownership");
+        expect(
+          (yield* remove(true, ThreadId.makeUnsafe("other-owner"))).blockedReasons.join(" "),
+        ).toContain("ownership");
         yield* Effect.promise(() => fs.writeFile(path.join(target, "setup-output"), "keep"));
         expect((yield* remove()).blockedReasons.join(" ")).toContain("uncommitted");
         yield* Effect.promise(() => fs.rm(path.join(target, "setup-output")));

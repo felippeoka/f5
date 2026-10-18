@@ -18,7 +18,7 @@ import {
 import { type TextGenerationShape, TextGeneration } from "../Services/TextGeneration.ts";
 import { GitServiceLive } from "./GitService.ts";
 import { GitService } from "../Services/GitService.ts";
-import { GitCoreLive } from "./GitCore.ts";
+import { GitCoreTestLive as GitCoreLive } from "../testLayers.ts";
 import { makeGitManager } from "./GitManager.ts";
 import { makeLocalPushFriendlyGitServiceLayer } from "../testUtils.ts";
 import { ServerConfig, type ServerConfigShape } from "../../config.ts";

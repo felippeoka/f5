@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import {
   CheckpointRef,
   CommandId,
@@ -708,6 +707,8 @@ async function createHarness(
       ),
       Layer.provideMerge(
         Layer.succeed(GitCore, {
+          allocateWorktreePath: ({ cwd, branch }: { cwd: string; branch: string }) =>
+            Effect.succeed(`${cwd}/worktrees/${branch.replaceAll("/", "-")}`),
           createWorktree,
         } as unknown as GitCoreShape),
       ),
@@ -3175,10 +3176,7 @@ describe("WorkflowService", () => {
     expect(createWorktreeArgs?.branch).toBe("main");
     expect(typeof createWorktreeArgs?.newBranch).toBe("string");
     expect(createWorktreeArgs?.path).toBe(
-      join(
-        "/tmp/f5-workflow/worktrees/project",
-        createWorktreeArgs!.newBranch!.replace(/\//g, "-"),
-      ),
+      `/tmp/project/worktrees/${createWorktreeArgs!.newBranch!.replaceAll("/", "-")}`,
     );
 
     const threadCreate = harness.dispatched.find(

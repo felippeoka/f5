@@ -1,8 +1,54 @@
 # Project settings
 
-Open Settings and use the **Global › Project** selector to choose a project. The selector supports search and scrolling. Project scope shows only settings that can be overridden; account credentials, profiles, models and other global controls remain in Global settings.
+Override global settings for one project, such as its default permissions, workspace or PR merge
+method. Each value shows where it comes from, so you can tell an override from a checked-in
+default.
 
-The initial project settings are:
+![Project settings showing checked-in values from f5.json](../images/settings-project.webp)
+
+## How to
+
+1. Open **Settings**.
+2. Click **Global settings** at the top and pick a project.
+3. Change a setting. The field shows that it is now a project override.
+4. Use **Reset** on a field, or **Reset all project overrides**, to go back to the inherited value.
+
+Project scope only lists settings a project can override. Accounts, profiles and models stay in
+global settings.
+
+## Where values come from
+
+F5 uses the first value it finds:
+
+1. Your project override.
+2. The project's older workspace default (workspace mode only).
+3. The repository's `f5.json` (or `t3.json` if there is no `f5.json`).
+4. The global setting.
+5. The built-in default.
+
+A checked-in `f5.json` can change permissions, the text-generation account and writing
+instructions, so review it in repositories you don't trust. To keep your own choice, set a project
+override, which wins over the file. See [Project configuration](../project-configuration.md).
+
+## When changes apply
+
+Permission and workspace defaults apply to new drafts; existing threads keep their modes. Commit,
+branch and PR text use the project's account, model and writing settings. The PR Hub uses the
+project's merge default when the checkout maps to one project, and a method you pick by hand still
+wins.
+
+## Good to know
+
+- Automatic worktree cleanup, auto-pull, external preview hosts, Claude in Chrome and computer use
+  are never read from `f5.json`. Only you can turn them on.
+- Deleting a project removes its overrides.
+- Skill scan problems appear above project settings with the affected path. **Refresh
+  diagnostics** reloads them.
+- If draft settings can't load, a new draft falls back to the project's last permission mode, or
+  to approval-required.
+
+<details>
+<summary>Details and limits</summary>
 
 | Setting                             | Built-in default                                           |
 | ----------------------------------- | ---------------------------------------------------------- |
@@ -16,53 +62,36 @@ The initial project settings are:
 | Automatic worktree cleanup          | The global rules in Settings → Storage                     |
 | Auto-pull the default branch        | Off                                                        |
 
-Each field shows its source and an override has a Reset action. Reset all project overrides removes the project's override object. Overrides are stored by project ID in the profile's server settings and removed when the project is deleted. Updating one project's overrides replaces its complete override object, without changing other projects.
+**Submodules.** `none`, `shallow` (top-level modules only) or `recursive`. Modules are initialized
+with local file transport disabled and credential prompts suppressed; SSH still works for private
+modules. A failed initialization logs a warning and keeps the worktree.
 
-Values resolve in this order:
+**Reading `f5.json`.** The file is always read from the registered project root, even when a
+worktree is missing or on another branch. Fork worktree branches don't supply settings. The file
+must be a regular file of at most 64 KiB, and symlinks are not followed. Each invalid field falls
+back independently. A partial source-control writing object inherits missing fields from the next
+layer.
 
-1. Project override.
-2. The project's legacy workspace default, for workspace mode only.
-3. `f5.json`, or `t3.json` when `f5.json` is absent.
-4. Global server setting.
-5. Built-in default.
+**Storage.** Overrides are stored by project ID in the profile's server settings. Saving one
+project replaces its whole override object without touching other projects.
 
-For example, a checked-in `f5.json` can contain:
+**Invalid overrides.** A broken stored override leaves global and other project settings intact.
+That project uses approval-required with no submodule initialization. Writes stay blocked until
+the file is repaired, and F5 never silently rewrites it.
 
-```json
-{
-  "defaultRuntimeMode": "approval-required",
-  "defaultThreadEnvMode": "worktree",
-  "worktreeSubmodules": "shallow",
-  "enableAssistantStreaming": true,
-  "prHubDefaultMergeMethod": "squash"
-}
-```
+**Failure fallbacks.** If the PR preference can't load, the merge dialog uses the global
+preference and shows a notice. A disabled text-generation provider falls back the same way global
+settings do, while keeping your stored choice.
 
-Automatic worktree cleanup and auto-pull are never read from `f5.json` or `t3.json`; only a global setting or a project override can turn them on. See [worktrees and storage automation](worktrees-and-storage-automation.md).
+**Streaming.** Streaming used to default to on in the browser, and unmigrated defaults keep that
+behavior. The first time a client connects, a browser-stored preference is migrated to the server
+once per profile, and the first client wins.
 
-`worktreeSubmodules` accepts `none`, `shallow` (top-level modules only), or `recursive`. Worktree creation and recreation initialize modules with local file transport disabled. Initialization failures produce a server warning and keep the created worktree available. Configuration is always read from the registered project root, including when a worktree is missing or checks out a different branch. Repository configuration is read as bounded regular files (64 KiB); symlinked files are not followed. Invalid checked-in fields fall back independently. Partial source-control writing objects inherit unspecified fields from the lower-precedence layer. Repository scripts and MCP configuration retain their existing explicit-approval rules.
+</details>
 
-Permission and workspace defaults apply to new drafts. Existing threads and reused drafts keep their chosen modes. An explicit project model default takes precedence over remembered model preferences for a fresh draft. Commit, branch and PR text generation use the project's resolved account/model and writing settings. Streaming preferences are tracked separately for concurrent threads. The PR hub uses a project merge default when its local checkout resolves to one project; an ambiguous or missing project uses the global default. A manually selected merge method still wins.
+## Related
 
-## Compatibility
-
-Protocol version 9 requires an existing open tab to reload. Existing persisted settings decode with empty project overrides and migration markers. Explicit browser-local workspace and streaming preferences migrate once per profile using server-side compare-and-set; the first client wins. Absent keys are not migrated, failed requests retain the browser value, and acknowledged keys are removed from local storage. Settings routing remains derived from the web-local schema.
-
-There is no environment settings layer. New scoped settings from later phases are not exposed yet.
-
-## Failure handling and trust
-
-Checked-in settings intentionally take precedence over global settings, as described above. They can select permission defaults, a text-generation account and writing instructions. Review a repository's project configuration; use an explicit project override to pin a user choice above checked-in configuration. Fork worktree branches do not supply these settings. Submodule initialization retains the approved recursive default and normal Git transports (including SSH for private modules), with file transport disabled and credential prompts suppressed.
-
-If draft settings cannot be fetched, the draft uses its last resolved project permission mode; without one it uses approval-required. Concurrent new-thread requests reuse the same draft. Failed PR preference lookups open the merge dialog using the global preference and show a notice. Disabled text-generation providers use the same read-time fallback as global settings while keeping the stored selection.
-
-An invalid persisted project override does not reset valid global or other project settings. The affected project uses approval-required and no submodule initialization; writes remain blocked until the original file is repaired. The file is not silently rewritten.
-
-Streaming previously defaulted to on in the browser. Unmigrated server streaming defaults retain that behavior. A migrated browser preference or explicit global edit records the choice and takes precedence over later migration requests. Old browser storage does not distinguish a saved default from an explicit choice, so migration preserves present keys as recorded rather than guessing intent.
-
-Skill scan diagnostics appear above project settings with the affected path and
-parse or filesystem error. Invalid skills are omitted from the catalog. Watcher
-failures use periodic retries; **Refresh diagnostics** reloads the latest scan
-results. Repository changes refresh only affected projects, with shared watch
-registrations retained until their final project subscriber is removed. User-scope
-provider catalogs remain isolated to their configured provider homes.
+- [Project configuration (`f5.json`)](../project-configuration.md)
+- [Worktrees and storage automation](worktrees-and-storage-automation.md)
+- [Runtime modes](../runtime-modes.md)
+- [PR Hub and forges](pr-hub-forges.md)

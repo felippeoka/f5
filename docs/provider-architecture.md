@@ -1,5 +1,7 @@
 # Provider architecture
 
+> Contributors: the WebSocket protocol between web and server, and the provider adapter contract.
+
 The web app communicates with the server via WebSocket. Requests and pushes are expressed as tagged discriminated unions rather than plain JSON-RPC:
 
 - **Request/Response**: `WebSocketRequest` → `WebSocketResponse` (both carry a `_tag`). See `packages/contracts/src/ws.ts`.

@@ -1,5 +1,7 @@
 # Encyclopedia
 
+> Contributors: a glossary of terms used in the codebase.
+
 This is a living glossary for F5. It explains what common terms mean in this codebase.
 
 ## Table of contents

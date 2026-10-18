@@ -1,3 +1,4 @@
+import { WorktreePreparation } from "../../project/Services/WorktreePreparation.ts";
 import { assertWorktreeReady, WorktreeInspectionError } from "../../project/worktreeReadiness.ts";
 import { readProjectSettings } from "../../project/projectSettings.ts";
 import { hasNativeOperationReservation } from "../../provider/nativeOperations.ts";
@@ -158,6 +159,7 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
   const deliveries = yield* ProviderTurnDeliveryRepository;
   const fileSystem = yield* FileSystem.FileSystem;
   const git = yield* GitCore;
+  const preparation = yield* Effect.serviceOption(WorktreePreparation);
   const worktreeSetupGate = yield* Effect.serviceOption(WorktreeSetupGate);
   const readWorktreeSetupGate = (threadId: ThreadId, token: string | null) =>
     Option.isSome(worktreeSetupGate)
@@ -310,8 +312,9 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
             detail: `Worktree branch ${thread.branch} is missing.`,
           };
         }
-        if (recreate && thread.branch)
-          yield* git.ensureWorktree({
+        if (recreate && thread.branch) {
+          const ensured = yield* git.ensureWorktree({
+            owner: `thread:${thread.threadId}`,
             submodules: Option.isSome(worktreeSettings)
               ? (yield* readProjectSettings(yield* worktreeSettings.value.getSettings, project))
                   .settings.worktreeSubmodules
@@ -320,6 +323,30 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
             path: thread.worktreePath!,
             branch: thread.branch!,
           });
+          if (
+            Option.isSome(preparation) &&
+            (ensured.recreated ||
+              ((yield* preparation.value.needsPreparation(thread.worktreePath!)) &&
+                (yield* git.readWorktreePreparation(thread.worktreePath!))?.phase !==
+                  "setup_failed"))
+          ) {
+            yield* preparation.value.startBackground(
+              {
+                threadId: thread.threadId,
+                projectId: project.id,
+                worktreePath: thread.worktreePath!,
+                branch: thread.branch,
+              },
+              () => notify(thread.threadId),
+            );
+            return {
+              kind: "wait" as const,
+              reasonCode: "worktree_setup" as const,
+              detail: "Preparing the worktree.",
+              retryAfterMs: undefined,
+            };
+          }
+        }
         if (recreate || requireExisting) inspectionRetries.delete(item.threadId);
         return gate;
       }).pipe(

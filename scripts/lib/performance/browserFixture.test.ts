@@ -25,7 +25,11 @@ it("answers project settings polling without silently skipping a renderer query"
 
 it("answers worktree setup subscriptions without adding setup work", () => {
   const fixture = createBrowserFixture();
-  expect(fixture.rpc({ _tag: "worktreeSetup.subscribe", threadId: "perf-small" })).toBeNull();
+  expect(fixture.rpc({ _tag: "worktreeSetup.subscribe", threadId: "perf-small" })).toEqual({
+    snapshot: null,
+    generation: 0,
+    sequence: 0,
+  });
   expect([...fixture.unknownMethods]).toEqual([]);
 });
 

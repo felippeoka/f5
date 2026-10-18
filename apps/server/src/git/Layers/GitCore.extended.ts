@@ -10,7 +10,7 @@ import { describe, expect, vi } from "vitest";
 
 import { GitServiceLive } from "./GitService.ts";
 import { GitService, type GitServiceShape } from "../Services/GitService.ts";
-import { GitCoreLive } from "./GitCore.ts";
+import { GitCoreTestLive as GitCoreLive } from "../testLayers.ts";
 import { GitCore, type GitCoreShape } from "../Services/GitCore.ts";
 import { GitCommandError } from "../Errors.ts";
 import { type ProcessRunResult, runProcess } from "../../processRunner.ts";
@@ -110,6 +110,10 @@ const makeIsolatedGitCore = (gitService: GitServiceShape) =>
       fastForwardTo: (cwd, sha) => core.fastForwardTo(cwd, sha),
       initializeWorktreeSubmodules: (path, policy) =>
         core.initializeWorktreeSubmodules(path, policy),
+      readWorktreePreparation: (path) => core.readWorktreePreparation(path),
+      allocateWorktreePath: (input) => core.allocateWorktreePath(input),
+      isValidBranchName: (name) => core.isValidBranchName(name),
+      resolveAvailableBranchName: (cwd, name) => core.resolveAvailableBranchName(cwd, name),
       ensureWorktree: (input) => core.ensureWorktree(input),
       branchExists: (cwd, branch) => core.branchExists(cwd, branch),
       status: (input) => core.status(input),

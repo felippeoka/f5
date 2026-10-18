@@ -1,5 +1,7 @@
 # CI quality gates
 
+> Contributors: what CI runs and which checks to run locally.
+
 - `.github/workflows/ci.yml` runs `bun run fmt:check`, `bun run lint`, `bun run typecheck`, and `bun run test:full` for pull requests and pushes to `main`.
 - Use the fast `bun run test` suite for local feedback; CI runs the extended real-Git matrix before a change can merge.
 - Agents and contributors must run `bun run test:full` at least once before declaring work complete. It is also required before releases and after major Git subsystem changes.
