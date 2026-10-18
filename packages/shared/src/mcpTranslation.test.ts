@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildMcpToolFilters,
+  claudeDisallowedMcpToolNames,
+  evaluateMcpToolFilter,
+  normalizeClaudeMcpName,
   CodexMcpOAuthCallbackPortConflictError,
   CodexMcpOAuthCallbackUrlConflictError,
   readCodexMcpOAuthCallbackConfig,
@@ -10,6 +14,38 @@ import {
 } from "./mcpTranslation";
 
 describe("mcpTranslation", () => {
+  it.each(["stdio", "http", "sse"] as const)(
+    "translates Claude %s tool timeouts to milliseconds",
+    (type) => {
+      const server =
+        type === "stdio"
+          ? { type, command: "node", toolTimeoutSec: 45 }
+          : {
+              type,
+              url: "https://example.test/mcp",
+              toolTimeoutSec: 45,
+              bearerTokenEnvVar: "TOKEN",
+            };
+      const translated = translateMcpForClaudeAgent({ server })!.server!;
+      expect(translated.timeout).toBe(45_000);
+      expect(translated).not.toHaveProperty("bearerTokenEnvVar");
+      expect(translated).not.toHaveProperty("headers");
+    },
+  );
+
+  it("leaves Claude's default timeout in effect for a saved zero", () => {
+    expect(
+      translateMcpForClaudeAgent({ server: { type: "stdio", command: "node", toolTimeoutSec: 0 } })!
+        .server,
+    ).not.toHaveProperty("timeout");
+  });
+
+  it("keeps SSE URLs unchanged for Codex", () => {
+    expect(
+      translateMcpForCodex({ server: { type: "sse", url: "https://example.test/sse" } }),
+    ).toEqual({ server: { type: "sse", url: "https://example.test/sse" } });
+  });
+
   it("filters disabled servers and drops Codex-only fields for Claude", () => {
     expect(
       translateMcpForClaudeAgent({
@@ -59,7 +95,7 @@ describe("mcpTranslation", () => {
       alpha: {
         type: "http",
         url: "https://example.com/mcp",
-        headers: {
+        http_headers: {
           Authorization: "Bearer token",
         },
         bearer_token_env_var: "MCP_TOKEN",
@@ -231,5 +267,112 @@ describe("mcpTranslation", () => {
         },
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("Claude MCP tool filters", () => {
+  const filters = buildMcpToolFilters({
+    team__docs: {
+      type: "stdio",
+      command: "node",
+      enabledTools: ["a__b", "blocked"],
+      disabledTools: ["blocked"],
+    },
+    "team docs.v2": { type: "http", url: "https://example.test", disabledTools: ["write"] },
+    unrestricted: { type: "stdio", command: "node", enabledTools: [] },
+    disabled: { type: "stdio", command: "node", enabled: false, disabledTools: ["read"] },
+  });
+  const owned = new Set(filters.keys());
+
+  it("normalizes only characters Claude replaces, retaining double underscores", () => {
+    expect(normalizeClaudeMcpName("team docs.v2__docs-/a")).toBe("team_docs_v2__docs-_a");
+  });
+
+  it("builds denied tool names for enabled servers only", () => {
+    expect(filters.has("disabled")).toBe(false);
+    expect(claudeDisallowedMcpToolNames(filters)).toEqual([
+      "mcp__team__docs__blocked",
+      "mcp__team_docs_v2__write",
+    ]);
+  });
+
+  it.each([
+    ["team__docs", "a__b", false],
+    ["team__docs", "blocked", true],
+    ["team__docs", "missing", true],
+    ["team docs.v2", "read", false],
+    ["team docs.v2", "write", true],
+    ["unrestricted", "anything", false],
+  ] as const)("enforces %s / %s with and without provenance", (name, tool, denied) => {
+    const toolName = `mcp__${normalizeClaudeMcpName(name)}__${tool}`;
+    for (const provenance of [undefined, { name, source: "dynamic" }, { name }]) {
+      const reason = evaluateMcpToolFilter(filters, owned, toolName, provenance);
+      expect(Boolean(reason)).toBe(denied);
+      if (denied) {
+        expect(reason).toContain(tool);
+        expect(reason).toContain(name);
+        expect(reason).toContain("F5 MCP settings");
+      }
+    }
+  });
+
+  it("ignores SDK, external and unowned servers", () => {
+    for (const source of ["sdk", "project", "user", "plugin"]) {
+      expect(
+        evaluateMcpToolFilter(filters, owned, "mcp__team__docs__blocked", {
+          name: "team__docs",
+          source,
+        }),
+      ).toBeUndefined();
+    }
+    expect(
+      evaluateMcpToolFilter(filters, new Set(), "mcp__team__docs__blocked", { name: "team__docs" }),
+    ).toBeUndefined();
+    expect(evaluateMcpToolFilter(filters, owned, "Read")).toBeUndefined();
+  });
+
+  it("denies every tool from an owned server whose filter was removed", () => {
+    for (const provenance of [
+      undefined,
+      { name: "team__docs", source: "dynamic" },
+      { name: "team__docs" },
+    ]) {
+      for (const tool of ["a__b", "write"]) {
+        const reason = evaluateMcpToolFilter(
+          new Map(),
+          owned,
+          `mcp__team__docs__${tool}`,
+          provenance,
+        );
+        expect(reason).toContain(tool);
+        expect(reason).toContain("team__docs");
+        expect(reason).toContain("removed or disabled in F5 MCP settings");
+      }
+    }
+    expect(
+      evaluateMcpToolFilter(new Map(), owned, "mcp__team__docs__write", {
+        name: "team__docs",
+        source: "sdk",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("fails closed on a mismatched prefix", () => {
+    expect(
+      evaluateMcpToolFilter(filters, owned, "mcp__other__a__b", {
+        name: "team__docs",
+        source: "dynamic",
+      }),
+    ).toContain("F5 MCP settings");
+  });
+
+  it("checks every normalized alias when provenance is absent", () => {
+    const aliases = buildMcpToolFilters({
+      "a.b": { type: "stdio", command: "node", disabledTools: ["write"] },
+      a_b: { type: "stdio", command: "node" },
+    });
+    expect(evaluateMcpToolFilter(aliases, new Set(aliases.keys()), "mcp__a_b__write")).toContain(
+      "a.b",
+    );
   });
 });

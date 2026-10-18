@@ -1,5 +1,6 @@
 import type {
   McpCodexStatusResult,
+  McpStatusUpdatedPayload,
   McpCommonConfigResult,
   McpEffectiveConfigResult,
   McpLoginStatusResult,
@@ -52,6 +53,33 @@ export const mcpQueryKeys = {
     homePath: CodexEnvironmentKeyPart,
   ) => ["mcp", "oauthStatus", projectId, serverName, binaryPath, homePath] as const,
 };
+
+/** Scoped account events must never refresh another account's control or login queries. */
+export function isMcpQueryAffected(
+  queryKey: readonly unknown[],
+  event: McpStatusUpdatedPayload,
+): boolean {
+  if (queryKey[0] !== "mcp") return false;
+  const kind = queryKey[1];
+  const accountScoped = [
+    "providerStatus",
+    "serverStatuses",
+    "loginStatus",
+    "codexStatus",
+    "oauthStatus",
+  ].includes(String(kind));
+  if (event.instanceId) {
+    if (!accountScoped) return false;
+    const instance = queryKey[kind === "codexStatus" ? 3 : kind === "loginStatus" ? 5 : 4];
+    if (instance !== event.instanceId) return false;
+  }
+  if (event.projectId && event.scope === "project") {
+    const project =
+      queryKey[accountScoped && kind !== "codexStatus" && kind !== "oauthStatus" ? 3 : 2];
+    if (kind !== "commonConfig" && project !== event.projectId) return false;
+  }
+  return true;
+}
 
 export function mcpCommonConfigQueryOptions(input?: { readonly enabled?: boolean }) {
   return queryOptions<McpCommonConfigResult>({
@@ -189,7 +217,6 @@ export function mcpLoginStatusQueryOptions(input: {
   readonly binaryPath?: string;
   readonly homePath?: string;
   readonly enabled?: boolean;
-  readonly refetchInterval?: number | false;
 }) {
   return queryOptions<McpLoginStatusResult>({
     queryKey: mcpQueryKeys.loginStatus(
@@ -203,7 +230,7 @@ export function mcpLoginStatusQueryOptions(input: {
       (input.enabled ?? true) &&
       Boolean(input.projectId) &&
       (input.provider === "claudeAgent" || Boolean(input.serverName)),
-    refetchInterval: input.refetchInterval ?? false,
+    refetchInterval: (query) => (query.state.data?.status === "pending" ? 2_000 : false),
     queryFn: async () => {
       if (!input.projectId) {
         throw new Error("MCP login status is unavailable.");

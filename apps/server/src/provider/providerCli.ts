@@ -17,6 +17,7 @@ export interface ProviderCliCommandResult {
 }
 
 export interface ProviderCliCommandOptions {
+  readonly cwd?: string | undefined;
   readonly baseEnvironment: NodeJS.ProcessEnv;
   readonly binaryPath?: string | undefined;
   readonly envOverrides?: NodeJS.ProcessEnv | undefined;
@@ -90,6 +91,7 @@ export function runProviderCliCommand(
     const invocation = yield* resolveInvocationEffect(resolvedBinary, commandArgs, environment);
     const command = ChildProcess.make(invocation.file, [...invocation.args], {
       env: environment,
+      ...(options.cwd ? { cwd: options.cwd } : {}),
       stdin: "ignore",
     });
 

@@ -43,10 +43,6 @@ export function McpServerRow(props: {
 
       enabled:
         props.selectedProvider === "codex" && props.projectId !== null && !props.isOverridden,
-      refetchInterval:
-        props.selectedProvider === "codex" && props.projectId !== null && !props.isOverridden
-          ? 2_000
-          : false,
     }),
   );
 

@@ -13,7 +13,8 @@
  */
 import type {
   ElicitationSubmitInput,
-  McpReloadResult,
+  McpSessionReloadOutcome,
+  ProviderInstanceId,
   ProjectId,
   ProviderInterruptTurnInput,
   ProviderKind,
@@ -44,10 +45,7 @@ import type {
 
 export interface ProviderMcpReloadOutcome {
   /** Sessions the reload reached, with their final result after retries. */
-  readonly sessions: ReadonlyArray<{
-    readonly threadId: ThreadId;
-    readonly result: McpReloadResult;
-  }>;
+  readonly sessions: ReadonlyArray<McpSessionReloadOutcome>;
 }
 
 /**
@@ -96,6 +94,13 @@ export interface ProviderServiceShape {
     threadId: ThreadId,
     input: ProviderSessionStartInput,
   ) => Effect.Effect<ProviderSession, ProviderServiceError>;
+
+  /** Replace only the generation inspected by the caller, under one service gate. */
+  readonly replaceSession: (
+    threadId: ThreadId,
+    input: ProviderSessionStartInput,
+    expected: { readonly instanceId: ProviderInstanceId; readonly generation: number },
+  ) => Effect.Effect<ProviderSession | null, ProviderServiceError>;
 
   /**
    * Send a provider turn.
@@ -219,12 +224,16 @@ export interface ProviderServiceShape {
    */
   readonly reloadMcpConfigForProject: (input: {
     readonly provider: ProviderKind;
+    readonly instanceId?: ProviderInstanceId;
+    readonly requestedVersion?: string;
     readonly projectId: ProjectId;
     readonly providerOptions?: ProviderSessionStartInput["providerOptions"];
     /** Limit the reload to these threads. */
     readonly threadIds?: ReadonlyArray<ThreadId>;
-    /** Skip the per-session backoff (callers with their own retry loop). */
+    /** Skip the per-session backoff for one-shot internal callers. */
     readonly retry?: boolean;
+    /** Internal caller-specific backoff; all attempts keep the gated snapshot. */
+    readonly retryDelaysMs?: ReadonlyArray<number>;
     /**
      * Post per-session runtime warnings for failures a later attempt might fix
      * (default true). Restart-required results are final and always warn.

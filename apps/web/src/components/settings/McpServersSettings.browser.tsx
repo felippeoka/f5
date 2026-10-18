@@ -10,6 +10,7 @@ import type {
   ProjectId,
 } from "@t3tools/contracts";
 import { formatMcpServersAsJson } from "@t3tools/shared/mcpConfig";
+import { CODEX_SSE_TRANSPORT_HINT } from "@t3tools/shared/mcpTranslation";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
@@ -212,6 +213,7 @@ function createNativeApiMock() {
 }
 
 async function renderSettings() {
+  await page.viewport(1280, 900);
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -239,6 +241,12 @@ async function renderSettings() {
   return { screen, queryClient };
 }
 
+async function captureSettingsScreenshot() {
+  await page.viewport(1280, 1800);
+  window.scrollTo(0, 0);
+  await page.screenshot({ fullPage: true });
+}
+
 function clickButtonWithExactText(label: string) {
   const button = Array.from(document.querySelectorAll("button")).find(
     (candidate) => candidate.textContent?.trim() === label,
@@ -254,6 +262,95 @@ describe("McpServersSettings", () => {
     document.body.innerHTML = "";
   });
 
+  it("shows the Codex streamable HTTP hint only when editing SSE", async () => {
+    createNativeApiMock();
+    const { screen, queryClient } = await renderSettings();
+    try {
+      expect(document.body.textContent).not.toContain(CODEX_SSE_TRANSPORT_HINT);
+      await page.getByRole("combobox", { name: "MCP transport type" }).click();
+      await page.getByRole("option", { name: "sse", exact: true }).click();
+      await vi.waitFor(() => expect(document.body.textContent).toContain(CODEX_SSE_TRANSPORT_HINT));
+      await page.getByRole("combobox", { name: "MCP transport type" }).click();
+      await page.getByRole("option", { name: "http", exact: true }).click();
+      await vi.waitFor(() =>
+        expect(document.body.textContent).not.toContain(CODEX_SSE_TRANSPORT_HINT),
+      );
+    } finally {
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
+
+  it("polls login every two seconds while pending and stops for idle and terminal statuses", async () => {
+    const mocks = createNativeApiMock();
+    let status: McpLoginStatusResult["status"] = "idle";
+    mocks.getLoginStatus.mockImplementation(async ({ provider, projectId, serverName }) => ({
+      target: "server",
+      mode: "cli",
+      provider,
+      projectId,
+      ...(serverName ? { serverName } : {}),
+      status,
+    }));
+    mocks.getServerStatuses.mockResolvedValue({
+      provider: "codex",
+      projectId: PROJECT_ID,
+      support: "supported",
+      configVersion: "effective-v1",
+      statuses: [
+        {
+          name: "project-server",
+          state: "login-required",
+          authStatus: "unauthenticated",
+          toolCount: 0,
+          resourceCount: 0,
+          resourceTemplateCount: 0,
+        },
+      ],
+    });
+    mocks.startLogin.mockImplementation(async () => {
+      status = "pending";
+      return {
+        target: "server",
+        mode: "cli",
+        provider: "codex",
+        projectId: PROJECT_ID,
+        serverName: "project-server",
+        status,
+      };
+    });
+    const { screen, queryClient } = await renderSettings();
+    const interval = () => new Promise((resolve) => setTimeout(resolve, 2_200));
+    try {
+      await vi.waitFor(() => expect(mocks.getLoginStatus).toHaveBeenCalled());
+      const initial = mocks.getLoginStatus.mock.calls.length;
+      await interval();
+      expect(mocks.getLoginStatus).toHaveBeenCalledTimes(initial);
+      await page.getByRole("button", { name: "Login", exact: true }).click();
+      await vi.waitFor(() => expect(document.body.textContent).toContain("Logging in..."));
+      const pending = mocks.getLoginStatus.mock.calls.length;
+      await vi.waitFor(
+        () => expect(mocks.getLoginStatus.mock.calls.length).toBeGreaterThan(pending),
+        { timeout: 3_000 },
+      );
+      status = "completed";
+      await vi.waitFor(() => expect(document.body.textContent).not.toContain("Logging in..."), {
+        timeout: 3_000,
+      });
+      const completed = mocks.getLoginStatus.mock.calls.length;
+      await interval();
+      expect(mocks.getLoginStatus).toHaveBeenCalledTimes(completed);
+      status = "failed";
+      await queryClient.invalidateQueries({ queryKey: ["mcp", "loginStatus"] });
+      const failed = mocks.getLoginStatus.mock.calls.length;
+      await interval();
+      expect(mocks.getLoginStatus).toHaveBeenCalledTimes(failed);
+    } finally {
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
+
   it("renders the effective JSON export and copies the canonical merged config", async () => {
     const mocks = createNativeApiMock();
     const { screen, queryClient } = await renderSettings();
@@ -266,13 +363,14 @@ describe("McpServersSettings", () => {
         expect(exportTextarea?.value).toBe(effectiveJson);
       });
 
-      expect(document.body.textContent).toContain("Codex-only options");
+      expect(document.body.textContent).toContain("Advanced options");
       expect(document.body.textContent?.toLowerCase()).not.toContain("redacted");
 
       await page.getByRole("button", { name: "Copy JSON" }).click();
 
       expect(copyToClipboard).toHaveBeenCalledWith(effectiveJson, undefined);
       expect(mocks.getEffectiveConfig).toHaveBeenCalledWith({ projectId: PROJECT_ID });
+      await captureSettingsScreenshot();
     } finally {
       queryClient.clear();
       await screen.unmount();
@@ -292,7 +390,7 @@ describe("McpServersSettings", () => {
         expect(document.body.textContent).toContain("Common servers (1/16)");
       });
 
-      await page.getByRole("button", { name: "Apply to live sessions" }).click();
+      await page.getByRole("button", { name: "Apply to all live sessions" }).click();
 
       await vi.waitFor(() => {
         expect(mocks.applyToLiveSessions).toHaveBeenCalledWith({
@@ -306,7 +404,7 @@ describe("McpServersSettings", () => {
         expect(document.body.textContent).toContain("Project servers (1/16)");
       });
 
-      await page.getByRole("button", { name: "Apply to live sessions" }).click();
+      await page.getByRole("button", { name: "Apply to all live sessions" }).click();
 
       await vi.waitFor(() => {
         expect(mocks.applyToLiveSessions).toHaveBeenCalledWith({
@@ -314,6 +412,7 @@ describe("McpServersSettings", () => {
           projectId: PROJECT_ID,
         });
       });
+      await captureSettingsScreenshot();
     } finally {
       queryClient.clear();
       await screen.unmount();
@@ -615,7 +714,7 @@ describe("McpServersSettings", () => {
       await expect
         .element(page.getByRole("textbox", { name: "Command", exact: true }))
         .toHaveValue("updated-command");
-      await page.getByRole("button", { name: /Codex-only options/ }).click();
+      await page.getByRole("button", { name: /Advanced options/ }).click();
       await page.getByRole("textbox", { name: "Startup timeout (sec)", exact: true }).fill("30");
       expect(document.body.textContent).toContain("Draft save failed");
       await page.getByRole("textbox", { name: "Command", exact: true }).fill("retry-command");
@@ -648,7 +747,7 @@ describe("McpServersSettings", () => {
     try {
       await page.getByRole("button", { name: "Edit", exact: true }).click();
       await page.getByRole("textbox", { name: "Name", exact: true }).fill("unsaved-name");
-      await page.getByRole("button", { name: /Codex-only options/ }).click();
+      await page.getByRole("button", { name: /Advanced options/ }).click();
       await page.getByRole("textbox", { name: "OAuth callback port", exact: true }).fill("0");
       await page.getByRole("button", { name: "Save changes" }).click();
       await vi.waitFor(() =>
@@ -681,7 +780,7 @@ describe("McpServersSettings", () => {
         .element(page.getByRole("switch", { name: "Enable MCP server", exact: true }))
         .toBeChecked();
       await expect
-        .element(page.getByRole("button", { name: /Codex-only options/ }))
+        .element(page.getByRole("button", { name: /Advanced options/ }))
         .toHaveAttribute("aria-expanded", "false");
       await expect.element(importInput).toHaveValue(importText);
       expect(mocks.replaceCommonConfig).not.toHaveBeenCalled();
@@ -798,7 +897,7 @@ describe("McpServersSettings", () => {
     const { screen, queryClient } = await renderSettings();
     try {
       await page.getByRole("button", { name: "Edit", exact: true }).click();
-      await page.getByRole("button", { name: /Codex-only options/ }).click();
+      await page.getByRole("button", { name: /Advanced options/ }).click();
       await page
         .getByRole("combobox", { name: "Supports parallel tool calls" })
         .selectOptions("disabled");

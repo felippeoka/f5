@@ -88,6 +88,7 @@ export const McpProjectServersWriteConfig = Schema.Record(
 export type McpProjectServersWriteConfig = typeof McpProjectServersWriteConfig.Type;
 
 const ClaudeAgentStdioMcpServerConfig = Schema.Struct({
+  timeout: Schema.optional(PositiveInt),
   type: Schema.Literal("stdio"),
   command: TrimmedNonEmptyString,
   args: Schema.optional(McpArgArray),
@@ -96,6 +97,7 @@ const ClaudeAgentStdioMcpServerConfig = Schema.Struct({
 });
 
 const ClaudeAgentRemoteMcpServerConfig = Schema.Struct({
+  timeout: Schema.optional(PositiveInt),
   type: Schema.Literals(["sse", "http"]),
   url: TrimmedNonEmptyString,
   headers: Schema.optional(McpStringRecord),
@@ -130,7 +132,7 @@ const CodexStdioMcpServerEntry = Schema.Struct({
   env: Schema.optional(McpStringRecord),
   cwd: Schema.optional(FilesystemPath),
   url: UnsupportedMcpField,
-  headers: UnsupportedMcpField,
+  http_headers: UnsupportedMcpField,
   ...CodexMcpServerCommonFields,
 });
 
@@ -141,7 +143,7 @@ const CodexRemoteMcpServerEntry = Schema.Struct({
   env: UnsupportedMcpField,
   cwd: UnsupportedMcpField,
   url: TrimmedNonEmptyString,
-  headers: Schema.optional(McpStringRecord),
+  http_headers: Schema.optional(McpStringRecord),
   ...CodexMcpServerCommonFields,
 });
 

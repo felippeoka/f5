@@ -6419,6 +6419,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         });
         return yield* codexMcpSyncService.getStatus({
           projectId: body.projectId,
+          ...(body.instanceId ? { instanceId: body.instanceId } : {}),
           ...(providerOptions ? { providerOptions } : {}),
         });
       }
@@ -6433,16 +6434,19 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         yield* providerService.reloadMcpConfigForProject({
           provider: "codex",
           projectId: body.projectId,
+          ...(body.instanceId ? { instanceId: body.instanceId } : {}),
           ...(providerOptions ? { providerOptions } : {}),
         });
         const status = yield* codexMcpSyncService.getStatus({
           projectId: body.projectId,
+          ...(body.instanceId ? { instanceId: body.instanceId } : {}),
           ...(providerOptions ? { providerOptions } : {}),
         });
         yield* codexMcpEventBus.publishStatusUpdated({
           provider: "codex",
           scope: "project",
           projectId: body.projectId,
+          ...(body.instanceId ? { instanceId: body.instanceId } : {}),
           reason: "reloaded",
           ...(status.configVersion ? { configVersion: status.configVersion } : {}),
         });
@@ -6451,7 +6455,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.mcpApplyToLiveSessions: {
         const requestBody = stripRequestTag(request.body);
-        const body = yield* profileCall(() => resolveMcpAccount(requestBody));
+        if (requestBody.binaryPath !== undefined || requestBody.homePath !== undefined)
+          return yield* new RouteRequestError({
+            message:
+              "Client-supplied provider executable and home paths are not accepted. Select a provider instance.",
+          });
+        const body = requestBody;
         const { providerCommandReactor } = yield* awaitOrchestrationRuntimeForRoute;
         const result = yield* providerCommandReactor.applyMcpConfigToLiveSessions(body).pipe(
           Effect.mapError(
@@ -6463,6 +6472,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         );
         yield* codexMcpEventBus.publishStatusUpdated({
           scope: result.scope,
+          ...(body.instanceId ? { instanceId: body.instanceId } : {}),
           ...(result.projectId ? { projectId: result.projectId } : {}),
           reason: "applied",
           ...(result.configVersion ? { configVersion: result.configVersion } : {}),

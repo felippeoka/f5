@@ -659,5 +659,6 @@ export class CodexControlClient extends EventEmitter<{
     if (!this.child.killed) {
       killChildTree(this.child);
     }
+    this.emit("closed", new Error("Codex control client closed."));
   }
 }
