@@ -3934,6 +3934,10 @@ describe("WebSocket Server", () => {
   describe("first sends through nextTurnQueue.submit", { timeout: 90_000 }, () => {
     /** How long to wait for background setup or a turn on a slow runner. */
     const SLOW_WAIT = { timeout: 30_000 } as const;
+    function nodeSetupCommand(script: string): string {
+      return `"${process.execPath}" -e "${script}"`;
+    }
+
     function makeGitRepo(prefix: string): string {
       const repo = makeTempDir(prefix);
       const git = (...args: string[]) =>
@@ -4108,16 +4112,20 @@ describe("WebSocket Server", () => {
       const snapshot = (await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot))
         .result as OrchestrationReadModel;
       const thread = snapshot.threads.find((entry) => entry.id === threadId);
-      const worktreesDir = path.join(path.dirname(stateDir), "worktrees");
-      const relative = (value: string | null | undefined) =>
-        value == null
-          ? null
-          : value.startsWith(worktreesDir) ||
-              value.startsWith(path.join(fs.realpathSync(path.dirname(stateDir)), "worktrees"))
-            ? `<worktrees>/<repo>/${path.basename(value)}`
-            : value === repo
-              ? "<repo>"
-              : value;
+      const relative = (value: string | null | undefined) => {
+        if (value == null) return null;
+        // Resolve short Windows temp paths and separators before comparing routes.
+        const canonicalValue = fs.realpathSync(value);
+        const canonicalWorktreesDir = path.join(
+          fs.realpathSync(path.dirname(stateDir)),
+          "worktrees",
+        );
+        return canonicalValue.startsWith(`${canonicalWorktreesDir}${path.sep}`)
+          ? `<worktrees>/<repo>/${path.basename(canonicalValue)}`
+          : canonicalValue === fs.realpathSync(repo)
+            ? "<repo>"
+            : value;
+      };
       const outcome = {
         // The title is left out: it is renamed later by title generation, whose
         // timing depends on the environment and not on the bootstrap route.
@@ -4435,7 +4443,13 @@ describe("WebSocket Server", () => {
             ),
           );
           const ws = await startServer({ repo, sentTurns, generateBranchName });
-          await createProject(ws, repo, late ? { command: "sleep 1", async: false } : undefined);
+          await createProject(
+            ws,
+            repo,
+            late
+              ? { command: nodeSetupCommand("setTimeout(() => {}, 1000)"), async: false }
+              : undefined,
+          );
           const base = firstSend({ repo, threadId: "generated-name" });
           const response = await sendRequest(ws, WS_METHODS.nextTurnQueueSubmit, {
             ...base,
@@ -4479,7 +4493,10 @@ describe("WebSocket Server", () => {
           generateBranchName: () =>
             Effect.sleep("3100 millis").pipe(Effect.as({ branch: "shared-title" })),
         });
-        await createProject(ws, repo, { command: "sleep 1", async: false });
+        await createProject(ws, repo, {
+          command: nodeSetupCommand("setTimeout(() => {}, 1000)"),
+          async: false,
+        });
         const address = server!.address();
         const port = typeof address === "object" && address !== null ? address.port : 0;
         const [secondClient] = await connectAndAwaitWelcome(port);
@@ -4587,7 +4604,10 @@ describe("WebSocket Server", () => {
       it("reserves an explicit branch before admitting competing conversations", async () => {
         const repo = makeGitRepo("f5-ws-name-reservation-");
         const ws = await startServer({ repo, sentTurns: [] });
-        await createProject(ws, repo, { command: "sleep 30", async: false });
+        await createProject(ws, repo, {
+          command: nodeSetupCommand("setTimeout(() => {}, 30000)"),
+          async: false,
+        });
         const requests = ["reservation-one", "reservation-two"].map((threadId) => {
           const base = firstSend({ repo, threadId });
           return {
@@ -4653,7 +4673,7 @@ describe("WebSocket Server", () => {
           const sentTurns: Array<Parameters<ProviderServiceShape["sendTurn"]>[0]> = [];
           const ws = await startServer({ repo, sentTurns });
           await createProject(ws, repo, {
-            command: "echo setup-started; sleep 30",
+            command: nodeSetupCommand("console.log('setup-started'); setTimeout(() => {}, 30000)"),
             ...(async === undefined ? {} : { async }),
           });
           const threadId = "async-setup";
@@ -4848,7 +4868,10 @@ describe("WebSocket Server", () => {
         const repo = makeGitRepo("t3code-ws-setup-cancel-clean-");
         const sentTurns: Array<Parameters<ProviderServiceShape["sendTurn"]>[0]> = [];
         const ws = await startServer({ repo, sentTurns });
-        await createProject(ws, repo, { command: "sleep 30", async: false });
+        await createProject(ws, repo, {
+          command: nodeSetupCommand("setTimeout(() => {}, 30000)"),
+          async: false,
+        });
         await sendRequest(
           ws,
           WS_METHODS.nextTurnQueueSubmit,
@@ -4906,7 +4929,9 @@ describe("WebSocket Server", () => {
         const sentTurns: Array<Parameters<ProviderServiceShape["sendTurn"]>[0]> = [];
         const ws = await startServer({ repo, sentTurns });
         await createProject(ws, repo, {
-          command: "echo generated > generated.txt && sleep 30",
+          command: nodeSetupCommand(
+            "require('node:fs').writeFileSync('generated.txt', 'generated'); setTimeout(() => {}, 30000)",
+          ),
           async: false,
         });
         await sendRequest(
@@ -4982,7 +5007,10 @@ describe("WebSocket Server", () => {
           makeSqlitePersistenceLive(dbPath).pipe(Layer.provide(NodeServices.layer));
         const sentTurns: Array<Parameters<ProviderServiceShape["sendTurn"]>[0]> = [];
         let ws = await startServer({ repo, stateDir, persistenceLayer: persistence(), sentTurns });
-        await createProject(ws, repo, { command: "sleep 30", async: false });
+        await createProject(ws, repo, {
+          command: nodeSetupCommand("setTimeout(() => {}, 30000)"),
+          async: false,
+        });
         await sendRequest(
           ws,
           WS_METHODS.nextTurnQueueSubmit,
