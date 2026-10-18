@@ -11,6 +11,7 @@ import {
   parseRelease,
   selectArtifact,
   sha256File,
+  tarExecutable,
   versionToken,
   type CliRelease,
 } from "@t3tools/shared/cliRelease";
@@ -71,7 +72,8 @@ export async function fetchRelease(url: string): Promise<CliRelease> {
 }
 /** Reject links and traversal before the tar process can write anything. */
 export function validateArchiveListing(listing: string, verbose: string, stem: string): void {
-  const entries = listing.trimEnd().split("\n");
+  // Windows bsdtar may end lines with CRLF.
+  const entries = listing.trimEnd().split(/\r?\n/);
   if (!entries.length || entries.length > 100_000) throw new Error("Invalid archive size.");
   for (const entry of entries) {
     if (
@@ -86,7 +88,7 @@ export function validateArchiveListing(listing: string, verbose: string, stem: s
     )
       throw new Error("Unsafe archive path.");
   }
-  const rows = verbose.trimEnd().split("\n");
+  const rows = verbose.trimEnd().split(/\r?\n/);
   if (rows.length !== entries.length || rows.some((row) => row[0] !== "-" && row[0] !== "d"))
     throw new Error("Archives may contain only regular files and directories.");
   let expanded = 0;
@@ -173,16 +175,17 @@ export async function stageRelease(
     if (received !== artifact.size || (await sha256File(archive)) !== artifact.sha256)
       throw new Error("Release integrity verification failed.");
     const stem = `f5-${release.version}-${artifact.target}`;
-    const listing = await exec("tar", ["-tzf", archive], {
+    const tar = tarExecutable();
+    const listing = await exec(tar, ["-tzf", archive], {
       timeout: 60_000,
       maxBuffer: 32 * 1024 * 1024,
     });
-    const verbose = await exec("tar", ["-tvzf", archive], {
+    const verbose = await exec(tar, ["-tvzf", archive], {
       timeout: 60_000,
       maxBuffer: 32 * 1024 * 1024,
     });
     validateArchiveListing(listing.stdout, verbose.stdout, stem);
-    await exec("tar", ["-xzf", archive, "-C", staging], { timeout: 120_000, maxBuffer: 64 * 1024 });
+    await exec(tar, ["-xzf", archive, "-C", staging], { timeout: 120_000, maxBuffer: 64 * 1024 });
     const content = path.join(staging, stem);
     const metadata = await readJson(path.join(content, "runtime.json"));
     if (

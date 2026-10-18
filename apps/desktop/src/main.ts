@@ -119,7 +119,7 @@ import {
   normalizePreviewUrl,
   validatePreviewHostPatterns,
 } from "@t3tools/shared/preview";
-import { killProcessTree } from "@t3tools/shared/processTree";
+import { killProcessTreeAsync } from "@t3tools/shared/processTree";
 import { buildDesktopBackendEnv, resolveDesktopStateDirConfig } from "./backendEnv";
 import {
   authorizeDesktopBackendRequestHeaders,
@@ -2656,7 +2656,10 @@ function restoreInstallWindows(): void {
 const updaterInstallerAdapter = createUpdaterInstallerAdapter(autoUpdater, process.platform);
 const updateInstaller = createUpdateInstaller({
   stage: () => updaterInstallerAdapter.stage(),
-  onStageStart: () => setUpdateState({ status: "preparing", message: null }),
+  onStageStart: () => {
+    writeDesktopLogHeader("update install confirmed");
+    setUpdateState({ status: "preparing", message: null });
+  },
   onCancel: () => setUpdateState({ status: "downloaded" }),
   resetAttempt: () => updaterInstallerAdapter.resetAttempt(),
   watchdogEnabled: updaterInstallerAdapter.watchdogEnabled,
@@ -2701,14 +2704,21 @@ const updateInstaller = createUpdateInstaller({
       restoreInstallWindows();
       return false;
     }
+    writeDesktopLogHeader("update install: windows closed");
     installCleanupStarted = true;
     await cleanupBeforeExit();
+    writeDesktopLogHeader("update install: cleanup complete");
     shutdownComplete = true;
     restoreStdIoCapture?.();
     return true;
   },
-  install: () => updaterInstallerAdapter.install(),
+  install: async () => {
+    writeDesktopLogHeader("update install: launching installer");
+    await updaterInstallerAdapter.install();
+    writeDesktopLogHeader("update install: installer launched");
+  },
   recover: async (message) => {
+    writeDesktopLogHeader(`update install recovery: ${message}`);
     cancelQuit();
     try {
       const errors = await recoverUpdateSession<BackendRuntime>({
@@ -3049,10 +3059,10 @@ function stopBackend(runtime: BackendRuntime = defaultBackend): void {
   if (!child) return;
 
   if (child.exitCode === null && child.signalCode === null) {
-    killProcessTree(child, { isGroupLeader: false, graceful: true });
+    void killProcessTreeAsync(child, { isGroupLeader: false, graceful: true });
     setTimeout(() => {
       if (child.exitCode === null && child.signalCode === null) {
-        killProcessTree(child, { isGroupLeader: false, graceful: false });
+        void killProcessTreeAsync(child, { isGroupLeader: false, graceful: false });
       }
     }, 2_000).unref();
   }
@@ -3100,11 +3110,19 @@ async function stopBackendAndWaitForExit(
     }
 
     backendChild.once("exit", onExit);
-    killProcessTree(backendChild, { isGroupLeader: false, graceful: true });
+    // Asynchronous: a blocking taskkill once froze the main thread during update installs.
+    void killProcessTreeAsync(backendChild, { isGroupLeader: false, graceful: true }).then(
+      (result) => {
+        if (!result.terminated || result.usedFallback)
+          writeDesktopLogHeader(
+            `backend stop: process tree kill pid=${backendChild.pid} ${JSON.stringify(result)}`,
+          );
+      },
+    );
 
     forceKillTimer = setTimeout(() => {
       if (backendChild.exitCode === null && backendChild.signalCode === null) {
-        killProcessTree(backendChild, { isGroupLeader: false, graceful: false });
+        void killProcessTreeAsync(backendChild, { isGroupLeader: false, graceful: false });
       }
     }, 2_000);
     forceKillTimer.unref();
@@ -3984,10 +4002,12 @@ function cancelQuit(): void {
 }
 
 async function cleanupBeforeExit(): Promise<void> {
+  writeDesktopLogHeader("cleanup: closing computer control");
   computerSystem?.channel.close();
   computerSystem?.controller.close();
   computerSystem?.overlay.close();
   computerSystem?.helper.close();
+  writeDesktopLogHeader("cleanup: stopping backends and preview");
   clearUpdatePollTimer();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {

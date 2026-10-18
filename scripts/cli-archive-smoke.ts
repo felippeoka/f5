@@ -7,7 +7,7 @@ import * as os from "node:os";
 import * as net from "node:net";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { cliTarget, parseRelease, sha256File } from "@t3tools/shared/cliRelease";
+import { cliTarget, parseRelease, sha256File, tarExecutable } from "@t3tools/shared/cliRelease";
 const exec = promisify(execFile);
 const [archive, manifestFile] = process.argv.slice(2);
 if (!archive || !manifestFile) throw new Error("Usage: cli-archive-smoke.ts ARCHIVE MANIFEST");
@@ -22,15 +22,19 @@ if (
 const directory = await fs.mkdtemp(path.join(os.tmpdir(), "f5-cli-smoke-"));
 let child: ReturnType<typeof spawn> | undefined;
 try {
-  await exec("tar", ["-xzf", path.resolve(archive), "-C", directory]);
+  await exec(tarExecutable(), ["-xzf", path.resolve(archive), "-C", directory]);
   const runtime = path.join(directory, `f5-${release.version}-${artifact.target}`);
   const executable = path.join(runtime, process.platform === "win32" ? "f5.exe" : "f5");
   const emptyPath = path.join(directory, "empty-path");
   await fs.mkdir(emptyPath);
   const home = path.join(directory, "home");
   await fs.mkdir(home);
+  // Windows names it `Path`; drop every casing so the child cannot inherit the real one.
+  const inherited = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => key.toUpperCase() !== "PATH"),
+  );
   const env = {
-    ...process.env,
+    ...inherited,
     PATH: emptyPath,
     SHELL: path.join(emptyPath, "no-login-shell"),
     HOME: home,

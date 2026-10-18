@@ -6,7 +6,7 @@ import {
 import { Schema } from "effect";
 import { parse as parseToml } from "smol-toml";
 
-import { normalizeServerName, mcpServerNameKey } from "./mcpValidation";
+import { normalizeServerName, mcpServerNameKey } from "./mcpServerName";
 
 function normalizeImportedNames(servers: McpProjectServersConfig): McpProjectServersConfig {
   const names = new Set<string>();
