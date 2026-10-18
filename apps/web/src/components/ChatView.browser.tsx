@@ -2352,6 +2352,8 @@ describe("ChatView timeline (full app)", () => {
         await cdp().send("Animation.setPlaybackRate", { playbackRate: 0 });
         editor.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
         await vi.waitFor(() => expect(form.dataset.composerCollapsed).toBe("false"));
+        // Let transitionrun mark the running animation before seeking pauses it.
+        await vi.waitFor(() => expect(form.hasAttribute("data-composer-resizing")).toBe(true));
         await seekComposerTransitions(form, 0.05);
         // Animating toward the uncapped draft height would already be clamped at 200px.
         const early = editor.getBoundingClientRect().height;
