@@ -314,7 +314,26 @@ Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 $A = [System.Windows.Automation.AutomationElement]
 $Scope = [System.Windows.Automation.TreeScope]
 $messageBox = New-Object System.Windows.Automation.PropertyCondition($A::ClassNameProperty, '#32770')
-$button = New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
+# Task dialog buttons are exposed as Pane elements of these classes, not as Buttons.
+$buttonClasses = @('CCPushButton', 'CCCommandLink', 'Button')
+Add-Type -Namespace F5Rehearsal -Name Input -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+[DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
+'@
+function Press($dialog, $target) {
+  $invoke = $null
+  if ($target.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke)) {
+    $invoke.Invoke()
+    return
+  }
+  [F5Rehearsal.Input]::SetForegroundWindow([IntPtr]$dialog.Current.NativeWindowHandle) | Out-Null
+  Start-Sleep -Milliseconds 200
+  $r = $target.Current.BoundingRectangle
+  [F5Rehearsal.Input]::SetCursorPos([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2)) | Out-Null
+  [F5Rehearsal.Input]::mouse_event(0x2, 0, 0, 0, [UIntPtr]::Zero)
+  [F5Rehearsal.Input]::mouse_event(0x4, 0, 0, 0, [UIntPtr]::Zero)
+}
 function F5Windows {
   $ids = @(Get-Process | Where-Object { $_.ProcessName -eq 'F5' } | ForEach-Object { $_.Id })
   @($A::RootElement.FindAll($Scope::Children, [System.Windows.Automation.Condition]::TrueCondition) | Where-Object { $ids -contains $_.Current.ProcessId })
@@ -324,10 +343,18 @@ while ((Get-Date) -lt $deadline) {
   foreach ($window in F5Windows) {
     $dialogs = if ($window.Current.ClassName -eq '#32770') { @($window) } else { @($window.FindAll($Scope::Descendants, $messageBox)) }
     foreach ($dialog in $dialogs) {
-      foreach ($candidate in $dialog.FindAll($Scope::Descendants, $button)) {
-        if ($candidate.Current.Name -like '${name}*') {
-          $candidate.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-          exit 0
+      foreach ($candidate in $dialog.FindAll($Scope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+        if ($buttonClasses -contains $candidate.Current.ClassName -and $candidate.Current.Name -like '${name}*') {
+          Press $dialog $candidate
+          $handle = $dialog.Current.NativeWindowHandle
+          $closeBy = (Get-Date).AddSeconds(10)
+          while ((Get-Date) -lt $closeBy) {
+            $open = $A::RootElement.FindAll($Scope::Descendants, $messageBox) | Where-Object { $_.Current.NativeWindowHandle -eq $handle }
+            if (-not $open) { exit 0 }
+            Start-Sleep -Milliseconds 250
+          }
+          [Console]::Error.WriteLine("Pressed '${name}' but the message box stayed open")
+          exit 4
         }
       }
     }
