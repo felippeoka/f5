@@ -1,3 +1,5 @@
+import { buildGeneratedWorktreeBranchName } from "../../git/worktreeBranchNames.ts";
+import { WorktreePreparation } from "../../project/Services/WorktreePreparation.ts";
 import { withWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import {
   assertWorktreeReady,
@@ -190,8 +192,6 @@ function mapProviderSessionStatusToOrchestrationStatus(
 const serverCommandId = (tag: string): CommandId =>
   CommandId.makeUnsafe(`server:${tag}:${crypto.randomUUID()}`);
 
-const WORKTREE_BRANCH_PREFIX = "t3code";
-
 function threadMessageContextCharacters(thread: OrchestrationThread): number {
   return thread.messages.reduce(
     (sum, message) =>
@@ -283,36 +283,6 @@ function isUnknownPendingApprovalRequestError(cause: Cause.Cause<ProviderService
     message.includes("unknown pending permission request") ||
     message.includes("unknown pending codex approval request")
   );
-}
-
-function buildGeneratedWorktreeBranchName(raw: string, configuredPrefix: string): string {
-  const normalized = raw
-    .trim()
-    .toLowerCase()
-    .replace(/^refs\/heads\//, "")
-    .replace(/['"`]/g, "");
-
-  const withoutPrefix = normalized.startsWith(`${WORKTREE_BRANCH_PREFIX}/`)
-    ? normalized.slice(`${WORKTREE_BRANCH_PREFIX}/`.length)
-    : normalized;
-
-  const branchFragment = withoutPrefix
-    .replace(/[^a-z0-9/_-]+/g, "-")
-    .replace(/\/+/g, "/")
-    .replace(/-+/g, "-")
-    .replace(/^[./_-]+|[./_-]+$/g, "")
-    .slice(0, 64)
-    .replace(/[./_-]+$/g, "");
-
-  const safeFragment = branchFragment.length > 0 ? branchFragment : "update";
-  const prefix =
-    configuredPrefix
-      .trim()
-      .toLowerCase()
-      .replace(/^refs\/heads\//, "")
-      .replace(/[^a-z0-9/_-]+/g, "-")
-      .replace(/^\/+|\/+$/g, "") || "f5";
-  return `${prefix}/${safeFragment}`;
 }
 
 /**
@@ -414,6 +384,7 @@ const make = Effect.gen(function* () {
   const providerSessionDirectory = yield* ProviderSessionDirectory;
   const projectMcpConfigService = yield* ProjectMcpConfigService;
   const git = yield* GitCore;
+  const preparation = yield* Effect.serviceOption(WorktreePreparation);
   const textGeneration = yield* TextGeneration;
   const serverSettings = yield* ServerSettingsService;
   const computerBroker = yield* Effect.serviceOption(ComputerAutomationBroker);
@@ -689,6 +660,13 @@ const make = Effect.gen(function* () {
           worktreePath: thread.worktreePath,
           branch: thread.branch,
         });
+        if (thread.branch && Option.isSome(preparation))
+          yield* preparation.value.prepare({
+            threadId: thread.id,
+            projectId: project.id,
+            worktreePath: thread.worktreePath,
+            branch: thread.branch,
+          });
       }
       const instructionContext: Partial<SharedInstructionInput> = {
         ...baseInstructionContext,
@@ -1270,13 +1248,22 @@ const make = Effect.gen(function* () {
     if (thread.worktreePath && thread.branch) {
       const model = yield* orchestrationEngine.getReadModel();
       const project = model.projects.find((entry) => entry.id === thread.projectId);
-      if (project)
+      if (project) {
         yield* git.ensureWorktree({
+          owner: `thread:${thread.id}`,
           submodules: (yield* settingsForThread(thread)).worktreeSubmodules,
           cwd: project.workspaceRoot,
           path: thread.worktreePath,
           branch: thread.branch,
         });
+        if (Option.isSome(preparation))
+          yield* preparation.value.prepare({
+            threadId: thread.id,
+            projectId: project.id,
+            worktreePath: thread.worktreePath,
+            branch: thread.branch,
+          });
+      }
     }
     const workspace = resolveThreadWorkspaceCwd({
       thread,
@@ -1396,6 +1383,8 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    if (thread.activities.some((activity) => activity.id === `worktree-setup:${input.threadId}`))
+      return;
     const userMessages = thread.messages.filter((message) => message.role === "user");
     if (userMessages.length !== 1 || userMessages[0]?.id !== input.messageId) {
       return;

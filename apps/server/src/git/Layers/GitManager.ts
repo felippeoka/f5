@@ -30,8 +30,6 @@ import { GitHubCli } from "../Services/GitHubCli.ts";
 import { makeGitHubCli } from "./GitHubCli.ts";
 import { GitHubCredentialScope } from "../githubApi.ts";
 import { TextGeneration } from "../Services/TextGeneration.ts";
-import { resolveDefaultWorktreePath } from "../worktreePaths.ts";
-import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import {
   buildDeterministicCommitMessage,
@@ -605,7 +603,6 @@ export const makeGitManager = Effect.gen(function* () {
   ]);
   const githubProvider = yield* sourceControlProviders.get("github");
   const textGeneration = yield* TextGeneration;
-  const serverConfig = yield* ServerConfig;
   const serverSettings = yield* ServerSettingsService;
 
   const projects = yield* ProjectionProjectRepository;
@@ -1485,11 +1482,11 @@ export const makeGitManager = Effect.gen(function* () {
       }
 
       const worktree = yield* gitCore.createWorktree({
+        preparation: { owner: `pr:${localPullRequestBranch}`, runSetupScript: true },
         submodules: (yield* getProjectSettings(input.cwd)).worktreeSubmodules,
         cwd: input.cwd,
         branch: localPullRequestBranch,
-        path: resolveDefaultWorktreePath({
-          worktreesDir: serverConfig.worktreesDir,
+        path: yield* gitCore.allocateWorktreePath({
           cwd: input.cwd,
           branch: localPullRequestBranch,
         }),

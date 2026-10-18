@@ -3476,6 +3476,7 @@ describe("ProviderCommandReactor", () => {
         git: {
           resolveCommit: () => Effect.die("unexpected resolve"),
           resolveCommonDir: () => Effect.die("unexpected resolve"),
+          allocateWorktreePath: () => Effect.die("unused"),
           createWorktree: () => Effect.die("unexpected worktree creation"),
           fetchRemoteBranchCommit: () => Effect.die("unexpected remote base fetch"),
           hasRemote: () => Effect.die("unexpected remote probe"),

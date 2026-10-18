@@ -1,3 +1,4 @@
+import { setupProjectScript } from "@t3tools/shared/projectScripts";
 import { CommandId, type OrchestrationCommand } from "@t3tools/contracts";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/worktree";
 import { Effect, Schema } from "effect";
@@ -5,7 +6,6 @@ import { Effect, Schema } from "effect";
 import { AttachmentIngressError } from "../attachmentIngress.ts";
 import { GitCommandError } from "../git/Errors.ts";
 import type { GitCoreShape } from "../git/Services/GitCore.ts";
-import { resolveDefaultWorktreePath } from "../git/worktreePaths.ts";
 import { PersistenceDecodeError, PersistenceSqlError } from "../persistence/Errors.ts";
 import {
   OrchestrationCommandIdConflictError,
@@ -71,6 +71,7 @@ interface BootstrapTurnStartBaseDependencies {
   readonly orchestrationEngine: Pick<OrchestrationEngineShape, "dispatch" | "getReadModel">;
   readonly git: Pick<
     GitCoreShape,
+    | "allocateWorktreePath"
     | "createWorktree"
     | "fetchRemoteBranchCommit"
     | "hasRemote"
@@ -476,10 +477,25 @@ export const dispatchBootstrapTurnStart = Effect.fnUntraced(function* (
       // creating a second worktree. Otherwise the subsequent
       // `thread.meta.update` below would replace the existing `worktreePath`
       // and leave the earlier worktree orphaned on disk.
+      let runSetupScript =
+        bootstrap.prepareWorktree?.runSetupScript ?? bootstrap.runSetupScript ?? false;
+      let setupIdentity: string | null = null;
       let shouldPrepareWorktree = bootstrap.prepareWorktree !== undefined;
       if (shouldPrepareWorktree && bootstrap.prepareWorktree) {
         failureStage = "worktree-create";
         const preWorktreeReadModel = yield* input.orchestrationEngine.getReadModel();
+        const setupScript = setupProjectScript(
+          preWorktreeReadModel.projects.find(
+            (project) =>
+              project.workspaceRoot === bootstrap.prepareWorktree!.projectCwd &&
+              project.deletedAt === null,
+          )?.scripts ?? [],
+        );
+        setupIdentity = setupScript?.command ?? null;
+        runSetupScript =
+          bootstrap.prepareWorktree.runSetupScript ??
+          bootstrap.runSetupScript ??
+          setupScript !== null;
         const existingThreadBeforeWorktree = preWorktreeReadModel.threads.find(
           (thread) =>
             thread.id === input.command.threadId &&
@@ -536,18 +552,19 @@ export const dispatchBootstrapTurnStart = Effect.fnUntraced(function* (
         const worktree = yield* observeBootstrapStage(
           "worktree-create",
           input.git.createWorktree({
+            preparation: {
+              owner: `thread:${input.command.threadId}`,
+              runSetupScript,
+              setupIdentity,
+            },
             cwd: bootstrap.prepareWorktree.projectCwd,
             branch: bootstrap.prepareWorktree.baseBranch,
             baseRefName: baseSha,
             newBranch,
-            path:
-              input.worktreesDir === undefined
-                ? null
-                : resolveDefaultWorktreePath({
-                    worktreesDir: input.worktreesDir,
-                    cwd: bootstrap.prepareWorktree.projectCwd,
-                    branch: newBranch,
-                  }),
+            path: yield* input.git.allocateWorktreePath({
+              cwd: bootstrap.prepareWorktree.projectCwd,
+              branch: newBranch,
+            }),
           }),
         );
         targetProjectCwd = bootstrap.prepareWorktree.projectCwd;
@@ -580,7 +597,7 @@ export const dispatchBootstrapTurnStart = Effect.fnUntraced(function* (
         }
       }
 
-      if (bootstrap.runSetupScript && targetWorktreePath) {
+      if (runSetupScript && targetWorktreePath) {
         const setupScriptLaunch = input.projectSetupScriptRunner
           .runForThread({
             threadId: input.command.threadId,

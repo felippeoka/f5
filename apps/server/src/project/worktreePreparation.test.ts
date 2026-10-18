@@ -1,3 +1,5 @@
+import { makeFakeGitCore } from "../git/testDoubles.ts";
+import { makeMemoryWorktreePreparations } from "../persistence/worktreePreparations.testUtils.ts";
 import { ThreadId, type GitPrepareWorktreeInput } from "@t3tools/contracts";
 import { Effect, Exit, Fiber, Scope } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -21,20 +23,67 @@ afterEach(async () => {
 async function harness() {
   const scope = await Effect.runPromise(Scope.make());
   scopes.push(scope);
-  const createWorktree = vi.fn(() => Effect.succeed(result));
+  const receipts = makeMemoryWorktreePreparations();
+  const git = makeFakeGitCore({
+    resolveCommonDir: () => Effect.succeed("/repo/.git"),
+    resolveCommit: () => Effect.succeed("base-oid"),
+    allocateWorktreePath: () => Effect.succeed(result.worktree.path),
+    inspectCheckout: (path) =>
+      makeFakeGitCore()
+        .service.inspectCheckout(path)
+        .pipe(
+          Effect.map((inspection) => ({
+            ...inspection,
+            canonicalRoot: result.worktree.path,
+            commonDir: "/repo/.git",
+            branch: input.newBranch,
+            headSha: "base-oid",
+            registration: {
+              path: result.worktree.path,
+              canonicalPath: result.worktree.path,
+              branch: input.newBranch,
+              headSha: "base-oid",
+              bare: false,
+              detached: false,
+              locked: null,
+              prunable: null,
+              isMain: false,
+            },
+          })),
+        ),
+  }).service;
+  const createWorktree = vi.fn((request: GitPrepareWorktreeInput & { operationId: string }) =>
+    Effect.gen(function* () {
+      const receipt = yield* receipts.allocate({
+        operationId: request.operationId,
+        repositoryIdentity: "/repo/.git",
+        projectIdentity: "/repo",
+        owner: `thread:${request.threadId}`,
+        requestedBase: request.branch,
+        baseOid: "base-oid",
+        path: result.worktree.path,
+        branch: request.newBranch,
+        namingIntent: "temporary",
+        runSetupScript: true,
+        setupIdentity: null,
+      });
+      yield* receipts.update(receipt, { phase: "checkout_created", createdCheckout: true });
+      return result;
+    }),
+  );
   const runSetup = vi.fn<ProjectSetupScriptRunnerShape["runForThread"]>(() =>
     Effect.succeed({ status: "no-script" } as const),
   );
   const prepare = await Effect.runPromise(
-    makeWorktreePreparation({ scope, createWorktree, runSetup }),
+    makeWorktreePreparation({ scope, git, receipts, createWorktree, runSetup }),
   );
-  return { scope, createWorktree, runSetup, prepare };
+  return { scope, git, receipts, createWorktree, runSetup, prepare };
 }
 
 describe("worktree preparation", () => {
   it("launches project setup in the prepared cwd for draft and established threads", async () => {
-    const { prepare, runSetup } = await harness();
     for (const threadId of [input.threadId, ThreadId.makeUnsafe("server-1")]) {
+      const { prepare, runSetup } = await harness();
       await Effect.runPromise(prepare({ ...input, threadId, newBranch: `t3code/${threadId}` }));
       expect(runSetup).toHaveBeenLastCalledWith({
         threadId,
@@ -51,7 +100,10 @@ describe("worktree preparation", () => {
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    createWorktree.mockImplementation(() => Effect.promise(() => held).pipe(Effect.as(result)));
+    const original = createWorktree.getMockImplementation()!;
+    createWorktree.mockImplementation((request) =>
+      Effect.promise(() => held).pipe(Effect.andThen(original(request))),
+    );
     const first = Effect.runPromise(prepare(input));
     const second = Effect.runPromise(prepare(input));
     await vi.waitFor(() => expect(createWorktree).toHaveBeenCalledTimes(1));
@@ -69,7 +121,10 @@ describe("worktree preparation", () => {
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    createWorktree.mockImplementation(() => Effect.promise(() => held).pipe(Effect.as(result)));
+    const original = createWorktree.getMockImplementation()!;
+    createWorktree.mockImplementation((request) =>
+      Effect.promise(() => held).pipe(Effect.andThen(original(request))),
+    );
     const request = await Effect.runPromise(prepare(input).pipe(Effect.forkIn(scope)));
     await vi.waitFor(() => expect(createWorktree).toHaveBeenCalledTimes(1));
     await Effect.runPromise(Fiber.interrupt(request));
@@ -95,5 +150,63 @@ describe("worktree preparation", () => {
       Effect.runPromise(prepare({ ...input, threadId: ThreadId.makeUnsafe("other") })),
     ).rejects.toThrow("different workspace");
     expect(createWorktree).toHaveBeenCalledTimes(1);
+  });
+  it("replays a verified completed receipt after the service restarts", async () => {
+    const { scope, git, receipts, createWorktree, runSetup, prepare } = await harness();
+    await Effect.runPromise(prepare(input));
+    const restarted = await Effect.runPromise(
+      makeWorktreePreparation({ scope, git, receipts, createWorktree, runSetup }),
+    );
+    expect(await Effect.runPromise(restarted(input))).toEqual(result);
+    expect(createWorktree).toHaveBeenCalledTimes(1);
+    expect(runSetup).toHaveBeenCalledTimes(1);
+  });
+  it("requires explicit acknowledgment after a restart during setup", async () => {
+    const { scope, git, receipts, createWorktree, runSetup, prepare } = await harness();
+    await Effect.runPromise(prepare(input));
+    const receipt = (await Effect.runPromise(receipts.latest(result.worktree.path)))!;
+    await Effect.runPromise(receipts.update(receipt, { phase: "setup_running" }));
+    await Effect.runPromise(receipts.reconcile);
+    const restarted = await Effect.runPromise(
+      makeWorktreePreparation({ scope, git, receipts, createWorktree, runSetup }),
+    );
+    await expect(Effect.runPromise(restarted(input))).rejects.toThrow("external effects");
+    expect(createWorktree).toHaveBeenCalledTimes(1);
+    await Effect.runPromise(restarted({ ...input, retryAcknowledged: true }));
+    expect(runSetup).toHaveBeenCalledTimes(2);
+  });
+  it("conflicts on changed bases and setup behavior even after completion", async () => {
+    const { prepare } = await harness();
+    await Effect.runPromise(prepare(input));
+    await expect(Effect.runPromise(prepare({ ...input, branch: "other-base" }))).rejects.toThrow(
+      "different workspace",
+    );
+    await expect(Effect.runPromise(prepare({ ...input, runSetupScript: false }))).rejects.toThrow(
+      "different workspace",
+    );
+  });
+  it("resumes an allocation interrupted before worktree add on its original path", async () => {
+    const { prepare, receipts, createWorktree } = await harness();
+    await Effect.runPromise(
+      receipts.allocate({
+        operationId: "before-add",
+        repositoryIdentity: "/repo/.git",
+        projectIdentity: "/repo",
+        owner: `thread:${input.threadId}`,
+        requestedBase: input.branch,
+        baseOid: "base-oid",
+        path: result.worktree.path,
+        branch: input.newBranch,
+        namingIntent: "temporary",
+        setupIdentity: null,
+        runSetupScript: true,
+      }),
+    );
+    expect(await Effect.runPromise(prepare(input))).toEqual(result);
+    expect(createWorktree).toHaveBeenCalledTimes(1);
+    expect(createWorktree.mock.calls[0]?.[0]).toMatchObject({
+      operationId: "before-add",
+      path: result.worktree.path,
+    });
   });
 });

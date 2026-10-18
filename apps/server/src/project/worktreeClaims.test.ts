@@ -179,7 +179,13 @@ describe("effective workspace claims and removal gate", () => {
       Effect.gen(function* () {
         const core = yield* GitCore;
         const target = path.join((yield* ServerConfig).worktreesDir, "owned");
-        git(repo.root, "worktree", "add", "-q", "-b", "owned", target, "main");
+        yield* core.createWorktree({
+          cwd: repo.root,
+          branch: "main",
+          newBranch: "owned",
+          path: target,
+          preparation: { owner: "thread:owner" },
+        });
         const owner = thread({
           id: "owner",
           projectId: "p",

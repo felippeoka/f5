@@ -1,9 +1,14 @@
+import { createHash } from "node:crypto";
+import { basename, dirname } from "node:path";
+import { WorktreePreparations } from "../../persistence/Services/WorktreePreparations.ts";
 import { lstat as inspectPath } from "node:fs/promises";
 import { parseWorktreeListPorcelain, stripPathTerminator } from "../worktreeList.ts";
 import { networkFailureDetail } from "../networkFailureDetail.ts";
 import {
   withWorktreeLifecycleLock,
   withRepositoryLifecycleLock,
+  repositoryIdentityHash,
+  pathContains,
 } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import {
   parseRemoteFetchUrls,
@@ -41,7 +46,11 @@ import {
   parseRemoteRefWithRemoteNames,
 } from "../remoteRefs.ts";
 import { ServerConfig } from "../../config.ts";
-import { canonicalWorktreePath, resolveDefaultWorktreePath } from "../worktreePaths.ts";
+import {
+  canonicalWorktreePath,
+  worktreePathSlug,
+  worktreePathExceedsWindowsLimit,
+} from "../worktreePaths.ts";
 
 const inspectionSemaphore = Semaphore.makeUnsafe(4);
 const fullInspectionSemaphore = Semaphore.makeUnsafe(4);
@@ -243,6 +252,7 @@ function missingCwdErrorDetail(cwd: string): string {
 
 const makeGitCore = Effect.gen(function* () {
   const git = yield* GitService;
+  const preparations = yield* WorktreePreparations;
   const { worktreesDir, baseDir } = yield* ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
 
@@ -368,14 +378,25 @@ const makeGitCore = Effect.gen(function* () {
     desiredBranch: string,
   ): Effect.Effect<string, GitCommandError> =>
     Effect.gen(function* () {
-      const isDesiredTaken = yield* branchExists(cwd, desiredBranch);
+      const identity = yield* canonicalPath(yield* resolveCommonDir(cwd));
+      const reserved = (name: string) =>
+        preparations
+          .branchReserved(identity, name)
+          .pipe(
+            Effect.mapError((error) =>
+              createGitCommandError("GitCore.resolveAvailableBranchName", cwd, [], error.message),
+            ),
+          );
+      const isDesiredTaken =
+        (yield* branchExists(cwd, desiredBranch)) || (yield* reserved(desiredBranch));
       if (!isDesiredTaken) {
         return desiredBranch;
       }
 
       for (let suffix = 1; suffix <= 100; suffix += 1) {
         const candidate = `${desiredBranch}-${suffix}`;
-        const isCandidateTaken = yield* branchExists(cwd, candidate);
+        const isCandidateTaken =
+          (yield* branchExists(cwd, candidate)) || (yield* reserved(candidate));
         if (!isCandidateTaken) {
           return candidate;
         }
@@ -1197,21 +1218,70 @@ const makeGitCore = Effect.gen(function* () {
                 `Branch ${input.branch} is checked out at ${other.path}.`,
               );
             yield* clearMissingRegistrationUnlocked(input.cwd, input.path);
+            const prior = yield* preparations
+              .latest(target)
+              .pipe(
+                Effect.mapError((error) =>
+                  createGitCommandError("GitCore.ensureWorktree", input.cwd, [], error.message),
+                ),
+              );
+            const baseOid = yield* resolveCommit(input.cwd, input.branch);
+            if (!baseOid)
+              return yield* createGitCommandError(
+                "GitCore.ensureWorktree",
+                input.cwd,
+                [],
+                "The branch has no commit.",
+              );
+            // Recreation creates a new checkout, and consequently a new preparation receipt.
+            if (prior && !["completed", "skipped"].includes(prior.phase))
+              yield* preparations
+                .update(prior, {
+                  phase: "skipped",
+                  error: "Checkout disappeared; recreation superseded this attempt.",
+                })
+                .pipe(
+                  Effect.mapError((error) =>
+                    createGitCommandError("GitCore.ensureWorktree", input.cwd, [], error.message),
+                  ),
+                );
+            const receipt = yield* preparations
+              .allocate({
+                operationId: crypto.randomUUID(),
+                repositoryIdentity: yield* canonicalPath(yield* resolveCommonDir(input.cwd)),
+                projectIdentity: yield* canonicalPath(input.cwd),
+                owner: input.owner ?? prior?.owner ?? `recreation:${input.branch}`,
+                requestedBase: input.branch,
+                baseOid,
+                path: target,
+                branch: input.branch,
+                namingIntent: "existing",
+                setupIdentity: prior?.setupIdentity ?? null,
+                runSetupScript: prior?.runSetupScript ?? true,
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  createGitCommandError("GitCore.ensureWorktree", input.cwd, [], error.message),
+                ),
+              );
             yield* executeGit(
               "GitCore.ensureWorktree",
               input.cwd,
               ["worktree", "add", "--", input.path, input.branch],
               { timeoutMs: 300_000 },
             );
+            yield* preparations
+              .update(receipt, { phase: "checkout_created", createdCheckout: true })
+              .pipe(
+                Effect.mapError((error) =>
+                  createGitCommandError("GitCore.ensureWorktree", input.cwd, [], error.message),
+                ),
+              );
             return { recreated: true };
           }),
         );
       }),
     ).pipe(
-      // Submodule initialization may fetch; never hold lifecycle locks while it runs.
-      Effect.tap((result) =>
-        result.recreated ? initializeSubmodules(input.path, input.submodules) : Effect.void,
-      ),
       Effect.mapError((error) =>
         Schema.is(GitCommandError)(error)
           ? error
@@ -1791,19 +1861,49 @@ const makeGitCore = Effect.gen(function* () {
       ),
     );
 
+  const allocateWorktreePath: GitCoreShape["allocateWorktreePath"] = ({ cwd, branch }) =>
+    Effect.gen(function* () {
+      const common = yield* canonicalPath(yield* resolveCommonDir(cwd));
+      const repository = basename(common) === ".git" ? basename(dirname(common)) : basename(common);
+      const target = joinPath(
+        worktreesDir,
+        `${worktreePathSlug(repository)}-${repositoryIdentityHash(common).slice(0, 12)}`,
+        `${worktreePathSlug(branch)}-${createHash("sha256").update(branch).digest("hex").slice(0, 8)}`,
+      );
+      if (worktreePathExceedsWindowsLimit(target))
+        return yield* createGitCommandError(
+          "GitCore.allocateWorktreePath",
+          cwd,
+          [],
+          "The new worktree path exceeds the Windows limit of 180 UTF-16 code units.",
+        );
+      const root = yield* canonicalPath(worktreesDir);
+      const canonical = yield* canonicalPath(target);
+      if (canonical === root || !pathContains(root, canonical))
+        return yield* createGitCommandError(
+          "GitCore.allocateWorktreePath",
+          cwd,
+          [],
+          "The allocated worktree path escapes this profile's managed root.",
+        );
+      return target;
+    });
+
+  const isValidBranchName: GitCoreShape["isValidBranchName"] = (name) =>
+    executeGit("GitCore.isValidBranchName", baseDir, ["check-ref-format", "--branch", name], {
+      allowNonZeroExit: true,
+    }).pipe(
+      Effect.map((result) => result.code === 0 && !name.startsWith("-") && !name.includes("\0")),
+    );
+
   const createWorktree: GitCoreShape["createWorktree"] = (input) =>
     Effect.gen(function* () {
       const targetBranch = input.newBranch ?? input.branch;
       const worktreePath =
-        input.path ??
-        resolveDefaultWorktreePath({
-          worktreesDir,
-          cwd: input.cwd,
-          branch: targetBranch,
-        });
+        input.path ?? (yield* allocateWorktreePath({ cwd: input.cwd, branch: targetBranch }));
       const baseRefName = input.baseRefName ?? input.branch;
       const create = Effect.gen(function* () {
-        yield* runGitStdout(
+        const resolvedBase = yield* runGitStdout(
           "GitCore.createWorktree.verifyBaseRef",
           input.cwd,
           ["rev-parse", "--verify", "--end-of-options", `${baseRefName}^{commit}`],
@@ -1836,6 +1936,77 @@ const makeGitCore = Effect.gen(function* () {
         const existedBefore = yield* fileSystem
           .exists(worktreePath)
           .pipe(Effect.orElseSucceed(() => true));
+        const target = yield* canonicalPath(worktreePath);
+        const managedRoot = yield* canonicalPath(worktreesDir);
+        // Explicit paths remain supported, but a symlink may never redirect a managed allocation.
+        if (
+          pathContains(resolvePath(worktreesDir), resolvePath(worktreePath)) &&
+          (target === managedRoot || !pathContains(managedRoot, target))
+        )
+          return yield* createGitCommandError(
+            "GitCore.createWorktree",
+            input.cwd,
+            [],
+            "The worktree target escapes the managed root.",
+          );
+        if (worktreePathExceedsWindowsLimit(worktreePath))
+          return yield* createGitCommandError(
+            "GitCore.createWorktree",
+            input.cwd,
+            [],
+            "The new worktree path exceeds the Windows limit of 180 UTF-16 code units.",
+          );
+        if (existedBefore)
+          return yield* createGitCommandError(
+            "GitCore.createWorktree",
+            input.cwd,
+            [],
+            "The worktree target is occupied. Existing files were kept; inspect the checkout before retrying.",
+          );
+        if (input.preparation?.replaceMissing) {
+          const previous = yield* preparations
+            .latest(target)
+            .pipe(
+              Effect.mapError((error) =>
+                createGitCommandError("GitCore.createWorktree", input.cwd, [], error.message),
+              ),
+            );
+          if (
+            previous &&
+            previous.owner === input.preparation.owner &&
+            !["completed", "skipped"].includes(previous.phase)
+          )
+            yield* preparations
+              .update(previous, {
+                phase: "skipped",
+                error: "Explicit recovery replaced a verified missing checkout.",
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  createGitCommandError("GitCore.createWorktree", input.cwd, [], error.message),
+                ),
+              );
+        }
+        const receipt = yield* preparations
+          .allocate({
+            operationId: input.preparation?.operationId ?? crypto.randomUUID(),
+            repositoryIdentity: yield* canonicalPath(yield* resolveCommonDir(input.cwd)),
+            projectIdentity: yield* canonicalPath(input.preparation?.projectCwd ?? input.cwd),
+            owner: input.preparation?.owner ?? `raw:${targetBranch}`,
+            requestedBase: input.preparation?.requestedBase ?? input.branch,
+            baseOid: resolvedBase.trim(),
+            path: target,
+            branch: targetBranch,
+            namingIntent:
+              input.preparation?.namingIntent ?? (input.newBranch ? "temporary" : "existing"),
+            setupIdentity: input.preparation?.setupIdentity ?? null,
+            runSetupScript: input.preparation?.runSetupScript ?? false,
+          })
+          .pipe(
+            Effect.mapError((error) =>
+              createGitCommandError("GitCore.createWorktree", input.cwd, [], error.message, error),
+            ),
+          );
         let claimed = false;
         const claim = () => {
           if (claimed) return;
@@ -1873,6 +2044,13 @@ const makeGitCore = Effect.gen(function* () {
             ),
           ),
         );
+        yield* preparations
+          .update(receipt, { phase: "checkout_created", createdCheckout: true })
+          .pipe(
+            Effect.mapError((error) =>
+              createGitCommandError("GitCore.createWorktree", input.cwd, [], error.message, error),
+            ),
+          );
         // A successful add made this a worktree of the repository, even in a
         // directory that existed (empty) beforehand.
         claim();
@@ -1889,6 +2067,26 @@ const makeGitCore = Effect.gen(function* () {
       );
 
       yield* initializeSubmodules(worktreePath, input.submodules, input.progress);
+      if (!input.preparation?.runSetupScript) {
+        const receipt = yield* preparations
+          .latest(yield* canonicalPath(worktreePath))
+          .pipe(
+            Effect.mapError((error) =>
+              createGitCommandError("GitCore.createWorktree", input.cwd, [], error.message),
+            ),
+          );
+        if (receipt?.phase === "checkout_created")
+          yield* preparations
+            .update(receipt, {
+              phase: "skipped",
+              result: JSON.stringify({ path: worktreePath, branch: targetBranch }),
+            })
+            .pipe(
+              Effect.mapError((error) =>
+                createGitCommandError("GitCore.createWorktree", input.cwd, [], error.message),
+              ),
+            );
+      }
       return {
         worktree: {
           path: worktreePath,
@@ -2584,6 +2782,16 @@ const makeGitCore = Effect.gen(function* () {
   return {
     status,
     ensureWorktree,
+    readWorktreePreparation: (path) =>
+      canonicalPath(path).pipe(
+        Effect.flatMap(preparations.latest),
+        Effect.mapError((error) =>
+          createGitCommandError("GitCore.readWorktreePreparation", path, [], error.message),
+        ),
+      ),
+    allocateWorktreePath,
+    isValidBranchName,
+    resolveAvailableBranchName,
     fastForwardTo: (cwd, sha) =>
       withRepositoryLock(
         "GitCore.fastForwardTo",

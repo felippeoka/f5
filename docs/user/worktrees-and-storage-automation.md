@@ -8,9 +8,8 @@ each stage: fetching the base branch, checking out files (with a percentage), in
 submodules, running the project setup script and starting the agent. The last few lines of the
 setup script's output are shown while it runs.
 
-The queued message waits for the worktree. It is delivered when the checkout is ready, or when the
-setup script finishes if the script is marked **Agent waits for this script** in the project
-scripts menu. Other setup scripts keep running alongside the agent.
+The queued message waits for checkout, submodules, and the requested setup script to finish.
+A failed script is reported on the card and the agent still starts.
 
 From the card you can:
 
@@ -24,6 +23,31 @@ From the card you can:
 
 If F5 restarts during setup, the setup is shown as failed and its queue is paused. Nothing is
 removed; use Retry or Work locally.
+
+## Creation, names and preparation
+
+New managed paths use `<repository-slug>-<repository-hash>/<branch-slug>-<branch-hash>`
+inside the profile's worktrees directory. The hashes distinguish repositories with the same name
+and branches such as `fix/login` and `fix-login`. Existing worktrees keep their recorded paths.
+Occupied targets are rejected and their files are kept.
+
+For automatic names, F5 starts branch-name generation while fetching the base. A name available
+within three seconds is used for both branch and directory. A late result may rename the branch
+before the agent starts; its directory keeps the temporary name. Explicit branch names must be
+valid, unused Git branch names and cannot use F5's reserved temporary-name pattern. Each model
+in a multi-model send receives its own allocation.
+
+F5 records preparation in the profile database before creating a checkout. A repeated request
+uses its verified receipt, and completed preparation does not run again. Recreating a missing
+checkout initializes submodules and runs the project's opted-in setup script unless setup was
+explicitly skipped. Checkouts created before receipts were introduced are never automatically
+prepared again.
+
+A restart during a setup script leaves preparation indeterminate because scripts can have effects
+outside the checkout. **Retry** explicitly acknowledges rerunning that script. A changed checkout,
+repository identity, or conflicting preparation request is retained for inspection. Cancellation
+only removes a checkout whose receipt proves creation ownership and whose base commit and files
+are unchanged; generated `.env` files and databases still prevent removal.
 
 ## Sending one message to several models
 

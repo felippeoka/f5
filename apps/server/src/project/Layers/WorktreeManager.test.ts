@@ -1,3 +1,5 @@
+import { WorktreePreparation } from "../Services/WorktreePreparation.ts";
+import { makeWorktreePreparationService } from "./WorktreePreparation.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { NextTurnQueueStore } from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
@@ -55,7 +57,11 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
           const providers = yield* ProviderService;
           const engine = yield* OrchestrationEngineService;
           const queue = yield* NextTurnQueueStore;
+          const preparation = yield* makeWorktreePreparationService.pipe(
+            Effect.provideService(GitCore, { ...originalGit, ...overrides }),
+          );
           const manager = yield* makeWorktreeManager.pipe(
+            Effect.provideService(WorktreePreparation, preparation),
             Effect.provideService(ProviderService, {
               ...providers,
               stopSession: (input) =>
@@ -302,6 +308,7 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
         Effect.gen(function* () {
           const target = path.join(root, "retry");
           git(repo.root, "worktree", "add", "-q", "-b", "retry", target, "main");
+          yield* Effect.promise(() => fs.rm(target, { recursive: true }));
           world.threads.push(
             thread({ id: threadId, projectId: "p", branch: "retry", worktreePath: target }),
           );
@@ -446,6 +453,7 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
         Effect.gen(function* () {
           const target = path.join(root, "interrupt");
           git(repo.root, "worktree", "add", "-q", "-b", "interrupt", target, "main");
+          yield* Effect.promise(() => fs.rm(target, { recursive: true }));
           world.threads.push(
             thread({ id: threadId, projectId: "p", branch: "interrupt", worktreePath: target }),
           );

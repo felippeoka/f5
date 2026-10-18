@@ -1367,6 +1367,8 @@ export const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
 export type ThreadTurnStartBootstrapCreateThread = typeof ThreadTurnStartBootstrapCreateThread.Type;
 
 export const ThreadTurnStartBootstrapPrepareWorktree = Schema.Struct({
+  namingIntent: Schema.optional(Schema.Literals(["auto", "explicit"])),
+  runSetupScript: Schema.optional(Schema.Boolean),
   projectCwd: FilesystemPath,
   baseBranch: TrimmedNonEmptyString,
   branch: Schema.optional(TrimmedNonEmptyString),

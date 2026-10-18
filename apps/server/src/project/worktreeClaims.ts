@@ -302,6 +302,25 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
       return Effect.succeed(false);
     }),
   );
+  const preparation = yield* git.readWorktreePreparation(input.path).pipe(
+    Effect.catch(() => {
+      blockedReasons.push("preparation ownership could not be read");
+      return Effect.succeed(null);
+    }),
+  );
+  if (
+    preparation &&
+    ["allocated", "checkout_created", "setup_running", "setup_indeterminate"].includes(
+      preparation.phase,
+    ) &&
+    !(
+      input.policy.kind === "ownedRollback" &&
+      preparation.owner === `thread:${input.policy.ownThreadId}`
+    )
+  )
+    blockedReasons.push(
+      "a preparation operation owns this checkout; finish or explicitly recover it first",
+    );
   const entries = yield* git.listWorktrees(input.projectCwd).pipe(
     Effect.orElseSucceed(() => {
       blockedReasons.push("worktree registrations could not be read");
@@ -400,7 +419,13 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
       }
       if (input.policy.kind === "ownedRollback") {
         const proof = input.policy.ownedCreation;
+        const receipt = yield* git
+          .readWorktreePreparation(input.path)
+          .pipe(Effect.orElseSucceed(() => null));
         if (
+          !receipt?.createdCheckout ||
+          receipt.repositoryIdentity !== common ||
+          receipt.baseOid !== inspected.headSha ||
           !proof?.created ||
           (yield* canonical(proof.path)) !== target ||
           (yield* canonical(proof.commonDir)) !== common ||

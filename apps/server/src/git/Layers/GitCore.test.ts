@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { GitCoreLive } from "./GitCore.ts";
+import { GitCoreTestLive as GitCoreLive } from "../testLayers.ts";
 import { GitCommandError } from "../Errors.ts";
 import { GitCore } from "../Services/GitCore.ts";
 import {
