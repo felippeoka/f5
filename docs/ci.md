@@ -26,8 +26,8 @@ matrices finish every shard, and all jobs have timeouts.
 A docs-only PR (only Markdown or `docs/**`) skips the heavy jobs. Static checks
 and workspace/Git/integration tests still run, including environment documentation
 drift tests. Main pushes, nightly runs and dispatches always run heavy jobs.
-The full macOS suite never runs on PRs. It feeds `CI result`, adding approximately
-45 to 60 minutes of release-gate latency after a merge. Hosted timing targets for
+The full macOS suite never runs on PRs. It feeds `CI result`, so release eligibility
+waits for it after each merge (with a 60-minute job timeout). Hosted timing targets for
 non-packaging PRs are at most 10 minutes on Linux and 12 minutes on Windows;
 measure these on Actions before treating them as achieved. TypeScript is checked once
 on Linux, whose case-sensitive filesystem catches import-casing errors. TypeScript
@@ -133,9 +133,15 @@ hosted runners before merge. Muse auditing, the marketing build, Dependabot and
 main-status reconciliation are part of the approved CI scope. Local checks do not
 establish hosted macOS/Windows behavior, cache hits or wall-clock targets.
 
-Before merging the restructure, temporarily run `macos-suite` on the PR with
-`if: always()`. After a successful hosted run, restore its non-PR condition in a
-follow-up commit without rewriting history. Exercise the throwaway PR cases from
+The full macOS rehearsal passed on PR #163 in
+[run 39155081320](https://github.com/lopes-felipe/f5/actions/runs/39155081320):
+6m38s for strict native checks, all workspace/server suites, desktop build/smoke
+and profile lifecycle. The normal non-PR condition was restored in a follow-up
+commit without rewriting history. That run also passed all 85 browser files and
+854 tests; an earlier failed browser assertion successfully uploaded its screenshot.
+These observations establish the rehearsal, not a guarantee of future timings.
+
+Exercise the throwaway PR cases from
 the implementation plan: docs-only, docs plus code, failing server assertion,
 failing browser assertion, and native lock-file drift. Record cold/warm cache
 behavior and Linux/Windows job timings. The permanent full macOS gate remains

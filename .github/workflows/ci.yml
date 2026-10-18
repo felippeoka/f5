@@ -531,8 +531,7 @@ jobs:
   macos-suite:
     runs-on: macos-latest
     timeout-minutes: 60
-    # TEMP: PR #163 hosted rehearsal; restore the non-PR condition after validation.
-    if: always()
+    if: github.event_name != 'pull_request'
     defaults:
       run:
         shell: bash
