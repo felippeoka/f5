@@ -75,7 +75,8 @@
     "test:cli-smoke": "node scripts/cli-archive-smoke.ts",
     "sdk:audit": "bun scripts/audit-claude-sdk.ts",
     "protocol:audit:requests": "bun scripts/audit-codex-request-shapes.ts",
-    "protocol:audit:requests:baseline": "bun scripts/audit-codex-request-shapes.ts --install-baseline"
+    "protocol:audit:requests:baseline": "bun scripts/audit-codex-request-shapes.ts --install-baseline",
+    "test:ci:workspaces": "node node_modules/turbo/bin/turbo run test --filter=!t3 --concurrency=2 --continue=always"
   },
   "devDependencies": {
     "@types/node": "catalog:",
@@ -92,10 +93,5 @@
     "bun": "^1.3.9",
     "node": "^24.13.1"
   },
-  "packageManager": "bun@1.3.9",
-  "msw": {
-    "workerDirectory": [
-      "apps/web/public"
-    ]
-  }
+  "packageManager": "bun@1.3.9"
 }
