@@ -1,5 +1,7 @@
 # Architecture
 
+> Contributors: how the server, providers, orchestration and persistence fit together.
+
 F5 runs as a **Node.js WebSocket server** that wraps one or more coding-agent providers and serves a React web app. F5 supports seven providers:
 
 - **Codex** via `codex app-server` (JSON-RPC over stdio).

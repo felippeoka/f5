@@ -1,6 +1,6 @@
 # Profiles implementation verification
 
-This records checks against the current working tree, not a release certification. The real-provider release gate in [profiles.md](profiles.md#real-provider-release-gate) remains pending.
+This records checks against the current working tree, not a release certification. The real-provider release gate in [profiles.md](../profiles.md#real-provider-release-gate) remains pending.
 
 ## Automated checks
 

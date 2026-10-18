@@ -1,5 +1,9 @@
 # Scripts
 
+> Contributors: every root `bun run` script and what it does.
+
+**Contents:** [Desktop `.dmg` packaging notes](#desktop-dmg-packaging-notes) · [Running multiple dev instances](#running-multiple-dev-instances) · [Upstream port ledger](#upstream-port-ledger)
+
 - `bun run dev` — Starts contracts, server, and web in `turbo watch` mode.
 - `bun run dev:server` — Starts just the WebSocket server (uses Bun TypeScript execution).
 - `bun run dev:web` — Starts just the Vite dev server for the web app.
@@ -16,7 +20,7 @@
 - `bun run test:full` — Runs the fast workspace suite followed by the exhaustive real-Git matrix; required before declaring work complete, releases, and after major Git subsystem changes.
 - `bun run perf:server` — Records the deterministic server component performance suite; `--smoke` checks the harness with fewer repetitions. See [performance scope and gates](performance.md).
 - `bun run perf:compare <before.json> <after.json> [CPU targets...]` — Checks matching server reports against the approved regression and resource limits.
-- `bun run screenshots:capture [-- --skip-build]`: Builds the server and web app, seeds demo data into a fresh temp directory with an isolated HOME, and regenerates the README screenshots and the marketing hero image. Requires Playwright's Chromium (`bun run --cwd apps/web test:browser:install`).
+- `bun run screenshots:capture [-- --skip-build] [-- --only <id,...>]`: Builds the server and web app, seeds demo data into a fresh temp directory with an isolated HOME, and regenerates the README screenshots, the marketing hero image and the docs images in `docs/images/` (listed in `scripts/docs-screenshots.manifest.ts`). No real provider binary runs: on macOS and Linux, Codex and Claude point at a probe-only shim; on Windows they are disabled, so provider shots show them as disabled. Other providers are always disabled. `--only` recaptures the listed docs shots and skips the README shots. Requires Playwright's Chromium (`bun run --cwd apps/web test:browser:install`).
 - `bun run scripts/run-demo.ts [--skip-build]`: Builds the desktop app, seeds the same demo data into a fresh temp root (never reused or deleted) and launches the desktop app on it, for manual screenshots of desktop-only surfaces such as the Preview browser.
 - `bun run dist:desktop:artifact -- --platform <mac|linux|win> --target <target> --arch <arch>` — Builds a desktop artifact for a specific platform/target/arch.
 - `bun run dist:desktop:dmg` — Builds a shareable macOS `.dmg` into `./release`.

@@ -1,201 +1,122 @@
 # Worktrees, fan-out and storage automation
 
-## Worktree setup progress
+Run threads in their own Git worktrees, send one message to several models at once, and let F5
+clean up idle worktrees and keep backups.
 
-The first message of a new worktree thread is sent at once. F5 creates the thread, queues the
-message and prepares the worktree in the background, showing a setup card above the composer with
-each stage: fetching the base branch, checking out files (with a percentage), initializing
-submodules, running the project setup script and starting the agent. The last few lines of the
-setup script's output are shown while it runs.
+![Model picker with several models selected for one message](../images/worktrees-multi-model.webp)
 
-The queued message waits for checkout and submodules. Setup scripts run in the background by
-default; enabling **Agent waits** makes the message wait for the script to finish.
-A failed script is reported on the card and the agent still starts.
+## How to
 
-From the card you can:
+1. Start a new thread in a project that is a Git repository.
+2. To work in one isolated checkout, switch the workspace under the composer to **Worktree**.
+3. To send to several models, Shift+click (or Shift+Enter) up to six models in the model picker
+   instead. A plain click goes back to a single model.
+4. Send. With several models, F5 creates one thread per model, each with its own worktree and
+   branch, whatever the workspace switch says.
+5. Follow the setup card above the composer until the agent starts.
 
-- **Cancel** while setup runs. A worktree and branch that F5 created are removed only if nothing was
-  written to them and no other thread, terminal or session uses them; otherwise they are kept and
-  the card says so. The message stays queued and paused.
-- **Retry** after a failure, for example once a missing base branch exists.
-- **Work locally** to send the paused message in the project root instead.
-- **Discard** a cancelled or failed setup. The empty thread is deleted and your message is restored
-  as a new draft.
+## Worktree setup
 
-If F5 restarts during setup, the setup is shown as failed and its queue is paused. Nothing is
-removed; use Retry or Work locally.
+The first message is queued immediately while F5 prepares the worktree in the background. The
+setup card shows each stage: fetching the base branch, checking out files, initializing
+submodules, running the project setup script and starting the agent. The message goes out once
+checkout and submodules are ready. Setup scripts run in the background unless you enable **Agent
+waits**; a failed script is reported on the card and the agent still starts.
 
-## Creation, names and preparation
+From the card you can **Cancel**, **Retry** after a failure, **Work locally** to send the message
+in the project root instead, or **Discard** a failed setup to get your message back as a draft.
 
-New managed paths use `<repository-slug>-<repository-hash>/<branch-slug>-<branch-hash>`
-inside the profile's worktrees directory. The hashes distinguish repositories with the same name
-and branches such as `fix/login` and `fix-login`. Existing worktrees keep their recorded paths.
-Occupied targets are rejected and their files are kept.
+## Automatic cleanup
 
-For automatic names, F5 starts branch-name generation while fetching the base. A name available
-within three seconds is used for both branch and directory. A late result may rename the branch
-before the agent starts; its directory keeps the temporary name. Explicit branch names must be
-valid, unused Git branch names and cannot use F5's reserved temporary-name pattern. Each model
-in a multi-model send receives its own allocation.
+![Settings → Storage with automatic cleanup and backups](../images/settings-storage.webp)
 
-F5 records preparation in the profile database before creating a checkout. A repeated request
-uses its verified receipt, and completed preparation does not run again. Recreating a missing
-checkout initializes submodules and runs the project's opted-in setup script unless setup was
-explicitly skipped. Checkouts created before receipts were introduced are never automatically
-prepared again.
+**Settings → Storage → Automatic cleanup** (off by default) removes idle worktrees F5 created and
+old provider logs. Enable the rules you want: idle for some number of days, PR merged, thread
+deleted, or no commits beyond the default branch. **Preview what would run** shows each match and
+the action F5 would take or why it would skip it. **Recent activity** shows what ran.
 
-A restart during a setup script leaves preparation indeterminate because scripts can have effects
-outside the checkout. **Retry** explicitly acknowledges rerunning that script. A changed checkout,
-repository identity, or conflicting preparation request is retained for inspection. Cancellation
-only removes a checkout whose receipt proves creation ownership and whose base commit and files
-are unchanged; generated `.env` files and databases still prevent removal.
+## Removing worktrees and missing checkouts
 
-## Sending one message to several models
+Deleting conversations opens one removal dialog for their worktrees. Unsafe rows are disabled, and
+**Keep all** leaves every checkout in place. Branch deletion is optional and preselected only for
+merged branches.
 
-In a new thread's model picker, Shift+click (or Shift+Enter) adds up to six models. The picker shows
-how many are selected, and a plain click goes back to one model. Sending creates one thread per
-model, each with its own worktree and branch, three at a time. Attachments are copied to each
-thread. If some threads cannot start, the others continue and the draft is kept so you can retry
-the failed ones.
+If a thread's worktree goes missing, F5 never quietly moves the thread into the project checkout.
+Use **Recreate now** (the branch still exists), **Recreate from the default branch** (it doesn't),
+or **Continue in project checkout**. A checkout found on a different branch is kept untouched and
+blocked until you restore the branch or choose a recovery action.
 
-## Automatic storage cleanup
+## Auto-pull and backups
 
-Settings → Storage → **Automatic cleanup** is off by default. When on, F5 checks hourly, at
-startup, after a thread is deleted and when these settings change. It can remove:
+**Settings → Git & GitHub → Auto-pull default branches** fast-forwards clean project roots with `git pull --ff-only`. It
+never merges or rebases. **Export backup** writes a consistent snapshot of settings, threads and
+attachments while you keep working. **Daily backups** keeps the seven newest scheduled archives.
+Restoring a backup takes effect on restart.
 
-- **Idle worktrees** that F5 created for this profile, when any enabled rule matches: idle for a
-  number of days since the thread's last message, the thread's pull request was merged and its
-  commits are in the default branch, the thread was deleted, or the branch has no commits beyond the
-  default branch.
-- **Provider logs** older than a number of days. The live event log is never removed.
+## Good to know
 
-A worktree is never removed when it has uncommitted or untracked changes, ignored files other than
-`node_modules/` (for example `.env`), a detached HEAD, an open terminal or agent session, queued
-turns, or an active or pending turn in another conversation using it. Unreadable identity, claims,
-locked registrations, and an in-progress Git operation also block removal. Idle conversations,
-including archived ones, may remain linked. Each check is repeated right before removal, and removal
-never forces. Automatic cleanup always keeps the branch and recorded worktree path, so the next message
-recreates the worktree. Worktrees outside this profile's worktrees directory, and any directory
-containing a project root, are ignored.
+> [!NOTE]
+> F5 never removes a worktree that has uncommitted, untracked or ignored files (other than
+> `node_modules/`), initialized submodules, an open terminal or provider session, queued turns,
+> or an active turn in another conversation using it. Automatic cleanup always keeps the branch,
+> so the next message recreates the worktree.
 
-**Preview what would run** lists every match with the action F5 would take or the exact reason it
-would skip. **Recent activity** shows what ran, kept for 90 days. Entries name worktrees relative
-to the worktrees directory.
+- Cleanup and auto-pull can be set per project, but never from a checked-in `f5.json`.
+- If F5 restarts mid-setup, the setup shows as failed and nothing is removed.
+- Backups leave out credentials unless you choose encrypted credential export and set a password.
+- In a fan-out send, threads that fail to start can be retried from the kept draft.
 
-**Keep preview screenshots and recordings for** sets how long the desktop app keeps preview
-artifacts. Empty keeps the 7-day default. Profiles share one artifact folder, so the longest
-retention any profile sets applies.
+<details>
+<summary>Details and limits</summary>
 
-## Auto-pull default branches
+| Topic               | Detail                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fan-out             | Up to 6 models; threads start 3 at a time; attachments are copied to each thread                                                                                                                                                                                                                                                                                                                                             |
+| Cancel during setup | A checkout is removed only if its receipt proves F5 created it, its base commit and files are unchanged and nothing else uses it; generated `.env` files and databases keep it. The message stays queued and paused                                                                                                                                                                                                          |
+| Cleanup schedule    | Hourly, at startup, after a thread is deleted and when settings change                                                                                                                                                                                                                                                                                                                                                       |
+| Cleanup scope       | Only worktrees inside this profile's worktrees directory; never a directory containing a project root. Unreadable identity, claims, locked registrations and in-progress Git operations also block removal. Idle and archived conversations may stay linked and recreate the checkout on their next send. Checks repeat right before removal, and removal never forces                                                       |
+| Provider logs       | Removed after the configured number of days; the live event log is never removed                                                                                                                                                                                                                                                                                                                                             |
+| Recent activity     | Kept for 90 days                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Preview artifacts   | **Keep preview screenshots and recordings for** defaults to 7 days. Profiles share the folder, so the longest setting wins                                                                                                                                                                                                                                                                                                   |
+| Auto-pull           | Every 15 minutes. Needs the default branch checked out with an upstream, a clean tree with no untracked files, no merge/rebase/cherry-pick/revert/bisect, no unpushed commits, and no active conversation, queued work, live agent session or live terminal in the root checkout. Fetches before taking locks, then rechecks and fast-forwards to the inspected commit. Skipped while another profile updates the repository |
+| Daily backups       | Checks hourly from 1 minute after launch and exports when no scheduled backup succeeded in 24 hours. Archives go to `<profile state>/backups`. Manual and failed exports don't count. Scheduled backups never include credentials                                                                                                                                                                                            |
+| Export              | Runs in a separate process that you can cancel. The SQLite snapshot is integrity-checked. Credential-free exports redact OpenCode passwords and sensitive provider variables                                                                                                                                                                                                                                                 |
+| Restore             | Into a different state directory, attachment paths are rebound to the new location; ownership and hashes are kept                                                                                                                                                                                                                                                                                                            |
 
-**Auto-pull default branches** (Settings → Git & GitHub, off by default) fast-forwards a project root
-every 15 minutes when it has the default branch checked out with an upstream, a clean tree with no
-untracked files, no merge, rebase, cherry-pick, revert or bisect in progress, no local commits the
-upstream lacks, and no active conversation, queued work, live agent session, or live terminal
-using the root checkout. Idle and archived conversations alone do not prevent an update; unknown
-workspace usage does. Close a root terminal before expecting auto-pull to run.
+**Manual removal.** Removal rechecks HEAD and usage under locks, and a changed checkout is kept with
+a reason. A fully pushed branch can also be selected for deletion, but a deleted upstream alone
+never makes unmerged commits safe. Default branches, branches checked out elsewhere and branches
+referenced by other conversations can't be deleted. An open provider session blocks removal, even
+between turns; stop it first. Initialized submodules block removal: save their work and
+deinitialize them first.
 
-The fetch runs before lifecycle and repository locks so network delays do not block local work.
-Under those locks F5 rechecks claims, checkout identity, and the local upstream reference, then
-fast-forwards to that inspected commit. It never merges or rebases. When another F5 profile is
-updating the same repository, the cycle is skipped. Updates appear in Recent activity and in the preview.
+**Recovery.** Recovery stops an idle provider session, applies the project's submodule setting and
+starts its opted-in setup script, then releases queued work. Setup preparation has a 10-minute
+timeout and a **Cancel preparation** action. A failed or interrupted recovery keeps its retry
+controls visible.
 
-## Project overrides
+**Names and paths.** New worktrees live at
+`<repository-slug>-<repository-hash>/<branch-slug>-<branch-hash>` in the profile's worktrees
+directory, so `fix/login` and `fix-login` never collide; existing worktrees keep their paths and
+occupied targets are rejected. Automatic branch names are generated while the base is fetched; a
+name ready within 3 seconds names both branch and directory, and a later one may rename only the
+branch. Explicit names must be valid, unused branch names outside F5's temporary-name pattern.
+Each model in a multi-model send gets its own allocation.
 
-**Automatic worktree cleanup** (use the global rules, off, or custom rules) and **Auto-pull the
-default branch** can be set per project in Settings → Global › Project. A checked-in `f5.json`
-cannot set either one: automation that removes worktrees or pulls branches is always your choice.
+**Preparation receipts.** F5 records preparation in the profile database before creating a
+checkout, so a repeated request reuses its receipt and completed preparation never runs twice.
+Recreating a missing checkout initializes submodules and runs the opted-in setup script unless
+setup was explicitly skipped; checkouts older than receipts are never prepared again
+automatically. A restart during a setup script leaves preparation indeterminate, and **Retry**
+asks you to confirm rerunning the script. A changed checkout, repository identity or conflicting
+request is kept for inspection.
 
-## Backups
+**Kept on disk.** Cancel and rollback keep checkouts with ignored files created by setup (such as
+`.env` or a local database) and report them as retained artifacts. Legacy worktrees with
+unresolved Git metadata, and legacy setups without a verified checkout commit, are skipped and
+never deleted recursively. Paths are preserved exactly, including whitespace.
 
-Settings → Storage → **Export backup** creates a consistent SQLite snapshot,
-checks its integrity, and archives settings, snapshot-owned attachments and older
-unregistered attachment files in a
-separate maintenance process. You can keep using F5 while it runs. Attachment
-cleanup waits until the snapshot’s files have been copied; ordinary thread writes
-do not take that retention lease. Cancelling export terminates the helper before
-staging files and the lease are released. Profile credentials stay excluded from
-manual backups unless you choose encrypted credential export and supply a password.
-
-**Daily backups** is off by default and independent of automatic cleanup. While
-F5 is open it checks hourly, starting one minute after launch, and exports when
-there is no successful scheduled backup in the preceding 24 hours. It keeps the
-seven newest successful scheduled archives in `<profile state>/backups`; manual
-archives and failed exports do not count against retention. Scheduled backups
-always exclude credentials. F5 does not store an encryption password for them.
-A failed export preserves the previous successful backups and retries at the next
-hourly check. Backups can be validated and restored through the existing Restore
-control; restoration takes effect on restart.
-
-Restoring into a different state directory rebinds attachment registry and cleanup
-paths to that directory while retaining ownership and content hashes. Restored
-archives can be exported again without relying on files in the source profile.
-
-Daily backup status shows the last attempt, last success and any failure in Storage
-settings. Missing owned attachment errors identify the attachment and path. Known
-owned files that are missing are not silently omitted. Old restored registry paths
-are rebound only in the exported snapshot; the live database is unchanged.
-Credential-free exports redact OpenCode passwords and sensitive provider environment
-values from settings. When credential export is explicitly selected, settings and
-secret files are encrypted with the supplied password. Old interrupted daily partial
-files are removed before the next scheduled check.
-
-## Manual removal and missing workspaces
-
-Deleting conversations opens one removal dialog for all orphaned worktrees. The dialog inspects
-current Git state and usage, disables unsafe rows, and lists idle linked conversations that will
-recreate their checkout on their next send. **Keep all** leaves every remaining checkout intact.
-Removal rechecks HEAD and usage under lifecycle locks; a changed checkout is retained with a reason.
-
-Branch deletion is optional. It is selected by default only when the branch is merged. A branch
-that is fully pushed can also be selected. A deleted upstream alone never makes unmerged local commits safe to delete. Default branches,
-branches checked out elsewhere, and branches or paths referenced by non-deleted conversations cannot
-be deleted. Branch deletion compares the inspected commit again before changing the ref.
-
-A missing worktree never silently moves a conversation into the shared project checkout. When its
-branch still exists, the next send can recreate the registered checkout in this profile's managed
-worktrees directory. A missing branch, different repository or checkout, or unreadable identity
-blocks execution. Archive and delete remain available.
-
-The recovery controls offer **Recreate now** when the original branch survives, **Recreate from the
-default branch** when it does not, and **Continue in project checkout** as an explicit alternative.
-Recovery stops an idle provider session before switching the reference. Recreation resolves the
-project's submodule setting and starts its opted-in worktree setup script before releasing queued
-work. It resumes a queue paused for a missing worktree, or for interrupted recovery when that
-recovery is retried successfully; manual pauses remain in place.
-
-Cancel and bootstrap rollback use the same file protection rules as manual removal. Ignored files
-created by setup, such as `.env` or a local database, keep the checkout on disk and are reported as
-retained artifacts. Legacy directories with unresolved Git metadata are also retained.
-
-Paths are preserved exactly, including leading or trailing whitespace and embedded newlines.
-Previously trimmed persisted paths cannot be reconstructed; identity verification refuses unsafe
-operations on them.
-
-Automatic cleanup uses the same idle-reference policy as manual removal: idle and archived
-conversations keep their recorded paths and recreate on the next send. Cleanup can remove
-`node_modules`; automatic recreation initializes submodules but does not rerun setup scripts in
-Release 1. Protected ignored files such as `.env` and build outputs still block removal.
-Legacy worktrees with unresolved Git metadata are skipped with a warning, never recursively deleted.
-
-A checkout on a different branch (including a detached HEAD during rebase) is preserved and blocked
-until its recorded branch is restored or an explicit recovery action is chosen. Recovery does not
-discard or overwrite files in the old checkout. Adopting another branch is part of the later workspace
-switching release.
-
-Initialized submodules also block worktree removal, including rollback after failed creation.
-Preserve any submodule work and deinitialize the submodules before retrying removal. F5 does not
-force removal of these checkouts. A failed or interrupted recovery keeps its retry controls visible
-even when the checkout has already been created; retry preparation or continue in the project checkout.
-
-Recovery reserves an execution barrier before stopping the idle session. Setup preparation has a
-ten-minute timeout and a **Cancel preparation** action; cancellation keeps the checkout and the
-recovery barrier for explicit retry. Setup activities record the final output lines for diagnosis.
-Interrupted recovery remains visible even after switching the conversation to the project checkout.
-
-Idle linked conversations alone do not block removal, but an open provider session does, including
-a ready session between turns. Stop that session before retrying removal. Legacy setup snapshots
-without a verified checkout commit cannot prove rollback ownership, so their checkout is retained.
+</details>
 
 ## Durable workspace switching
 
@@ -220,3 +141,9 @@ the original checkout still matches its recorded identity. Neither action restor
 discards files. **Retry** is available only when no Git mutation could have occurred.
 If the checkout changes after inspection, inspect again before accepting it.
 Archiving or deleting the conversation cancels its switch and keeps checkout files.
+
+## Related
+
+- [Project settings](project-settings.md)
+- [Codex marketplace cleanup](../providers/codex.md#good-to-know)
+- [Getting started](getting-started.md)
