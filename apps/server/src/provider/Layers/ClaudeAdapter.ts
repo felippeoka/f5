@@ -26,7 +26,7 @@ import {
   effectiveClaudeApprovalDecision,
 } from "../claudeApprovalPresentation.ts";
 import { ElicitationRegistry, type ElicitationTerminalReceipt } from "../elicitationRegistry.ts";
-import { reconcileClaudeMcpServers } from "../mcpReconcile.ts";
+import { reconcileClaudeMcpServers, stableMcpConfigKey } from "../mcpReconcile.ts";
 import {
   CLAUDE_AUTO_UNAVAILABLE_WARNING,
   claudeAutoModeRecheck,
@@ -139,7 +139,13 @@ import {
 import { filterReservedClaudeLaunchArgs } from "@t3tools/shared/cliArgs";
 import { assertNever } from "@t3tools/shared/exhaustive";
 import { isImagePreviewPath } from "@t3tools/shared/filePreview";
-import { translateMcpForClaudeAgent } from "@t3tools/shared/mcpTranslation";
+import {
+  buildMcpToolFilters,
+  claudeDisallowedMcpToolNames,
+  evaluateMcpToolFilter,
+  type McpToolFilters,
+  translateMcpForClaudeAgent,
+} from "@t3tools/shared/mcpTranslation";
 import {
   Cause,
   DateTime,
@@ -408,6 +414,9 @@ interface ClaudeSessionContext {
   promptQueue: Queue.Queue<PromptQueueItem>;
   query: ClaudeQueryRuntime;
   readonly queryOptions: ClaudeQueryOptions;
+  readonly mandatoryDisallowedTools: ReadonlyArray<string>;
+  /** SDK deny list installed on the live query; recovery options can be newer. */
+  activeDisallowedTools: ReadonlyArray<string>;
   readonly pendingPrompts: SDKUserMessage[];
   recovering: boolean;
   recoveryMetadata: ReturnType<typeof readClaudeRecoveryMetadata>;
@@ -426,6 +435,8 @@ interface ClaudeSessionContext {
   readonly elicitations: ElicitationRegistry;
   /** Dynamic MCP servers F5 set on this query; the only ones reconcile may replace or remove. */
   ownedMcpServerNames: ReadonlySet<string>;
+  mcpToolFilters: McpToolFilters;
+  readonly internalMcpServers: NonNullable<ClaudeQueryOptions["mcpServers"]>;
   readonly turns: Array<{
     id: TurnId;
     items: Array<unknown>;
@@ -5439,11 +5450,12 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               context.promptQueue = yield* Queue.unbounded<PromptQueueItem>();
               context.lastAssistantUuid = selected;
               yield* updateResumeCursor(context);
+              const recoveryOptions = { ...context.queryOptions, resumeSessionAt: selected };
               context.query = yield* Effect.try({
                 try: () =>
                   createQuery({
                     prompt: makeClaudePromptInput(context.promptQueue),
-                    options: { ...context.queryOptions, resumeSessionAt: selected },
+                    options: recoveryOptions,
                   }),
                 catch: (cause) =>
                   new ProviderAdapterProcessError({
@@ -5453,6 +5465,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                     cause,
                   }),
               });
+              context.activeDisallowedTools = recoveryOptions.disallowedTools ?? [];
               for (const message of context.pendingPrompts)
                 yield* Queue.offer(context.promptQueue, { type: "message", message });
               context.recovering = false;
@@ -6438,6 +6451,14 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                 } satisfies PermissionResult;
               }
 
+              const mcpDenial = evaluateMcpToolFilter(
+                context.mcpToolFilters,
+                context.ownedMcpServerNames,
+                toolName,
+                callbackOptions.mcpServer,
+              );
+              if (mcpDenial)
+                return { behavior: "deny", message: mcpDenial } satisfies PermissionResult;
               const mandatoryDenial = evaluateClaudeMandatoryPolicy(
                 {
                   subagentsEnabled: providerOptions?.subagentsEnabled,
@@ -6778,6 +6799,15 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               }
 
               if (decision === "accept" || decision === "acceptForSession") {
+                // A live reload can change the filter while an approval is open.
+                const mcpDenial = evaluateMcpToolFilter(
+                  context.mcpToolFilters,
+                  context.ownedMcpServerNames,
+                  toolName,
+                  callbackOptions.mcpServer,
+                );
+                if (mcpDenial)
+                  return { behavior: "deny", message: mcpDenial } satisfies PermissionResult;
                 // Consent can stay open while the user pauses or changes policy.
                 // Revalidate the main-owned Chrome lease after the approval wait.
                 if (isClaudeInChromeTool(toolName)) {
@@ -6847,6 +6877,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         // session into a more permissive SDK mode.
         const permissionMode = input.workflowExecutionProfile ? "plan" : runtimePermissionMode;
         const translatedMcpServers = translateMcpForClaudeAgent(input.providerOptions?.mcpServers);
+        const mcpToolFilters = buildMcpToolFilters(input.providerOptions?.mcpServers);
         // Preview tools are installed in every interactive desktop session; each
         // call checks live policy. Launch-flag capabilities read policy here.
         const previewServer = agentBrowserBroker
@@ -7087,8 +7118,18 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               allowReadOnlyMcpTool: (toolName, mcpServer, toolInput) =>
                 classifyF5PreviewTool(toolName, agentBrowserState, mcpServer) === "observe" &&
                 !writesPreviewArtifact(toolName, toolInput),
-              evaluateDynamic: (toolName) =>
-                Effect.runPromise(evaluateAgentBrowserToolPolicy(threadId, toolName)),
+              evaluateDynamic: async (toolName, mcpServer) => {
+                const context = sessions.get(threadId);
+                const denial = evaluateMcpToolFilter(
+                  context?.mcpToolFilters ?? mcpToolFilters,
+                  context?.ownedMcpServerNames ?? new Set(Object.keys(translatedMcpServers ?? {})),
+                  toolName,
+                  mcpServer,
+                );
+                return (
+                  denial ?? Effect.runPromise(evaluateAgentBrowserToolPolicy(threadId, toolName))
+                );
+              },
               plansDirectory: NodePath.join(
                 resolveClaudeConfigDir(queryEnvironment, input.cwd),
                 "plans",
@@ -7102,6 +7143,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                 signal,
                 toolUseID: hook.tool_use_id,
                 requestId: `mandatory:${hook.tool_use_id}`,
+                ...(hook.mcp_server ? { mcpServer: hook.mcp_server } : {}),
               });
             },
           ),
@@ -7114,11 +7156,21 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           systemPrompt,
           planModeInstructions,
         } satisfies ClaudeQueryOptions;
-        if (translatedMcpServers || previewServer || computerServer) {
+        const mandatoryDisallowedTools = queryOptions.disallowedTools ?? [];
+        queryOptions.disallowedTools = [
+          ...new Set([
+            ...mandatoryDisallowedTools,
+            ...claudeDisallowedMcpToolNames(mcpToolFilters),
+          ]),
+        ];
+        const internalMcpServers: NonNullable<ClaudeQueryOptions["mcpServers"]> = {
+          ...(previewServer ? { [previewServer.serverName]: previewServer.config } : {}),
+          ...(computerServer ? { [computerServer.serverName]: computerServer.config } : {}),
+        };
+        if (translatedMcpServers || Object.keys(internalMcpServers).length > 0) {
           queryOptions.mcpServers = {
             ...(translatedMcpServers as NonNullable<ClaudeQueryOptions["mcpServers"]> | undefined),
-            ...(previewServer ? { [previewServer.serverName]: previewServer.config } : {}),
-            ...(computerServer ? { [computerServer.serverName]: computerServer.config } : {}),
+            ...internalMcpServers,
           };
         }
 
@@ -7313,6 +7365,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           promptQueue,
           query: queryRuntime,
           queryOptions,
+          mandatoryDisallowedTools,
+          activeDisallowedTools: queryOptions.disallowedTools,
           pendingPrompts: [],
           recovering: false,
           recoveryMetadata: {
@@ -7332,6 +7386,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           pendingUserInputs,
           elicitations,
           ownedMcpServerNames: new Set(Object.keys(translatedMcpServers ?? {})),
+          mcpToolFilters,
+          internalMcpServers,
           turns: (resumeState?.turnBoundaries ?? []).map((boundary) => ({
             id: TurnId.makeUnsafe(boundary.turnId),
             items: [],
@@ -8023,12 +8079,24 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               issue: mcpConfigErrorMessage(cause),
             }),
         });
+        const owned = context.ownedMcpServerNames;
+        // Restrict existing and lingering servers before any provider I/O.
+        context.mcpToolFilters = buildMcpToolFilters(mcpServers);
+        context.queryOptions.disallowedTools = [
+          ...new Set([
+            ...context.mandatoryDisallowedTools,
+            ...claudeDisallowedMcpToolNames(context.mcpToolFilters),
+          ]),
+        ];
         const outcome = yield* Effect.tryPromise({
           try: () =>
             reconcileClaudeMcpServers({
               query: context.query,
               desired,
-              owned: context.ownedMcpServerNames,
+              owned,
+              beforeSetServers: (names) => {
+                context.ownedMcpServerNames = names;
+              },
             }),
           catch: (cause) =>
             new ProviderAdapterRequestError({
@@ -8040,11 +8108,28 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         context.ownedMcpServerNames = outcome.owned;
         if (outcome.applied) {
           // Keep in-process recovery (which re-creates the query) on the new set.
-          if (Object.keys(outcome.applied).length > 0)
-            context.queryOptions.mcpServers = outcome.applied;
+          const recoveryServers = { ...outcome.applied, ...context.internalMcpServers };
+          if (Object.keys(recoveryServers).length > 0)
+            context.queryOptions.mcpServers = recoveryServers;
           else delete context.queryOptions.mcpServers;
         }
-        return outcome.result;
+        const denyListChanged =
+          stableMcpConfigKey([...context.activeDisallowedTools].sort()) !==
+          stableMcpConfigKey([...context.queryOptions.disallowedTools].sort());
+        return denyListChanged
+          ? {
+              ...outcome.result,
+              converged: false,
+              restartRequired: true,
+              errors: [
+                ...outcome.result.errors,
+                {
+                  message:
+                    "Claude must restart to update its MCP tool deny list. The live F5 MCP filters already enforce the saved settings.",
+                },
+              ],
+            }
+          : outcome.result;
       });
 
     const respondToUserInput: ClaudeAdapterShape["respondToUserInput"] = (

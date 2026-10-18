@@ -1,3 +1,4 @@
+import { CODEX_SSE_TRANSPORT_HINT } from "@t3tools/shared/mcpTranslation";
 import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../../ui/collapsible";
@@ -83,6 +84,10 @@ export function McpServerEditor({
           </Select>
         </label>
       </div>
+
+      {draft.type === "sse" ? (
+        <p className="text-xs text-muted-foreground">{CODEX_SSE_TRANSPORT_HINT}</p>
+      ) : null}
 
       <div className="flex items-center justify-between rounded-lg border border-border/70 bg-card/40 px-3 py-3">
         <div className="space-y-1">
@@ -197,9 +202,9 @@ export function McpServerEditor({
       <Collapsible open={isAdvancedOpen} onOpenChange={onAdvancedOpenChange}>
         <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border border-border px-3 py-2 text-left">
           <span>
-            <span className="block text-xs font-medium text-foreground">Codex-only options</span>
+            <span className="block text-xs font-medium text-foreground">Advanced options</span>
             <span className="block text-xs text-muted-foreground">
-              Optional OAuth, timeout, tool-filter, and bearer-token settings.
+              Tool timeout and tool filters apply to Codex and Claude. Other options apply to Codex.
             </span>
           </span>
           <Badge variant="outline">{isAdvancedOpen ? "Hide" : "Show"}</Badge>
