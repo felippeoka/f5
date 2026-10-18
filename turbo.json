@@ -60,6 +60,7 @@
   ],
   "tasks": {
     "build": {
+      "passThroughEnv": ["NODE_OPTIONS"],
       "dependsOn": ["^build"],
       "outputs": ["dist/**", "dist-electron/**", "dist-native/**"]
     },

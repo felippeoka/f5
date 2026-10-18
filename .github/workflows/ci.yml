@@ -592,10 +592,16 @@ jobs:
         run: |
           bun run --cwd apps/server test:git:extended
       - name: Build desktop
+        # ARM64 Node defaults to a 2 GiB heap; declaration generation exceeds it.
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: |
           bun run build:desktop
       - name: Desktop smoke
+        # ARM64 Node defaults to a 2 GiB heap; declaration generation exceeds it.
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: |
           bun run test:desktop-smoke

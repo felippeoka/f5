@@ -59,7 +59,10 @@ repository activity; the maintainer checks schedule activity monthly.
 Use Node from `.node-version` and Bun from `packageManager` in `package.json`.
 Install with `bun install --frozen-lockfile`. The shared setup action caches Bun's
 download cache and Electron downloads, never `node_modules`, native or Turbo outputs.
-Rust caches are scoped to the Windows helper and fixture. MSW worker regeneration
+Rust caches are scoped to the Windows helper and fixture. The full macOS desktop
+build steps request a 4 GiB Node heap for contract declaration generation, which
+exceeds the ARM64 runtime's default 2 GiB limit. Turbo forwards `NODE_OPTIONS` to
+build tasks. MSW worker regeneration
 is explicit: its postinstall hook overwrites the worker with vendor bytes even when
 the version already matches. A formatting difference alone can dirty the tracked
 worker during installation. `scripts/msw-worker-install.test.ts` reproduces that behavior,
