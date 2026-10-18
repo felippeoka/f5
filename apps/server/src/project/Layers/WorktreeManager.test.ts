@@ -430,13 +430,22 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
     async (cancelRpc) => {
       const { repo, world, run } = await fixture();
       const threadId = ThreadId.makeUnsafe("interrupted-recovery");
+      const setupScript = path.join(repo.root, "interrupt-setup.cjs");
+      await fs.writeFile(
+        setupScript,
+        [
+          'console.log("diagnostic");',
+          'require("node:fs").writeFileSync("setup-started", "started");',
+          "setInterval(() => {}, 1000);",
+        ].join("\n"),
+      );
       world.projects[0] = {
         ...world.projects[0]!,
         scripts: [
           {
             id: "setup",
             name: "setup",
-            command: "echo diagnostic; echo started > setup-started; sleep 30",
+            command: `"${process.execPath}" "${setupScript}"`,
             icon: "play",
             runOnWorktreeCreate: true,
           },
