@@ -3700,6 +3700,10 @@ describe("ProviderCommandReactor", () => {
     );
 
     await waitFor(() => harness.startSession.mock.calls.length === 1);
+    // Session startup publishes metadata after invoking the provider mock. Settle it
+    // before taking the fixture's expected workspace/session version.
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await harness.drain();
     const legacySession = harness.runtimeSessions[0] as { cwd?: string } | undefined;
     expect(legacySession).toBeDefined();
     delete legacySession!.cwd;

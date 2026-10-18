@@ -431,7 +431,28 @@ interface PersistedComposerThreadDraftState {
   serviceTier?: string | null;
 }
 
-interface PersistedDraftThreadState {
+interface WorktreeCreationOptions {
+  worktreeBranchName?: string | null;
+  runSetupScript?: boolean | null;
+}
+
+function resolveDraftWorktreeOptions(
+  current?: WorktreeCreationOptions,
+  patch?: WorktreeCreationOptions,
+) {
+  return {
+    worktreeBranchName:
+      patch?.worktreeBranchName === undefined
+        ? (current?.worktreeBranchName ?? null)
+        : patch.worktreeBranchName,
+    runSetupScript:
+      patch?.runSetupScript === undefined
+        ? (current?.runSetupScript ?? null)
+        : patch.runSetupScript,
+  };
+}
+
+interface PersistedDraftThreadState extends WorktreeCreationOptions {
   projectId: ProjectId;
   createdAt: string;
   runtimeMode: RuntimeMode;
@@ -439,8 +460,6 @@ interface PersistedDraftThreadState {
   branch: string | null;
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
-  worktreeBranchName?: string | null;
-  runSetupScript?: boolean | null;
 }
 
 interface PersistedComposerDraftStoreState {
@@ -512,7 +531,7 @@ export type PromptStashRestoreResult =
     }
   | { readonly status: "failed"; readonly message: string };
 
-export interface DraftThreadState {
+export interface DraftThreadState extends WorktreeCreationOptions {
   projectId: ProjectId;
   createdAt: string;
   runtimeMode: RuntimeMode;
@@ -521,8 +540,6 @@ export interface DraftThreadState {
   worktreePath: string | null;
   sharedFilesystemConfirmed?: boolean;
   envMode: DraftThreadEnvMode;
-  worktreeBranchName?: string | null;
-  runSetupScript?: boolean | null;
 }
 
 export interface ProjectDraftThread extends DraftThreadState {
@@ -1848,14 +1865,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
                 ? (existingThread?.branch ?? null)
                 : (options.branch ?? null),
             worktreePath: nextWorktreePath,
-            worktreeBranchName:
-              options?.worktreeBranchName === undefined
-                ? (existingThread?.worktreeBranchName ?? null)
-                : options.worktreeBranchName,
-            runSetupScript:
-              options?.runSetupScript === undefined
-                ? (existingThread?.runSetupScript ?? null)
-                : options.runSetupScript,
+            ...resolveDraftWorktreeOptions(existingThread, options),
             envMode:
               options?.envMode ??
               (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
@@ -1977,14 +1987,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             interactionMode: options.interactionMode ?? existing.interactionMode,
             branch: options.branch === undefined ? existing.branch : (options.branch ?? null),
             worktreePath: nextWorktreePath,
-            worktreeBranchName:
-              options.worktreeBranchName === undefined
-                ? (existing.worktreeBranchName ?? null)
-                : options.worktreeBranchName,
-            runSetupScript:
-              options.runSetupScript === undefined
-                ? (existing.runSetupScript ?? null)
-                : options.runSetupScript,
+            ...resolveDraftWorktreeOptions(existing, options),
             ...((options.sharedFilesystemConfirmed ??
             (nextProjectId === existing.projectId &&
               nextWorktreePath === existing.worktreePath &&

@@ -2,7 +2,7 @@ import { FilesystemPath } from "./baseSchemas";
 import { Option, Schema } from "effect";
 import { NonNegativeInt, PositiveInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 import { DEFAULT_GIT_TEXT_GENERATION_MODEL } from "./model";
-import { ChangeRequest, SourceControlProviderIdentity } from "./sourceControl";
+export * from "./gitInspectionResults";
 
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 
@@ -12,7 +12,7 @@ export const GitStackedAction = Schema.Literals(["commit", "commit_push", "commi
 export type GitStackedAction = typeof GitStackedAction.Type;
 export const GitActionProgressPhase = Schema.Literals(["branch", "commit", "push", "pr"]);
 export type GitActionProgressPhase = typeof GitActionProgressPhase.Type;
-export const GitActionProgressKind = Schema.Literals([
+export const GitActionProgressKind = /* @__PURE__ */ Schema.Literals([
   "action_started",
   "phase_started",
   "hook_started",
@@ -32,35 +32,8 @@ const GitPushStepStatus = Schema.Literals([
 ]);
 const GitBranchStepStatus = Schema.Literals(["created", "skipped_not_requested"]);
 const GitPrStepStatus = Schema.Literals(["created", "opened_existing", "skipped_not_requested"]);
-const GitStatusPrState = Schema.Literals(["open", "closed", "merged"]);
 const GitPullRequestReference = TrimmedNonEmptyStringSchema;
-const GitPullRequestState = Schema.Literals(["open", "closed", "merged"]);
 const GitPreparePullRequestThreadMode = Schema.Literals(["local", "worktree"]);
-
-export const GitBranch = Schema.Struct({
-  name: TrimmedNonEmptyStringSchema,
-  isRemote: Schema.optional(Schema.Boolean),
-  remoteName: Schema.optional(TrimmedNonEmptyStringSchema),
-  current: Schema.Boolean,
-  isDefault: Schema.Boolean,
-  worktreePath: FilesystemPath.pipe(Schema.NullOr),
-});
-export type GitBranch = typeof GitBranch.Type;
-
-const GitWorktree = Schema.Struct({
-  path: FilesystemPath,
-  branch: TrimmedNonEmptyStringSchema,
-});
-const GitResolvedPullRequest = Schema.Struct({
-  number: PositiveInt,
-  title: TrimmedNonEmptyStringSchema,
-  url: Schema.String,
-  baseBranch: TrimmedNonEmptyStringSchema,
-  headBranch: TrimmedNonEmptyStringSchema,
-  headOid: Schema.optional(Schema.NullOr(TrimmedNonEmptyStringSchema)),
-  state: GitPullRequestState,
-});
-export type GitResolvedPullRequest = typeof GitResolvedPullRequest.Type;
 
 // RPC Inputs
 
@@ -163,67 +136,6 @@ export type GitInitInput = typeof GitInitInput.Type;
 
 // RPC Results
 
-const GitStatusPr = Schema.Struct({
-  number: PositiveInt,
-  title: TrimmedNonEmptyStringSchema,
-  url: Schema.String,
-  baseBranch: TrimmedNonEmptyStringSchema,
-  headBranch: TrimmedNonEmptyStringSchema,
-  state: GitStatusPrState,
-});
-
-export const GitStatusResult = Schema.Struct({
-  sourceControl: Schema.optionalKey(SourceControlProviderIdentity),
-  worktreeMissing: Schema.optionalKey(Schema.Boolean),
-  branch: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
-  hasWorkingTreeChanges: Schema.Boolean,
-  workingTree: Schema.Struct({
-    files: Schema.Array(
-      Schema.Struct({
-        path: FilesystemPath,
-        insertions: NonNegativeInt,
-        deletions: NonNegativeInt,
-      }),
-    ),
-    insertions: NonNegativeInt,
-    deletions: NonNegativeInt,
-    countUnavailableReason: Schema.optionalKey(Schema.Literal("unborn_head")),
-  }),
-  hasUpstream: Schema.Boolean,
-  aheadCount: NonNegativeInt,
-  behindCount: NonNegativeInt,
-  pr: Schema.NullOr(GitStatusPr),
-  changeRequest: Schema.optionalKey(Schema.NullOr(ChangeRequest)),
-});
-export type GitStatusResult = typeof GitStatusResult.Type;
-
-export const GitListBranchesResult = Schema.Struct({
-  worktreeMissing: Schema.optionalKey(Schema.Boolean),
-  branches: Schema.Array(GitBranch),
-  isRepo: Schema.Boolean,
-  hasOriginRemote: Schema.Boolean,
-});
-export type GitListBranchesResult = typeof GitListBranchesResult.Type;
-
-export const GitCreateWorktreeResult = Schema.Struct({
-  worktree: GitWorktree,
-});
-export type GitCreateWorktreeResult = typeof GitCreateWorktreeResult.Type;
-
-export const GitResolvePullRequestResult = Schema.Struct({
-  pullRequest: GitResolvedPullRequest,
-  changeRequest: Schema.optional(ChangeRequest),
-});
-export type GitResolvePullRequestResult = typeof GitResolvePullRequestResult.Type;
-
-export const GitPreparePullRequestThreadResult = Schema.Struct({
-  pullRequest: GitResolvedPullRequest,
-  changeRequest: Schema.optional(ChangeRequest),
-  branch: TrimmedNonEmptyStringSchema,
-  worktreePath: FilesystemPath.pipe(Schema.NullOr),
-});
-export type GitPreparePullRequestThreadResult = typeof GitPreparePullRequestThreadResult.Type;
-
 export const GitRunStackedActionResult = Schema.Struct({
   action: GitStackedAction,
   branch: Schema.Struct({
@@ -251,13 +163,6 @@ export const GitRunStackedActionResult = Schema.Struct({
   }),
 });
 export type GitRunStackedActionResult = typeof GitRunStackedActionResult.Type;
-
-export const GitPullResult = Schema.Struct({
-  status: Schema.Literals(["pulled", "skipped_up_to_date"]),
-  branch: TrimmedNonEmptyStringSchema,
-  upstreamBranch: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
-});
-export type GitPullResult = typeof GitPullResult.Type;
 
 export const GitStatusInvalidatedPayload = Schema.Struct({
   cwd: Schema.NullOr(FilesystemPath),
