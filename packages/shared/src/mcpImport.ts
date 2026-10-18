@@ -294,9 +294,10 @@ export function parseMcpImport(
 ): import("@t3tools/contracts").McpListImportCandidatesResult {
   type Issue = import("@t3tools/contracts").McpImportIssue;
   const issues: Issue[] = [];
+  const jsonInput = text.trim().startsWith("{");
   let document: unknown;
   try {
-    document = text.trim().startsWith("{") ? JSON.parse(text) : parseToml(text);
+    document = jsonInput ? JSON.parse(text) : parseToml(text);
   } catch (error) {
     return {
       candidates: [],
@@ -318,7 +319,9 @@ export function parseMcpImport(
     ? document.mcpServers
     : isRecord(document.mcp_servers)
       ? document.mcp_servers
-      : document;
+      : jsonInput
+        ? document
+        : {};
   const seen = new Set<string>();
   const candidates = Object.entries(root).map(([rawName, raw], index) => {
     const name = normalizeServerName(rawName) ?? rawName;

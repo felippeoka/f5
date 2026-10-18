@@ -61,6 +61,7 @@ export function resolveMcpSecrets(
 export function validateStoredMcpSecrets(
   servers: McpProjectServersConfig,
   store: ServerSecretStoreShape | undefined,
+  base: McpProjectServersConfig = {},
 ) {
   return Effect.gen(function* () {
     yield* Effect.try({
@@ -70,14 +71,21 @@ export function validateStoredMcpSecrets(
           message: error instanceof Error ? error.message : "Invalid MCP secret placeholder.",
         }),
     });
-    for (const id of mcpSecretReferences(servers)) {
-      const bytes = store ? yield* store.get(`mcp-secret-${id}`) : null;
-      if (!bytes)
-        return yield* Effect.fail(
-          new McpSecretValidationError({
-            message: "A stored MCP secret is missing. Replace it before saving.",
-          }),
-        );
+    for (const [name, server] of Object.entries(servers)) {
+      for (const field of ["env", "headers"] as const) {
+        for (const [key, value] of Object.entries(server[field] ?? {})) {
+          const id = mcpSecretId(value);
+          // An unchanged reference may be unavailable after a restore. Keep repair and unrelated edits possible.
+          if (!id || base[name]?.[field]?.[key] === value) continue;
+          const bytes = store ? yield* store.get(`mcp-secret-${id}`) : null;
+          if (!bytes)
+            return yield* Effect.fail(
+              new McpSecretValidationError({
+                message: `${name}.${field}.${key}: stored secret is missing. Replace it before saving.`,
+              }),
+            );
+        }
+      }
     }
   });
 }

@@ -1,4 +1,5 @@
 import type { McpProjectServersConfig } from "@t3tools/contracts";
+import { mcpServerNameKey } from "./mcpServerName";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -29,11 +30,12 @@ export function mergeMcpServerLayers(input: {
   readonly project?: McpProjectServersConfig | null;
   readonly disabledCommon?: ReadonlyArray<string> | undefined;
 }): McpProjectServersConfig {
+  const disabled = new Set(input.disabledCommon?.map(mcpServerNameKey));
   return {
     ...Object.fromEntries(
       Object.entries(input.common ?? {}).map(([name, server]) => [
         name,
-        input.disabledCommon?.includes(name) ? { ...server, enabled: false } : server,
+        disabled.has(mcpServerNameKey(name)) ? { ...server, enabled: false } : server,
       ]),
     ),
     ...input.project,

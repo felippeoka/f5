@@ -1,3 +1,4 @@
+import { makeMcpSecretWriter } from "./McpSecretWriter.ts";
 import { makeMcpAccountExecutionResolver } from "./accountExecution.ts";
 import { ProjectionProjectRepository } from "../persistence/Services/ProjectionProjects.ts";
 import { mkdtemp, mkdir, writeFile, readFile, symlink, rm } from "node:fs/promises";
@@ -93,7 +94,10 @@ describe("MCP feature boundaries", () => {
       join(claude, ".claude.json"),
       JSON.stringify({
         mcpServers: { user: { command: "node" } },
-        projects: { [project]: { mcpServers: { legacy: { command: "legacy" } } } },
+        projects: {
+          [project]: { mcpServers: { user: { command: "legacy" } } },
+          "/unrelated-project": { mcpServers: { unrelated: { command: "do-not-import" } } },
+        },
       }),
     );
     await writeFile(
@@ -109,12 +113,29 @@ describe("MCP feature boundaries", () => {
       cwd: project,
     });
     expect(result.issues).toEqual([]);
+    expect(result.candidates[1]).toMatchObject({
+      selectedByDefault: false,
+      issues: [expect.objectContaining({ field: "name", severity: "warning" })],
+    });
+    expect(result.candidates[2]?.selectedByDefault).toBe(false);
     expect(result.candidates.map((entry) => entry.name)).toEqual([
       "user",
-      "legacy",
+      "user",
       "project",
       "codex",
     ]);
+  });
+  it("ignores Codex TOML without MCP servers during detection", async () => {
+    const dir = await temp();
+    await mkdir(join(dir, ".codex"));
+    await writeFile(
+      join(dir, ".codex/config.toml"),
+      'model="gpt-5"\n[projects."/tmp"]\ntrust_level="trusted"',
+    );
+    expect(await detectMcpImports({ environment: { HOME: dir } })).toEqual({
+      candidates: [],
+      issues: [],
+    });
   });
   it("refuses symlinks, directories, and oversized import files", async () => {
     const dir = await temp();
@@ -144,6 +165,31 @@ describe("MCP feature boundaries", () => {
     expect(result.toolsTruncated).toBe(true);
     expect(result.stderrTail).toContain("[redacted]");
     expect(JSON.stringify(result)).not.toContain("very-private-token");
+  });
+  it("redacts bare inherited account credentials from probe stderr", async () => {
+    const result = await Effect.runPromise(
+      probeMcpServer(
+        {
+          serverName: "inherited",
+          server: { type: "stdio", command: process.execPath, args: [fixture, "fail"] },
+        },
+        {
+          ...execution,
+          environment: { ...execution.environment, ACCOUNT_TOKEN: "inherited-private-value" },
+        },
+      ),
+    );
+    expect(result.stderrTail).toContain("[redacted]");
+    expect(JSON.stringify(result)).not.toContain("inherited-private-value");
+  });
+  it("caps tool fields after redaction expands them", async () => {
+    const result = await Effect.runPromise(
+      probe("sanitizer-growth", { env: { PROBE_TOKEN: "abcdefgh" } }),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.tools[0]?.name).toHaveLength(128);
+    expect(result.tools[0]?.description).toHaveLength(300);
+    expect(result.tools[0]?.name).toContain("[redacted]");
   });
   it("returns sanitized stderr when a stdio command exits before initialization", async () => {
     const result = await Effect.runPromise(
@@ -312,7 +358,39 @@ describe("MCP feature boundaries", () => {
     await expect(Effect.runPromise(validateStoredMcpSecrets(servers, store))).rejects.toThrow(
       "missing",
     );
+    await Effect.runPromise(
+      validateStoredMcpSecrets(
+        { ...servers, missing: { ...servers.missing, enabled: false } },
+        store,
+        servers,
+      ),
+    );
+    await expect(Effect.runPromise(validateStoredMcpSecrets(servers, store))).rejects.toThrow(
+      "missing.headers.Authorization",
+    );
     await Effect.runPromise(collectMcpSecrets(store, servers));
     expect(removed).toEqual(["mcp-secret-stale"]);
   });
+});
+
+it("bounds secret writes across concurrent clients without exposing values in errors", async () => {
+  const entries = new Map<string, Uint8Array>();
+  const store: ServerSecretStoreShape = {
+    get: (name) => Effect.succeed(entries.get(name) ?? null),
+    set: (name, value) =>
+      Effect.sync(() => {
+        entries.set(name, value);
+      }),
+    list: () =>
+      Effect.succeed([...entries.keys()].map((name) => ({ name, modifiedAt: Date.now() }))),
+    remove: () => Effect.void,
+    getOrCreateRandom: () => Effect.succeed(new Uint8Array()),
+  };
+  const write = await Effect.runPromise(makeMcpSecretWriter(store, 2));
+  const results = await Promise.allSettled(
+    ["first", "second", "third"].map((value) => Effect.runPromise(write(value))),
+  );
+  expect(results.filter((entry) => entry.status === "fulfilled")).toHaveLength(2);
+  expect(entries.size).toBe(2);
+  await expect(Effect.runPromise(write("private-value"))).rejects.toThrow("storage limit");
 });

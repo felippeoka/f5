@@ -5,7 +5,13 @@ import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { Textarea } from "../../ui/textarea";
 
-type Row = { key: string; value: string; secret?: boolean; replacing?: boolean };
+type Row = {
+  key: string;
+  value: string;
+  secret?: boolean;
+  replacing?: boolean;
+  previousValue?: string;
+};
 function readRows(text: string): Row[] {
   if (!text) return [];
   if (text.trim().startsWith("[")) return JSON.parse(text) as Row[];
@@ -19,7 +25,9 @@ function readRows(text: string): Row[] {
     .filter(Boolean)
     .map((line) => {
       const index = line.indexOf("=");
-      return { key: line.slice(0, index), value: line.slice(index + 1) };
+      return index < 0
+        ? { key: line, value: "" }
+        : { key: line.slice(0, index), value: line.slice(index + 1) };
     });
 }
 
@@ -30,14 +38,16 @@ export function McpKeyValueFields(props: {
 }) {
   const rows = readRows(props.value);
   const mounted = useRef(true);
-  const currentValue = useRef(props.value);
-  currentValue.current = props.value;
-  useEffect(
-    () => () => {
+  const current = useRef({ value: props.value, onChange: props.onChange });
+  useEffect(() => {
+    current.current = { value: props.value, onChange: props.onChange };
+  }, [props.value, props.onChange]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
       mounted.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const update = (next: Row[]) => {
@@ -74,7 +84,9 @@ export function McpKeyValueFields(props: {
               <Button
                 size="xs"
                 variant="outline"
-                onClick={() => patch({ value: "", secret: true, replacing: true })}
+                onClick={() =>
+                  patch({ previousValue: row.value, value: "", secret: true, replacing: true })
+                }
               >
                 Replace
               </Button>
@@ -99,13 +111,40 @@ export function McpKeyValueFields(props: {
                       void ensureNativeApi()
                         .mcp.storeSecret({ value: row.value })
                         .then(({ placeholder }) => {
-                          if (mounted.current && currentValue.current === props.value)
-                            patch({ value: placeholder, secret: false, replacing: false });
+                          if (!mounted.current) return;
+                          const latest = readRows(current.current.value);
+                          const matches = latest.filter(
+                            (entry) =>
+                              entry.key === row.key && entry.value === row.value && entry.secret,
+                          );
+                          if (matches.length !== 1) {
+                            setError(
+                              "This value changed while storing. Your current draft was kept; store the secret again.",
+                            );
+                            return;
+                          }
+                          current.current.onChange(
+                            JSON.stringify(
+                              latest.map((entry) =>
+                                entry === matches[0]
+                                  ? {
+                                      key: entry.key,
+                                      value: placeholder,
+                                      secret: false,
+                                      replacing: false,
+                                    }
+                                  : entry,
+                              ),
+                            ),
+                          );
                         })
-                        .catch(() =>
-                          setError("Could not store secret. Your value is still in this draft."),
-                        )
-                        .finally(() => setBusy(null));
+                        .catch(() => {
+                          if (mounted.current)
+                            setError("Could not store secret. Your value is still in this draft.");
+                        })
+                        .finally(() => {
+                          if (mounted.current) setBusy(null);
+                        });
                     }}
                   >
                     Store secret
@@ -113,6 +152,17 @@ export function McpKeyValueFields(props: {
                 ) : null}
               </>
             )}
+            {row.replacing && row.previousValue ? (
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() =>
+                  patch({ value: row.previousValue!, secret: false, replacing: false })
+                }
+              >
+                Cancel replacement
+              </Button>
+            ) : null}
             <Button
               size="xs"
               variant="outline"

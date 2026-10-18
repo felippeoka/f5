@@ -1,4 +1,6 @@
 import "../../index.css";
+import { StrictMode, useState } from "react";
+import { McpKeyValueFields } from "./mcp/McpKeyValueFields";
 
 import type {
   McpCommonConfigResult,
@@ -257,7 +259,7 @@ function createNativeApiMock() {
   };
 }
 
-async function renderSettings() {
+async function renderSettings(withProject = true) {
   await page.viewport(1280, 900);
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -270,7 +272,7 @@ async function renderSettings() {
   const screen = await render(
     <QueryClientProvider client={queryClient}>
       <McpServersSettings
-        selectedProject={{ id: PROJECT_ID, name: "Project One" }}
+        selectedProject={withProject ? { id: PROJECT_ID, name: "Project One" } : null}
         hasProjects
         codexBinaryPath=""
         codexHomePath=""
@@ -280,7 +282,7 @@ async function renderSettings() {
   );
 
   await vi.waitFor(() => {
-    expect(document.body.textContent).toContain("project-server");
+    expect(document.body.textContent).toContain(withProject ? "project-server" : "common-server");
   });
 
   return { screen, queryClient };
@@ -1484,6 +1486,7 @@ it("reads detected configuration only after an explicit Detect click", async () 
         id: "detected",
         name: "detected",
         source: ".mcp.json",
+        selectedByDefault: false,
         server: { type: "stdio" as const, command: "node" },
         issues: [],
       },
@@ -1499,6 +1502,10 @@ it("reads detected configuration only after an explicit Detect click", async () 
     expect(detect).not.toHaveBeenCalled();
     await page.getByRole("button", { name: "Detect configurations", exact: true }).click();
     await vi.waitFor(() => expect(detect).toHaveBeenCalledTimes(1));
+    await expect
+      .element(page.getByRole("button", { name: "Import 0 into project" }))
+      .toBeDisabled();
+    await page.getByRole("checkbox", { name: "detected", exact: true }).click();
     await expect.element(page.getByRole("button", { name: "Import 1 into project" })).toBeEnabled();
   } finally {
     queryClient.clear();
@@ -1538,6 +1545,190 @@ it("tests an unsaved draft only on click and opens its bounded tool summaries", 
     await vi.waitFor(() =>
       expect(document.body.textContent).toContain("Tool from the unsaved draft"),
     );
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+function SecretFieldsHarness({ initial }: { initial: string }) {
+  const [value, setValue] = useState(initial);
+  return <McpKeyValueFields label="Environment" value={value} onChange={setValue} />;
+}
+it.each([false, true])(
+  "stores under Strict Mode and preserves concurrent edits (same row: %s)",
+  async (editSameRow) => {
+    createNativeApiMock();
+    let finish!: (result: { placeholder: string }) => void;
+    const store = vi.fn(
+      () =>
+        new Promise<{ placeholder: string }>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    nativeApiRef.current!.mcp.storeSecret = store;
+    const screen = await render(
+      <StrictMode>
+        <SecretFieldsHarness
+          initial={JSON.stringify([
+            { key: "TOKEN", value: "private-value", secret: true },
+            { key: "OTHER", value: "original" },
+          ])}
+        />
+      </StrictMode>,
+    );
+    try {
+      await page.getByRole("button", { name: "Store secret", exact: true }).click();
+      await vi.waitFor(() => expect(store).toHaveBeenCalledTimes(1));
+      await page
+        .getByRole("textbox", { name: `Environment value ${editSameRow ? 1 : 2}` })
+        .fill("edited");
+      finish({ placeholder: "${f5-secret:00000000-0000-4000-8000-000000000000}" });
+      if (editSameRow) {
+        await expect
+          .element(page.getByText("This value changed while storing.", { exact: false }))
+          .toBeVisible();
+        await expect
+          .element(page.getByRole("textbox", { name: "Environment value 1" }))
+          .toHaveValue("edited");
+      } else {
+        await expect.element(page.getByText("•••••• (stored secret)")).toBeVisible();
+        await expect
+          .element(page.getByRole("textbox", { name: "Environment value 2" }))
+          .toHaveValue("edited");
+        await page.getByRole("button", { name: "Replace", exact: true }).click();
+        await page.getByRole("button", { name: "Cancel replacement", exact: true }).click();
+        await expect.element(page.getByText("•••••• (stored secret)")).toBeVisible();
+      }
+    } finally {
+      await screen.unmount();
+    }
+  },
+);
+it("keeps legacy key-only lines intact", async () => {
+  const screen = await render(<SecretFieldsHarness initial="TOKEN" />);
+  try {
+    await expect
+      .element(page.getByRole("textbox", { name: "Environment key 1" }))
+      .toHaveValue("TOKEN");
+    await expect
+      .element(page.getByRole("textbox", { name: "Environment value 1" }))
+      .toHaveValue("");
+  } finally {
+    await screen.unmount();
+  }
+});
+it("retains disabled tools in a single list when the live listing omits them", async () => {
+  const mocks = createNativeApiMock();
+  mocks.getProjectConfig.mockResolvedValue({
+    ...projectConfig,
+    servers: {
+      "project-server": { type: "stdio", command: "node", disabledTools: ["hidden"] },
+    },
+  });
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("button", { name: "Inspect", exact: true }).click();
+    await page.getByRole("tab", { name: "Tools", exact: true }).click();
+    await expect
+      .element(page.getByRole("switch", { name: "Enable tool hidden" }))
+      .not.toBeChecked();
+    await expect.element(page.getByText("read", { exact: true })).toBeVisible();
+    await page.getByRole("switch", { name: "Enable tool hidden" }).click();
+    await vi.waitFor(() =>
+      expect(mocks.replaceProjectConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          servers: {
+            "project-server": { type: "stdio", command: "node", disabledTools: [] },
+          },
+        }),
+      ),
+    );
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+it("opens probe tools and saves switches in common settings without a project", async () => {
+  const mocks = createNativeApiMock();
+  nativeApiRef.current!.mcp.probeServer = vi.fn(async () => ({
+    ok: true,
+    durationMs: 1,
+    tools: [{ name: "probe-tool" }],
+    toolsTruncated: false,
+    resourceCount: 0,
+    promptCount: 0,
+    authRequired: false,
+  }));
+  const { screen, queryClient } = await renderSettings(false);
+  try {
+    await page.getByRole("button", { name: "Test", exact: true }).first().click();
+    await page.getByRole("button", { name: "1 tools", exact: true }).click();
+    await page.getByRole("switch", { name: "Enable tool probe-tool" }).click();
+    await vi.waitFor(() =>
+      expect(mocks.replaceCommonConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          servers: {
+            "common-server": {
+              type: "stdio",
+              command: "common-command",
+              disabledTools: ["probe-tool"],
+            },
+          },
+        }),
+      ),
+    );
+    expect(mocks.inspectServer).not.toHaveBeenCalled();
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("marks cross-source duplicate selections on each affected candidate", async () => {
+  createNativeApiMock();
+  nativeApiRef.current!.mcp.listImportCandidates = vi.fn<NativeApi["mcp"]["listImportCandidates"]>(
+    async () => ({
+      candidates: [
+        {
+          id: "first",
+          name: "duplicate",
+          source: "user config",
+          server: { type: "stdio", command: "first" },
+          issues: [],
+        },
+        {
+          id: "second",
+          name: "duplicate",
+          source: "codex config",
+          selectedByDefault: false,
+          server: { type: "stdio", command: "second" },
+          issues: [
+            {
+              field: "name",
+              severity: "warning",
+              message:
+                "Duplicate name also found in user config. Select only one candidate with this name.",
+            },
+          ],
+        },
+      ],
+      issues: [],
+    }),
+  );
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("button", { name: "Import configuration", exact: true }).click();
+    await page.getByRole("tab", { name: "Detected", exact: true }).click();
+    await page.getByRole("button", { name: "Detect configurations", exact: true }).click();
+    const candidates = page.getByRole("checkbox", { name: "duplicate", exact: true });
+    await expect.element(candidates.first()).toBeChecked();
+    await expect.element(candidates.nth(1)).not.toBeChecked();
+    await candidates.nth(1).click();
+    await expect
+      .element(page.getByRole("button", { name: "Import 2 into project" }))
+      .toBeDisabled();
+    expect(document.body.textContent?.match(/Duplicate selected name/g)).toHaveLength(2);
   } finally {
     queryClient.clear();
     await screen.unmount();

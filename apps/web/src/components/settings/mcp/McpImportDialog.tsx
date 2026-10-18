@@ -50,7 +50,9 @@ export function McpImportDialog(props: {
     );
   const selected = (entry: McpImportCandidate) =>
     choices[entry.id] ??
-    (!!entry.server && !entry.issues.some((issue) => issue.severity === "error"));
+    (entry.selectedByDefault !== false &&
+      !!entry.server &&
+      !entry.issues.some((issue) => issue.severity === "error"));
   const preview = useMemo(() => {
     const next = { ...props.servers };
     let additions = 0,
@@ -66,7 +68,9 @@ export function McpImportDialog(props: {
       if (existing) conflicts++;
       const include =
         choices[entry.id] ??
-        (!!entry.server && !entry.issues.some((issue) => issue.severity === "error"));
+        (entry.selectedByDefault !== false &&
+          !!entry.server &&
+          !entry.issues.some((issue) => issue.severity === "error"));
       if (!include || (existing && !replace[entry.id])) {
         skipped++;
         continue;
@@ -98,6 +102,17 @@ export function McpImportDialog(props: {
       count: Object.keys(next).length,
     };
   }, [props.servers, parsed, choices, replace]);
+  const duplicateNames = new Set(
+    parsed.candidates
+      .filter((entry) => selected(entry))
+      .filter((entry, index, entries) =>
+        entries.some(
+          (other, i) =>
+            i !== index && mcpServerNameKey(other.name) === mcpServerNameKey(entry.name),
+        ),
+      )
+      .map((entry) => mcpServerNameKey(entry.name)),
+  );
   return (
     <>
       <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
@@ -189,6 +204,11 @@ export function McpImportDialog(props: {
                       <option value="replace">Replace</option>
                     </select>
                   </label>
+                ) : null}
+                {duplicateNames.has(mcpServerNameKey(entry.name)) ? (
+                  <p className="text-destructive">
+                    Duplicate selected name. Select only one candidate with this name.
+                  </p>
                 ) : null}
                 {entry.issues.map((issue, index) => (
                   <p key={index}>

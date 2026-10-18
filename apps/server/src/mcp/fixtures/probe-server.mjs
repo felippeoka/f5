@@ -2,6 +2,7 @@ import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 const mode = process.argv[2];
+if (process.env.ACCOUNT_TOKEN) process.stderr.write(process.env.ACCOUNT_TOKEN + "\n");
 if (process.env.PROBE_TOKEN) process.stderr.write(`token=${process.env.PROBE_TOKEN}\n`);
 if (mode === "fail") process.exit(1);
 if (mode.includes("grandchild")) {
@@ -26,8 +27,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   else if (request.method === "tools/list")
     respond({
       tools: Array.from({ length: mode === "many" ? 250 : 1 }, (_, index) => ({
-        name: `tool${index}`,
-        description: "A fixture tool",
+        name: mode === "sanitizer-growth" ? "abcdefgh".repeat(16) : `tool${index}`,
+        description: mode === "sanitizer-growth" ? "abcdefgh".repeat(37) : "A fixture tool",
         inputSchema: { type: "object" },
         annotations: { readOnlyHint: true },
       })),

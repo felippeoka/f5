@@ -296,6 +296,7 @@ export const McpImportIssue = Schema.Struct({
   message: Schema.String,
 });
 export const McpImportCandidate = Schema.Struct({
+  selectedByDefault: Schema.optional(Schema.Boolean),
   id: Schema.String,
   name: Schema.String,
   source: Schema.String,

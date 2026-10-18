@@ -1,4 +1,4 @@
-import { killProcessTreeAsync } from "@t3tools/shared/processTree";
+import { closeProbeProcess } from "./McpProbeProcess.ts";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { homedir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -13,7 +13,7 @@ import type {
   McpToolSummary,
 } from "@t3tools/contracts";
 import { summarizeMcpTools } from "@t3tools/shared/mcpTools";
-import { createMcpDiagnosticsSanitizer } from "@t3tools/shared/mcpDiagnostics";
+import { isMcpCredentialKey, createMcpDiagnosticsSanitizer } from "@t3tools/shared/mcpDiagnostics";
 import { Data, Effect } from "effect";
 
 /** The SDK's stdio transport does not own a process group. Probes must also reap descendants. */
@@ -99,18 +99,7 @@ export class ProbeStdioTransport implements Transport {
     this.closing = (async () => {
       const child = this.child;
       if (!child) return;
-      await killProcessTreeAsync(child, {
-        isGroupLeader: process.platform !== "win32",
-        graceful: true,
-        environment: this.env,
-      });
-      // Keep the group identity even when the parent exits: descendants may ignore SIGTERM.
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      await killProcessTreeAsync(child, {
-        isGroupLeader: process.platform !== "win32",
-        graceful: false,
-        environment: this.env,
-      });
+      await closeProbeProcess(child, this.env);
       child.stdin.destroy();
       child.stdout.destroy();
       child.stderr.destroy();
@@ -142,10 +131,12 @@ export function probeMcpServer(
   const bearer = server.bearerTokenEnvVar
     ? execution.environment[server.bearerTokenEnvVar]
     : undefined;
-  const sanitizer = createMcpDiagnosticsSanitizer(
-    { [input.serverName]: server },
-    bearer ? [bearer] : [],
-  );
+  const sanitizer = createMcpDiagnosticsSanitizer({ [input.serverName]: server }, [
+    ...(bearer ? [bearer] : []),
+    ...Object.entries(execution.environment).flatMap(([name, value]) =>
+      value && isMcpCredentialKey(name) ? [value] : [],
+    ),
+  ]);
   const empty = {
     tools: [] as McpToolSummary[],
     toolsTruncated: false,
@@ -307,14 +298,16 @@ export function probeMcpServer(
           durationMs: Date.now() - start,
           tools: result.tools.map((tool) => ({
             ...tool,
-            name: sanitizer.text(tool.name),
-            ...(tool.description ? { description: sanitizer.text(tool.description) } : {}),
+            name: sanitizer.text(tool.name).slice(0, 128),
+            ...(tool.description
+              ? { description: sanitizer.text(tool.description).slice(0, 300) }
+              : {}),
           })),
           ...(transport instanceof ProbeStdioTransport && transport.stderrTail
             ? { stderrTail: sanitizer.text(transport.stderrTail).slice(-4096) }
             : {}),
         };
       }),
-    );
+    ).pipe(Effect.map((result) => ({ ...result, durationMs: Date.now() - start })));
   });
 }

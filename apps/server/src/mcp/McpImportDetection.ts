@@ -3,6 +3,7 @@ import { open } from "node:fs/promises";
 import { homedir } from "node:os";
 import * as path from "node:path";
 import type { McpListImportCandidatesResult } from "@t3tools/contracts";
+import { mcpServerNameKey } from "@t3tools/shared/mcpValidation";
 import { parseMcpImport } from "@t3tools/shared/mcpImport";
 
 const MAX_IMPORT_BYTES = 1024 * 1024;
@@ -53,7 +54,12 @@ export async function detectMcpImports(input: {
       if (text === null) continue;
       if (filename.endsWith("config.toml") || filename.endsWith(".mcp.json")) {
         const parsed = parseMcpImport(text, filename);
-        candidates.push(...parsed.candidates);
+        candidates.push(
+          ...parsed.candidates.map((entry) => ({
+            ...entry,
+            selectedByDefault: !filename.endsWith(".mcp.json"),
+          })),
+        );
         issues.push(...parsed.issues);
         continue;
       }
@@ -65,8 +71,9 @@ export async function detectMcpImports(input: {
         issues.push(...parsed.issues);
       };
       append(state.mcpServers, filename);
-      if (state.projects && typeof state.projects === "object") {
+      if (input.cwd && state.projects && typeof state.projects === "object") {
         for (const [project, config] of Object.entries(state.projects)) {
+          if (path.resolve(project) !== path.resolve(input.cwd)) continue;
           if (config && typeof config === "object" && "mcpServers" in config)
             append(config.mcpServers, `${filename} (${project})`);
         }
@@ -79,5 +86,28 @@ export async function detectMcpImports(input: {
       });
     }
   }
-  return { candidates, issues };
+  const names = new Map<string, string>();
+  return {
+    candidates: candidates.map((entry) => {
+      const key = mcpServerNameKey(entry.name);
+      const firstSource = names.get(key);
+      names.set(key, firstSource ?? entry.source);
+      return firstSource
+        ? {
+            ...entry,
+            selectedByDefault: false,
+            issues: [
+              ...entry.issues,
+              {
+                serverName: entry.name,
+                field: "name",
+                severity: "warning" as const,
+                message: `Duplicate name also found in ${firstSource}. Select only one candidate with this name.`,
+              },
+            ],
+          }
+        : entry;
+    }),
+    issues,
+  };
 }

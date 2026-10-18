@@ -5,6 +5,21 @@ import { mcpToolSwitchState, setMcpToolEnabled, summarizeMcpTools } from "./mcpT
 import { mcpSecretId, validateMcpSecretPlaceholders } from "./mcpSecrets";
 
 describe("MCP feature data", () => {
+  it("finds no pasted servers in Codex TOML without an MCP section", () => {
+    expect(parseMcpImport('model="gpt-5"\n[projects."/tmp"]\ntrust_level="trusted"')).toEqual({
+      candidates: [],
+      issues: [],
+    });
+    expect(parseMcpImport('{"local":{"command":"node"}}').candidates).toHaveLength(1);
+  });
+  it("keeps opt-outs after a case-only common-server rename", () => {
+    expect(
+      mergeMcpServerLayers({
+        common: { GitHub: { type: "stdio", command: "node" } },
+        disabledCommon: ["github"],
+      }).GitHub?.enabled,
+    ).toBe(false);
+  });
   it("imports lossless TOML with inline tables, multiline strings, arrays, and OAuth inheritance", () => {
     const parsed = parseMcpImport(`mcp_oauth_callback_port = 3140
 [mcp_servers.remote]

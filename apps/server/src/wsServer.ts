@@ -1,3 +1,4 @@
+import { makeMcpSecretWriter } from "./mcp/McpSecretWriter.ts";
 import { McpServerWriteDefinition } from "@t3tools/contracts";
 import { makeMcpAccountExecutionResolver } from "./mcp/accountExecution.ts";
 import { detectMcpImports } from "./mcp/McpImportDetection.ts";
@@ -1072,6 +1073,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const profileSecrets = yield* makeServerSecretStore.pipe(
     Effect.mapError((cause) => new ServerLifecycleError({ operation: "profiles.secrets", cause })),
   );
+  const storeMcpSecret = yield* makeMcpSecretWriter(profileSecrets);
   const resolveMcpFeatureExecution = yield* makeMcpAccountExecutionResolver.pipe(
     Effect.provideService(ProjectionProjectRepository, projectionProjects),
   );
@@ -6755,17 +6757,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.mcpStoreSecret: {
         const { value } = stripRequestTag(request.body);
-        if (Buffer.byteLength(value, "utf8") > 16384)
-          return yield* new RouteRequestError({ message: "Secrets must be at most 16 KiB." });
-        const id = crypto.randomUUID();
-        yield* profileSecrets
-          .set(`mcp-secret-${id}`, new TextEncoder().encode(value))
-          .pipe(
-            Effect.mapError(
-              () => new RouteRequestError({ message: "Could not store the secret." }),
-            ),
-          );
-        return { placeholder: "${f5-secret:" + id + "}" };
+        return yield* storeMcpSecret(value).pipe(
+          Effect.mapError((error) => new RouteRequestError({ message: error.message })),
+        );
       }
 
       case WS_METHODS.mcpInspectServer: {

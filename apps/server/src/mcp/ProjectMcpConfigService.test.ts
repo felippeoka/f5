@@ -765,3 +765,60 @@ it("keeps placeholders and their versions in storage while every runtime read re
     ),
   );
 });
+
+it("allows unrelated edits, opt-outs and disabling with unchanged missing secrets, but rejects new references", async () => {
+  const { layer, rows } = makeRepositoryLayer();
+  const projectId = ProjectId.makeUnsafe("missing-secret");
+  const broken = {
+    type: "stdio" as const,
+    command: "node",
+    env: { TOKEN: "${f5-secret:00000000-0000-4000-8000-000000000000}" },
+  };
+  rows.set(scopeKey("project", projectId), {
+    scope: "project",
+    projectId,
+    version: "initial",
+    servers: { broken },
+    updatedAt: new Date().toISOString(),
+  });
+  await runServiceEffect(
+    Effect.gen(function* () {
+      const service = yield* ProjectMcpConfigService;
+      const first = yield* service.replaceProjectConfig({
+        projectId,
+        expectedVersion: "initial",
+        servers: {
+          broken,
+          unrelated: { type: "stdio", command: "other" },
+        },
+      });
+      const second = yield* service.replaceProjectConfig({
+        projectId,
+        expectedVersion: first.version,
+        servers: {
+          ...first.servers,
+          broken: { ...broken, enabled: false },
+        },
+        disabledCommonServers: ["common"],
+      });
+      expect(second.disabledCommonServers).toEqual(["common"]);
+      const failed = yield* service
+        .replaceProjectConfig({
+          projectId,
+          expectedVersion: second.version,
+          servers: {
+            ...second.servers,
+            newlyReferenced: broken,
+          },
+        })
+        .pipe(Effect.flip);
+      expect(failed.message).toContain("newlyReferenced.env.TOKEN");
+      yield* service.replaceProjectConfig({
+        projectId,
+        expectedVersion: second.version,
+        servers: {},
+      });
+    }),
+    layer,
+  );
+});

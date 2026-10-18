@@ -25,7 +25,7 @@ export function McpServerInspector(props: {
   onToolToggle?: ((name: string, enabled: boolean) => Promise<void>) | undefined;
   provider: ProviderKind;
   instanceId: ProviderInstanceId;
-  projectId: ProjectId;
+  projectId: ProjectId | null;
   serverName: string;
   ownership?: "managed" | "external" | "built-in";
   observation?: McpServerStatusesResult | undefined;
@@ -39,7 +39,14 @@ export function McpServerInspector(props: {
   const [retrying, setRetrying] = useState(false);
   const [retryOutcomes, setRetryOutcomes] = useState<ReadonlyArray<McpSessionReloadOutcome>>();
   const queryClient = useQueryClient();
-  const query = useQuery(mcpInspectServerQueryOptions({ ...props, serverName: props.serverName }));
+  const query = useQuery(
+    mcpInspectServerQueryOptions({
+      ...props,
+      projectId: props.projectId,
+      enabled: !!props.projectId,
+      serverName: props.serverName,
+    }),
+  );
   const { copyToClipboard, isCopied } = useCopyToClipboard();
   const data = query.data;
   const status = data?.statuses.find(
@@ -47,9 +54,16 @@ export function McpServerInspector(props: {
       entry.name === props.serverName &&
       (entry.ownership ?? "managed") === (props.ownership ?? "managed"),
   );
-  const toolSummaries = data?.tools.length
-    ? summarizeMcpTools(data.tools)
-    : (props.fallbackTools ?? []);
+  const reportedTools = new Map(data?.tools.map((tool) => [tool.name, tool]));
+  const toolSummaries = summarizeMcpTools([
+    ...new Map(
+      [
+        ...(props.configuredServer?.disabledTools ?? []).map((name) => ({ name })),
+        ...(props.fallbackTools ?? []),
+        ...(data?.tools ?? []),
+      ].map((tool) => [tool.name, tool]),
+    ).values(),
+  ]);
   return (
     <section
       className="space-y-3 rounded-md border border-border p-3"
@@ -71,13 +85,15 @@ export function McpServerInspector(props: {
         <Button
           size="xs"
           variant="outline"
-          disabled={query.isFetching}
+          disabled={!props.projectId || query.isFetching}
           onClick={() => void query.refetch()}
         >
           Refresh inspector
         </Button>
       </div>
-      {query.isPending ? <p className="text-xs text-muted-foreground">Loading inspector…</p> : null}
+      {props.projectId && query.isPending ? (
+        <p className="text-xs text-muted-foreground">Loading inspector…</p>
+      ) : null}
       {query.error ? (
         <p className="text-xs text-destructive">
           {readErrorMessage(query.error, "Could not inspect this server.")}
@@ -88,6 +104,7 @@ export function McpServerInspector(props: {
           {" "}
           {toolSummaries.length ? (
             toolSummaries.map((tool) => {
+              const reported = reportedTools.get(tool.name);
               const state = props.configuredServer
                 ? mcpToolSwitchState(props.configuredServer, tool.name)
                 : undefined;
@@ -103,6 +120,21 @@ export function McpServerInspector(props: {
                       {tool.destructive ? " · destructive" : ""}
                     </p>
                     {tool.description ? <p>{tool.description}</p> : null}
+                    {reported ? (
+                      <details>
+                        <summary>Tool details</summary>
+                        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all">
+                          {JSON.stringify(reported.annotations ?? {}, null, 2)}
+                        </pre>
+                        {data?.capabilities.inputSchemas ? (
+                          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all">
+                            {JSON.stringify(reported.inputSchema ?? {}, null, 2)}
+                          </pre>
+                        ) : (
+                          <p>Input schemas are not available from this runtime.</p>
+                        )}
+                      </details>
+                    ) : null}
                   </div>
                   {state && props.onToolToggle ? (
                     <span
@@ -172,50 +204,6 @@ export function McpServerInspector(props: {
               ) : null}
               {status?.message ? (
                 <p className="whitespace-pre-wrap break-words">{status.message}</p>
-              ) : null}
-            </>
-          ) : null}
-          {tab === "Tools" ? (
-            <>
-              {!data.capabilities.tools ? (
-                <p>Tools are not available from this provider runtime.</p>
-              ) : data.tools.length === 0 ? (
-                <p>No tools were reported in this observation.</p>
-              ) : (
-                data.tools.map((tool, index) => (
-                  <details
-                    key={`${tool.name}:${index}`}
-                    className="rounded border border-border p-2"
-                  >
-                    <summary>{tool.name}</summary>
-                    {tool.description ? (
-                      <p className="whitespace-pre-wrap break-words">{tool.description}</p>
-                    ) : null}
-                    {tool.annotations !== undefined ? (
-                      <pre className="overflow-auto whitespace-pre-wrap break-all">
-                        {JSON.stringify(tool.annotations, null, 2)}
-                      </pre>
-                    ) : null}
-                    {data.capabilities.inputSchemas ? (
-                      <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all">
-                        {JSON.stringify(tool.inputSchema ?? {}, null, 2)}
-                      </pre>
-                    ) : (
-                      <p>
-                        {props.provider === "claudeAgent"
-                          ? "Input schemas are not available from Claude."
-                          : "Input schemas are not available from this runtime."}
-                      </p>
-                    )}
-                  </details>
-                ))
-              )}
-              {!data.capabilities.inputSchemas ? (
-                <p>
-                  {props.provider === "claudeAgent"
-                    ? "Input schemas are not available from Claude."
-                    : "Input schemas are not available from this runtime."}
-                </p>
               ) : null}
             </>
           ) : null}
@@ -310,6 +298,7 @@ export function McpServerInspector(props: {
               variant="outline"
               disabled={retrying}
               onClick={() => {
+                if (!props.projectId) return;
                 setRetrying(true);
                 setRetryError(null);
                 const retry =

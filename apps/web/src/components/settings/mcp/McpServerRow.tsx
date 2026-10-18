@@ -269,7 +269,7 @@ export function McpServerRow(props: {
           setInspectorOpen(true);
         }}
       />
-      {inspectorOpen && props.projectId ? (
+      {inspectorOpen ? (
         <McpServerInspector
           key={`${props.observation?.threadId}:${props.observation?.generation}:${toolsOpenCount}`}
           initialTab={toolsOpenCount ? "Tools" : "Overview"}

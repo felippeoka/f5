@@ -745,11 +745,17 @@ export function McpServersSettings(props: {
                         <Switch
                           aria-label={`Use ${name} in this project`}
                           disabled={isSavingConfig}
-                          checked={!projectConfigQuery.data?.disabledCommonServers?.includes(name)}
+                          checked={
+                            !projectConfigQuery.data?.disabledCommonServers?.some(
+                              (disabled) => mcpServerNameKey(disabled) === mcpServerNameKey(name),
+                            )
+                          }
                           onCheckedChange={(enabled) => {
                             if (!selectedProjectId) return;
                             const disabled = new Set(
-                              projectConfigQuery.data?.disabledCommonServers ?? [],
+                              (projectConfigQuery.data?.disabledCommonServers ?? []).filter(
+                                (disabled) => mcpServerNameKey(disabled) !== mcpServerNameKey(name),
+                              ),
                             );
                             if (enabled) disabled.delete(name);
                             else disabled.add(name);

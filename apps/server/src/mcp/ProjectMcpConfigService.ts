@@ -362,7 +362,7 @@ const makeProjectMcpConfigService = Effect.gen(function* () {
               try: () => validateMcpLayerWrite(base.servers, input.servers),
               catch: validationError,
             });
-            yield* validateStoredMcpSecrets(servers, secretStore).pipe(
+            yield* validateStoredMcpSecrets(servers, secretStore, base.servers).pipe(
               Effect.mapError(validationError),
             );
             if (projectId) {

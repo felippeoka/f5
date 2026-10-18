@@ -1,5 +1,6 @@
 import type {
   McpInspectServerRequest,
+  ProjectId,
   McpInspectServerResult,
   McpServerStatusesResult,
 } from "@t3tools/contracts";
@@ -7,7 +8,8 @@ import { queryOptions } from "@tanstack/react-query";
 import { ensureNativeApi } from "../nativeApi";
 
 export function mcpInspectServerQueryOptions(
-  input: McpInspectServerRequest & {
+  input: Omit<McpInspectServerRequest, "projectId"> & {
+    projectId: ProjectId | null;
     observation?: McpServerStatusesResult | undefined;
     enabled?: boolean;
   },
@@ -28,9 +30,10 @@ export function mcpInspectServerQueryOptions(
       input.serverName,
       input.ownership ?? "managed",
     ],
-    enabled: input.enabled ?? true,
-    queryFn: () =>
-      ensureNativeApi().mcp.inspectServer({
+    enabled: input.projectId !== null && (input.enabled ?? true),
+    queryFn: () => {
+      if (!input.projectId) throw new Error("Select a project to read live server details.");
+      return ensureNativeApi().mcp.inspectServer({
         provider: input.provider,
         projectId: input.projectId,
         ...(input.instanceId ? { instanceId: input.instanceId } : {}),
@@ -39,6 +42,7 @@ export function mcpInspectServerQueryOptions(
         ...((input.threadId ?? input.observation?.threadId)
           ? { threadId: input.threadId ?? input.observation?.threadId }
           : {}),
-      }),
+      });
+    },
   });
 }
