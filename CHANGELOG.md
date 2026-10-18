@@ -6,6 +6,10 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 
 ### Installation
 
+- Windows x64 is the first stable desktop platform: an unsigned per-user installer with in-app updates from the GitHub release feed. SmartScreen may warn, and Windows 11 Smart App Control blocks unsigned apps; see the install guide. A later signed release updates unsigned installations in place.
+- The download page links the Windows installer, keeps the labelled macOS Apple Silicon preview, and shows "Not yet available" for macOS Intel and Linux instead of a misleading link.
+- Releases follow a checked-in desktop profile (`windows` or `all`). Windows-only releases are refused once macOS or Linux updates have shipped. Every release verifies the `SHA256SUMS` contents and the packaged update feed, and must pass a Windows install, upgrade and uninstall rehearsal between two unpublished builds of the release commit.
+
 - Production desktop updates now use only the public baked GitHub feed; ambient `GH_TOKEN` and `T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN` private-feed overrides are no longer supported.
 
 - F5 now uses its own app identity and imports existing F5 (Alpha) settings once. Screen Recording and Accessibility must be granted again.
@@ -107,6 +111,7 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 - `NOTICE.md`, `ARCHITECTURE.md` (root stub), `SECURITY.md`, `CODE_OF_CONDUCT.md`, and `THIRD_PARTY_LICENSES.md` at the repository root.
 - `docs/provider-prerequisites.md` covering both Codex and Claude Code install/auth.
 - Documentation index at `docs/README.md`.
+- `bun run screenshots:capture` regenerates the README and marketing screenshots from seeded demo data in an isolated temp root.
 - Drift test (`scripts/env-docs-drift.test.ts`) checking that every `F5_*`/`T3CODE_*` variable in `turbo.json` `globalEnv` is documented in `docs/environment.md`.
 - Server-authoritative thread pins and snoozes with global pin ordering, durable expiry, wake
   predicates, and one-time migration of legacy browser-local pins.
@@ -146,6 +151,7 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 
 ### Fixed
 
+- `scripts/run-demo.ts` no longer deletes a caller-chosen directory or inherits provider credentials.
 - Telemetry is off unless `T3CODE_POSTHOG_KEY` is set. Builds without a key no longer create an anonymous id, open an HTTP client or send heartbeats.
 - Streaming assistant replies no longer re-read every message in the thread for each delta; the projection reads only the affected row, so long threads stay responsive while a reply streams. A message row owned by another thread is never overwritten.
 - Code blocks no longer crash with a React hook-order error when a highlighted block is shown again from cache, and two different code blocks can no longer share a cached highlight.
@@ -218,7 +224,7 @@ All notable changes to F5 are documented here. The format is based on [Keep a Ch
 - **Breaking:** the web server now binds to `127.0.0.1` by default. Remote deployments must set an
   explicit non-loopback `--host`, use an authentication token of at least 24 bytes, and provide
   encrypted transport through a private network or HTTPS/WSS reverse proxy.
-- README rewritten with user-first framing (download links, explicit provider auth commands, install/run matrix).
+- README rewritten for the current feature set (seven providers, four workflow types, thread workspace, PR hub, usage) with regenerated screenshots, plus new workflow, thread and agent-tool guides and a docs index.
 - `CONTRIBUTING.md` restructured so "how to run / test / ship" appears before the triage policy.
 - `AGENTS.md` adds a Repository map section and now mentions both Codex and Claude Code.
 - `docs/release.md` updated to reference the `lopes-felipe/f5` repo and document the legacy `t3`/`T3CODE_*` identifier policy.

@@ -19,7 +19,7 @@ Supported fields:
 
 The `$schema` value is metadata only. F5 never downloads it. Configuration and icon files have
 strict size limits, cannot be symbolic links, and are authorized against the registered project
-root. Malformed fields are reported individually in Settings → Projects, while other valid fields
+root. Malformed fields are reported individually in the **Project** category of that project's settings (choose the project with the **Global › Project** selector), while other valid fields
 continue to apply.
 
 Executable `scripts` and MCP server definitions are deliberately ignored until an explicit

@@ -16,6 +16,8 @@
 - `bun run test:full` — Runs the fast workspace suite followed by the exhaustive real-Git matrix; required before declaring work complete, releases, and after major Git subsystem changes.
 - `bun run perf:server` — Records the deterministic server component performance suite; `--smoke` checks the harness with fewer repetitions. See [performance scope and gates](performance.md).
 - `bun run perf:compare <before.json> <after.json> [CPU targets...]` — Checks matching server reports against the approved regression and resource limits.
+- `bun run screenshots:capture [-- --skip-build]`: Builds the server and web app, seeds demo data into a fresh temp directory with an isolated HOME, and regenerates the README screenshots and the marketing hero image. Requires Playwright's Chromium (`bun run --cwd apps/web test:browser:install`).
+- `bun run scripts/run-demo.ts [--skip-build]`: Builds the desktop app, seeds the same demo data into a fresh temp root (never reused or deleted) and launches the desktop app on it, for manual screenshots of desktop-only surfaces such as the Preview browser.
 - `bun run dist:desktop:artifact -- --platform <mac|linux|win> --target <target> --arch <arch>` — Builds a desktop artifact for a specific platform/target/arch.
 - `bun run dist:desktop:dmg` — Builds a shareable macOS `.dmg` into `./release`.
 - `bun run dist:desktop:dmg:x64` — Builds an Intel macOS `.dmg`.

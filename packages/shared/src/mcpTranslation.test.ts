@@ -74,6 +74,15 @@ describe("mcpTranslation", () => {
     });
   });
 
+  it.each([{ enabledTools: [] }, { enabledTools: [" ", "\t"] }])(
+    "treats an empty enabled-tools list as no allowlist: %j",
+    ({ enabledTools }) => {
+      expect(
+        translateMcpForCodex({ shell: { type: "stdio", command: "node", enabledTools } })?.shell,
+      ).not.toHaveProperty("enabled_tools");
+    },
+  );
+
   it("reads the shared enabled Codex OAuth callback port", () => {
     expect(
       readCodexMcpOAuthCallbackPort({

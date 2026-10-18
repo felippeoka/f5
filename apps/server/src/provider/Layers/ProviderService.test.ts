@@ -2,7 +2,7 @@ import { withWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycl
 import { withProviderThreadAccess } from "../providerThreadAccess.ts";
 import { Deferred } from "effect";
 import { ServerSettingsService } from "../../serverSettings";
-import { beginAccountChange } from "../../profiles/ProviderAccountGuard.ts";
+import { beginAccountChange, beginProviderUpdate } from "../../profiles/ProviderAccountGuard.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -18,6 +18,7 @@ import type {
 import {
   ApprovalRequestId,
   EventId,
+  ProviderDriverKind,
   ProjectId,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   type ProviderKind,
@@ -46,6 +47,7 @@ import {
   ProviderAdapterRegistry,
   type ProviderAdapterRegistryShape,
 } from "../Services/ProviderAdapterRegistry.ts";
+import type { ProviderInstallTarget } from "../providerInstallChannel.ts";
 import { ProviderService } from "../Services/ProviderService.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import { makeProviderServiceLive, type ProviderServiceLiveOptions } from "./ProviderService.ts";
@@ -76,7 +78,9 @@ const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
 const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
 
-function makeProjectMcpConfigServiceTestLayer() {
+function makeProjectMcpConfigServiceTestLayer(
+  servers: import("@t3tools/contracts").McpProjectServersConfig = {},
+) {
   return Layer.succeed(ProjectMcpConfigService, {
     readCommonStoredConfig: () =>
       Effect.succeed({
@@ -97,7 +101,7 @@ function makeProjectMcpConfigServiceTestLayer() {
         commonVersion: "mcp-version-test",
         projectVersion: "mcp-version-test",
         effectiveVersion: "mcp-version-test",
-        servers: {},
+        servers,
       }),
     readCommonConfig: () =>
       Effect.succeed({
@@ -386,6 +390,7 @@ function makeProviderServiceLayer(options?: ProviderServiceLiveOptions) {
 function makeProviderServiceLayerForAdapters(
   adaptersByProvider: ReadonlyMap<ProviderKind, ProviderAdapterShape<ProviderAdapterError>>,
   overrides: Partial<ProviderAdapterRegistryShape> = {},
+  servers: import("@t3tools/contracts").McpProjectServersConfig = {},
 ) {
   const registry = {
     ...makeAdapterRegistryMock(Object.fromEntries(adaptersByProvider) as KindAdapterMap),
@@ -402,7 +407,7 @@ function makeProviderServiceLayerForAdapters(
       Layer.provide(providerServiceConfigLayer),
       Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
       Layer.provide(directoryLayer),
-      Layer.provide(makeProjectMcpConfigServiceTestLayer()),
+      Layer.provide(makeProjectMcpConfigServiceTestLayer(servers)),
       Layer.provideMerge(AnalyticsService.layerTest),
     ),
     directoryLayer,
@@ -3018,6 +3023,141 @@ it.effect(
       assert.ok((yield* Fiber.join(pending)).turnId);
     }).pipe(
       Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]))),
+    );
+  },
+);
+
+it.effect("reports invalid stored reload config per target without invoking an adapter", () => {
+  const codex = makeFakeCodexAdapter();
+  const servers = Object.fromEntries(
+    Array.from({ length: 33 }, (_, i) => [
+      `legacy-${i}`,
+      { type: "stdio" as const, command: "node" },
+    ]),
+  );
+  const layer = makeProviderServiceLayerForAdapters(
+    new Map([["codex", codex.adapter]]),
+    {},
+    servers,
+  );
+  return Effect.gen(function* () {
+    const service = yield* ProviderService;
+    const directory = yield* ProviderSessionDirectory;
+    const threadId = asThreadId("invalid-reload-config");
+    const projectId = ProjectId.makeUnsafe("invalid-reload-project");
+    yield* directory.upsert({
+      threadId,
+      projectId,
+      provider: "codex",
+      status: "running",
+      mcpEffectiveConfigVersion: "old",
+    });
+    const outcome = yield* service.reloadMcpConfigForProject({ provider: "codex", projectId });
+    assert.equal(outcome.sessions.length, 1);
+    assert.equal(outcome.sessions[0]?.result.converged, false);
+    assert.include(outcome.sessions[0]?.result.errors[0]?.message, "32-server limit");
+    assert.equal(codex.reloadMcpConfig.mock.calls.length, 0);
+    const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+    assert.equal(binding?.mcpEffectiveConfigVersion, "old");
+  }).pipe(Effect.provide(layer));
+});
+
+it.effect(
+  "rejects starts, recovery and sends for both known instances and new physical aliases during an update",
+  () => {
+    const fake = makeFakeCodexAdapter();
+    let targetAvailable = true;
+    const physical: ProviderInstallTarget = {
+      channel: "self-update",
+      executablePath: "/cli",
+      realPath: "/versions/1.0.0",
+      installKey: "shared-install",
+      updateEnvironment: {},
+      latestSource: null,
+      sourceKey: null,
+      guidance: "test",
+    };
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const known = ProviderInstanceId.make("codex");
+      const alias = ProviderInstanceId.make("codex-alias");
+      const first = asThreadId("update-first");
+      const second = asThreadId("update-alias");
+      for (const [threadId, providerInstanceId] of [
+        [first, known],
+        [second, alias],
+      ] as const)
+        yield* service.startSession(threadId, {
+          threadId,
+          providerInstanceId,
+          runtimeMode: "full-access",
+        });
+      const release = beginProviderUpdate(
+        path.join(os.tmpdir(), `f5-provider-service-tests-${process.pid}`),
+        physical.installKey,
+        [known],
+      );
+      try {
+        for (const threadId of [first, second]) {
+          const failure = yield* service
+            .sendTurn({ threadId, input: "must wait", attachments: [] })
+            .pipe(Effect.flip);
+          assert.match(failure.message, /update in progress/);
+        }
+        const failure = yield* service
+          .startSession(asThreadId("update-new"), {
+            threadId: asThreadId("update-new"),
+            providerInstanceId: alias,
+            runtimeMode: "full-access",
+          })
+          .pipe(Effect.flip);
+        assert.match(failure.message, /update in progress/);
+        // Stopped bindings ordinarily recover; the gate must reject before launching a replacement.
+        yield* service.stopSession({ threadId: second });
+        assert.match(
+          (yield* service
+            .sendTurn({ threadId: second, input: "recover", attachments: [] })
+            .pipe(Effect.flip)).message,
+          /update in progress/,
+        );
+        targetAvailable = false;
+        const unresolved = yield* service
+          .startSession(asThreadId("update-missing-alias"), {
+            threadId: asThreadId("update-missing-alias"),
+            providerInstanceId: alias,
+            runtimeMode: "full-access",
+          })
+          .pipe(Effect.flip);
+        assert.match(
+          unresolved.message,
+          /Could not identify this installation while a provider update is running/,
+        );
+        assert.equal(fake.sendTurn.mock.calls.length, 0);
+        assert.equal(fake.startSession.mock.calls.length, 2);
+      } finally {
+        release();
+        targetAvailable = true;
+      }
+      yield* service.sendTurn({ threadId: second, input: "after update", attachments: [] });
+      assert.equal(fake.sendTurn.mock.calls.length, 1);
+    }).pipe(
+      Effect.provide(
+        makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]), {
+          getByInstance: () => Effect.succeed(fake.adapter),
+          getInstanceInfo: (instanceId) =>
+            Effect.succeed({
+              instanceId,
+              driverKind: ProviderDriverKind.make("codex"),
+              displayName: "Codex",
+              enabled: true,
+              continuationIdentity: {
+                driverKind: ProviderDriverKind.make("codex"),
+                continuationKey: String(instanceId),
+              },
+              resolveInstallTarget: () => (targetAvailable ? physical : null),
+            }),
+        }),
+      ),
     );
   },
 );

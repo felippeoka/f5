@@ -1,18 +1,38 @@
 # Install F5
 
-Download installers from [GitHub Releases](https://github.com/lopes-felipe/f5/releases/latest). F5 bundles its backend runtime; Node, Bun and a source checkout are unnecessary. Git and your chosen provider CLI are separate prerequisites for using agents; diagnostics remain available if either is missing.
+Download installers from [GitHub Releases](https://github.com/lopes-felipe/f5/releases/latest). F5 bundles its backend runtime; Node, Bun and a source checkout are unnecessary. Git and your chosen provider CLI are separate prerequisites for using agents ([provider prerequisites](provider-prerequisites.md)); diagnostics remain available if either is missing.
+
+This page covers the desktop app. To run F5 in a browser without the desktop app, use the [standalone CLI](user/standalone-cli.md). To build from source, see [Quick start](quick-start.md).
+
+Current availability: Windows x64 is the first stable desktop platform, starting with `v0.1.0`, with in-app updates. If the latest release lists no `F5-<version>-x64.exe`, that first Windows release has not been published yet. macOS Apple Silicon has only the computer use preview below. macOS Intel and Linux desktop builds are not yet available. The `f5` CLI ships for all five targets in every release.
 
 ## macOS
 
-Choose arm64 for Apple Silicon or x64 for Intel. Open the DMG, drag F5 to Applications, eject the disk, then open F5 from Applications. Official releases use Developer ID signing and notarization. Grant Screen Recording and Accessibility when prompted. If launched from a mounted disk or App Translocation, choose Move to Applications to enable updates.
+No stable macOS release exists yet. The [`v0.0.11-computer-use-preview.1`](https://github.com/lopes-felipe/f5/releases/tag/v0.0.11-computer-use-preview.1) preview is Apple Silicon only, unsigned and not notarized, does not update automatically, and replaces F5 (Alpha); follow its release notes. Once stable macOS releases ship, they will use Developer ID signing and notarization: choose arm64 for Apple Silicon or x64 for Intel, open the DMG, drag F5 to Applications, eject the disk, then open F5 from Applications. If launched from a mounted disk or App Translocation, choose Move to Applications to enable updates.
 
 ## Windows
 
-Run the x64 installer. It installs for your user without administrator privileges and adds a Start-menu shortcut. Until Azure Trusted Signing is configured, SmartScreen may show an unknown publisher warning. Verify the download came from this repository before proceeding.
+Run the x64 installer (`F5-<version>-x64.exe`). It installs for your user without administrator privileges and adds a Start-menu shortcut. Windows on ARM is not supported by a native build.
+
+The installer and application are **not code-signed** yet:
+
+- SmartScreen may show "Windows protected your PC" with an unknown publisher. Choose **More info → Run anyway** only after verifying the download. Signing alone also does not guarantee immediate SmartScreen reputation ([Microsoft guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)).
+- Windows 11 Smart App Control in enforcement mode blocks unsigned applications, with no per-app override. F5 cannot be installed there until signed releases ship.
+- Organisation policies (WDAC/App Control, AppLocker, or antivirus rules) may also block unsigned applications.
+
+Verify the installer before running it: compare `Get-FileHash F5-<version>-x64.exe -Algorithm SHA256` with the matching line in the release's `SHA256SUMS`.
+
+Updates install in place through Settings → About. A later signed release updates unsigned installations normally; from then on, F5 verifies that each update is signed by the same publisher.
 
 ## Linux
 
-Download the x64 AppImage, make it executable (`chmod +x F5-*.AppImage`), and open it. Keep the AppImage somewhere writable for updates. Your distribution may require FUSE support for AppImages.
+No desktop build is available yet. Once AppImage releases ship: download the x64 AppImage, make it executable (`chmod +x F5-*.AppImage`), and open it. Keep the AppImage somewhere writable for updates. Your distribution may require FUSE support for AppImages.
+
+## Optional: computer use on macOS
+
+Screen Recording and Accessibility are only needed for the opt-in, uncertified computer use
+preview. Grant them in System Settings when you turn that preview on; see
+[agent browser and computer use](agent-browser.md).
 
 ## Upgrade from F5 (Alpha)
 
@@ -20,7 +40,7 @@ The unsigned `v0.0.11-computer-use-preview.1` preview does not support an in-pla
 
 On Windows, the new app identity installs alongside F5 (Alpha). Quit the old application, install and launch F5 to import settings, and verify your data before uninstalling F5 (Alpha) from Settings → Apps → Installed apps. Keep the legacy settings directory until the import is verified. Always use the new F5 Start-menu entry afterward.
 
-Screen Recording and Accessibility must be granted again. On macOS and Linux, preview-browser sign-ins may need to be redone: Chromium Safe Storage uses the application name in Keychain/libsecret, and F5 does not copy that secret across identities. The profile copy preserves localStorage and IndexedDB but does not promise decryptable cookies. Windows also copies `Local State`, which contains its encrypted profile key. F5 and upstream T3 Code can run independently after import.
+If you use computer use, Screen Recording and Accessibility must be granted again. On macOS and Linux, preview-browser sign-ins may need to be redone: Chromium Safe Storage uses the application name in Keychain/libsecret, and F5 does not copy that secret across identities. The profile copy preserves localStorage and IndexedDB but does not promise decryptable cookies. Windows also copies `Local State`, which contains its encrypted profile key. F5 and upstream T3 Code can run independently after import.
 
 An existing nonempty `f5` Chromium profile is preserved even if it has no migration marker. An empty folder (or one containing only `.DS_Store`, `Thumbs.db`, or `desktop.ini`) pre-created by Electron is eligible for import; F5 never replaces a populated profile solely because a marker is missing.
 

@@ -9,9 +9,10 @@ import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
-import { verifyStagedLockfile } from "./verify-staged-lockfile.ts";
+import { seedStagedLockfile, verifyStagedLockfile } from "./verify-staged-lockfile.ts";
+import { RELEASE_UPDATE_REPOSITORY, verifyAppUpdateConfig } from "./lib/app-update-config.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
-import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
+import { stagedDesktopDependencies } from "./lib/desktop-stage.ts";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -181,6 +182,7 @@ interface StagePackageJson {
   readonly devDependencies: {
     readonly electron: string;
   };
+  readonly overrides?: Record<string, string>;
 }
 
 const AzureTrustedSigningOptionsConfig = Config.all({
@@ -405,54 +407,7 @@ function validateBundledClientAssets(clientDir: string) {
   });
 }
 
-function resolveDesktopRuntimeDependencies(
-  dependencies: Record<string, unknown> | undefined,
-  catalog: Record<string, unknown>,
-): Record<string, unknown> {
-  if (!dependencies || Object.keys(dependencies).length === 0) {
-    return {};
-  }
-
-  const runtimeDependencies = Object.fromEntries(
-    Object.entries(dependencies).filter(([dependencyName]) => dependencyName !== "electron"),
-  );
-
-  return resolveCatalogDependencies(runtimeDependencies, catalog, "apps/desktop");
-}
-
-function resolveFffBinaryDependencies(
-  platform: typeof BuildPlatform.Type,
-  arch: typeof BuildArch.Type,
-  version: unknown,
-): Record<string, unknown> {
-  if (typeof version !== "string" || version.length === 0) {
-    return {};
-  }
-
-  const architectures = arch === "universal" ? (["arm64", "x64"] as const) : ([arch] as const);
-  if (platform === "mac") {
-    return Object.fromEntries(
-      architectures.map((architecture) => [`@ff-labs/fff-bin-darwin-${architecture}`, version]),
-    );
-  }
-
-  if (platform === "win") {
-    return Object.fromEntries(
-      architectures.map((architecture) => [`@ff-labs/fff-bin-win32-${architecture}`, version]),
-    );
-  }
-
-  return Object.fromEntries(
-    architectures.flatMap((architecture) =>
-      (["gnu", "musl"] as const).map((libc) => [
-        `@ff-labs/fff-bin-linux-${architecture}-${libc}`,
-        version,
-      ]),
-    ),
-  );
-}
-
-function resolveGitHubPublishConfig():
+function resolveGitHubPublishConfig(release: boolean):
   | {
       readonly provider: "github";
       readonly owner: string;
@@ -461,10 +416,12 @@ function resolveGitHubPublishConfig():
       readonly channel: string;
     }
   | undefined {
-  const rawRepo =
-    process.env.T3CODE_DESKTOP_UPDATE_REPOSITORY?.trim() ||
-    process.env.GITHUB_REPOSITORY?.trim() ||
-    "";
+  // Versioned builds always bake the production feed; the override only serves local builds.
+  const rawRepo = release
+    ? RELEASE_UPDATE_REPOSITORY
+    : process.env.T3CODE_DESKTOP_UPDATE_REPOSITORY?.trim() ||
+      process.env.GITHUB_REPOSITORY?.trim() ||
+      "";
   if (!rawRepo) return undefined;
 
   const [owner, repo, ...rest] = rawRepo.split("/");
@@ -484,7 +441,14 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   target: string,
   productName: string,
   signed: boolean,
+  release: boolean,
 ) {
+  const repositoryOverride = process.env.T3CODE_DESKTOP_UPDATE_REPOSITORY?.trim();
+  if (release && repositoryOverride && repositoryOverride !== RELEASE_UPDATE_REPOSITORY) {
+    return yield* new BuildScriptError({
+      message: `Versioned builds use the ${RELEASE_UPDATE_REPOSITORY} update feed; unset T3CODE_DESKTOP_UPDATE_REPOSITORY (${repositoryOverride}).`,
+    });
+  }
   const buildConfig: Record<string, unknown> = {
     appId: "io.github.lopesfelipe.f5",
     electronFuses: {
@@ -507,9 +471,13 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       buildResources: "apps/desktop/resources",
     },
   };
-  const publishConfig = resolveGitHubPublishConfig();
+  const publishConfig = resolveGitHubPublishConfig(release);
   if (publishConfig) {
     buildConfig.publish = [publishConfig];
+  } else if (release) {
+    return yield* new BuildScriptError({
+      message: "Versioned builds require a resolved update feed.",
+    });
   }
 
   if (platform === "mac") {
@@ -564,6 +532,12 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     };
     if (signed) {
       winConfig.azureSignOptions = yield* AzureTrustedSigningOptionsConfig;
+    } else {
+      // `signAndEditExecutable: false` would also skip rcedit and drop the icon and
+      // version metadata. Without a publisherName, updates skip signature checks;
+      // the first signed release embeds one for all later updates.
+      winConfig.signExecutable = false;
+      winConfig.verifyUpdateCodeSignature = false;
     }
     buildConfig.win = winConfig;
     buildConfig.nsis = {
@@ -614,35 +588,18 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   const electronVersion = desktopPackageJson.dependencies.electron;
 
-  const serverDependencies = serverPackageJson.dependencies;
-  if (!serverDependencies || Object.keys(serverDependencies).length === 0) {
-    return yield* new BuildScriptError({
-      message: "Could not resolve production dependencies from apps/server/package.json.",
-    });
-  }
-
-  const resolvedServerDependencies = yield* Effect.try({
+  const stagedDependencies = yield* Effect.try({
     try: () =>
-      resolveCatalogDependencies(
-        serverDependencies,
-        rootPackageJson.workspaces.catalog,
-        "apps/server",
-      ),
-    catch: (cause) =>
-      new BuildScriptError({
-        message: "Could not resolve production dependencies from apps/server/package.json.",
-        cause,
+      stagedDesktopDependencies({
+        platform: options.platform,
+        arch: options.arch,
+        serverDependencies: serverPackageJson.dependencies ?? {},
+        desktopDependencies: desktopPackageJson.dependencies,
+        catalog: rootPackageJson.workspaces.catalog,
       }),
-  });
-  const resolvedDesktopRuntimeDependencies = yield* Effect.try({
-    try: () =>
-      resolveDesktopRuntimeDependencies(
-        desktopPackageJson.dependencies,
-        rootPackageJson.workspaces.catalog,
-      ),
     catch: (cause) =>
       new BuildScriptError({
-        message: "Could not resolve desktop runtime dependencies from apps/desktop/package.json.",
+        message: `Could not resolve staged desktop dependencies: ${String(cause)}`,
         cause,
       }),
   });
@@ -752,45 +709,49 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       options.target,
       desktopPackageJson.productName ?? "F5",
       options.signed,
+      options.version !== undefined,
     ),
-    dependencies: {
-      ...resolvedServerDependencies,
-      ...resolveFffBinaryDependencies(
-        options.platform,
-        options.arch,
-        serverPackageJson.dependencies["@ff-labs/fff-node"],
-      ),
-      ...resolvedDesktopRuntimeDependencies,
-    },
+    dependencies: stagedDependencies,
     devDependencies: {
       electron: electronVersion,
     },
+    ...(rootPackageJson.overrides ? { overrides: rootPackageJson.overrides } : {}),
   };
 
   const stagePackageJsonString = yield* encodeJsonString(stagePackageJson);
   yield* fs.writeFileString(path.join(stageAppDir, "package.json"), `${stagePackageJsonString}\n`);
 
-  yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
-  yield* runCommand(
-    ChildProcess.make({
-      cwd: stageAppDir,
-      env: withoutSigningCredentials(process.env),
-      extendEnv: false,
-      ...commandOutputOptions(options.verbose),
-      // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
-      shell: process.platform === "win32",
-    })`bun install --production`,
+  const stagedBun = (args: TemplateStringsArray) =>
+    runCommand(
+      ChildProcess.make({
+        cwd: stageAppDir,
+        env: withoutSigningCredentials(process.env),
+        extendEnv: false,
+        ...commandOutputOptions(options.verbose),
+        // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
+        shell: process.platform === "win32",
+      })(args),
+    );
+  // `bun install --production` never saves a lockfile, so resolve one first and
+  // audit it before anything is installed or any install script runs. Seeding the
+  // stage with the root lock keeps every root-locked version, including nested
+  // duplicates, instead of re-resolving the manifest's ranges against the registry.
+  const rootLock = requireReadLock(path.join(repoRoot, "bun.lock"), "utf8");
+  yield* fs.writeFileString(
+    path.join(stageAppDir, "bun.lock"),
+    seedStagedLockfile(rootLock, stagePackageJson),
   );
+  yield* Effect.log("[desktop-artifact] Resolving staged dependencies...");
+  yield* stagedBun`bun install --lockfile-only --ignore-scripts`;
 
   yield* Effect.try({
     try: () =>
-      verifyStagedLockfile(
-        requireReadLock(path.join(repoRoot, "bun.lock"), "utf8"),
-        requireReadLock(path.join(stageAppDir, "bun.lock"), "utf8"),
-      ),
+      verifyStagedLockfile(rootLock, requireReadLock(path.join(stageAppDir, "bun.lock"), "utf8")),
     catch: (error) =>
       new BuildScriptError({ message: `Staged dependency audit failed: ${String(error)}` }),
   });
+  yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
+  yield* stagedBun`bun install --production --frozen-lockfile`;
   yield* fs.makeDirectory(options.outputDir, { recursive: true });
   yield* fs.copyFile(
     path.join(stageAppDir, "bun.lock"),
@@ -812,6 +773,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     delete buildEnv.APPLE_API_KEY;
     delete buildEnv.APPLE_API_KEY_ID;
     delete buildEnv.APPLE_API_ISSUER;
+    // A stray Windows certificate would otherwise sign and embed a publisherName.
+    delete buildEnv.WIN_CSC_LINK;
+    delete buildEnv.WIN_CSC_KEY_PASSWORD;
   }
 
   if (process.platform === "win32") {
@@ -820,34 +784,42 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       buildEnv.PYTHON = python;
       buildEnv.npm_config_python = python;
     }
-    buildEnv.npm_config_msvs_version = buildEnv.npm_config_msvs_version ?? "2022";
-    buildEnv.GYP_MSVS_VERSION = buildEnv.GYP_MSVS_VERSION ?? "2022";
+    // Let node-gyp pick the newest supported Visual Studio: pinning a year rejects
+    // every other install, and windows-latest now ships only VS 2026.
   }
 
   yield* Effect.log(
     `[desktop-artifact] Building ${options.platform}/${options.target} (arch=${options.arch}, version=${appVersion})...`,
   );
-  const electronBuilderExecutable = path.join(
-    repoRoot,
-    "node_modules",
-    ".bin",
-    process.platform === "win32" ? "electron-builder.cmd" : "electron-builder",
-  );
-  if (!(yield* fs.exists(electronBuilderExecutable))) {
+  // Run the pinned package's own entry point with this Node instead of a
+  // node_modules/.bin shim: bun creates no .cmd shims on Windows, and this
+  // avoids shell mode on every platform.
+  const electronBuilderPackage = path.join(repoRoot, "node_modules", "electron-builder");
+  const electronBuilderCli = path.join(electronBuilderPackage, "cli.js");
+  const installedElectronBuilder = yield* fs
+    .readFileString(path.join(electronBuilderPackage, "package.json"))
+    .pipe(
+      Effect.map((text) => (JSON.parse(text) as { version?: string }).version),
+      Effect.catch(() => Effect.succeed(undefined)),
+    );
+  if (
+    installedElectronBuilder !== rootPackageJson.devDependencies["electron-builder"] ||
+    !(yield* fs.exists(electronBuilderCli))
+  ) {
     return yield* new BuildScriptError({
-      message: `Pinned electron-builder executable was not found at ${electronBuilderExecutable}. Run bun install first.`,
+      message: `Pinned electron-builder ${rootPackageJson.devDependencies["electron-builder"]} was not found at ${electronBuilderPackage} (found ${installedElectronBuilder ?? "none"}). Run bun install first.`,
     });
   }
   yield* runCommand(
     ChildProcess.make(
-      electronBuilderExecutable,
-      [platformConfig.cliFlag, `--${options.arch}`, "--publish", "never"],
+      process.execPath,
+      [electronBuilderCli, platformConfig.cliFlag, `--${options.arch}`, "--publish", "never"],
       {
         cwd: stageAppDir,
         env: buildEnv,
-        ...commandOutputOptions(options.verbose),
-        // This is a repository-pinned, input-free .cmd shim on Windows.
-        shell: process.platform === "win32",
+        // electron-builder reports its errors on stdout, so never hide it.
+        stdout: "inherit",
+        stderr: "inherit",
       },
     ),
   );
@@ -856,6 +828,34 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   if (!(yield* fs.exists(stageDistDir))) {
     return yield* new BuildScriptError({
       message: `Build completed but dist directory was not found at ${stageDistDir}`,
+    });
+  }
+
+  if (options.platform === "win" && options.version !== undefined) {
+    const unpacked = options.arch === "x64" ? "win-unpacked" : `win-${options.arch}-unpacked`;
+    const appUpdatePath = path.join(stageDistDir, unpacked, "resources", "app-update.yml");
+    const appUpdate = yield* fs.readFileString(appUpdatePath).pipe(
+      Effect.mapError(
+        (cause) =>
+          new BuildScriptError({
+            message: `Packaged update feed missing at ${appUpdatePath}`,
+            cause,
+          }),
+      ),
+    );
+    yield* Effect.try({
+      try: () =>
+        verifyAppUpdateConfig(appUpdate, {
+          channel: process.env.T3CODE_DESKTOP_UPDATE_CHANNEL || "latest",
+          publisherName: options.signed
+            ? process.env.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME
+            : undefined,
+        }),
+      catch: (cause) =>
+        new BuildScriptError({
+          message: `Packaged update feed is invalid: ${String(cause)}`,
+          cause,
+        }),
     });
   }
 

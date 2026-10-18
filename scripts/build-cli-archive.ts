@@ -36,10 +36,11 @@ export async function buildCliArchive(options: {
   ) as { version: string; target: string };
   if (runtime.version !== CLI_NODE_VERSION || runtime.target !== target)
     throw new Error(`Build requires Node ${CLI_NODE_VERSION} for ${target}.`);
-  const run = (command: string, args: string[], cwd = repo) => {
+  const run = (command: string, args: string[], cwd = repo, timeout?: number) => {
     const result = spawnSync(command, args, {
       cwd,
       stdio: "inherit",
+      timeout,
       env: {
         ...process.env,
         PATH: `${path.dirname(node)}${path.delimiter}${process.env.PATH ?? ""}`,
@@ -111,12 +112,10 @@ export async function buildCliArchive(options: {
       node,
       [
         path.join(repo, "apps/server/node_modules/tsdown/dist/run.mjs"),
-        "src/distribution/launcherEntry.ts",
-        "--format",
-        "cjs",
+        "--config",
+        "tsdown.launcher.config.ts",
         "--out-dir",
         path.join(temporary, "launcher"),
-        "--no-config",
       ],
       path.join(repo, "apps/server"),
     );
@@ -202,7 +201,8 @@ export async function buildCliArchive(options: {
         }
       }
     }
-    run(executable, ["runtime-preflight"], stage);
+    // Fail fast on a hang instead of at the job timeout; installs allow it 30 seconds.
+    run(executable, ["runtime-preflight"], stage, 60_000);
     await fs.rm(path.join(stage, "node_modules/.bin"), { recursive: true, force: true });
     const archive = path.join(output, `${stem}.tar.gz`);
     // Dereference build-store links. Runtime extraction permits regular files/directories only.

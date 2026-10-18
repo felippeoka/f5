@@ -1,6 +1,6 @@
 # Claude
 
-This guide is for people who want to use more than one Claude setup in T3 Code.
+This guide is for people who want to use more than one Claude setup in F5.
 
 Common reasons:
 
@@ -19,7 +19,7 @@ Log in with Claude Code normally:
 claude auth login
 ```
 
-In T3 Code Settings, your Claude provider can stay like this:
+In F5 Settings, your Claude provider can stay like this:
 
 ```text
 Display name: Claude
@@ -28,7 +28,7 @@ Claude HOME path: empty
 ```
 
 The default `claude` binary setting selects the executable bundled with the Claude Agent SDK; it
-does not require a global `claude` command on `PATH`. An empty `Claude HOME path` means T3 Code uses
+does not require a global `claude` command on `PATH`. An empty `Claude HOME path` means F5 uses
 your normal home directory.
 
 F5 pins Claude Agent SDK 0.3.295, which bundles Claude Code v2.1.295. Claude Fable 5.1
@@ -103,7 +103,7 @@ Log in normally:
 claude auth login
 ```
 
-In T3 Code Settings:
+In F5 Settings:
 
 ```text
 Display name: Claude Work
@@ -120,7 +120,7 @@ mkdir -p ~/.claude_personal_home
 HOME=~/.claude_personal_home claude auth login
 ```
 
-Then add another Claude provider in T3 Code:
+Then add another Claude provider in F5:
 
 ```text
 Display name: Claude Personal
@@ -135,11 +135,11 @@ blurred by default; click the blurred email to reveal it.
 
 Usually, no.
 
-T3 Code only offers Claude providers that use the same Claude home for an existing thread. A
+F5 only offers Claude providers that use the same Claude home for an existing thread. A
 different Claude home is treated as a different Claude environment.
 
 This is different from the recommended Codex setup. Claude Code keeps account and local state across
-multiple files under its home directory, so T3 Code keeps separate Claude homes isolated instead of
+multiple files under its home directory, so F5 keeps separate Claude homes isolated instead of
 trying to share part of the state.
 
 ## I Want To Use OpenRouter
@@ -152,7 +152,7 @@ variables.
 
 ### Configure A Claude OpenRouter Provider
 
-Add or edit a Claude provider in T3 Code Settings:
+Add or edit a Claude provider in F5 Settings:
 
 ```text
 Display name: Claude OpenRouter
@@ -168,7 +168,7 @@ ANTHROPIC_AUTH_TOKEN sk-or-...                Sensitive
 ANTHROPIC_API_KEY                              Empty value
 ```
 
-Mark `ANTHROPIC_AUTH_TOKEN` as sensitive. T3 Code stores the value as a server secret and does not
+Mark `ANTHROPIC_AUTH_TOKEN` as sensitive. F5 stores the value as a server secret and does not
 send it back to the app after saving.
 
 If you want this setup isolated from your normal Claude account, create that home first:
@@ -227,7 +227,7 @@ OpenRouter's setup can change over time. Use its upstream Claude Code guide for 
 Claude Code Router is useful when you want a local routing layer with more control than a direct
 OpenRouter setup.
 
-T3 Code does not need a special Claude Code Router provider. Treat the router as a Claude
+F5 does not need a special Claude Code Router provider. Treat the router as a Claude
 environment.
 
 Use this when you want Claude Code Router to decide which upstream model or provider handles Claude
@@ -236,7 +236,7 @@ requests.
 High-level flow:
 
 1. Start Claude Code Router.
-2. Add or configure a Claude provider in T3 Code.
+2. Add or configure a Claude provider in F5.
 3. Put the router's required variables on that provider instance.
 
 Configure a Claude provider:
@@ -321,6 +321,10 @@ no additional Claude process. Larger histories still need representative latency
 refresh feels slow.
 
 ### Isolated profiles
+
+Provider instances and profiles solve different problems. Instances are several Claude entries in
+Settings → Providers inside one profile, each with its own Claude home. A profile is a separate F5
+environment with its own projects, threads and accounts.
 
 Use [Profiles](../profiles.md) for independent managed Claude accounts and in-app login. Isolated profiles use the certified bundled executable and a complete home environment on Windows. The real-provider release gate includes macOS keychain separation.
 
