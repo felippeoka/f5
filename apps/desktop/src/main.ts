@@ -3110,7 +3110,9 @@ async function stopBackendAndWaitForExit(
     }
 
     backendChild.once("exit", onExit);
-    killProcessTree(backendChild, { isGroupLeader: false, graceful: true });
+    writeDesktopLogHeader(`backend stop: killing process tree pid=${backendChild.pid}`);
+    const killed = killProcessTree(backendChild, { isGroupLeader: false, graceful: true });
+    writeDesktopLogHeader(`backend stop: kill returned ${JSON.stringify(killed)}`);
 
     forceKillTimer = setTimeout(() => {
       if (backendChild.exitCode === null && backendChild.signalCode === null) {
@@ -3994,10 +3996,12 @@ function cancelQuit(): void {
 }
 
 async function cleanupBeforeExit(): Promise<void> {
+  writeDesktopLogHeader("cleanup: closing computer control");
   computerSystem?.channel.close();
   computerSystem?.controller.close();
   computerSystem?.overlay.close();
   computerSystem?.helper.close();
+  writeDesktopLogHeader("cleanup: stopping backends and preview");
   clearUpdatePollTimer();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
