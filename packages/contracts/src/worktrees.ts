@@ -59,7 +59,7 @@ export type WorktreesThreadStateResult = typeof WorktreesThreadStateResult.Type;
 export const WorktreesRecoverInput = Schema.Struct({
   threadId: ThreadId,
   expectedQueueRevision: NonNegativeInt,
-  action: Schema.Literals(["recreate", "recreateFromBase", "useProjectCheckout"]),
+  action: Schema.Literals(["recreate", "recreateFromBase", "useProjectCheckout", "cancel"]),
 });
 export type WorktreesRecoverInput = typeof WorktreesRecoverInput.Type;
 export const WorktreesRecoverResult = WorktreesThreadStateResult;

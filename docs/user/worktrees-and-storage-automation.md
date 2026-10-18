@@ -162,3 +162,12 @@ Initialized submodules also block worktree removal, including rollback after fai
 Preserve any submodule work and deinitialize the submodules before retrying removal. F5 does not
 force removal of these checkouts. A failed or interrupted recovery keeps its retry controls visible
 even when the checkout has already been created; retry preparation or continue in the project checkout.
+
+Recovery reserves an execution barrier before stopping the idle session. Setup preparation has a
+ten-minute timeout and a **Cancel preparation** action; cancellation keeps the checkout and the
+recovery barrier for explicit retry. Setup activities record the final output lines for diagnosis.
+Interrupted recovery remains visible even after switching the conversation to the project checkout.
+
+Idle linked conversations alone do not block removal, but an open provider session does, including
+a ready session between turns. Stop that session before retrying removal. Legacy setup snapshots
+without a verified checkout commit cannot prove rollback ownership, so their checkout is retained.

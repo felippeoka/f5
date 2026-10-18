@@ -556,6 +556,7 @@ for (const scenario of [
   "missing-ref",
   "checked-out-elsewhere",
   "repository-busy",
+  "inspection-error",
 ] as const) {
   it.effect(`handles a missing worktree before queue dispatch: ${scenario}`, () => {
     const target = path.join(os.tmpdir(), `f5-missing-${crypto.randomUUID()}`);
@@ -572,8 +573,19 @@ for (const scenario of [
         isMain: false,
       }));
     let busy = scenario === "repository-busy";
+    let unreadable = scenario === "inspection-error";
     const git = makeFakeGitCore({
-      listWorktrees: () => registration().pipe(Effect.map((entry) => [entry])),
+      listWorktrees: () =>
+        unreadable
+          ? Effect.fail(
+              new GitCommandError({
+                operation: "inspect",
+                cwd: target,
+                command: "git worktree list",
+                detail: "unreadable metadata",
+              }),
+            )
+          : registration().pipe(Effect.map((entry) => [entry])),
       inspectCheckout: () =>
         Effect.gen(function* () {
           const entry = yield* registration();
@@ -635,6 +647,28 @@ for (const scenario of [
       if (scenario === "recoverable") {
         assert.equal(dispatched.length, 1);
         assert.equal(git.calls.ensureWorktree.length, 1);
+      } else if (scenario === "inspection-error") {
+        assert.equal(queue.state.paused, false);
+        // Reading snapshots must not consume the worker's bounded retry budget.
+        for (let i = 0; i < 10; i++) yield* dispatcher.getSnapshot(threadId);
+        for (let i = 0; i < 4; i++) {
+          yield* dispatcher.notify(threadId);
+          yield* dispatcher.drain;
+        }
+        const store = yield* NextTurnQueueStore;
+        const paused = yield* store.listByThread(threadId);
+        assert.equal(paused.state.pauseReasonCode, "worktree_missing");
+        assert.equal(paused.state.paused, true);
+        assert.equal(dispatched.length, 0);
+        unreadable = false;
+        yield* store.setPaused({
+          threadId,
+          paused: false,
+          expectedRevision: paused.state.revision,
+        });
+        yield* dispatcher.notify(threadId);
+        yield* dispatcher.drain;
+        assert.equal(dispatched.length, 1);
       } else if (scenario === "repository-busy") {
         assert.equal(dispatched.length, 0);
         assert.equal(queue.state.paused, false);

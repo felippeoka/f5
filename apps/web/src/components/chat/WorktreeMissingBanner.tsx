@@ -25,7 +25,7 @@ export function WorktreeMissingBanner({
   const state = useQuery({
     queryKey: ["worktrees", "threadState", threadId, worktreePath, branch, revision],
     queryFn: () => ensureNativeApi().worktrees.threadState({ threadId }),
-    enabled: queue || Boolean(worktreePath),
+    enabled: true,
     staleTime: 30_000,
   });
   const recover = async (action: WorktreesRecoverInput["action"]) => {
@@ -60,7 +60,10 @@ export function WorktreeMissingBanner({
       </div>
     );
   if (
-    !state.data?.worktreePath ||
+    !state.data ||
+    (!state.data.worktreePath &&
+      state.data.recovery !== "running" &&
+      state.data.recovery !== "interrupted") ||
     (recoveryOnly && state.data.recovery !== "interrupted" && state.data.recovery !== "running") ||
     (!queue &&
       state.data.recovery !== "interrupted" &&
@@ -94,21 +97,27 @@ export function WorktreeMissingBanner({
                 : `This thread's worktree and branch ${data.branch ?? "(unknown)"} are gone.`}
       </p>
       <div className="flex flex-wrap gap-2">
-        {canRecreateOriginal ? (
-          <Button
-            size="sm"
-            disabled={busy || state.data?.recovery === "running"}
-            onClick={() => void recover("recreate")}
-          >
-            {data.recovery === "interrupted" ? "Retry recovery" : "Recreate now"}
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            disabled={busy || recovering || !data.defaultBranch}
-            onClick={() => void recover("recreateFromBase")}
-          >
-            Recreate from {data.defaultBranch ?? "default branch"}
+        {data.worktreePath &&
+          (canRecreateOriginal ? (
+            <Button
+              size="sm"
+              disabled={busy || state.data?.recovery === "running"}
+              onClick={() => void recover("recreate")}
+            >
+              {data.recovery === "interrupted" ? "Retry recovery" : "Recreate now"}
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              disabled={busy || recovering || !data.defaultBranch}
+              onClick={() => void recover("recreateFromBase")}
+            >
+              Recreate from {data.defaultBranch ?? "default branch"}
+            </Button>
+          ))}
+        {recovering && (
+          <Button size="sm" variant="outline" onClick={() => void recover("cancel")}>
+            Cancel preparation
           </Button>
         )}
         <Button

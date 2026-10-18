@@ -2478,17 +2478,20 @@ const makeStorageMaintenance = Effect.gen(function* () {
         const claims = yield* readWorktreeClaims(targetPath).pipe(
           Effect.provideServices(removalServices),
         );
-        yield* stopDeletedWorktreeClaims(claims.deletedThreadIds).pipe(
+        const stopped = yield* stopDeletedWorktreeClaims(claims.deletedThreadIds).pipe(
           Effect.provideServices(removalServices),
-          Effect.mapError(
-            (cause) =>
-              new StorageMaintenanceError({
-                operation: "stopDeletedClaims",
-                message: "Could not stop deleted conversation processes.",
-                cause,
-              }),
-          ),
+          Effect.exit,
         );
+        if (Exit.isFailure(stopped)) {
+          warnings.push(
+            warningFor(
+              targetPath,
+              `Could not stop deleted conversation processes: ${Cause.pretty(stopped.cause)}`,
+            ),
+          );
+          completedTargets += 1;
+          continue;
+        }
         const outcome = yield* withWorktreeLifecycleLock(
           targetPath,
           Effect.gen(function* () {
@@ -2930,17 +2933,20 @@ const makeStorageMaintenance = Effect.gen(function* () {
           const claims = yield* readWorktreeClaims(targetPath).pipe(
             Effect.provideServices(removalServices),
           );
-          yield* stopDeletedWorktreeClaims(claims.deletedThreadIds).pipe(
+          const stopped = yield* stopDeletedWorktreeClaims(claims.deletedThreadIds).pipe(
             Effect.provideServices(removalServices),
-            Effect.mapError(
-              (cause) =>
-                new StorageMaintenanceError({
-                  operation: "stopDeletedClaims",
-                  message: "Could not stop deleted conversation processes.",
-                  cause,
-                }),
-            ),
+            Effect.exit,
           );
+          if (Exit.isFailure(stopped)) {
+            warnings.push(
+              warningFor(
+                targetPath,
+                `Could not stop deleted conversation processes: ${Cause.pretty(stopped.cause)}`,
+              ),
+            );
+            completedTargets += 1;
+            continue;
+          }
           const exit = yield* Effect.exit(
             removeWorktreeSafely({
               projectCwd: commandCwd,

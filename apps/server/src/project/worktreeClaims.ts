@@ -162,14 +162,19 @@ export const readWorktreeClaims = Effect.fn("readWorktreeClaims")(function* (pat
     }
   }
   const liveSessions: Array<{ threadId: string; cwd: string }> = [];
+  const startingBefore = yield* providers.listStartingWorkspaces?.() ?? Effect.succeed([]);
   const providerSessions = yield* providers.listSessions().pipe(
     Effect.orElseSucceed(() => {
       unknown = true;
       return [];
     }),
   );
-  for (const session of providerSessions) {
-    if (session.status === "closed") continue;
+  const startingAfter = yield* providers.listStartingWorkspaces?.() ?? Effect.succeed([]);
+  for (const session of [
+    ...startingBefore,
+    ...providerSessions.filter((session) => session.status !== "closed"),
+    ...startingAfter,
+  ]) {
     if (session.cwd === undefined) {
       unknown = true;
       continue;
@@ -238,7 +243,10 @@ export function foreignClaims(
   );
   if (userTerminals.length > 0) reasons.push("a terminal is open in it");
   const otherSessions = claims.sessions.filter((session) => session.threadId !== ownThreadId);
-  if (otherSessions.length > 0) reasons.push("another agent session is running in it");
+  if (otherSessions.length > 0)
+    reasons.push(
+      "an open or starting agent session uses it; stop that session before removing the worktree",
+    );
   return reasons;
 }
 
@@ -484,19 +492,20 @@ export const stopDeletedWorktreeClaims = Effect.fn("stopDeletedWorktreeClaims")(
 /** Wait for an idle or deleted owner's provider session before taking lifecycle locks. */
 export const stopWorktreeSession = Effect.fn("stopWorktreeSession")(function* (threadId: ThreadId) {
   const providers = yield* ProviderService;
-  if (
-    (yield* providers.listSessions()).some(
-      (session) => session.threadId === threadId && session.status !== "closed",
-    )
-  ) {
+  const isLive = Effect.gen(function* () {
+    return (
+      (yield* providers.listSessions()).some(
+        (session) => session.threadId === threadId && session.status !== "closed",
+      ) ||
+      (yield* providers.listStartingWorkspaces?.() ?? Effect.succeed([])).some(
+        (session) => session.threadId === threadId,
+      )
+    );
+  });
+  if (yield* isLive) {
     yield* providers.stopSession({ threadId });
     yield* Effect.gen(function* () {
-      while (
-        (yield* providers.listSessions()).some(
-          (session) => session.threadId === threadId && session.status !== "closed",
-        )
-      )
-        yield* Effect.sleep("50 millis");
+      while (yield* isLive) yield* Effect.sleep("50 millis");
     }).pipe(Effect.timeout("10 seconds"));
   }
 });

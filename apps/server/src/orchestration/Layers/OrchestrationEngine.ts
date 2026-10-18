@@ -129,10 +129,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           "thread.turn-steer-requested",
       );
     }).pipe(Effect.mapError(toPersistenceSqlError("OrchestrationEngine.readSteerFallback")));
-  const workspaceWaitError = (command: OrchestrationCommand, detail: string) =>
-    command.type === "thread.turn.start" && command.dispatchSource === "next-turn-queue"
-      ? new ThreadTurnNotReadyError({ threadId: command.threadId, detail })
-      : new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+  const workspaceWaitError = (
+    command: Extract<OrchestrationCommand, { type: "thread.turn.start" | "thread.turn.steer" }>,
+    detail: string,
+  ) => new ThreadTurnNotReadyError({ threadId: command.threadId, detail });
 
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
     const dispatchStartSequence = readModel.snapshotSequence;

@@ -530,6 +530,27 @@ it.layer(TestLayer)("git integration", (it) => {
       }),
     );
 
+    it.effect(
+      "inspects a clean repository whose index exceeds the buffered output limit",
+      () =>
+        Effect.gen(function* () {
+          const cwd = yield* makeTmpDir();
+          yield* initRepoWithCommit(cwd);
+          const fs = yield* FileSystem.FileSystem;
+          yield* Effect.forEach(
+            Array.from({ length: 15_000 }, (_, i) => i),
+            (i) => fs.writeFileString(path.join(cwd, `file-${i}-${"x".repeat(64)}`), "fixture\n"),
+            { concurrency: 64 },
+          );
+          yield* git(cwd, ["add", "."]);
+          yield* git(cwd, ["commit", "-qm", "large index"]);
+          const inspection = yield* (yield* GitCore).inspectCheckout(cwd);
+          expect(inspection.hasInitializedSubmodules).toBe(false);
+          expect(inspection.hasTrackedChanges).toBe(false);
+        }),
+      { timeout: 120_000 },
+    );
+
     it.effect("preserves whitespace paths and verifies the exact checkout identity", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

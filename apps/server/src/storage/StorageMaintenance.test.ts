@@ -270,6 +270,69 @@ async function writeGitWorktreeMetadata(input: {
   await NodeFS.writeFile(NodePath.join(worktreeGitDir, "commondir"), "../..\n");
 }
 
+for (const categoryId of ["inactiveF5Worktrees", "legacyT3Worktrees"] as const) {
+  it.effect(`continues ${categoryId} cleanup after a deleted session refuses to stop`, () => {
+    const threadId = ThreadId.makeUnsafe(`stop-failed-${categoryId}`);
+    let blockedPath = "";
+    const providers: ProviderServiceShape = {
+      ...makeProviderServiceStub({ stopSession: () => Effect.die("stop refused") }),
+      listSessions: () =>
+        Effect.succeed([{ threadId, cwd: blockedPath, status: "ready" }] as never),
+    };
+    return withHomeSandbox(
+      Effect.gen(function* () {
+        const config = yield* ServerConfig;
+        const sql = yield* SqlClient.SqlClient;
+        const storage = yield* StorageMaintenance;
+        const root =
+          categoryId === "inactiveF5Worktrees"
+            ? config.worktreesDir
+            : NodePath.join(NodeOS.homedir(), ".t3", "worktrees");
+        blockedPath = NodePath.join(root, "blocked");
+        const cleanPath = NodePath.join(root, "clean");
+        yield* Effect.promise(async () => {
+          await writeFile(
+            NodePath.join(NodeOS.homedir(), ".f5", "userdata", "state.sqlite"),
+            "ready",
+          );
+          for (const worktreePath of [blockedPath, cleanPath]) {
+            await writeGitWorktreeMetadata({
+              worktreePath,
+              mainWorktreePath: NodePath.join(config.baseDir, "main"),
+            });
+            await writeFile(NodePath.join(worktreePath, "file.txt"), "contents");
+          }
+        });
+        yield* seedThread({
+          sql,
+          threadId,
+          deletedAt: new Date().toISOString(),
+          worktreePath: blockedPath,
+        });
+        const report = yield* storage.inspect({ force: true });
+        const targets = report.categories.find((category) => category.id === categoryId)!.targets;
+        assert.equal(targets.filter((target) => target.safeToDelete).length, 2);
+        const result = yield* storage.cleanup({
+          operationId: `cleanup-${categoryId}`,
+          scanId: report.scanId,
+          confirmationNonce: report.confirmationNonce,
+          categoryIds: [categoryId],
+          targetSelections: [{ categoryId, targetIds: targets.map((target) => target.id) }],
+          confirmationText: "DELETE",
+          options: { vacuumAfterDeletes: false },
+        });
+        assert.equal(yield* Effect.promise(() => pathExists(blockedPath)), true);
+        assert.equal(yield* Effect.promise(() => pathExists(cleanPath)), false);
+        assert.ok(
+          result.results[0]?.warnings.some(
+            (warning) => warning.path === blockedPath && warning.reason.includes("stop refused"),
+          ),
+        );
+      }).pipe(Effect.provide(makeStorageTestLayer({ providerService: providers }))),
+    );
+  });
+}
+
 const layer = it.layer(makeStorageTestLayer());
 
 layer("StorageMaintenance", (it) => {

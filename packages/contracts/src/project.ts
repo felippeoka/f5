@@ -83,7 +83,7 @@ const ProjectEntryKind = Schema.Literals(["file", "directory"]);
 export const ProjectEntry = Schema.Struct({
   path: FilesystemPath,
   kind: ProjectEntryKind,
-  parentPath: Schema.optional(TrimmedNonEmptyString),
+  parentPath: Schema.optional(FilesystemPath),
 });
 export type ProjectEntry = typeof ProjectEntry.Type;
 

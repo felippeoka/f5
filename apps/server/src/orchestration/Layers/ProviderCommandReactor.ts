@@ -1,5 +1,9 @@
 import { withWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
-import { assertWorktreeReady } from "../../project/worktreeReadiness.ts";
+import {
+  assertWorktreeReady,
+  WorktreeInspectionError,
+  WorktreeNotReadyError,
+} from "../../project/worktreeReadiness.ts";
 import { assertMcpRuntimeConfig, mcpConfigErrorMessage } from "@t3tools/shared/mcpValidation";
 import { readCodexMcpOAuthCallbackConfig } from "@t3tools/shared/mcpTranslation";
 import { readSubmissionSource } from "../../provider/submissionProvenance.ts";
@@ -318,6 +322,12 @@ function buildGeneratedWorktreeBranchName(raw: string, configuredPrefix: string)
  */
 export function toProviderTurnDeliveryError(error: unknown): ProviderTurnDeliveryError {
   if (Schema.is(ProviderTurnDeliveryError)(error)) return error;
+  if (error instanceof WorktreeInspectionError || error instanceof WorktreeNotReadyError)
+    return new ProviderTurnDeliveryError({
+      certainty: "not_sent",
+      retryable: error instanceof WorktreeInspectionError,
+      detail: error.message,
+    });
   let rejectedUsageLimit: import("@t3tools/contracts").RuntimeUsageLimit | undefined;
   let rejectedMessage: string | undefined;
   let adapterNotSent: ProviderAdapterRequestError | undefined;
@@ -1687,16 +1697,7 @@ const make = Effect.gen(function* () {
         projectCwd: project.workspaceRoot,
         worktreePath: thread.worktreePath,
         branch: thread.branch,
-      }).pipe(
-        Effect.mapError(
-          (error) =>
-            new ProviderTurnDeliveryError({
-              certainty: "not_sent",
-              retryable: false,
-              detail: error.message,
-            }),
-        ),
-      );
+      }).pipe(Effect.mapError(toProviderTurnDeliveryError));
       return yield* providerService.sendTurn({
         threadId: thread.id,
         ...(event.commandId ? { deliveryId: event.commandId } : {}),

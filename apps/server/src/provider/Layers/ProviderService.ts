@@ -2349,7 +2349,6 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
 
     const listSessions: ProviderServiceShape["listSessions"] = () =>
       Effect.gen(function* () {
-        const startingAtInspection = new Map(startingSessions);
         const currentAdapters = yield* getAdapterEntries;
         const sessionsByProvider = yield* Effect.forEach(currentAdapters, ([instanceId, adapter]) =>
           adapter.listSessions().pipe(
@@ -2364,17 +2363,6 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         const activeSessions: ProviderSession[] = sessionsByProvider.flatMap(
           (sessions) => sessions,
         );
-        for (const [threadId, starting] of new Map([
-          ...startingAtInspection,
-          ...startingSessions,
-        ])) {
-          if (
-            !activeSessions.some(
-              (session) => session.threadId === threadId && session.status !== "closed",
-            )
-          )
-            activeSessions.push(starting.session);
-        }
         const persistedBindings = yield* directory.listThreadIds().pipe(
           Effect.flatMap((threadIds) =>
             Effect.forEach(
@@ -3021,6 +3009,13 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             : withProviderThreadAccess(input.threadId, respondToElicitation(input));
         }),
       stopSession: (input) => withProviderThreadAccess(input.threadId, stopSession(input)),
+      listStartingWorkspaces: () =>
+        Effect.sync(() =>
+          Array.from(startingSessions, ([threadId, { session }]) => ({
+            threadId,
+            ...(session.cwd !== undefined ? { cwd: session.cwd } : {}),
+          })),
+        ),
       listSessions,
       getCapabilities,
       getSessionCapabilities,

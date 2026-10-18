@@ -81,6 +81,7 @@ import { NextTurnQueueStore } from "../Services/NextTurnQueueStore.ts";
 import { DISPATCH_LEASE_TTL_MS, QUEUE_WORKER_SHARDS } from "../constants.ts";
 import {
   classifyNextTurnDispatchFailure,
+  nextTurnDispatchBackoffMs,
   type NextTurnDispatchOutcome,
 } from "../dispatchOutcome.ts";
 import { resolveNextTurnQueueGate } from "../gate.ts";
@@ -139,6 +140,10 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
         : fingerprint
     ).pipe(Effect.mapError(storageError));
   };
+  const inspectionRetries = new Map<
+    ThreadId,
+    { commandId: CommandId; count: number; revision: number }
+  >();
   const readinessRetries = new Map<ThreadId, { commandId: CommandId; count: number }>();
   const usageOption = yield* Effect.serviceOption(UsageService);
   const registryOption = yield* Effect.serviceOption(ProviderInstanceRegistry);
@@ -315,18 +320,31 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
             path: thread.worktreePath!,
             branch: thread.branch!,
           });
+        if (recreate || requireExisting) inspectionRetries.delete(item.threadId);
         return gate;
       }).pipe(
         Effect.catch((error) => {
           const retryable =
             error instanceof WorktreeInspectionError || error.cause instanceof RepositoryBusyError;
+          const previous = inspectionRetries.get(item.threadId);
+          const count =
+            (previous?.commandId === item.command.commandId &&
+            previous.revision === queue.state.revision
+              ? previous.count
+              : 0) + (recreate || requireExisting ? 1 : 0);
+          if (retryable && (recreate || requireExisting))
+            inspectionRetries.set(item.threadId, {
+              commandId: item.command.commandId,
+              count,
+              revision: queue.state.revision,
+            });
           return Effect.succeed(
-            retryable
+            retryable && count < 5
               ? {
                   kind: "wait" as const,
                   reasonCode: "worktree_missing" as const,
                   detail: error.message,
-                  retryAfterMs: 1_000,
+                  retryAfterMs: nextTurnDispatchBackoffMs(Math.max(1, count)),
                 }
               : {
                   kind: "autoPause" as const,
@@ -1131,6 +1149,8 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
           );
           for (const id of previousPolicy.keys())
             if (!liveThreads.has(id)) previousPolicy.delete(id);
+          for (const id of inspectionRetries.keys())
+            if (!liveThreads.has(id)) inspectionRetries.delete(id);
           for (const id of readinessRetries.keys())
             if (!liveThreads.has(id)) readinessRetries.delete(id);
           for (const [id, attempt] of refreshAttempts) {

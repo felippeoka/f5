@@ -101,6 +101,7 @@ function createProviderServiceHarness(
     respondToUserInput: () => unsupported(),
     respondToElicitation: () => unsupported(),
     stopSession: () => unsupported(),
+    listStartingWorkspaces: () => Effect.succeed([]),
     listSessions,
     getSessionCapabilities: () => Effect.succeed(null),
     assertSessionAction: () => Effect.die(new Error("assertSessionAction is unused here")),

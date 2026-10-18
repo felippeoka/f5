@@ -538,7 +538,7 @@ export const dispatchBootstrapTurnStart = Effect.fnUntraced(function* (
           input.git.createWorktree({
             cwd: bootstrap.prepareWorktree.projectCwd,
             branch: bootstrap.prepareWorktree.baseBranch,
-            ...(remoteBase ? { baseRefName: remoteBase.commit } : {}),
+            baseRefName: baseSha,
             newBranch,
             path:
               input.worktreesDir === undefined

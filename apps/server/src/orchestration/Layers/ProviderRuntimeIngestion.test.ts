@@ -145,6 +145,7 @@ function createProviderServiceHarness() {
         return "submitted" as const;
       }),
     stopSession: () => unsupported(),
+    listStartingWorkspaces: () => Effect.succeed([]),
     listSessions: () => Effect.succeed([...runtimeSessions]),
     getSessionCapabilities: () => Effect.sync(() => sessionCapabilities),
     assertSessionAction: () => Effect.die(new Error("assertSessionAction is unused here")),
@@ -1080,9 +1081,14 @@ describe("ProviderRuntimeIngestion", () => {
     ]);
   });
 
-  it.each([true, false, "probe-error"] as const)(
-    "retains a missing worktree for explicit recovery: %s",
-    async (branchExists) => {
+  it.each([
+    { branchExists: true, paused: false },
+    { branchExists: false, paused: false },
+    { branchExists: "probe-error", paused: false },
+    { branchExists: false, paused: true },
+  ] as const)(
+    "retains a missing worktree without replacing an existing pause: %o",
+    async ({ branchExists, paused }) => {
       const harness = await createHarness({ startIngestion: false });
       const threadId = asThreadId("thread-1");
       const missingPath = path.join(os.tmpdir(), `missing-worktree-${crypto.randomUUID()}`);
@@ -1111,7 +1117,11 @@ describe("ProviderRuntimeIngestion", () => {
       const setPaused = vi.fn(() => Effect.void);
       await Effect.runPromise(
         cleanupStaleWorktrees(harness.engine).pipe(
-          Effect.provideService(NextTurnQueueStore, { setPaused } as never),
+          Effect.provideService(NextTurnQueueStore, {
+            setPaused,
+            listByThread: () =>
+              Effect.succeed({ state: { paused, revision: 7, pauseReasonCode: "manual_pause" } }),
+          } as never),
           Effect.provide(Layer.mergeAll(Layer.succeed(GitCore, git.service), NodeServices.layer)),
         ),
       );
@@ -1120,7 +1130,9 @@ describe("ProviderRuntimeIngestion", () => {
         missingPath,
       );
       expect(git.calls.branchExists).toHaveLength(1);
-      expect(setPaused).toHaveBeenCalledTimes(branchExists === false ? 1 : 0);
+      expect(setPaused).toHaveBeenCalledTimes(branchExists === false && !paused ? 1 : 0);
+      if (branchExists === false && !paused)
+        expect(setPaused).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 7 }));
     },
   );
 

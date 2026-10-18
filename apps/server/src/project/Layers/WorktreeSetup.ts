@@ -592,6 +592,9 @@ export const makeWorktreeSetup = Effect.gen(function* () {
                 update(threadId, (snapshot) => stageStatus(snapshot, "submodules", status, detail)),
             },
           });
+          const checkoutSha = yield* git.resolveCommit(worktreePath, "HEAD");
+          if (checkoutSha)
+            yield* commit(threadId, (snapshot) => ({ ...snapshot, checkoutSha }), true);
           update(threadId, (snapshot) => {
             let next: WorktreeSetupSnapshot = {
               ...snapshot,
@@ -783,12 +786,12 @@ export const makeWorktreeSetup = Effect.gen(function* () {
             policy: {
               kind: "ownedRollback",
               ownThreadId: snapshot.threadId,
-              ...(snapshot.baseSha && snapshot.creationCommonDir
+              ...(snapshot.checkoutSha && snapshot.creationCommonDir
                 ? {
                     ownedCreation: {
                       path: worktreePath,
                       commonDir: snapshot.creationCommonDir,
-                      baseSha: snapshot.baseSha,
+                      baseSha: snapshot.checkoutSha,
                       created: snapshot.createdWorktree,
                     },
                   }

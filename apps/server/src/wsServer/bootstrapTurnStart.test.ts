@@ -1247,7 +1247,10 @@ describe("dispatchBootstrapTurnStart", () => {
         newBranch: "t3code/bootstrap-branch",
       }),
     );
-    expect(createWorktree.mock.calls[0]?.[0]).not.toHaveProperty("baseRefName");
+    expect(createWorktree.mock.calls[0]?.[0]).toHaveProperty(
+      "baseRefName",
+      "0123456789abcdef0123456789abcdef01234567",
+    );
   });
 
   it("creates from a local-only base when the configured remote lacks that branch", async () => {
@@ -1303,7 +1306,10 @@ describe("dispatchBootstrapTurnStart", () => {
         newBranch: "t3code/bootstrap-branch",
       }),
     );
-    expect(createWorktree.mock.calls[0]?.[0]).not.toHaveProperty("baseRefName");
+    expect(createWorktree.mock.calls[0]?.[0]).toHaveProperty(
+      "baseRefName",
+      "0123456789abcdef0123456789abcdef01234567",
+    );
   });
 
   it.each(["invariant", "conflict"])(

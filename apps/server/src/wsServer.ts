@@ -4757,15 +4757,19 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case WS_METHODS.gitRemoveWorktree: {
         const body = stripRequestTag(request.body);
         const { worktreeManager, orchestrationEngine } = yield* awaitOrchestrationRuntimeForRoute;
-        const canonical = yield* Effect.tryPromise(() => canonicalWorktreePath(body.cwd));
+        const canonical = yield* Effect.tryPromise(() => canonicalWorktreePath(body.cwd)).pipe(
+          Effect.orElseSucceed(() => null),
+        );
         const projects = (yield* orchestrationEngine.getReadModel()).projects.filter(
           (project) => project.deletedAt === null,
         );
         let projectId: ProjectId | undefined;
         for (const project of projects) {
           if (
-            (yield* Effect.tryPromise(() => canonicalWorktreePath(project.workspaceRoot))) ===
-            canonical
+            canonical !== null &&
+            (yield* Effect.tryPromise(() => canonicalWorktreePath(project.workspaceRoot)).pipe(
+              Effect.orElseSucceed(() => null),
+            )) === canonical
           ) {
             projectId = project.id;
             break;

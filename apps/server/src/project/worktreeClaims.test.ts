@@ -67,6 +67,9 @@ describe("effective workspace claims and removal gate", () => {
           });
         expect((yield* inspect()).blockedReasons).toEqual([]);
         expect((yield* inspect()).linkedThreads).toEqual(["idle"]);
+        world.sessions.push({ threadId: "idle", cwd: target, status: "ready" });
+        expect((yield* inspect()).blockedReasons.join(" ")).toContain("stop that session");
+        world.sessions.length = 0;
         yield* Effect.promise(() => fs.writeFile(path.join(target, ".env"), "SECRET=value\n"));
         expect((yield* inspect()).blockedReasons.join(" ")).toContain("ignored");
         yield* Effect.promise(() => fs.rm(path.join(target, ".env")));

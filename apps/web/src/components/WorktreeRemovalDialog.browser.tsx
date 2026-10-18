@@ -209,3 +209,51 @@ it.each([false, true])(
     });
   },
 );
+
+it("offers recovery after a restart between switching to the project and clearing the barrier", async () => {
+  api.worktrees.threadState.mockResolvedValue({
+    worktreePath: null,
+    branch: "main",
+    directoryExists: true,
+    registration: "none",
+    branchExists: false,
+    defaultBranch: null,
+    recovery: "interrupted",
+  });
+  api.nextTurnQueue.list.mockResolvedValue({ revision: 12 });
+  api.worktrees.recover.mockResolvedValue({});
+  const threadId = ThreadId.makeUnsafe("local-interrupted");
+  const screen = await mount(
+    <WorktreeMissingBanner threadId={threadId} worktreePath={null} branch="main" />,
+  );
+  await screen.getByRole("button", { name: "Continue in project checkout" }).click();
+  expect(api.worktrees.recover).toHaveBeenCalledWith({
+    threadId,
+    action: "useProjectCheckout",
+    expectedQueueRevision: 12,
+  });
+});
+
+it("allows cancelling a running preparation", async () => {
+  api.worktrees.threadState.mockResolvedValue({
+    worktreePath: "/recovering",
+    branch: "feature",
+    directoryExists: true,
+    registration: "matching",
+    branchExists: true,
+    defaultBranch: "main",
+    recovery: "running",
+  });
+  api.nextTurnQueue.list.mockResolvedValue({ revision: 12 });
+  api.worktrees.recover.mockResolvedValue({});
+  const threadId = ThreadId.makeUnsafe("cancel-recovery");
+  const screen = await mount(
+    <WorktreeMissingBanner threadId={threadId} worktreePath="/recovering" />,
+  );
+  await screen.getByRole("button", { name: "Cancel preparation" }).click();
+  expect(api.worktrees.recover).toHaveBeenCalledWith({
+    threadId,
+    action: "cancel",
+    expectedQueueRevision: 12,
+  });
+});

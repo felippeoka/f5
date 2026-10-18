@@ -74,7 +74,11 @@ import { TextGeneration, type TextGenerationShape } from "../../git/Services/Tex
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
-import { ProviderCommandReactorLive } from "./ProviderCommandReactor.ts";
+import {
+  ProviderCommandReactorLive,
+  toProviderTurnDeliveryError,
+} from "./ProviderCommandReactor.ts";
+import { WorktreeInspectionError, WorktreeNotReadyError } from "../../project/worktreeReadiness.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -84,6 +88,20 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { makeLocalFileTracer } from "../../observability/LocalFileTracer.ts";
 import { dispatchBootstrapTurnStart } from "../../wsServer/bootstrapTurnStart.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+
+it.each([
+  [new WorktreeInspectionError("Git inspection timed out"), true],
+  [new WorktreeNotReadyError("The recorded branch is missing"), false],
+] as const)(
+  "records pre-provider workspace failures as definitely unsent: %s",
+  (error, retryable) => {
+    expect(toProviderTurnDeliveryError(error)).toMatchObject({
+      certainty: "not_sent",
+      retryable,
+      detail: error.message,
+    });
+  },
+);
 
 const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId =>
@@ -501,6 +519,7 @@ describe("ProviderCommandReactor", () => {
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
       respondToElicitation: () => Effect.die("unused"),
       stopSession: stopSession as ProviderServiceShape["stopSession"],
+      listStartingWorkspaces: () => Effect.succeed([]),
       listSessions: () => Effect.succeed(runtimeSessions),
       getSessionCapabilities: () => Effect.succeed(null),
       assertSessionAction: () => Effect.die(new Error("assertSessionAction is unused here")),

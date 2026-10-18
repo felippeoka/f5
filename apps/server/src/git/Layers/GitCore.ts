@@ -2012,14 +2012,29 @@ const makeGitCore = Effect.gen(function* () {
             [],
             "Cannot inspect symbolic HEAD.",
           );
-        const gitlinks = (yield* runGitStdout("GitCore.inspectCheckout", cwd, [
-          "ls-files",
-          "--stage",
-          "-z",
-        ]))
-          .split("\0")
-          .filter((entry) => entry.startsWith("160000 "))
-          .map((entry) => entry.slice(entry.indexOf("\t") + 1));
+        // Stream the index: ordinary repositories can exceed the buffered output cap.
+        // Retain only gitlinks and the current (possibly split) NUL-delimited record.
+        const gitlinks: string[] = [];
+        const decoder = new TextDecoder();
+        let pending = "";
+        yield* git.execute({
+          operation: "GitCore.inspectCheckout.submodules",
+          cwd,
+          args: ["ls-files", "--stage", "-z"],
+          onStdoutChunk: (chunk) => {
+            const records = (pending + decoder.decode(chunk, { stream: true })).split("\0");
+            pending = records.pop()!;
+            for (const entry of records)
+              if (entry.startsWith("160000 ")) gitlinks.push(entry.slice(entry.indexOf("\t") + 1));
+          },
+        });
+        if (pending.length || decoder.decode().length)
+          return yield* createGitCommandError(
+            "GitCore.inspectCheckout",
+            cwd,
+            [],
+            "Incomplete index inspection.",
+          );
         const populated = yield* Effect.forEach(
           gitlinks,
           (path) =>

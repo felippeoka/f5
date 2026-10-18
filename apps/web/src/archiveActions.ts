@@ -244,6 +244,6 @@ export async function deleteThreadsWithCleanup(
     checkedPaths.add(orphanedPath);
     removalRows.push({ projectId: project.id, path: orphanedPath });
   }
-  await useWorktreeRemovalDialogStore.getState().request(removalRows);
+  void useWorktreeRemovalDialogStore.getState().request(removalRows);
   return { succeeded, failures };
 }

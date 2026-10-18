@@ -56,7 +56,7 @@ import {
   type KindAdapterMap,
 } from "../testUtils/providerAdapterRegistryMock.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
-import { readPersistedUnconvergedMcpConfigVersion } from "../runtimePayload.ts";
+import { readPersistedCwd, readPersistedUnconvergedMcpConfigVersion } from "../runtimePayload.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProjectMcpConfigService } from "../../mcp/ProjectMcpConfigService.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../../persistence/Layers/ProviderSessionRuntime.ts";
@@ -668,6 +668,11 @@ it.effect("advances the session generation and refuses steering from a stale bro
     ),
   );
 });
+it("preserves persisted workspace paths exactly", () => {
+  assert.equal(readPersistedCwd({ cwd: " /worktree \n" }), " /worktree \n");
+  assert.equal(readPersistedCwd({ cwd: "   " }), undefined);
+});
+
 it.effect("answers form requests a new session opens while it is still starting", () => {
   const codex = makeFakeCodexAdapter();
   const answers: Array<{ requestId: string; action: string; content?: unknown }> = [];
@@ -704,10 +709,13 @@ it.effect("answers form requests a new session opens while it is still starting"
       })
       .pipe(Effect.forkChild);
     yield* Deferred.await(opened);
-    const starting = (yield* service.listSessions()).find(
+    assert.equal(
+      (yield* service.listSessions()).some((session) => session.threadId === threadId),
+      false,
+    );
+    const starting = (yield* service.listStartingWorkspaces()).find(
       (session) => session.threadId === threadId,
     );
-    assert.equal(starting?.status, "connecting");
     assert.equal(starting?.cwd, process.cwd());
     // Startup is claimed, but provider waits never hold the path lifecycle lock.
     yield* withWorktreeLifecycleLock(process.cwd(), Effect.void).pipe(Effect.timeout("1 second"));

@@ -105,6 +105,8 @@ describe("bulk deletion cleanup", () => {
       worktreePath: "/repo/second",
     });
     mocks.dispatch.mockResolvedValue(undefined);
+    // Deletion must finish while the removal dialog remains open.
+    mocks.request.mockImplementation(() => new Promise<void>(() => {}));
     await deleteThreadsWithCleanup(input);
     expect(mocks.request).toHaveBeenCalledTimes(1);
     expect(mocks.request).toHaveBeenCalledWith([

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ProjectEntry } from "./project";
 import { Schema } from "effect";
 import { FilesystemPath } from "./baseSchemas";
 import { GitRemoveWorktreeInput } from "./git";
@@ -6,6 +7,13 @@ import { WorktreesInspectInput, WorktreesRecoverInput } from "./worktrees";
 describe("worktree safety wire contracts", () => {
   it("preserves paths including leading, trailing and newline whitespace", () => {
     const path = " /tmp/worktree\n ";
+    expect(
+      Schema.decodeUnknownSync(ProjectEntry)({
+        path: `${path}/child`,
+        kind: "file",
+        parentPath: path,
+      }).parentPath,
+    ).toBe(path);
     expect(Schema.decodeUnknownSync(FilesystemPath)(path)).toBe(path);
     expect(Schema.decodeUnknownSync(GitRemoveWorktreeInput)({ cwd: path, path })).toEqual({
       cwd: path,

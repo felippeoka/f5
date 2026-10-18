@@ -105,6 +105,8 @@ export const WorktreeSetupSnapshot = Schema.Struct({
   baseRef: Schema.NullOr(TrimmedNonEmptyString),
   /** Commit the new branch was created at; branch deletion requires it to be unchanged. */
   baseSha: Schema.NullOr(TrimmedNonEmptyString),
+  /** Actual initial checkout commit, including when attaching an existing branch. */
+  checkoutSha: Schema.optional(TrimmedNonEmptyString),
   /** Repository identity recorded before checkout; absent legacy snapshots cannot prove deletion ownership. */
   creationCommonDir: Schema.optional(FilesystemPath),
   worktreePath: Schema.NullOr(FilesystemPath),
