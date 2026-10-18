@@ -3,6 +3,7 @@ import type {
   McpProviderStatusResult,
   McpServerStatusEntry,
   McpLoginStatusResult,
+  McpServerStatusesResult,
 } from "@t3tools/contracts";
 import { Badge } from "../../ui/badge";
 
@@ -11,11 +12,13 @@ export function McpProviderStatusBadge({
   status,
   isLoading,
   isApplying,
+  source,
 }: {
   readonly provider: ProviderKind;
   readonly status: McpProviderStatusResult | undefined;
   readonly isLoading: boolean;
   readonly isApplying: boolean;
+  readonly source?: McpServerStatusesResult["source"];
 }) {
   if (isApplying) {
     return <Badge variant="info">Applying...</Badge>;
@@ -27,6 +30,9 @@ export function McpProviderStatusBadge({
     return <Badge variant="outline">Unknown</Badge>;
   }
 
+  if (source === "conversation") return <Badge variant="info">Live conversation</Badge>;
+  if (source === "configurationCheck" && provider === "claudeAgent")
+    return <Badge variant="outline">Configured</Badge>;
   switch (provider) {
     case "claudeAgent":
       if (!status.available) {
@@ -75,7 +81,7 @@ export function McpServerStatusBadge({
   if (
     provider === "claudeAgent" &&
     status.state === "unknown" &&
-    status.authStatus === "authenticated"
+    status.message?.startsWith("Live status appears")
   ) {
     return <Badge variant="outline">Configured</Badge>;
   }
@@ -86,6 +92,7 @@ export function McpServerStatusBadge({
       return <Badge variant="success">Ready</Badge>;
     case "starting":
       return <Badge variant="info">Starting</Badge>;
+    case "needs-auth":
     case "login-required":
       return <Badge variant="warning">Login required</Badge>;
     case "failed":

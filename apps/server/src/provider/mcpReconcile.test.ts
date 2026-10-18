@@ -263,3 +263,12 @@ describe("summarizeMcpReload", () => {
     expect(codexObservedMcpStatus({ authStatus: "unsupported", hasTools: true })).toBe("connected");
   });
 });
+
+it("does not treat an external same-name server as applied", () => {
+  const result = summarizeMcpReload({
+    desired: ["docs"],
+    observed: [{ name: "docs", status: "connected", ownership: "external" }],
+  });
+  expect(result.converged).toBe(false);
+  expect(result.servers[0]?.owned).toBe(false);
+});

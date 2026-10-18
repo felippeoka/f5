@@ -1,5 +1,8 @@
 import type {
   McpCodexStatusResult,
+  McpInspectServerRequest,
+  McpInspectServerResult,
+  ThreadId,
   McpStatusUpdatedPayload,
   McpCommonConfigResult,
   McpEffectiveConfigResult,
@@ -13,6 +16,7 @@ import type {
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import { queryOptions } from "@tanstack/react-query";
+import { getWsConnectionState } from "../wsConnectionState";
 import { ensureNativeApi } from "../nativeApi";
 
 type CodexEnvironmentKeyPart = string | null;
@@ -64,6 +68,7 @@ export function isMcpQueryAffected(
   const accountScoped = [
     "providerStatus",
     "serverStatuses",
+    "inspectServer",
     "loginStatus",
     "codexStatus",
     "oauthStatus",
@@ -187,21 +192,44 @@ export function mcpServerStatusesQueryOptions(input: {
   readonly binaryPath?: string;
   readonly homePath?: string;
   readonly enabled?: boolean;
+  readonly threadId?: ThreadId;
+  readonly fingerprint?: string;
+  readonly generation?: number;
+  readonly desiredVersion?: string;
+  readonly appliedVersion?: string;
 }) {
   return queryOptions<McpServerStatusesResult>({
-    queryKey: mcpQueryKeys.serverStatuses(
-      input.provider,
-      input.projectId,
-      input.instanceId ?? input.binaryPath ?? null,
-      input.homePath ?? null,
-    ),
+    queryKey: [
+      ...mcpQueryKeys.serverStatuses(
+        input.provider,
+        input.projectId,
+        input.instanceId ?? input.binaryPath ?? null,
+        input.homePath ?? null,
+      ),
+      input.threadId ? "conversation" : "configurationCheck",
+      input.fingerprint ?? null,
+      input.threadId ?? null,
+      input.generation ?? null,
+      input.desiredVersion ?? null,
+      input.appliedVersion ?? null,
+    ],
     enabled: (input.enabled ?? true) && Boolean(input.projectId),
+    refetchInterval: (query) => {
+      if (!query.state.data?.statuses.some((server) => server.state === "starting")) {
+        runtimePollWindows.delete(query);
+        return false;
+      }
+      const started = runtimePollWindows.get(query) ?? Date.now();
+      runtimePollWindows.set(query, started);
+      return shouldPollMcpRuntime(query.state.data, started) ? 2_000 : false;
+    },
     queryFn: async () => {
       if (!input.projectId) {
         throw new Error("MCP server statuses are unavailable.");
       }
       return ensureNativeApi().mcp.getServerStatuses({
         provider: input.provider,
+        ...(input.threadId ? { threadId: input.threadId } : {}),
         projectId: input.projectId,
         ...(input.instanceId ? { instanceId: input.instanceId } : {}),
       });
@@ -274,4 +302,61 @@ export function mcpOAuthStatusQueryOptions(input: {
       });
     },
   });
+}
+
+const runtimePollWindows = new WeakMap<object, number>();
+
+// The poll budget is per identity, and is not extended by each successful refresh.
+export function shouldPollMcpRuntime(
+  data: McpServerStatusesResult | undefined,
+  startedAt: number,
+  now = Date.now(),
+): boolean {
+  return (
+    getWsConnectionState().phase === "connected" &&
+    Boolean(data?.statuses.some((server) => server.state === "starting")) &&
+    now - startedAt < 30_000
+  );
+}
+
+export function mcpInspectServerQueryOptions(
+  input: McpInspectServerRequest & {
+    observation?: McpServerStatusesResult | undefined;
+    enabled?: boolean;
+  },
+) {
+  return queryOptions<McpInspectServerResult>({
+    queryKey: [
+      "mcp",
+      "inspectServer",
+      input.provider,
+      input.projectId,
+      input.instanceId ?? null,
+      input.observation?.source ?? "configurationCheck",
+      input.observation?.fingerprint ?? null,
+      input.threadId ?? input.observation?.threadId ?? null,
+      input.observation?.generation ?? null,
+      input.observation?.desiredVersion ?? null,
+      input.observation?.appliedVersion ?? null,
+      input.serverName,
+      input.ownership ?? "managed",
+    ],
+    enabled: input.enabled ?? true,
+    queryFn: () =>
+      ensureNativeApi().mcp.inspectServer({
+        provider: input.provider,
+        projectId: input.projectId,
+        ...(input.instanceId ? { instanceId: input.instanceId } : {}),
+        serverName: input.serverName,
+        ...(input.ownership ? { ownership: input.ownership } : {}),
+        ...((input.threadId ?? input.observation?.threadId)
+          ? { threadId: input.threadId ?? input.observation?.threadId }
+          : {}),
+      }),
+  });
+}
+
+export function resetMcpRuntimePolling(queryClient: import("@tanstack/react-query").QueryClient) {
+  for (const query of queryClient.getQueryCache().findAll({ queryKey: mcpQueryKeys.all }))
+    runtimePollWindows.delete(query);
 }

@@ -1205,7 +1205,8 @@ export function readMcpStatusActivityPayload(
     statusValue !== "starting" &&
     statusValue !== "ready" &&
     statusValue !== "failed" &&
-    statusValue !== "cancelled"
+    statusValue !== "cancelled" &&
+    statusValue !== "needs-auth"
   ) {
     return null;
   }
@@ -1215,6 +1216,17 @@ export function readMcpStatusActivityPayload(
     ...(name ? { name } : {}),
     ...(error ? { error } : {}),
     ...(toolCount !== undefined ? { toolCount } : {}),
+    ...(typeof record.providerInstanceId === "string"
+      ? {
+          providerInstanceId:
+            record.providerInstanceId as CompactMcpStatusActivityPayload["providerInstanceId"],
+        }
+      : {}),
+    ...(typeof record.sessionGeneration === "number" &&
+    Number.isInteger(record.sessionGeneration) &&
+    record.sessionGeneration >= 0
+      ? { sessionGeneration: record.sessionGeneration }
+      : {}),
   };
 }
 
@@ -1266,4 +1278,23 @@ export function compactThreadActivityPayload(input: {
     default:
       return payload;
   }
+}
+
+/** A new stamped generation retires every older and unstamped server observation. */
+export function latestMcpStatusActivities(
+  activities: ReadonlyArray<{ kind: string; payload: unknown }>,
+) {
+  const entries = activities
+    .filter((activity) => activity.kind === "mcp.status.updated")
+    .map((activity) => readMcpStatusActivityPayload(activity.payload))
+    .filter((entry): entry is CompactMcpStatusActivityPayload => entry !== null);
+  const generation = entries.reduce(
+    (max, entry) => Math.max(max, entry.sessionGeneration ?? -1),
+    -1,
+  );
+  const latest = new Map<string, CompactMcpStatusActivityPayload>();
+  for (const entry of entries)
+    if ((entry.sessionGeneration ?? -1) === generation)
+      latest.set(entry.name ?? "__unnamed__", entry);
+  return latest;
 }

@@ -1,3 +1,4 @@
+import { readBoundedPages } from "./readBoundedPages.ts";
 import { mcpServerNameKey } from "@t3tools/shared/mcpValidation";
 import type { CodexControlClient, CodexControlMcpServerStatus } from "./CodexControlClient.ts";
 
@@ -30,7 +31,22 @@ export function mergeCodexMcpStartupStatuses(
     const exact = matches.filter((entry) => entry.name.trim() === status.name.trim());
     const notification =
       exact.length === 1 ? exact[0] : matches.length === 1 ? matches[0] : undefined;
-    return notification ? { ...status, ...notification, name: status.name } : status;
+    if (!notification) return status;
+    const {
+      error: notificationError,
+      startupStatus: notificationStatus,
+      ...metadata
+    } = notification;
+    const startupStatus = status.startupStatus ?? notificationStatus;
+    const error =
+      status.error ?? (status.startupStatus === undefined ? notificationError : undefined);
+    return {
+      ...metadata,
+      ...status,
+      ...(startupStatus ? { startupStatus } : {}),
+      ...(error ? { error } : {}),
+      name: status.name,
+    };
   });
   const returnedKeys = new Set(statuses.map((status) => mcpServerNameKey(status.name)));
   const returnedNames = new Set(statuses.map((status) => status.name.trim()));
@@ -79,15 +95,40 @@ export function codexServerStatusCanReconcileCompletedOauthLogin(
 export async function listAllCodexServerStatuses(
   client: CodexControlClient,
 ): Promise<ReadonlyArray<CodexControlMcpServerStatus>> {
-  const statuses: CodexControlMcpServerStatus[] = [];
-  let cursor: string | undefined;
+  return (await readCodexServerStatusPages(client)).entries;
+}
 
-  while (true) {
-    const page = await client.listMcpServerStatus(cursor, 100);
-    statuses.push(...page.data);
-    if (!page.nextCursor) {
-      return statuses;
-    }
-    cursor = page.nextCursor;
-  }
+export async function readCodexServerStatusPages(
+  client: CodexControlClient,
+  options: { signal?: AbortSignal; deadline?: number } = {},
+) {
+  const context = client.getMcpObservationContext?.();
+  const pages = await readBoundedPages<CodexControlMcpServerStatus>({
+    label: "mcpServerStatus/list",
+    maxItems: 1000,
+    maxPageItems: 100,
+    initialFailureIsPartial: true,
+    ...options,
+    request: (cursor, remaining) => client.listMcpServerStatus(cursor, 100, remaining),
+    decode: decodeCodexMcpServerStatus,
+  });
+  if (context && context !== client.getMcpObservationContext?.())
+    throw new Error("The MCP configuration check was superseded.");
+  return {
+    ...pages,
+    entries: mergeCodexMcpStartupStatuses(pages.entries, client.getMcpStartupStatuses?.() ?? []),
+  };
+}
+
+export function decodeCodexMcpServerStatus(row: unknown): CodexControlMcpServerStatus | undefined {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return undefined;
+  const record = row as Record<string, unknown>;
+  if (typeof record.name !== "string" || !record.name.trim()) return undefined;
+  for (const field of ["startupStatus", "authStatus", "error", "source", "scope"])
+    if (record[field] != null && typeof record[field] !== "string") return undefined;
+  if (record.tools != null && (typeof record.tools !== "object" || Array.isArray(record.tools)))
+    return undefined;
+  for (const field of ["resources", "resourceTemplates"])
+    if (record[field] != null && !Array.isArray(record[field])) return undefined;
+  return record as unknown as CodexControlMcpServerStatus;
 }

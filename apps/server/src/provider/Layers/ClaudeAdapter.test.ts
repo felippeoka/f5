@@ -810,9 +810,12 @@ describe("ClaudeAdapter agent browser", () => {
           external,
         ];
         let reads = 0;
+        let watcherReads = 0;
+        let blockReads = false;
         Object.assign(harness.query, {
           mcpServerStatus: async () => {
-            if (reads++ === 0) {
+            watcherReads++;
+            if (blockReads && reads++ === 0) {
               listEntered.resolve();
               await releaseList.promise;
             }
@@ -841,6 +844,8 @@ describe("ClaudeAdapter agent browser", () => {
             runtimeMode: "full-access",
             providerOptions: { mcpServers: { docs: { type: "stdio", command: "node" } } },
           });
+          yield* Effect.promise(() => vi.waitFor(() => assert.ok(watcherReads > 0)));
+          blockReads = true;
           const hook = harness.getLastCreateQueryInput()!.options.hooks!.PreToolUse!.at(-1)!
             .hooks[0]!;
           const call = (name: string, tool: string, source?: string) =>
@@ -13015,3 +13020,94 @@ it.effect("launches legacy case-variant MCP servers for Claude", () => {
     ]);
   }).pipe(Effect.provide(harness.layer));
 });
+
+it.effect("emits owned Claude MCP status and tool-count changes from one singleton watcher", () => {
+  const harness = makeHarness();
+  harness.query.mcpServerStatusValue = [
+    { name: "docs", status: "pending", source: "dynamic", tools: [{ name: "one" }] },
+    { name: "external", status: "pending", source: "plugin" },
+  ];
+  Object.assign(harness.query, {
+    setMcpServers: async () => ({ added: [], removed: [], errors: {} }),
+  });
+  return Effect.gen(function* () {
+    const adapter = yield* ClaudeAdapter;
+    const events: ProviderRuntimeEvent[] = [];
+    yield* Stream.runForEach(adapter.streamEvents, (event) =>
+      Effect.sync(() => {
+        if (event.type === "mcp.status.updated") events.push(event);
+      }),
+    ).pipe(Effect.forkChild);
+    yield* adapter.startSession({
+      threadId: THREAD_ID,
+      runtimeMode: "full-access",
+      providerOptions: { mcpServers: { docs: { type: "stdio", command: "node" } } },
+    });
+    yield* Effect.promise(() => vi.waitFor(() => assert.equal(events.length, 1)));
+    harness.query.mcpServerStatusValue[0]!.tools = [{ name: "one" }, { name: "two" }];
+    yield* TestClock.adjust("1 second");
+    yield* Effect.promise(() => vi.waitFor(() => assert.equal(events.length, 2)));
+    assert.deepEqual(
+      events.map((event) => event.type === "mcp.status.updated" && event.payload.status.toolCount),
+      [1, 2],
+    );
+    yield* adapter.reloadMcpConfig!({
+      threadId: THREAD_ID,
+      mcpServers: { docs: { type: "stdio", command: "node" } },
+    });
+    yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 10)));
+    const before = harness.query.mcpServerStatusCalls;
+    yield* TestClock.adjust("1 second");
+    yield* Effect.promise(() =>
+      vi.waitFor(() => assert.equal(harness.query.mcpServerStatusCalls, before + 1)),
+    );
+    assert.equal(events.length, 2);
+    yield* adapter.stopSession(THREAD_ID);
+    const stopped = harness.query.mcpServerStatusCalls;
+    yield* TestClock.adjust("2 seconds");
+    assert.equal(harness.query.mcpServerStatusCalls, stopped);
+  }).pipe(Effect.provide(harness.layer));
+});
+it.effect(
+  "reads Claude tool metadata without exposing config and skips reconnect for non-owned servers",
+  () => {
+    const harness = makeHarness();
+    const reconnect = vi.fn(async () => {});
+    Object.assign(harness.query, { reconnectMcpServer: reconnect });
+    harness.query.mcpServerStatusValue = [
+      {
+        name: "docs",
+        status: "needs-auth",
+        source: "dynamic",
+        tools: [{ name: "read", description: "Read docs", annotations: { readOnly: true } }],
+      },
+      { name: "external", status: "connected", source: "plugin" },
+    ];
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        runtimeMode: "full-access",
+        providerOptions: { mcpServers: { docs: { type: "stdio", command: "node" } } },
+      });
+      const observed = yield* adapter.getMcpServerStatuses!(THREAD_ID);
+      assert.deepEqual(observed.capabilities, {
+        tools: true,
+        inputSchemas: false,
+        resources: false,
+      });
+      assert.equal(observed.servers[0]?.status, "needs-auth");
+      assert.equal(observed.servers[1]?.ownership, "external");
+      assert.equal(
+        yield* adapter.reconnectMcpServer!({ threadId: THREAD_ID, serverName: "external" }),
+        false,
+      );
+      assert.equal(reconnect.mock.calls.length, 0);
+      assert.equal(
+        yield* adapter.reconnectMcpServer!({ threadId: THREAD_ID, serverName: "docs" }),
+        true,
+      );
+      assert.deepEqual(reconnect.mock.calls, [["docs"]]);
+    }).pipe(Effect.provide(harness.layer));
+  },
+);

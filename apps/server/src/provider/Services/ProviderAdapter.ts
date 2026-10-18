@@ -246,6 +246,17 @@ export interface ProviderAdapterShape<TError> {
    * report the observed result. Servers the provider loads from its own
    * settings or plugins are never removed by omission.
    */
+  readonly getOwnedMcpServerNames?: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<string>, TError>;
+  readonly getMcpServerStatuses?: (
+    threadId: ThreadId,
+  ) => Effect.Effect<import("../mcpObservation.ts").McpAdapterObservation, TError>;
+  readonly reconnectMcpServer?: (input: {
+    readonly threadId: ThreadId;
+    readonly serverName: string;
+  }) => Effect.Effect<boolean, TError>;
+
   readonly reloadMcpConfig?: (input: {
     readonly threadId: ThreadId;
     readonly mcpServers: ProviderStartOptions["mcpServers"] | undefined;

@@ -1,3 +1,4 @@
+import { CodexMcpEventBus } from "../../codex/CodexMcpEventBus.ts";
 import {
   COALESCE_STREAMING_DELTAS_DRIVERS,
   makeStreamingAssistantDeltas,
@@ -1819,6 +1820,15 @@ export function runtimeEventToActivities(
             ...(name ? { name } : {}),
             status,
             ...(error ? { error, detail: error } : {}),
+            ...(event.payload.status.toolCount !== undefined
+              ? { toolCount: event.payload.status.toolCount }
+              : {}),
+            ...(event.payload.status.providerInstanceId
+              ? { providerInstanceId: event.payload.status.providerInstanceId }
+              : {}),
+            ...(event.payload.status.sessionGeneration !== undefined
+              ? { sessionGeneration: event.payload.status.sessionGeneration }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -2304,6 +2314,11 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const usageService = yield* Effect.serviceOption(UsageService);
   const ingestionScope = yield* Effect.scope;
+  const mcpEventBus = yield* Effect.serviceOption(CodexMcpEventBus);
+  const pendingMcpPushes = new Map<
+    string,
+    Set<import("@t3tools/contracts").ProviderInstanceId | null>
+  >();
   // Runtime error and terminal reports share one refresh, without blocking the serial worker.
   const refreshedUsageFailures = new Map<ThreadId, string>();
   let enqueueResolvedUsageLimit: (input: RuntimeIngestionInput) => Effect.Effect<void> = () =>
@@ -5486,6 +5501,32 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.asVoid);
 
+      if (event.type === "mcp.status.updated" && Option.isSome(mcpEventBus)) {
+        const projectId = thread.projectId;
+        const instanceId = event.payload.status.providerInstanceId;
+        const existing = pendingMcpPushes.get(projectId);
+        if (existing) {
+          existing.add(instanceId ?? null);
+        } else {
+          const instances = new Set([instanceId ?? null]);
+          pendingMcpPushes.set(projectId, instances);
+          yield* Effect.forkIn(
+            Effect.gen(function* () {
+              yield* Effect.sleep("1 second");
+              pendingMcpPushes.delete(projectId);
+              yield* mcpEventBus.value.publishStatusUpdated({
+                scope: "project",
+                projectId,
+                reason: "runtime",
+                ...(instances.size === 1 && [...instances][0]
+                  ? { instanceId: [...instances][0]! }
+                  : {}),
+              });
+            }),
+            ingestionScope,
+          );
+        }
+      }
       if (isProviderTerminalRuntimeEvent(event)) {
         yield* providerTerminalEventRepository.markApplied(event.eventId);
       }

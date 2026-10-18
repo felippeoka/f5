@@ -1,7 +1,14 @@
+import { onServerWelcome } from "../../../wsNativeApi";
+import { useWsConnectionState } from "../../../wsConnectionState";
+import { useThreadSummaries } from "../../../threadSelectors";
+import { McpObservedGroup } from "./McpObservedGroup";
 import { isMcpQueryAffected } from "../../../lib/mcpReactQuery";
 import { useProfileState } from "../../../profileState";
 import {
   type McpConfigScope,
+  type McpSessionReloadOutcome,
+  type McpServerStatusesResult,
+  ThreadId,
   type McpCommonConfigResult,
   type McpProjectConfigResult,
   type McpProjectServersConfig,
@@ -23,10 +30,10 @@ import { ensureNativeApi } from "../../../nativeApi";
 import {
   mcpCommonConfigQueryOptions,
   mcpEffectiveConfigQueryOptions,
-  mcpProviderStatusQueryOptions,
   mcpProjectConfigQueryOptions,
   mcpQueryKeys,
   mcpServerStatusesQueryOptions,
+  resetMcpRuntimePolling,
 } from "../../../lib/mcpReactQuery";
 import { useCopyToClipboard } from "../../../hooks/useCopyToClipboard";
 import { Button } from "../../ui/button";
@@ -104,24 +111,73 @@ export function McpServersSettings(props: {
       enabled: selectedProject !== null,
     }),
   );
-  const providerStatusQuery = useQuery(
-    mcpProviderStatusQueryOptions({
-      provider: selectedProvider,
-      instanceId: selectedInstanceId,
-      projectId: selectedProjectId,
-
-      enabled: selectedProject !== null,
-    }),
-  );
+  const connection = useWsConnectionState();
+  const threads = useThreadSummaries();
+  const observationContext = JSON.stringify([
+    selectedProvider,
+    selectedProjectId,
+    selectedInstanceId,
+  ]);
+  const [conversationSelection, setConversationSelection] = useState<{
+    context: string;
+    threadId?: ThreadId;
+  }>({ context: "" });
+  const [observationIdentity, setObservationIdentity] = useState<{
+    context: string;
+    data?: McpServerStatusesResult;
+  }>({ context: "" });
+  const [applyOutcomes, setApplyOutcomes] = useState<ReadonlyArray<McpSessionReloadOutcome>>();
+  const selectedThreadId =
+    conversationSelection.context === observationContext
+      ? conversationSelection.threadId
+      : undefined;
+  const identity =
+    observationIdentity.context === observationContext ? observationIdentity.data : undefined;
   const serverStatusesQuery = useQuery(
     mcpServerStatusesQueryOptions({
       provider: selectedProvider,
       instanceId: selectedInstanceId,
       projectId: selectedProjectId,
-
+      ...(selectedThreadId ? { threadId: selectedThreadId } : {}),
+      ...(identity?.fingerprint ? { fingerprint: identity.fingerprint } : {}),
+      ...(identity?.generation !== undefined ? { generation: identity.generation } : {}),
+      ...(identity?.appliedVersion ? { appliedVersion: identity.appliedVersion } : {}),
+      ...(effectiveConfigQuery.data?.effectiveVersion
+        ? { desiredVersion: effectiveConfigQuery.data.effectiveVersion }
+        : {}),
       enabled: selectedProject !== null,
     }),
   );
+  const providerStatusQuery = {
+    data: serverStatusesQuery.data
+      ? {
+          provider: selectedProvider,
+          projectId: selectedProjectId!,
+          support: serverStatusesQuery.data.support,
+          available: serverStatusesQuery.data.support === "supported",
+          authStatus: "unknown" as const,
+          ...(serverStatusesQuery.data.supportMessage
+            ? { supportMessage: serverStatusesQuery.data.supportMessage }
+            : {}),
+        }
+      : undefined,
+    isPending: serverStatusesQuery.isPending,
+    error: serverStatusesQuery.error,
+  };
+  useEffect(() => {
+    const data = serverStatusesQuery.data;
+    if (!data) return;
+    if (data.threadId && !selectedThreadId)
+      setConversationSelection({ context: observationContext, threadId: data.threadId });
+    setObservationIdentity((previous) =>
+      previous.context === observationContext &&
+      previous.data?.fingerprint === data.fingerprint &&
+      previous.data?.generation === data.generation &&
+      previous.data?.appliedVersion === data.appliedVersion
+        ? previous
+        : { context: observationContext, data },
+    );
+  }, [serverStatusesQuery.data, observationContext, selectedThreadId]);
 
   useEffect(() => {
     if (!selectedProjectId && selectedScope === "project") {
@@ -165,7 +221,11 @@ export function McpServersSettings(props: {
   );
   const serverStatusByName = useMemo(
     () =>
-      new Map((serverStatusesQuery.data?.statuses ?? []).map((status) => [status.name, status])),
+      new Map(
+        (serverStatusesQuery.data?.statuses ?? [])
+          .filter((status) => !status.ownership || status.ownership === "managed")
+          .map((status) => [status.name, status]),
+      ),
     [serverStatusesQuery.data],
   );
   const overriddenServerNames = useMemo(() => {
@@ -201,6 +261,19 @@ export function McpServersSettings(props: {
         void queryClient.invalidateQueries({
           predicate: (query) => isMcpQueryAffected(query.queryKey, event),
         });
+      }),
+    [queryClient],
+  );
+  useEffect(
+    () =>
+      onServerWelcome(() => {
+        void queryClient
+          .cancelQueries({
+            queryKey: mcpQueryKeys.all,
+            predicate: (query) =>
+              query.state.data === undefined && query.state.fetchStatus === "fetching",
+          })
+          .then(() => queryClient.invalidateQueries({ queryKey: mcpQueryKeys.all }));
       }),
     [queryClient],
   );
@@ -424,6 +497,7 @@ export function McpServersSettings(props: {
           <McpProviderStatusBadge
             provider={selectedProvider}
             status={providerStatusQuery.data}
+            source={serverStatusesQuery.data?.source}
             isLoading={providerStatusQuery.isPending && !providerStatusQuery.data}
             isApplying={isApplying}
           />
@@ -450,6 +524,7 @@ export function McpServersSettings(props: {
                     : {}),
                 })
                 .then(async (result) => {
+                  setApplyOutcomes(result.sessions);
                   const notice = describeMcpApplyProblems(result);
                   if (notice) setProjectActionError(notice);
                   await queryClient.invalidateQueries({ queryKey: mcpQueryKeys.all });
@@ -569,12 +644,68 @@ export function McpServersSettings(props: {
             {providerStatusQuery.data.supportMessage}
           </p>
         ) : null}
-        {selectedProvider === "claudeAgent" ? (
-          <p className="rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
-            Claude uses the same shared MCP config. Per-server Claude readiness is not surfaced here
-            yet. If Claude shows <strong>Login required</strong>, run <code>claude auth login</code>{" "}
-            in a terminal and then refresh this page.
-          </p>
+        {selectedProject ? (
+          <div className="space-y-2 rounded-lg border border-border p-3 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-2">
+                Observe conversation
+                <select
+                  aria-label="Observed conversation"
+                  value={selectedThreadId ?? ""}
+                  className="rounded border border-border bg-background p-1"
+                  onChange={(event) =>
+                    setConversationSelection({
+                      context: observationContext,
+                      ...(event.target.value
+                        ? { threadId: ThreadId.make(event.target.value) }
+                        : {}),
+                    })
+                  }
+                >
+                  <option value="">Automatic selection</option>
+                  {serverStatusesQuery.data?.sessions?.map((session) => (
+                    <option key={session.threadId} value={session.threadId}>
+                      {threads.find((thread) => thread.id === session.threadId)?.title ??
+                        session.threadId}
+                      {session.busy ? " (busy)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={serverStatusesQuery.isFetching || connection.phase !== "connected"}
+                onClick={() => {
+                  resetMcpRuntimePolling(queryClient);
+                  void serverStatusesQuery.refetch();
+                }}
+              >
+                Refresh status
+              </Button>
+            </div>
+            <p>
+              {serverStatusesQuery.data?.source === "conversation"
+                ? `Observed in ${threads.find((thread) => thread.id === serverStatusesQuery.data?.threadId)?.title ?? serverStatusesQuery.data.threadId} at ${serverStatusesQuery.data.observedAt ? new Date(serverStatusesQuery.data.observedAt).toLocaleTimeString() : "unknown time"}`
+                : "Configuration check"}
+            </p>
+            {serverStatusesQuery.data?.source === "conversation" &&
+            serverStatusesQuery.data.appliedVersion !== serverStatusesQuery.data.desiredVersion ? (
+              <p>Saved changes are pending in this conversation.</p>
+            ) : null}
+            {selectedProvider === "claudeAgent" &&
+            serverStatusesQuery.data?.source === "configurationCheck" ? (
+              <p>
+                Live status appears while a Claude session for this account runs in this project.
+              </p>
+            ) : null}
+            {serverStatusesQuery.data?.complete === false ? (
+              <p>Partial observation. Missing servers have unknown status.</p>
+            ) : null}
+            {serverStatusesQuery.data?.statuses.some((server) => server.state === "starting") ? (
+              <p>Startup polling is limited to 30 seconds. Use Refresh status to check again.</p>
+            ) : null}
+          </div>
         ) : null}
         {(selectedScope === "common" ? commonConfigQuery.error : projectConfigQuery.error) ? (
           <p className="text-xs text-destructive">
@@ -610,6 +741,14 @@ export function McpServersSettings(props: {
           <>
             <McpServerList
               selectedScope={selectedScope}
+              observation={serverStatusesQuery.data}
+              outcomes={applyOutcomes?.filter(
+                (outcome) =>
+                  outcome.instanceId === selectedInstanceId &&
+                  serverStatusesQuery.data?.sessions?.some(
+                    (session) => session.threadId === outcome.threadId,
+                  ),
+              )}
               orderedServers={orderedServers}
               beginCreate={beginCreate}
               isSavingConfig={isSavingConfig}
@@ -629,6 +768,20 @@ export function McpServersSettings(props: {
               onToggleEnabled={toggleServerEnabled}
               beginEdit={beginEdit}
               removeServer={removeServer}
+            />
+            <McpObservedGroup
+              group="built-in"
+              observation={serverStatusesQuery.data}
+              projectId={selectedProjectId}
+              provider={selectedProvider}
+              instanceId={selectedInstanceId}
+            />
+            <McpObservedGroup
+              group="external"
+              observation={serverStatusesQuery.data}
+              projectId={selectedProjectId}
+              provider={selectedProvider}
+              instanceId={selectedInstanceId}
             />
             <McpServerEditor
               editingServerName={editingServerName}

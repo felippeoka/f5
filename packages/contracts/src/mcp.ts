@@ -102,6 +102,7 @@ export const McpServerStatusState = Schema.Literals([
   "ready",
   "starting",
   "login-required",
+  "needs-auth",
   "failed",
   "unknown",
 ]);
@@ -115,13 +116,45 @@ export const McpServerStatusEntry = Schema.Struct({
   resourceCount: NonNegativeInt,
   resourceTemplateCount: NonNegativeInt,
   message: Schema.optional(TrimmedNonEmptyString),
+  ownership: Schema.optional(Schema.Literals(["managed", "external", "built-in"])),
+  origin: Schema.optional(Schema.String),
+  desiredEnabled: Schema.optional(Schema.Boolean),
 });
 export type McpServerStatusEntry = typeof McpServerStatusEntry.Type;
 
-export const McpGetServerStatusesRequest = McpGetProviderStatusRequest;
+export const McpGetServerStatusesRequest = Schema.Struct({
+  ...McpGetProviderStatusRequest.fields,
+  threadId: Schema.optional(ThreadId),
+});
+
+export const McpSessionSummary = Schema.Struct({
+  threadId: ThreadId,
+  instanceId: ProviderInstanceId,
+  generation: NonNegativeInt,
+  lastSeenAt: IsoDateTime,
+  busy: Schema.Boolean,
+  appliedVersion: Schema.optional(Schema.String),
+  unconvergedVersion: Schema.optional(Schema.String),
+});
+export type McpSessionSummary = typeof McpSessionSummary.Type;
+
+export const McpObservationMetadata = {
+  source: Schema.optional(Schema.Literals(["conversation", "configurationCheck"])),
+  observedAt: Schema.optional(IsoDateTime),
+  instanceId: Schema.optional(ProviderInstanceId),
+  threadId: Schema.optional(ThreadId),
+  generation: Schema.optional(NonNegativeInt),
+  desiredVersion: Schema.optional(Schema.String),
+  appliedVersion: Schema.optional(Schema.String),
+  fingerprint: Schema.optional(Schema.String),
+  complete: Schema.optional(Schema.Boolean),
+  omissions: Schema.optional(Schema.Array(Schema.String)),
+  sessions: Schema.optional(Schema.Array(McpSessionSummary)),
+};
 export type McpGetServerStatusesRequest = typeof McpGetServerStatusesRequest.Type;
 
 export const McpServerStatusesResult = Schema.Struct({
+  ...McpObservationMetadata,
   provider: ProviderKind,
   projectId: ProjectId,
   support: McpProjectStatusSupport,
@@ -318,6 +351,7 @@ export const McpStatusUpdatedReason = Schema.Literals([
   "applied",
   "oauth-completed",
   "login-completed",
+  "runtime",
 ]);
 export type McpStatusUpdatedReason = typeof McpStatusUpdatedReason.Type;
 
@@ -330,3 +364,58 @@ export const McpStatusUpdatedPayload = Schema.Struct({
   configVersion: Schema.optional(TrimmedNonEmptyString),
 });
 export type McpStatusUpdatedPayload = typeof McpStatusUpdatedPayload.Type;
+
+export const McpInspectServerRequest = Schema.Struct({
+  ...McpGetServerStatusesRequest.fields,
+  provider: Schema.optional(ProviderKind),
+  serverName: TrimmedNonEmptyString,
+  ownership: Schema.optional(Schema.Literals(["managed", "external", "built-in"])),
+});
+export type McpInspectServerRequest = typeof McpInspectServerRequest.Type;
+
+export const McpInspectorTool = Schema.Struct({
+  name: Schema.String,
+  description: Schema.optional(Schema.String),
+  annotations: Schema.optional(Schema.Unknown),
+  inputSchema: Schema.optional(Schema.Unknown),
+});
+export const McpInspectServerResult = Schema.Struct({
+  ...McpServerStatusesResult.fields,
+  serverName: Schema.String,
+  capabilities: Schema.Struct({
+    tools: Schema.Boolean,
+    inputSchemas: Schema.Boolean,
+    resources: Schema.Boolean,
+  }),
+  tools: Schema.Array(McpInspectorTool),
+  resources: Schema.Array(Schema.Unknown),
+  resourceTemplates: Schema.Array(Schema.Unknown),
+  diagnostics: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      status: Schema.String,
+      message: Schema.optional(Schema.String),
+      createdAt: Schema.String,
+    }),
+  ),
+  outcomes: Schema.optional(Schema.Array(McpSessionReloadOutcome)),
+});
+export type McpInspectServerResult = typeof McpInspectServerResult.Type;
+
+export const McpReconnectServerRequest = Schema.Struct({
+  ...McpGetProviderStatusRequest.fields,
+  provider: Schema.optional(ProviderKind),
+  serverName: TrimmedNonEmptyString,
+  threadIds: Schema.optional(Schema.Array(ThreadId)),
+});
+export type McpReconnectServerRequest = typeof McpReconnectServerRequest.Type;
+export const McpReconnectServerResult = Schema.Struct({
+  settingsConnectionReloaded: Schema.Boolean,
+  sessionsMatched: NonNegativeInt,
+  sessionsReconnected: NonNegativeInt,
+  failures: Schema.Array(
+    Schema.Struct({ threadId: Schema.optional(ThreadId), message: Schema.String }),
+  ),
+  sessions: Schema.optional(Schema.Array(McpSessionReloadOutcome)),
+});
+export type McpReconnectServerResult = typeof McpReconnectServerResult.Type;

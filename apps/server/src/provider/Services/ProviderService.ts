@@ -222,6 +222,29 @@ export interface ProviderServiceShape {
    * its next turn. Per-session failures are reported in the result (and as
    * runtime warnings), not raised.
    */
+  readonly readMcpSessionStatuses?: (
+    input: import("@t3tools/contracts").McpGetServerStatusesRequest & {
+      readonly desiredVersion: string;
+    },
+  ) => Effect.Effect<
+    {
+      readonly sessions: ReadonlyArray<import("@t3tools/contracts").McpSessionSummary>;
+      readonly selected?: import("@t3tools/contracts").McpSessionSummary;
+      readonly observation?: import("../mcpObservation.ts").McpAdapterObservation;
+    },
+    ProviderServiceError
+  >;
+  readonly getMcpReconnectTargets?: (
+    input: import("@t3tools/contracts").McpReconnectServerRequest & {
+      readonly provider: ProviderKind;
+    },
+  ) => Effect.Effect<ReadonlyArray<ThreadId>, ProviderServiceError>;
+  readonly reconnectMcpServerForProject?: (
+    input: import("@t3tools/contracts").McpReconnectServerRequest & {
+      readonly provider: ProviderKind;
+    },
+  ) => Effect.Effect<import("@t3tools/contracts").McpReconnectServerResult, ProviderServiceError>;
+
   readonly reloadMcpConfigForProject: (input: {
     readonly provider: ProviderKind;
     readonly instanceId?: ProviderInstanceId;

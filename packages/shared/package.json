@@ -331,6 +331,10 @@
     "./workflowSummary": {
       "types": "./src/workflowSummary.ts",
       "import": "./src/workflowSummary.ts"
+    },
+    "./mcpDiagnostics": {
+      "types": "./src/mcpDiagnostics.ts",
+      "import": "./src/mcpDiagnostics.ts"
     }
   },
   "scripts": {

@@ -357,6 +357,14 @@ function makeProviderRuntimeTestLayer(providerLayer: Layer.Layer<ProviderService
         }),
     }),
     Layer.succeed(McpRuntimeService, {
+      inspectServer: () => Effect.die("unused inspector"),
+      reconnectServer: () =>
+        Effect.succeed({
+          settingsConnectionReloaded: true,
+          sessionsMatched: 0,
+          sessionsReconnected: 0,
+          failures: [],
+        }),
       getProviderStatus: ({ provider, projectId }) =>
         Effect.succeed({
           provider,

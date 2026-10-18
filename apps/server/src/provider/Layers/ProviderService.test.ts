@@ -3482,3 +3482,216 @@ it.effect("preserves a newer applied version when a reload requires restart", ()
     );
   }).pipe(Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]))));
 });
+
+it.effect(
+  "selects the newest current-version conversation using metadata and reads only that session",
+  () => {
+    const fake = makeFakeCodexAdapter();
+    const reads: ThreadId[] = [];
+    const adapter = {
+      ...fake.adapter,
+      getMcpServerStatuses: (threadId: ThreadId) =>
+        Effect.sync(() => {
+          reads.push(threadId);
+          return {
+            servers: [],
+            complete: true,
+            capabilities: { tools: true, inputSchemas: true, resources: true },
+          };
+        }),
+    };
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const directory = yield* ProviderSessionDirectory;
+      const projectId = ProjectId.make("observation-project");
+      for (const [name, version] of [
+        ["current", "desired"],
+        ["newer-stale", "stale"],
+      ])
+        yield* directory.upsert({
+          threadId: asThreadId(name!),
+          provider: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          projectId,
+          status: "running",
+          mcpEffectiveConfigVersion: version!,
+          runtimePayload: { sessionGeneration: 1 },
+        });
+      const result = yield* service.readMcpSessionStatuses!({
+        provider: "codex",
+        instanceId: ProviderInstanceId.make("codex"),
+        projectId,
+        desiredVersion: "desired",
+      });
+      assert.equal(result.selected?.threadId, "current");
+      assert.deepEqual(reads, [asThreadId("current")]);
+      assert.equal(result.sessions.length, 2);
+      const failure = yield* service.readMcpSessionStatuses!({
+        provider: "codex",
+        projectId,
+        threadId: asThreadId("not-in-scope"),
+        desiredVersion: "desired",
+      }).pipe(Effect.flip);
+      assert.include(failure.message, "not running");
+      assert.equal(reads.length, 1);
+    }).pipe(Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", adapter]]))));
+  },
+);
+it.effect(
+  "fences an MCP read when the session is replaced while the provider is responding",
+  () => {
+    const fake = makeFakeCodexAdapter();
+    let reader!: NonNullable<ProviderAdapterShape<ProviderAdapterError>["getMcpServerStatuses"]>;
+    const adapter = {
+      ...fake.adapter,
+      getMcpServerStatuses: (threadId: ThreadId) => reader(threadId),
+    };
+    return Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const service = yield* ProviderService;
+      const directory = yield* ProviderSessionDirectory;
+      const threadId = asThreadId("fenced-read"),
+        projectId = ProjectId.make("fenced-project");
+      reader = () =>
+        Deferred.succeed(entered, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+          Effect.as({
+            servers: [],
+            complete: true,
+            capabilities: { tools: true, inputSchemas: true, resources: true },
+          }),
+        );
+      yield* directory.upsert({
+        threadId,
+        projectId,
+        provider: "codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        status: "running",
+        runtimePayload: { sessionGeneration: 1 },
+      });
+      const pending = yield* service.readMcpSessionStatuses!({
+        provider: "codex",
+        projectId,
+        threadId,
+        desiredVersion: "desired",
+      }).pipe(Effect.forkChild);
+      yield* Deferred.await(entered);
+      yield* directory.upsert({
+        threadId,
+        provider: "codex",
+        runtimePayload: { sessionGeneration: 2 },
+      });
+      yield* Deferred.succeed(release, undefined);
+      const result = yield* Fiber.join(pending).pipe(Effect.flip);
+      assert.include(result.message, "superseded");
+    }).pipe(Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", adapter]]))));
+  },
+);
+
+it.effect(
+  "validates every reconnect target before touching any session and reports success, skips, and failures",
+  () => {
+    const fake = makeFakeCodexAdapter("claudeAgent");
+    const reconnect = vi.fn(({ threadId }: { threadId: ThreadId }) =>
+      threadId === "broken"
+        ? Effect.fail(
+            new ProviderAdapterRequestError({
+              provider: "claudeAgent",
+              method: "reconnectMcpServer",
+              detail: "fixture connection failed",
+            }),
+          )
+        : Effect.succeed(threadId === "owned"),
+    );
+    const adapter = {
+      ...fake.adapter,
+      reconnectMcpServer: reconnect,
+      getOwnedMcpServerNames: (threadId: ThreadId) =>
+        Effect.succeed(threadId === "unowned" ? [] : ["docs"]),
+    };
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const directory = yield* ProviderSessionDirectory;
+      const projectId = ProjectId.make("reconnect-project"),
+        instanceId = ProviderInstanceId.make("claudeAgent");
+      for (const id of ["owned", "unowned", "broken"])
+        yield* directory.upsert({
+          threadId: asThreadId(id),
+          projectId,
+          provider: "claudeAgent",
+          providerInstanceId: instanceId,
+          status: "running",
+          mcpEffectiveConfigVersion: "saved",
+          runtimePayload: { sessionGeneration: 1 },
+        });
+      yield* service.reconnectMcpServerForProject!({
+        provider: "claudeAgent",
+        projectId,
+        instanceId,
+        serverName: "docs",
+        threadIds: [asThreadId("owned"), asThreadId("missing")],
+      }).pipe(Effect.flip);
+      assert.equal(reconnect.mock.calls.length, 0);
+      assert.deepEqual(
+        (yield* service.getMcpReconnectTargets!({
+          provider: "claudeAgent",
+          projectId,
+          instanceId,
+          serverName: "docs",
+        })).toSorted(),
+        [asThreadId("broken"), asThreadId("owned")],
+      );
+      const result = yield* service.reconnectMcpServerForProject!({
+        provider: "claudeAgent",
+        projectId,
+        instanceId,
+        serverName: "docs",
+      });
+      assert.equal(result.settingsConnectionReloaded, false);
+      assert.equal(result.sessionsMatched, 2);
+      assert.equal(result.sessionsReconnected, 1);
+      assert.equal(result.failures.length, 1);
+      assert.deepEqual(result.sessions?.map((session) => session.disposition).toSorted(), [
+        "applied",
+        "failed",
+      ]);
+    }).pipe(
+      Effect.provide(makeProviderServiceLayerForAdapters(new Map([["claudeAgent", adapter]]))),
+    );
+  },
+);
+it.effect("stamps MCP runtime activity with the live binding's account and generation", () => {
+  const fake = makeFakeCodexAdapter();
+  return Effect.gen(function* () {
+    const service = yield* ProviderService;
+    const threadId = asThreadId("stamped-mcp");
+    yield* service.startSession(threadId, {
+      threadId,
+      provider: "codex",
+      runtimeMode: "full-access",
+    });
+    const observed = yield* Stream.runHead(
+      Stream.filter(service.streamEvents, (event) => event.type === "mcp.status.updated"),
+    ).pipe(Effect.forkChild);
+    yield* sleep(20);
+    fake.emit({
+      type: "mcp.status.updated",
+      eventId: asEventId("mcp-stamp"),
+      provider: "codex",
+      threadId,
+      createdAt: new Date().toISOString(),
+      payload: { status: { name: "docs", status: "ready", toolCount: 4 } },
+    } as unknown as LegacyProviderRuntimeEvent);
+    const event = Option.getOrThrow(yield* Fiber.join(observed));
+    assert.equal(event.type, "mcp.status.updated");
+    if (event.type === "mcp.status.updated")
+      assert.deepEqual(event.payload.status, {
+        name: "docs",
+        status: "ready",
+        toolCount: 4,
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        sessionGeneration: 1,
+      });
+  }).pipe(Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]))));
+});

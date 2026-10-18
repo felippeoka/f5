@@ -42,3 +42,12 @@ describe("Codex MCP name matching", () => {
     expect(findCodexServerStatusByName(merged, "github")).toBeUndefined();
   });
 });
+
+it("lets startup status in the listing supersede earlier notification errors", () => {
+  expect(
+    mergeCodexMcpStartupStatuses(
+      [{ name: "docs", startupStatus: "ready", tools: {} }],
+      [{ name: "docs", startupStatus: "failed", error: "Earlier startup failure" }],
+    ),
+  ).toEqual([{ name: "docs", startupStatus: "ready", tools: {} }]);
+});

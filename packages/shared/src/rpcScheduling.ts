@@ -94,6 +94,7 @@ const READ_ONLY_METHODS = new Set([
   "mcp.getProjectConfig",
   "mcp.getProviderStatus",
   "mcp.getServerStatuses",
+  "mcp.inspectServer",
   "nativeOperation.inspect",
   "nativeOperation.list",
   "nextTurnQueue.list",
