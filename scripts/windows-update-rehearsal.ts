@@ -298,7 +298,9 @@ async function download(mode: FeedMode): Promise<DesktopUpdateState> {
 /**
  * Invokes a button in a native dialog owned by an F5 process via UI Automation.
  * Only message boxes (window class #32770) are searched, so a same-named button
- * in the renderer's accessibility tree can never be pressed instead.
+ * in the renderer's accessibility tree can never be pressed instead. An owned
+ * message box appears under its owner window rather than at the top level, so
+ * each F5 window is searched as well. On timeout the window tree is printed.
  */
 function pressDialogButton(name: string, timeoutSeconds: number): boolean {
   const result = spawnSync(
@@ -309,19 +311,34 @@ function pressDialogButton(name: string, timeoutSeconds: number): boolean {
       "-Command",
       `
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+$A = [System.Windows.Automation.AutomationElement]
+$Scope = [System.Windows.Automation.TreeScope]
+$messageBox = New-Object System.Windows.Automation.PropertyCondition($A::ClassNameProperty, '#32770')
+$button = New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
+function F5Windows {
+  $ids = @(Get-Process | Where-Object { $_.ProcessName -eq 'F5' } | ForEach-Object { $_.Id })
+  @($A::RootElement.FindAll($Scope::Children, [System.Windows.Automation.Condition]::TrueCondition) | Where-Object { $ids -contains $_.Current.ProcessId })
+}
 $deadline = (Get-Date).AddSeconds(${timeoutSeconds})
 while ((Get-Date) -lt $deadline) {
-  $ids = @(Get-Process -Name F5 -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
-  foreach ($window in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
-    if ($ids -notcontains $window.Current.ProcessId -or $window.Current.ClassName -ne '#32770') { continue }
-    foreach ($button in $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)))) {
-      if ($button.Current.Name -like '${name}*') {
-        $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-        exit 0
+  foreach ($window in F5Windows) {
+    $dialogs = if ($window.Current.ClassName -eq '#32770') { @($window) } else { @($window.FindAll($Scope::Descendants, $messageBox)) }
+    foreach ($dialog in $dialogs) {
+      foreach ($candidate in $dialog.FindAll($Scope::Descendants, $button)) {
+        if ($candidate.Current.Name -like '${name}*') {
+          $candidate.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+          exit 0
+        }
       }
     }
   }
   Start-Sleep -Milliseconds 500
+}
+foreach ($window in F5Windows) {
+  [Console]::Error.WriteLine("window pid=$($window.Current.ProcessId) class=$($window.Current.ClassName) name=$($window.Current.Name)")
+  foreach ($child in $window.FindAll($Scope::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+    [Console]::Error.WriteLine("  child class=$($child.Current.ClassName) type=$($child.Current.ControlType.ProgrammaticName) name=$($child.Current.Name)")
+  }
 }
 exit 3
 `,
@@ -329,7 +346,12 @@ exit 3
     { encoding: "utf8" },
   );
   if (result.status === 0) return true;
-  if (result.status === 3) return false;
+  if (result.status === 3) {
+    step(
+      `No "${name}" button in an F5 message box. F5 windows:\n${result.stderr.trim() || "(none)"}`,
+    );
+    return false;
+  }
   throw new Error(`UI Automation failed: ${result.stderr || result.error}`);
 }
 /**
