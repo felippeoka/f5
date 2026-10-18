@@ -775,6 +775,7 @@ const isToolCompletionEnvelope = Schema.is(ToolCompletionEnvelope);
 function compactToolPayload(payload: CompactToolActivityPayload): Record<string, unknown> {
   return {
     itemType: payload.itemType,
+    ...(payload.computerTool === true ? { computerTool: true } : {}),
     ...(payload.completion ? { completion: payload.completion } : {}),
     ...(payload.imagePath ? { imagePath: payload.imagePath } : {}),
     ...(payload.providerItemId ? { providerItemId: payload.providerItemId } : {}),
@@ -952,6 +953,7 @@ export function readToolActivityPayload(payload: unknown): CompactToolActivityPa
 
   return {
     itemType: record.itemType,
+    ...(record.computerTool === true ? { computerTool: true } : {}),
     ...(completion ? { completion } : {}),
     ...(imagePath ? { imagePath } : {}),
     ...(providerItemId ? { providerItemId } : {}),

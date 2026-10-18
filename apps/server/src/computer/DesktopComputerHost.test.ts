@@ -23,7 +23,11 @@ describe("private desktop host", () => {
       profileId: "p",
       backendIncarnation: "i",
       protocolVersion: 1,
-      capabilities: ["background-ax-v1"],
+      capabilities: [
+        "background-ax-v1",
+        "computer-agent-identity-v1",
+        "computer-activity-correlation-v1",
+      ],
     });
     expect(host.backgroundCapable()).toBe(false);
     ipc.emit("message", { type: "hostCapabilities", capabilities: ["background-ax-v1"] });

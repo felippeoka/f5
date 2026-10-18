@@ -229,15 +229,25 @@ const program = Effect.gen(function* () {
         request.clientCapabilities?._meta?.parameterizedModelPicker !== false;
       return {
         protocolVersion: 1,
-        agentCapabilities: { loadSession: true },
+        agentCapabilities: {
+          loadSession: true,
+          ...(process.env.ACP_MOCK_MCP_HTTP === "1" ? { mcpCapabilities: { http: true } } : {}),
+        },
       };
     }),
   );
 
-  yield* agent.handleAuthenticate(() => Effect.succeed({}));
+  yield* agent.handleAuthenticate(() =>
+    process.env.ACP_MOCK_AUTH_FAIL === "1"
+      ? Effect.fail(AcpError.AcpRequestError.internalError("Mock authentication failed"))
+      : Effect.succeed({}),
+  );
 
   yield* agent.handleCreateSession(() =>
     Effect.gen(function* () {
+      if (process.env.ACP_MOCK_NEW_HANG === "1") return yield* Effect.never;
+      if (process.env.ACP_MOCK_NEW_FAIL === "1")
+        return yield* AcpError.AcpRequestError.internalError("Mock session failed");
       if (process.env.F5_ACP_STARTUP_COMMANDS === "1") {
         yield* agent.client.sessionUpdate({
           sessionId,
@@ -351,6 +361,29 @@ const program = Effect.gen(function* () {
   yield* agent.handlePrompt((request) =>
     Effect.gen(function* () {
       const requestedSessionId = String(request.sessionId ?? sessionId);
+      if (process.env.ACP_MOCK_PRIVATE_TOOL_EVENTS === "1") {
+        for (const update of [
+          {
+            sessionUpdate: "tool_call_update" as const,
+            toolCallId: "private-update-only",
+            title: "Terminal",
+            kind: "execute" as const,
+            status: "completed" as const,
+            rawInput: { command: "echo safe" },
+            rawOutput: "PRIVATE_ADAPTER_SENTINEL",
+          },
+          {
+            sessionUpdate: "tool_call" as const,
+            toolCallId: "private-task",
+            title: "Running start_subagent",
+            kind: "other" as const,
+            status: "completed" as const,
+            rawInput: { text: "PRIVATE_ADAPTER_SENTINEL" },
+            rawOutput: "PRIVATE_ADAPTER_SENTINEL",
+          },
+        ])
+          yield* agent.client.sessionUpdate({ sessionId: requestedSessionId, update });
+      }
 
       if (promptDelayMs > 0) {
         yield* Effect.sleep(`${promptDelayMs} millis`);

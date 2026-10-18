@@ -1,25 +1,57 @@
+import { useAgentComputerActivityStore } from "../agentComputerActivityStore";
 import { useAgentBrowserActivityStore } from "../agentBrowserActivityStore";
 import type { ThreadId } from "@t3tools/contracts";
 import { readNativeApi } from "../nativeApi";
 import { newCommandId } from "../lib/utils";
+// macOS only while Windows preview is gated; remote clients also control a Mac host.
+export const COMPUTER_STOP_SHORTCUT_LABEL = "⌃⌘Esc";
 export async function stopComputerTurn(threadId: ThreadId): Promise<void> {
-  try {
-    await window.desktopBridge?.computerAutomation?.setPaused(threadId, true);
-  } finally {
-    await readNativeApi()?.orchestration.dispatchCommand({
-      type: "thread.turn.interrupt",
-      commandId: newCommandId(),
-      threadId,
-      createdAt: new Date().toISOString(),
-    });
-  }
+  useAgentComputerActivityStore.getState().markStopUnconfirmed(threadId);
+  const outcomes = await Promise.allSettled([
+    pauseComputerThread(threadId, true),
+    Promise.resolve().then(() => {
+      const api = readNativeApi();
+      if (!api) throw new Error("The host is disconnected.");
+      return api.orchestration.dispatchCommand({
+        type: "thread.turn.interrupt",
+        commandId: newCommandId(),
+        threadId,
+        createdAt: new Date().toISOString(),
+      });
+    }),
+  ]);
+  const failures = outcomes.flatMap((outcome) =>
+    outcome.status === "rejected" ? [outcome.reason] : [],
+  );
+  if (failures.length)
+    throw new AggregateError(failures, "Stop unconfirmed. Check the app and retry Stop.");
+  useAgentComputerActivityStore.getState().confirmStopIfReleased(threadId);
 }
 export async function pauseComputerThread(threadId: ThreadId, paused: boolean): Promise<void> {
   const bridge = window.desktopBridge?.computerAutomation;
   if (!paused && !bridge) throw new Error("Resume on the computer running F5.");
-  await bridge?.setPaused(threadId, paused);
+  useAgentComputerActivityStore.getState().invalidate(threadId);
+  const outcomes = await Promise.allSettled([
+    (() => {
+      try {
+        return Promise.resolve(bridge?.setPaused(threadId, paused));
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    })(),
+    Promise.resolve().then(() => {
+      if (!paused) return;
+      const api = readNativeApi();
+      if (!api) throw new Error("The host is disconnected.");
+      return api.preview.automation.setPaused({ threadId, paused });
+    }),
+  ]);
+  const failures = outcomes.flatMap((outcome) =>
+    outcome.status === "rejected" ? [outcome.reason] : [],
+  );
+  if (failures.length === 1) throw failures[0];
+  if (failures.length) throw new AggregateError(failures, "Computer control could not be updated.");
   // Main sends the authoritative resume notification only after its checks succeed.
-  if (paused) await readNativeApi()?.preview.automation.setPaused({ threadId, paused });
 }
 
 /** Preview resume shares the pause latch; computer-bound threads need local approval. */

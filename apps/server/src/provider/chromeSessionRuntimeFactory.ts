@@ -1,3 +1,7 @@
+import {
+  CLAUDE_IN_CHROME_CERTIFIED,
+  CLAUDE_IN_CHROME_UNAVAILABLE_DETAIL,
+} from "./Layers/claudeAgentBrowser";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -12,6 +16,7 @@ import {
   CHROME_NATIVE_HOST_CERTIFICATIONS,
   parseChromeRegistryQuery,
   type ChromeProvider,
+  type ChromeNativeHostDescriptor,
 } from "./chromeNativeHost";
 import { inspectChromeNativeHosts } from "./chromeNativeHostInspection";
 import { makeChromeNativeHostStorage } from "./chromeNativeHostStorage";
@@ -79,6 +84,69 @@ export async function restoreChromeSessionSetup(
   throw new Error("Chrome transaction does not belong to this profile.");
 }
 
+export type ChromeUnavailableReason = {
+  reason: "not-certified" | "platform" | "executable-drift" | "unverifiable";
+  detail: string;
+};
+export function chromeCertificationAvailability(input: {
+  provider: ChromeProvider;
+  masterEnabled: boolean;
+  descriptors: ReadonlyArray<ChromeNativeHostDescriptor>;
+  platform: string;
+  arch: string;
+  executableSha256?: string;
+}): { descriptor: ChromeNativeHostDescriptor } | { unavailable: ChromeUnavailableReason } {
+  const label = input.provider === "claude" ? "Claude" : "Codex";
+  const certified = input.descriptors.filter(
+    (entry) =>
+      entry.provider === input.provider &&
+      entry.certified &&
+      entry.runtime?.evidence &&
+      entry.verifyServer,
+  );
+  if (!input.masterEnabled || !certified.length)
+    return {
+      unavailable: {
+        reason: "not-certified",
+        detail:
+          input.provider === "claude"
+            ? CLAUDE_IN_CHROME_UNAVAILABLE_DETAIL
+            : "Codex Chrome control is awaiting safety certification.",
+      },
+    };
+  const matchingPlatform = certified.filter(
+    (entry) => entry.runtime!.platform === input.platform && entry.runtime!.arch === input.arch,
+  );
+  if (!matchingPlatform.length)
+    return {
+      unavailable: {
+        reason: "platform",
+        detail:
+          input.provider === "claude" && input.platform === "darwin"
+            ? "Claude in Chrome isn't certified on this Mac's architecture yet."
+            : `${label} Chrome control is not certified on this platform or architecture yet.`,
+      },
+    };
+  if (!input.executableSha256)
+    return {
+      unavailable: {
+        reason: "unverifiable",
+        detail: `F5 couldn't verify the ${label} executable.`,
+      },
+    };
+  const descriptor = matchingPlatform.find(
+    (entry) => entry.runtime!.executableSha256 === input.executableSha256,
+  );
+  return descriptor
+    ? { descriptor }
+    : {
+        unavailable: {
+          reason: "executable-drift",
+          detail: `This ${label} build isn't certified for Chrome. Update F5 or remove the custom ${label} executable.`,
+        },
+      };
+}
+
 export const makeChromeSessionRuntime = (input: {
   stateDir: string;
   providerHome: string;
@@ -88,16 +156,16 @@ export const makeChromeSessionRuntime = (input: {
   provider: ChromeProvider;
 }) =>
   Effect.gen(function* () {
-    const records = CHROME_NATIVE_HOST_CERTIFICATIONS.flatMap((descriptor) =>
-      descriptor.runtime && descriptor.verifyServer ? [{ descriptor, ...descriptor.runtime }] : [],
-    ).filter(
-      (entry) =>
-        entry.platform === process.platform &&
-        entry.descriptor.provider === input.provider &&
-        entry.descriptor.certified &&
-        entry.evidence,
-    );
-    if (!records.length) return undefined;
+    // The master switch remains effective even if a certified descriptor is accidentally present.
+    const preflight = chromeCertificationAvailability({
+      provider: input.provider,
+      masterEnabled: input.provider !== "claude" || CLAUDE_IN_CHROME_CERTIFIED,
+      descriptors: CHROME_NATIVE_HOST_CERTIFICATIONS,
+      platform: process.platform,
+      arch: process.arch,
+    });
+    if ("unavailable" in preflight && preflight.unavailable.reason !== "unverifiable")
+      return preflight;
     const executable = yield* Effect.tryPromise(async () => {
       const executablePath = input.executablePath ?? input.resolveDefaultExecutable?.();
       if (!executablePath) return undefined;
@@ -108,11 +176,19 @@ export const makeChromeSessionRuntime = (input: {
       for await (const chunk of createReadStream(executablePath)) hash.update(chunk);
       return hash.digest("hex");
     }).pipe(Effect.catch(() => Effect.succeed(undefined)));
-    const record = records.find((entry) => entry.executableSha256 === executable);
-    if (!record) return undefined;
+    const availability = chromeCertificationAvailability({
+      provider: input.provider,
+      masterEnabled: input.provider !== "claude" || CLAUDE_IN_CHROME_CERTIFIED,
+      descriptors: CHROME_NATIVE_HOST_CERTIFICATIONS,
+      platform: process.platform,
+      arch: process.arch,
+      ...(executable ? { executableSha256: executable } : {}),
+    });
+    if ("unavailable" in availability) return availability;
+    const record = { descriptor: availability.descriptor, ...availability.descriptor.runtime! };
     const key = JSON.stringify([input.stateDir, input.provider, input.providerHome, executable]);
     const existing = runtimes.get(key);
-    if (existing) return existing.runtime;
+    if (existing) return { runtime: existing.runtime };
     const locations = record.locations(input.providerHome, homedir());
     const services = yield* Effect.services<FileSystem.FileSystem | Path.Path>();
     const storage = yield* makeChromeNativeHostStorage({
@@ -190,5 +266,5 @@ export const makeChromeSessionRuntime = (input: {
       storage,
     });
     runtimes.set(key, { stateDir: input.stateDir, provider: input.provider, runtime });
-    return runtime;
+    return { runtime };
   });

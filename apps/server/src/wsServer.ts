@@ -1223,6 +1223,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
                   pushBus.publishAll(WS_CHANNELS.computerAccessGrantsChanged, event.data),
                 );
                 break;
+              case "computer.observations.invalidated":
+                void Effect.runPromise(
+                  pushBus.publishAll(WS_CHANNELS.computerObservationsInvalidated, event.data),
+                );
+                break;
               case "computer.activity":
                 void Effect.runPromise(
                   pushBus.publishAll(WS_CHANNELS.computerActivity, event.data),

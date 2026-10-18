@@ -335,6 +335,14 @@
     "./mcpDiagnostics": {
       "types": "./src/mcpDiagnostics.ts",
       "import": "./src/mcpDiagnostics.ts"
+    },
+    "./agentAutomationSupport": {
+      "types": "./src/agentAutomationSupport.ts",
+      "import": "./src/agentAutomationSupport.ts"
+    },
+    "./computerAction": {
+      "types": "./src/computerAction.ts",
+      "import": "./src/computerAction.ts"
     }
   },
   "scripts": {

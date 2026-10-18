@@ -7406,19 +7406,29 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         let chromeRuntime: ChromeSessionRuntime | undefined;
         let chromeGeneration: string | undefined;
         if (serverConfig.mode === "desktop" && !input.workflowExecutionProfile && computerBroker) {
-          chromeRuntime =
-            options?.chromeRuntime ??
-            (yield* makeChromeSessionRuntime({
-              stateDir: serverConfig.stateDir,
-              providerHome: resolveClaudeConfigDir(queryEnvironment, input.cwd),
-              executablePath: sdkExecutableOptions.pathToClaudeCodeExecutable,
-              resolveDefaultExecutable: resolveBundledClaudeExecutable,
-              broker: computerBroker,
-              provider: "claude",
-            }).pipe(
-              Effect.provideService(FileSystem.FileSystem, fileSystem),
-              Effect.provide(EffectNodePath.layer),
-            ));
+          const chromeResult = options?.chromeRuntime
+            ? { runtime: options.chromeRuntime }
+            : yield* makeChromeSessionRuntime({
+                stateDir: serverConfig.stateDir,
+                providerHome: resolveClaudeConfigDir(queryEnvironment, input.cwd),
+                executablePath: sdkExecutableOptions.pathToClaudeCodeExecutable,
+                resolveDefaultExecutable: resolveBundledClaudeExecutable,
+                broker: computerBroker,
+                provider: "claude",
+              }).pipe(
+                Effect.provideService(FileSystem.FileSystem, fileSystem),
+                Effect.provide(EffectNodePath.layer),
+              );
+          chromeRuntime = "runtime" in chromeResult ? chromeResult.runtime : undefined;
+          if (
+            "unavailable" in chromeResult &&
+            startBrowserPolicy.claudeInChrome &&
+            agentBrowserState
+          )
+            agentBrowserState.chrome = {
+              state: "unavailable",
+              detail: chromeResult.unavailable.detail,
+            };
           if (chromeRuntime && startBrowserPolicy.claudeInChrome) {
             chromeGeneration = computerServer ? computerBroker.generation(threadId)! : randomUUID();
             if (!computerServer) computerBroker.bindSession(threadId, chromeGeneration, "claude");

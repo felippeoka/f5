@@ -1,3 +1,5 @@
+import { useShallow } from "zustand/react/shallow";
+import { AGENT_ACTIVITY_WINDOW_MS } from "../agentActivityWindow";
 import { useEffect, useMemo, useState } from "react";
 import type { ComputerAccessPush, ComputerGrant, ThreadId } from "@t3tools/contracts";
 import {
@@ -13,6 +15,7 @@ import {
 import {
   useAgentComputerActivityStore,
   isAgentComputerActive,
+  EMPTY_COMPUTER_REQUESTS,
 } from "../agentComputerActivityStore";
 import { cn } from "../lib/utils";
 import { readNativeApi } from "../nativeApi";
@@ -28,7 +31,6 @@ import { Button } from "./ui/button";
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "./ui/popover";
 import { pauseComputerThread, stopComputerTurn } from "./computerControls";
 const EMPTY_GRANTS: ReadonlyArray<ComputerGrant> = [];
-const HISTORY_LIMIT = 20;
 const TONE_CLASS: Record<ComputerStatusTone, string> = {
   ok: "bg-success",
   pending: "bg-info animate-pulse",
@@ -48,8 +50,16 @@ export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
   const activity = useAgentComputerActivityStore((state) => state.activity[threadId]);
   const capture = useAgentComputerActivityStore((state) => state.lastCapture[threadId]);
   const grants = useAgentComputerActivityStore((state) => state.grants[threadId] ?? EMPTY_GRANTS);
-  const appNames = useAgentComputerActivityStore((state) => state.appNames);
-  const requests = useAgentComputerActivityStore((state) => state.requests);
+  const appNames = useAgentComputerActivityStore(
+    useShallow((state) =>
+      Object.fromEntries(grants.map((grant) => [grant.appId, state.appNames[grant.appId]])),
+    ),
+  );
+  const requests = useAgentComputerActivityStore(
+    (state) => state.requestsByThread[threadId] ?? EMPTY_COMPUTER_REQUESTS,
+  );
+  const actions = useAgentComputerActivityStore((state) => state.history[threadId]);
+  const stopUnconfirmed = useAgentComputerActivityStore((state) => state.stopUnconfirmed[threadId]);
   const paused = useAgentComputerActivityStore((state) => state.paused[threadId]);
   const held = useAgentComputerActivityStore(
     (state) =>
@@ -60,26 +70,38 @@ export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
   const [now, setNow] = useState(Date.now());
   const [error, setError] = useState("");
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  const history = useMemo(
-    () =>
-      Object.values(requests)
-        .filter((request): request is AccessRequest => request?.threadId === threadId)
-        .slice(-HISTORY_LIMIT)
-        .reverse(),
-    [requests, threadId],
-  );
+    setNow(Date.now());
+  }, [activity, lastLeaseAt, held]);
+  useEffect(() => {
+    if (held) return;
+    const expiries = [
+      activity && activity.status !== "started"
+        ? activity.at + AGENT_ACTIVITY_WINDOW_MS
+        : undefined,
+      lastLeaseAt !== undefined ? lastLeaseAt + AGENT_ACTIVITY_WINDOW_MS : undefined,
+    ].filter((expiry): expiry is number => expiry !== undefined && expiry > now);
+    if (!expiries.length) return;
+    const timer = setTimeout(
+      () => setNow(Date.now()),
+      Math.max(0, Math.min(...expiries) - Date.now()) + 50,
+    );
+    return () => clearTimeout(timer);
+  }, [activity, lastLeaseAt, held, now]);
+  const history = useMemo(() => [...requests].reverse(), [requests]);
   const run = (action: () => Promise<unknown>) => {
     setError("");
-    void action().catch(() => setError("Computer control could not be updated."));
+    void action().catch((cause) =>
+      setError(cause instanceof Error ? cause.message : "Computer control could not be updated."),
+    );
   };
   const visible =
-    paused || grants.length > 0 || isAgentComputerActive(activity, now, held, lastLeaseAt);
+    stopUnconfirmed ||
+    paused ||
+    grants.length > 0 ||
+    isAgentComputerActive(activity, now, held, lastLeaseAt);
   if (!visible) {
     const latest = history[0];
-    if (!latest) return null;
+    if (!latest && !actions?.length) return null;
     return (
       <div
         className="mx-auto mt-2 flex w-full max-w-3xl items-center gap-2 rounded-lg border border-border bg-card px-3 py-1 text-muted-foreground text-xs shadow-xs"
@@ -87,10 +109,11 @@ export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
       >
         <MonitorIcon className="size-3.5 shrink-0" />
         <span className="min-w-0 flex-1 truncate" aria-live="polite">
-          Computer access · last request{" "}
-          {!latest.settled ? "pending" : latest.allowed ? "allowed" : "not allowed"}
+          {latest ? "Computer access · last request" : "Computer actions"}{" "}
+          {latest ? (!latest.settled ? "pending" : latest.allowed ? "allowed" : "not allowed") : ""}
         </span>
-        <ComputerAccessHistory history={history} />
+        {actions?.length ? <ComputerActionsHistory history={actions} /> : null}
+        {history.length ? <ComputerAccessHistory history={history} /> : null}
       </div>
     );
   }
@@ -120,7 +143,11 @@ export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
       <div className="min-w-40 flex-1 space-y-1">
         <p className="flex items-center gap-1.5 truncate font-medium" aria-live="polite">
           <span className={cn("size-1.5 shrink-0 rounded-full", TONE_CLASS[tone])} />
-          <span className="truncate">{describeComputerAction(activity, { paused, held })}</span>
+          <span className="truncate">
+            {stopUnconfirmed
+              ? "Stop unconfirmed"
+              : describeComputerAction(activity, { paused, held })}
+          </span>
           {activity?.appName && !paused ? (
             <span className="truncate font-normal text-muted-foreground">· {activity.appName}</span>
           ) : null}
@@ -155,14 +182,23 @@ export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
             })
           )}
         </div>
+        {activity?.outcome === "OutcomeUnknown" ? (
+          <p className="text-warning-foreground text-xs">
+            Check the app before resuming. Observe the result before another action.
+          </p>
+        ) : null}
+        {paused && !window.desktopBridge?.computerAutomation ? (
+          <p className="text-muted-foreground text-xs">Resume on the computer running F5.</p>
+        ) : null}
         {error ? (
           <p role="alert" className="text-destructive-foreground text-xs">
             {error}
           </p>
         ) : null}
       </div>
-      {/* Kept unshrinkable so Stop stays reachable; wraps to its own row on narrow widths. */}
-      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+      {/* Controls wrap onto another row so Stop remains reachable at narrow widths. */}
+      <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1.5">
+        {actions?.length ? <ComputerActionsHistory history={actions} /> : null}
         {history.length > 0 ? <ComputerAccessHistory history={history} /> : null}
         <Button
           size="xs"
@@ -179,7 +215,7 @@ export function AgentComputerLiveCard({ threadId }: { threadId: ThreadId }) {
           onClick={() => run(() => stopComputerTurn(threadId))}
         >
           <SquareIcon />
-          Stop
+          {stopUnconfirmed ? "Retry Stop" : "Stop"}
         </Button>
       </div>
     </div>
@@ -232,6 +268,50 @@ function ComputerAccessHistory({ history }: { history: ReadonlyArray<AccessReque
                   <p className="line-clamp-2 text-muted-foreground text-xs">{request.reason}</p>
                 ) : null}
               </div>
+            </li>
+          ))}
+        </ul>
+      </PopoverPopup>
+    </Popover>
+  );
+}
+
+function ComputerActionsHistory({
+  history,
+}: {
+  history: ReadonlyArray<import("@t3tools/contracts").ComputerActivity & { at: number }>;
+}) {
+  const [openedAt, setOpenedAt] = useState(Date.now());
+  return (
+    <Popover
+      onOpenChange={(open) => {
+        if (open) setOpenedAt(Date.now());
+      }}
+    >
+      <PopoverTrigger
+        render={
+          <Button size="xs" variant="ghost">
+            <HistoryIcon />
+            Actions ({history.length})
+          </Button>
+        }
+      />
+      <PopoverPopup className="w-96" align="end">
+        <PopoverTitle className="mb-2 text-sm">Computer actions</PopoverTitle>
+        <ul className="max-h-72 space-y-2 overflow-y-auto">
+          {[...history].reverse().map((entry, index) => (
+            <li key={`${entry.at}:${index}`} className="text-sm">
+              <p>
+                {describeComputerAction(entry, {})}
+                {entry.appName ? ` · ${entry.appName}` : ""}{" "}
+                {entry.delivery === "background" ? (
+                  <Badge variant="outline">background</Badge>
+                ) : null}
+              </p>
+              <p className="text-muted-foreground text-xs">
+                {entry.outcome ? `${entry.outcome} · ` : ""}
+                {Math.max(0, Math.floor((openedAt - entry.at) / 1000))}s ago
+              </p>
             </li>
           ))}
         </ul>

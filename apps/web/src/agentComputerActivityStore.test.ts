@@ -3,20 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isAgentComputerActive, useAgentComputerActivityStore } from "./agentComputerActivityStore";
 import { computerUseBannerTargets, computerUseBannerText } from "./components/ComputerUseBanner";
 const threadId = ThreadId.makeUnsafe("computer-thread");
-beforeEach(() =>
-  useAgentComputerActivityStore.setState({
-    appNames: {},
-    activity: {},
-    lastCapture: {},
-    grants: {},
-    requests: {},
-    paused: {},
-    leases: { holders: [] },
-    lastLeaseAt: {},
-  }),
-);
+beforeEach(() => useAgentComputerActivityStore.getState().resetConnection());
 describe("computer activity", () => {
-  it("keeps the last capture separate from later actions that have no screenshot", () => {
+  it("clears the last capture when a later action starts or completes without one", () => {
     const store = useAgentComputerActivityStore.getState();
     store.record({
       threadId,
@@ -31,11 +20,7 @@ describe("computer activity", () => {
     const state = useAgentComputerActivityStore.getState();
     expect(state.activity[threadId]).toMatchObject({ op: "type", status: "completed" });
     expect(state.activity[threadId]?.thumbnailDataUrl).toBeUndefined();
-    expect(state.lastCapture[threadId]).toMatchObject({
-      op: "activateApp",
-      appName: "Fixture",
-      thumbnailDataUrl: "SYNTHETIC_CAPTURE",
-    });
+    expect(state.lastCapture[threadId]).toBeUndefined();
     expect(state.lastCapture.otherThread).toBeUndefined();
   });
   it("discards capture content on grant changes, backend switches and reconnect", () => {
@@ -237,4 +222,93 @@ describe("computer use banner text", () => {
     );
     expect(computerUseBannerText({ holders: [] }, false)).toBeNull();
   });
+});
+
+it("bounds settled access requests per thread and globally while retaining unsettled requests and stable unrelated indexes", () => {
+  const store = useAgentComputerActivityStore.getState();
+  store.request({
+    requestId: "pending",
+    threadId: "pending-thread",
+    backendIncarnation: "b",
+    kind: "apps",
+    reason: "Test",
+    apps: [],
+  });
+  const stable = useAgentComputerActivityStore.getState().requestsByThread["pending-thread"];
+  for (let t = 0; t < 15; t++)
+    for (let i = 0; i < 25; i++) {
+      const id = `${t}-${i}`;
+      store.request({
+        requestId: id,
+        threadId: `t${t}`,
+        backendIncarnation: "b",
+        kind: "apps",
+        reason: "Test",
+        apps: [],
+      });
+      store.settle({ requestId: id, threadId: `t${t}`, allowed: true });
+    }
+  const state = useAgentComputerActivityStore.getState();
+  expect(Object.values(state.requests).filter((request) => request?.settled)).toHaveLength(200);
+  expect(
+    Object.values(state.requestsByThread).every(
+      (requests) => (requests?.filter((request) => request.settled).length ?? 0) <= 20,
+    ),
+  ).toBe(true);
+  expect(state.requestsByThread["pending-thread"]).toBe(stable);
+  expect(state.requests.pending?.settled).toBeUndefined();
+});
+it("records only tool history, preserves captures on tool completion and caps history at thirty", () => {
+  const store = useAgentComputerActivityStore.getState();
+  store.record({
+    threadId,
+    backend: "native",
+    op: "type",
+    status: "completed",
+    thumbnailDataUrl: "capture",
+  });
+  const capture = useAgentComputerActivityStore.getState().lastCapture[threadId];
+  const activity = useAgentComputerActivityStore.getState().activity[threadId];
+  store.record({ threadId, source: "tool", backend: "native", op: "type", status: "completed" });
+  expect(useAgentComputerActivityStore.getState().lastCapture[threadId]).toBe(capture);
+  expect(useAgentComputerActivityStore.getState().activity[threadId]).toBe(activity);
+  store.record({ threadId, backend: "native", op: "type", status: "interrupted" });
+  store.record({
+    threadId,
+    source: "tool",
+    backend: "native",
+    op: "type",
+    status: "failed",
+    outcome: "OutcomeUnknown",
+  });
+  expect(useAgentComputerActivityStore.getState().history[threadId]).toHaveLength(2);
+  for (let i = 0; i < 50; i++)
+    store.record({ threadId, source: "tool", backend: "native", op: "wait", status: "completed" });
+  expect(useAgentComputerActivityStore.getState().history[threadId]).toHaveLength(30);
+  store.resetConnection();
+  expect(useAgentComputerActivityStore.getState().history).toEqual({});
+});
+it("keeps Stop unconfirmed until a host lease update confirms release", () => {
+  const store = useAgentComputerActivityStore.getState();
+  store.markStopUnconfirmed(threadId);
+  store.setLeases({ holders: [{ threadId, delivery: "foreground", state: "paused" }] });
+  expect(useAgentComputerActivityStore.getState().stopUnconfirmed[threadId]).toBe(true);
+  store.setLeases({ holders: [] });
+  expect(useAgentComputerActivityStore.getState().stopUnconfirmed[threadId]).toBeUndefined();
+});
+
+it("preserves the last capture through aggregate wait events", () => {
+  const store = useAgentComputerActivityStore;
+  store.getState().resetConnection();
+  store.getState().record({
+    threadId: "wait",
+    backend: "native",
+    op: "screenshot",
+    status: "completed",
+    thumbnailDataUrl: "data:image/png;base64,a",
+  });
+  const capture = store.getState().lastCapture.wait;
+  store.getState().record({ threadId: "wait", backend: "native", op: "wait", status: "started" });
+  store.getState().record({ threadId: "wait", backend: "native", op: "wait", status: "completed" });
+  expect(store.getState().lastCapture.wait).toBe(capture);
 });

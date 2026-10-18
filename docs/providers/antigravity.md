@@ -30,6 +30,8 @@ show only Antigravity's own choices.
 - Stop running turns before changing accounts.
 - Attachments are limited to 50 MiB per turn.
 
+- F5 preview tools remain gated pending startup verification and negotiated HTTP MCP support; F5 computer tools await Antigravity live privacy verification.
+
 <details>
 <summary>Details and limits</summary>
 

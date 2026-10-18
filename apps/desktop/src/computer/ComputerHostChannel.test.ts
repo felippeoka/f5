@@ -514,3 +514,27 @@ describe("background capability negotiation", () => {
     );
   });
 });
+
+it.each([
+  [[], []],
+  [["background-ax-v1"], []],
+  [["computer-agent-identity-v1"], ["computer-agent-identity-v1"]],
+  [["computer-activity-correlation-v1"], ["computer-activity-correlation-v1"]],
+  [
+    ["background-ax-v1", "computer-agent-identity-v1", "computer-activity-correlation-v1"],
+    ["computer-agent-identity-v1", "computer-activity-correlation-v1"],
+  ],
+])(
+  "negotiates features independently with the background gate closed (%s)",
+  (advertised, accepted) => {
+    const h = setup(false, false);
+    h.hello(advertised);
+    const messages = h.process.send.mock.calls.map(
+      ([message]) => message as Record<string, unknown>,
+    );
+    expect(messages.filter((message) => message.type === "hostCapabilities")).toEqual(
+      accepted.length ? [{ type: "hostCapabilities", capabilities: accepted }] : [],
+    );
+    expect(messages.find((message) => message.type === "leasesChanged")).toBeUndefined();
+  },
+);
