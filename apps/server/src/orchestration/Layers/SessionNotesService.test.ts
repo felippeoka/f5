@@ -175,6 +175,7 @@ async function createHarness(input: {
     respondToUserInput: () => unsupported(),
     respondToElicitation: () => unsupported(),
     stopSession: () => Effect.void,
+    listStartingWorkspaces: () => Effect.succeed([]),
     listSessions: () => Effect.succeed([]),
     getSessionCapabilities: () => Effect.succeed(null),
     assertSessionAction: () => Effect.die(new Error("assertSessionAction is unused here")),

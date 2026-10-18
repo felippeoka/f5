@@ -1,3 +1,9 @@
+import { withWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
+import {
+  assertWorktreeReady,
+  WorktreeInspectionError,
+  WorktreeNotReadyError,
+} from "../../project/worktreeReadiness.ts";
 import { assertMcpRuntimeConfig, mcpConfigErrorMessage } from "@t3tools/shared/mcpValidation";
 import { readCodexMcpOAuthCallbackConfig } from "@t3tools/shared/mcpTranslation";
 import { readSubmissionSource } from "../../provider/submissionProvenance.ts";
@@ -316,6 +322,12 @@ function buildGeneratedWorktreeBranchName(raw: string, configuredPrefix: string)
  */
 export function toProviderTurnDeliveryError(error: unknown): ProviderTurnDeliveryError {
   if (Schema.is(ProviderTurnDeliveryError)(error)) return error;
+  if (error instanceof WorktreeInspectionError || error instanceof WorktreeNotReadyError)
+    return new ProviderTurnDeliveryError({
+      certainty: "not_sent",
+      retryable: error instanceof WorktreeInspectionError,
+      detail: error.message,
+    });
   let rejectedUsageLimit: import("@t3tools/contracts").RuntimeUsageLimit | undefined;
   let rejectedMessage: string | undefined;
   let adapterNotSent: ProviderAdapterRequestError | undefined;
@@ -667,6 +679,17 @@ const make = Effect.gen(function* () {
         persistedBinding,
         desiredRuntimeMode,
       } = sessionContext;
+      if (thread.worktreePath) {
+        const project = (yield* orchestrationEngine.getReadModel()).projects.find(
+          (entry) => entry.id === thread.projectId,
+        );
+        if (!project) return yield* Effect.fail(new Error("Unknown project"));
+        yield* assertWorktreeReady(git, {
+          projectCwd: project.workspaceRoot,
+          worktreePath: thread.worktreePath,
+          branch: thread.branch,
+        });
+      }
       const instructionContext: Partial<SharedInstructionInput> = {
         ...baseInstructionContext,
         ...(options?.workflowExecutionProfile
@@ -1392,6 +1415,7 @@ const make = Effect.gen(function* () {
         writingPreferences,
       })
       .pipe(
+        Effect.timeout("3 seconds"),
         Effect.catch((error) =>
           Effect.logWarning(
             "provider command reactor failed to generate worktree branch name; skipping rename",
@@ -1407,16 +1431,20 @@ const make = Effect.gen(function* () {
           );
           if (targetBranch === oldBranch) return Effect.void;
 
-          return Effect.flatMap(
-            git.renameBranch({ cwd, oldBranch, newBranch: targetBranch }),
-            (renamed) =>
-              orchestrationEngine.dispatch({
+          return withWorktreeLifecycleLock(
+            cwd,
+            Effect.gen(function* () {
+              const current = yield* resolveThread(input.threadId);
+              if (current?.worktreePath !== cwd || current.branch !== oldBranch) return;
+              const renamed = yield* git.renameBranch({ cwd, oldBranch, newBranch: targetBranch });
+              yield* orchestrationEngine.dispatch({
                 type: "thread.meta.update",
                 commandId: serverCommandId("worktree-branch-rename"),
                 threadId: input.threadId,
                 branch: renamed.branch,
                 worktreePath: cwd,
-              }),
+              });
+            }),
           );
         }),
         Effect.catchCause((cause) =>
@@ -1656,6 +1684,20 @@ const make = Effect.gen(function* () {
           )
         : undefined;
     if (event.type === "thread.turn-steer-requested") {
+      const project = (yield* orchestrationEngine.getReadModel()).projects.find(
+        (entry) => entry.id === thread.projectId,
+      );
+      if (!project)
+        return yield* new ProviderTurnDeliveryError({
+          certainty: "not_sent",
+          retryable: false,
+          detail: "Unknown project",
+        });
+      yield* assertWorktreeReady(git, {
+        projectCwd: project.workspaceRoot,
+        worktreePath: thread.worktreePath,
+        branch: thread.branch,
+      }).pipe(Effect.mapError(toProviderTurnDeliveryError));
       return yield* providerService.sendTurn({
         threadId: thread.id,
         ...(event.commandId ? { deliveryId: event.commandId } : {}),
@@ -1695,7 +1737,7 @@ const make = Effect.gen(function* () {
       messageText: message.text,
       ...(submissionSource ? { submissionSource } : {}),
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
-    }).pipe(Effect.forkScoped);
+    });
 
     yield* maybeRequestThreadTitleForFirstTurn({
       threadId: event.payload.threadId,

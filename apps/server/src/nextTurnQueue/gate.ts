@@ -16,7 +16,12 @@ export const WORKTREE_SETUP_INTERRUPTED_DETAIL =
 
 export type NextTurnQueueGate =
   | { readonly kind: "ready" }
-  | { readonly kind: "wait"; readonly reasonCode: QueueReasonCode; readonly detail?: string }
+  | {
+      readonly kind: "wait";
+      readonly reasonCode: QueueReasonCode;
+      readonly detail?: string;
+      readonly retryAfterMs?: number;
+    }
   | { readonly kind: "autoPause"; readonly reasonCode: QueueReasonCode; readonly detail?: string }
   | { readonly kind: "drop"; readonly reasonCode: QueueReasonCode };
 
@@ -70,7 +75,10 @@ export function resolveNextTurnQueueGate(input: {
     return {
       kind: "autoPause",
       reasonCode: "worktree_missing",
-      detail: `Worktree '${input.thread.worktreePath}' is missing.`,
+      detail:
+        input.thread.branch === null
+          ? "This thread's worktree is gone. Recreate it or continue in the project checkout."
+          : `Worktree '${input.thread.worktreePath}' is missing.`,
     };
   }
   if (

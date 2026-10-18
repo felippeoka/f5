@@ -1,3 +1,4 @@
+import { withWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import { withProviderThreadAccess } from "../providerThreadAccess.ts";
 import { Deferred } from "effect";
 import { ServerSettingsService } from "../../serverSettings";
@@ -55,7 +56,7 @@ import {
   type KindAdapterMap,
 } from "../testUtils/providerAdapterRegistryMock.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
-import { readPersistedUnconvergedMcpConfigVersion } from "../runtimePayload.ts";
+import { readPersistedCwd, readPersistedUnconvergedMcpConfigVersion } from "../runtimePayload.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProjectMcpConfigService } from "../../mcp/ProjectMcpConfigService.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../../persistence/Layers/ProviderSessionRuntime.ts";
@@ -667,6 +668,11 @@ it.effect("advances the session generation and refuses steering from a stale bro
     ),
   );
 });
+it("preserves persisted workspace paths exactly", () => {
+  assert.equal(readPersistedCwd({ cwd: " /worktree \n" }), " /worktree \n");
+  assert.equal(readPersistedCwd({ cwd: "   " }), undefined);
+});
+
 it.effect("answers form requests a new session opens while it is still starting", () => {
   const codex = makeFakeCodexAdapter();
   const answers: Array<{ requestId: string; action: string; content?: unknown }> = [];
@@ -703,6 +709,16 @@ it.effect("answers form requests a new session opens while it is still starting"
       })
       .pipe(Effect.forkChild);
     yield* Deferred.await(opened);
+    assert.equal(
+      (yield* service.listSessions()).some((session) => session.threadId === threadId),
+      false,
+    );
+    const starting = (yield* service.listStartingWorkspaces()).find(
+      (session) => session.threadId === threadId,
+    );
+    assert.equal(starting?.cwd, process.cwd());
+    // Startup is claimed, but provider waits never hold the path lifecycle lock.
+    yield* withWorktreeLifecycleLock(process.cwd(), Effect.void).pipe(Effect.timeout("1 second"));
 
     for (const [requestId, action] of [
       ["startup-submit", "accept"],
@@ -2690,7 +2706,7 @@ it.effect("does not settle an admitted send after its binding disappears", () =>
         .pipe(Effect.flip);
       assert.equal(error._tag, "ProviderTurnDeliveryError");
       assert.equal(reads, 3);
-      assert.equal(fake.sendTurn.mock.calls.length, 1);
+      assert.equal(fake.sendTurn.mock.calls.length, 0);
     } finally {
       spy.mockRestore();
     }

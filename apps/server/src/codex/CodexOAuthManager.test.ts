@@ -78,6 +78,7 @@ function makeProviderServiceStub(input?: {
     respondToUserInput: (_input) => unused(),
     respondToElicitation: (_input) => unused(),
     stopSession: (_input) => unused(),
+    listStartingWorkspaces: () => Effect.succeed([]),
     listSessions: () => Effect.succeed([] satisfies ReadonlyArray<ProviderSession>),
     getSessionCapabilities: () => Effect.succeed(null),
     assertSessionAction: () => Effect.die(new Error("assertSessionAction is unused here")),

@@ -1,3 +1,4 @@
+import { FilesystemPath } from "./baseSchemas";
 import { Schema } from "effect";
 import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas";
 import { KeybindingRule, KeybindingsConfig, ResolvedKeybindingsConfig } from "./keybindings";
@@ -94,7 +95,7 @@ export type ServerProviderSlashCommand = typeof ServerProviderSlashCommand.Type;
 export const ServerProviderSkill = Schema.Struct({
   name: TrimmedNonEmptyString,
   description: Schema.optional(TrimmedNonEmptyString),
-  path: TrimmedNonEmptyString,
+  path: FilesystemPath,
   scope: Schema.optional(TrimmedNonEmptyString),
   enabled: Schema.Boolean,
   displayName: Schema.optional(TrimmedNonEmptyString),
@@ -125,8 +126,8 @@ export const ServerProviderUpdateCommand = Schema.Struct({
   args: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(() => [])),
   channel: Schema.Literals(["npm", "homebrew", "self-update"]),
   shell: Schema.optional(Schema.Literals(["posix", "powershell"])),
-  pathPrepend: Schema.optional(TrimmedNonEmptyString),
-  cwd: Schema.optional(TrimmedNonEmptyString),
+  pathPrepend: Schema.optional(FilesystemPath),
+  cwd: Schema.optional(FilesystemPath),
   env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 });
 export type ServerProviderUpdateCommand = typeof ServerProviderUpdateCommand.Type;
@@ -287,7 +288,7 @@ export const ServerValidateHarnessesResult = Schema.Struct({
 export type ServerValidateHarnessesResult = typeof ServerValidateHarnessesResult.Type;
 
 export const ServerConfig = Schema.Struct({
-  cwd: TrimmedNonEmptyString,
+  cwd: FilesystemPath,
   keybindingsConfigPath: TrimmedNonEmptyString,
   keybindings: ResolvedKeybindingsConfig,
   customKeybindings: KeybindingsConfig.pipe(Schema.withDecodingDefault(() => [])),

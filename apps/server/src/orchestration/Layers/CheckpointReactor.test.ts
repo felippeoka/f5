@@ -101,6 +101,7 @@ function createProviderServiceHarness(
     respondToUserInput: () => unsupported(),
     respondToElicitation: () => unsupported(),
     stopSession: () => unsupported(),
+    listStartingWorkspaces: () => Effect.succeed([]),
     listSessions,
     getSessionCapabilities: () => Effect.succeed(null),
     assertSessionAction: () => Effect.die(new Error("assertSessionAction is unused here")),
@@ -440,7 +441,7 @@ describe("CheckpointReactor", () => {
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
         branch: null,
-        worktreePath: options?.threadWorktreePath ?? cwd,
+        worktreePath: options?.threadWorktreePath === undefined ? cwd : options.threadWorktreePath,
         createdAt,
       }),
     );

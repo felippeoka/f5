@@ -1,3 +1,11 @@
+import {
+  NextTurnQueueStore,
+  type NextTurnQueueStoreShape,
+} from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
+import { GitCommandError } from "../../git/Errors.ts";
+import { canonicalWorktreePath } from "../../git/worktreePaths.ts";
+import { GitCore, type GitCoreShape } from "../../git/Services/GitCore.ts";
+import { makeFakeGitCore } from "../../git/testDoubles.ts";
 import fs from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import os from "node:os";
@@ -13,7 +21,7 @@ import {
   TurnId,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
-import { Effect, Layer, ManagedRuntime, Metric, Queue, Stream, Tracer } from "effect";
+import { Deferred, Effect, Layer, ManagedRuntime, Metric, Queue, Stream, Tracer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { describe, expect, it } from "vitest";
 
@@ -91,6 +99,8 @@ function diskSpaceMonitorLayer(hold: { current: string | null }) {
 
 async function createOrchestrationSystem(input?: {
   readonly tracePath?: string;
+  readonly git?: GitCoreShape;
+  readonly queue?: NextTurnQueueStoreShape;
   readonly diskSpaceHold?: { current: string | null };
 }) {
   if (input?.tracePath) {
@@ -112,7 +122,9 @@ async function createOrchestrationSystem(input?: {
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
-    Layer.provide(SqlitePersistenceMemory),
+    Layer.provideMerge(SqlitePersistenceMemory),
+    Layer.provide(input?.queue ? Layer.succeed(NextTurnQueueStore, input.queue) : Layer.empty),
+    Layer.provide(input?.git ? Layer.succeed(GitCore, input.git) : Layer.empty),
     Layer.provide(input?.diskSpaceHold ? diskSpaceMonitorLayer(input.diskSpaceHold) : Layer.empty),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
     Layer.provideMerge(tracerLayer),
@@ -120,8 +132,10 @@ async function createOrchestrationSystem(input?: {
   );
   const runtime = ManagedRuntime.make(orchestrationLayer);
   const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+  const sql = await runtime.runPromise(Effect.service(SqlClient.SqlClient));
   return {
     engine,
+    sql,
     run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
     dispose: () => runtime.dispose(),
   };
@@ -178,6 +192,233 @@ function now() {
 }
 
 describe("OrchestrationEngine", () => {
+  it("keeps the command worker available during workspace verification and rejects changed metadata", async () => {
+    const target = await canonicalWorktreePath(
+      fs.mkdtempSync(path.join(os.tmpdir(), "f5-engine-workspace-")),
+    );
+    const commonDir = await canonicalWorktreePath(path.join(target, ".git"));
+    const entered = Deferred.makeUnsafe<void>();
+    const release = Deferred.makeUnsafe<void>();
+    const fake = makeFakeGitCore({
+      listWorktrees: () =>
+        Deferred.succeed(entered, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+          Effect.as([
+            {
+              path: target,
+              canonicalPath: target,
+              branch: "feature",
+              headSha: "abc",
+              isMain: false,
+              bare: false,
+              detached: false,
+              locked: null,
+              prunable: null,
+            },
+          ]),
+        ),
+      inspectCheckoutIdentity: () =>
+        Effect.succeed({ canonicalRoot: target, commonDir, branch: "feature" }),
+      resolveCommonDir: () => Effect.succeed(commonDir),
+    });
+    const system = await createOrchestrationSystem({ git: fake.service });
+    const threadId = ThreadId.makeUnsafe("workspace-thread");
+    const projectId = asProjectId("workspace-project");
+    const createdAt = now();
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("workspace-project"),
+          projectId,
+          title: "Project",
+          workspaceRoot: target,
+          defaultModel: "gpt-5-codex",
+          createdAt,
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("workspace-thread"),
+          threadId,
+          projectId,
+          title: "Thread",
+          model: "gpt-5-codex",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: "feature",
+          worktreePath: target,
+          createdAt,
+        }),
+      );
+      const pending = system.run(
+        system.engine
+          .dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.makeUnsafe("workspace-start"),
+            threadId,
+            message: {
+              messageId: asMessageId("workspace-message"),
+              role: "user",
+              text: "hello",
+              attachments: [],
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt,
+          })
+          .pipe(Effect.flip),
+      );
+      await system.run(Deferred.await(entered));
+      // This must finish while the Git probe remains deliberately blocked.
+      await system.run(
+        system.engine
+          .dispatch({
+            type: "thread.meta.update",
+            commandId: CommandId.makeUnsafe("workspace-change"),
+            threadId,
+            branch: "main",
+            worktreePath: null,
+          })
+          .pipe(Effect.timeout("2 seconds")),
+      );
+      await system.run(Deferred.succeed(release, undefined));
+      expect((await pending).message).toContain("workspace changed");
+    } finally {
+      await system.run(Deferred.succeed(release, undefined));
+      await system.dispose();
+      fs.rmSync(target, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    "transient",
+    "barrier",
+    "steer-fallback",
+    "direct-transient",
+    "direct-barrier",
+  ] as const)("accepts work after %s without poisoning the command receipt", async (scenario) => {
+    const target = await canonicalWorktreePath(
+      fs.mkdtempSync(path.join(os.tmpdir(), "f5-engine-retry-")),
+    );
+    const commonDir = await canonicalWorktreePath(path.join(target, ".git"));
+    let failProbe = scenario.endsWith("transient");
+    let blocked = scenario.endsWith("barrier");
+    const fake = makeFakeGitCore({
+      listWorktrees: () =>
+        failProbe
+          ? Effect.fail(
+              new GitCommandError({
+                operation: "test",
+                command: "git worktree list",
+                cwd: target,
+                detail: "temporarily unavailable",
+              }),
+            )
+          : Effect.succeed([
+              {
+                path: target,
+                canonicalPath: target,
+                branch: "feature",
+                headSha: "abc",
+                isMain: false,
+                bare: false,
+                detached: false,
+                locked: null,
+                prunable: null,
+              },
+            ]),
+      inspectCheckoutIdentity: () =>
+        Effect.succeed({ canonicalRoot: target, commonDir, branch: "feature" }),
+      resolveCommonDir: () => Effect.succeed(commonDir),
+    });
+    const system = await createOrchestrationSystem({
+      git: fake.service,
+      queue: {
+        listByThread: () =>
+          Effect.succeed({
+            state: { worktreeBlockToken: blocked ? "recovery:test" : null },
+            items: [],
+          }),
+      } as unknown as NextTurnQueueStoreShape,
+    });
+    const threadId = ThreadId.makeUnsafe("retry-thread");
+    const projectId = asProjectId("retry-project");
+    const createdAt = now();
+    const command = {
+      type: "thread.turn.start" as const,
+      commandId: CommandId.makeUnsafe("retry-turn"),
+      threadId,
+      ...(!scenario.startsWith("direct-") ? { dispatchSource: "next-turn-queue" as const } : {}),
+      message: {
+        messageId: asMessageId("retry-message"),
+        role: "user" as const,
+        text: "hello",
+        attachments: [],
+      },
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "approval-required" as const,
+      createdAt,
+    };
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("retry-project"),
+          projectId,
+          title: "Project",
+          workspaceRoot: target,
+          defaultModel: "gpt-5-codex",
+          createdAt,
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("retry-thread"),
+          threadId,
+          projectId,
+          title: "Thread",
+          model: "gpt-5-codex",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: "feature",
+          worktreePath: target,
+          createdAt,
+        }),
+      );
+      if (scenario === "steer-fallback") {
+        // An accepted receipt whose delivery was confirmed not sent and requeued as a start.
+        await system.run(system.engine.dispatch(command));
+        await system.run(
+          system.sql`UPDATE provider_turn_deliveries SET state = 'rejected', certainty = 'not_sent', event_json = json_set(event_json, '$.type', 'thread.turn-steer-requested', '$.payload.expectedTurnId', 'prior-turn') WHERE command_id = ${command.commandId}`,
+        );
+        await system.run(
+          system.sql`INSERT INTO next_turn_queue (item_id, thread_id, submission_id, command_id, message_id, position, command_json, last_error_code, created_at, updated_at) VALUES ('fallback', ${threadId}, 'fallback', ${command.commandId}, ${command.message.messageId}, 0, '{}', 'steer_queued', ${createdAt}, ${createdAt})`,
+        );
+      } else {
+        expect(await system.run(system.engine.dispatch(command).pipe(Effect.flip))).toMatchObject({
+          _tag: "ThreadTurnNotReadyError",
+        });
+      }
+      failProbe = false;
+      blocked = false;
+      await system.run(system.engine.dispatch(command));
+      const deliveries = await system.run(
+        system.sql<{
+          state: string;
+          type: string;
+        }>`SELECT state, json_extract(event_json, '$.type') AS type FROM provider_turn_deliveries WHERE command_id = ${command.commandId}`,
+      );
+      expect(deliveries).toEqual([{ state: "pending", type: "thread.turn-start-requested" }]);
+      expect(fake.calls.listWorktrees.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      await system.dispose();
+      fs.rmSync(target, { recursive: true, force: true });
+    }
+  });
+
   it("returns deterministic read models for repeated reads", async () => {
     const createdAt = now();
     const system = await createOrchestrationSystem();

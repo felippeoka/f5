@@ -138,8 +138,15 @@ function makeDependencies(input?: {
   };
   const git: Pick<
     GitCoreShape,
-    "createWorktree" | "fetchRemoteBranchCommit" | "hasRemote" | "removeWorktree"
+    | "createWorktree"
+    | "fetchRemoteBranchCommit"
+    | "hasRemote"
+    | "removeWorktree"
+    | "resolveCommit"
+    | "resolveCommonDir"
   > = {
+    resolveCommit: () => Effect.succeed("0123456789abcdef0123456789abcdef01234567"),
+    resolveCommonDir: () => Effect.succeed("/repo/project/.git"),
     createWorktree:
       input?.createWorktree ??
       (() =>
@@ -176,6 +183,9 @@ function makeDependencies(input?: {
 
   return {
     orchestrationEngine,
+    rollbackWorktree: vi.fn((receipt: { cwd: string; path: string }, _ownedTerminalId?: string) =>
+      git.removeWorktree({ cwd: receipt.cwd, path: receipt.path }),
+    ),
     git,
     projectSetupScriptRunner,
   };
@@ -566,6 +576,7 @@ describe("dispatchBootstrapTurnStart", () => {
     );
 
     expect(runForThread).toHaveBeenCalledWith({
+      preferredTerminalId: expect.stringMatching(/^setup-/),
       threadId: ThreadId.makeUnsafe("thread-1"),
       projectId: PROJECT_ID,
       projectCwd: "/repo/project",
@@ -811,7 +822,6 @@ describe("dispatchBootstrapTurnStart", () => {
     expect(removeWorktree).toHaveBeenCalledWith({
       cwd: "/repo/project",
       path: "/repo/project/.worktrees/thread-1",
-      force: true,
     });
   });
 
@@ -854,7 +864,6 @@ describe("dispatchBootstrapTurnStart", () => {
     expect(removeWorktree).toHaveBeenCalledWith({
       cwd: "/repo/project",
       path: "/repo/project/.worktrees/thread-1",
-      force: true,
     });
   });
 
@@ -951,7 +960,6 @@ describe("dispatchBootstrapTurnStart", () => {
     expect(removeWorktree).toHaveBeenCalledWith({
       cwd: "/repo/project",
       path: "/repo/project/.worktrees/thread-1",
-      force: true,
     });
   });
 
@@ -1070,7 +1078,6 @@ describe("dispatchBootstrapTurnStart", () => {
     expect(removeWorktree).toHaveBeenCalledWith({
       cwd: "/repo/project",
       path: "/repo/project/.worktrees/thread-1",
-      force: true,
     });
   });
 
@@ -1240,7 +1247,10 @@ describe("dispatchBootstrapTurnStart", () => {
         newBranch: "t3code/bootstrap-branch",
       }),
     );
-    expect(createWorktree.mock.calls[0]?.[0]).not.toHaveProperty("baseRefName");
+    expect(createWorktree.mock.calls[0]?.[0]).toHaveProperty(
+      "baseRefName",
+      "0123456789abcdef0123456789abcdef01234567",
+    );
   });
 
   it("creates from a local-only base when the configured remote lacks that branch", async () => {
@@ -1296,7 +1306,10 @@ describe("dispatchBootstrapTurnStart", () => {
         newBranch: "t3code/bootstrap-branch",
       }),
     );
-    expect(createWorktree.mock.calls[0]?.[0]).not.toHaveProperty("baseRefName");
+    expect(createWorktree.mock.calls[0]?.[0]).toHaveProperty(
+      "baseRefName",
+      "0123456789abcdef0123456789abcdef01234567",
+    );
   });
 
   it.each(["invariant", "conflict"])(
@@ -1340,6 +1353,7 @@ describe("dispatchBootstrapTurnStart", () => {
             ...dependencies,
             command: makeTurnStartCommand({
               bootstrap: {
+                runSetupScript: true,
                 createThread: {
                   projectId: PROJECT_ID,
                   title: "New thread",
@@ -1368,6 +1382,7 @@ describe("dispatchBootstrapTurnStart", () => {
           ? OrchestrationCommandIdConflictError
           : OrchestrationCommandInvariantError,
       );
+      expect(dependencies.rollbackWorktree.mock.calls[0]?.[1]).toBe("setup-setup");
       expect((caught as Error).message).toContain("turn start failed");
       expect((caught as Error).message).toContain("Cleanup failed during worktree removal");
       expect((caught as OrchestrationCommandInvariantError).detail).toContain(

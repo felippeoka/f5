@@ -1,3 +1,5 @@
+import { makeFakeGitCore } from "../../git/testDoubles.ts";
+import { canonicalWorktreePath } from "../../git/worktreePaths.ts";
 import { makeProviderServiceLive } from "../../provider/Layers/ProviderService";
 import { makeCursorAdapter } from "../../provider/Layers/CursorAdapter";
 import { ProviderAdapterRegistry } from "../../provider/Services/ProviderAdapterRegistry";
@@ -72,7 +74,11 @@ import { TextGeneration, type TextGenerationShape } from "../../git/Services/Tex
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
-import { ProviderCommandReactorLive } from "./ProviderCommandReactor.ts";
+import {
+  ProviderCommandReactorLive,
+  toProviderTurnDeliveryError,
+} from "./ProviderCommandReactor.ts";
+import { WorktreeInspectionError, WorktreeNotReadyError } from "../../project/worktreeReadiness.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -82,6 +88,20 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { makeLocalFileTracer } from "../../observability/LocalFileTracer.ts";
 import { dispatchBootstrapTurnStart } from "../../wsServer/bootstrapTurnStart.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+
+it.each([
+  [new WorktreeInspectionError("Git inspection timed out"), true],
+  [new WorktreeNotReadyError("The recorded branch is missing"), false],
+] as const)(
+  "records pre-provider workspace failures as definitely unsent: %s",
+  (error, retryable) => {
+    expect(toProviderTurnDeliveryError(error)).toMatchObject({
+      certainty: "not_sent",
+      retryable,
+      detail: error.message,
+    });
+  },
+);
 
 const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId =>
@@ -435,6 +455,7 @@ describe("ProviderCommandReactor", () => {
     const ensureWorktree = vi.fn<GitCoreShape["ensureWorktree"]>((input) =>
       Effect.sync(() => {
         fs.mkdirSync(input.path, { recursive: true });
+        return { recreated: true };
       }),
     );
     const renameBranch = vi.fn((input: unknown) =>
@@ -498,6 +519,7 @@ describe("ProviderCommandReactor", () => {
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
       respondToElicitation: () => Effect.die("unused"),
       stopSession: stopSession as ProviderServiceShape["stopSession"],
+      listStartingWorkspaces: () => Effect.succeed([]),
       listSessions: () => Effect.succeed(runtimeSessions),
       getSessionCapabilities: () => Effect.succeed(null),
       assertSessionAction: () => Effect.die(new Error("assertSessionAction is unused here")),
@@ -559,7 +581,57 @@ describe("ProviderCommandReactor", () => {
         )
       : Layer.empty;
 
+    let readWorkspaceModel: OrchestrationEngineShape["getReadModel"] = () =>
+      Effect.die("workspace model not ready");
+    const workspaceGit = makeFakeGitCore({
+      renameBranch,
+      ensureWorktree,
+      resolveCommonDir: () => Effect.promise(() => canonicalWorktreePath(workspaceRoot)),
+      listWorktrees: () =>
+        Effect.gen(function* () {
+          const model = yield* readWorkspaceModel();
+          return yield* Effect.forEach(
+            model.threads.filter((thread) => thread.worktreePath),
+            (thread) =>
+              Effect.promise(async () => ({
+                path: thread.worktreePath!,
+                canonicalPath: await canonicalWorktreePath(thread.worktreePath!),
+                headSha: "abc",
+                branch: thread.branch,
+                bare: false,
+                detached: false,
+                locked: null,
+                prunable: null,
+                isMain: false,
+              })),
+          );
+        }),
+      inspectCheckout: (cwd) =>
+        Effect.gen(function* () {
+          const model = yield* readWorkspaceModel();
+          const thread = model.threads.find((thread) => thread.worktreePath === cwd);
+          return {
+            canonicalRoot: yield* Effect.promise(() => canonicalWorktreePath(cwd)),
+            commonDir: yield* Effect.promise(() => canonicalWorktreePath(workspaceRoot)),
+            registration: null,
+            headSha: "abc",
+            branch: thread?.branch ?? null,
+            operation: null,
+            hasInitializedSubmodules: false,
+            hasTrackedChanges: false,
+            hasUntrackedChanges: false,
+            ignoredEntries: [],
+            ignoredTruncated: false,
+            upstreamRef: null,
+            upstreamSha: null,
+            aheadCount: null,
+            behindCount: null,
+          };
+        }),
+    }).service;
+    const workspaceGitLayer = Layer.succeed(GitCore, workspaceGit);
     const orchestrationLayer = OrchestrationEngineLive.pipe(
+      Layer.provide(workspaceGitLayer),
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
       Layer.provide(OrchestrationProjectionPipelineLive),
       Layer.provide(OrchestrationEventStoreLive),
@@ -652,9 +724,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(projectMcpLayer),
       Layer.provideMerge(providerLayer),
       Layer.provideMerge(Layer.succeed(ProviderSessionDirectory, providerSessionDirectory)),
-      Layer.provideMerge(
-        Layer.succeed(GitCore, { renameBranch, ensureWorktree } as unknown as GitCoreShape),
-      ),
+      Layer.provideMerge(workspaceGitLayer),
       Layer.provideMerge(
         Layer.succeed(TextGeneration, {
           generateBranchName,
@@ -668,6 +738,7 @@ describe("ProviderCommandReactor", () => {
     const runtime = ManagedRuntime.make(layer);
 
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    readWorkspaceModel = engine.getReadModel;
     const reactor = await runtime.runPromise(Effect.service(ProviderCommandReactor));
     if (input?.orphanedTitleRegenerationBeforeStart) {
       await Effect.runPromise(
@@ -3097,6 +3168,53 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.runtimeMode).toBe("approval-required");
   });
 
+  it("finishes first-turn branch naming before session startup and delivery", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const worktreePath = path.join(harness.workspaceRoot, "named-worktree");
+    fs.mkdirSync(worktreePath);
+    harness.generateBranchName.mockImplementation(() => Effect.succeed({ branch: "safe-name" }));
+    const startSession = harness.startSession.getMockImplementation()!;
+    harness.startSession.mockImplementation((provider, input) =>
+      Effect.gen(function* () {
+        expect(harness.renameBranch).toHaveBeenCalledOnce();
+        const model = yield* harness.engine.getReadModel();
+        expect(model.threads.find((thread) => thread.id === threadId)?.branch).toBe("f5/safe-name");
+        yield* Effect.sleep("50 millis");
+        return yield* startSession(provider, input);
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("named-meta"),
+        threadId,
+        branch: "t3code/abcdef12",
+        worktreePath,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("named-start"),
+        threadId,
+        message: {
+          messageId: asMessageId("named-message"),
+          role: "user",
+          text: "first",
+          attachments: [],
+        },
+        provider: "codex",
+        model: "gpt-5.4",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.ensureWorktree.mock.calls[0]?.[0]).toMatchObject({ branch: "f5/safe-name" });
+  });
+
   it.each(["none", "shallow"] as const)(
     "recreates a missing worktree with root submodule policy %s and the selected branch account",
     async (submodules) => {
@@ -3354,7 +3472,10 @@ describe("ProviderCommandReactor", () => {
           createdAt: now,
         },
         orchestrationEngine: harness.engine,
+        rollbackWorktree: () => Effect.die("unexpected rollback"),
         git: {
+          resolveCommit: () => Effect.die("unexpected resolve"),
+          resolveCommonDir: () => Effect.die("unexpected resolve"),
           createWorktree: () => Effect.die("unexpected worktree creation"),
           fetchRemoteBranchCommit: () => Effect.die("unexpected remote base fetch"),
           hasRemote: () => Effect.die("unexpected remote probe"),

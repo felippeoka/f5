@@ -1,3 +1,4 @@
+import { FilesystemPath } from "./baseSchemas";
 import { Schema } from "effect";
 import { NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from "./baseSchemas";
 
@@ -41,7 +42,7 @@ const McpStdioServerDefinition = Schema.Struct({
   command: TrimmedNonEmptyString,
   args: Schema.optional(McpArgArray),
   env: Schema.optional(McpStringRecord),
-  cwd: Schema.optional(TrimmedNonEmptyString),
+  cwd: Schema.optional(FilesystemPath),
   url: UnsupportedMcpField,
   headers: UnsupportedMcpField,
   ...McpCommonServerFields,
@@ -91,7 +92,7 @@ const ClaudeAgentStdioMcpServerConfig = Schema.Struct({
   command: TrimmedNonEmptyString,
   args: Schema.optional(McpArgArray),
   env: Schema.optional(McpStringRecord),
-  cwd: Schema.optional(TrimmedNonEmptyString),
+  cwd: Schema.optional(FilesystemPath),
 });
 
 const ClaudeAgentRemoteMcpServerConfig = Schema.Struct({
@@ -127,7 +128,7 @@ const CodexStdioMcpServerEntry = Schema.Struct({
   command: TrimmedNonEmptyString,
   args: Schema.optional(McpArgArray),
   env: Schema.optional(McpStringRecord),
-  cwd: Schema.optional(TrimmedNonEmptyString),
+  cwd: Schema.optional(FilesystemPath),
   url: UnsupportedMcpField,
   headers: UnsupportedMcpField,
   ...CodexMcpServerCommonFields,

@@ -1,3 +1,4 @@
+import { WorktreeMissingBanner } from "./WorktreeMissingBanner";
 import type {
   CommandId,
   CompactRuntimeConfiguredActivityPayload,
@@ -398,18 +399,13 @@ export function NextTurnQueuePanel({
           className={`mt-1 rounded px-2 py-1 text-xs ${snapshot.blockedKind === "waiting" ? "text-muted-foreground" : "bg-warning/10 text-warning-foreground"}`}
         >
           {blockedDescription}
-          {snapshot.reasonCode === "worktree_missing" ? (
-            <Button
-              type="button"
-              variant="link"
-              size="xs"
-              onClick={() => {
-                const api = readNativeApi();
-                if (api) void api.nextTurnQueue.refreshGate({ threadId }).then(applySnapshot);
-              }}
-            >
-              Refresh
-            </Button>
+          {snapshot.reasonCode === "worktree_missing" ||
+          snapshot.reasonCode === "worktree_setup_failed" ? (
+            <WorktreeMissingBanner
+              threadId={threadId}
+              queue
+              recoveryOnly={snapshot.reasonCode === "worktree_setup_failed"}
+            />
           ) : null}
           {hasDeliveryFailure || hasDeliveryPause ? (
             <span className="ml-1 inline-flex gap-1">
