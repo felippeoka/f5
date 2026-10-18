@@ -2,14 +2,17 @@
 // @effect-diagnostics nodeBuiltinImport:off
 // @effect-diagnostics globalTimers:off
 /**
- * capture-screenshots.ts: regenerates the README screenshots and the marketing
- * hero image from seeded demo data.
+ * capture-screenshots.ts: regenerates the README screenshots, the marketing
+ * hero image and the docs images under `docs/images/` from seeded demo data.
  *
  *   1. Creates a fresh sandbox root (`f5-screenshots-*` under the OS temp dir)
  *      with its own state dir, an empty HOME and an allowlisted environment.
+ *      On macOS and Linux, Codex and Claude point at a shim that only answers
+ *      version and auth probes, so no real provider binary runs.
  *   2. Builds the server and web app (skip with `--skip-build`).
  *   3. Seeds demo data, starts the built server in web mode on loopback and
- *      drives Playwright through `apps/web/scripts/capture-readme-screenshots.mjs`.
+ *      drives Playwright through `apps/web/scripts/capture-readme-screenshots.mjs`
+ *      and `apps/web/scripts/capture-docs-screenshots.mjs`.
  *   4. Stops the server and verifies that no provider turn was started or
  *      replayed while it ran.
  *   5. Copies the staged images into the repo only if every step succeeded.
@@ -17,7 +20,10 @@
  * The sandbox root is kept after exit for inspection.
  *
  * Usage:
- *   bun run screenshots:capture [-- --skip-build]
+ *   bun run screenshots:capture [-- --skip-build] [-- --only <docs-shot-id,...>]
+ *
+ * `--only` recaptures the listed docs shots (ids from
+ * `scripts/docs-screenshots.manifest.ts`) and skips the README shots.
  */
 import { Database } from "bun:sqlite";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
@@ -31,12 +37,92 @@ import {
   isolatedEnv,
   writeDemoSettings,
 } from "./lib/demo-sandbox.ts";
+import { DOCS_SHOTS } from "./docs-screenshots.manifest.ts";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const WEB_DIR = path.join(REPO_ROOT, "apps/web");
 const skipBuild = process.argv.includes("--skip-build");
+const onlyIndex = process.argv.indexOf("--only");
+const onlyIds = onlyIndex === -1 ? null : (process.argv[onlyIndex + 1] ?? "");
 
 const log = (message: string) => console.log(`[screenshots] ${message}`);
+
+if (onlyIds !== null) {
+  const known = new Set(DOCS_SHOTS.map((shot) => shot.id));
+  const requested = onlyIds.split(",").filter((id) => id.length > 0);
+  const unknown = requested.filter((id) => !known.has(id));
+  if (requested.length === 0 || unknown.length > 0) {
+    console.error(
+      `[screenshots] --only needs docs shot ids; unknown: ${unknown.join(", ") || "(none given)"}. Known: ${[...known].join(", ")}`,
+    );
+    process.exit(1);
+  }
+}
+
+// F5 resolves provider binaries through the login shell's PATH, so the
+// sandbox PATH alone would still find a real `codex` or `claude`. Point both
+// providers at a shim that only answers version and auth-status probes (so the
+// UI shows signed-in providers) and refuses everything else, and disable the
+// rest. Probes may carry config flags before the subcommand, so match on words.
+const PROVIDER_SHIM = `#!/bin/sh
+case " $* " in
+  *" --version "*) case "$0" in *claude) echo "2.1.300 (Claude Code)" ;; *) echo "codex-cli 0.160.1" ;; esac; exit 0 ;;
+  *" login status "*) echo "Logged in using ChatGPT"; exit 0 ;;
+  *" auth status "*) echo '{"loggedIn": true, "authMethod": "claude.ai"}'; exit 0 ;;
+esac
+echo "capture-screenshots: provider execution is disabled" >&2
+exit 1
+`;
+
+function providerShimSettings(root: string): Record<string, unknown> {
+  if (process.platform === "win32") return {};
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir, { recursive: true });
+  const codex = path.join(binDir, "codex");
+  const claude = path.join(binDir, "claude");
+  for (const file of [codex, claude]) fs.writeFileSync(file, PROVIDER_SHIM, { mode: 0o755 });
+  const disabled = { enabled: false };
+  return {
+    providers: {
+      codex: { binaryPath: codex },
+      claudeAgent: { binaryPath: claude },
+      cursor: disabled,
+      opencode: disabled,
+      grok: disabled,
+      antigravity: disabled,
+      muse: disabled,
+    },
+  };
+}
+
+// The seeder creates plain workspace folders; commit them so the UI shows the
+// normal Git actions instead of "Initialize Git".
+function initWorkspaceRepos(root: string, env: Record<string, string>): void {
+  const workspacesDir = path.join(root, "workspaces");
+  for (const name of fs.readdirSync(workspacesDir)) {
+    const cwd = path.join(workspacesDir, name);
+    fs.writeFileSync(path.join(cwd, "README.md"), `# ${name}\n`);
+    for (const gitArgs of [
+      ["init", "-q", "-b", "main"],
+      ["add", "-A"],
+      [
+        "-c",
+        "user.name=F5 Demo",
+        "-c",
+        "user.email=demo@example.com",
+        "commit",
+        "-q",
+        "-m",
+        "Initial commit",
+      ],
+    ]) {
+      const result = spawnSync("git", gitArgs, { cwd, env, encoding: "utf8" });
+      if (result.status !== 0) {
+        throw new Error(`git ${gitArgs.join(" ")} failed in ${cwd}: ${result.stderr}`);
+      }
+    }
+  }
+}
 
 // The browser driver only talks to the loopback server, but it still gets a
 // minimal environment: enough to find Node and Playwright's browser cache,
@@ -210,7 +296,7 @@ try {
   }
 
   log(`sandbox root: ${root}`);
-  writeDemoSettings(root);
+  writeDemoSettings(root, providerShimSettings(root));
 
   if (!skipBuild) {
     log("building server and web app...");
@@ -237,6 +323,7 @@ try {
   });
   checkInterrupted();
   if (seeded.status !== 0) throw new Error(`seed-demo failed with exit code ${seeded.status}`);
+  initWorkspaceRepos(root, env);
   const before = snapshot(dbPath);
   seededSnapshot = before;
   log(`seeded ${before.deliveries} delivery rows, max event sequence ${before.maxSequence}`);
@@ -299,19 +386,31 @@ try {
   }
   log(`server ready at ${baseUrl}`);
 
-  capture = spawn("node", ["scripts/capture-readme-screenshots.mjs", baseUrl, stagingDir], {
-    cwd: WEB_DIR,
-    stdio: "inherit",
-    env: browserEnv,
-  });
-  // Rejects on a spawn error, so a browser that never starts cannot hang the run.
-  const captureExit = await waitForChild(capture);
-  checkInterrupted();
-  if (captureExit.code !== 0) {
-    failed = true;
-    console.error(
-      `[screenshots] capture failed (code=${captureExit.code}, signal=${captureExit.signal})`,
-    );
+  const drivers: ReadonlyArray<ReadonlyArray<string>> = [
+    ...(onlyIds === null ? [["scripts/capture-readme-screenshots.mjs", baseUrl, stagingDir]] : []),
+    [
+      "scripts/capture-docs-screenshots.mjs",
+      baseUrl,
+      stagingDir,
+      ...(onlyIds === null ? [] : ["--only", onlyIds]),
+    ],
+  ];
+  for (const driverArgs of drivers) {
+    if (failed) break;
+    capture = spawn("node", [...driverArgs], {
+      cwd: WEB_DIR,
+      stdio: "inherit",
+      env: browserEnv,
+    });
+    // Rejects on a spawn error, so a browser that never starts cannot hang the run.
+    const captureExit = await waitForChild(capture);
+    checkInterrupted();
+    if (captureExit.code !== 0) {
+      failed = true;
+      console.error(
+        `[screenshots] ${driverArgs[0]} failed (code=${captureExit.code}, signal=${captureExit.signal})`,
+      );
+    }
   }
   // A server that died during capture invalidates the screenshots even if the
   // browser happened to finish.
