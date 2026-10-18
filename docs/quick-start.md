@@ -1,5 +1,7 @@
 # Quick start
 
+> Contributors: commands for developing, building and packaging F5 from source.
+
 There are three ways to run F5:
 
 - **Desktop app:** download an installer; no source checkout, Bun or Node needed. See

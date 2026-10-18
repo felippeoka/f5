@@ -36,6 +36,10 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
       "pushCurrentBranch",
       "branchExists",
       "ensureWorktree",
+      "allocateWorktreePath",
+      "readWorktreePreparation",
+      "resolveAvailableBranchName",
+      "isValidBranchName",
       "fastForwardTo",
       "initializeWorktreeSubmodules",
       "listWorktrees",
@@ -74,6 +78,11 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
   ) as unknown as { [K in keyof GitCoreShape]: Array<ReadonlyArray<unknown>> };
 
   const implementations: GitCoreShape = {
+    readWorktreePreparation: () => Effect.succeed(null),
+    allocateWorktreePath: ({ cwd, branch }) =>
+      Effect.succeed(`${cwd}/worktrees/${branch.replaceAll("/", "-")}`),
+    resolveAvailableBranchName: (_cwd, name) => Effect.succeed(name),
+    isValidBranchName: () => Effect.succeed(true),
     cloneRepository: () => Effect.void,
     fastForwardTo: () => Effect.void,
     initializeWorktreeSubmodules: () => Effect.void,
@@ -194,6 +203,22 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
     clearMissingRegistration: (cwd, path) => {
       record("clearMissingRegistration", [cwd, path]);
       return implementations.clearMissingRegistration(cwd, path);
+    },
+    readWorktreePreparation: (path) => {
+      record("readWorktreePreparation", [path]);
+      return implementations.readWorktreePreparation(path);
+    },
+    allocateWorktreePath: (input) => {
+      record("allocateWorktreePath", [input]);
+      return implementations.allocateWorktreePath(input);
+    },
+    resolveAvailableBranchName: (cwd, name) => {
+      record("resolveAvailableBranchName", [cwd, name]);
+      return implementations.resolveAvailableBranchName(cwd, name);
+    },
+    isValidBranchName: (name) => {
+      record("isValidBranchName", [name]);
+      return implementations.isValidBranchName(name);
     },
     cloneRepository: (input) => {
       record("cloneRepository", [input]);

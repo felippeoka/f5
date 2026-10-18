@@ -138,6 +138,7 @@ function makeDependencies(input?: {
   };
   const git: Pick<
     GitCoreShape,
+    | "allocateWorktreePath"
     | "createWorktree"
     | "fetchRemoteBranchCommit"
     | "hasRemote"
@@ -145,6 +146,7 @@ function makeDependencies(input?: {
     | "resolveCommit"
     | "resolveCommonDir"
   > = {
+    allocateWorktreePath: ({ cwd, branch }) => Effect.succeed(`${cwd}/worktrees/${branch}`),
     resolveCommit: () => Effect.succeed("0123456789abcdef0123456789abcdef01234567"),
     resolveCommonDir: () => Effect.succeed("/repo/project/.git"),
     createWorktree:
@@ -432,7 +434,8 @@ describe("dispatchBootstrapTurnStart", () => {
       branch: "main",
       baseRefName: "0123456789abcdef0123456789abcdef01234567",
       newBranch: "t3code/bootstrap-branch",
-      path: null,
+      path: "/repo/project/worktrees/t3code/bootstrap-branch",
+      preparation: { owner: `thread:${THREAD_ID}`, runSetupScript: false, setupIdentity: null },
     });
     expect(dispatchedCommands.map((command) => command.type)).toEqual([
       "thread.meta.update",
@@ -525,7 +528,8 @@ describe("dispatchBootstrapTurnStart", () => {
       branch: "main",
       baseRefName: "0123456789abcdef0123456789abcdef01234567",
       newBranch: "t3code/1234abcd",
-      path: null,
+      path: "/repo/project/worktrees/t3code/1234abcd",
+      preparation: { owner: `thread:${THREAD_ID}`, runSetupScript: false, setupIdentity: null },
     });
   });
 

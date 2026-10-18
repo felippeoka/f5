@@ -1,12 +1,18 @@
+import { ServerSettingsService } from "../serverSettings.ts";
+import { ProjectionProjectRepository } from "../persistence/Services/ProjectionProjects.ts";
+import { ProjectionProjectRepositoryLive } from "../persistence/Layers/ProjectionProjects.ts";
+import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodePath from "@effect/platform-node/NodePath";
 import { describe, it, assert } from "@effect/vitest";
-import { Effect, Layer, Sink, Stream } from "effect";
+import { Effect, Layer, Schema, Sink, Stream } from "effect";
 import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { vi } from "vitest";
 
 import {
+  ServerSettings,
+  ProviderDriverKind,
   ProjectId,
   ProviderInstanceId,
   type McpProjectServersConfig,
@@ -66,14 +72,14 @@ function mockSpawnerLayer(
   );
 }
 
-function hangingSpawnerLayer() {
+function hangingSpawnerLayer(onInterrupted: () => void = () => {}) {
   return Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make(() =>
       Effect.succeed(
         ChildProcessSpawner.makeHandle({
           pid: ChildProcessSpawner.ProcessId(1),
-          exitCode: Effect.never,
+          exitCode: Effect.never.pipe(Effect.onInterrupt(() => Effect.sync(onInterrupted))),
           isRunning: Effect.succeed(true),
           kill: () => Effect.void,
           stdin: Sink.drain,
@@ -93,6 +99,7 @@ function makeProviderServiceStub(): ProviderServiceShape {
 
   return {
     startSession: (_threadId, _input) => unused(),
+    replaceSession: () => unused(),
     sendTurn: (_input) => unused(),
     interruptTurn: (_input) => unused(),
     respondToRequest: (_input) => unused(),
@@ -697,6 +704,75 @@ describe("McpRuntimeService", () => {
       ),
     ),
   );
+
+  for (const change of ["fingerprint", "workspace"] as const) {
+    it.effect(`cancels pending CLI login after a ${change} change`, () => {
+      const instanceId = ProviderInstanceId.make("codex-work");
+      let interrupted = false;
+      const settingsLayer = ServerSettingsService.layerTest(
+        Schema.decodeUnknownSync(ServerSettings)({
+          providerInstances: {
+            [instanceId]: { driver: ProviderDriverKind.make("codex"), config: {} },
+          },
+        }),
+      );
+      const projectLayer = ProjectionProjectRepositoryLive.pipe(
+        Layer.provide(SqlitePersistenceMemory),
+      );
+      return Effect.gen(function* () {
+        const projects = yield* ProjectionProjectRepository;
+        const settings = yield* ServerSettingsService;
+        const service = yield* McpRuntimeService;
+        const project = {
+          projectId,
+          title: "MCP",
+          workspaceRoot: "/tmp/login-a",
+          defaultModel: null,
+          scripts: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          deletedAt: null,
+        };
+        yield* projects.upsert(project);
+        const input = {
+          provider: "codex" as const,
+          projectId,
+          instanceId,
+          serverName: "cli-server",
+        };
+        assert.equal((yield* service.startLogin(input)).status, "pending");
+        yield* TestClock.adjust(1);
+        if (change === "workspace")
+          yield* projects.upsert({ ...project, workspaceRoot: "/tmp/login-b" });
+        else {
+          const current = yield* settings.getSettings;
+          yield* settings.updateSettings({
+            providerInstances: {
+              ...current.providerInstances,
+              [instanceId]: {
+                ...current.providerInstances[instanceId]!,
+                environment: [{ name: "ACCOUNT_LABEL", value: "changed" }],
+              },
+            },
+          });
+        }
+        yield* TestClock.adjust("2 seconds");
+        const status = yield* service.getLoginStatus(input);
+        assert.equal(status.status, "failed");
+        assert.include(status.error, "execution settings or project directory changed");
+        assert.equal(interrupted, true);
+      }).pipe(
+        Effect.provide(
+          makeRuntimeLayer({
+            servers: { "cli-server": { type: "stdio", command: "npx" } },
+            spawnerLayer: hangingSpawnerLayer(() => {
+              interrupted = true;
+            }),
+          }).pipe(Layer.provideMerge(settingsLayer), Layer.provideMerge(projectLayer)),
+        ),
+      );
+    });
+  }
 
   it.effect("marks codex CLI login as failed after the timeout elapses", () =>
     Effect.gen(function* () {

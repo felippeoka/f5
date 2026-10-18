@@ -1,5 +1,7 @@
 # Workspace layout
 
+> Contributors: one line per package in the monorepo.
+
 - `/apps/server`: Node.js WebSocket server. Hosts the provider adapters and orchestration engine and serves the built web app.
 - `/apps/web`: React + Vite UI. Session control, conversation, and provider event rendering. Connects to the server via WebSocket.
 - `/apps/desktop`: Electron shell. Spawns a desktop-scoped backend process and loads the shared web app.

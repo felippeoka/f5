@@ -17,7 +17,7 @@ import type {
 import { Effect, Layer, Option, Stream } from "effect";
 
 import { ServerConfig } from "../config.ts";
-import { GitCoreLive } from "../git/Layers/GitCore.ts";
+import { GitCoreTestLive as GitCoreLive, WorktreePreparationsTestLive } from "../git/testLayers.ts";
 import { GitServiceLive } from "../git/Layers/GitService.ts";
 import { NextTurnQueueStore } from "../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
@@ -282,6 +282,7 @@ export function automationLayer(
       })),
   } as never);
   return Layer.mergeAll(
+    WorktreePreparationsTestLive,
     GitCoreLive.pipe(Layer.provideMerge(GitServiceLive)),
     engine,
     terminals,

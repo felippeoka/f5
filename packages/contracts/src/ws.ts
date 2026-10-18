@@ -274,7 +274,11 @@ import {
   NextTurnQueueUpdateInput,
 } from "./nextTurnQueue";
 import { GlobalSearchQueryInput } from "./globalSearch";
-import { WorktreeSetupThreadInput, WorktreeSetupUpdatedPayload } from "./worktreeSetup";
+import {
+  WorktreeSetupActionInput,
+  WorktreeSetupThreadInput,
+  WorktreeSetupUpdatedPayload,
+} from "./worktreeSetup";
 import {
   AGENTS_WS_CHANNELS,
   AGENTS_WS_METHODS,
@@ -839,9 +843,9 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.worktreesThreadState, WorktreesThreadStateInput),
   tagRequestBody(WS_METHODS.worktreesRecover, WorktreesRecoverInput),
   tagRequestBody(WS_METHODS.worktreeSetupSubscribe, WorktreeSetupThreadInput),
-  tagRequestBody(WS_METHODS.worktreeSetupCancel, WorktreeSetupThreadInput),
-  tagRequestBody(WS_METHODS.worktreeSetupRetry, WorktreeSetupThreadInput),
-  tagRequestBody(WS_METHODS.worktreeSetupWorkLocally, WorktreeSetupThreadInput),
+  tagRequestBody(WS_METHODS.worktreeSetupCancel, WorktreeSetupActionInput),
+  tagRequestBody(WS_METHODS.worktreeSetupRetry, WorktreeSetupActionInput),
+  tagRequestBody(WS_METHODS.worktreeSetupWorkLocally, WorktreeSetupActionInput),
   tagRequestBody(WS_METHODS.globalSearchQuery, GlobalSearchQueryInput),
   tagRequestBody(WS_METHODS.workflowPlatformListTemplates, Schema.Struct({})),
   WorkflowPlatformCreateRunInput.mapMembers(

@@ -1,4 +1,6 @@
 import { carryPreparedComputerEvidence } from "../prepareAutomationRuntimeEvent";
+import { resolveBindingInstanceId } from "../bindingIdentity.ts";
+import { makeOperationGate } from "../operationGate.ts";
 import { withWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import { canonicalWorktreePath } from "../../git/worktreePaths.ts";
 import { assertWorktreeReady } from "../../project/worktreeReadiness.ts";
@@ -64,6 +66,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderSession,
   type McpReloadResult,
+  type McpSessionReloadOutcome,
   PROVIDER_DISPLAY_NAMES,
   TrimmedNonEmptyString,
 } from "@t3tools/contracts";
@@ -100,6 +103,7 @@ import {
 } from "../../observability/Metrics.ts";
 import {
   type ProviderAdapterError,
+  type ProviderServiceError,
   ProviderSessionActionUnavailableError,
   ProviderValidationError,
   ProviderTurnDeliveryError,
@@ -281,16 +285,6 @@ function mergeResolvedMcpProviderOptions(input: {
     ...input.providerOptions,
     mcpServers: input.projectMcpServers,
   };
-}
-
-function resolveBindingInstanceId(binding: {
-  readonly provider: ProviderKind;
-  readonly providerInstanceId?: ProviderInstanceId | null;
-}): ProviderInstanceId {
-  return (
-    binding.providerInstanceId ??
-    defaultInstanceIdForDriver(ProviderDriverKind.make(binding.provider))
-  );
 }
 
 function resolveStartInstanceId(input: {
@@ -836,6 +830,9 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       () => reconcileInstanceSubscriptions,
     ).pipe(Effect.forkScoped);
 
+    // Lock order: reactor turn gate, then this service gate. Never enter the reactor here.
+    const withSessionOperation = makeOperationGate<ThreadId>();
+
     const recoverSessionForThread = (input: {
       readonly binding: ProviderRuntimeBinding;
       readonly operation: string;
@@ -1111,7 +1108,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         }),
       );
 
-    const resolveRoutableSession = (input: {
+    const resolveRoutableSessionUnlocked = (input: {
       readonly threadId: ThreadId;
       readonly operation: string;
       readonly allowRecovery: boolean;
@@ -1192,6 +1189,16 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             : {}),
         } as const;
       });
+
+    const resolveRoutableSession = (input: Parameters<typeof resolveRoutableSessionUnlocked>[0]) =>
+      resolveRoutableSessionUnlocked({ ...input, allowRecovery: false }).pipe(
+        Effect.flatMap((routed) => {
+          if (routed.isActive || !input.allowRecovery) return Effect.succeed(routed);
+          // Only recovery mutates lifecycle state. Live controls remain usable during reconciliation.
+          const { binding: _binding, ...request } = input;
+          return withSessionOperation(input.threadId, resolveRoutableSessionUnlocked(request));
+        }),
+      );
 
     const stopStaleSessionsForThread = Effect.fnUntraced(function* (input: {
       readonly threadId: ThreadId;
@@ -2276,7 +2283,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             );
           });
 
-    const stopSession: ProviderServiceShape["stopSession"] = (rawInput) =>
+    const stopSessionUnlocked: ProviderServiceShape["stopSession"] = (rawInput) =>
       Effect.gen(function* () {
         const input = yield* decodeInputOrValidationError({
           operation: "ProviderService.stopSession",
@@ -2285,7 +2292,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         });
         let metricProvider = "unknown";
         return yield* Effect.gen(function* () {
-          const routed = yield* resolveRoutableSession({
+          const routed = yield* resolveRoutableSessionUnlocked({
             threadId: input.threadId,
             operation: "ProviderService.stopSession",
             allowRecovery: false,
@@ -2348,6 +2355,28 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           }),
         );
       });
+
+    const stopSession: ProviderServiceShape["stopSession"] = (input) =>
+      withSessionOperation(input.threadId, stopSessionUnlocked(input));
+
+    const replaceSession: ProviderServiceShape["replaceSession"] = (threadId, input, expected) =>
+      withProviderThreadAccess(
+        threadId,
+        withSessionOperation(
+          threadId,
+          Effect.gen(function* () {
+            const current = Option.getOrUndefined(yield* directory.getBinding(threadId));
+            if (
+              !current ||
+              resolveBindingInstanceId(current) !== expected.instanceId ||
+              readPersistedSessionGeneration(current.runtimePayload) !== expected.generation
+            )
+              return null;
+            yield* stopSessionUnlocked({ threadId });
+            return yield* startSession(threadId, input);
+          }),
+        ),
+      );
 
     const listSessions: ProviderServiceShape["listSessions"] = () =>
       Effect.gen(function* () {
@@ -2658,176 +2687,216 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         })),
       );
 
+    // A newer reconciliation supersedes sleeping retries even within the same generation.
+    const mcpReloadAttempts = new Map<ThreadId, symbol>();
     const reloadMcpConfigForProject: ProviderServiceShape["reloadMcpConfigForProject"] = (input) =>
       Effect.gen(function* () {
         const bindings = yield* directory.listBindingsByProject(input.projectId);
-        const matchingBindings = bindings.filter((binding) => {
-          if (binding.provider !== input.provider) {
-            return false;
-          }
-          if (input.threadIds && !input.threadIds.includes(binding.threadId)) {
-            return false;
-          }
-          if (binding.status === "stopped") {
-            return false;
-          }
-          if (binding.projectId !== input.projectId) {
-            return false;
-          }
-          if (!input.providerOptions) {
-            return true;
-          }
-          const persistedProviderOptions = readPersistedProviderOptions(binding.runtimePayload);
-          return (
-            getProviderEnvironmentKey(
-              binding.provider,
-              persistedProviderOptions as ProviderStartOptions | undefined,
-            ) === getProviderEnvironmentKey(binding.provider, input.providerOptions)
-          );
-        });
-
-        if (matchingBindings.length === 0) {
-          return { sessions: [] };
-        }
-
-        const configResult = yield* projectMcpConfigService
-          .readEffectiveStoredConfig(input.projectId)
-          .pipe(
-            Effect.flatMap((stored) =>
-              Effect.try({
-                try: () => {
-                  assertMcpRuntimeConfig(stored.servers, input.provider);
-                  if (input.provider === "codex") readCodexMcpOAuthCallbackConfig(stored.servers);
-                  return stored;
-                },
-                catch: mcpConfigErrorMessage,
-              }),
-            ),
-            Effect.result,
-          );
-        if (configResult._tag === "Failure") {
-          return {
-            sessions: matchingBindings.map((binding) => ({
-              threadId: binding.threadId,
-              result: {
-                converged: false,
-                restartRequired: false,
-                servers: [],
-                errors: [{ message: mcpConfigErrorMessage(configResult.failure) }],
-              } satisfies McpReloadResult,
-            })),
-          };
-        }
-        const currentProjectMcp = configResult.success;
-
-        // `reached` is false when the reload request itself failed, so the
-        // session may not hold the new config at all.
-        const reloadOnce = (
-          reloadMcpConfig: NonNullable<
-            ProviderAdapterShape<ProviderAdapterError>["reloadMcpConfig"]
-          >,
-          threadId: ThreadId,
-        ) =>
-          reloadMcpConfig({ threadId, mcpServers: currentProjectMcp.servers }).pipe(
-            Effect.map((result) => ({ result, reached: true })),
-            Effect.catch((error) =>
-              Effect.succeed({
-                result: {
-                  converged: false,
-                  restartRequired: false,
-                  servers: [],
-                  errors: [{ message: error.message.trim() || "The MCP reload request failed." }],
-                } satisfies McpReloadResult,
-                reached: false,
-              }),
-            ),
-          );
-        // Bounded backoff: a restart-required result is final, as is convergence.
-        const retryDelays = input.retry === false ? [] : MCP_RELOAD_RETRY_DELAYS_MS;
-        const reloadWithRetry = (
-          reloadMcpConfig: NonNullable<
-            ProviderAdapterShape<ProviderAdapterError>["reloadMcpConfig"]
-          >,
-          threadId: ThreadId,
-          attempt: number,
-        ): Effect.Effect<{ readonly result: McpReloadResult; readonly reached: boolean }> =>
-          reloadOnce(reloadMcpConfig, threadId).pipe(
-            Effect.flatMap((outcome) => {
-              const delayMs = retryDelays[attempt];
-              if (
-                outcome.result.converged ||
-                outcome.result.restartRequired ||
-                delayMs === undefined
-              ) {
-                return Effect.succeed(outcome);
-              }
-              return Effect.sleep(Duration.millis(delayMs)).pipe(
-                Effect.andThen(reloadWithRetry(reloadMcpConfig, threadId, attempt + 1)),
-              );
-            }),
-          );
-
-        const sessions = yield* Effect.forEach(
-          matchingBindings,
+        const matchingBindings = bindings.filter(
           (binding) =>
-            Effect.gen(function* () {
-              // Custom instances have their own adapter; resolve it per binding.
-              const adapter = yield* registry
-                .getByInstance(resolveBindingInstanceId(binding))
-                .pipe(Effect.option);
-              const reloadMcpConfig = Option.getOrUndefined(adapter)?.reloadMcpConfig;
-              if (
-                Option.isNone(adapter) ||
-                !reloadMcpConfig ||
-                !(yield* adapter.value.hasSession(binding.threadId))
-              ) {
-                return [];
-              }
-              const { result, reached } = yield* reloadWithRetry(
-                reloadMcpConfig,
-                binding.threadId,
-                0,
-              );
-              // A broken server stays broken after a restart, so only a
-              // restart-required (or undelivered) reload keeps the version
-              // stale; the next turn start restarts that session. A reload
-              // that did not converge is marked so Apply still retries it.
-              if (reached && !result.restartRequired) {
-                yield* directory.upsert({
-                  threadId: binding.threadId,
-                  projectId: input.projectId,
-                  provider: binding.provider,
-                  // The directory resets an omitted instance to the default one.
-                  providerInstanceId: resolveBindingInstanceId(binding),
-                  mcpEffectiveConfigVersion: currentProjectMcp.effectiveVersion,
-                  runtimePayload: {
-                    mcpUnconvergedConfigVersion: result.converged
-                      ? null
-                      : currentProjectMcp.effectiveVersion,
-                  },
-                });
-              }
-              // A restart-required result is final, so a caller's own retries
-              // cannot change it: always say so.
-              if (result.errors.length > 0 && (input.warn !== false || result.restartRequired)) {
-                yield* publishRuntimeEvent({
-                  type: "runtime.warning",
-                  eventId: EventId.makeUnsafe(randomUUID()),
-                  provider: binding.provider,
-                  threadId: binding.threadId,
-                  createdAt: new Date().toISOString(),
-                  payload: {
-                    category: "provider",
-                    message: describeMcpReloadFailure(result),
-                    actionable: !result.restartRequired,
-                  },
-                });
-              }
-              return [{ threadId: binding.threadId, result }];
-            }),
-          // Bound the wall time of Apply when several sessions retry.
-          { concurrency: 4 },
+            binding.provider === input.provider &&
+            binding.status !== "stopped" &&
+            (!input.instanceId || resolveBindingInstanceId(binding) === input.instanceId) &&
+            (!input.threadIds || input.threadIds.includes(binding.threadId)) &&
+            (input.instanceId !== undefined ||
+              !input.providerOptions ||
+              getProviderEnvironmentKey(
+                binding.provider,
+                readPersistedProviderOptions(binding.runtimePayload),
+              ) === getProviderEnvironmentKey(binding.provider, input.providerOptions)),
         );
+        const reloadSession = (
+          selected: ProviderRuntimeBinding,
+        ): Effect.Effect<ReadonlyArray<McpSessionReloadOutcome>, ProviderServiceError> => {
+          const token = Symbol("mcp-reload");
+          const instanceId = resolveBindingInstanceId(selected);
+          const generation = readPersistedSessionGeneration(selected.runtimePayload);
+          const emptyResult: McpReloadResult = {
+            converged: false,
+            restartRequired: false,
+            servers: [],
+            errors: [],
+          };
+          const base = {
+            threadId: selected.threadId,
+            instanceId,
+            generation,
+            requestedVersion: input.requestedVersion ?? "",
+            attemptedVersion: "",
+          };
+          const isCurrent = (binding: ProviderRuntimeBinding | undefined) =>
+            binding !== undefined &&
+            binding.status !== "stopped" &&
+            binding.projectId === input.projectId &&
+            binding.provider === input.provider &&
+            resolveBindingInstanceId(binding) === instanceId &&
+            readPersistedSessionGeneration(binding.runtimePayload) === generation;
+          return Effect.gen(function* () {
+            const prepared = yield* withSessionOperation(
+              selected.threadId,
+              Effect.gen(function* () {
+                const current = Option.getOrUndefined(
+                  yield* directory.getBinding(selected.threadId),
+                );
+                if (!isCurrent(current))
+                  return {
+                    sessions: [
+                      { ...base, disposition: "superseded" as const, result: emptyResult },
+                    ],
+                  };
+                const adapter = Option.getOrUndefined(
+                  yield* registry.getByInstance(instanceId).pipe(Effect.option),
+                );
+                if (!adapter?.reloadMcpConfig) return { sessions: [] };
+                const config = yield* projectMcpConfigService
+                  .readEffectiveStoredConfig(input.projectId)
+                  .pipe(Effect.result);
+                if (config._tag === "Failure")
+                  return {
+                    sessions: [
+                      {
+                        ...base,
+                        disposition: "failed" as const,
+                        result: {
+                          ...emptyResult,
+                          errors: [{ message: mcpConfigErrorMessage(config.failure) }],
+                        },
+                      },
+                    ],
+                  };
+                // Capture once; never replace this snapshot during a backoff window.
+                const snapshot = {
+                  ...config.success,
+                  servers: structuredClone(config.success.servers),
+                };
+                const metadata = {
+                  ...base,
+                  requestedVersion: input.requestedVersion ?? snapshot.effectiveVersion,
+                  attemptedVersion: snapshot.effectiveVersion,
+                };
+                const valid = yield* Effect.try({
+                  try: () => {
+                    assertMcpRuntimeConfig(snapshot.servers, input.provider);
+                    if (input.provider === "codex")
+                      readCodexMcpOAuthCallbackConfig(snapshot.servers);
+                  },
+                  catch: mcpConfigErrorMessage,
+                }).pipe(Effect.result);
+                if (valid._tag === "Failure")
+                  return {
+                    sessions: [
+                      {
+                        ...metadata,
+                        disposition: "failed" as const,
+                        result: { ...emptyResult, errors: [{ message: valid.failure }] },
+                      },
+                    ],
+                  };
+                if (!(yield* adapter.hasSession(selected.threadId))) return { sessions: [] };
+                mcpReloadAttempts.set(selected.threadId, token);
+                return { metadata, snapshot, reload: adapter.reloadMcpConfig };
+              }),
+            );
+            if ("sessions" in prepared) return prepared.sessions;
+            const { metadata, snapshot, reload } = prepared;
+            const stillCurrent = Effect.gen(function* () {
+              const binding = Option.getOrUndefined(yield* directory.getBinding(selected.threadId));
+              return mcpReloadAttempts.get(selected.threadId) === token && isCurrent(binding);
+            });
+            const reloadOnce = () =>
+              withSessionOperation(
+                selected.threadId,
+                Effect.gen(function* () {
+                  if (!(yield* stillCurrent)) return null;
+                  return yield* reload({
+                    threadId: selected.threadId,
+                    mcpServers: snapshot.servers,
+                  }).pipe(
+                    Effect.map((result) => ({ result, reached: true })),
+                    Effect.catch((error) =>
+                      Effect.succeed({
+                        reached: false,
+                        result: {
+                          ...emptyResult,
+                          errors: [
+                            { message: error.message.trim() || "The MCP reload request failed." },
+                          ],
+                        },
+                      }),
+                    ),
+                  );
+                }),
+              );
+            let outcome = yield* reloadOnce();
+            if (!outcome)
+              return [{ ...metadata, disposition: "superseded" as const, result: emptyResult }];
+            const delays =
+              input.retry === false ? [] : (input.retryDelaysMs ?? MCP_RELOAD_RETRY_DELAYS_MS);
+            for (const delay of delays) {
+              if (outcome.result.converged || outcome.result.restartRequired) break;
+              // Stop, replacement, recovery, and turn delivery can proceed while we wait.
+              yield* Effect.sleep(Duration.millis(delay));
+              const retried = yield* reloadOnce();
+              if (!retried)
+                return [
+                  { ...metadata, disposition: "superseded" as const, result: outcome.result },
+                ];
+              outcome = retried;
+            }
+            const { result, reached } = outcome;
+            return yield* withSessionOperation(
+              selected.threadId,
+              Effect.gen(function* () {
+                if (!(yield* stillCurrent))
+                  return [{ ...metadata, disposition: "superseded" as const, result }];
+                const committed = yield* directory.updateMcpStateIfCurrent({
+                  threadId: selected.threadId,
+                  instanceId,
+                  generation,
+                  ...(reached && !result.restartRequired
+                    ? { effectiveVersion: snapshot.effectiveVersion }
+                    : {}),
+                  unconvergedVersion: result.converged ? null : snapshot.effectiveVersion,
+                });
+                if (!committed)
+                  return [{ ...metadata, disposition: "superseded" as const, result }];
+                if (result.errors.length > 0 && (input.warn !== false || result.restartRequired)) {
+                  yield* publishRuntimeEvent({
+                    type: "runtime.warning",
+                    eventId: EventId.makeUnsafe(randomUUID()),
+                    provider: selected.provider,
+                    threadId: selected.threadId,
+                    createdAt: new Date().toISOString(),
+                    payload: {
+                      category: "provider",
+                      message: describeMcpReloadFailure(result),
+                      actionable: !result.restartRequired,
+                    },
+                  });
+                }
+                return [
+                  {
+                    ...metadata,
+                    result,
+                    disposition: result.restartRequired
+                      ? ("restart-required" as const)
+                      : result.converged
+                        ? ("applied" as const)
+                        : ("failed" as const),
+                  },
+                ];
+              }),
+            );
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                if (mcpReloadAttempts.get(selected.threadId) === token)
+                  mcpReloadAttempts.delete(selected.threadId);
+              }),
+            ),
+          );
+        };
+        const sessions = yield* Effect.forEach(matchingBindings, reloadSession, { concurrency: 4 });
         return { sessions: sessions.flat() };
       });
 
@@ -2992,8 +3061,12 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
     return {
       nativeOperations,
       renameThread,
+      replaceSession,
       startSession: (threadId, input) =>
-        withProviderThreadAccess(threadId, startSession(threadId, input)),
+        withProviderThreadAccess(
+          threadId,
+          withSessionOperation(threadId, startSession(threadId, input)),
+        ),
       submitTurn,
       sendTurn: (input) => submitTurn(input).pipe(Effect.flatMap((handle) => handle.acceptance)),
       interruptTurn: (input) => withProviderThreadAccess(input.threadId, interruptTurn(input)),

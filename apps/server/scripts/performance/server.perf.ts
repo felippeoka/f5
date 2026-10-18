@@ -21,7 +21,7 @@ import { ensureAttachmentSchema } from "../../src/persistence/Migrations/Attachm
 import { makeAttachmentUploads } from "../../src/attachmentUploads.ts";
 import * as NodeSqlite from "../../src/persistence/NodeSqliteClient.ts";
 import { ServerConfig } from "../../src/config.ts";
-import { GitCoreLive } from "../../src/git/Layers/GitCore.ts";
+import { GitCoreTestLive as GitCoreLive } from "../../src/git/testLayers.ts";
 import { GitServiceLive } from "../../src/git/Layers/GitService.ts";
 import { GitCore } from "../../src/git/Services/GitCore.ts";
 import { OrchestrationEventStore } from "../../src/persistence/Services/OrchestrationEventStore.ts";

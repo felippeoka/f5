@@ -135,6 +135,7 @@ function createProviderServiceHarness() {
   let sessionCapabilities: ProviderSessionCapabilities | null = null;
   const service: ProviderServiceShape = {
     startSession: () => unsupported(),
+    replaceSession: () => unsupported(),
     sendTurn: () => unsupported(),
     interruptTurn: (input) => Effect.sync(() => void interruptedTurns.push(input)),
     respondToRequest: (input) => Effect.sync(() => void requestResponses.push(input)),

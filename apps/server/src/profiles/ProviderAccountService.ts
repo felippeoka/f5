@@ -55,7 +55,14 @@ export class ProviderAccountService {
     ) => Promise<void> = async () => {},
   ) {}
   async resolve(instanceId: ProviderInstanceId) {
-    const settings = await Effect.runPromise(this.settings.getSettings);
+    return ProviderAccountService.resolve(this.config, this.settings, instanceId);
+  }
+  static async resolve(
+    serverConfig: ServerConfigShape,
+    settingsService: ServerSettingsShape,
+    instanceId: ProviderInstanceId,
+  ) {
+    const settings = await Effect.runPromise(settingsService.getSettings);
     const instance = deriveProviderInstanceConfigMap(settings)[instanceId];
     if (!instance || (instance.driver !== "codex" && instance.driver !== "claudeAgent"))
       throw new Error(
@@ -65,11 +72,11 @@ export class ProviderAccountService {
       instance.driver === "codex"
         ? Schema.decodeUnknownSync(CodexSettings)(instance.config ?? {})
         : Schema.decodeUnknownSync(ClaudeSettings)(instance.config ?? {});
-    await validateManagedHome(this.config, config.homePath);
+    await validateManagedHome(serverConfig, config.homePath);
     let environment = buildAccountExecutionEnvironment({
       purpose: "account",
-      profile: this.config.profile,
-      stateDir: this.config.stateDir,
+      profile: serverConfig.profile,
+      stateDir: serverConfig.stateDir,
       baseEnv: process.env,
       instance: instance.environment,
     });
@@ -79,7 +86,7 @@ export class ProviderAccountService {
       );
     else if (config.homePath) environment.CODEX_HOME = config.homePath;
     await validateProviderCompatibility(
-      this.config,
+      serverConfig,
       instance.driver,
       config.binaryPath,
       environment,
@@ -90,7 +97,7 @@ export class ProviderAccountService {
         : resolveInvocation(
             config.binaryPath,
             [
-              ...(this.config.profile?.isDefault === false
+              ...(serverConfig.profile?.isDefault === false
                 ? ["-c", 'cli_auth_credentials_store="file"']
                 : []),
               ...args,

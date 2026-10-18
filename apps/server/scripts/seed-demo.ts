@@ -21,6 +21,7 @@
  * the user's real F5 or legacy T3 state roots — guard against accidentally
  * writing to the real database.
  */
+import { createHash } from "node:crypto";
 import * as FS from "node:fs";
 import * as Path from "node:path";
 
@@ -38,6 +39,7 @@ import {
   ProjectId,
   ThreadId,
   TurnId,
+  type ChatAttachment,
   type CodeReviewWorkflow,
   type OrchestrationCheckpointFile,
   type PlanningWorkflow,
@@ -50,6 +52,7 @@ import { inferProviderForModel } from "@t3tools/shared/model";
 import { Effect, Layer, Logger, ManagedRuntime } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { resolveAttachmentPath } from "../src/attachmentStore.ts";
 import { ServerConfig } from "../src/config.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../src/persistence/Layers/OrchestrationCommandReceipts.ts";
 import { OrchestrationEventStoreLive } from "../src/persistence/Layers/OrchestrationEventStore.ts";
@@ -166,6 +169,132 @@ const cmd = (label: string): typeof CommandId.Type =>
   CommandId.makeUnsafe(`server:seed:${++commandCounter}:${label}`);
 
 // ---------------------------------------------------------------------------
+// Attachment contents for the OPML thread. SVG keeps the seed dependency-free.
+// ---------------------------------------------------------------------------
+
+const OPML_MOCKUP_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+  <rect width="640" height="360" rx="14" fill="#0f1115"/>
+  <rect x="24" y="24" width="592" height="312" rx="10" fill="#171a21" stroke="#2a2f3a"/>
+  <circle cx="48" cy="48" r="6" fill="#ff5f57"/><circle cx="68" cy="48" r="6" fill="#febc2e"/><circle cx="88" cy="48" r="6" fill="#28c840"/>
+  <text x="48" y="96" fill="#9aa4b2" font-family="Menlo, monospace" font-size="15">$ rss import opml feeds.opml --dry-run</text>
+  <text x="48" y="136" fill="#e6e9ef" font-family="Menlo, monospace" font-size="15">Imported 42 feeds into 6 categories</text>
+  <text x="48" y="166" fill="#7ee787" font-family="Menlo, monospace" font-size="15">  + Tech/Rust       12 feeds</text>
+  <text x="48" y="192" fill="#7ee787" font-family="Menlo, monospace" font-size="15">  + Tech/Web         9 feeds</text>
+  <text x="48" y="218" fill="#7ee787" font-family="Menlo, monospace" font-size="15">  + News             8 feeds</text>
+  <text x="48" y="244" fill="#f2cc60" font-family="Menlo, monospace" font-size="15">  ! 3 feeds already exist, skipped</text>
+  <text x="48" y="292" fill="#9aa4b2" font-family="Menlo, monospace" font-size="15">Dry run: nothing was written.</text>
+</svg>
+`;
+
+const OPML_NOTES_MARKDOWN = `# OPML edge cases
+
+- Nested outlines: join category titles with \`/\`.
+- Missing \`xmlUrl\`: treat as a category, not a feed.
+- Duplicate URLs inside one file: import once, warn once.
+- HTML entities in titles: decode at display time.
+`;
+
+// Checked-in project defaults for todo-cli, so Project settings shows values
+// sourced from `f5.json`.
+const TODO_CLI_PROJECT_CONFIG = {
+  defaultRuntimeMode: "approval-required",
+  defaultThreadEnvMode: "worktree",
+  worktreeSubmodules: "shallow",
+  prHubDefaultMergeMethod: "squash",
+};
+
+// ---------------------------------------------------------------------------
+// Usage facts — a week of deterministic token and cost history so the Usage
+// page has a populated chart, metric cards and project/thread breakdown.
+// ---------------------------------------------------------------------------
+
+interface DemoUsageFact {
+  readonly threadId: typeof ThreadId.Type;
+  readonly projectId: typeof ProjectId.Type;
+  readonly provider: "codex" | "claudeAgent";
+  readonly model: string;
+  readonly completedAt: string;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly costUsd: number | null;
+}
+
+const USAGE_THREADS: ReadonlyArray<
+  Pick<DemoUsageFact, "threadId" | "projectId" | "provider" | "model">
+> = [
+  {
+    threadId: THREAD_SNIPPET_PG,
+    projectId: PROJECT_SNIPPET,
+    provider: "codex",
+    model: "gpt-6.1-sol",
+  },
+  {
+    threadId: THREAD_RSS_OPML,
+    projectId: PROJECT_RSS,
+    provider: "claudeAgent",
+    model: "claude-sonnet-5-5",
+  },
+  {
+    threadId: THREAD_TODO_DUE,
+    projectId: PROJECT_TODO,
+    provider: "codex",
+    model: "gpt-6.1-sol",
+  },
+  {
+    threadId: THREAD_SNIPPET_RACE,
+    projectId: PROJECT_SNIPPET,
+    provider: "claudeAgent",
+    model: "claude-sonnet-5-5",
+  },
+  {
+    threadId: THREAD_RSS_INTERRUPTED,
+    projectId: PROJECT_RSS,
+    provider: "codex",
+    model: "gpt-6.1-sol",
+  },
+];
+
+const USAGE_FACT_COUNT = 36;
+
+/**
+ * Deterministic usage history. Each fact completes between its thread's
+ * creation and now, so no thread reports usage from before it existed.
+ */
+const demoUsageFacts = (
+  threadCreatedAt: (threadId: typeof ThreadId.Type) => string,
+): ReadonlyArray<DemoUsageFact> => {
+  // Small LCG so every seed produces the same history.
+  let state = 0x5eed;
+  const next = () => {
+    state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return state / 2_147_483_648;
+  };
+  const facts: DemoUsageFact[] = [];
+  for (let index = 0; index < USAGE_FACT_COUNT; index++) {
+    const thread = USAGE_THREADS[Math.floor(next() * USAGE_THREADS.length)]!;
+    const createdMs = Date.parse(threadCreatedAt(thread.threadId));
+    const completedMs = createdMs + next() * (now.getTime() - createdMs);
+    const inputTokens = 8_000 + Math.floor(next() * 60_000);
+    const outputTokens = 1_200 + Math.floor(next() * 9_000);
+    const cacheReadTokens = Math.floor(inputTokens * (0.4 + next() * 0.4));
+    facts.push({
+      ...thread,
+      completedAt: new Date(completedMs).toISOString(),
+      inputTokens,
+      outputTokens,
+      cacheReadTokens,
+      // Codex reports no cost, so the Usage page shows it as unpriced.
+      costUsd:
+        thread.provider === "claudeAgent"
+          ? Math.round(((inputTokens - cacheReadTokens) * 3 + outputTokens * 15) / 10_000) / 100
+          : null,
+    });
+  }
+  return facts;
+};
+
+// ---------------------------------------------------------------------------
 // Hand-written demo conversations. No proprietary references.
 // ---------------------------------------------------------------------------
 
@@ -192,16 +321,38 @@ interface DemoFileChange {
   readonly completedAt: string;
 }
 
+interface DemoAttachment {
+  readonly type: "image" | "file";
+  /** Must match the server's `<thread-segment>-<uuid>` attachment id format. */
+  readonly id: string;
+  readonly name: string;
+  readonly mimeType: string;
+  readonly content: string;
+}
+
+const toChatAttachment = (attachment: DemoAttachment): ChatAttachment => {
+  const fields = {
+    id: attachment.id,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    sizeBytes: Buffer.byteLength(attachment.content),
+  };
+  return attachment.type === "image"
+    ? { type: "image" as const, ...fields }
+    : { type: "file" as const, ...fields };
+};
+
 interface DemoChat {
   readonly threadId: typeof ThreadId.Type;
   readonly projectId: typeof ProjectId.Type;
   readonly title: string;
   readonly model: string;
-  readonly worktreePath: string;
   readonly createdAt: string;
   readonly userMessage: string;
   readonly assistantMessage: string;
   readonly turnCompletedAt: string;
+  /** Files written to the attachments dir and referenced by the user message. */
+  readonly attachments?: ReadonlyArray<DemoAttachment>;
   /**
    * Defaults to `"default"` (the conversational mode). Use `"plan"` for
    * plan-mode threads — combined with a non-implemented `proposedPlan`,
@@ -253,7 +404,6 @@ const DEMO_CHATS: ReadonlyArray<DemoChat> = [
     projectId: PROJECT_SNIPPET,
     title: "Add Postgres backend support",
     model: "gpt-6.1-sol",
-    worktreePath: project1Dir,
     createdAt: isoHoursAgo(6),
     userMessage:
       "Right now SnippetStore only supports SQLite. I want to add a Postgres adapter behind the same `StorageAdapter` interface. The adapter should support both `pg` and `postgres.js` clients via a small driver shim, and the migration tool should pick the right dialect from the connection URL.",
@@ -412,7 +562,6 @@ const DEMO_CHATS: ReadonlyArray<DemoChat> = [
     projectId: PROJECT_SNIPPET,
     title: "Fix race condition in concurrent writes",
     model: "claude-sonnet-5-5",
-    worktreePath: project1Dir,
     createdAt: isoDaysAgo(1),
     userMessage:
       "I'm seeing intermittent test failures in `concurrent-writes.test.ts`. Looks like two `put` calls with the same key sometimes both think they won. Stack trace below — can you find the race?\n\n```\nAssertionError: expected 'value-2' to equal 'value-1'\n  at concurrent-writes.test.ts:42\n```",
@@ -543,10 +692,25 @@ const DEMO_CHATS: ReadonlyArray<DemoChat> = [
     projectId: PROJECT_RSS,
     title: "OPML import",
     model: "claude-sonnet-5-5",
-    worktreePath: project2Dir,
     createdAt: isoHoursAgo(36),
     userMessage:
-      "Can we add OPML import to the CLI? Should accept a file path or stdin and add each feed to the store with its category. If a feed already exists by URL, skip it but log a warning. Bonus: a `--dry-run` flag.",
+      "Can we add OPML import to the CLI? Should accept a file path or stdin and add each feed to the store with its category. If a feed already exists by URL, skip it but log a warning. Bonus: a `--dry-run` flag. I attached a mockup of the summary output and my notes on edge cases.",
+    attachments: [
+      {
+        type: "image",
+        id: "thread-rss-opml-6f1c2a4e-0d3b-4c1a-9a51-3e2f8b7c9d01",
+        name: "import-summary-mockup.svg",
+        mimeType: "image/svg+xml",
+        content: OPML_MOCKUP_SVG,
+      },
+      {
+        type: "file",
+        id: "thread-rss-opml-0b9e7d3c-5a2f-4e61-8c4d-7f1a2b3c4d02",
+        name: "opml-edge-cases.md",
+        mimeType: "text/markdown",
+        content: OPML_NOTES_MARKDOWN,
+      },
+    ],
     assistantMessage: [
       "Adding `cargo run -- import opml <path>` and `cat feeds.opml | cargo run -- import opml -`.",
       "",
@@ -696,7 +860,6 @@ const DEMO_CHATS: ReadonlyArray<DemoChat> = [
     projectId: PROJECT_TODO,
     title: "Add due dates",
     model: "gpt-6.1-sol",
-    worktreePath: project3Dir,
     createdAt: isoMinutesAgo(90),
     userMessage:
       "Let's add optional due dates to todos. Storage is currently a single JSON file. CLI should accept `--due tomorrow`, `--due 2026-05-01`, or `--due 'next monday'`. Listing shows overdue items in red.",
@@ -875,7 +1038,6 @@ const DEMO_CHATS: ReadonlyArray<DemoChat> = [
     projectId: PROJECT_SNIPPET,
     title: "Index cold-start optimization",
     model: "claude-sonnet-5-5",
-    worktreePath: project1Dir,
     createdAt: isoMinutesAgo(25),
     interactionMode: "plan",
     userMessage:
@@ -938,7 +1100,6 @@ const DEMO_CHATS: ReadonlyArray<DemoChat> = [
     projectId: PROJECT_RSS,
     title: "Switch HTTP client to reqwest::Client pool",
     model: "gpt-6.1-sol",
-    worktreePath: project2Dir,
     createdAt: isoMinutesAgo(50),
     interactionMode: "plan",
     userMessage:
@@ -992,7 +1153,6 @@ const DEMO_CHATS: ReadonlyArray<DemoChat> = [
     projectId: PROJECT_RSS,
     title: "Migrate config to TOML",
     model: "gpt-6.1-sol",
-    worktreePath: project2Dir,
     createdAt: isoMinutesAgo(8),
     userMessage:
       "Let's move the user config from JSON to TOML. The current `~/.config/rss-reader/config.json` should be auto-migrated on first run, then deleted. Don't forget the schema docs.",
@@ -1018,7 +1178,6 @@ const DEMO_CHATS: ReadonlyArray<DemoChat> = [
     projectId: PROJECT_TODO,
     title: "Add JSON export to the list command",
     model: "claude-sonnet-5-5",
-    worktreePath: project3Dir,
     createdAt: isoMinutesAgo(2),
     userMessage:
       "Add a `--json` flag to the `list` command that emits each todo as a JSON Lines record on stdout. Should still respect the existing filters (`--all`, `--tag`). Make sure dates are ISO-8601, not the human-friendly format.",
@@ -1078,7 +1237,6 @@ const WORKFLOW_STAGE_CHATS: ReadonlyArray<DemoChat> = [
     projectId: PROJECT_RSS,
     title: "Merge: Parallelize feed refresh",
     model: "claude-opus-5-5",
-    worktreePath: project2Dir,
     createdAt: isoHoursAgo(3),
     userMessage:
       "Merge the two revised plans for parallel feed refresh into one implementation plan. Keep the strongest parts of each and resolve any disagreements explicitly.",
@@ -1121,7 +1279,6 @@ const WORKFLOW_STAGE_CHATS: ReadonlyArray<DemoChat> = [
     projectId: PROJECT_TODO,
     title: "Reviewer A: Kanban board view",
     model: "claude-sonnet-5-5",
-    worktreePath: project3Dir,
     branch: "feat/kanban-view",
     createdAt: isoHoursAgo(1),
     userMessage:
@@ -1140,7 +1297,6 @@ const WORKFLOW_STAGE_CHATS: ReadonlyArray<DemoChat> = [
     projectId: PROJECT_TODO,
     title: "Reviewer B: Kanban board view",
     model: "gpt-6.1-sol",
-    worktreePath: project3Dir,
     branch: "feat/kanban-view",
     createdAt: isoHoursAgo(1),
     userMessage:
@@ -1159,7 +1315,6 @@ const WORKFLOW_STAGE_CHATS: ReadonlyArray<DemoChat> = [
     projectId: PROJECT_TODO,
     title: "Consolidation: Kanban board view",
     model: "claude-opus-5-5",
-    worktreePath: project3Dir,
     branch: "feat/kanban-view",
     createdAt: isoHoursAgo(1),
     userMessage: "Consolidate both reviews into one ranked list of findings and a verdict.",
@@ -1376,6 +1531,28 @@ const CODE_REVIEW_WORKFLOW: CodeReviewWorkflow = {
 // Seed program
 // ---------------------------------------------------------------------------
 
+const attachmentsDir = Path.join(normalized, "attachments");
+FS.mkdirSync(attachmentsDir, { recursive: true });
+const attachmentFinalPath = (attachment: DemoAttachment): string => {
+  const finalPath = resolveAttachmentPath({
+    attachmentsDir,
+    attachment: toChatAttachment(attachment),
+  });
+  if (!finalPath) {
+    throw new Error(`[seed-demo] invalid attachment id: ${attachment.id}`);
+  }
+  return finalPath;
+};
+for (const chat of DEMO_CHATS) {
+  for (const attachment of chat.attachments ?? []) {
+    FS.writeFileSync(attachmentFinalPath(attachment), attachment.content);
+  }
+}
+FS.writeFileSync(
+  Path.join(project3Dir, "f5.json"),
+  `${JSON.stringify(TODO_CLI_PROJECT_CONFIG, null, 2)}\n`,
+);
+
 const seedProgram = Effect.gen(function* () {
   const engine = yield* OrchestrationEngineService;
   const sql = yield* SqlClient.SqlClient;
@@ -1428,13 +1605,33 @@ const seedProgram = Effect.gen(function* () {
         runtimeMode: "approval-required",
         interactionMode,
         branch: chat.branch ?? null,
-        worktreePath: chat.worktreePath,
+        // Every demo thread works in its project root, i.e. a local thread. A
+        // recorded worktree path makes `thread.turn.start` verify Git worktree
+        // identity, which the seed's engine (no GitCore) cannot do, and makes
+        // startup cleanup check it against the real repository.
+        worktreePath: null,
         createdAt: chat.createdAt,
       });
 
       const turnId = TurnId.makeUnsafe(`turn-${chat.threadId}`);
       const userMessageId = MessageId.makeUnsafe(`msg-user-${chat.threadId}`);
       const assistantMessageId = MessageId.makeUnsafe(`msg-assistant-${chat.threadId}`);
+
+      // Register attachment files as uploaded and ready; message ownership rows
+      // reference them by foreign key.
+      for (const attachment of chat.attachments ?? []) {
+        const contentHash = createHash("sha256").update(attachment.content).digest("hex");
+        yield* sql`
+          INSERT INTO attachments (
+            attachment_id, thread_id, type, name, mime_type, size_bytes, content_hash,
+            staging_path, final_path, lifecycle, created_at, updated_at
+          ) VALUES (
+            ${attachment.id}, ${chat.threadId}, ${attachment.type}, ${attachment.name},
+            ${attachment.mimeType}, ${Buffer.byteLength(attachment.content)}, ${contentHash},
+            ${null}, ${attachmentFinalPath(attachment)}, 'ready', ${chat.createdAt}, ${chat.createdAt}
+          )
+        `;
+      }
 
       yield* engine.dispatch({
         type: "thread.turn.start",
@@ -1444,7 +1641,7 @@ const seedProgram = Effect.gen(function* () {
           messageId: userMessageId,
           role: "user",
           text: chat.userMessage,
-          attachments: [],
+          attachments: (chat.attachments ?? []).map(toChatAttachment),
         },
         runtimeMode: "approval-required",
         interactionMode,
@@ -1727,7 +1924,7 @@ const seedProgram = Effect.gen(function* () {
     runtimeMode: "approval-required",
     interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
     branch: null,
-    worktreePath: project2Dir,
+    worktreePath: null,
     createdAt: isoHoursAgo(3),
   });
   yield* engine.dispatch({
@@ -1740,7 +1937,7 @@ const seedProgram = Effect.gen(function* () {
     runtimeMode: "approval-required",
     interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
     branch: null,
-    worktreePath: project2Dir,
+    worktreePath: null,
     createdAt: isoHoursAgo(3),
   });
   // Implementation phase: an implementer thread plus two code-review threads.
@@ -1756,7 +1953,7 @@ const seedProgram = Effect.gen(function* () {
     runtimeMode: "approval-required",
     interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
     branch: "feat/parallel-feed-refresh",
-    worktreePath: project2Dir,
+    worktreePath: null,
     createdAt: isoMinutesAgo(70),
   });
   yield* engine.dispatch({
@@ -1769,7 +1966,7 @@ const seedProgram = Effect.gen(function* () {
     runtimeMode: "approval-required",
     interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
     branch: "feat/parallel-feed-refresh",
-    worktreePath: project2Dir,
+    worktreePath: null,
     createdAt: isoMinutesAgo(45),
   });
   yield* engine.dispatch({
@@ -1782,7 +1979,7 @@ const seedProgram = Effect.gen(function* () {
     runtimeMode: "approval-required",
     interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
     branch: "feat/parallel-feed-refresh",
-    worktreePath: project2Dir,
+    worktreePath: null,
     createdAt: isoMinutesAgo(45),
   });
 
@@ -1842,7 +2039,41 @@ const seedProgram = Effect.gen(function* () {
     updatedAt: CODE_REVIEW_WORKFLOW.updatedAt,
   });
 
-  // 5. Invariant: nothing the delivery worker or restart recovery could
+  // 5. Usage history for the Usage page.
+  const chatCreatedAt = (threadId: typeof ThreadId.Type): string => {
+    const chat = DEMO_CHATS.find((entry) => entry.threadId === threadId);
+    if (!chat) throw new Error(`[seed-demo] usage thread ${threadId} is not a demo chat`);
+    return chat.createdAt;
+  };
+  for (const [index, fact] of demoUsageFacts(chatCreatedAt).entries()) {
+    const completedAt = fact.completedAt;
+    yield* engine.dispatch({
+      type: "thread.usage.record",
+      commandId: cmd(`usage-${index}`),
+      threadId: fact.threadId,
+      usageFact: {
+        turnId: TurnId.makeUnsafe(`usage-turn-${index}`),
+        threadId: fact.threadId,
+        projectId: fact.projectId,
+        provider: fact.provider,
+        providerInstanceId: null,
+        model: fact.model,
+        inputTokens: fact.inputTokens,
+        outputTokens: fact.outputTokens,
+        cacheReadTokens: fact.cacheReadTokens,
+        cacheWriteTokens: 0,
+        totalTokens: fact.inputTokens + fact.outputTokens,
+        providerReportedCostUsd: fact.costUsd,
+        tokenProvenance: "provider-reported",
+        costProvenance: fact.costUsd === null ? "unreported" : "provider-reported",
+        completedAt,
+        sourceEventId: `seed-usage-${index}`,
+      },
+      createdAt: completedAt,
+    });
+  }
+
+  // 6. Invariant: nothing the delivery worker or restart recovery could
   //    replay against a real provider on the next boot.
   const [replayable] = yield* sql<{ readonly count: number }>`
     SELECT COUNT(*) AS count FROM provider_turn_deliveries

@@ -1,3 +1,10 @@
+import { setupProjectScript } from "@t3tools/shared/projectScripts";
+import { WorktreePreparations } from "./persistence/Services/WorktreePreparations.ts";
+import { WorktreePreparationsLive } from "./persistence/Layers/WorktreePreparations.ts";
+import {
+  WorktreePreparation,
+  type WorktreePreparationShape,
+} from "./project/Services/WorktreePreparation.ts";
 import { assertWorktreeReady } from "./project/worktreeReadiness.ts";
 import { removeWorktreeSafely } from "./project/worktreeClaims.ts";
 import { WorktreeManager, type WorktreeManagerShape } from "./project/Services/WorktreeManager.ts";
@@ -280,7 +287,6 @@ import {
   withStartupPhaseTiming,
 } from "./startupTiming.ts";
 import { isPrivateHttpPath, makeServerAuth } from "./serverAuth.ts";
-import { resolveDefaultWorktreePath } from "./git/worktreePaths.ts";
 import { getReviewPreviewDiff } from "./git/ReviewDiffService.ts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
 import { getProviderTurnInputLengthIssue } from "@t3tools/shared/providerInput";
@@ -879,6 +885,7 @@ interface OrchestrationRuntimeServices {
   readonly storageMaintenance: StorageMaintenanceShape;
   readonly nextTurnQueueDispatcher: NextTurnQueueDispatcherShape;
   readonly worktreeSetup: WorktreeSetupShape;
+  readonly worktreePreparation: WorktreePreparationShape;
   readonly worktreeManager: WorktreeManagerShape;
   readonly storageCleanupWorker: StorageCleanupWorkerShape;
   readonly defaultBranchAutoPull: DefaultBranchAutoPullShape;
@@ -1614,7 +1621,24 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             ),
           }
         : {}),
-      projectSetupScriptRunner: input.projectSetupScriptRunner,
+      projectSetupScriptRunner: {
+        runForThread: (request) =>
+          Effect.gen(function* () {
+            if (!request.worktreePath)
+              return yield* input.projectSetupScriptRunner.runForThread(request);
+            const { worktreePreparation } = yield* awaitOrchestrationRuntimeForRoute;
+            const model = yield* input.orchestrationEngine.getReadModel();
+            const thread = model.threads.find((thread) => thread.id === request.threadId);
+            if (thread?.branch)
+              yield* worktreePreparation.prepare({
+                threadId: thread.id,
+                projectId: thread.projectId,
+                worktreePath: request.worktreePath,
+                branch: thread.branch,
+              });
+            return { status: "no-script" as const };
+          }),
+      },
       worktreesDir: serverConfig.worktreesDir,
       onThreadRolledBack: (disposition) => {
         rolledBack = disposition;
@@ -2567,6 +2591,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       );
       const worktreeManager = ServiceMap.get(orchestrationRuntimeServices, WorktreeManager);
       const worktreeSetup = ServiceMap.get(orchestrationRuntimeServices, WorktreeSetup);
+      const worktreePreparation = ServiceMap.get(orchestrationRuntimeServices, WorktreePreparation);
       const storageCleanupWorker = ServiceMap.get(
         orchestrationRuntimeServices,
         StorageCleanupWorker,
@@ -2700,6 +2725,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         storageMaintenance,
         nextTurnQueueDispatcher,
         worktreeSetup,
+        worktreePreparation,
         storageCleanupWorker,
         worktreeManager,
         projectSkillSyncService,
@@ -3363,29 +3389,47 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     };
   };
 
+  const preparationReceipts = yield* Effect.service(WorktreePreparations).pipe(
+    Effect.provide(WorktreePreparationsLive),
+  );
   const prepareWorktree = yield* makeWorktreePreparation({
     scope: subscriptionsScope,
+    git,
+    receipts: preparationReceipts,
     createWorktree: (input) =>
-      Effect.gen(function* () {
-        const commit = yield* git.resolveCommit(input.cwd, input.branch);
-        if (!commit)
-          return yield* Effect.fail(new Error(`Cannot resolve worktree base '${input.branch}'.`));
-        return yield* createConfiguredWorktree({
-          ...input,
-          baseRefName: commit,
-          path: resolveDefaultWorktreePath({
-            worktreesDir: serverConfig.worktreesDir,
-            cwd: input.cwd,
-            branch: input.newBranch,
-          }),
-        });
+      createConfiguredWorktree({
+        ...input,
+        preparation: {
+          owner: `thread:${input.threadId}`,
+          projectCwd: input.projectCwd,
+          requestedBase: input.branch,
+          operationId: input.operationId,
+          runSetupScript: input.runSetupScript ?? true,
+          setupIdentity: input.setupIdentity ?? null,
+        },
       }),
     runSetup: (input) =>
-      awaitOrchestrationRuntimeForRoute.pipe(
-        Effect.flatMap(({ projectSetupScriptRunner }) =>
-          projectSetupScriptRunner.runForThread(input),
-        ),
-      ),
+      Effect.gen(function* () {
+        const { orchestrationEngine, worktreePreparation } =
+          yield* awaitOrchestrationRuntimeForRoute;
+        const model = yield* orchestrationEngine.getReadModel();
+        const project = model.projects.find(
+          (p) => p.workspaceRoot === input.projectCwd && p.deletedAt === null,
+        );
+        if (!project || !input.worktreePath) return { status: "no-script" as const };
+        const receipt = yield* preparationReceipts.latest(
+          yield* Effect.promise(() => canonicalWorktreePath(input.worktreePath!)),
+        );
+        if (receipt)
+          yield* worktreePreparation.prepare({
+            threadId: input.threadId,
+            projectId: project.id,
+            worktreePath: input.worktreePath,
+            branch: receipt.branch,
+            retry: input.retry === true,
+          });
+        return { status: "no-script" as const };
+      }),
   });
 
   const routeRequest = Effect.fnUntraced(function* (ws: WebSocket, request: WebSocketRequest) {
@@ -3621,7 +3665,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case NATIVE_OPERATION_WS_METHODS.fork: {
         const input = stripRequestTag(request.body);
-        const { orchestrationEngine, providerSessionDirectory, projectSetupScriptRunner } =
+        const { orchestrationEngine, providerSessionDirectory, worktreePreparation } =
           yield* awaitOrchestrationRuntimeForRoute;
         const snapshot = yield* orchestrationEngine.getReadModel();
         const source = snapshot.threads.find(
@@ -3634,11 +3678,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           return yield* new RouteRequestError({ message: "Invalid fork identifier." });
         const targetId = NativeForkThreadId.makeUnsafe(`fork-${input.operationId}`);
         const branch = `t3code/${input.operationId.slice(0, 8)}`;
-        const cwd = resolveDefaultWorktreePath({
-          worktreesDir: serverConfig.worktreesDir,
-          cwd: project.workspaceRoot,
-          branch,
-        });
+        const cwd = yield* git.allocateWorktreePath({ cwd: project.workspaceRoot, branch });
         const binding = yield* providerSessionDirectory
           .getBinding(input.threadId)
           .pipe(Effect.mapError((cause) => new RouteRequestError({ message: String(cause) })));
@@ -3699,13 +3739,8 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
                     cwd,
                   },
                 });
-                yield* projectSetupScriptRunner
-                  .runForThread({
-                    threadId: targetId,
-                    projectId: project.id,
-                    projectCwd: project.workspaceRoot,
-                    worktreePath: cwd,
-                  })
+                yield* worktreePreparation
+                  .prepare({ threadId: targetId, projectId: project.id, worktreePath: cwd, branch })
                   .pipe(Effect.mapError(validation));
               }),
             createConfiguredWorktree({
@@ -3713,6 +3748,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
               branch: source.branch ?? "HEAD",
               baseRefName: source.branch ?? "HEAD",
               newBranch: branch,
+              preparation: { owner: `thread:${targetId}`, runSetupScript: true },
               path: cwd,
             }).pipe(Effect.asVoid, Effect.mapError(validation)),
             { background: true },
@@ -4746,17 +4782,34 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return yield* createConfiguredWorktree({
           ...body,
           path:
-            body.path ??
-            resolveDefaultWorktreePath({
-              worktreesDir: serverConfig.worktreesDir,
-              cwd: body.cwd,
-              branch: targetBranch,
-            }),
+            body.path ?? (yield* git.allocateWorktreePath({ cwd: body.cwd, branch: targetBranch })),
         });
       }
 
       case WS_METHODS.gitPrepareWorktree: {
-        return yield* prepareWorktree(stripRequestTag(request.body));
+        const body = stripRequestTag(request.body);
+        const { orchestrationEngine } = yield* awaitOrchestrationRuntimeForRoute;
+        const canonicalProject = yield* Effect.promise(() =>
+          canonicalWorktreePath(body.projectCwd),
+        );
+        const projects = (yield* orchestrationEngine.getReadModel()).projects.filter(
+          (project) => project.deletedAt === null,
+        );
+        let script: ReturnType<typeof setupProjectScript> = null;
+        for (const project of projects) {
+          if (
+            (yield* Effect.promise(() => canonicalWorktreePath(project.workspaceRoot))) ===
+            canonicalProject
+          ) {
+            script = setupProjectScript(project.scripts);
+            break;
+          }
+        }
+        return yield* prepareWorktree({
+          ...body,
+          runSetupScript: body.runSetupScript ?? script !== null,
+          setupIdentity: script?.command ?? null,
+        });
       }
 
       case WS_METHODS.gitRemoveWorktree: {
@@ -5745,7 +5798,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case WS_METHODS.worktreeSetupSubscribe: {
         const body = stripRequestTag(request.body);
         const { worktreeSetup } = yield* awaitOrchestrationRuntimeForRoute;
-        return yield* worktreeSetup.get(body.threadId);
+        const snapshot = yield* worktreeSetup.get(body.threadId);
+        return {
+          snapshot,
+          ...(snapshot
+            ? { generation: snapshot.generation, sequence: snapshot.sequence }
+            : yield* worktreeSetup.ordering(body.threadId)),
+        };
       }
 
       case WS_METHODS.worktreeSetupCancel:
@@ -5759,7 +5818,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             : request.body._tag === WS_METHODS.worktreeSetupRetry
               ? worktreeSetup.retry
               : worktreeSetup.workLocally;
-        const snapshot = yield* action(body.threadId).pipe(
+        const snapshot = yield* action(body.threadId, body.expectedOperationId).pipe(
           Effect.mapError(
             (error) =>
               new RouteRequestError({
@@ -5769,7 +5828,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           ),
         );
         yield* publishNextTurnQueueSnapshot(body.threadId).pipe(Effect.ignoreCause({ log: true }));
-        return { snapshot };
+        return {
+          snapshot,
+          ...(snapshot
+            ? { generation: snapshot.generation, sequence: snapshot.sequence }
+            : yield* worktreeSetup.ordering(body.threadId)),
+        };
       }
 
       case WS_METHODS.nextTurnQueueList: {
@@ -6360,6 +6424,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         });
         return yield* codexMcpSyncService.getStatus({
           projectId: body.projectId,
+          ...(body.instanceId ? { instanceId: body.instanceId } : {}),
           ...(providerOptions ? { providerOptions } : {}),
         });
       }
@@ -6374,16 +6439,19 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         yield* providerService.reloadMcpConfigForProject({
           provider: "codex",
           projectId: body.projectId,
+          ...(body.instanceId ? { instanceId: body.instanceId } : {}),
           ...(providerOptions ? { providerOptions } : {}),
         });
         const status = yield* codexMcpSyncService.getStatus({
           projectId: body.projectId,
+          ...(body.instanceId ? { instanceId: body.instanceId } : {}),
           ...(providerOptions ? { providerOptions } : {}),
         });
         yield* codexMcpEventBus.publishStatusUpdated({
           provider: "codex",
           scope: "project",
           projectId: body.projectId,
+          ...(body.instanceId ? { instanceId: body.instanceId } : {}),
           reason: "reloaded",
           ...(status.configVersion ? { configVersion: status.configVersion } : {}),
         });
@@ -6392,7 +6460,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.mcpApplyToLiveSessions: {
         const requestBody = stripRequestTag(request.body);
-        const body = yield* profileCall(() => resolveMcpAccount(requestBody));
+        if (requestBody.binaryPath !== undefined || requestBody.homePath !== undefined)
+          return yield* new RouteRequestError({
+            message:
+              "Client-supplied provider executable and home paths are not accepted. Select a provider instance.",
+          });
+        const body = requestBody;
         const { providerCommandReactor } = yield* awaitOrchestrationRuntimeForRoute;
         const result = yield* providerCommandReactor.applyMcpConfigToLiveSessions(body).pipe(
           Effect.mapError(
@@ -6404,6 +6477,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         );
         yield* codexMcpEventBus.publishStatusUpdated({
           scope: result.scope,
+          ...(body.instanceId ? { instanceId: body.instanceId } : {}),
           ...(result.projectId ? { projectId: result.projectId } : {}),
           reason: "applied",
           ...(result.configVersion ? { configVersion: result.configVersion } : {}),

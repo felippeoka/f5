@@ -56,7 +56,20 @@ export type ListProviderSessionRuntimeByProjectInput =
 /**
  * ProviderSessionRuntimeRepositoryShape - Service API for provider runtime records.
  */
+export interface ProviderMcpStateUpdate {
+  readonly threadId: ThreadId;
+  readonly instanceId: ProviderInstanceId;
+  readonly generation: number;
+  /** Omit to preserve the current applied version on an unreached/restart-required attempt. */
+  readonly effectiveVersion?: string | null;
+  readonly unconvergedVersion: string | null;
+}
+
 export interface ProviderSessionRuntimeRepositoryShape {
+  readonly updateMcpStateIfCurrent: (
+    input: ProviderMcpStateUpdate,
+  ) => Effect.Effect<boolean, ProviderSessionRuntimeRepositoryError>;
+
   /**
    * Insert or replace a provider runtime row.
    *

@@ -274,6 +274,7 @@ import type {
   TurnSubmissionResult,
 } from "./nextTurnQueue";
 import type {
+  WorktreeSetupActionInput,
   WorktreeSetupActionResult,
   WorktreeSetupSubscribeResult,
   WorktreeSetupThreadInput,
@@ -942,9 +943,9 @@ export interface NativeApi {
   worktreeSetup: {
     /** Current snapshot (null when nothing is tracked); updates arrive on `onUpdated`. */
     subscribe: (input: WorktreeSetupThreadInput) => Promise<WorktreeSetupSubscribeResult>;
-    cancel: (input: WorktreeSetupThreadInput) => Promise<WorktreeSetupActionResult>;
-    retry: (input: WorktreeSetupThreadInput) => Promise<WorktreeSetupActionResult>;
-    workLocally: (input: WorktreeSetupThreadInput) => Promise<WorktreeSetupActionResult>;
+    cancel: (input: WorktreeSetupActionInput) => Promise<WorktreeSetupActionResult>;
+    retry: (input: WorktreeSetupActionInput) => Promise<WorktreeSetupActionResult>;
+    workLocally: (input: WorktreeSetupActionInput) => Promise<WorktreeSetupActionResult>;
     onUpdated: (callback: (payload: WorktreeSetupUpdatedPayload) => void) => () => void;
   };
   globalSearch: {
