@@ -235,6 +235,7 @@ const defaultProviderService: ProviderServiceShape = {
   respondToUserInput: () => unsupportedProviderCall(),
   respondToElicitation: () => unsupportedProviderCall(),
   stopSession: () => unsupportedProviderCall(),
+  listStartingWorkspaces: () => Effect.succeed([]),
   listSessions: () => Effect.succeed([]),
   getSessionCapabilities: () => Effect.succeed(null),
   assertSessionAction: () => Effect.die(new Error("assertSessionAction is unused here")),
@@ -1877,6 +1878,9 @@ describe("WebSocket Server", () => {
       const storageMaintenanceModule = await vi.importActual<
         typeof import("./storage/StorageMaintenance.ts")
       >("./storage/StorageMaintenance.ts");
+      const worktreeManagerModule = await vi.importActual<
+        typeof import("./project/Services/WorktreeManager.ts")
+      >("./project/Services/WorktreeManager.ts");
       const worktreeSetupModule = await vi.importActual<
         typeof import("./project/Services/WorktreeSetup.ts")
       >("./project/Services/WorktreeSetup.ts");
@@ -1938,6 +1942,7 @@ describe("WebSocket Server", () => {
         Layer.succeed(investigationWorkflowServiceModule.InvestigationWorkflowService, {} as any),
         Layer.succeed(projectSetupScriptRunnerModule.ProjectSetupScriptRunner, {} as any),
         Layer.succeed(storageMaintenanceModule.StorageMaintenance, {} as any),
+        Layer.succeed(worktreeManagerModule.WorktreeManager, {} as never),
         Layer.succeed(worktreeSetupModule.WorktreeSetup, {
           startup: Effect.void,
           changes: Stream.empty,
@@ -2119,6 +2124,9 @@ describe("WebSocket Server", () => {
       const storageMaintenanceModule = await vi.importActual<
         typeof import("./storage/StorageMaintenance.ts")
       >("./storage/StorageMaintenance.ts");
+      const worktreeManagerModule = await vi.importActual<
+        typeof import("./project/Services/WorktreeManager.ts")
+      >("./project/Services/WorktreeManager.ts");
       const worktreeSetupModule = await vi.importActual<
         typeof import("./project/Services/WorktreeSetup.ts")
       >("./project/Services/WorktreeSetup.ts");
@@ -2244,6 +2252,7 @@ describe("WebSocket Server", () => {
         Layer.succeed(investigationWorkflowServiceModule.InvestigationWorkflowService, {} as any),
         Layer.succeed(projectSetupScriptRunnerModule.ProjectSetupScriptRunner, {} as any),
         Layer.succeed(storageMaintenanceModule.StorageMaintenance, {} as any),
+        Layer.succeed(worktreeManagerModule.WorktreeManager, {} as never),
         Layer.succeed(worktreeSetupModule.WorktreeSetup, {
           startup: Effect.void,
           changes: Stream.empty,
@@ -4444,6 +4453,17 @@ describe("WebSocket Server", () => {
         for (const worktree of worktrees) expect(worktree && fs.existsSync(worktree)).toBe(true);
       });
 
+      it("rejects manual removal from an unknown project cwd", async () => {
+        const repo = makeGitRepo("t3code-ws-removal-project-");
+        const ws = await startServer({ repo, sentTurns: [] });
+        await createProject(ws, repo);
+        const result = await sendRequest(ws, WS_METHODS.gitRemoveWorktree, {
+          cwd: path.join(repo, "unknown"),
+          path: path.join(repo, "untouched"),
+        });
+        expect(result.error?.message).toBe("Unknown project");
+      });
+
       it("cancel mid-setup removes the clean worktree and the branch it created", async () => {
         const repo = makeGitRepo("t3code-ws-setup-cancel-clean-");
         const sentTurns: Array<Parameters<ProviderServiceShape["sendTurn"]>[0]> = [];
@@ -4481,6 +4501,51 @@ describe("WebSocket Server", () => {
         expect(sentTurns).toHaveLength(0);
       });
 
+      it("cancel removes a clean checkout of an existing branch without deleting the branch", async () => {
+        const repo = makeGitRepo("t3code-ws-setup-existing-cancel-");
+        const branch = "f5/thread-existing-cancel";
+        const git = (...args: string[]) =>
+          execFileSync("git", args, { cwd: repo, stdio: "pipe" }).toString().trim();
+        git("switch", "-c", branch);
+        git(
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@example.com",
+          "commit",
+          "--allow-empty",
+          "-m",
+          "Existing branch work",
+        );
+        const existingHead = git("rev-parse", "HEAD");
+        git("switch", "main");
+        const ws = await startServer({ repo, sentTurns: [] });
+        await createProject(ws, repo, { command: "sleep 30", async: false });
+        const submitted = await sendRequest(
+          ws,
+          WS_METHODS.nextTurnQueueSubmit,
+          firstSend({ repo, threadId: "thread-existing-cancel" }),
+        );
+        expect(submitted.error).toBeUndefined();
+        const running = await waitForSetup(
+          ws,
+          "thread-existing-cancel",
+          (entry) =>
+            entry?.stages.find((stage) => stage.id === "setup-script")?.status === "running",
+        );
+        expect(running?.checkoutSha).toBe(existingHead);
+        expect(running?.baseSha).not.toBe(existingHead);
+        const cancelled = await sendRequest(ws, WS_METHODS.worktreeSetupCancel, {
+          threadId: "thread-existing-cancel",
+        });
+        expect(cancelled.error).toBeUndefined();
+        expect((cancelled.result as { snapshot: WorktreeSetupSnapshot }).snapshot.phase).toBe(
+          "cancelled",
+        );
+        expect(fs.existsSync(running!.worktreePath!)).toBe(false);
+        expect(git("rev-parse", branch)).toBe(existingHead);
+      });
+
       it("cancel after the setup script wrote files keeps the worktree and branch", async () => {
         const repo = makeGitRepo("t3code-ws-setup-cancel-kept-");
         const sentTurns: Array<Parameters<ProviderServiceShape["sendTurn"]>[0]> = [];
@@ -4506,7 +4571,7 @@ describe("WebSocket Server", () => {
         });
         const settled = (cancelled.result as { snapshot: WorktreeSetupSnapshot }).snapshot;
         expect(settled.phase).toBe("cancelled_kept");
-        expect(settled.error).toContain("may contain changes");
+        expect(settled.error).toContain("uncommitted");
         expect(fs.existsSync(path.join(running!.worktreePath!, "generated.txt"))).toBe(true);
         expect(branchExists(repo, "f5/thread-cancel-kept")).toBe(true);
         const queue = (
@@ -5000,6 +5065,7 @@ describe("WebSocket Server", () => {
       respondToUserInput: () => unsupported(),
       respondToElicitation: () => unsupported(),
       stopSession: () => unsupported(),
+      listStartingWorkspaces: () => Effect.succeed([]),
       listSessions: () => Effect.succeed([]),
       getSessionCapabilities: () => Effect.succeed(null),
       assertSessionAction: () => Effect.die(new Error("assertSessionAction is unused here")),

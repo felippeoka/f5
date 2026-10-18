@@ -657,6 +657,445 @@ describe("ClaudeAdapter agent browser", () => {
     ...(mcpServer ? { mcp_server: mcpServer } : {}),
   });
 
+  for (const runtimeMode of ["full-access", "approval-required"] as const) {
+    it.effect(
+      `enforces MCP filters in ${runtimeMode} and updates the hook after a live reload`,
+      () => {
+        const harness = makeHarness();
+        const setMcpServers = vi.fn(async () => ({ added: [], removed: [], errors: {} }));
+        Object.assign(harness.query, { setMcpServers });
+        harness.query.mcpServerStatusValue = [
+          { name: "team__docs", status: "connected", source: "dynamic" },
+        ];
+        return Effect.gen(function* () {
+          const adapter = yield* ClaudeAdapter;
+          yield* adapter.startSession({
+            threadId: THREAD_ID,
+            runtimeMode,
+            providerOptions: {
+              claudeAgent: { subagentsEnabled: false },
+              mcpServers: {
+                team__docs: {
+                  type: "stdio",
+                  command: "node",
+                  enabledTools: ["a__b"],
+                  disabledTools: ["write"],
+                  toolTimeoutSec: 15,
+                },
+              },
+            },
+          });
+          const options = harness.getLastCreateQueryInput()!.options;
+          assert.equal(
+            options.permissionMode,
+            runtimeMode === "full-access" ? "bypassPermissions" : "default",
+          );
+          assert.deepEqual(options.disallowedTools, ["Agent", "Task", "mcp__team__docs__write"]);
+          assert.equal((options.mcpServers!.team__docs as { timeout?: number }).timeout, 15_000);
+          const hook = options.hooks!.PreToolUse!.at(-1)!.hooks[0]!;
+          const call = (tool: string, source = "dynamic") =>
+            Effect.promise(() =>
+              hook(
+                preToolUse(`mcp__team__docs__${tool}`, { name: "team__docs", source }),
+                undefined,
+                {
+                  signal: new AbortController().signal,
+                },
+              ),
+            );
+          assert.notEqual(hookDecision(yield* call("a__b")), "deny");
+          assert.equal(hookDecision(yield* call("write")), "deny");
+          assert.equal(hookDecision(yield* call("unlisted")), "deny");
+          assert.notEqual(hookDecision(yield* call("write", "sdk")), "deny");
+          const reloaded = yield* adapter.reloadMcpConfig!({
+            threadId: THREAD_ID,
+            mcpServers: {
+              team__docs: {
+                type: "stdio",
+                command: "node",
+                enabledTools: [],
+                disabledTools: ["a__b"],
+              },
+            },
+          });
+          assert.equal(reloaded.converged, false);
+          assert.equal(reloaded.restartRequired, true);
+          assert.ok(reloaded.errors.some((error) => error.message.includes("tool deny list")));
+          assert.equal(setMcpServers.mock.calls.length, 1);
+          assert.equal(hookDecision(yield* call("a__b")), "deny");
+          assert.notEqual(hookDecision(yield* call("write")), "deny");
+          assert.notEqual(hookDecision(yield* call("unlisted")), "deny");
+          // Recovery uses the new list, but the current SDK query still needs a restart.
+          assert.deepEqual(options.disallowedTools, ["Agent", "Task", "mcp__team__docs__a__b"]);
+          const repeated = yield* adapter.reloadMcpConfig!({
+            threadId: THREAD_ID,
+            mcpServers: { team__docs: { type: "stdio", command: "node", disabledTools: ["a__b"] } },
+          });
+          assert.equal(repeated.restartRequired, true);
+          assert.equal(repeated.converged, false);
+        }).pipe(Effect.provide(harness.layer));
+      },
+    );
+  }
+
+  for (const change of ["removed", "disabled"] as const) {
+    for (const activeTurn of [false, true]) {
+      it.effect(`denies lingering ${change} MCP servers (active turn: ${activeTurn})`, () => {
+        const harness = makeHarness();
+        Object.assign(harness.query, {
+          setMcpServers: async () => ({ added: [], removed: [], errors: {} }),
+        });
+        harness.query.mcpServerStatusValue = [
+          { name: "docs", status: "connected", source: "dynamic" },
+        ];
+        return Effect.gen(function* () {
+          const adapter = yield* ClaudeAdapter;
+          yield* adapter.startSession({
+            threadId: THREAD_ID,
+            runtimeMode: "full-access",
+            providerOptions: {
+              mcpServers: { docs: { type: "stdio", command: "node", enabledTools: ["read"] } },
+            },
+          });
+          if (activeTurn) yield* adapter.sendTurn({ threadId: THREAD_ID, input: "Read the docs" });
+          const hook = harness.getLastCreateQueryInput()!.options.hooks!.PreToolUse!.at(-1)!
+            .hooks[0]!;
+          const call = (tool: string, source?: string) =>
+            Effect.promise(() =>
+              hook(
+                preToolUse(`mcp__docs__${tool}`, source ? { name: "docs", source } : undefined),
+                undefined,
+                { signal: new AbortController().signal },
+              ),
+            );
+          assert.notEqual(hookDecision(yield* call("read", "dynamic")), "deny");
+          assert.equal(hookDecision(yield* call("write", "dynamic")), "deny");
+          const result = yield* adapter.reloadMcpConfig!({
+            threadId: THREAD_ID,
+            mcpServers:
+              change === "removed"
+                ? {}
+                : {
+                    docs: {
+                      type: "stdio",
+                      command: "node",
+                      enabled: false,
+                      enabledTools: ["read"],
+                    },
+                  },
+          });
+          assert.equal(result.restartRequired, true);
+          for (const tool of ["read", "write"]) {
+            assert.equal(hookDecision(yield* call(tool, "dynamic")), "deny");
+            assert.equal(hookDecision(yield* call(tool)), "deny");
+          }
+          assert.notEqual(hookDecision(yield* call("write", "sdk")), "deny");
+        }).pipe(Effect.provide(harness.layer));
+      });
+    }
+  }
+
+  for (const rejectSet of [false, true]) {
+    it.effect(
+      `enforces narrowed and new MCP filters throughout provider I/O (reject set: ${rejectSet})`,
+      () => {
+        const harness = makeHarness();
+        const listEntered = Promise.withResolvers<void>();
+        const releaseList = Promise.withResolvers<void>();
+        const setEntered = Promise.withResolvers<void>();
+        const releaseSet = Promise.withResolvers<void>();
+        const external = { name: "external", status: "connected" as const, source: "plugin" };
+        harness.query.mcpServerStatusValue = [
+          { name: "docs", status: "connected", source: "dynamic" },
+          external,
+        ];
+        let reads = 0;
+        Object.assign(harness.query, {
+          mcpServerStatus: async () => {
+            if (reads++ === 0) {
+              listEntered.resolve();
+              await releaseList.promise;
+            }
+            return harness.query.mcpServerStatusValue;
+          },
+          setMcpServers: async (servers: Record<string, unknown>) => {
+            assert.deepEqual(Object.keys(servers).sort(), ["docs", "new"]);
+            harness.query.mcpServerStatusValue = [
+              external,
+              ...Object.keys(servers).map((name) => ({
+                name,
+                status: "connected" as const,
+                source: "dynamic",
+              })),
+            ];
+            setEntered.resolve();
+            await releaseSet.promise;
+            if (rejectSet) throw new Error("reply failed after partial installation");
+            return { added: ["new"], removed: [], errors: {} };
+          },
+        });
+        return Effect.gen(function* () {
+          const adapter = yield* ClaudeAdapter;
+          yield* adapter.startSession({
+            threadId: THREAD_ID,
+            runtimeMode: "full-access",
+            providerOptions: { mcpServers: { docs: { type: "stdio", command: "node" } } },
+          });
+          const hook = harness.getLastCreateQueryInput()!.options.hooks!.PreToolUse!.at(-1)!
+            .hooks[0]!;
+          const call = (name: string, tool: string, source?: string) =>
+            Effect.promise(() =>
+              hook(
+                preToolUse(`mcp__${name}__${tool}`, source ? { name, source } : undefined),
+                undefined,
+                { signal: new AbortController().signal },
+              ),
+            );
+          const reload = yield* adapter.reloadMcpConfig!({
+            threadId: THREAD_ID,
+            mcpServers: {
+              docs: { type: "stdio", command: "node", enabledTools: ["read"] },
+              new: { type: "stdio", command: "node", enabledTools: ["read"] },
+              external: { type: "stdio", command: "node", enabledTools: ["read"] },
+            },
+          }).pipe(Effect.forkChild);
+          yield* Effect.promise(() => listEntered.promise);
+          assert.equal(hookDecision(yield* call("docs", "write", "dynamic")), "deny");
+          releaseList.resolve();
+          yield* Effect.promise(() => setEntered.promise);
+          for (const name of ["docs", "new"]) {
+            assert.equal(hookDecision(yield* call(name, "write", "dynamic")), "deny");
+            assert.equal(hookDecision(yield* call(name, "write")), "deny");
+            assert.notEqual(hookDecision(yield* call(name, "read", "dynamic")), "deny");
+          }
+          assert.notEqual(hookDecision(yield* call("external", "write", "plugin")), "deny");
+          assert.notEqual(hookDecision(yield* call("external", "write")), "deny");
+          releaseSet.resolve();
+          const result = yield* Fiber.join(reload);
+          assert.equal(result.restartRequired, rejectSet);
+          assert.equal(result.converged, !rejectSet);
+          assert.equal(hookDecision(yield* call("new", "write", "dynamic")), "deny");
+        }).pipe(
+          Effect.provide(harness.layer),
+          Effect.ensuring(
+            Effect.sync(() => {
+              releaseList.resolve();
+              releaseSet.resolve();
+            }),
+          ),
+        );
+      },
+    );
+  }
+
+  it.effect("rechecks MCP filters if they change while a native approval is open", () => {
+    const harness = makeHarness();
+    Object.assign(harness.query, {
+      setMcpServers: async () => ({ added: [], removed: [], errors: {} }),
+    });
+    harness.query.mcpServerStatusValue = [{ name: "docs", status: "connected", source: "dynamic" }];
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        runtimeMode: "approval-required",
+        providerOptions: { mcpServers: { docs: { type: "stdio", command: "node" } } },
+      });
+      const canUseTool = harness.getLastCreateQueryInput()!.options.canUseTool!;
+      const pending = canUseTool(
+        "mcp__docs__read",
+        {},
+        permissionOptions("pending-read", { name: "docs", source: "dynamic" }),
+      );
+      const approval = yield* Stream.runHead(
+        adapter.streamEvents.pipe(Stream.filter((event) => event.type === "request.opened")),
+      );
+      assert.equal(approval._tag, "Some");
+      if (approval._tag !== "Some") return;
+      yield* adapter.reloadMcpConfig!({
+        threadId: THREAD_ID,
+        mcpServers: { docs: { type: "stdio", command: "node", disabledTools: ["read"] } },
+      });
+      yield* adapter.respondToRequest(
+        THREAD_ID,
+        ApprovalRequestId.makeUnsafe(approval.value.requestId!),
+        "accept",
+      );
+      const result = yield* Effect.promise(() => pending);
+      assert.equal(result?.behavior, "deny");
+      if (result?.behavior === "deny") assert.include(result.message, "F5 MCP settings");
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  for (const removeAll of [false, true]) {
+    it.effect(
+      `preserves preview and computer servers through reload and recovery (remove all: ${removeAll})`,
+      () => {
+        const host = new DesktopComputerHost("profile", "incarnation", undefined, false);
+        const computer = new ComputerAutomationBrokerRuntime(host, {
+          platform: "darwin",
+          storage: { load: async () => [], save: async () => {} },
+          resolve: async () => {
+            throw new Error("unused");
+          },
+        });
+        const selection = vi
+          .spyOn(computerBackendPolicy, "resolveComputerBackendSelection")
+          .mockReturnValue(
+            Effect.succeed({
+              status: { available: true },
+              selection: { kind: "native" },
+              fingerprint: "test-native",
+            }),
+          );
+        const checkpoint = "123e4567-e89b-42d3-a456-426614174001";
+        const previous = "123e4567-e89b-42d3-a456-426614174000";
+        const { harness } = makeBrowserHarness(
+          { computerUse: true },
+          {
+            computerAutomationBroker: computer,
+            readResumeTranscript: async () =>
+              new Map([
+                [previous, { uuid: previous, parentUuid: null }],
+                [checkpoint, { uuid: checkpoint, parentUuid: previous }],
+              ]),
+          },
+        );
+        Object.assign(harness.query, {
+          setMcpServers: async (servers: Record<string, unknown>) => {
+            harness.query.mcpServerStatusValue = [
+              ...harness.query.mcpServerStatusValue.filter((server) => server.source === "sdk"),
+              ...Object.keys(servers).map((name) => ({
+                name,
+                status: "connected" as const,
+                source: "dynamic",
+              })),
+            ];
+            return {
+              added: Object.keys(servers),
+              removed: "old" in servers ? [] : ["old"],
+              errors: {},
+            };
+          },
+        });
+        return Effect.gen(function* () {
+          const adapter = yield* ClaudeAdapter;
+          const events: ProviderRuntimeEvent[] = [];
+          yield* adapter.streamEvents.pipe(
+            Stream.runForEach((event) =>
+              Effect.sync(() => {
+                events.push(event);
+              }),
+            ),
+            Effect.forkChild,
+          );
+          yield* adapter.startSession({
+            threadId: THREAD_ID,
+            runtimeMode: "full-access",
+            resumeCursor: {
+              resume: "550e8400-e29b-41d4-a716-446655440000",
+              resumeSessionAt: checkpoint,
+              turnBoundaries: [
+                { turnId: "previous", assistantUuid: previous },
+                { turnId: "old", assistantUuid: checkpoint },
+              ],
+            },
+            providerOptions: {
+              claudeAgent: { subagentsEnabled: false },
+              mcpServers: { old: { type: "stdio", command: "node", disabledTools: ["write"] } },
+            },
+          });
+          const internal = Object.fromEntries(
+            Object.entries(harness.getLastCreateQueryInput()!.options.mcpServers!).filter(
+              ([, config]) => config.type === "sdk",
+            ),
+          );
+          assert.deepEqual(Object.keys(internal).sort(), ["f5_computer", "f5_preview"]);
+          harness.query.mcpServerStatusValue = Object.keys(internal).map((name) => ({
+            name,
+            status: "connected",
+            source: "sdk",
+          }));
+          const servers = removeAll
+            ? {}
+            : {
+                old: {
+                  type: "stdio" as const,
+                  command: "updated-command",
+                  disabledTools: ["delete"],
+                },
+              };
+          const reload = yield* adapter.reloadMcpConfig!({
+            threadId: THREAD_ID,
+            mcpServers: servers,
+          });
+          assert.equal(reload.restartRequired, true);
+          assert.equal(reload.converged, false);
+          harness.query.emit({
+            type: "result",
+            subtype: "error_during_execution",
+            is_error: true,
+            errors: [`No message found with message.uuid of: ${checkpoint}`],
+            session_id: "550e8400-e29b-41d4-a716-446655440000",
+            uuid: "mcp-recovery-error",
+          } as unknown as SDKMessage);
+          while (
+            !events.some(
+              (event) =>
+                event.type === "runtime.warning" && event.payload.message.includes("Retrying once"),
+            )
+          )
+            yield* Effect.yieldNow;
+          yield* TestClock.adjust("500 millis");
+          while (harness.getCreateQueryInputs().length < 2) yield* Effect.yieldNow;
+          const recovered = harness.getLastCreateQueryInput()!.options.mcpServers!;
+          assert.deepEqual(
+            Object.keys(recovered).sort(),
+            [...Object.keys(internal), ...Object.keys(servers)].sort(),
+          );
+          for (const [name, config] of Object.entries(internal))
+            assert.strictEqual(recovered[name], config);
+          assert.deepEqual(harness.getLastCreateQueryInput()!.options.disallowedTools, [
+            "Agent",
+            "Task",
+            ...(removeAll ? [] : ["mcp__old__delete"]),
+          ]);
+          // Once recovery actually installs the new deny list, the same reload converges.
+          const query = harness.queries[1]!;
+          query.mcpServerStatusValue = [
+            ...Object.keys(internal).map((name) => ({
+              name,
+              status: "connected" as const,
+              source: "sdk",
+            })),
+            ...Object.keys(servers).map((name) => ({
+              name,
+              status: "connected" as const,
+              source: "dynamic",
+            })),
+          ];
+          Object.assign(query, {
+            setMcpServers: async () => ({ added: [], removed: [], errors: {} }),
+          });
+          const repeated = yield* adapter.reloadMcpConfig!({
+            threadId: THREAD_ID,
+            mcpServers: servers,
+          });
+          assert.equal(repeated.restartRequired, false);
+          assert.equal(repeated.converged, true);
+        }).pipe(
+          Effect.provide(harness.layer),
+          Effect.ensuring(
+            Effect.sync(() => {
+              selection.mockRestore();
+              computer.close();
+            }),
+          ),
+        );
+      },
+    );
+  }
+
   it.effect("disposes the computer server and binding if SDK query construction fails", () => {
     const host = new DesktopComputerHost("profile", "incarnation", undefined, false);
     const computer = new ComputerAutomationBrokerRuntime(host, {
@@ -12535,4 +12974,44 @@ it.effect("cleans up the temporary fork query and fork flag when receipt persist
     yield* adapter.stopSession(target);
     yield* adapter.stopSession(THREAD_ID);
   }).pipe(Effect.provide(h.layer));
+});
+
+it.effect("rejects excessive MCP start and reload inputs before creating a query", () => {
+  const harness = makeHarness();
+  const mcpServers = Object.fromEntries(
+    Array.from({ length: 33 }, (_, i) => [`s${i}`, { type: "stdio" as const, command: "node" }]),
+  );
+  return Effect.gen(function* () {
+    const adapter = yield* ClaudeAdapter;
+    const threadId = ThreadId.makeUnsafe("mcp-overflow");
+    const started = yield* adapter
+      .startSession({ threadId, runtimeMode: "approval-required", providerOptions: { mcpServers } })
+      .pipe(Effect.result);
+    assert.equal(started._tag, "Failure");
+    assert.equal(harness.getCreateQueryInputs().length, 0);
+    const reloaded = yield* adapter.reloadMcpConfig!({ threadId, mcpServers }).pipe(Effect.result);
+    assert.equal(reloaded._tag, "Failure");
+    assert.equal(harness.getCreateQueryInputs().length, 0);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("launches legacy case-variant MCP servers for Claude", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const adapter = yield* ClaudeAdapter;
+    yield* adapter.startSession({
+      threadId: ThreadId.makeUnsafe("legacy-aliases"),
+      runtimeMode: "approval-required",
+      providerOptions: {
+        mcpServers: {
+          GitHub: { type: "stdio", command: "node" },
+          github: { type: "stdio", command: "node" },
+        },
+      },
+    });
+    assert.deepEqual(Object.keys(harness.getLastCreateQueryInput()?.options.mcpServers ?? {}), [
+      "GitHub",
+      "github",
+    ]);
+  }).pipe(Effect.provide(harness.layer));
 });

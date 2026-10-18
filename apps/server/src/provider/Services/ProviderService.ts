@@ -146,6 +146,10 @@ export interface ProviderServiceShape {
    *
    * Aggregates runtime session lists from all registered adapters.
    */
+  /** In-flight starts are workspace claims, never reusable provider sessions. */
+  readonly listStartingWorkspaces: () => Effect.Effect<
+    ReadonlyArray<Pick<ProviderSession, "threadId" | "cwd">>
+  >;
   readonly listSessions: () => Effect.Effect<ReadonlyArray<ProviderSession>>;
 
   /**

@@ -43,10 +43,6 @@ export function McpServerRow(props: {
 
       enabled:
         props.selectedProvider === "codex" && props.projectId !== null && !props.isOverridden,
-      refetchInterval:
-        props.selectedProvider === "codex" && props.projectId !== null && !props.isOverridden
-          ? 2_000
-          : false,
     }),
   );
 
@@ -124,7 +120,7 @@ export function McpServerRow(props: {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="truncate text-sm font-medium text-foreground">{props.name}</p>
+            <p className="truncate text-sm font-medium text-foreground">{props.name.trim()}</p>
             <Badge variant="outline">{props.server.type}</Badge>
             <McpServerStatusBadge
               provider={props.selectedProvider}

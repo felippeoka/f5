@@ -87,6 +87,7 @@ function makeProviderService() {
     respondToUserInput: () => unsupported(),
     respondToElicitation: () => unsupported(),
     stopSession: () => unsupported(),
+    listStartingWorkspaces: () => Effect.succeed([]),
     listSessions: () => Effect.succeed([...sessions]),
     getSessionCapabilities: () => Effect.succeed(null),
     assertSessionAction: () => unsupported(),

@@ -1,3 +1,4 @@
+import { NextTurnQueueStore } from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { ServerSettingsService } from "../../serverSettings";
 import { UsageService, type UsageServiceShape } from "../../usage/Services/UsageService.ts";
 import {
@@ -144,6 +145,7 @@ function createProviderServiceHarness() {
         return "submitted" as const;
       }),
     stopSession: () => unsupported(),
+    listStartingWorkspaces: () => Effect.succeed([]),
     listSessions: () => Effect.succeed([...runtimeSessions]),
     getSessionCapabilities: () => Effect.sync(() => sessionCapabilities),
     assertSessionAction: () => Effect.die(new Error("assertSessionAction is unused here")),
@@ -1079,9 +1081,14 @@ describe("ProviderRuntimeIngestion", () => {
     ]);
   });
 
-  it.each([true, false, "probe-error"] as const)(
-    "retains a missing worktree unless the branch is known to be gone: %s",
-    async (branchExists) => {
+  it.each([
+    { branchExists: true, paused: false },
+    { branchExists: false, paused: false },
+    { branchExists: "probe-error", paused: false },
+    { branchExists: false, paused: true },
+  ] as const)(
+    "retains a missing worktree without replacing an existing pause: %o",
+    async ({ branchExists, paused }) => {
       const harness = await createHarness({ startIngestion: false });
       const threadId = asThreadId("thread-1");
       const missingPath = path.join(os.tmpdir(), `missing-worktree-${crypto.randomUUID()}`);
@@ -1107,21 +1114,30 @@ describe("ProviderRuntimeIngestion", () => {
               )
             : Effect.succeed(branchExists),
       });
+      const setPaused = vi.fn(() => Effect.void);
       await Effect.runPromise(
         cleanupStaleWorktrees(harness.engine).pipe(
+          Effect.provideService(NextTurnQueueStore, {
+            setPaused,
+            listByThread: () =>
+              Effect.succeed({ state: { paused, revision: 7, pauseReasonCode: "manual_pause" } }),
+          } as never),
           Effect.provide(Layer.mergeAll(Layer.succeed(GitCore, git.service), NodeServices.layer)),
         ),
       );
       const model = await Effect.runPromise(harness.engine.getReadModel());
       expect(model.threads.find((thread) => thread.id === threadId)?.worktreePath).toBe(
-        branchExists ? missingPath : null,
+        missingPath,
       );
       expect(git.calls.branchExists).toHaveLength(1);
+      expect(setPaused).toHaveBeenCalledTimes(branchExists === false && !paused ? 1 : 0);
+      if (branchExists === false && !paused)
+        expect(setPaused).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 7 }));
     },
   );
 
   it.each(["no-branch", "no-project", "deleted-project"] as const)(
-    "clears an unrecoverable missing worktree: %s",
+    "clears missing worktree references only for deleted projects: %s",
     async (scenario) => {
       const harness = await createHarness({ startIngestion: false });
       const threadId = asThreadId("thread-1");
@@ -1155,7 +1171,11 @@ describe("ProviderRuntimeIngestion", () => {
         ),
       );
       const updated = await Effect.runPromise(harness.engine.getReadModel());
-      expect(updated.threads.find((thread) => thread.id === threadId)?.worktreePath).toBeNull();
+      expect(updated.threads.find((thread) => thread.id === threadId)?.worktreePath).toBe(
+        scenario === "deleted-project"
+          ? null
+          : model.threads.find((thread) => thread.id === threadId)?.worktreePath,
+      );
       expect(git.calls.branchExists).toHaveLength(0);
     },
   );

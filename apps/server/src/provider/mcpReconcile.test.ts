@@ -58,12 +58,18 @@ describe("reconcileClaudeMcpServers", () => {
       (name) => ({ name, status: "connected", source: "dynamic" }),
     );
 
+    const beforeSetServers = vi.fn((names: ReadonlySet<string>) => {
+      expect(fake.setMcpServers).not.toHaveBeenCalled();
+      expect([...names]).toEqual(["old-f5", "new-f5"]);
+    });
     const outcome = await reconcileClaudeMcpServers({
       query: fake.query,
       desired: { "new-f5": { type: "stdio", command: "x" }, "plugin-server": { type: "stdio" } },
       owned: new Set(["old-f5"]),
+      beforeSetServers,
     });
 
+    expect(beforeSetServers).toHaveBeenCalledOnce();
     expect(fake.setMcpServers).toHaveBeenCalledWith({ "new-f5": { type: "stdio", command: "x" } });
     expect([...outcome.owned]).toEqual(["new-f5"]);
     // The name conflict is visible but does not block convergence.
@@ -216,7 +222,7 @@ describe("reconcileClaudeMcpServers", () => {
       owned: new Set(),
     });
     expect(rejected.result.restartRequired).toBe(true);
-    expect(rejected.owned.size).toBe(0);
+    expect([...rejected.owned]).toEqual(["a"]);
   });
 });
 

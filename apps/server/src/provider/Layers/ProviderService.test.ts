@@ -1,3 +1,4 @@
+import { withWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import { withProviderThreadAccess } from "../providerThreadAccess.ts";
 import { Deferred } from "effect";
 import { ServerSettingsService } from "../../serverSettings";
@@ -55,7 +56,7 @@ import {
   type KindAdapterMap,
 } from "../testUtils/providerAdapterRegistryMock.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
-import { readPersistedUnconvergedMcpConfigVersion } from "../runtimePayload.ts";
+import { readPersistedCwd, readPersistedUnconvergedMcpConfigVersion } from "../runtimePayload.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProjectMcpConfigService } from "../../mcp/ProjectMcpConfigService.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../../persistence/Layers/ProviderSessionRuntime.ts";
@@ -77,7 +78,9 @@ const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
 const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
 
-function makeProjectMcpConfigServiceTestLayer() {
+function makeProjectMcpConfigServiceTestLayer(
+  servers: import("@t3tools/contracts").McpProjectServersConfig = {},
+) {
   return Layer.succeed(ProjectMcpConfigService, {
     readCommonStoredConfig: () =>
       Effect.succeed({
@@ -98,7 +101,7 @@ function makeProjectMcpConfigServiceTestLayer() {
         commonVersion: "mcp-version-test",
         projectVersion: "mcp-version-test",
         effectiveVersion: "mcp-version-test",
-        servers: {},
+        servers,
       }),
     readCommonConfig: () =>
       Effect.succeed({
@@ -387,6 +390,7 @@ function makeProviderServiceLayer(options?: ProviderServiceLiveOptions) {
 function makeProviderServiceLayerForAdapters(
   adaptersByProvider: ReadonlyMap<ProviderKind, ProviderAdapterShape<ProviderAdapterError>>,
   overrides: Partial<ProviderAdapterRegistryShape> = {},
+  servers: import("@t3tools/contracts").McpProjectServersConfig = {},
 ) {
   const registry = {
     ...makeAdapterRegistryMock(Object.fromEntries(adaptersByProvider) as KindAdapterMap),
@@ -403,7 +407,7 @@ function makeProviderServiceLayerForAdapters(
       Layer.provide(providerServiceConfigLayer),
       Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
       Layer.provide(directoryLayer),
-      Layer.provide(makeProjectMcpConfigServiceTestLayer()),
+      Layer.provide(makeProjectMcpConfigServiceTestLayer(servers)),
       Layer.provideMerge(AnalyticsService.layerTest),
     ),
     directoryLayer,
@@ -664,6 +668,11 @@ it.effect("advances the session generation and refuses steering from a stale bro
     ),
   );
 });
+it("preserves persisted workspace paths exactly", () => {
+  assert.equal(readPersistedCwd({ cwd: " /worktree \n" }), " /worktree \n");
+  assert.equal(readPersistedCwd({ cwd: "   " }), undefined);
+});
+
 it.effect("answers form requests a new session opens while it is still starting", () => {
   const codex = makeFakeCodexAdapter();
   const answers: Array<{ requestId: string; action: string; content?: unknown }> = [];
@@ -700,6 +709,16 @@ it.effect("answers form requests a new session opens while it is still starting"
       })
       .pipe(Effect.forkChild);
     yield* Deferred.await(opened);
+    assert.equal(
+      (yield* service.listSessions()).some((session) => session.threadId === threadId),
+      false,
+    );
+    const starting = (yield* service.listStartingWorkspaces()).find(
+      (session) => session.threadId === threadId,
+    );
+    assert.equal(starting?.cwd, process.cwd());
+    // Startup is claimed, but provider waits never hold the path lifecycle lock.
+    yield* withWorktreeLifecycleLock(process.cwd(), Effect.void).pipe(Effect.timeout("1 second"));
 
     for (const [requestId, action] of [
       ["startup-submit", "accept"],
@@ -2687,7 +2706,7 @@ it.effect("does not settle an admitted send after its binding disappears", () =>
         .pipe(Effect.flip);
       assert.equal(error._tag, "ProviderTurnDeliveryError");
       assert.equal(reads, 3);
-      assert.equal(fake.sendTurn.mock.calls.length, 1);
+      assert.equal(fake.sendTurn.mock.calls.length, 0);
     } finally {
       spy.mockRestore();
     }
@@ -3015,6 +3034,41 @@ it.effect(
     );
   },
 );
+
+it.effect("reports invalid stored reload config per target without invoking an adapter", () => {
+  const codex = makeFakeCodexAdapter();
+  const servers = Object.fromEntries(
+    Array.from({ length: 33 }, (_, i) => [
+      `legacy-${i}`,
+      { type: "stdio" as const, command: "node" },
+    ]),
+  );
+  const layer = makeProviderServiceLayerForAdapters(
+    new Map([["codex", codex.adapter]]),
+    {},
+    servers,
+  );
+  return Effect.gen(function* () {
+    const service = yield* ProviderService;
+    const directory = yield* ProviderSessionDirectory;
+    const threadId = asThreadId("invalid-reload-config");
+    const projectId = ProjectId.makeUnsafe("invalid-reload-project");
+    yield* directory.upsert({
+      threadId,
+      projectId,
+      provider: "codex",
+      status: "running",
+      mcpEffectiveConfigVersion: "old",
+    });
+    const outcome = yield* service.reloadMcpConfigForProject({ provider: "codex", projectId });
+    assert.equal(outcome.sessions.length, 1);
+    assert.equal(outcome.sessions[0]?.result.converged, false);
+    assert.include(outcome.sessions[0]?.result.errors[0]?.message, "32-server limit");
+    assert.equal(codex.reloadMcpConfig.mock.calls.length, 0);
+    const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+    assert.equal(binding?.mcpEffectiveConfigVersion, "old");
+  }).pipe(Effect.provide(layer));
+});
 
 it.effect(
   "rejects starts, recovery and sends for both known instances and new physical aliases during an update",

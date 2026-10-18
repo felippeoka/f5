@@ -1,3 +1,5 @@
+import { makeFakeGitCore } from "../../git/testDoubles.ts";
+import { canonicalWorktreePath } from "../../git/worktreePaths.ts";
 import { makeProviderServiceLive } from "../../provider/Layers/ProviderService";
 import { makeCursorAdapter } from "../../provider/Layers/CursorAdapter";
 import { ProviderAdapterRegistry } from "../../provider/Services/ProviderAdapterRegistry";
@@ -11,7 +13,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { McpReloadResult, ProviderRuntimeEvent, ProviderSession } from "@t3tools/contracts";
+import type {
+  McpProjectServersConfig,
+  McpReloadResult,
+  ProviderRuntimeEvent,
+  ProviderSession,
+} from "@t3tools/contracts";
 import {
   ApprovalRequestId,
   CommandId,
@@ -46,7 +53,10 @@ import { roughTokenEstimateFromCharacters } from "@t3tools/shared/model";
 import { ServerConfig } from "../../config.ts";
 import { TextGenerationError } from "../../git/Errors.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
-import { ProjectMcpConfigService } from "../../mcp/ProjectMcpConfigService.ts";
+import {
+  ProjectMcpConfigService,
+  ProjectMcpConfigServiceError,
+} from "../../mcp/ProjectMcpConfigService.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
@@ -64,7 +74,11 @@ import { TextGeneration, type TextGenerationShape } from "../../git/Services/Tex
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
-import { ProviderCommandReactorLive } from "./ProviderCommandReactor.ts";
+import {
+  ProviderCommandReactorLive,
+  toProviderTurnDeliveryError,
+} from "./ProviderCommandReactor.ts";
+import { WorktreeInspectionError, WorktreeNotReadyError } from "../../project/worktreeReadiness.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -74,6 +88,20 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { makeLocalFileTracer } from "../../observability/LocalFileTracer.ts";
 import { dispatchBootstrapTurnStart } from "../../wsServer/bootstrapTurnStart.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+
+it.each([
+  [new WorktreeInspectionError("Git inspection timed out"), true],
+  [new WorktreeNotReadyError("The recorded branch is missing"), false],
+] as const)(
+  "records pre-provider workspace failures as definitely unsent: %s",
+  (error, retryable) => {
+    expect(toProviderTurnDeliveryError(error)).toMatchObject({
+      certainty: "not_sent",
+      retryable,
+      detail: error.message,
+    });
+  },
+);
 
 const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId =>
@@ -185,6 +213,7 @@ describe("ProviderCommandReactor", () => {
   });
 
   async function createHarness(input?: {
+    readonly mcpServers?: McpProjectServersConfig;
     readonly realCursorBinary?: string;
     readonly settings?: Partial<ServerSettings>;
     readonly stateDir?: string;
@@ -426,6 +455,7 @@ describe("ProviderCommandReactor", () => {
     const ensureWorktree = vi.fn<GitCoreShape["ensureWorktree"]>((input) =>
       Effect.sync(() => {
         fs.mkdirSync(input.path, { recursive: true });
+        return { recreated: true };
       }),
     );
     const renameBranch = vi.fn((input: unknown) =>
@@ -489,6 +519,7 @@ describe("ProviderCommandReactor", () => {
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
       respondToElicitation: () => Effect.die("unused"),
       stopSession: stopSession as ProviderServiceShape["stopSession"],
+      listStartingWorkspaces: () => Effect.succeed([]),
       listSessions: () => Effect.succeed(runtimeSessions),
       getSessionCapabilities: () => Effect.succeed(null),
       assertSessionAction: () => Effect.die(new Error("assertSessionAction is unused here")),
@@ -550,7 +581,57 @@ describe("ProviderCommandReactor", () => {
         )
       : Layer.empty;
 
+    let readWorkspaceModel: OrchestrationEngineShape["getReadModel"] = () =>
+      Effect.die("workspace model not ready");
+    const workspaceGit = makeFakeGitCore({
+      renameBranch,
+      ensureWorktree,
+      resolveCommonDir: () => Effect.promise(() => canonicalWorktreePath(workspaceRoot)),
+      listWorktrees: () =>
+        Effect.gen(function* () {
+          const model = yield* readWorkspaceModel();
+          return yield* Effect.forEach(
+            model.threads.filter((thread) => thread.worktreePath),
+            (thread) =>
+              Effect.promise(async () => ({
+                path: thread.worktreePath!,
+                canonicalPath: await canonicalWorktreePath(thread.worktreePath!),
+                headSha: "abc",
+                branch: thread.branch,
+                bare: false,
+                detached: false,
+                locked: null,
+                prunable: null,
+                isMain: false,
+              })),
+          );
+        }),
+      inspectCheckout: (cwd) =>
+        Effect.gen(function* () {
+          const model = yield* readWorkspaceModel();
+          const thread = model.threads.find((thread) => thread.worktreePath === cwd);
+          return {
+            canonicalRoot: yield* Effect.promise(() => canonicalWorktreePath(cwd)),
+            commonDir: yield* Effect.promise(() => canonicalWorktreePath(workspaceRoot)),
+            registration: null,
+            headSha: "abc",
+            branch: thread?.branch ?? null,
+            operation: null,
+            hasInitializedSubmodules: false,
+            hasTrackedChanges: false,
+            hasUntrackedChanges: false,
+            ignoredEntries: [],
+            ignoredTruncated: false,
+            upstreamRef: null,
+            upstreamSha: null,
+            aheadCount: null,
+            behindCount: null,
+          };
+        }),
+    }).service;
+    const workspaceGitLayer = Layer.succeed(GitCore, workspaceGit);
     const orchestrationLayer = OrchestrationEngineLive.pipe(
+      Layer.provide(workspaceGitLayer),
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
       Layer.provide(OrchestrationProjectionPipelineLive),
       Layer.provide(OrchestrationEventStoreLive),
@@ -558,6 +639,15 @@ describe("ProviderCommandReactor", () => {
       Layer.provide(SqlitePersistenceMemory),
     );
     const settingsLayer = ServerSettingsService.layerTest(input?.settings);
+    const readEffectiveStoredConfig = vi.fn((projectId: ProjectId) =>
+      Effect.succeed({
+        projectId,
+        commonVersion: "mcp-version-test",
+        projectVersion: "mcp-version-test",
+        effectiveVersion: "mcp-version-test",
+        servers: input?.mcpServers ?? {},
+      }),
+    );
     const projectMcpLayer = Layer.succeed(ProjectMcpConfigService, {
       readCommonStoredConfig: () =>
         Effect.succeed({
@@ -572,14 +662,7 @@ describe("ProviderCommandReactor", () => {
           version: "mcp-version-test",
           servers: {},
         }),
-      readEffectiveStoredConfig: (projectId: ProjectId) =>
-        Effect.succeed({
-          projectId,
-          commonVersion: "mcp-version-test",
-          projectVersion: "mcp-version-test",
-          effectiveVersion: "mcp-version-test",
-          servers: {},
-        }),
+      readEffectiveStoredConfig,
       readCommonConfig: () =>
         Effect.succeed({
           version: "mcp-version-test",
@@ -641,9 +724,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(projectMcpLayer),
       Layer.provideMerge(providerLayer),
       Layer.provideMerge(Layer.succeed(ProviderSessionDirectory, providerSessionDirectory)),
-      Layer.provideMerge(
-        Layer.succeed(GitCore, { renameBranch, ensureWorktree } as unknown as GitCoreShape),
-      ),
+      Layer.provideMerge(workspaceGitLayer),
       Layer.provideMerge(
         Layer.succeed(TextGeneration, {
           generateBranchName,
@@ -657,6 +738,7 @@ describe("ProviderCommandReactor", () => {
     const runtime = ManagedRuntime.make(layer);
 
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    readWorkspaceModel = engine.getReadModel;
     const reactor = await runtime.runPromise(Effect.service(ProviderCommandReactor));
     if (input?.orphanedTitleRegenerationBeforeStart) {
       await Effect.runPromise(
@@ -763,6 +845,7 @@ describe("ProviderCommandReactor", () => {
       generateThreadTitle,
       runtimeSessions,
       mcpReload,
+      readEffectiveStoredConfig,
       reloadMcpConfigForProject,
       stateDir,
       workspaceRoot,
@@ -2429,6 +2512,118 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  it("continues Claude turns with legacy aliases and keeps an existing session through a config read failure", async () => {
+    const harness = await createHarness({
+      threadModel: "claude-sonnet-4-6",
+      mcpServers: {
+        GitHub: { type: "stdio", command: "node" },
+        github: { type: "stdio", command: "node" },
+      },
+    });
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const send = (index: number) =>
+      Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe(`legacy-${index}`),
+          threadId,
+          message: {
+            messageId: asMessageId(`legacy-message-${index}`),
+            role: "user",
+            text: "hello",
+            attachments: [],
+          },
+          provider: "claudeAgent",
+          model: "claude-sonnet-4-6",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: new Date().toISOString(),
+        }),
+      );
+    await send(1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await harness.waitForDeliveries();
+    // Verify unchanged live config is not checked again at every send.
+    harness.readEffectiveStoredConfig.mockImplementationOnce(
+      () =>
+        Effect.fail(
+          new ProjectMcpConfigServiceError({ code: "storage", message: "Temporary read failure" }),
+        ) as never,
+    );
+    await send(2);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    expect(harness.startSession).toHaveBeenCalledTimes(1);
+    expect(harness.stopSession).not.toHaveBeenCalled();
+  });
+
+  it("isolates project reload errors during common Apply and still reloads healthy Claude sessions", async () => {
+    const harness = await createHarness();
+    for (const provider of ["codex", "claudeAgent"] as const) {
+      const threadId = ThreadId.makeUnsafe(`isolated-${provider}`);
+      const projectId = asProjectId(provider === "codex" ? "invalid-project" : "healthy-project");
+      await Effect.runPromise(harness.startSession(threadId, { threadId, projectId, provider }));
+      harness.upsertBinding({ ...harness.getBinding(threadId)!, mcpEffectiveConfigVersion: "old" });
+    }
+    harness.reloadMcpConfigForProject.mockImplementation((input) =>
+      input.provider === "codex"
+        ? (Effect.fail(
+            new ProjectMcpConfigServiceError({
+              code: "validation",
+              message: "Invalid legacy MCP config",
+            }),
+          ) as never)
+        : Effect.succeed({
+            sessions: input.threadIds!.map((threadId) => ({
+              threadId,
+              result: { converged: true, restartRequired: false, servers: [], errors: [] },
+            })),
+          }),
+    );
+    const result = await Effect.runPromise(
+      harness.reactor.applyMcpConfigToLiveSessions({ scope: "common" }),
+    );
+    expect(result.claudeReconciled).toBe(1);
+    expect(result.codexReloaded).toBe(0);
+    expect(result.failures).toEqual([
+      expect.objectContaining({
+        threadId: "isolated-codex",
+        errors: [{ message: "Invalid legacy MCP config" }],
+      }),
+    ]);
+  });
+
+  it("reports conflicted Codex targets and continues applying to valid Claude targets", async () => {
+    const harness = await createHarness({
+      mcpServers: {
+        first: { type: "http", url: "http://localhost/first", oauthCallbackPort: 3001 },
+        second: { type: "http", url: "http://localhost/second", oauthCallbackPort: 3002 },
+      },
+    });
+    const projectId = asProjectId("project-1");
+    for (const provider of ["codex", "claudeAgent"] as const) {
+      const threadId = ThreadId.makeUnsafe(`apply-${provider}`);
+      await Effect.runPromise(harness.startSession(threadId, { threadId, projectId, provider }));
+      harness.upsertBinding({ ...harness.getBinding(threadId)!, mcpEffectiveConfigVersion: "old" });
+    }
+    harness.mcpReload.result = { converged: true, restartRequired: false, servers: [], errors: [] };
+    const result = await Effect.runPromise(
+      harness.reactor.applyMcpConfigToLiveSessions({ scope: "common" }),
+    );
+    expect(result.codexReloaded).toBe(0);
+    expect(result.claudeReconciled).toBe(1);
+    expect(result.failures).toEqual([
+      expect.objectContaining({
+        provider: "codex",
+        threadId: "apply-codex",
+        errors: [
+          expect.objectContaining({ message: expect.stringContaining("conflicting ports") }),
+        ],
+      }),
+    ]);
+    expect(harness.reloadMcpConfigForProject).toHaveBeenCalledTimes(1);
+    expect(harness.reloadMcpConfigForProject.mock.calls[0]?.[0].provider).toBe("claudeAgent");
+  });
+
   describe("Claude MCP apply", () => {
     const startClaudeTurn = async (harness: Awaited<ReturnType<typeof createHarness>>) => {
       const threadId = ThreadId.makeUnsafe("thread-1");
@@ -2973,6 +3168,53 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.runtimeMode).toBe("approval-required");
   });
 
+  it("finishes first-turn branch naming before session startup and delivery", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const worktreePath = path.join(harness.workspaceRoot, "named-worktree");
+    fs.mkdirSync(worktreePath);
+    harness.generateBranchName.mockImplementation(() => Effect.succeed({ branch: "safe-name" }));
+    const startSession = harness.startSession.getMockImplementation()!;
+    harness.startSession.mockImplementation((provider, input) =>
+      Effect.gen(function* () {
+        expect(harness.renameBranch).toHaveBeenCalledOnce();
+        const model = yield* harness.engine.getReadModel();
+        expect(model.threads.find((thread) => thread.id === threadId)?.branch).toBe("f5/safe-name");
+        yield* Effect.sleep("50 millis");
+        return yield* startSession(provider, input);
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("named-meta"),
+        threadId,
+        branch: "t3code/abcdef12",
+        worktreePath,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("named-start"),
+        threadId,
+        message: {
+          messageId: asMessageId("named-message"),
+          role: "user",
+          text: "first",
+          attachments: [],
+        },
+        provider: "codex",
+        model: "gpt-5.4",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.ensureWorktree.mock.calls[0]?.[0]).toMatchObject({ branch: "f5/safe-name" });
+  });
+
   it.each(["none", "shallow"] as const)(
     "recreates a missing worktree with root submodule policy %s and the selected branch account",
     async (submodules) => {
@@ -3230,7 +3472,10 @@ describe("ProviderCommandReactor", () => {
           createdAt: now,
         },
         orchestrationEngine: harness.engine,
+        rollbackWorktree: () => Effect.die("unexpected rollback"),
         git: {
+          resolveCommit: () => Effect.die("unexpected resolve"),
+          resolveCommonDir: () => Effect.die("unexpected resolve"),
           createWorktree: () => Effect.die("unexpected worktree creation"),
           fetchRemoteBranchCommit: () => Effect.die("unexpected remote base fetch"),
           hasRemote: () => Effect.die("unexpected remote probe"),

@@ -185,6 +185,7 @@ async function createHarness(input?: {
     respondToElicitation: () => unsupported(),
     stopSession:
       input?.stopSession ?? (() => Effect.void as ReturnType<ProviderServiceShape["stopSession"]>),
+    listStartingWorkspaces: () => Effect.succeed([]),
     listSessions: () => Effect.succeed([]),
     ...(input?.nativeOperations ? { nativeOperations: input.nativeOperations } : {}),
     getSessionCapabilities: input?.getSessionCapabilities ?? (() => Effect.succeed(null)),

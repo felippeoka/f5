@@ -1,3 +1,5 @@
+import { assertWorktreeReady, WorktreeInspectionError } from "../../project/worktreeReadiness.ts";
+import { GitCore } from "../../git/Services/GitCore.ts";
 import type { OrchestrationReadModel, ProjectId, ThreadId } from "@t3tools/contracts";
 import { NextTurnQueueStore } from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { canonicalRequestHash } from "../../nextTurnQueue/canonicalRequestHash.ts";
@@ -51,6 +53,7 @@ interface CommandEnvelope {
   command: OrchestrationCommand;
   result: Deferred.Deferred<{ sequence: number }, OrchestrationDispatchError>;
   startedAtMs: number;
+  workspace?: { path: string; branch: string | null; projectCwd: string };
 }
 
 function commandToAggregateRef(command: OrchestrationCommand): {
@@ -103,6 +106,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository;
   const projectionPipeline = yield* OrchestrationProjectionPipeline;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const workspaceGit = yield* Effect.serviceOption(GitCore);
   const maintenanceLock = yield* makeStorageMaintenanceLock;
   const providerRegistry = yield* Effect.serviceOption(ProviderRegistry);
   const diskSpaceMonitor = yield* Effect.serviceOption(DiskSpaceMonitor);
@@ -111,6 +115,24 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
   const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
+
+  const readSteerFallback = (command: OrchestrationCommand) =>
+    Effect.gen(function* () {
+      if (command.type !== "thread.turn.start" && command.type !== "thread.turn.steer")
+        return false;
+      const rows = yield* sql<{
+        readonly event: string;
+      }>`SELECT d.event_json AS event FROM provider_turn_deliveries d JOIN next_turn_queue q ON q.command_id = d.command_id WHERE d.command_id = ${command.commandId} AND d.thread_id = ${command.threadId} AND d.state = 'rejected' AND d.certainty = 'not_sent' AND q.last_error_code = 'steer_queued' AND q.deleted_at IS NULL`;
+      return rows.some(
+        (row) =>
+          Schema.decodeUnknownSync(Schema.fromJsonString(OrchestrationEvent))(row.event).type ===
+          "thread.turn-steer-requested",
+      );
+    }).pipe(Effect.mapError(toPersistenceSqlError("OrchestrationEngine.readSteerFallback")));
+  const workspaceWaitError = (
+    command: Extract<OrchestrationCommand, { type: "thread.turn.start" | "thread.turn.steer" }>,
+    detail: string,
+  ) => new ThreadTurnNotReadyError({ threadId: command.threadId, detail });
 
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
     const dispatchStartSequence = readModel.snapshotSequence;
@@ -151,19 +173,8 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         const existingReceipt = yield* commandReceiptRepository.getByCommandId({
           commandId: envelope.command.commandId,
         });
-        const fallbackRows =
-          (envelope.command.type === "thread.turn.start" ||
-            envelope.command.type === "thread.turn.steer") &&
-          Option.isSome(existingReceipt)
-            ? yield* sql<{
-                readonly event: string;
-              }>`SELECT d.event_json AS event FROM provider_turn_deliveries d JOIN next_turn_queue q ON q.command_id = d.command_id WHERE d.command_id = ${envelope.command.commandId} AND d.thread_id = ${envelope.command.threadId} AND d.state = 'rejected' AND d.certainty = 'not_sent' AND q.last_error_code = 'steer_queued' AND q.deleted_at IS NULL`
-            : [];
-        const steerFallback = fallbackRows.some(
-          (row) =>
-            Schema.decodeUnknownSync(Schema.fromJsonString(OrchestrationEvent))(row.event).type ===
-            "thread.turn-steer-requested",
-        );
+        const steerFallback =
+          Option.isSome(existingReceipt) && (yield* readSteerFallback(envelope.command));
         if (Option.isSome(existingReceipt) && !steerFallback) {
           const receipt = existingReceipt.value;
           let matchesAggregate =
@@ -291,6 +302,38 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               detail: "That rewind identifier belongs to a different request.",
             });
         }
+        if (
+          envelope.command.type === "thread.turn.start" ||
+          envelope.command.type === "thread.turn.steer"
+        ) {
+          const command = envelope.command;
+          const thread = readModel.threads.find((entry) => entry.id === command.threadId);
+          if (
+            Option.isSome(queueStore) &&
+            (yield* queueStore.value.listByThread(command.threadId)).state.worktreeBlockToken
+          )
+            return yield* workspaceWaitError(
+              command,
+              "Workspace preparation is still in progress. Wait for it to finish.",
+            );
+          if (thread?.worktreePath || envelope.workspace) {
+            const project = readModel.projects.find(
+              (entry) => entry.id === thread?.projectId && entry.deletedAt === null,
+            );
+            if (
+              !thread ||
+              !envelope.workspace ||
+              envelope.workspace.path !== thread.worktreePath ||
+              envelope.workspace.branch !== thread.branch ||
+              envelope.workspace.projectCwd !== project?.workspaceRoot
+            )
+              return yield* workspaceWaitError(
+                command,
+                "The workspace changed during verification. Retry the request.",
+              );
+          }
+        }
+
         const eventBase = yield* decideOrchestrationCommand({
           command: envelope.command,
           readModel,
@@ -707,8 +750,58 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
     Effect.gen(function* () {
+      // Git I/O must not occupy the serialized projection worker. The worker
+      // revalidates this metadata fingerprint before accepting the command.
+      let workspace: CommandEnvelope["workspace"];
+      if (
+        (command.type === "thread.turn.start" || command.type === "thread.turn.steer") &&
+        (Option.isNone(
+          yield* commandReceiptRepository.getByCommandId({ commandId: command.commandId }),
+        ) ||
+          (yield* readSteerFallback(command)))
+      ) {
+        const thread = readModel.threads.find((entry) => entry.id === command.threadId);
+        if (thread?.worktreePath) {
+          const project = readModel.projects.find(
+            (entry) => entry.id === thread.projectId && entry.deletedAt === null,
+          );
+          if (!project || Option.isNone(workspaceGit))
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "Workspace identity cannot be verified.",
+            });
+          workspace = {
+            path: thread.worktreePath,
+            branch: thread.branch,
+            projectCwd: project.workspaceRoot,
+          };
+          yield* assertWorktreeReady(
+            workspaceGit.value,
+            {
+              projectCwd: workspace.projectCwd,
+              worktreePath: workspace.path,
+              branch: workspace.branch,
+            },
+            command.type === "thread.turn.start",
+          ).pipe(
+            Effect.mapError((error) =>
+              error instanceof WorktreeInspectionError
+                ? workspaceWaitError(command, error.message)
+                : new OrchestrationCommandInvariantError({
+                    commandType: command.type,
+                    detail: error.message,
+                  }),
+            ),
+          );
+        }
+      }
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
-      yield* Queue.offer(commandQueue, { command, result, startedAtMs: Date.now() });
+      yield* Queue.offer(commandQueue, {
+        command,
+        result,
+        startedAtMs: Date.now(),
+        ...(workspace ? { workspace } : {}),
+      });
       return yield* Deferred.await(result);
     });
 

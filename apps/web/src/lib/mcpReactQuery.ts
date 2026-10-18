@@ -189,7 +189,6 @@ export function mcpLoginStatusQueryOptions(input: {
   readonly binaryPath?: string;
   readonly homePath?: string;
   readonly enabled?: boolean;
-  readonly refetchInterval?: number | false;
 }) {
   return queryOptions<McpLoginStatusResult>({
     queryKey: mcpQueryKeys.loginStatus(
@@ -203,7 +202,7 @@ export function mcpLoginStatusQueryOptions(input: {
       (input.enabled ?? true) &&
       Boolean(input.projectId) &&
       (input.provider === "claudeAgent" || Boolean(input.serverName)),
-    refetchInterval: input.refetchInterval ?? false,
+    refetchInterval: (query) => (query.state.data?.status === "pending" ? 2_000 : false),
     queryFn: async () => {
       if (!input.projectId) {
         throw new Error("MCP login status is unavailable.");

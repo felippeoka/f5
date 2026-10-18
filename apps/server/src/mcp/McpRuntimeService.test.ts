@@ -6,7 +6,15 @@ import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { vi } from "vitest";
 
-import { ProjectId, type McpProjectServersConfig, type ProviderSession } from "@t3tools/contracts";
+import {
+  ProjectId,
+  ProviderInstanceId,
+  type McpProjectServersConfig,
+  type ProviderSession,
+} from "@t3tools/contracts";
+import { CODEX_SSE_TRANSPORT_HINT } from "@t3tools/shared/mcpTranslation";
+import { ServerConfig } from "../config.ts";
+import * as instanceLocks from "../profiles/InstanceLock.ts";
 
 import type { CodexControlClient } from "../codex/CodexControlClient.ts";
 import { CodexControlClientRegistry } from "../codex/CodexControlClientRegistry.ts";
@@ -91,6 +99,7 @@ function makeProviderServiceStub(): ProviderServiceShape {
     respondToUserInput: (_input) => unused(),
     respondToElicitation: (_input) => unused(),
     stopSession: (_input) => unused(),
+    listStartingWorkspaces: () => Effect.succeed([]),
     listSessions: () => Effect.succeed([] satisfies ReadonlyArray<ProviderSession>),
     getSessionCapabilities: () => Effect.succeed(null),
     assertSessionAction: () => Effect.die(new Error("assertSessionAction is unused here")),
@@ -251,6 +260,134 @@ function makeRuntimeLayer(input?: {
 }
 
 describe("McpRuntimeService", () => {
+  for (const state of [
+    "ready",
+    "starting",
+    "failed",
+    "cancelled",
+    "missing",
+    "disabled",
+    "login-required",
+  ] as const) {
+    it.effect(
+      `adds the SSE transport hint only to failure, unknown or auth states (${state})`,
+      () =>
+        Effect.gen(function* () {
+          const service = yield* McpRuntimeService;
+          const result = yield* service.getServerStatuses({ provider: "codex", projectId });
+          const sse = result.statuses.find((server) => server.name === "sse");
+          const http = result.statuses.find((server) => server.name === "http");
+          assert.equal(
+            sse?.message?.includes(CODEX_SSE_TRANSPORT_HINT) ?? false,
+            ["failed", "cancelled", "missing", "login-required"].includes(state),
+          );
+          assert.equal(http?.message?.includes(CODEX_SSE_TRANSPORT_HINT) ?? false, false);
+          if (state === "failed") assert.include(sse?.message, "fixture startup failure");
+        }).pipe(
+          Effect.provide(
+            makeRuntimeLayer({
+              servers: {
+                sse: {
+                  type: "sse",
+                  url: "https://example.test/sse",
+                  enabled: state !== "disabled",
+                },
+                http: { type: "http", url: "https://example.test/mcp" },
+              },
+              controlStatuses:
+                state === "missing" || state === "disabled"
+                  ? []
+                  : [
+                      {
+                        name: "sse",
+                        ...(state === "login-required" ? {} : { startupStatus: state }),
+                        authStatus: state === "login-required" ? "notLoggedIn" : "oAuth",
+                        ...(state === "failed" ? { error: "fixture startup failure" } : {}),
+                      },
+                      {
+                        name: "http",
+                        ...(state === "login-required" ? {} : { startupStatus: state }),
+                        authStatus: state === "login-required" ? "notLoggedIn" : "oAuth",
+                      },
+                    ],
+              spawnerLayer: mockSpawnerLayer((args) =>
+                args.join(" ").endsWith("--version")
+                  ? { stdout: "codex 1.2.3\n", stderr: "", code: 0 }
+                  : { stdout: '{"loggedIn":true}\n', stderr: "", code: 0 },
+              ),
+            }),
+          ),
+        ),
+    );
+  }
+
+  it.effect(
+    "keeps CLI login status independent for two accounts on the same project and server",
+    () =>
+      Effect.gen(function* () {
+        const service = yield* McpRuntimeService;
+        const input = { provider: "codex" as const, projectId, serverName: "cli-server" };
+        const first = { ...input, instanceId: ProviderInstanceId.make("codex-personal") };
+        const second = { ...input, instanceId: ProviderInstanceId.make("codex-work") };
+        const pendingFirst = yield* service.startLogin(first);
+        assert.equal((yield* service.getLoginStatus(first)).status, "pending");
+        assert.equal((yield* service.getLoginStatus(second)).status, "idle");
+        const pendingSecond = yield* service.startLogin(second);
+        assert.notStrictEqual(pendingFirst, pendingSecond);
+        assert.strictEqual(yield* service.getLoginStatus(first), pendingFirst);
+        assert.strictEqual(yield* service.getLoginStatus(second), pendingSecond);
+      }).pipe(
+        Effect.provide(
+          makeRuntimeLayer({
+            servers: { "cli-server": { type: "stdio", command: "node" } },
+            spawnerLayer: hangingSpawnerLayer(),
+          }),
+        ),
+      ),
+  );
+
+  it.effect("records a complete failed CLI status when the OAuth lease is busy", () => {
+    const lease = vi
+      .spyOn(instanceLocks, "instanceLock")
+      .mockReturnValue(
+        Effect.fail(new instanceLocks.ProfileBusyError({ message: "fixture busy" })),
+      );
+    return Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      const input = {
+        provider: "codex" as const,
+        projectId,
+        instanceId: ProviderInstanceId.make("codex-work"),
+        serverName: "cli-server",
+      };
+      const pending = yield* service.startLogin(input);
+      let status = yield* service.getLoginStatus(input);
+      while (status.status === "pending") {
+        yield* Effect.yieldNow;
+        status = yield* service.getLoginStatus(input);
+      }
+      assert.equal(status.status, "failed");
+      assert.equal(status.target, "server");
+      assert.equal(status.mode, "cli");
+      assert.equal(status.startedAt, pending.startedAt);
+      assert.isString(status.completedAt);
+      assert.include(status.error, "Another profile is signing in");
+    }).pipe(
+      Effect.provide(
+        makeRuntimeLayer({
+          servers: { "cli-server": { type: "stdio", command: "node" } },
+        }).pipe(
+          Layer.provide(
+            ServerConfig.layerTest("/tmp", { prefix: "f5-mcp-lease-test-" }).pipe(
+              Layer.provide(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)),
+            ),
+          ),
+        ),
+      ),
+      Effect.ensuring(Effect.sync(() => lease.mockRestore())),
+    );
+  });
+
   it.effect("reports Claude provider status as authenticated when preflight succeeds", () =>
     Effect.gen(function* () {
       const service = yield* McpRuntimeService;
@@ -346,6 +483,34 @@ describe("McpRuntimeService", () => {
             }
             throw new Error(`Unexpected CLI args: ${joined}`);
           }),
+        }),
+      ),
+    ),
+  );
+
+  it.effect("keeps ambiguous provider names visible as conflicts without assigning readiness", () =>
+    Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      const result = yield* service.getServerStatuses({ provider: "codex", projectId });
+      assert.equal(result.statuses[0]?.state, "unknown");
+      assert.equal(result.statuses[0]?.toolCount, 0);
+      assert.include(result.statuses[0]?.message, "GitHub, github");
+    }).pipe(
+      Effect.provide(
+        makeRuntimeLayer({
+          servers: { GitHub: { type: "http", url: "http://localhost/mcp" } },
+          controlStatuses: [
+            { name: "GitHub", startupStatus: "ready", toolCount: 3 },
+            { name: "github", startupStatus: "failed" },
+          ],
+          runtimeDiagnostics: [
+            { name: "github", status: "ready", createdAt: new Date().toISOString() },
+          ],
+          spawnerLayer: mockSpawnerLayer((args) =>
+            args.join(" ").endsWith("--version")
+              ? { stdout: "codex 1.2.3\n", stderr: "", code: 0 }
+              : { stdout: '{"loggedIn":true}\n', stderr: "", code: 0 },
+          ),
         }),
       ),
     ),

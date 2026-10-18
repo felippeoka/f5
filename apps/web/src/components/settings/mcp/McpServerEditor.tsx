@@ -1,3 +1,4 @@
+import { CODEX_SSE_TRANSPORT_HINT } from "@t3tools/shared/mcpTranslation";
 import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../../ui/collapsible";
@@ -84,6 +85,10 @@ export function McpServerEditor({
         </label>
       </div>
 
+      {draft.type === "sse" ? (
+        <p className="text-xs text-muted-foreground">{CODEX_SSE_TRANSPORT_HINT}</p>
+      ) : null}
+
       <div className="flex items-center justify-between rounded-lg border border-border/70 bg-card/40 px-3 py-3">
         <div className="space-y-1">
           <p className="text-xs font-medium text-foreground">Enabled</p>
@@ -114,6 +119,19 @@ export function McpServerEditor({
             />
           </label>
           <label className="space-y-1">
+            <span className="text-xs font-medium text-foreground">Argument format</span>
+            <select
+              value={draft.argsFormat}
+              onChange={(event) =>
+                onDraftChange({ argsFormat: event.target.value as ServerDraft["argsFormat"] })
+              }
+              className="block rounded border border-border bg-background px-2 py-1 text-xs"
+            >
+              <option value="lines">One argument per line</option>
+              <option value="json">JSON array</option>
+            </select>
+          </label>
+          <label className="space-y-1">
             <span className="text-xs font-medium text-foreground">Args</span>
             <Textarea
               value={draft.args}
@@ -123,7 +141,9 @@ export function McpServerEditor({
               className="min-h-20 font-mono"
               placeholder="@modelcontextprotocol/server-filesystem&#10;/path/to/project"
             />
-            <span className="text-xs text-muted-foreground">One argument per line.</span>
+            <span className="text-xs text-muted-foreground">
+              Empty lines are empty arguments. Use JSON for arguments containing line breaks.
+            </span>
           </label>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="space-y-1">
@@ -182,9 +202,9 @@ export function McpServerEditor({
       <Collapsible open={isAdvancedOpen} onOpenChange={onAdvancedOpenChange}>
         <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border border-border px-3 py-2 text-left">
           <span>
-            <span className="block text-xs font-medium text-foreground">Codex-only options</span>
+            <span className="block text-xs font-medium text-foreground">Advanced options</span>
             <span className="block text-xs text-muted-foreground">
-              Optional OAuth, timeout, tool-filter, and bearer-token settings.
+              Tool timeout and tool filters apply to Codex and Claude. Other options apply to Codex.
             </span>
           </span>
           <Badge variant="outline">{isAdvancedOpen ? "Hide" : "Show"}</Badge>
@@ -276,13 +296,21 @@ export function McpServerEditor({
                   Declare that this server supports concurrent tool execution.
                 </p>
               </div>
-              <Switch
-                checked={draft.supportsParallelToolCalls}
-                onCheckedChange={(checked) =>
-                  onAdvancedDraftChange({ supportsParallelToolCalls: Boolean(checked) })
+              <select
+                value={draft.supportsParallelToolCalls}
+                onChange={(event) =>
+                  onAdvancedDraftChange({
+                    supportsParallelToolCalls: event.target
+                      .value as ServerDraft["supportsParallelToolCalls"],
+                  })
                 }
                 aria-label="Supports parallel tool calls"
-              />
+                className="rounded border border-border bg-background px-2 py-1 text-xs"
+              >
+                <option value="default">Default</option>
+                <option value="enabled">Enabled</option>
+                <option value="disabled">Disabled</option>
+              </select>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
