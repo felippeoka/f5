@@ -1,18 +1,49 @@
+import { mcpServerNameKey } from "@t3tools/shared/mcpValidation";
 import type { CodexControlClient, CodexControlMcpServerStatus } from "./CodexControlClient.ts";
 
-function normalizeServerName(name: string): string {
-  return name.trim().toLowerCase();
-}
-
 export function codexServerNamesMatch(left: string, right: string): boolean {
-  return normalizeServerName(left) === normalizeServerName(right);
+  return mcpServerNameKey(left) === mcpServerNameKey(right);
 }
 
 export function findCodexServerStatusByName(
   statuses: ReadonlyArray<CodexControlMcpServerStatus>,
   name: string,
 ): CodexControlMcpServerStatus | undefined {
-  return statuses.find((status) => codexServerNamesMatch(status.name, name));
+  const matches = statuses.filter((status) => codexServerNamesMatch(status.name, name));
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+/** Merge a unique notification without hiding provider aliases or duplicating a casing variant. */
+export function mergeCodexMcpStartupStatuses(
+  statuses: ReadonlyArray<CodexControlMcpServerStatus>,
+  notifications: ReadonlyArray<CodexControlMcpServerStatus>,
+): CodexControlMcpServerStatus[] {
+  const byName = new Map<string, CodexControlMcpServerStatus[]>();
+  for (const notification of notifications) {
+    const key = mcpServerNameKey(notification.name);
+    const matches = byName.get(key);
+    if (matches) matches.push(notification);
+    else byName.set(key, [notification]);
+  }
+  const merged = statuses.map((status) => {
+    const matches = byName.get(mcpServerNameKey(status.name)) ?? [];
+    const exact = matches.filter((entry) => entry.name.trim() === status.name.trim());
+    const notification =
+      exact.length === 1 ? exact[0] : matches.length === 1 ? matches[0] : undefined;
+    return notification ? { ...status, ...notification, name: status.name } : status;
+  });
+  const returnedKeys = new Set(statuses.map((status) => mcpServerNameKey(status.name)));
+  const returnedNames = new Set(statuses.map((status) => status.name.trim()));
+  return [
+    ...merged,
+    ...notifications.filter((notification) => {
+      const key = mcpServerNameKey(notification.name);
+      return (
+        !returnedKeys.has(key) ||
+        ((byName.get(key)?.length ?? 0) > 1 && !returnedNames.has(notification.name.trim()))
+      );
+    }),
+  ];
 }
 
 export function codexServerStatusHasAuthenticatedOauth(

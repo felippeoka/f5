@@ -1,3 +1,5 @@
+import { assertMcpRuntimeConfig, mcpConfigErrorMessage } from "@t3tools/shared/mcpValidation";
+import { readCodexMcpOAuthCallbackConfig } from "@t3tools/shared/mcpTranslation";
 import { DeliveryAttemptContext } from "../deliveryAttemptContext";
 import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
 import { ComputerAutomationBroker } from "../../computer/ComputerAutomationBroker";
@@ -818,6 +820,15 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           projectMcpServers: resolvedProjectMcp?.servers,
         });
 
+        yield* Effect.try({
+          try: () => {
+            assertMcpRuntimeConfig(resumedProviderOptions?.mcpServers, input.binding.provider);
+            if (input.binding.provider === "codex")
+              readCodexMcpOAuthCallbackConfig(resumedProviderOptions?.mcpServers);
+          },
+          catch: (cause) => toValidationError(input.operation, mcpConfigErrorMessage(cause)),
+        });
+
         const recoveredRuntimeMode = input.binding.runtimeMode ?? DEFAULT_RUNTIME_MODE;
         const unsupportedRuntimeMode = runtimeModeUnsupportedReason(
           input.binding.provider,
@@ -1169,6 +1180,11 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           payload: rawInput,
         });
 
+        yield* Effect.try({
+          try: () => assertMcpRuntimeConfig(parsed.providerOptions?.mcpServers),
+          catch: (cause) =>
+            toValidationError("ProviderService.startSession", mcpConfigErrorMessage(cause)),
+        });
         const requestedInstanceId = resolveStartInstanceId(parsed);
         yield* Effect.annotateCurrentSpan({
           "provider.operation": "start-session",
@@ -1285,6 +1301,15 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               projectMcpServers: resolvedProjectMcp?.servers,
             }),
           };
+          yield* Effect.try({
+            try: () => {
+              assertMcpRuntimeConfig(adapterInput.providerOptions?.mcpServers, resolvedProvider);
+              if (resolvedProvider === "codex")
+                readCodexMcpOAuthCallbackConfig(adapterInput.providerOptions?.mcpServers);
+            },
+            catch: (cause) =>
+              toValidationError("ProviderService.startSession", mcpConfigErrorMessage(cause)),
+          });
           const launchFingerprint = computeProviderLaunchFingerprint({
             provider: resolvedProvider,
             providerInstanceId: requestedInstanceId,
@@ -2543,16 +2568,35 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           return { sessions: [] };
         }
 
-        const currentProjectMcp = yield* projectMcpConfigService
+        const configResult = yield* projectMcpConfigService
           .readEffectiveStoredConfig(input.projectId)
           .pipe(
-            Effect.mapError(
-              toProjectMcpProviderError(
-                "ProviderService.reloadMcpConfigForProject",
-                input.projectId,
-              ),
+            Effect.flatMap((stored) =>
+              Effect.try({
+                try: () => {
+                  assertMcpRuntimeConfig(stored.servers, input.provider);
+                  if (input.provider === "codex") readCodexMcpOAuthCallbackConfig(stored.servers);
+                  return stored;
+                },
+                catch: mcpConfigErrorMessage,
+              }),
             ),
+            Effect.result,
           );
+        if (configResult._tag === "Failure") {
+          return {
+            sessions: matchingBindings.map((binding) => ({
+              threadId: binding.threadId,
+              result: {
+                converged: false,
+                restartRequired: false,
+                servers: [],
+                errors: [{ message: mcpConfigErrorMessage(configResult.failure) }],
+              } satisfies McpReloadResult,
+            })),
+          };
+        }
+        const currentProjectMcp = configResult.success;
 
         // `reached` is false when the reload request itself failed, so the
         // session may not hold the new config at all.

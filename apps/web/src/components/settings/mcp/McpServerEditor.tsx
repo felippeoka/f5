@@ -114,6 +114,19 @@ export function McpServerEditor({
             />
           </label>
           <label className="space-y-1">
+            <span className="text-xs font-medium text-foreground">Argument format</span>
+            <select
+              value={draft.argsFormat}
+              onChange={(event) =>
+                onDraftChange({ argsFormat: event.target.value as ServerDraft["argsFormat"] })
+              }
+              className="block rounded border border-border bg-background px-2 py-1 text-xs"
+            >
+              <option value="lines">One argument per line</option>
+              <option value="json">JSON array</option>
+            </select>
+          </label>
+          <label className="space-y-1">
             <span className="text-xs font-medium text-foreground">Args</span>
             <Textarea
               value={draft.args}
@@ -123,7 +136,9 @@ export function McpServerEditor({
               className="min-h-20 font-mono"
               placeholder="@modelcontextprotocol/server-filesystem&#10;/path/to/project"
             />
-            <span className="text-xs text-muted-foreground">One argument per line.</span>
+            <span className="text-xs text-muted-foreground">
+              Empty lines are empty arguments. Use JSON for arguments containing line breaks.
+            </span>
           </label>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="space-y-1">
@@ -276,13 +291,21 @@ export function McpServerEditor({
                   Declare that this server supports concurrent tool execution.
                 </p>
               </div>
-              <Switch
-                checked={draft.supportsParallelToolCalls}
-                onCheckedChange={(checked) =>
-                  onAdvancedDraftChange({ supportsParallelToolCalls: Boolean(checked) })
+              <select
+                value={draft.supportsParallelToolCalls}
+                onChange={(event) =>
+                  onAdvancedDraftChange({
+                    supportsParallelToolCalls: event.target
+                      .value as ServerDraft["supportsParallelToolCalls"],
+                  })
                 }
                 aria-label="Supports parallel tool calls"
-              />
+                className="rounded border border-border bg-background px-2 py-1 text-xs"
+              >
+                <option value="default">Default</option>
+                <option value="enabled">Enabled</option>
+                <option value="disabled">Disabled</option>
+              </select>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">

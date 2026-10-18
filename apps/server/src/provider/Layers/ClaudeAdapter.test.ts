@@ -12536,3 +12536,43 @@ it.effect("cleans up the temporary fork query and fork flag when receipt persist
     yield* adapter.stopSession(THREAD_ID);
   }).pipe(Effect.provide(h.layer));
 });
+
+it.effect("rejects excessive MCP start and reload inputs before creating a query", () => {
+  const harness = makeHarness();
+  const mcpServers = Object.fromEntries(
+    Array.from({ length: 33 }, (_, i) => [`s${i}`, { type: "stdio" as const, command: "node" }]),
+  );
+  return Effect.gen(function* () {
+    const adapter = yield* ClaudeAdapter;
+    const threadId = ThreadId.makeUnsafe("mcp-overflow");
+    const started = yield* adapter
+      .startSession({ threadId, runtimeMode: "approval-required", providerOptions: { mcpServers } })
+      .pipe(Effect.result);
+    assert.equal(started._tag, "Failure");
+    assert.equal(harness.getCreateQueryInputs().length, 0);
+    const reloaded = yield* adapter.reloadMcpConfig!({ threadId, mcpServers }).pipe(Effect.result);
+    assert.equal(reloaded._tag, "Failure");
+    assert.equal(harness.getCreateQueryInputs().length, 0);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("launches legacy case-variant MCP servers for Claude", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const adapter = yield* ClaudeAdapter;
+    yield* adapter.startSession({
+      threadId: ThreadId.makeUnsafe("legacy-aliases"),
+      runtimeMode: "approval-required",
+      providerOptions: {
+        mcpServers: {
+          GitHub: { type: "stdio", command: "node" },
+          github: { type: "stdio", command: "node" },
+        },
+      },
+    });
+    assert.deepEqual(Object.keys(harness.getLastCreateQueryInput()?.options.mcpServers ?? {}), [
+      "GitHub",
+      "github",
+    ]);
+  }).pipe(Effect.provide(harness.layer));
+});

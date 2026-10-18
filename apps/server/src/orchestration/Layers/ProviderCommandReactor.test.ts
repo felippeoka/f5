@@ -11,7 +11,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { McpReloadResult, ProviderRuntimeEvent, ProviderSession } from "@t3tools/contracts";
+import type {
+  McpProjectServersConfig,
+  McpReloadResult,
+  ProviderRuntimeEvent,
+  ProviderSession,
+} from "@t3tools/contracts";
 import {
   ApprovalRequestId,
   CommandId,
@@ -46,7 +51,10 @@ import { roughTokenEstimateFromCharacters } from "@t3tools/shared/model";
 import { ServerConfig } from "../../config.ts";
 import { TextGenerationError } from "../../git/Errors.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
-import { ProjectMcpConfigService } from "../../mcp/ProjectMcpConfigService.ts";
+import {
+  ProjectMcpConfigService,
+  ProjectMcpConfigServiceError,
+} from "../../mcp/ProjectMcpConfigService.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
@@ -185,6 +193,7 @@ describe("ProviderCommandReactor", () => {
   });
 
   async function createHarness(input?: {
+    readonly mcpServers?: McpProjectServersConfig;
     readonly realCursorBinary?: string;
     readonly settings?: Partial<ServerSettings>;
     readonly stateDir?: string;
@@ -558,6 +567,15 @@ describe("ProviderCommandReactor", () => {
       Layer.provide(SqlitePersistenceMemory),
     );
     const settingsLayer = ServerSettingsService.layerTest(input?.settings);
+    const readEffectiveStoredConfig = vi.fn((projectId: ProjectId) =>
+      Effect.succeed({
+        projectId,
+        commonVersion: "mcp-version-test",
+        projectVersion: "mcp-version-test",
+        effectiveVersion: "mcp-version-test",
+        servers: input?.mcpServers ?? {},
+      }),
+    );
     const projectMcpLayer = Layer.succeed(ProjectMcpConfigService, {
       readCommonStoredConfig: () =>
         Effect.succeed({
@@ -572,14 +590,7 @@ describe("ProviderCommandReactor", () => {
           version: "mcp-version-test",
           servers: {},
         }),
-      readEffectiveStoredConfig: (projectId: ProjectId) =>
-        Effect.succeed({
-          projectId,
-          commonVersion: "mcp-version-test",
-          projectVersion: "mcp-version-test",
-          effectiveVersion: "mcp-version-test",
-          servers: {},
-        }),
+      readEffectiveStoredConfig,
       readCommonConfig: () =>
         Effect.succeed({
           version: "mcp-version-test",
@@ -763,6 +774,7 @@ describe("ProviderCommandReactor", () => {
       generateThreadTitle,
       runtimeSessions,
       mcpReload,
+      readEffectiveStoredConfig,
       reloadMcpConfigForProject,
       stateDir,
       workspaceRoot,
@@ -2427,6 +2439,118 @@ describe("ProviderCommandReactor", () => {
     expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
       resumeCursor: { opaque: "live-newer-cursor" },
     });
+  });
+
+  it("continues Claude turns with legacy aliases and keeps an existing session through a config read failure", async () => {
+    const harness = await createHarness({
+      threadModel: "claude-sonnet-4-6",
+      mcpServers: {
+        GitHub: { type: "stdio", command: "node" },
+        github: { type: "stdio", command: "node" },
+      },
+    });
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const send = (index: number) =>
+      Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe(`legacy-${index}`),
+          threadId,
+          message: {
+            messageId: asMessageId(`legacy-message-${index}`),
+            role: "user",
+            text: "hello",
+            attachments: [],
+          },
+          provider: "claudeAgent",
+          model: "claude-sonnet-4-6",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: new Date().toISOString(),
+        }),
+      );
+    await send(1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await harness.waitForDeliveries();
+    // Verify unchanged live config is not checked again at every send.
+    harness.readEffectiveStoredConfig.mockImplementationOnce(
+      () =>
+        Effect.fail(
+          new ProjectMcpConfigServiceError({ code: "storage", message: "Temporary read failure" }),
+        ) as never,
+    );
+    await send(2);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    expect(harness.startSession).toHaveBeenCalledTimes(1);
+    expect(harness.stopSession).not.toHaveBeenCalled();
+  });
+
+  it("isolates project reload errors during common Apply and still reloads healthy Claude sessions", async () => {
+    const harness = await createHarness();
+    for (const provider of ["codex", "claudeAgent"] as const) {
+      const threadId = ThreadId.makeUnsafe(`isolated-${provider}`);
+      const projectId = asProjectId(provider === "codex" ? "invalid-project" : "healthy-project");
+      await Effect.runPromise(harness.startSession(threadId, { threadId, projectId, provider }));
+      harness.upsertBinding({ ...harness.getBinding(threadId)!, mcpEffectiveConfigVersion: "old" });
+    }
+    harness.reloadMcpConfigForProject.mockImplementation((input) =>
+      input.provider === "codex"
+        ? (Effect.fail(
+            new ProjectMcpConfigServiceError({
+              code: "validation",
+              message: "Invalid legacy MCP config",
+            }),
+          ) as never)
+        : Effect.succeed({
+            sessions: input.threadIds!.map((threadId) => ({
+              threadId,
+              result: { converged: true, restartRequired: false, servers: [], errors: [] },
+            })),
+          }),
+    );
+    const result = await Effect.runPromise(
+      harness.reactor.applyMcpConfigToLiveSessions({ scope: "common" }),
+    );
+    expect(result.claudeReconciled).toBe(1);
+    expect(result.codexReloaded).toBe(0);
+    expect(result.failures).toEqual([
+      expect.objectContaining({
+        threadId: "isolated-codex",
+        errors: [{ message: "Invalid legacy MCP config" }],
+      }),
+    ]);
+  });
+
+  it("reports conflicted Codex targets and continues applying to valid Claude targets", async () => {
+    const harness = await createHarness({
+      mcpServers: {
+        first: { type: "http", url: "http://localhost/first", oauthCallbackPort: 3001 },
+        second: { type: "http", url: "http://localhost/second", oauthCallbackPort: 3002 },
+      },
+    });
+    const projectId = asProjectId("project-1");
+    for (const provider of ["codex", "claudeAgent"] as const) {
+      const threadId = ThreadId.makeUnsafe(`apply-${provider}`);
+      await Effect.runPromise(harness.startSession(threadId, { threadId, projectId, provider }));
+      harness.upsertBinding({ ...harness.getBinding(threadId)!, mcpEffectiveConfigVersion: "old" });
+    }
+    harness.mcpReload.result = { converged: true, restartRequired: false, servers: [], errors: [] };
+    const result = await Effect.runPromise(
+      harness.reactor.applyMcpConfigToLiveSessions({ scope: "common" }),
+    );
+    expect(result.codexReloaded).toBe(0);
+    expect(result.claudeReconciled).toBe(1);
+    expect(result.failures).toEqual([
+      expect.objectContaining({
+        provider: "codex",
+        threadId: "apply-codex",
+        errors: [
+          expect.objectContaining({ message: expect.stringContaining("conflicting ports") }),
+        ],
+      }),
+    ]);
+    expect(harness.reloadMcpConfigForProject).toHaveBeenCalledTimes(1);
+    expect(harness.reloadMcpConfigForProject.mock.calls[0]?.[0].provider).toBe("claudeAgent");
   });
 
   describe("Claude MCP apply", () => {
