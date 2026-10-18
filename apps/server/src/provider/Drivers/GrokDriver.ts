@@ -1,3 +1,6 @@
+import { Option } from "effect";
+import { PreviewMcpHttpServer } from "../../mcp/PreviewMcpHttpServer";
+import { ComputerAutomationBroker } from "../../computer/ComputerAutomationBroker";
 import { makeProviderLimits } from "../../usage/providerLimits.ts";
 import { discoverGrokSkills, discoverGlobalGrokSkills } from "./GrokSkills.ts";
 /**
@@ -80,8 +83,14 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
       });
       const effectiveConfig = { ...config, enabled } satisfies GrokSettings;
 
+      const previewMcp = Option.getOrUndefined(yield* Effect.serviceOption(PreviewMcpHttpServer));
+      const computerBroker = Option.getOrUndefined(
+        yield* Effect.serviceOption(ComputerAutomationBroker),
+      );
       const adapter = yield* makeGrokAdapter(effectiveConfig, {
         environment: processEnv,
+        ...(previewMcp ? { previewMcpHttpServer: previewMcp } : {}),
+        ...(computerBroker ? { computerAutomationBroker: computerBroker } : {}),
         discoverSkillCommands: (cwd) =>
           discoverGrokSkills(effectiveConfig, processEnv, cwd).pipe(
             Effect.map((skills) =>

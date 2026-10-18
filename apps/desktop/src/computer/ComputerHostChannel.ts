@@ -3,6 +3,8 @@ import type { ChildProcess } from "node:child_process";
 import { Schema } from "effect";
 import {
   COMPUTER_BACKGROUND_CAPABILITY,
+  COMPUTER_AGENT_IDENTITY_CAPABILITY,
+  COMPUTER_ACTIVITY_CORRELATION_CAPABILITY,
   DesktopComputerHostMessage,
   type ComputerAccessAnswer,
   type ComputerAutomationBackendStatus,
@@ -127,12 +129,18 @@ export class ComputerHostChannel {
         }
         backend.ready = true;
         backend.capabilities = new Set(
-          this.options.advertiseBackground === false ? [] : (message.capabilities ?? []),
+          (message.capabilities ?? []).filter(
+            (capability) =>
+              capability === COMPUTER_AGENT_IDENTITY_CAPABILITY ||
+              capability === COMPUTER_ACTIVITY_CORRELATION_CAPABILITY ||
+              (capability === COMPUTER_BACKGROUND_CAPABILITY &&
+                this.options.advertiseBackground !== false),
+          ),
         );
-        if (this.capable(backend))
+        if (backend.capabilities.size)
           this.send(profileId, {
             type: "hostCapabilities",
-            capabilities: [COMPUTER_BACKGROUND_CAPABILITY],
+            capabilities: [...backend.capabilities],
           });
         this.send(profileId, { type: "status", status: this.statusFor(backend) });
         this.sendLeases(profileId);
@@ -145,6 +153,20 @@ export class ComputerHostChannel {
         case "request":
           if (message.request.authorization.profileId !== profileId) {
             child.disconnect();
+            return;
+          }
+          if (
+            message.request.agent.provider !== "claude" &&
+            message.request.agent.provider !== "codex" &&
+            !backend.capabilities.has(COMPUTER_AGENT_IDENTITY_CAPABILITY)
+          ) {
+            fail(
+              message.request.requestId,
+              new ComputerControlError({
+                _tag: "Execution",
+                message: "Update F5 to use computer control with this agent.",
+              }),
+            );
             return;
           }
           // Background delivery is only accepted from peers that negotiated it.
@@ -389,6 +411,17 @@ export class ComputerHostChannel {
   }
   send(profileId: string, message: DesktopComputerHostMessage): void {
     const backend = this.backends.get(profileId);
+    if (
+      message.type === "activity" &&
+      !backend?.capabilities.has(COMPUTER_ACTIVITY_CORRELATION_CAPABILITY)
+    ) {
+      const {
+        requestId: _requestId,
+        sessionGeneration: _generation,
+        ...activity
+      } = message.activity;
+      message = { type: "activity", activity };
+    }
     if (backend?.ready && backend.child.connected) backend.child.send(message, () => undefined);
   }
   /** Capable peers get every own holder; legacy peers keep the single-holder message. */

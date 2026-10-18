@@ -529,6 +529,10 @@ export function createWsNativeApi(): NativeApi {
             listener(message.data),
           ),
       },
+      onObservationsInvalidated: (listener) =>
+        transport.subscribe(WS_CHANNELS.computerObservationsInvalidated, (message) =>
+          listener(message.data),
+        ),
       onActivity: (listener) =>
         transport.subscribe(WS_CHANNELS.computerActivity, (message) => listener(message.data)),
       onLeaseChanged: (listener) =>

@@ -90,6 +90,12 @@ export const makeAntigravityAcpRuntime = (input: {
   resumeSessionId?: string;
   accountSetup?: boolean;
   onAuthorizationUrl?: (url: string) => void;
+  mcpServers?: AcpSessionRuntimeOptions["mcpServers"];
+  requestLogger?: AcpSessionRuntimeOptions["requestLogger"];
+  logWritersRedact?: AcpSessionRuntimeOptions["logWritersRedact"];
+  protocolLogging?: AcpSessionRuntimeOptions["protocolLogging"];
+  sanitizeStderr?: AcpSessionRuntimeOptions["sanitizeStderr"];
+  hasSensitiveConfiguration?: AcpSessionRuntimeOptions["hasSensitiveConfiguration"];
 }): Effect.Effect<AcpSessionRuntimeShape, AcpErrors.AcpError, Scope.Scope> =>
   Effect.gen(function* () {
     const prepared = yield* Effect.tryPromise({
@@ -180,6 +186,13 @@ export const makeAntigravityAcpRuntime = (input: {
     const context = yield* Layer.build(
       AcpSessionRuntime.layer({
         cwd: input.cwd,
+        ...(input.hasSensitiveConfiguration
+          ? { hasSensitiveConfiguration: input.hasSensitiveConfiguration }
+          : {}),
+        ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
+        ...(input.logWritersRedact ? { logWritersRedact: true } : {}),
+        ...(input.requestLogger ? { requestLogger: input.requestLogger } : {}),
+        ...(input.protocolLogging ? { protocolLogging: input.protocolLogging } : {}),
         ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
         resumeMethod: "resume",
         authMethodId: "oauth-personal",
@@ -211,7 +224,8 @@ export const makeAntigravityAcpRuntime = (input: {
           }
           return line;
         },
-        sanitizeStderr: (text) => text.replace(/https:\/\/[^\s"<>]+/g, "[URL redacted]"),
+        sanitizeStderr: (text) =>
+          (input.sanitizeStderr?.(text) ?? text).replace(/https:\/\/[^\s"<>]+/g, "[URL redacted]"),
         onStderr: (chunk) => {
           stderr = (stderr + chunk).slice(-32_768);
           let newline: number;

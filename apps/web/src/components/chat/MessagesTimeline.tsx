@@ -1,3 +1,4 @@
+import { computerToolHeading } from "@t3tools/shared/computerAction";
 import { NativeFilePreview } from "./NativeFilePreview";
 import { AttachmentFileChip } from "./AttachmentFileChip";
 import { ChatAssetImage } from "../ChatAssetImage";
@@ -2343,7 +2344,11 @@ function isGenericInferredActivityHeading(value: string): boolean {
   return normalized === "tool call" || normalized === "reasoning update";
 }
 
-function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
+export function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
+  const computer = workEntry.computerTool
+    ? computerToolHeading(workEntry.mcpToolName, workEntry.status)
+    : undefined;
+  if (computer) return `Computer · ${computer}`;
   if (workEntry.itemType === "mcp_tool_call") {
     return `MCP Call - ${formatMcpToolHeading(workEntry)}`;
   }

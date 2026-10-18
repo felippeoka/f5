@@ -1681,3 +1681,22 @@ without opening a consent card. The user must explicitly allow the displayed sel
 Resume requires a trusted gesture in a local F5 window; remote clients can pause but
 cannot re-arm native or Chrome control. The server mirrors resume only after main's
 successful acknowledgement.
+
+## Claude in Chrome discovery follow-up (2026-10-18)
+
+The [native-host discovery attempt](../computer-certification/2026-10-18-claude-chrome-native-host-discovery.json)
+identified SDK `0.3.295`, darwin arm64, and executable SHA-256
+`0116ee2e0a513900b633d9951367f18747686478e2b462805b8c31609f047f70`.
+The macOS sandbox rejected the isolated launch before any registration was observed.
+The operator's Chrome-family native-host snapshots were identical. No host names,
+allowed origins, target paths, candidate descriptor or certification are inferred.
+
+The server master switch is now enforced. Certified descriptors must pin SDK version,
+architecture and executable hash; reporting distinguishes not-certified, platform,
+executable drift and unverifiable executables. A test guards SDK-version drift for
+any future certified Claude descriptor. Production never loads a candidate descriptor.
+The candidate and real Chrome runner remain blocked on successful C1 discovery;
+the signed installed-build run and C5 gate flip have not occurred. Existing gates
+remain closed and Claude always keeps `--no-chrome` in these unavailable cases.
+
+Implementation checks and remaining prerequisites are recorded in the [follow-up verification record](../computer-certification/2026-10-18-computer-followups-verification.md).

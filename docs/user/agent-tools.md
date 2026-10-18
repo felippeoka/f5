@@ -38,6 +38,32 @@ Servers that need OAuth show **Login required** with a **Connect** action; you c
 
 In project scope, **Effective JSON export** shows the merged config a thread in that project will receive, in `{ "mcpServers": { ... } }` format, and **Copy JSON** copies it.
 
+## F5 browser and computer tools
+
+Computer control is opt-in on macOS. See **Settings → Browser & Computer → Agent support**
+for each enabled provider and a readable readiness reason.
+
+| Agent                     | F5 preview                                                            | F5 computer control                                                           |
+| ------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Claude, Codex             | Available in desktop sessions                                         | Native macOS preview; per-app consent required                                |
+| Cursor, Grok, Antigravity | Awaiting per-harness preview startup verification                     | Awaiting per-harness live verification                                        |
+| OpenCode                  | Unavailable: session attribution cannot be confirmed before execution | Same attribution gate; external servers have a separate connection limitation |
+| Muse                      | Unavailable: the pinned SDK cannot configure MCP per session          | Same SDK limitation                                                           |
+
+Provider built-in computer tools and the Codex Chrome plugin await certification.
+Claude in Chrome is off by default and awaits native-host discovery and a signed
+macOS arm64 certification run. Windows computer control remains unavailable.
+
+Approve apps in F5's native dialog. Pending requests show their thread, project and
+expiry, and raise the existing attention badge/notification. **⌃⌘Esc** stops the Mac
+host; Pause all always pauses every target, and Retry Stop remains available for an
+unconfirmed stop. Resume on the computer running F5. If an action's outcome is unknown,
+check the app before resuming and observe before retrying.
+
+Agents can use `computer_wait` to settle or wait for an element, optionally capturing
+afterwards. The live card's Actions popover shows up to 30 recent tool outcomes;
+access-request history and actions are transient and reset on reconnect.
+
 ## Skills and native inventories
 
 Providers bring their own skills, plugins, connectors, subagents and memory, and these vary by provider. Each provider instance card under **Settings → Providers** lists what that instance found, grouped by kind, with the scope each entry came from (instance or project). **Reload inventory** rescans after you change files on disk.

@@ -1,10 +1,15 @@
+import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import type { AgentComputerUseChanged, AgentComputerUseHolder } from "@t3tools/contracts";
 import { MonitorIcon, SquareIcon } from "lucide-react";
 import { useAgentComputerActivityStore } from "../agentComputerActivityStore";
 import { useStore } from "../store";
 import { Button } from "./ui/button";
-import { pauseComputerThread, stopComputerTurn } from "./computerControls";
+import {
+  pauseComputerThread,
+  stopComputerTurn,
+  COMPUTER_STOP_SHORTCUT_LABEL,
+} from "./computerControls";
 
 const PAUSE_CAUSE_LABEL: Record<NonNullable<AgentComputerUseHolder["pauseCause"]>, string> = {
   paused: "",
@@ -21,7 +26,11 @@ const PAUSE_CAUSE_LABEL: Record<NonNullable<AgentComputerUseHolder["pauseCause"]
 export function primaryComputerHolder(
   leases: typeof AgentComputerUseChanged.Type,
 ): AgentComputerUseHolder | undefined {
-  return leases.holders.find((holder) => holder.delivery === "foreground") ?? leases.holders[0];
+  return (
+    leases.holders.find((holder) => holder.delivery === "foreground") ??
+    leases.holders.find((holder) => holder.state === "active") ??
+    leases.holders[0]
+  );
 }
 
 /** Threads the banner text speaks for: every active background agent when it summarizes them. */
@@ -30,7 +39,7 @@ export function computerUseBannerTargets(
 ): ReadonlyArray<AgentComputerUseHolder["threadId"]> {
   const holder = primaryComputerHolder(leases);
   if (!holder) return [];
-  if (holder.delivery === "foreground" || holder.state !== "active") return [holder.threadId];
+  if (holder.delivery === "foreground") return [holder.threadId];
   return leases.holders
     .filter((entry) => entry.delivery === "background")
     .map((entry) => entry.threadId);
@@ -62,7 +71,9 @@ export function computerUseBannerText(
     case "waiting-secure-input":
       return `Agent waiting${app ? ` in ${app}` : ""} while secure text entry is active`;
     case "pending-consent":
+      return "Agent waiting for computer access approval";
     case "waiting-idle":
+      return "Agent waiting for you to stop using the mouse and keyboard";
     case "active":
       break;
   }
@@ -70,13 +81,17 @@ export function computerUseBannerText(
     return holder.appId
       ? `An agent is controlling ${app} in the foreground`
       : "An agent is controlling this computer";
-  const background = leases.holders.filter((entry) => entry.delivery === "background");
+  const background = leases.holders.filter(
+    (entry) => entry.delivery === "background" && entry.state === "active",
+  );
   if (background.length <= 1) return `An agent is working in ${app ?? "an app"} in the background`;
   const apps = [...new Set(background.flatMap((entry) => (entry.appName ? [entry.appName] : [])))];
   return `${background.length} agents are working in the background${apps.length ? ` in ${apps.join(", ")}` : ""}`;
 }
 
 export function ComputerUseBanner() {
+  const [error, setError] = useState("");
+  const stopUnconfirmed = useAgentComputerActivityStore((state) => state.stopUnconfirmed);
   const leases = useAgentComputerActivityStore((state) => state.leases);
   const holder = primaryComputerHolder(leases);
   const threadId = leases.pendingTakeover?.threadId ?? holder?.threadId;
@@ -88,7 +103,10 @@ export function ComputerUseBanner() {
     threadId ? store.threads.find((thread) => thread.id === threadId)?.title : undefined,
   );
   const text = computerUseBannerText(leases, paused);
-  if (!text) return null;
+  const retryTargets = Object.entries(stopUnconfirmed)
+    .filter(([, value]) => value)
+    .map(([id]) => id as AgentComputerUseHolder["threadId"]);
+  if (!text && !retryTargets.length) return null;
   // Background-only control is ambient: a quieter style, no takeover of the user's attention.
   const ambient =
     !leases.pendingTakeover &&
@@ -100,20 +118,31 @@ export function ComputerUseBanner() {
   // A summary of several background agents controls all of them; otherwise just the one shown.
   const summarized = leases.pendingTakeover ? [] : computerUseBannerTargets(leases);
   const targets = summarized.length > 1 ? summarized : threadId ? [threadId] : [];
+  const run = async (
+    operation: (target: AgentComputerUseHolder["threadId"]) => Promise<void>,
+    snapshot = [...targets],
+  ) => {
+    setError("");
+    const results = await Promise.allSettled(snapshot.map(operation));
+    if (results.some((result) => result.status === "rejected"))
+      setError(
+        "Some controls could not be updated. Check the app. Resume on the computer running F5.",
+      );
+  };
   return (
     <div
       role="status"
       className={
         ambient
-          ? "fixed top-2 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-background/95 py-1 pr-1 pl-3 text-muted-foreground text-sm shadow-sm"
-          : "fixed top-2 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full border border-warning/50 bg-background/95 py-1 pr-1 pl-3 text-sm shadow-md"
+          ? "fixed top-2 left-1/2 z-[60] flex -translate-x-1/2 max-w-[calc(100vw-1rem)] flex-wrap items-center gap-2 rounded-2xl border border-border bg-background/95 py-1 pr-1 pl-3 text-muted-foreground text-sm shadow-sm"
+          : "fixed top-2 left-1/2 z-[60] flex -translate-x-1/2 max-w-[calc(100vw-1rem)] flex-wrap items-center gap-2 rounded-2xl border border-warning/50 bg-background/95 py-1 pr-1 pl-3 text-sm shadow-md"
       }
       data-testid="computer-use-banner"
       data-delivery={holder?.delivery}
     >
       <MonitorIcon className={ambient ? "size-4" : "size-4 text-warning-foreground"} />
       <span>
-        {text}
+        {retryTargets.length ? "Stop unconfirmed · check the app before resuming" : text}
         {title ? ` · ${title}` : ""}
         {backend ? ` · ${backend === "native" ? "F5" : backend}` : ""}
       </span>
@@ -129,20 +158,23 @@ export function ComputerUseBanner() {
           <Button
             size="xs"
             variant="ghost"
-            title="Stop shortcut: ⌃⌘Esc on macOS; Ctrl+Alt+Shift+F12 on Windows"
+            title={`Stop shortcut: ${COMPUTER_STOP_SHORTCUT_LABEL}`}
             onClick={() => {
-              for (const target of targets)
-                void pauseComputerThread(target, !paused).catch(() => undefined);
+              const snapshot = [...targets];
+              void run(
+                (target) => pauseComputerThread(target, snapshot.length > 1 ? true : !paused),
+                snapshot,
+              );
             }}
           >
-            {paused ? "Resume" : targets.length > 1 ? "Pause all" : "Pause"}
+            {targets.length > 1 ? "Pause all" : paused ? "Resume" : "Pause"}
           </Button>
           <Button
             size="xs"
             variant="destructive"
             title={backend === "native" ? "Stop computer input" : "Stops after the current action"}
             onClick={() => {
-              for (const target of targets) void stopComputerTurn(target).catch(() => undefined);
+              void run(stopComputerTurn);
             }}
           >
             <SquareIcon />
@@ -150,8 +182,30 @@ export function ComputerUseBanner() {
           </Button>
         </>
       ) : (
-        <span className="text-xs">⌃⌘Esc / Ctrl+Alt+Shift+F12 to stop</span>
+        <span className="text-xs">{COMPUTER_STOP_SHORTCUT_LABEL} to stop</span>
       )}
+      {retryTargets.length ? (
+        <Button
+          size="xs"
+          variant="destructive"
+          onClick={() => void run(stopComputerTurn, [...retryTargets])}
+        >
+          Retry Stop
+        </Button>
+      ) : null}
+      {holder?.pauseCause === "outcome-unknown" ? (
+        <span className="text-xs">
+          Check the app before resuming. Observe the result before another action.
+        </span>
+      ) : null}
+      {paused && !window.desktopBridge?.computerAutomation ? (
+        <span className="text-xs">Resume on the computer running F5.</span>
+      ) : null}
+      {error ? (
+        <span role="alert" className="w-full text-xs">
+          {error}
+        </span>
+      ) : null}
     </div>
   );
 }

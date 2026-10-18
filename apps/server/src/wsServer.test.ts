@@ -1090,7 +1090,7 @@ describe("WebSocket Server", () => {
     },
   );
 
-  it("delivers native action activity and ephemeral thumbnails from private IPC to clients", async () => {
+  it("delivers native action summaries and suppresses uncorrelated IPC thumbnails", async () => {
     const ipc = Object.assign(new EventEmitter(), {
       connected: true,
       send: (_message: unknown, callback: (error: Error | null) => void) => {
@@ -1125,7 +1125,8 @@ describe("WebSocket Server", () => {
       };
       ipc.emit("message", { type: "activity", activity });
       const push = await waitForPush(ws, WS_CHANNELS.computerActivity);
-      expect(push.data).toEqual(activity);
+      const { thumbnailDataUrl: _thumbnail, ...summary } = activity;
+      expect(push.data).toEqual(summary);
       const failed = {
         threadId: "fixture-thread",
         backend: "native",
