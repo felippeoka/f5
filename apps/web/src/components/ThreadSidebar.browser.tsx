@@ -492,6 +492,7 @@ function resolveWsRpc(body: WsRequestEnvelope["body"]): unknown {
   if (tag === WS_METHODS.filesystemBrowse) {
     return { parentPath: "/", entries: [] };
   }
+  if (tag === WS_METHODS.worktreesGetTransition) return null;
 
   return {};
 }

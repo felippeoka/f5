@@ -127,6 +127,17 @@ describe("WorkspaceWatchRegistry", () => {
     await waitForChange("client", { relativePath: "src", change: "changed" });
   });
 
+  it("reports a rename within a watched directory whose mtime did not move", async () => {
+    const dir = path.join(root, "src");
+    // Whole seconds, so restoring the mtime yields an identical mtimeMs.
+    fs.utimesSync(dir, 1_700_000_000, 1_700_000_000);
+    await registry.setWatchedPaths(client, { cwd: root, files: [], directories: ["src"] });
+
+    fs.renameSync(path.join(dir, "app.ts"), path.join(dir, "main.ts"));
+    fs.utimesSync(dir, 1_700_000_000, 1_700_000_000);
+    await waitForChange("client", { relativePath: "src", change: "changed" });
+  });
+
   it("shares one watch between subscribers and releases it with the last one", async () => {
     const other = { name: "other" };
     await registry.setWatchedPaths(client, { cwd: root, files: ["src/app.ts"], directories: [] });
