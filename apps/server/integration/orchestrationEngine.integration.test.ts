@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 
 import {
@@ -102,7 +103,10 @@ function withRealCodexHarness<A, E>(
   );
 }
 
-const seedProjectAndThread = (harness: OrchestrationIntegrationHarness) =>
+const seedProjectAndThread = (
+  harness: OrchestrationIntegrationHarness,
+  branch: string | null = null,
+) =>
   Effect.gen(function* () {
     const createdAt = nowIso();
 
@@ -125,7 +129,7 @@ const seedProjectAndThread = (harness: OrchestrationIntegrationHarness) =>
       model: "gpt-5-codex",
       interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
       runtimeMode: "approval-required",
-      branch: null,
+      branch,
       // This fixture uses the project checkout, not a linked worktree.
       worktreePath: null,
       createdAt,
@@ -594,14 +598,13 @@ it.live("tracks approval requests and resolves pending approvals on user respons
 it.live("records failed turn runtime state and checkpoint status as error", () =>
   withHarness((harness) =>
     Effect.gen(function* () {
-      yield* seedProjectAndThread(harness);
-
-      yield* harness.engine.dispatch({
-        type: "thread.meta.update",
-        commandId: CommandId.makeUnsafe("failed-turn-branch"),
-        threadId: THREAD_ID,
-        branch: "t3code/1234abcd",
-      });
+      yield* Effect.sync(() =>
+        execFileSync("git", ["checkout", "-b", "t3code/1234abcd"], {
+          cwd: harness.workspaceDir,
+          stdio: "pipe",
+        }),
+      );
+      yield* seedProjectAndThread(harness, "t3code/1234abcd");
 
       yield* harness.adapterHarness!.queueTurnResponseForNextSession({
         events: [

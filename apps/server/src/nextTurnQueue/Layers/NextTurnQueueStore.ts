@@ -523,6 +523,14 @@ export const makeNextTurnQueueStore = Effect.gen(function* () {
           Effect.gen(function* () {
             let input = submission;
             const threadId = input.command.threadId;
+            if (
+              (yield* sql`SELECT 1 FROM workspace_transitions WHERE thread_id=${threadId} AND phase IN ('reserved','stopping','applying','applied','needs_recovery') LIMIT 1`)
+                .length
+            )
+              return yield* new NextTurnQueueConflictError({
+                message:
+                  "A workspace transition must finish or be resolved before scheduling a continuation.",
+              });
             const at = now();
             const ledger = (yield* sql<{
               state: string;
@@ -726,6 +734,14 @@ export const makeNextTurnQueueStore = Effect.gen(function* () {
               }
               return { kind: "replay" as const, submission: existing };
             }
+
+            const switching =
+              yield* sql`SELECT 1 FROM workspace_transitions WHERE thread_id = ${input.command.threadId}
+              AND phase IN ('reserved','stopping','applying','applied','needs_recovery') LIMIT 1`;
+            if (switching.length)
+              return yield* new NextTurnQueueConflictError({
+                message: "A workspace transition must finish or be resolved before sending.",
+              });
 
             if (input.supersedeUsageResume) {
               const at = now();
@@ -1036,6 +1052,14 @@ export const makeNextTurnQueueStore = Effect.gen(function* () {
       sql
         .withTransaction(
           Effect.gen(function* () {
+            if (
+              input.token !== null &&
+              (yield* sql`SELECT 1 FROM workspace_transitions WHERE thread_id=${input.threadId} AND phase IN ('reserved','stopping','applying','applied','needs_recovery') LIMIT 1`)
+                .length
+            )
+              return yield* new NextTurnQueueConflictError({
+                message: "Resolve the workspace transition before starting setup.",
+              });
             yield* ensureState(input.threadId);
             const at = now();
             yield* input.expectedToken === undefined

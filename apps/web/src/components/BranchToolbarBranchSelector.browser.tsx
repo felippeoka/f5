@@ -85,7 +85,7 @@ async function selectMain() {
 describe("branch checkout recovery", () => {
   it("checks out main in the selected worktree and keeps the thread there", async () => {
     await selectMain();
-    await expect.poll(() => onSetThreadBranch.mock.calls).toEqual([["main", cwd]]);
+    await expect.poll(() => onSetThreadBranch.mock.calls).toEqual([["main", cwd, true]]);
     expect(api.checkout).toHaveBeenCalledWith({ cwd, branch: "main" });
   });
 
@@ -167,7 +167,7 @@ describe("recovery ownership and workspace choices", () => {
     await expect.element(page.getByText("/repo", { exact: true })).toBeVisible();
     expect(onSetThreadBranch).not.toHaveBeenCalled();
     await page.getByRole("button", { name: "Use this workspace", exact: true }).click();
-    await expect.poll(() => onSetThreadBranch.mock.calls).toEqual([["main", null]]);
+    await expect.poll(() => onSetThreadBranch.mock.calls).toEqual([["main", null, true]]);
     expect(api.checkout).not.toHaveBeenCalled();
   });
 

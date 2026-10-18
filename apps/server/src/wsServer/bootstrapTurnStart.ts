@@ -1,3 +1,4 @@
+import { dispatchVerifiedWorkspace } from "../project/workspaceTransitionContext.ts";
 import { setupProjectScript } from "@t3tools/shared/projectScripts";
 import { CommandId, type OrchestrationCommand } from "@t3tools/contracts";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/worktree";
@@ -71,6 +72,7 @@ interface BootstrapTurnStartBaseDependencies {
   readonly orchestrationEngine: Pick<OrchestrationEngineShape, "dispatch" | "getReadModel">;
   readonly git: Pick<
     GitCoreShape,
+    | "inspectCheckoutIdentity"
     | "allocateWorktreePath"
     | "createWorktree"
     | "fetchRemoteBranchCommit"
@@ -361,13 +363,18 @@ export const dispatchBootstrapTurnStart = Effect.fnUntraced(function* (
             const restoreThreadMeta = yield* runCleanupStep(
               error,
               "thread metadata restore",
-              input.orchestrationEngine.dispatch({
-                type: "thread.meta.update",
-                commandId: serverCommandId("bootstrap-thread-meta-restore"),
-                threadId: input.command.threadId,
-                branch: previousThreadMeta.branch,
-                worktreePath: previousThreadMeta.worktreePath,
-              }),
+              dispatchVerifiedWorkspace(
+                input.orchestrationEngine,
+                input.git,
+                {
+                  type: "thread.meta.update",
+                  commandId: serverCommandId("bootstrap-thread-meta-restore"),
+                  threadId: input.command.threadId,
+                  branch: previousThreadMeta.branch,
+                  worktreePath: previousThreadMeta.worktreePath,
+                },
+                { allowMissing: true },
+              ),
             );
             if (!restoreThreadMeta.ok) {
               return yield* restoreThreadMeta.error;
@@ -456,6 +463,9 @@ export const dispatchBootstrapTurnStart = Effect.fnUntraced(function* (
             interactionMode: bootstrap.createThread.interactionMode,
             branch: bootstrap.createThread.branch,
             worktreePath: bootstrap.createThread.worktreePath,
+            ...(bootstrap.createThread.sharedFilesystemConfirmed
+              ? { sharedFilesystemConfirmed: true }
+              : {}),
             ...(bootstrap.createThread.pullRequest
               ? { pullRequest: bootstrap.createThread.pullRequest }
               : {}),
@@ -580,7 +590,7 @@ export const dispatchBootstrapTurnStart = Effect.fnUntraced(function* (
         failureStage = "thread-meta-update";
         yield* observeBootstrapStage(
           "thread-meta-update",
-          input.orchestrationEngine.dispatch({
+          dispatchVerifiedWorkspace(input.orchestrationEngine, input.git, {
             type: "thread.meta.update",
             commandId: serverCommandId("bootstrap-thread-meta-update"),
             threadId: input.command.threadId,

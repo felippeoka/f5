@@ -994,6 +994,27 @@ describe("buildExpiredTerminalContextToastCopy", () => {
 });
 
 describe("buildFirstSendBootstrap", () => {
+  it("carries an explicit shared-workspace confirmation into thread creation", () => {
+    const result = buildFirstSendBootstrap({
+      isLocalDraftThread: true,
+      projectId: ProjectId.makeUnsafe("project-1"),
+      projectCwd: "/repo/project",
+      projectModel: null,
+      projectScripts: [],
+      selectedModel: null,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      thread: {
+        branch: "topic",
+        worktreePath: "/managed/topic",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      baseBranchForWorktree: null,
+      sharedFilesystemConfirmed: true,
+    });
+    expect(result?.createThread?.sharedFilesystemConfirmed).toBe(true);
+  });
+
   it("builds create-thread bootstrap for local drafts without worktree preparation", () => {
     expect(
       buildFirstSendBootstrap({

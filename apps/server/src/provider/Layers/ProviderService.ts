@@ -341,6 +341,13 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
     const checkWorkspace = (threadId: ThreadId, sessionCwd?: string) =>
       Effect.gen(function* () {
         if (Option.isNone(workspaceSql)) return;
+        const switching =
+          yield* workspaceSql.value`SELECT 1 FROM workspace_transitions WHERE thread_id = ${threadId}
+          AND phase IN ('reserved','stopping','applying','applied','needs_recovery') LIMIT 1`;
+        if (switching.length)
+          return yield* Effect.fail(
+            new Error("A workspace transition must be resolved before provider delivery."),
+          );
         const rows = yield* workspaceSql.value<{
           worktreePath: string | null;
           branch: string | null;

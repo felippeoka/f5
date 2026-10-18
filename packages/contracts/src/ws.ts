@@ -1,4 +1,8 @@
 import {
+  WorktreesSwitchWorkspaceInput,
+  WorktreesGetTransitionInput,
+  WorktreesPreviewTransitionRecoveryInput,
+  WorktreesResolveTransitionInput,
   WorktreesInspectInput,
   WorktreesRemoveInput,
   WorktreesThreadStateInput,
@@ -465,6 +469,11 @@ export const WS_METHODS = {
   worktreesRemove: "worktrees.remove",
   worktreesThreadState: "worktrees.threadState",
   worktreesRecover: "worktrees.recover",
+  worktreesSwitchWorkspace: "worktrees.switchWorkspace",
+  worktreesGetTransition: "worktrees.getTransition",
+  worktreesPreviewTransitionRecovery: "worktrees.previewTransitionRecovery",
+  worktreesResolveTransition: "worktrees.resolveTransition",
+
   worktreeSetupSubscribe: "worktreeSetup.subscribe",
   worktreeSetupCancel: "worktreeSetup.cancel",
   worktreeSetupRetry: "worktreeSetup.retry",
@@ -842,6 +851,14 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.worktreesRemove, WorktreesRemoveInput),
   tagRequestBody(WS_METHODS.worktreesThreadState, WorktreesThreadStateInput),
   tagRequestBody(WS_METHODS.worktreesRecover, WorktreesRecoverInput),
+  tagRequestBody(WS_METHODS.worktreesSwitchWorkspace, WorktreesSwitchWorkspaceInput),
+  tagRequestBody(WS_METHODS.worktreesGetTransition, WorktreesGetTransitionInput),
+  tagRequestBody(
+    WS_METHODS.worktreesPreviewTransitionRecovery,
+    WorktreesPreviewTransitionRecoveryInput,
+  ),
+  tagRequestBody(WS_METHODS.worktreesResolveTransition, WorktreesResolveTransitionInput),
+
   tagRequestBody(WS_METHODS.worktreeSetupSubscribe, WorktreeSetupThreadInput),
   tagRequestBody(WS_METHODS.worktreeSetupCancel, WorktreeSetupActionInput),
   tagRequestBody(WS_METHODS.worktreeSetupRetry, WorktreeSetupActionInput),

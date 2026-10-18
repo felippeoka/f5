@@ -75,6 +75,7 @@ export const GitPullInput = Schema.Struct({
 export type GitPullInput = typeof GitPullInput.Type;
 
 export const GitRunStackedActionInput = Schema.Struct({
+  threadId: Schema.optional(ThreadId),
   actionId: Schema.optional(TrimmedNonEmptyStringSchema),
   cwd: FilesystemPath,
   action: GitStackedAction,
@@ -120,6 +121,7 @@ export const GitPullRequestRefInput = Schema.Struct({
 export type GitPullRequestRefInput = typeof GitPullRequestRefInput.Type;
 
 export const GitPreparePullRequestThreadInput = Schema.Struct({
+  threadId: Schema.optional(ThreadId),
   cwd: FilesystemPath,
   reference: GitPullRequestReference,
   mode: GitPreparePullRequestThreadMode,
@@ -140,6 +142,8 @@ export const GitCreateBranchInput = Schema.Struct({
 export type GitCreateBranchInput = typeof GitCreateBranchInput.Type;
 
 export const GitCheckoutInput = Schema.Struct({
+  threadId: Schema.optional(ThreadId),
+  operationId: Schema.optional(Schema.String),
   cwd: FilesystemPath,
   branch: TrimmedNonEmptyStringSchema,
 });

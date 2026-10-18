@@ -517,6 +517,7 @@ export interface DraftThreadState {
   interactionMode: ProviderInteractionMode;
   branch: string | null;
   worktreePath: string | null;
+  sharedFilesystemConfirmed?: boolean;
   envMode: DraftThreadEnvMode;
 }
 
@@ -663,6 +664,7 @@ interface ComposerDraftStoreState {
   setDraftThreadContext: (
     threadId: ThreadId,
     options: {
+      sharedFilesystemConfirmed?: boolean;
       branch?: string | null;
       worktreePath?: string | null;
       projectId?: ProjectId;
@@ -1373,6 +1375,9 @@ function normalizePersistedComposerDraftState(value: unknown): PersistedComposer
             : DEFAULT_INTERACTION_MODE,
         branch: typeof branch === "string" ? branch : null,
         worktreePath: normalizedWorktreePath,
+        ...(candidateDraftThread.sharedFilesystemConfirmed === true
+          ? { sharedFilesystemConfirmed: true }
+          : {}),
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
       };
     }
@@ -1942,6 +1947,13 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             interactionMode: options.interactionMode ?? existing.interactionMode,
             branch: options.branch === undefined ? existing.branch : (options.branch ?? null),
             worktreePath: nextWorktreePath,
+            ...((options.sharedFilesystemConfirmed ??
+            (nextProjectId === existing.projectId &&
+              nextWorktreePath === existing.worktreePath &&
+              (options.branch === undefined || options.branch === existing.branch) &&
+              existing.sharedFilesystemConfirmed))
+              ? { sharedFilesystemConfirmed: true }
+              : {}),
             envMode:
               options.envMode ?? (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
           };
@@ -1952,7 +1964,8 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             nextDraftThread.interactionMode === existing.interactionMode &&
             nextDraftThread.branch === existing.branch &&
             nextDraftThread.worktreePath === existing.worktreePath &&
-            nextDraftThread.envMode === existing.envMode;
+            nextDraftThread.envMode === existing.envMode &&
+            nextDraftThread.sharedFilesystemConfirmed === existing.sharedFilesystemConfirmed;
           if (isUnchanged) {
             return state;
           }

@@ -1,3 +1,4 @@
+import { checkoutFingerprint } from "../checkoutFingerprint.ts";
 import { createHash } from "node:crypto";
 import { basename, dirname } from "node:path";
 import {
@@ -2251,6 +2252,7 @@ const makeGitCore = Effect.gen(function* () {
         // Stream the index: ordinary repositories can exceed the buffered output cap.
         // Retain only gitlinks and the current (possibly split) NUL-delimited record.
         const gitlinks: string[] = [];
+        const indexFingerprint = options?.recoveryFingerprint ? createHash("sha256") : null;
         const decoder = new TextDecoder();
         let pending = "";
         yield* git.execute({
@@ -2258,6 +2260,7 @@ const makeGitCore = Effect.gen(function* () {
           cwd,
           args: ["ls-files", "--stage", "-z"],
           onStdoutChunk: (chunk) => {
+            indexFingerprint?.update(chunk);
             const records = (pending + decoder.decode(chunk, { stream: true })).split("\0");
             pending = records.pop()!;
             for (const entry of records)
@@ -2290,19 +2293,44 @@ const makeGitCore = Effect.gen(function* () {
           ["--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=normal"],
           { timeoutMs: options?.statusTimeoutMs ?? 30_000 },
         )).stdout;
+        const changedPaths: string[] = [];
         let hasTrackedChanges = false;
         let hasUntrackedChanges = false;
         const records = status.split("\0");
         for (let i = 0; i < records.length; i++) {
           const record = records[i]!;
           if (!record) continue;
+          changedPaths.push(record.slice(3));
           if (record.startsWith("??")) hasUntrackedChanges = true;
           else {
             hasTrackedChanges = true;
-            if (/^[RC]|^.[RC]/.test(record)) i++;
+            if (/^[RC]|^.[RC]/.test(record)) {
+              if (records[i + 1]) changedPaths.push(records[i + 1]!);
+              i++;
+            }
           }
         }
         const ignored = yield* listIgnoredEntries(cwd);
+        if (options?.recoveryFingerprint && ignored.truncated)
+          return yield* createGitCommandError(
+            "GitCore.inspectCheckout",
+            cwd,
+            [],
+            "The ignored-file listing is incomplete; recovery inspection cannot verify all local files.",
+          );
+        const localFingerprint = indexFingerprint
+          ? yield* Effect.tryPromise({
+              try: () =>
+                checkoutFingerprint(
+                  cwd,
+                  [...changedPaths, ...ignored.entries],
+                  indexFingerprint.digest(),
+                  status,
+                ),
+              catch: (cause) =>
+                createGitCommandError("GitCore.inspectCheckout", cwd, [], String(cause)),
+            })
+          : null;
         const upstream = yield* executeGit(
           "GitCore.inspectCheckout",
           cwd,
@@ -2326,6 +2354,7 @@ const makeGitCore = Effect.gen(function* () {
             )
           : null;
         return {
+          ...(localFingerprint ? { localFingerprint } : {}),
           canonicalRoot,
           commonDir,
           registration: entries.find((entry) => entry.canonicalPath === canonicalRoot) ?? null,
@@ -2516,6 +2545,15 @@ const makeGitCore = Effect.gen(function* () {
   const fetchPullRequestBranch: GitCoreShape["fetchPullRequestBranch"] = (input) =>
     Effect.gen(function* () {
       const remoteName = yield* resolvePrimaryRemoteName(input.cwd);
+      if (input.preserveExisting)
+        return yield* fetchRemoteBranch({
+          cwd: input.cwd,
+          remoteName,
+          remoteBranch: input.branch,
+          remoteRef: `refs/pull/${input.prNumber}/head`,
+          localBranch: input.branch,
+          preserveExisting: true,
+        });
       yield* executeGit(
         "GitCore.fetchPullRequestBranch",
         input.cwd,
@@ -2714,7 +2752,7 @@ const makeGitCore = Effect.gen(function* () {
       fallbackErrorMessage: "git branch create failed",
     }).pipe(Effect.asVoid);
 
-  const checkoutBranch: GitCoreShape["checkoutBranch"] = (input) =>
+  const resolveCheckoutTarget: GitCoreShape["resolveCheckoutTarget"] = (input) =>
     Effect.gen(function* () {
       const [localInputExists, remoteExists] = yield* Effect.all(
         [
@@ -2782,12 +2820,46 @@ const makeGitCore = Effect.gen(function* () {
               ? ["checkout", localTrackingBranch]
               : ["checkout", input.branch];
 
-      yield* executeGit("GitCore.checkoutBranch.checkout", input.cwd, [...checkoutArgs, "--"], {
-        timeoutMs: 10_000,
-        fallbackErrorMessage: "git checkout failed",
-        // Keep diagnostics stable for classification, regardless of the host's locale.
-        env: { LC_ALL: "C" },
-      }).pipe(
+      const branch = localInputExists
+        ? input.branch
+        : remoteExists && localTrackingBranch
+          ? localTrackingBranch
+          : remoteExists && !localTrackedBranchTargetExists
+            ? localTrackedBranchCandidate
+            : null;
+      const ref = localInputExists
+        ? `refs/heads/${input.branch}`
+        : remoteExists && localTrackingBranch
+          ? `refs/heads/${localTrackingBranch}`
+          : `refs/remotes/${input.branch}`;
+      return { branch, headSha: yield* resolveCommit(input.cwd, ref), checkoutArgs };
+    });
+  const checkoutBranch: GitCoreShape["checkoutBranch"] = (input, options) =>
+    Effect.gen(function* () {
+      const target = yield* resolveCheckoutTarget(input);
+      if (
+        options?.expectedTarget &&
+        (target.branch !== options.expectedTarget.branch ||
+          target.headSha !== options.expectedTarget.headSha)
+      )
+        return yield* createGitCommandError(
+          "GitCore.checkoutBranch",
+          input.cwd,
+          [],
+          "The target branch changed after workspace verification.",
+        );
+      const checkoutArgs = target.checkoutArgs;
+      yield* executeGit(
+        "GitCore.checkoutBranch.checkout",
+        input.cwd,
+        [checkoutArgs[0]!, "--no-overwrite-ignore", ...checkoutArgs.slice(1), "--"],
+        {
+          timeoutMs: 10_000,
+          fallbackErrorMessage: "git checkout failed",
+          // Keep diagnostics stable for classification, regardless of the host's locale.
+          env: { LC_ALL: "C" },
+        },
+      ).pipe(
         Effect.mapError((error) => {
           const files = checkoutConflictFiles(error.detail);
           return files === null
@@ -2800,9 +2872,10 @@ const makeGitCore = Effect.gen(function* () {
       );
 
       // Refresh upstream refs in the background so checkout remains responsive.
-      yield* Effect.forkScoped(
-        refreshCheckedOutBranchUpstream(input.cwd).pipe(Effect.ignoreCause({ log: true })),
-      );
+      if (options?.refreshUpstream !== false)
+        yield* Effect.forkScoped(
+          refreshCheckedOutBranchUpstream(input.cwd).pipe(Effect.ignoreCause({ log: true })),
+        );
     });
 
   const initRepo: GitCoreShape["initRepo"] = (input) =>
@@ -2885,6 +2958,7 @@ const makeGitCore = Effect.gen(function* () {
     renameBranch,
     createBranch,
     checkoutBranch,
+    resolveCheckoutTarget,
     cloneRepository: (input) =>
       git
         .execute({

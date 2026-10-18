@@ -277,6 +277,7 @@ export default function GitActionsControl({
 
   const runImmediateGitActionMutation = useMutation(
     gitRunStackedActionMutationOptions({
+      threadId: isServerThread ? activeThreadId : null,
       cwd: gitCwd,
       queryClient,
       model: settings.textGenerationModel ?? null,

@@ -408,8 +408,8 @@ describe("GitManager unit", () => {
     expect(github.calls).toContain("getPullRequest:42");
   });
 
-  it("prepares a local PR thread through the GitHub checkout boundary", async () => {
-    const { manager, github } = await makeManager({
+  it("prepares a local PR thread through safe Git checkout", async () => {
+    const { manager, github, git } = await makeManager({
       gitCore: { statusDetails: () => Effect.succeed(cleanStatus) },
     });
 
@@ -418,8 +418,43 @@ describe("GitManager unit", () => {
     );
 
     expect(result).toMatchObject({ branch: "feature/test", worktreePath: null });
-    expect(github.calls).toContain("checkoutPullRequest:42");
+    expect(github.calls).not.toContain("checkoutPullRequest:42");
+    expect(git.calls.checkoutBranch).toHaveLength(1);
   });
+
+  it.each(["feature/test", "main"])(
+    "preserves an existing local %s branch when a PR head differs",
+    async (branch) => {
+      const { manager, git, github } = await makeManager({
+        gitCore: {
+          statusDetails: () => Effect.succeed(cleanStatus),
+          listLocalBranchNames: () => Effect.succeed([branch]),
+          resolveCommit: () => Effect.succeed("local-unpushed-commit"),
+        },
+        gitHub: {
+          pullRequest: {
+            number: 42,
+            title: "Updated PR",
+            url: "https://github.com/t3tools/f5/pull/42",
+            baseRefName: "main",
+            headRefName: branch,
+            headRefOid: "updated-remote-commit",
+            isCrossRepository: true,
+            headRepositoryNameWithOwner: "contributor/f5",
+            headRepositoryOwnerLogin: "contributor",
+          },
+        },
+      });
+      await expect(
+        Effect.runPromise(
+          manager.preparePullRequestThread({ cwd, reference: "42", mode: "local" }),
+        ),
+      ).rejects.toThrow("contains a different commit");
+      expect(git.calls.checkoutBranch).toHaveLength(0);
+      expect(git.calls.fetchRemoteBranch).toHaveLength(0);
+      expect(github.calls).not.toContain("checkoutPullRequest:42");
+    },
+  );
 
   it("materializes a PR branch and creates a dedicated worktree", async () => {
     const worktreePath = "/tmp/f5-pr-worktree";
@@ -438,7 +473,7 @@ describe("GitManager unit", () => {
 
     expect(result).toMatchObject({ branch: "feature/test", worktreePath });
     expect(git.calls.fetchPullRequestBranch).toEqual([
-      [{ cwd, prNumber: 42, branch: "feature/test" }],
+      [{ cwd, prNumber: 42, branch: "feature/test", preserveExisting: true }],
     ]);
     expect(git.calls.createWorktree).toHaveLength(1);
   });
@@ -494,7 +529,8 @@ it("does not write tracking config if the index locks after PR checkout", async 
     manager.preparePullRequestThread({ cwd, reference: "42", mode: "local" }).pipe(Effect.result),
   );
   expect(result._tag).toBe("Failure");
-  expect(github.calls).toContain("checkoutPullRequest:42");
+  expect(github.calls).not.toContain("checkoutPullRequest:42");
+  expect(git.calls.checkoutBranch).toHaveLength(1);
   expect(git.calls.setBranchUpstream).toEqual([]);
 });
 

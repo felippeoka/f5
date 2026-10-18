@@ -1,3 +1,4 @@
+import { project as automationProject } from "../storage/storageAutomation.testHarness.ts";
 import {
   CommandId,
   MessageId,
@@ -109,7 +110,7 @@ function makeReadModel(input?: {
   };
   return {
     snapshotSequence: 1,
-    projects: [],
+    projects: [automationProject(PROJECT_ID, "/repo/project")],
     threads: input?.includeThread === false ? [] : [thread],
     planningWorkflows: [],
     codeReviewWorkflows: [],
@@ -127,17 +128,40 @@ function makeDependencies(input?: {
   removeWorktree?: GitCoreShape["removeWorktree"];
   runForThread?: ProjectSetupScriptRunnerShape["runForThread"];
 }) {
+  let createdThread: OrchestrationThread | undefined;
+  let createdCheckout: GitCreateWorktreeResult["worktree"] | undefined;
+  const originalDispatch =
+    input?.dispatch ??
+    ((command: OrchestrationCommand) =>
+      Effect.succeed({ sequence: command.type === "thread.turn.start" ? 2 : 1 }));
   const orchestrationEngine: Pick<OrchestrationEngineShape, "dispatch" | "getReadModel"> = {
-    dispatch:
-      input?.dispatch ??
-      ((command) =>
-        Effect.succeed({
-          sequence: command.type === "thread.turn.start" ? 2 : 1,
-        })),
-    getReadModel: input?.getReadModel ?? (() => Effect.succeed(makeReadModel())),
+    dispatch: (command) =>
+      originalDispatch(command).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            if (command.type === "thread.create")
+              createdThread = {
+                ...makeReadModel().threads[0]!,
+                id: command.threadId,
+                projectId: command.projectId,
+                branch: command.branch,
+                worktreePath: command.worktreePath,
+              };
+          }),
+        ),
+      ),
+    getReadModel: () =>
+      (input?.getReadModel?.() ?? Effect.succeed(makeReadModel())).pipe(
+        Effect.map((model) =>
+          createdThread && !model.threads.some((thread) => thread.id === createdThread!.id)
+            ? { ...model, threads: [...model.threads, createdThread] }
+            : model,
+        ),
+      ),
   };
   const git: Pick<
     GitCoreShape,
+    | "inspectCheckoutIdentity"
     | "allocateWorktreePath"
     | "createWorktree"
     | "fetchRemoteBranchCommit"
@@ -146,18 +170,31 @@ function makeDependencies(input?: {
     | "resolveCommit"
     | "resolveCommonDir"
   > = {
+    inspectCheckoutIdentity: (cwd) =>
+      Effect.succeed({
+        canonicalRoot: cwd,
+        commonDir: "/repo/project/.git",
+        branch: createdCheckout?.path === cwd ? createdCheckout.branch : "main",
+      }),
     allocateWorktreePath: ({ cwd, branch }) => Effect.succeed(`${cwd}/worktrees/${branch}`),
     resolveCommit: () => Effect.succeed("0123456789abcdef0123456789abcdef01234567"),
     resolveCommonDir: () => Effect.succeed("/repo/project/.git"),
-    createWorktree:
-      input?.createWorktree ??
-      (() =>
+    createWorktree: (request) =>
+      (
+        input?.createWorktree?.(request) ??
         Effect.succeed({
           worktree: {
             branch: "t3code/bootstrap-branch",
             path: "/repo/project/.worktrees/thread-1",
           },
-        } satisfies GitCreateWorktreeResult)),
+        } satisfies GitCreateWorktreeResult)
+      ).pipe(
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            createdCheckout = result.worktree;
+          }),
+        ),
+      ),
     fetchRemoteBranchCommit:
       input?.fetchRemoteBranchCommit ??
       ((request) =>
@@ -216,7 +253,8 @@ describe("dispatchBootstrapTurnStart", () => {
               runtimeMode: "full-access",
               interactionMode: "default",
               branch: "main",
-              worktreePath: null,
+              worktreePath: "/repo/project/.worktrees/shared",
+              sharedFilesystemConfirmed: true,
               createdAt: "2026-01-01T00:00:00.000Z",
             },
           },
@@ -229,6 +267,7 @@ describe("dispatchBootstrapTurnStart", () => {
       "thread.create",
       "thread.turn.start",
     ]);
+    expect(dispatchedCommands[0]).toMatchObject({ sharedFilesystemConfirmed: true });
     expect(dispatchedCommands[1]).toMatchObject({
       type: "thread.turn.start",
       commandId: "cmd-turn-start",

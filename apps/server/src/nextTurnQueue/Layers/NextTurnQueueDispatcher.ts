@@ -1,3 +1,7 @@
+import {
+  WorkspaceTransitions,
+  workspaceTransitionSnapshot,
+} from "../../persistence/Services/WorkspaceTransitions.ts";
 import { WorktreePreparation } from "../../project/Services/WorktreePreparation.ts";
 import { assertWorktreeReady, WorktreeInspectionError } from "../../project/worktreeReadiness.ts";
 import { readProjectSettings } from "../../project/projectSettings.ts";
@@ -159,6 +163,24 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
   const deliveries = yield* ProviderTurnDeliveryRepository;
   const fileSystem = yield* FileSystem.FileSystem;
   const git = yield* GitCore;
+  const transitions = yield* Effect.serviceOption(WorkspaceTransitions);
+  const transitionGate = (threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const active = Option.isSome(transitions)
+        ? yield* transitions.value.forThread(threadId, true).pipe(Effect.mapError(storageError))
+        : null;
+      return active
+        ? {
+            kind: "wait" as const,
+            reasonCode:
+              active.phase === "needs_recovery"
+                ? ("workspace_switch_failed" as const)
+                : ("workspace_switch" as const),
+            detail: active.error ?? "Switching workspace.",
+            retryAfterMs: undefined,
+          }
+        : null;
+    });
   const preparation = yield* Effect.serviceOption(WorktreePreparation);
   const worktreeSetupGate = yield* Effect.serviceOption(WorktreeSetupGate);
   const readWorktreeSetupGate = (threadId: ThreadId, token: string | null) =>
@@ -198,6 +220,8 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
 
   const readGate = (item: NextTurnQueueItem, recreate = false, requireExisting = false) =>
     Effect.gen(function* () {
+      const switching = yield* transitionGate(item.threadId);
+      if (switching) return switching;
       if (hasNativeOperationReservation(item.threadId))
         return {
           kind: "wait" as const,
@@ -493,11 +517,23 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
         blockedKind = "error";
       }
 
+      const switching = yield* transitionGate(threadId);
+      if (switching) {
+        reasonCode = switching.reasonCode;
+        reasonDetail = switching.detail;
+        blockedKind = switching.reasonCode === "workspace_switch_failed" ? "error" : "waiting";
+      }
       const session = ((yield* engine.getReadModel()).threads ?? []).find(
         (entry) => entry.id === threadId,
       )?.session;
       const blockingDelivery = yield* readBlockingDelivery(data, threadId);
+      const workspaceTransition = Option.isSome(transitions)
+        ? yield* transitions.value.forThread(threadId).pipe(Effect.mapError(storageError))
+        : null;
       return {
+        workspaceTransition: workspaceTransition
+          ? workspaceTransitionSnapshot(workspaceTransition)
+          : null,
         threadId,
         items: [...data.items],
         revision: data.state.revision,
@@ -641,7 +677,21 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
       // Recreation may initialize submodules from the network; finish before taking the acceptance lock.
       const preparedRevision = (yield* store.listByThread(threadId)).state.revision;
       const preparedGate = yield* readGate(item, true);
-      const start = startFromGate(item, preparedGate, preparedRevision);
+      const start = Effect.gen(function* () {
+        const model = yield* engine.getReadModel();
+        const current = Option.getOrNull(
+          yield* threads.getById({ threadId }).pipe(Effect.mapError(storageError)),
+        );
+        const effective =
+          current?.worktreePath ??
+          model.projects.find((entry) => entry.id === current?.projectId)?.workspaceRoot ??
+          null;
+        if (effective !== lockPath) {
+          yield* notify(threadId);
+          return;
+        }
+        yield* startFromGate(item, preparedGate, preparedRevision);
+      });
       yield* lockPath
         ? withWorktreeLifecycleLock(lockPath, start).pipe(
             Effect.catchTag("RepositoryLifecycleError", (error) =>

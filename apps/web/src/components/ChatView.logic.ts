@@ -517,6 +517,7 @@ export function resolveAttachedFileReferencePaths(input: {
 }
 
 export function buildFirstSendBootstrap(input: {
+  sharedFilesystemConfirmed?: boolean;
   isLocalDraftThread: boolean;
   projectId: ProjectId;
   projectCwd: string;
@@ -543,6 +544,7 @@ export function buildFirstSendBootstrap(input: {
         interactionMode: input.interactionMode,
         branch: input.thread.branch,
         worktreePath: input.thread.worktreePath,
+        ...(input.sharedFilesystemConfirmed ? { sharedFilesystemConfirmed: true } : {}),
         createdAt: input.thread.createdAt,
       }
     : undefined;

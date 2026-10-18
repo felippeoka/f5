@@ -1,3 +1,6 @@
+import { ServerConfig } from "../../config.ts";
+import { withRepositoryLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
+import { dispatchVerifiedWorkspace } from "../../project/workspaceTransitionContext.ts";
 import { buildGeneratedWorktreeBranchName } from "../../git/worktreeBranchNames.ts";
 import { WorktreePreparation } from "../../project/Services/WorktreePreparation.ts";
 import { deriveProviderInstanceConfigMap } from "../../provider/Layers/ProviderInstanceRegistryHydration.ts";
@@ -372,6 +375,7 @@ const make = Effect.gen(function* () {
   const providerSessionDirectory = yield* ProviderSessionDirectory;
   const projectMcpConfigService = yield* ProjectMcpConfigService;
   const git = yield* GitCore;
+  const workspaceConfig = yield* ServerConfig;
   const preparation = yield* Effect.serviceOption(WorktreePreparation);
   const textGeneration = yield* TextGeneration;
   const serverSettings = yield* ServerSettingsService;
@@ -1408,21 +1412,43 @@ const make = Effect.gen(function* () {
           );
           if (targetBranch === oldBranch) return Effect.void;
 
-          return withWorktreeLifecycleLock(
-            cwd,
-            Effect.gen(function* () {
-              const current = yield* resolveThread(input.threadId);
-              if (current?.worktreePath !== cwd || current.branch !== oldBranch) return;
-              const renamed = yield* git.renameBranch({ cwd, oldBranch, newBranch: targetBranch });
-              yield* orchestrationEngine.dispatch({
-                type: "thread.meta.update",
-                commandId: serverCommandId("worktree-branch-rename"),
-                threadId: input.threadId,
-                branch: renamed.branch,
-                worktreePath: cwd,
-              });
-            }),
-          );
+          return Effect.gen(function* () {
+            const common = yield* git.resolveCommonDir(cwd);
+            return yield* withWorktreeLifecycleLock(
+              cwd,
+              withRepositoryLifecycleLock(
+                workspaceConfig.baseDir,
+                common,
+                Effect.gen(function* () {
+                  const current = yield* resolveThread(input.threadId);
+                  if (current?.worktreePath !== cwd || current.branch !== oldBranch) return;
+                  if (
+                    Option.isSome(sqlOption) &&
+                    (yield* sqlOption.value`SELECT 1 FROM workspace_transitions WHERE thread_id = ${input.threadId} AND phase IN ('reserved','stopping','applying','applied','needs_recovery') LIMIT 1`)
+                      .length
+                  )
+                    return;
+                  const renamed = yield* git.renameBranch({
+                    cwd,
+                    oldBranch,
+                    newBranch: targetBranch,
+                  });
+                  yield* dispatchVerifiedWorkspace(
+                    orchestrationEngine,
+                    git,
+                    {
+                      type: "thread.meta.update",
+                      commandId: serverCommandId("worktree-branch-rename"),
+                      threadId: input.threadId,
+                      branch: renamed.branch,
+                      worktreePath: cwd,
+                    },
+                    { observation: true },
+                  );
+                }),
+              ),
+            );
+          });
         }),
         Effect.catchCause((cause) =>
           Effect.logWarning(

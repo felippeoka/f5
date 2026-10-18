@@ -1,10 +1,17 @@
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { WorkspaceTransitionError } from "../persistence/Services/WorkspaceTransitions.ts";
 import * as FS from "node:fs/promises";
 import * as Path from "node:path";
 import { legacyT3BaseDir } from "@t3tools/shared/appStatePaths";
 import { ServerConfig } from "../config.ts";
 import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurns.ts";
 import { WorktreeSetupGate } from "./Services/WorktreeSetupGate.ts";
-import { type ThreadId, WorktreeSetupSnapshot, worktreeSetupGatesTurn } from "@t3tools/contracts";
+import {
+  type ThreadId,
+  WorktreeSetupSnapshot,
+  worktreeSetupGatesTurn,
+  WorkspaceTransitionSnapshot,
+} from "@t3tools/contracts";
 import { Effect, Option, Schema } from "effect";
 
 import { GitCore, type GitCoreShape, type RegisteredWorktree } from "../git/Services/GitCore.ts";
@@ -27,6 +34,7 @@ export interface WorktreeClaims {
   readonly unknown: boolean;
   readonly activeThreadIds: ReadonlyArray<ThreadId>;
   readonly setupThreadIds: ReadonlyArray<ThreadId>;
+  readonly transitionThreadIds: ReadonlyArray<ThreadId>;
   readonly deletedThreadIds: ReadonlyArray<ThreadId>;
   /** Non-deleted threads (active or archived) whose worktree is this path. */
   readonly threadIds: ReadonlyArray<ThreadId>;
@@ -73,6 +81,7 @@ export const readWorktreeClaims = Effect.fn("readWorktreeClaims")(function* (pat
   const deletedThreadIds: ThreadId[] = [];
   const activeThreadIds: ThreadId[] = [];
   const setupThreadIds: ThreadId[] = [];
+  const transitionThreadIds: ThreadId[] = [];
   for (const thread of readModel.threads) {
     const project = readModel.projects.find((entry) => entry.id === thread.projectId);
     const workspace = thread.worktreePath ?? project?.workspaceRoot;
@@ -137,6 +146,42 @@ export const readWorktreeClaims = Effect.fn("readWorktreeClaims")(function* (pat
     )
       setupThreadIds.push(data.threadId);
   }
+  const transitionSql = yield* Effect.serviceOption(SqlClient.SqlClient);
+  if (Option.isSome(transitionSql)) {
+    const transitions = yield* transitionSql.value<{
+      record: string;
+    }>`SELECT record_json AS record FROM workspace_transitions
+      WHERE phase IN ('reserved','stopping','applying','applied','needs_recovery')`.pipe(
+      Effect.orElseSucceed(() => {
+        unknown = true;
+        return [];
+      }),
+    );
+    for (const row of transitions) {
+      const record = yield* Effect.try({
+        try: () => {
+          const value: unknown = JSON.parse(row.record);
+          if (!Schema.is(WorkspaceTransitionSnapshot)(value))
+            throw new Error("Unreadable workspace transition claim.");
+          return value;
+        },
+        catch: (error) => new WorkspaceTransitionError(String(error)),
+      }).pipe(
+        Effect.orElseSucceed(() => {
+          unknown = true;
+          return null;
+        }),
+      );
+      if (!record) continue;
+      if (
+        inside(yield* resolve(record.source.path)) ||
+        inside(yield* resolve(record.target.path))
+      ) {
+        setupThreadIds.push(record.threadId);
+        transitionThreadIds.push(record.threadId);
+      }
+    }
+  }
   const markDeletedOwner = (id: string) => {
     const thread = readModel.threads.find(
       (thread) => thread.id === id && thread.deletedAt !== null,
@@ -189,6 +234,7 @@ export const readWorktreeClaims = Effect.fn("readWorktreeClaims")(function* (pat
     threadIds,
     activeThreadIds,
     setupThreadIds,
+    transitionThreadIds,
     deletedThreadIds,
     queuedThreadIds,
     terminals: liveTerminals,
@@ -231,6 +277,7 @@ export function foreignClaims(
 ): ReadonlyArray<string> {
   const reasons: string[] = [];
   if (claims.unknown) reasons.push("workspace usage could not be verified");
+  if (claims.transitionThreadIds.length) reasons.push("a workspace transition owns this checkout");
   if (claims.activeThreadIds.some((id) => id !== ownThreadId))
     reasons.push("another thread has an active or pending turn");
   if (claims.setupThreadIds.some((id) => id !== ownThreadId))

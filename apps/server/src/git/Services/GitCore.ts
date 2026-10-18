@@ -32,6 +32,8 @@ export interface CheckoutIdentity {
   readonly branch: string | null;
 }
 export interface CheckoutInspection extends CheckoutIdentity {
+  /** Local status/index/file-metadata identity for recovery acceptance, without a diff-stat scan. */
+  readonly localFingerprint?: string;
   readonly canonicalRoot: string;
   readonly commonDir: string;
   readonly registration: RegisteredWorktree | null;
@@ -91,6 +93,7 @@ export interface GitRenameBranchResult {
 }
 
 export interface GitFetchPullRequestBranchInput {
+  preserveExisting?: boolean;
   cwd: string;
   prNumber: number;
   branch: string;
@@ -170,7 +173,7 @@ export interface GitCoreShape {
   ) => Effect.Effect<CheckoutIdentity, GitCommandError>;
   readonly inspectCheckout: (
     path: string,
-    options?: { aheadOf?: string; statusTimeoutMs?: number },
+    options?: { aheadOf?: string; statusTimeoutMs?: number; recoveryFingerprint?: boolean },
   ) => Effect.Effect<CheckoutInspection, GitCommandError>;
   readonly clearMissingRegistration: (
     cwd: string,
@@ -406,8 +409,15 @@ export interface GitCoreShape {
   /**
    * Checkout an existing branch and refresh its upstream metadata in background.
    */
+  readonly resolveCheckoutTarget: (
+    input: GitCheckoutInput,
+  ) => Effect.Effect<
+    { branch: string | null; headSha: string | null; checkoutArgs: ReadonlyArray<string> },
+    GitCommandError
+  >;
   readonly checkoutBranch: (
     input: GitCheckoutInput,
+    options?: { refreshUpstream?: boolean; expectedTarget?: { branch: string; headSha: string } },
   ) => Effect.Effect<void, GitCommandError, Scope.Scope>;
 
   /**
