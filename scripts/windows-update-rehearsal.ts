@@ -326,8 +326,10 @@ function Press($dialog, $target) {
   $invoke = $null
   if ($target.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke)) {
     $invoke.Invoke()
+    'pressed via Invoke'
     return
   }
+  'pressed via mouse click'
   [F5Rehearsal.Input]::SetForegroundWindow([IntPtr]$dialog.Current.NativeWindowHandle) | Out-Null
   Start-Sleep -Milliseconds 200
   $r = $target.Current.BoundingRectangle
@@ -373,7 +375,10 @@ exit 3
     ],
     { encoding: "utf8" },
   );
-  if (result.status === 0) return true;
+  if (result.status === 0) {
+    step(`"${name}" ${result.stdout.trim()}`);
+    return true;
+  }
   if (result.status === 3) {
     step(
       `No "${name}" button in an F5 message box. F5 windows:\n${result.stderr.trim() || "(none)"}`,
@@ -394,6 +399,32 @@ async function answerInstall(button: "Cancel" | "Restart to update"): Promise<vo
     step(`No restart confirmation appeared (attempt ${attempt}); retrying`);
   }
   throw new Error(`Dialog button not found: ${button}`);
+}
+
+/** Records why F5 stopped responding: live processes, the debug port, crash reports. */
+function writeDiagnostics(): void {
+  const crashpad = join(appData, "f5", "Crashpad").replace(/'/g, "''");
+  const script = `
+$ErrorActionPreference = 'Continue'
+'== F5 processes'
+Get-CimInstance Win32_Process -Filter "Name = 'F5.exe'" | ForEach-Object { "$($_.ProcessId) parent=$($_.ParentProcessId) $($_.CommandLine)" }
+'== Port ${debugPort}'
+Get-NetTCPConnection -LocalPort ${debugPort} -ErrorAction SilentlyContinue | ForEach-Object { "$($_.State) pid=$($_.OwningProcess)" }
+'== Application errors (last 30 minutes)'
+Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = (Get-Date).AddMinutes(-30) } -ErrorAction SilentlyContinue | Where-Object { $_.ProviderName -in 'Application Error', 'Windows Error Reporting', '.NET Runtime' } | ForEach-Object { "[$($_.TimeCreated)] $($_.ProviderName): $($_.Message)" }
+'== Crashpad'
+if (Test-Path '${crashpad}') { Get-ChildItem -Recurse '${crashpad}' | ForEach-Object { "$($_.LastWriteTime) $($_.Length) $($_.FullName)" } }
+`;
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", script],
+    {
+      encoding: "utf8",
+    },
+  );
+  const report = `${result.stdout}\n${result.stderr}`;
+  writeFileSync(join(logDir, "diagnostics.log"), report);
+  console.log(report);
 }
 
 function listFiles(root: string, prefix = ""): string[] {
@@ -547,9 +578,7 @@ try {
       return current.errorContext === "install" ? current : undefined;
     },
     180_000,
-  ).catch((error: unknown) => {
-    throw new Error(`${String(error)} (F5 processes running: ${f5ProcessIds().length})`);
-  });
+  );
   assert(failed.status === "downloaded" && failed.canRetry, JSON.stringify(failed));
   renameSync(stashed, join(pending, installer));
 
@@ -614,6 +643,10 @@ try {
   for (const marker of [join(stateDir, "rehearsal-marker"), join(userData, "rehearsal-marker")])
     assert(existsSync(marker), `Uninstall removed user data: ${marker}`);
   step("Windows update rehearsal passed");
+} catch (error) {
+  step(`Failed: ${String(error)}`);
+  writeDiagnostics();
+  throw error;
 } finally {
   if (app) stopApplication();
   restoreRuntimes?.();
