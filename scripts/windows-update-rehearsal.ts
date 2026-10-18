@@ -57,7 +57,9 @@ const localAppData = process.env.LOCALAPPDATA!;
 const userData = join(appData, "f5");
 const stateDir = join(homedir(), ".f5");
 const startMenuShortcut = join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "F5.lnk");
-const debugPort = 9333;
+// Each launch gets its own port: a socket inherited by the update installer can keep
+// the previous launch's port bound, and Chromium then starts without DevTools.
+let debugPort = 9332;
 const runtimes = ["node.exe", "bun.exe", "node.cmd", "bun.cmd"];
 const step = (message: string) => console.log(`[rehearsal] ${message}`);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -196,6 +198,7 @@ function assertNoForeignRuntime(): void {
 let app: ChildProcess | null = null;
 function launch(exe: string, name: string): void {
   const log = createWriteStream(join(logDir, `${name}.log`));
+  debugPort += 1;
   app = spawn(exe, [`--remote-debugging-port=${debugPort}`], {
     env: applicationEnvironment(),
     stdio: ["ignore", "pipe", "pipe"],
