@@ -41,6 +41,20 @@ describe("MCP read admission", () => {
     settle(2);
     expect(await second).toBe(2);
   });
+  it("reserves capacity for Codex when Claude SDK calls never settle", async () => {
+    vi.useFakeTimers();
+    const reads = new McpReadCoordinator();
+    const hung = () => new Promise<never>(() => {});
+    const a = expect(reads.read("claude-a", hung, 5000, "claude")).rejects.toThrow("timed out");
+    const b = expect(reads.read("claude-b", hung, 5000, "claude")).rejects.toThrow("timed out");
+    await expect(reads.read("claude-c", hung, 5000, "claude")).rejects.toThrow(
+      "temporarily unavailable",
+    );
+    await vi.advanceTimersByTimeAsync(5001);
+    await Promise.all([a, b]);
+    expect(await reads.read("codex", async () => "ready")).toBe("ready");
+    reads.dispose();
+  });
   it("rejects overload while permitting coalescing", async () => {
     const reads = new McpReadCoordinator();
     let settle!: () => void;

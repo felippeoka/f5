@@ -217,6 +217,10 @@ export interface McpRuntimeServiceShape {
       readonly provider: McpGetProviderStatusRequest["provider"];
     },
   ) => Effect.Effect<McpReconnectServerResult, McpRuntimeServiceError>;
+  readonly sanitizeReconnectResult: (
+    input: McpGetServerStatusesRequest,
+    result: McpReconnectServerResult,
+  ) => Effect.Effect<McpReconnectServerResult, McpRuntimeServiceError>;
   readonly startLogin: (
     input: McpStartLoginRequest,
   ) => Effect.Effect<McpLoginStatusResult, McpRuntimeServiceError>;
@@ -452,6 +456,30 @@ const makeMcpRuntimeService = Effect.gen(function* () {
     new McpRuntimeServiceError({
       message: cause instanceof Error ? cause.message : "MCP observation failed.",
     });
+  const readRedactionContext = (input: McpGetServerStatusesRequest) =>
+    Effect.gen(function* () {
+      const effective = yield* projectMcpConfigService
+        .readEffectiveStoredConfig(input.projectId)
+        .pipe(Effect.mapError(runtimeError));
+      const identity = yield* resolveExecution(input).pipe(Effect.option);
+      const environment = Option.isSome(identity) ? identity.value.environment : {};
+      const additionalValues = Object.values(effective.servers).flatMap((server) =>
+        server.bearerTokenEnvVar && environment[server.bearerTokenEnvVar]
+          ? [environment[server.bearerTokenEnvVar]!]
+          : [],
+      );
+      return { servers: effective.servers, additionalValues };
+    });
+  const sanitizeReconnectResult: McpRuntimeServiceShape["sanitizeReconnectResult"] = (
+    input,
+    result,
+  ) =>
+    readRedactionContext(input).pipe(
+      Effect.map(({ servers, additionalValues }) =>
+        sanitizeMcpReconnectResult(result, servers, additionalValues),
+      ),
+    );
+
   const observe = (input: McpGetServerStatusesRequest) =>
     Effect.gen(function* () {
       const identity = yield* resolveExecution(input).pipe(Effect.mapError(runtimeError));
@@ -634,7 +662,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
         const result = yield* providerService
           .reconnectMcpServerForProject({ ...input, instanceId: identity.instanceId })
           .pipe(Effect.mapError(runtimeError));
-        return sanitizeMcpReconnectResult(result, effective.servers);
+        return result;
       }
 
       const callback = yield* readCodexMcpOAuthCallbackConfigOrError(effective.servers);
@@ -660,9 +688,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
           reloaded._tag === "Failure"
             ? [
                 {
-                  message: createMcpDiagnosticsSanitizer(effective.servers).text(
-                    reloaded.failure.message,
-                  ),
+                  message: reloaded.failure.message,
                 },
               ]
             : [],
@@ -1018,12 +1044,14 @@ const makeMcpRuntimeService = Effect.gen(function* () {
       : request;
     return timed.pipe(
       Effect.catch((error) =>
-        projectMcpConfigService.readEffectiveStoredConfig(input.projectId).pipe(
-          Effect.catch(() => Effect.succeed({ servers: {} })),
-          Effect.flatMap((config) =>
+        readRedactionContext(input).pipe(
+          Effect.orElseSucceed(() => ({ servers: {}, additionalValues: [] as string[] })),
+          Effect.flatMap(({ servers, additionalValues }) =>
             Effect.fail(
               new McpRuntimeServiceError({
-                message: createMcpDiagnosticsSanitizer(config.servers).text(error.message),
+                message: createMcpDiagnosticsSanitizer(servers, additionalValues).text(
+                  error.message,
+                ),
               }),
             ),
           ),
@@ -1036,7 +1064,15 @@ const makeMcpRuntimeService = Effect.gen(function* () {
     getProviderStatus,
     getServerStatuses: (input) => safeObservationRequest(input, getServerStatuses(input)),
     inspectServer: (input) => safeObservationRequest(input, inspectServer(input)),
-    reconnectServer: (input) => safeObservationRequest(input, reconnectServer(input), false),
+    reconnectServer: (input) =>
+      safeObservationRequest(
+        input,
+        reconnectServer(input).pipe(
+          Effect.flatMap((result) => sanitizeReconnectResult(input, result)),
+        ),
+        false,
+      ),
+    sanitizeReconnectResult,
     startLogin,
     getLoginStatus,
   } satisfies McpRuntimeServiceShape;

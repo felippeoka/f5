@@ -7,7 +7,6 @@ import { useProfileState } from "../../../profileState";
 import {
   type McpConfigScope,
   type McpSessionReloadOutcome,
-  type McpServerStatusesResult,
   ThreadId,
   type McpCommonConfigResult,
   type McpProjectConfigResult,
@@ -31,6 +30,7 @@ import {
   mcpCommonConfigQueryOptions,
   mcpEffectiveConfigQueryOptions,
   mcpProjectConfigQueryOptions,
+  mcpProviderStatusQueryOptions,
   mcpQueryKeys,
   mcpServerStatusesQueryOptions,
   resetMcpRuntimePolling,
@@ -122,62 +122,64 @@ export function McpServersSettings(props: {
     context: string;
     threadId?: ThreadId;
   }>({ context: "" });
-  const [observationIdentity, setObservationIdentity] = useState<{
-    context: string;
-    data?: McpServerStatusesResult;
-  }>({ context: "" });
   const [applyOutcomes, setApplyOutcomes] = useState<ReadonlyArray<McpSessionReloadOutcome>>();
   const selectedThreadId =
     conversationSelection.context === observationContext
       ? conversationSelection.threadId
       : undefined;
-  const identity =
-    observationIdentity.context === observationContext ? observationIdentity.data : undefined;
   const serverStatusesQuery = useQuery(
     mcpServerStatusesQueryOptions({
       provider: selectedProvider,
       instanceId: selectedInstanceId,
       projectId: selectedProjectId,
       ...(selectedThreadId ? { threadId: selectedThreadId } : {}),
-      ...(identity?.fingerprint ? { fingerprint: identity.fingerprint } : {}),
-      ...(identity?.generation !== undefined ? { generation: identity.generation } : {}),
-      ...(identity?.appliedVersion ? { appliedVersion: identity.appliedVersion } : {}),
       ...(effectiveConfigQuery.data?.effectiveVersion
         ? { desiredVersion: effectiveConfigQuery.data.effectiveVersion }
         : {}),
-      enabled: selectedProject !== null,
+      enabled: selectedProject !== null && Boolean(effectiveConfigQuery.data),
+    }),
+  );
+  const claudeProviderStatusQuery = useQuery(
+    mcpProviderStatusQueryOptions({
+      provider: selectedProvider,
+      instanceId: selectedInstanceId,
+      projectId: selectedProjectId,
+      enabled:
+        selectedProvider === "claudeAgent" &&
+        serverStatusesQuery.data?.source === "configurationCheck",
     }),
   );
   const providerStatusQuery = {
-    data: serverStatusesQuery.data
-      ? {
-          provider: selectedProvider,
-          projectId: selectedProjectId!,
-          support: serverStatusesQuery.data.support,
-          available: serverStatusesQuery.data.support === "supported",
-          authStatus: "unknown" as const,
-          ...(serverStatusesQuery.data.supportMessage
-            ? { supportMessage: serverStatusesQuery.data.supportMessage }
-            : {}),
-        }
-      : undefined,
+    data:
+      selectedProvider === "claudeAgent" &&
+      serverStatusesQuery.data?.source === "configurationCheck"
+        ? claudeProviderStatusQuery.data
+        : serverStatusesQuery.data
+          ? {
+              provider: selectedProvider,
+              projectId: selectedProjectId!,
+              support: serverStatusesQuery.data.support,
+              available: serverStatusesQuery.data.support === "supported",
+              authStatus: "unknown" as const,
+              ...(serverStatusesQuery.data.supportMessage
+                ? { supportMessage: serverStatusesQuery.data.supportMessage }
+                : {}),
+            }
+          : undefined,
     isPending: serverStatusesQuery.isPending,
     error: serverStatusesQuery.error,
   };
   useEffect(() => {
-    const data = serverStatusesQuery.data;
-    if (!data) return;
-    if (data.threadId && !selectedThreadId)
-      setConversationSelection({ context: observationContext, threadId: data.threadId });
-    setObservationIdentity((previous) =>
-      previous.context === observationContext &&
-      previous.data?.fingerprint === data.fingerprint &&
-      previous.data?.generation === data.generation &&
-      previous.data?.appliedVersion === data.appliedVersion
-        ? previous
-        : { context: observationContext, data },
-    );
-  }, [serverStatusesQuery.data, observationContext, selectedThreadId]);
+    if (!selectedThreadId) return;
+    const error = serverStatusesQuery.error;
+    if (
+      error &&
+      /conversation is not running in this project and account|requested conversation is unavailable/i.test(
+        readErrorMessage(error, ""),
+      )
+    )
+      setConversationSelection({ context: observationContext });
+  }, [serverStatusesQuery.error, observationContext, selectedThreadId]);
 
   useEffect(() => {
     if (!selectedProjectId && selectedScope === "project") {
@@ -768,6 +770,24 @@ export function McpServersSettings(props: {
               onToggleEnabled={toggleServerEnabled}
               beginEdit={beginEdit}
               removeServer={removeServer}
+            />
+            <McpObservedGroup
+              group="managed"
+              removedNames={
+                serverStatusesQuery.data?.statuses
+                  .filter(
+                    (status) =>
+                      status.ownership === "managed" &&
+                      !Object.keys(effectiveConfigQuery.data?.servers ?? {}).some(
+                        (name) => mcpServerNameKey(name) === mcpServerNameKey(status.name),
+                      ),
+                  )
+                  .map((status) => status.name) ?? []
+              }
+              observation={serverStatusesQuery.data}
+              projectId={selectedProjectId}
+              provider={selectedProvider}
+              instanceId={selectedInstanceId}
             />
             <McpObservedGroup
               group="built-in"

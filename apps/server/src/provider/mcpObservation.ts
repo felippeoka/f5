@@ -1,3 +1,4 @@
+import { mcpServerNameKey } from "@t3tools/shared/mcpValidation";
 import type { McpObservedServerStatus, McpInspectServerResult } from "@t3tools/contracts";
 
 export interface ObservedMcpServer {
@@ -36,4 +37,18 @@ export function classifyMcpOwnership(
     return "built-in";
   const origin = input.source ?? input.scope;
   return owned.has(input.name) && (!origin || origin === "dynamic") ? "managed" : "external";
+}
+
+/** Codex aliases are accepted only when exactly one owned name matches. Claude names stay exact. */
+export function resolveOwnedMcpServerName(
+  names: ReadonlyArray<string>,
+  requested: string,
+  provider: string,
+): string | undefined {
+  const matches = names.filter((name) =>
+    provider === "codex"
+      ? mcpServerNameKey(name) === mcpServerNameKey(requested)
+      : name === requested,
+  );
+  return matches.length === 1 ? matches[0] : undefined;
 }

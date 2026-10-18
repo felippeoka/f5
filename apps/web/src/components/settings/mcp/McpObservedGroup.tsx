@@ -6,22 +6,33 @@ import type {
 } from "@t3tools/contracts";
 import { useState } from "react";
 import { Button } from "../../ui/button";
-import { McpServerInspector } from "./McpServerInspector";
+import { LazyMcpServerInspector as McpServerInspector } from "./LazyMcpServerInspector";
 
 export function McpObservedGroup(props: {
-  group: "external" | "built-in";
+  group: "external" | "built-in" | "managed";
   observation?: McpServerStatusesResult | undefined;
+  removedNames?: ReadonlyArray<string>;
   projectId: ProjectId | null;
   provider: ProviderKind;
   instanceId: ProviderInstanceId;
 }) {
   const [inspected, setInspected] = useState<string | null>(null);
   const entries =
-    props.observation?.statuses.filter((server) => server.ownership === props.group) ?? [];
+    props.observation?.statuses.filter(
+      (server) =>
+        server.ownership === props.group &&
+        (props.group !== "managed" || props.removedNames?.includes(server.name)),
+    ) ?? [];
   if (!entries.length) return null;
   return (
     <section className="space-y-2">
-      <p className="text-sm font-medium">{props.group === "external" ? "External" : "Built-in"}</p>
+      <p className="text-sm font-medium">
+        {props.group === "external"
+          ? "External"
+          : props.group === "built-in"
+            ? "Built-in"
+            : "Pending removal"}
+      </p>
       {entries.map((entry, index) => (
         <div
           className="space-y-2 rounded-lg border border-border p-3 text-xs"

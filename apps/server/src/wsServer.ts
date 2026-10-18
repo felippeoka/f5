@@ -1,4 +1,3 @@
-import { sanitizeMcpReconnectResult } from "@t3tools/shared/mcpDiagnostics";
 import { setupProjectScript } from "@t3tools/shared/projectScripts";
 import { WorktreePreparations } from "./persistence/Services/WorktreePreparations.ts";
 import { WorktreePreparationsLive } from "./persistence/Layers/WorktreePreparations.ts";
@@ -6417,16 +6416,24 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case WS_METHODS.mcpReconnectServer: {
         const requestBody = stripRequestTag(request.body);
         const body = yield* profileCall(() => resolveMcpAccount(requestBody));
-        const targets = providerService.getMcpReconnectTargets
-          ? yield* providerService
-              .getMcpReconnectTargets(body)
-              .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })))
-          : [];
+        const targetResult =
+          body.provider === "codex" && providerService.getMcpReconnectTargets
+            ? yield* providerService
+                .getMcpReconnectTargets(body)
+                .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })))
+            : { threadIds: [], failures: [] };
+        const targets = targetResult.threadIds;
         const result = yield* mcpRuntimeService
           .reconnectServer(body)
           .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
         if (body.provider === "claudeAgent") return result;
-        if (targets.length === 0) return result;
+        if (targets.length === 0)
+          return yield* mcpRuntimeService
+            .sanitizeReconnectResult(body, {
+              ...result,
+              failures: [...result.failures, ...targetResult.failures],
+            })
+            .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
         const { providerCommandReactor } = yield* awaitOrchestrationRuntimeForRoute;
         const applied = yield* providerCommandReactor
           .applyMcpConfigToLiveSessions({
@@ -6444,11 +6451,8 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           reason: "reloaded",
         });
         const sessions = applied.sessions ?? [];
-        const effective = yield* projectMcpConfigService
-          .readEffectiveStoredConfig(body.projectId)
-          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
-        return sanitizeMcpReconnectResult(
-          {
+        return yield* mcpRuntimeService
+          .sanitizeReconnectResult(body, {
             ...result,
             sessionsMatched: targets.length,
             sessionsReconnected: sessions.filter((session) => session.disposition === "applied")
@@ -6456,6 +6460,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             sessions,
             failures: [
               ...result.failures,
+              ...targetResult.failures,
               ...sessions
                 .filter((session) => session.disposition !== "applied")
                 .map((session) => ({
@@ -6465,9 +6470,8 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
                     session.disposition,
                 })),
             ],
-          },
-          effective.servers,
-        );
+          })
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
       }
 
       case WS_METHODS.mcpStartLogin: {

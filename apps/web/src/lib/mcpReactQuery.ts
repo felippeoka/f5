@@ -1,7 +1,5 @@
 import type {
   McpCodexStatusResult,
-  McpInspectServerRequest,
-  McpInspectServerResult,
   ThreadId,
   McpStatusUpdatedPayload,
   McpCommonConfigResult,
@@ -206,13 +204,23 @@ export function mcpServerStatusesQueryOptions(input: {
         input.instanceId ?? input.binaryPath ?? null,
         input.homePath ?? null,
       ),
-      input.threadId ? "conversation" : "configurationCheck",
+      input.threadId ? "conversation" : "automatic",
       input.fingerprint ?? null,
       input.threadId ?? null,
       input.generation ?? null,
       input.desiredVersion ?? null,
       input.appliedVersion ?? null,
     ],
+    placeholderData: (previous, previousQuery) => {
+      const key = previousQuery?.queryKey;
+      return key?.[2] === input.provider &&
+        key[3] === input.projectId &&
+        key[4] === (input.instanceId ?? input.binaryPath ?? null) &&
+        key[5] === (input.homePath ?? null) &&
+        key[8] === (input.threadId ?? null)
+        ? previous
+        : undefined;
+    },
     enabled: (input.enabled ?? true) && Boolean(input.projectId),
     refetchInterval: (query) => {
       if (!query.state.data?.statuses.some((server) => server.state === "starting")) {
@@ -317,43 +325,6 @@ export function shouldPollMcpRuntime(
     Boolean(data?.statuses.some((server) => server.state === "starting")) &&
     now - startedAt < 30_000
   );
-}
-
-export function mcpInspectServerQueryOptions(
-  input: McpInspectServerRequest & {
-    observation?: McpServerStatusesResult | undefined;
-    enabled?: boolean;
-  },
-) {
-  return queryOptions<McpInspectServerResult>({
-    queryKey: [
-      "mcp",
-      "inspectServer",
-      input.provider,
-      input.projectId,
-      input.instanceId ?? null,
-      input.observation?.source ?? "configurationCheck",
-      input.observation?.fingerprint ?? null,
-      input.threadId ?? input.observation?.threadId ?? null,
-      input.observation?.generation ?? null,
-      input.observation?.desiredVersion ?? null,
-      input.observation?.appliedVersion ?? null,
-      input.serverName,
-      input.ownership ?? "managed",
-    ],
-    enabled: input.enabled ?? true,
-    queryFn: () =>
-      ensureNativeApi().mcp.inspectServer({
-        provider: input.provider,
-        projectId: input.projectId,
-        ...(input.instanceId ? { instanceId: input.instanceId } : {}),
-        serverName: input.serverName,
-        ...(input.ownership ? { ownership: input.ownership } : {}),
-        ...((input.threadId ?? input.observation?.threadId)
-          ? { threadId: input.threadId ?? input.observation?.threadId }
-          : {}),
-      }),
-  });
 }
 
 export function resetMcpRuntimePolling(queryClient: import("@tanstack/react-query").QueryClient) {

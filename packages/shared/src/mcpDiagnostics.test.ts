@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createMcpDiagnosticsSanitizer } from "./mcpDiagnostics";
+import { ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  createMcpDiagnosticsSanitizer,
+  isMcpCredentialKey,
+  sanitizeMcpReconnectResult,
+} from "./mcpDiagnostics";
 
 describe("MCP diagnostics redaction", () => {
   const safe = createMcpDiagnosticsSanitizer({
@@ -40,5 +45,60 @@ describe("MCP diagnostics redaction", () => {
       authorizationUrl: "[redacted]",
     });
     expect(safe.text("Authorization: Bearer abcdefgh")).toBe("Authorization: [redacted]");
+  });
+  it.each([
+    "token",
+    "api_key",
+    "apiKey",
+    "access_token",
+    "accessToken",
+    "password",
+    "cookie",
+    "clientSecret",
+    "x-api-key",
+  ])("redacts %s in JSON and unstructured assignments", (key) => {
+    expect(isMcpCredentialKey(key)).toBe(true);
+    expect(safe.json({ [key]: "sensitive" })).toEqual({ [key]: "[redacted]" });
+    expect(safe.text(`state=failed ${key}=sensitive`)).not.toContain("sensitive");
+    expect(safe.text(`${key}: "sensitive with spaces"`)).not.toContain("sensitive");
+  });
+  it("scrubs bare bearer tokens and does not classify ordinary key suffixes", () => {
+    expect(safe.text("Authentication failed: Bearer xyz_123")).not.toContain("xyz_123");
+    expect(isMcpCredentialKey("monkey")).toBe(false);
+    expect(safe.text("Authorization: Basic encoded-user-password")).toBe(
+      "Authorization: [redacted]",
+    );
+    expect(safe.text("Cookie: session=private; other=private-too")).toBe("Cookie: [redacted]");
+  });
+  it("uses account bearer values for reconnect failures and session errors", () => {
+    const result = sanitizeMcpReconnectResult(
+      {
+        settingsConnectionReloaded: false,
+        sessionsMatched: 0,
+        sessionsReconnected: 0,
+        failures: [{ message: "account-bearer-secret" }],
+        sessions: [
+          {
+            threadId: ThreadId.make("thread"),
+            instanceId: ProviderInstanceId.make("account"),
+            generation: 1,
+            requestedVersion: "saved",
+            attemptedVersion: "saved",
+            disposition: "failed",
+            result: {
+              converged: false,
+              restartRequired: false,
+              errors: [{ message: "account-bearer-secret" }],
+              servers: [
+                { name: "docs", status: "failed", owned: true, error: "account-bearer-secret" },
+              ],
+            },
+          },
+        ],
+      },
+      {},
+      ["account-bearer-secret"],
+    );
+    expect(JSON.stringify(result)).not.toContain("account-bearer-secret");
   });
 });

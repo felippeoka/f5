@@ -102,6 +102,14 @@ export type ProviderResolvedAttachment = ChatAttachment & {
   readonly localPath: string;
 };
 
+/** Server-only identity captured by each emitting session, before asynchronous event queues. */
+export type ProviderAdapterSessionStartInput = ProviderSessionStartInput & {
+  readonly mcpEventIdentity?: {
+    readonly providerInstanceId: import("@t3tools/contracts").ProviderInstanceId;
+    readonly sessionGeneration: number;
+  };
+};
+
 export type ProviderAdapterSendTurnInput = ProviderSendTurnInput & {
   /** Populated by ProviderService; optional for direct adapter harnesses. */
   readonly resolvedAttachments?: ReadonlyArray<ProviderResolvedAttachment>;
@@ -138,7 +146,7 @@ export interface ProviderAdapterShape<TError> {
   ) => Effect.Effect<import("@t3tools/contracts").NativeFileRewindPreview, TError>;
   readonly stopBackgroundTask?: (threadId: ThreadId, taskId: string) => Effect.Effect<void, TError>;
   readonly startSession: (
-    input: ProviderSessionStartInput,
+    input: ProviderAdapterSessionStartInput,
   ) => Effect.Effect<ProviderSession, TError>;
 
   /**

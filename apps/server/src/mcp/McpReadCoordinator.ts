@@ -1,7 +1,10 @@
-/** No TTL cache. Uncancellable reads retain their slot and identity until settlement. */
+/** No TTL cache. Uncancellable reads retain their slot and identity until settlement.
+ * Claude can occupy two slots; two remain available to cancellable Codex reads.
+ */
 export class McpReadCoordinator {
   private readonly reads = new Map<string, Promise<unknown>>();
   private active = 0;
+  private claudeActive = 0;
   private tracked = 0;
   private readonly controllers = new Set<AbortController>();
   private disposed = false;
@@ -10,6 +13,7 @@ export class McpReadCoordinator {
     key: string,
     start: (signal: AbortSignal, deadline: number) => Promise<T>,
     timeoutMs = 10_000,
+    group?: "claude",
   ): Promise<T> {
     if (this.disposed || this.tracked >= 64)
       return Promise.reject(
@@ -17,7 +21,12 @@ export class McpReadCoordinator {
       );
     const existing = this.reads.get(key) as Promise<T> | undefined;
     if (existing) return this.withDeadline(existing, timeoutMs);
-    if (this.disposed || this.active >= 4 || this.reads.size >= 64)
+    if (
+      this.disposed ||
+      this.active >= 4 ||
+      this.reads.size >= 64 ||
+      (group === "claude" && this.claudeActive >= 2)
+    )
       return Promise.reject(
         new Error("MCP reads are temporarily unavailable. Try Refresh shortly."),
       );
@@ -26,6 +35,7 @@ export class McpReadCoordinator {
     const deadline = Date.now() + 9_900;
     const timer = setTimeout(() => controller.abort(), 10_000);
     this.active++;
+    if (group === "claude") this.claudeActive++;
     const pending = Promise.resolve()
       .then(() => {
         if (this.disposed || controller.signal.aborted)
@@ -40,6 +50,7 @@ export class McpReadCoordinator {
         clearTimeout(timer);
         this.controllers.delete(controller);
         this.active--;
+        if (group === "claude") this.claudeActive--;
         this.reads.delete(key);
       });
     this.reads.set(key, pending);

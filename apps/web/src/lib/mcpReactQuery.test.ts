@@ -1,11 +1,7 @@
+import { mcpInspectServerQueryOptions } from "./mcpInspectionReactQuery";
 import { describe, expect, it } from "vitest";
 import { ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
-import {
-  isMcpQueryAffected,
-  mcpQueryKeys,
-  mcpInspectServerQueryOptions,
-  shouldPollMcpRuntime,
-} from "./mcpReactQuery";
+import { isMcpQueryAffected, mcpQueryKeys, shouldPollMcpRuntime } from "./mcpReactQuery";
 
 describe("MCP status event scoping", () => {
   it("invalidates only the named account when an instance is stamped", () => {

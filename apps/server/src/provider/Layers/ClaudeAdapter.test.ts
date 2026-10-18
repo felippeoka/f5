@@ -13040,10 +13040,22 @@ it.effect("emits owned Claude MCP status and tool-count changes from one singlet
     ).pipe(Effect.forkChild);
     yield* adapter.startSession({
       threadId: THREAD_ID,
+      mcpEventIdentity: {
+        providerInstanceId: ProviderInstanceId.make("claude-review"),
+        sessionGeneration: 7,
+      },
       runtimeMode: "full-access",
       providerOptions: { mcpServers: { docs: { type: "stdio", command: "node" } } },
     });
     yield* Effect.promise(() => vi.waitFor(() => assert.equal(events.length, 1)));
+    assert.ok(
+      events.every(
+        (event) =>
+          event.type === "mcp.status.updated" &&
+          event.payload.status.providerInstanceId === "claude-review" &&
+          event.payload.status.sessionGeneration === 7,
+      ),
+    );
     harness.query.mcpServerStatusValue[0]!.tools = [{ name: "one" }, { name: "two" }];
     yield* TestClock.adjust("1 second");
     yield* Effect.promise(() => vi.waitFor(() => assert.equal(events.length, 2)));

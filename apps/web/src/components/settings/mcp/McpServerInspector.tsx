@@ -7,7 +7,8 @@ import type {
 } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { mcpInspectServerQueryOptions, mcpQueryKeys } from "../../../lib/mcpReactQuery";
+import { mcpQueryKeys } from "../../../lib/mcpReactQuery";
+import { mcpInspectServerQueryOptions } from "../../../lib/mcpInspectionReactQuery";
 import { ensureNativeApi } from "../../../nativeApi";
 import { useCopyToClipboard } from "../../../hooks/useCopyToClipboard";
 import { Button } from "../../ui/button";
@@ -23,6 +24,7 @@ export function McpServerInspector(props: {
   ownership?: "managed" | "external" | "built-in";
   observation?: McpServerStatusesResult | undefined;
   outcomes?: ReadonlyArray<McpSessionReloadOutcome> | undefined;
+  outcomeAction?: "apply" | "reconnect";
 }) {
   const [tab, setTab] = useState<InspectorTab>("Overview");
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -94,6 +96,9 @@ export function McpServerInspector(props: {
                 Saved version: {data.desiredVersion ?? "unknown"} · Applied version:{" "}
                 {data.appliedVersion ?? "not a conversation"}
               </p>
+              {props.provider === "codex" && (props.ownership ?? "managed") === "managed" ? (
+                <p>Reconnect reloads all MCP servers in each affected Codex conversation.</p>
+              ) : null}
               {status?.message ? (
                 <p className="whitespace-pre-wrap break-words">{status.message}</p>
               ) : null}
@@ -236,14 +241,22 @@ export function McpServerInspector(props: {
               onClick={() => {
                 setRetrying(true);
                 setRetryError(null);
-                void ensureNativeApi()
-                  .mcp.applyToLiveSessions({
-                    scope: "project",
-                    projectId: props.projectId,
-                    instanceId: props.instanceId,
-                    threadIds: [outcome.threadId],
-                    retryUnchanged: true,
-                  })
+                const retry =
+                  props.outcomeAction === "reconnect"
+                    ? ensureNativeApi().mcp.reconnectServer({
+                        projectId: props.projectId,
+                        instanceId: props.instanceId,
+                        serverName: props.serverName,
+                        threadIds: [outcome.threadId],
+                      })
+                    : ensureNativeApi().mcp.applyToLiveSessions({
+                        scope: "project",
+                        projectId: props.projectId,
+                        instanceId: props.instanceId,
+                        threadIds: [outcome.threadId],
+                        retryUnchanged: true,
+                      });
+                void retry
                   .then((result) => {
                     setRetryOutcomes(result.sessions);
                     return queryClient.invalidateQueries({ queryKey: mcpQueryKeys.all });

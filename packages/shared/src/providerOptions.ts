@@ -1,4 +1,3 @@
-import { normalizeServerName } from "./mcpValidation";
 import { McpProjectServersConfig as McpServersSchema } from "@t3tools/contracts";
 import { Schema } from "effect";
 import type {
@@ -8,7 +7,7 @@ import type {
   ProviderModelOptions,
   ProviderStartOptions,
 } from "@t3tools/contracts";
-import { normalizeOptionalString } from "./mcpNormalization";
+import { normalizeOptionalString, normalizeServerName } from "./mcpNormalization";
 import { canonicalizeClaudeLaunchArgs } from "./cliArgs";
 function normalizeThinkingDisplay(value: unknown): "summarized" | "omitted" | undefined {
   return value === "summarized" || value === "omitted" ? value : undefined;

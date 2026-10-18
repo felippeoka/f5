@@ -105,6 +105,7 @@ export async function readCodexServerStatusPages(
   const context = client.getMcpObservationContext?.();
   const pages = await readBoundedPages<CodexControlMcpServerStatus>({
     label: "mcpServerStatus/list",
+    allowMissingCursor: true,
     maxItems: 1000,
     maxPageItems: 100,
     initialFailureIsPartial: true,

@@ -1,5 +1,5 @@
 import type { McpServerStatusEntry, McpProjectServersConfig } from "@t3tools/contracts";
-import { createMcpDiagnosticsSanitizer } from "@t3tools/shared/mcpDiagnostics";
+import { createMcpDiagnosticsSanitizer, isMcpCredentialKey } from "@t3tools/shared/mcpDiagnostics";
 import { mcpServerNameKey } from "@t3tools/shared/mcpValidation";
 import type { McpAdapterObservation, ObservedMcpServer } from "../provider/mcpObservation.ts";
 import { CODEX_SSE_TRANSPORT_HINT } from "@t3tools/shared/mcpTranslation";
@@ -90,7 +90,23 @@ export function projectMcpStatuses(
   });
   return [
     ...results,
-    ...(observation?.servers.filter((server) => server.ownership !== "managed").map(entry) ?? []),
+    ...(observation?.servers
+      .filter(
+        (server) =>
+          server.ownership !== "managed" ||
+          !Object.keys(servers).some(
+            (name) => mcpServerNameKey(name) === mcpServerNameKey(server.name),
+          ),
+      )
+      .map((server) =>
+        server.ownership === "managed"
+          ? {
+              ...entry(server),
+              desiredEnabled: false,
+              message: `Removed from saved configuration; ${server.status === "connected" ? "still connected" : server.status} in this conversation; removal pending. Apply the saved configuration.${server.error ? ` ${sanitizer.text(server.error)}` : ""}`,
+            }
+          : entry(server),
+      ) ?? []),
   ];
 }
 
@@ -146,9 +162,7 @@ export function boundMcpObservation(
             omitted = true;
             break;
           }
-          result[key] = /authorization|(?:-token|-key|secret)$|authorizationUrl/i.test(key)
-            ? "[redacted]"
-            : visit(child, depth + 1);
+          result[key] = isMcpCredentialKey(key) ? "[redacted]" : visit(child, depth + 1);
         }
         return result;
       }

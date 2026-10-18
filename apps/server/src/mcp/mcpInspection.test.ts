@@ -15,6 +15,46 @@ const observation = (
 const config = { docs: { type: "stdio" as const, command: "node" } };
 
 describe("MCP observations", () => {
+  it("keeps a removed managed server visible until the live connection is removed", () => {
+    const statuses = projectMcpStatuses(
+      {},
+      observation([{ name: "docs", status: "connected", ownership: "managed" }]),
+      "claudeAgent",
+    );
+    expect(statuses).toHaveLength(1);
+    expect(statuses[0]).toMatchObject({
+      name: "docs",
+      state: "ready",
+      desiredEnabled: false,
+      ownership: "managed",
+    });
+    expect(statuses[0]?.message).toContain("removal pending");
+  });
+  it("uses the shared credential classifier for schemas and annotations", () => {
+    const credentials = {
+      token: "bare",
+      api_key: "underscored",
+      apiKey: "camel",
+      accessToken: "access",
+      password: "pw",
+      cookie: "cookie-value",
+    };
+    const result = boundMcpObservation(
+      observation([
+        {
+          name: "docs",
+          status: "connected",
+          tools: [{ name: "ping", inputSchema: credentials, annotations: credentials }],
+        },
+      ]),
+      {},
+    );
+    const redacted = Object.fromEntries(Object.keys(credentials).map((key) => [key, "[redacted]"]));
+    expect(result.servers[0]?.tools?.[0]).toMatchObject({
+      inputSchema: redacted,
+      annotations: redacted,
+    });
+  });
   it("keeps saved disabled state separate from a live connection", () => {
     const statuses = projectMcpStatuses(
       { docs: { ...config.docs, enabled: false } },

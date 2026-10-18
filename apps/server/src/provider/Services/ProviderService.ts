@@ -238,7 +238,13 @@ export interface ProviderServiceShape {
     input: import("@t3tools/contracts").McpReconnectServerRequest & {
       readonly provider: ProviderKind;
     },
-  ) => Effect.Effect<ReadonlyArray<ThreadId>, ProviderServiceError>;
+  ) => Effect.Effect<
+    {
+      threadIds: ReadonlyArray<ThreadId>;
+      failures: ReadonlyArray<{ threadId: ThreadId; message: string }>;
+    },
+    ProviderServiceError
+  >;
   readonly reconnectMcpServerForProject?: (
     input: import("@t3tools/contracts").McpReconnectServerRequest & {
       readonly provider: ProviderKind;

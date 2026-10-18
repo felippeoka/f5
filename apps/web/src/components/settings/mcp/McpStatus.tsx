@@ -31,8 +31,6 @@ export function McpProviderStatusBadge({
   }
 
   if (source === "conversation") return <Badge variant="info">Live conversation</Badge>;
-  if (source === "configurationCheck" && provider === "claudeAgent")
-    return <Badge variant="outline">Configured</Badge>;
   switch (provider) {
     case "claudeAgent":
       if (!status.available) {
@@ -44,7 +42,7 @@ export function McpProviderStatusBadge({
       if (status.authStatus === "unauthenticated") {
         return <Badge variant="warning">Login required</Badge>;
       }
-      return <Badge variant="outline">Unknown</Badge>;
+      return <Badge variant="outline">Configured</Badge>;
     case "codex":
       if (status.support === "supported") {
         return <Badge variant="success">Control ready</Badge>;

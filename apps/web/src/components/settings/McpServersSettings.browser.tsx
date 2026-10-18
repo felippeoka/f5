@@ -6,6 +6,8 @@ import type {
   McpLoginStatusResult,
   McpProjectConfigResult,
   McpServerStatusesResult,
+  McpReconnectServerResult,
+  McpProviderStatusResult,
   NativeApi,
   ProjectId,
 } from "@t3tools/contracts";
@@ -83,7 +85,13 @@ function createNativeApiMock() {
   const getProjectConfig = vi.fn(async () => projectConfig);
   const getEffectiveConfig = vi.fn(async () => effectiveConfig);
   const getProviderStatus = vi.fn(
-    async ({ provider, projectId }: { provider: "codex" | "claudeAgent"; projectId: ProjectId }) =>
+    async ({
+      provider,
+      projectId,
+    }: {
+      provider: "codex" | "claudeAgent";
+      projectId: ProjectId;
+    }): Promise<McpProviderStatusResult> =>
       provider === "codex"
         ? {
             provider,
@@ -152,12 +160,14 @@ function createNativeApiMock() {
       status: "idle" as const,
     }),
   );
-  const reconnectServer = vi.fn(async () => ({
-    settingsConnectionReloaded: false,
-    sessionsMatched: 1,
-    sessionsReconnected: 1,
-    failures: [],
-  }));
+  const reconnectServer = vi.fn(
+    async (): Promise<McpReconnectServerResult> => ({
+      settingsConnectionReloaded: false,
+      sessionsMatched: 1,
+      sessionsReconnected: 1,
+      failures: [],
+    }),
+  );
   const inspectServer = vi.fn(async (input: Parameters<NativeApi["mcp"]["inspectServer"]>[0]) => ({
     ...(await getServerStatuses({
       provider: input.provider as "codex",
@@ -989,6 +999,172 @@ describe("McpServersSettings", () => {
       await screen.unmount();
     }
   });
+});
+
+it("keeps automatic selection automatic and recovers after an explicitly selected conversation stops", async () => {
+  const mocks = createNativeApiMock();
+  const first = ThreadId.make("first-running"),
+    second = ThreadId.make("second-running");
+  let live = [first, second];
+  mocks.getServerStatuses.mockImplementation(async (input) => {
+    const requested = (input as { threadId?: ThreadId }).threadId;
+    if (requested && !live.includes(requested))
+      throw new Error("The conversation is not running in this project and account.");
+    const threadId = requested ?? live[0];
+    return {
+      provider: input.provider,
+      projectId: PROJECT_ID,
+      support: "supported",
+      source: threadId ? "conversation" : "configurationCheck",
+      ...(threadId ? { threadId } : {}),
+      generation: 1,
+      appliedVersion: "saved",
+      fingerprint: "execution",
+      statuses: [],
+      sessions: live.map((id) => ({
+        threadId: id,
+        instanceId: ProviderInstanceId.make("codex"),
+        generation: 1,
+        lastSeenAt: "2026-10-18T10:00:00Z",
+        busy: false,
+      })),
+    };
+  });
+  noteWsConnectionOpened();
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain("Observed in first-running"),
+    );
+    expect(mocks.getServerStatuses).toHaveBeenCalledTimes(1);
+    expect(
+      (document.querySelector('[aria-label="Observed conversation"]') as HTMLSelectElement).value,
+    ).toBe("");
+    live = [second];
+    await page.getByRole("button", { name: "Refresh status", exact: true }).click();
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain("Observed in second-running"),
+    );
+    expect(
+      mocks.getServerStatuses.mock.calls.every(
+        ([input]) => !(input as { threadId?: string }).threadId,
+      ),
+    ).toBe(true);
+    await page.getByRole("combobox", { name: "Observed conversation" }).selectOptions(second);
+    await vi.waitFor(() =>
+      expect(
+        mocks.getServerStatuses.mock.calls.some(
+          ([input]) => (input as { threadId?: string }).threadId === second,
+        ),
+      ).toBe(true),
+    );
+    live = [];
+    await page.getByRole("button", { name: "Refresh status", exact: true }).click();
+    await vi.waitFor(() =>
+      expect(
+        (document.querySelector('[aria-label="Observed conversation"]') as HTMLSelectElement).value,
+      ).toBe(""),
+    );
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Configuration check"));
+    expect(document.body.textContent).not.toContain("not running in this project");
+  } finally {
+    screen.unmount();
+    queryClient.clear();
+  }
+});
+
+it("retries a failed reconnect with targeted Reconnect rather than Apply", async () => {
+  const mocks = createNativeApiMock();
+  const threadId = ThreadId.make("reconnect-thread");
+  mocks.reconnectServer.mockResolvedValue({
+    settingsConnectionReloaded: false,
+    sessionsMatched: 1,
+    sessionsReconnected: 0,
+    failures: [{ threadId, message: "fixture failure" }],
+    sessions: [
+      {
+        threadId,
+        instanceId: ProviderInstanceId.make("codex"),
+        generation: 1,
+        requestedVersion: "saved",
+        attemptedVersion: "saved",
+        disposition: "failed",
+        result: {
+          converged: false,
+          restartRequired: false,
+          servers: [],
+          errors: [{ message: "fixture failure" }],
+        },
+      },
+    ],
+  });
+  mocks.getServerStatuses.mockResolvedValue({
+    provider: "codex",
+    projectId: PROJECT_ID,
+    support: "supported",
+    statuses: [
+      {
+        name: "project-server",
+        state: "failed",
+        authStatus: "unknown",
+        toolCount: 0,
+        resourceCount: 0,
+        resourceTemplateCount: 0,
+      },
+    ],
+  });
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("button", { name: "Reconnect", exact: true }).click();
+    await vi.waitFor(() => expect(mocks.reconnectServer).toHaveBeenCalledTimes(1));
+    await page.getByRole("button", { name: "Inspect", exact: true }).click();
+    await page.getByRole("button", { name: "Retry in this conversation", exact: true }).click();
+    await vi.waitFor(() =>
+      expect(mocks.reconnectServer).toHaveBeenCalledWith({
+        projectId: PROJECT_ID,
+        instanceId: "codex",
+        serverName: "project-server",
+        threadIds: [threadId],
+      }),
+    );
+    expect(mocks.applyToLiveSessions).not.toHaveBeenCalled();
+  } finally {
+    screen.unmount();
+    queryClient.clear();
+  }
+});
+
+it("shows Claude CLI preflight failures without starting a conversation", async () => {
+  const mocks = createNativeApiMock();
+  mocks.getServerStatuses.mockImplementation(async (input) => ({
+    provider: input.provider,
+    projectId: PROJECT_ID,
+    source: "configurationCheck",
+    support: "supported",
+    statuses: [],
+  }));
+  mocks.getProviderStatus.mockResolvedValue({
+    provider: "claudeAgent",
+    projectId: PROJECT_ID,
+    support: "unavailable",
+    available: false,
+    authStatus: "unknown",
+    supportMessage: "Claude CLI is not installed.",
+  });
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("button", { name: "Claude", exact: true }).click();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Unavailable"));
+    expect(document.body.textContent).toContain("Claude CLI is not installed.");
+    expect(mocks.getProviderStatus).toHaveBeenCalledWith({
+      provider: "claudeAgent",
+      projectId: PROJECT_ID,
+      instanceId: "claudeAgent",
+    });
+  } finally {
+    screen.unmount();
+    queryClient.clear();
+  }
 });
 
 it("observes only the selected conversation, refreshes on runtime push, and loads inspector data lazily", async () => {

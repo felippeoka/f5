@@ -2172,6 +2172,16 @@ function mapToRuntimeEvents(
           status: {
             name,
             status,
+            ...(typeof payload?.sessionGeneration === "number"
+              ? { sessionGeneration: payload.sessionGeneration }
+              : {}),
+            ...(asString(payload?.providerInstanceId)
+              ? {
+                  providerInstanceId: ProviderInstanceId.makeUnsafe(
+                    asString(payload?.providerInstanceId)!,
+                  ),
+                }
+              : {}),
             ...(asString(payload?.error) ? { error: asString(payload?.error) } : {}),
           },
         },
@@ -2612,6 +2622,7 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
             })
           : {};
         const managerInput: CodexAppServerStartSessionInput = {
+          ...(input.mcpEventIdentity ? { mcpEventIdentity: input.mcpEventIdentity } : {}),
           threadId: input.threadId,
           provider: "codex",
           ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),

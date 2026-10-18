@@ -35,6 +35,7 @@ import {
 import { McpRuntimeDiagnostics } from "./McpRuntimeDiagnostics.ts";
 import { McpRuntimeService, McpRuntimeServiceLive } from "./McpRuntimeService.ts";
 import { ProjectMcpConfigService } from "./ProjectMcpConfigService.ts";
+import { ProviderAdapterRequestError } from "../provider/Errors.ts";
 
 // The spawner is simulated, so command discovery must not depend on installed CLIs.
 vi.mock("../spawn/resolveCommand.ts", async (importOriginal) => ({
@@ -1033,3 +1034,49 @@ it.effect("keeps external same-name tool metadata out of the managed inspector",
     ),
   );
 });
+
+it.effect(
+  "scrubs account bearer environment values from observation errors and reconnect results",
+  () => {
+    vi.stubEnv("F5_MCP_REVIEW_BEARER", "account-bearer-review-value");
+    return Effect.gen(function* () {
+      const runtime = yield* McpRuntimeService;
+      const input = { projectId, provider: "claudeAgent" as const };
+      const error = yield* runtime.getServerStatuses(input).pipe(Effect.flip);
+      assert.notInclude(error.message, "account-bearer-review-value");
+      assert.include(error.message, "[redacted]");
+      const result = yield* runtime.reconnectServer({ ...input, serverName: "docs" });
+      assert.notInclude(JSON.stringify(result), "account-bearer-review-value");
+    }).pipe(
+      Effect.provide(
+        makeRuntimeLayer({
+          servers: {
+            docs: {
+              type: "http",
+              url: "https://example.test",
+              bearerTokenEnvVar: "F5_MCP_REVIEW_BEARER",
+            },
+          },
+          providerService: {
+            readMcpSessionStatuses: () =>
+              Effect.fail(
+                new ProviderAdapterRequestError({
+                  provider: "claudeAgent",
+                  method: "mcpServerStatus",
+                  detail: "failed using account-bearer-review-value",
+                }),
+              ),
+            reconnectMcpServerForProject: () =>
+              Effect.succeed({
+                settingsConnectionReloaded: false,
+                sessionsMatched: 1,
+                sessionsReconnected: 0,
+                failures: [{ message: "failed using account-bearer-review-value" }],
+              }),
+          },
+        }),
+      ),
+      Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
+    );
+  },
+);

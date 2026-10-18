@@ -1,3 +1,10 @@
+import { normalizeServerName, mcpServerNameKey } from "./mcpNormalization";
+export {
+  MAX_SERVER_NAME_LENGTH,
+  normalizeServerName,
+  mcpServerNameKey,
+  trimToUndefined,
+} from "./mcpNormalization";
 import {
   McpServerWriteDefinition,
   type McpConfigIssue,
@@ -12,22 +19,6 @@ export const MCP_EFFECTIVE_SERVER_LIMIT = 32;
 export const MCP_INTERNAL_SERVER_RESERVE = 4;
 export const MCP_RUNTIME_SERVER_LIMIT = MCP_EFFECTIVE_SERVER_LIMIT + MCP_INTERNAL_SERVER_RESERVE;
 export const MAX_SERVER_COUNT = MCP_SERVERS_PER_SCOPE;
-export const MAX_SERVER_NAME_LENGTH = 128;
-
-export function trimToUndefined(value: string | null | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-export function mcpServerNameKey(name: string): string {
-  return name.trim().toLowerCase();
-}
-
-export function normalizeServerName(name: string): string | undefined {
-  const trimmed = trimToUndefined(name);
-  return trimmed && trimmed.length <= MAX_SERVER_NAME_LENGTH ? trimmed : undefined;
-}
-
 // Normalization must never discard legacy entries or rewrite their values.
 export function normalizeMcpServersRecord(
   value: McpProjectServersConfig | null | undefined,

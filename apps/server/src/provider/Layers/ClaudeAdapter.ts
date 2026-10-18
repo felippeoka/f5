@@ -1,3 +1,4 @@
+import type { ProviderAdapterSessionStartInput } from "../Services/ProviderAdapter.ts";
 import { classifyMcpOwnership } from "../mcpObservation.ts";
 import { mcpProviderReads, mcpContextKey } from "../../mcp/McpReadCoordinator.ts";
 import {
@@ -403,7 +404,7 @@ interface ClaudeSessionContext {
     string,
     { operationId: string; settlement?: Deferred.Deferred<unknown, ProviderAdapterRequestError> }
   >;
-  readonly startInput: ProviderSessionStartInput;
+  readonly startInput: ProviderAdapterSessionStartInput;
   readonly turnBoundaries: Array<import("../claudeResumeState.ts").ClaudeTurnBoundary>;
   latestUsage?: Record<string, unknown> | undefined;
   requestedRuntime?: Record<string, unknown>;
@@ -802,7 +803,7 @@ type ClaudeResumeSettlement =
 // Bounds how long the first turn after a resume waits for the CLI to confirm
 // the saved conversation. On timeout the send is reported as before.
 const DEFAULT_CLAUDE_RESUME_CONFIRMATION_TIMEOUT_MS = 20_000;
-/** One status read per second for up to 15 s after init. */
+/** One status read per second for up to 30 s after init. */
 const AGENT_BROWSER_STATUS_POLL_ATTEMPTS = 30;
 
 const CLAUDE_MISSING_SESSION_PATTERNS = [
@@ -2504,7 +2505,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
 
     /**
      * After init: verify the preview server's `sdk` provenance once, then poll
-     * Claude in Chrome's connection (1 s, up to 15 s) until nothing is pending.
+     * Claude in Chrome's connection (1 s, up to 30 s) until nothing is pending.
      * Re-emits `session.configured` only when the reported state changes.
      */
     const readMcpStatus = async (context: ClaudeSessionContext) => {
@@ -2515,6 +2516,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         "claude:" + mcpContextKey(query),
         async () => ({ statuses: await query.mcpServerStatus!(), epoch }),
         5_000,
+        "claude",
       );
       if (
         context.stopped ||
@@ -2567,6 +2569,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               status: {
                 name: server.name,
                 status,
+                ...context.startInput.mcpEventIdentity,
                 ...(server.error ? { error: server.error } : {}),
                 ...(toolCount !== undefined ? { toolCount } : {}),
               },

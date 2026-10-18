@@ -1,5 +1,5 @@
 import { reconnectMcpServer } from "./mcpActions";
-import { McpServerInspector } from "./McpServerInspector";
+import { LazyMcpServerInspector as McpServerInspector } from "./LazyMcpServerInspector";
 import type {
   ProviderKind,
   ProviderInstanceId,
@@ -185,6 +185,11 @@ export function McpServerRow(props: {
                   size="xs"
                   variant="outline"
                   disabled={reconnecting}
+                  title={
+                    isCodexProvider
+                      ? "Reloads MCP connections for every server in the affected Codex sessions."
+                      : undefined
+                  }
                   onClick={() => {
                     setReconnecting(true);
                     setLoginError(null);
@@ -250,6 +255,7 @@ export function McpServerRow(props: {
           serverName={props.name}
           observation={props.observation}
           outcomes={reconnectOutcomes ?? props.outcomes}
+          outcomeAction={reconnectOutcomes ? "reconnect" : "apply"}
         />
       ) : null}
       {props.serverStatus?.message ? (

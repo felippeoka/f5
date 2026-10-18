@@ -4361,3 +4361,29 @@ describe("session catalog paging and effective fallback", () => {
     },
   );
 });
+
+it("stamps MCP startup notifications from their emitting Codex context", () => {
+  const { manager, context } = createSendTurnHarness();
+  const emitting = {
+    ...context,
+    mcpEventIdentity: { providerInstanceId: "old-account", sessionGeneration: 1 },
+  };
+  const managerInternals = manager as unknown as {
+    sessions: Map<string, unknown>;
+    handleServerNotification: (context: unknown, notification: unknown) => void;
+  };
+  managerInternals.sessions.set(context.session.threadId, {
+    ...context,
+    mcpEventIdentity: { providerInstanceId: "new-account", sessionGeneration: 2 },
+  });
+  const events: ProviderEvent[] = [];
+  manager.on("event", (event) => events.push(event));
+  managerInternals.handleServerNotification(emitting, {
+    method: "mcpServer/startupStatus/updated",
+    params: { name: "docs", status: "ready" },
+  });
+  expect(events[0]?.payload).toMatchObject({
+    providerInstanceId: "old-account",
+    sessionGeneration: 1,
+  });
+});

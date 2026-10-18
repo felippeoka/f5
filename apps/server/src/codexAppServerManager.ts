@@ -1,3 +1,4 @@
+import type { ProviderAdapterSessionStartInput } from "./provider/Services/ProviderAdapter.ts";
 import { readBoundedPages } from "./codex/readBoundedPages.ts";
 import {
   mergeCodexMcpStartupStatuses,
@@ -148,6 +149,7 @@ interface CodexUserInputAnswer {
 }
 
 interface CodexSessionContext {
+  mcpEventIdentity?: ProviderAdapterSessionStartInput["mcpEventIdentity"];
   session: ProviderSession;
   mcpStartupStatuses?: Map<string, CodexControlMcpServerStatus>;
   mcpObservationContext?: object;
@@ -282,6 +284,7 @@ export interface CodexAppServerSendTurnInput {
 }
 
 export interface CodexAppServerStartSessionInput {
+  readonly mcpEventIdentity?: ProviderAdapterSessionStartInput["mcpEventIdentity"];
   readonly effectiveModelCapabilities?: ReadonlyMap<string, ModelCapabilities>;
   readonly threadId: ThreadId;
   readonly provider?: "codex";
@@ -1190,6 +1193,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
       context = {
         session,
+        ...(input.mcpEventIdentity ? { mcpEventIdentity: input.mcpEventIdentity } : {}),
         account: {
           type: "unknown",
           planType: null,
@@ -2808,6 +2812,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     const observationContext = this.getMcpObservationContext(threadId);
     const result = await readBoundedPages<CodexControlMcpServerStatus>({
       label: "mcpServerStatus/list",
+      allowMissingCursor: true,
       maxItems: 1000,
       maxPageItems: 100,
       initialFailureIsPartial: true,
@@ -3244,7 +3249,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
                 id: context.nativeReviewTurnId,
               },
             }
-          : notification.params,
+          : notification.method === "mcpServer/startupStatus/updated"
+            ? { ...asObject(notification.params), ...context.mcpEventIdentity }
+            : notification.params,
     });
 
     if (notification.method === "thread/started") {

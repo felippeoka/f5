@@ -1,7 +1,10 @@
 import type { McpProjectServersConfig } from "@t3tools/contracts";
 
-const credentialKey =
-  /(?:authorization|(?:^|[-_])(?:token|key)$|secret$|authorizationUrl|bearer_token)/i;
+/** Covers header names and common bare, snake_case, and camelCase credential fields. */
+export function isMcpCredentialKey(key: string): boolean {
+  const normalized = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2");
+  return /authorization|secret$|(?:^|[-_])(?:token|key|secret|password|cookie)$/i.test(normalized);
+}
 
 /** Supplemental value scrubbing; transformed credentials cannot be guaranteed to match. */
 export function createMcpDiagnosticsSanitizer(
@@ -37,9 +40,14 @@ export function createMcpDiagnosticsSanitizer(
     });
     return result
       .replace(
-        /\b(authorization|[\w-]+(?:-token|-key|secret))\s*[:=]\s*[^\r\n,;}]+/gi,
+        /\b(authorization|(?:set-)?cookie)["']?\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\r\n]+)/gi,
         "$1: [redacted]",
       )
+      .replace(
+        /\b([\w-]+)["']?\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|(?:Bearer\s+)?[^\s,;}]+)/gi,
+        (match, key: string) => (isMcpCredentialKey(key) ? `${key}: [redacted]` : match),
+      )
+      .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
       .slice(0, 8192);
   };
   const json = (value: unknown, depth = 0): unknown => {
@@ -53,7 +61,7 @@ export function createMcpDiagnosticsSanitizer(
           .slice(0, 1000)
           .map(([key, child]) => [
             key,
-            credentialKey.test(key) ? "[redacted]" : json(child, depth + 1),
+            isMcpCredentialKey(key) ? "[redacted]" : json(child, depth + 1),
           ]),
       );
     return null;
@@ -64,8 +72,9 @@ export function createMcpDiagnosticsSanitizer(
 export function sanitizeMcpReconnectResult(
   result: import("@t3tools/contracts").McpReconnectServerResult,
   servers: McpProjectServersConfig,
+  additionalValues: ReadonlyArray<string> = [],
 ) {
-  const sanitizer = createMcpDiagnosticsSanitizer(servers);
+  const sanitizer = createMcpDiagnosticsSanitizer(servers, additionalValues);
   return {
     ...result,
     failures: result.failures
@@ -77,6 +86,10 @@ export function sanitizeMcpReconnectResult(
             ...session,
             result: {
               ...session.result,
+              servers: session.result.servers.slice(0, 1000).map((server) => ({
+                ...server,
+                ...(server.error ? { error: sanitizer.text(server.error).slice(0, 2000) } : {}),
+              })),
               errors: session.result.errors.slice(0, 1000).map((error) => ({
                 ...error,
                 message: sanitizer.text(error.message).slice(0, 2000),
