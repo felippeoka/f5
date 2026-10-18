@@ -1,3 +1,4 @@
+import { WorktreePreparations } from "../../persistence/Services/WorktreePreparations.ts";
 import { WorktreePreparation } from "../Services/WorktreePreparation.ts";
 import { makeWorktreePreparationService } from "./WorktreePreparation.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
@@ -43,7 +44,7 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
         manager: Effect.Success<typeof makeWorktreeManager>,
         root: string,
         gate: typeof WorktreeSetupGate.Service,
-      ) => Effect.Effect<A, E>,
+      ) => Effect.Effect<A, E, GitCore | WorktreePreparations>,
       overrides: Partial<GitCoreShape> = {},
       hooks: {
         beforeStop?: () => Effect.Effect<void>;
@@ -355,6 +356,80 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
     );
   });
 
+  it("recovers an orphaned preparation token on an existing checkout and resumes its setup pause", async () => {
+    const { repo, world, run, notified } = await fixture();
+    const threadId = ThreadId.makeUnsafe("orphan-preparation");
+    await run((manager, root) =>
+      Effect.gen(function* () {
+        const target = path.join(root, "orphan-preparation");
+        git(repo.root, "worktree", "add", "-q", "-b", "orphan-preparation", target, "main");
+        world.threads.push(
+          thread({
+            id: threadId,
+            projectId: "p",
+            branch: "orphan-preparation",
+            worktreePath: target,
+          }),
+        );
+        world.queueStates.set(threadId, {
+          revision: 5,
+          paused: true,
+          pauseReasonCode: "worktree_setup_failed",
+          worktreeBlockToken: "preparation:interrupted",
+        });
+        expect((yield* manager.threadState({ threadId })).recovery).toBe("interrupted");
+        const recovered = yield* manager.recover({
+          threadId,
+          action: "recreate",
+          expectedQueueRevision: 5,
+        });
+        expect(recovered.recovery).toBe("none");
+        expect(world.queueStates.get(threadId)?.paused).toBe(false);
+        expect(notified).toContain(threadId);
+      }),
+    );
+  });
+
+  it("exposes and retries an indeterminate async preparation after its queue token was cleared", async () => {
+    const { repo, world, run } = await fixture();
+    const threadId = ThreadId.makeUnsafe("async-restart");
+    await run((manager, root) =>
+      Effect.gen(function* () {
+        const gitCore = yield* GitCore;
+        const receipts = yield* WorktreePreparations;
+        const target = path.join(root, "async-restart");
+        yield* gitCore.createWorktree({
+          cwd: repo.root,
+          branch: "main",
+          newBranch: "async-restart",
+          path: target,
+          preparation: { owner: "workflow:async", runSetupScript: true },
+        });
+        const receipt = (yield* gitCore.readWorktreePreparation(target))!;
+        yield* receipts.update(receipt, { phase: "setup_running", result: '{"async":true}' });
+        yield* receipts.reconcile;
+        world.threads.push(
+          thread({ id: threadId, projectId: "p", branch: "async-restart", worktreePath: target }),
+        );
+        world.queueStates.set(threadId, {
+          revision: 3,
+          paused: true,
+          pauseReasonCode: "worktree_setup_failed",
+          worktreeBlockToken: null,
+        });
+        expect((yield* manager.threadState({ threadId })).recovery).toBe("interrupted");
+        const recovered = yield* manager.recover({
+          threadId,
+          action: "recreate",
+          expectedQueueRevision: 3,
+        });
+        expect(recovered.recovery).toBe("none");
+        expect((yield* gitCore.readWorktreePreparation(target))?.phase).toBe("completed");
+        expect(world.queueStates.get(threadId)?.paused).toBe(false);
+      }),
+    );
+  });
+
   it.each([false, true])(
     "reserves before stopping and detects a just-accepted turn (race: %s)",
     async (raced) => {
@@ -444,6 +519,7 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
             id: "setup",
             name: "setup",
             command: "echo diagnostic; echo started > setup-started; sleep 30",
+            async: false,
             icon: "play",
             runOnWorktreeCreate: true,
           },

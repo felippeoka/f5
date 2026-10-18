@@ -9,6 +9,9 @@ import {
 export function makeMemoryWorktreePreparations() {
   const rows: WorktreePreparationReceipt[] = [];
   return WorktreePreparations.of({
+    unfinished: Effect.sync(() =>
+      rows.filter((row) => !["completed", "skipped"].includes(row.phase)),
+    ),
     latest: (path) => Effect.sync(() => rows.findLast((row) => row.path === path) ?? null),
     branchReserved: (repositoryIdentity, branch) =>
       Effect.sync(() =>

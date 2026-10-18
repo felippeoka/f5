@@ -274,11 +274,21 @@ export const makeWorktreeManager = Effect.gen(function* () {
             };
       const data = yield* queue.listByThread(thread.id);
       const token = data.state.worktreeBlockToken;
-      const recovery = token?.startsWith("recovery:")
-        ? (yield* setup.check(thread.id, token)) === "gating"
-          ? "running"
-          : "interrupted"
-        : "none";
+      const receipt =
+        token === null && thread.worktreePath
+          ? yield* git.readWorktreePreparation(thread.worktreePath)
+          : null;
+      const preparationInterrupted =
+        receipt !== null &&
+        ["allocated", "setup_failed", "setup_indeterminate"].includes(receipt.phase);
+      const recovery =
+        token?.startsWith("recovery:") || token?.startsWith("preparation:")
+          ? (yield* setup.check(thread.id, token)) === "gating"
+            ? "running"
+            : "interrupted"
+          : preparationInterrupted
+            ? "interrupted"
+            : "none";
       return { ...state, recovery } as const;
     });
   const recover: WorktreeManagerShape["recover"] = (input) =>
@@ -323,14 +333,19 @@ export const makeWorktreeManager = Effect.gen(function* () {
         const setupState = yield* setup.check(thread.id, data.state.worktreeBlockToken);
         if (
           (setupState === "gating" && !reserved) ||
-          (setupState === "orphaned" && !data.state.worktreeBlockToken?.startsWith("recovery:"))
+          (setupState === "orphaned" &&
+            !data.state.worktreeBlockToken?.startsWith("recovery:") &&
+            !data.state.worktreeBlockToken?.startsWith("preparation:"))
         )
           return yield* Effect.fail(new Error("Workspace setup is already in progress."));
         return { thread, project, data };
       });
       const beforeRecovery = yield* check;
       const retryingRecovery =
-        beforeRecovery.data.state.worktreeBlockToken?.startsWith("recovery:") === true;
+        beforeRecovery.data.state.worktreeBlockToken?.startsWith("recovery:") === true ||
+        beforeRecovery.data.state.worktreeBlockToken?.startsWith("preparation:") === true ||
+        (beforeRecovery.data.state.worktreeBlockToken === null &&
+          (yield* threadState(input)).recovery === "interrupted");
       const path = initial.thread.worktreePath ?? initial.project.workspaceRoot;
       const plannedState = input.action === "recreateFromBase" ? yield* threadState(input) : null;
       const plannedBranch =

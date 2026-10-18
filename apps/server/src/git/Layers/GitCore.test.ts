@@ -1,3 +1,4 @@
+import { holdsWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import { ServerConfig } from "../../config.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Cause, Effect, Layer, Metric } from "effect";
@@ -726,6 +727,47 @@ it.each(["none", "shallow", "recursive"] as const)(
     }
   },
 );
+
+it("retains active receipt ownership while initializing submodules outside lifecycle locks", async () => {
+  const scripted = makeScriptedGitService((input) => {
+    if (input.args[0] === "worktree" && input.args[1] === "add") {
+      const target = input.args[input.args.length - 2]!;
+      mkdirSync(target, { recursive: true });
+      writeFileSync(join(target, ".gitmodules"), '[submodule "lib"]\n');
+    }
+    return { stdout: input.args[0] === "rev-parse" ? "a".repeat(40) : "" };
+  });
+  let observed = false;
+  const core = await makeCore({
+    execute: (input) =>
+      scripted.service.execute(input).pipe(
+        Effect.tap(() =>
+          input.args.includes("submodule")
+            ? Effect.gen(function* () {
+                observed = true;
+                expect((yield* core.readWorktreePreparation(input.cwd))?.phase).toBe(
+                  "setup_running",
+                );
+                expect(yield* holdsWorktreeLifecycleLock(input.cwd)).toBe(false);
+              }).pipe(Effect.orDie)
+            : Effect.void,
+        ),
+      ),
+  });
+  const created = await Effect.runPromise(
+    core.createWorktree({
+      cwd: process.cwd(),
+      branch: "main",
+      path: null,
+      submodules: "recursive",
+      preparation: { owner: "pr:pending", runSetupScript: true },
+    }),
+  );
+  expect(observed).toBe(true);
+  expect(
+    (await Effect.runPromise(core.readWorktreePreparation(created.worktree.path)))?.phase,
+  ).toBe("checkout_created");
+});
 
 describe("failed worktree add", () => {
   const failAdd = (createDir: boolean) =>

@@ -167,7 +167,7 @@ it("allocates by canonical repository and exact branch identity and preserves oc
           createdCheckout: true,
           branch: "fix-login",
         });
-        // An add that fails after allocation retains a retryable intent at that exact path.
+        // A verified add failure releases its reservation without claiming any checkout.
         const failedPath = path.join(path.dirname(dash), "failed-add");
         expect(
           (yield* core
@@ -180,8 +180,19 @@ it("allocates by canonical repository and exact branch identity and preserves oc
             .pipe(Effect.exit))._tag,
         ).toBe("Failure");
         expect(yield* core.readWorktreePreparation(failedPath)).toMatchObject({
-          phase: "allocated",
+          phase: "skipped",
           createdCheckout: false,
+        });
+        yield* core.createWorktree({
+          cwd: first,
+          branch: "main",
+          newBranch: "fixed-add",
+          path: failedPath,
+        });
+        expect(yield* core.readWorktreePreparation(failedPath)).toMatchObject({
+          phase: "skipped",
+          createdCheckout: true,
+          branch: "fixed-add",
         });
       }).pipe(Effect.provide(layer)),
     );

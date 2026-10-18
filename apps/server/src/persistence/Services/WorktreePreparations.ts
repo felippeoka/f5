@@ -39,6 +39,7 @@ export class PreparationError extends Schema.TaggedErrorClass<PreparationError>(
   },
 ) {}
 export interface WorktreePreparationsShape {
+  readonly unfinished: Effect.Effect<ReadonlyArray<WorktreePreparationReceipt>, PreparationError>;
   readonly allocate: (
     input: PreparationAllocation,
   ) => Effect.Effect<WorktreePreparationReceipt, PreparationError>;

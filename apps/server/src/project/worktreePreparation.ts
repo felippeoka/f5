@@ -35,11 +35,6 @@ export const makeWorktreePreparation = <E extends Error>(deps: {
           .resolveCommonDir(input.cwd)
           .pipe(Effect.flatMap((path) => Effect.tryPromise(() => canonicalWorktreePath(path))));
         const project = yield* Effect.tryPromise(() => canonicalWorktreePath(input.projectCwd));
-        const baseOid = yield* deps.git.resolveCommit(input.cwd, input.branch);
-        if (!baseOid)
-          return yield* new PreparationError({
-            message: `Cannot resolve worktree base '${input.branch}'.`,
-          });
         const path = yield* deps.git
           .allocateWorktreePath({ cwd: input.cwd, branch: input.newBranch })
           .pipe(Effect.flatMap((path) => Effect.tryPromise(() => canonicalWorktreePath(path))));
@@ -50,7 +45,6 @@ export const makeWorktreePreparation = <E extends Error>(deps: {
           project,
           owner,
           input.branch,
-          baseOid,
           input.newBranch,
           input.runSetupScript ?? true,
           input.setupIdentity ?? null,
@@ -70,6 +64,12 @@ export const makeWorktreePreparation = <E extends Error>(deps: {
             entries.set(key, { fingerprint, done });
             const run = Effect.gen(function* () {
               const receipt = yield* deps.receipts.latest(path);
+              const baseOid =
+                receipt?.baseOid ?? (yield* deps.git.resolveCommit(input.cwd, input.branch));
+              if (!baseOid)
+                return yield* new PreparationError({
+                  message: `Cannot resolve worktree base '${input.branch}'.`,
+                });
               let result: GitCreateWorktreeResult;
               if (receipt) {
                 if (
@@ -77,10 +77,10 @@ export const makeWorktreePreparation = <E extends Error>(deps: {
                   receipt.projectIdentity !== project ||
                   receipt.owner !== owner ||
                   receipt.requestedBase !== input.branch ||
-                  receipt.baseOid !== baseOid ||
                   receipt.branch !== input.newBranch ||
                   receipt.runSetupScript !== (input.runSetupScript ?? true) ||
-                  receipt.setupIdentity !== (input.setupIdentity ?? null)
+                  (receipt.setupIdentity !== (input.setupIdentity ?? null) &&
+                    !input.retryAcknowledged)
                 )
                   return yield* new PreparationError({
                     message:
@@ -130,7 +130,7 @@ export const makeWorktreePreparation = <E extends Error>(deps: {
                       recoveryRequired: true,
                     });
                   if (
-                    receipt.phase === "setup_running" ||
+                    (receipt.phase === "setup_running" && receipt.result !== '{"async":true}') ||
                     (receipt.phase === "setup_indeterminate" && !input.retryAcknowledged)
                   )
                     return yield* new PreparationError({
@@ -146,6 +146,7 @@ export const makeWorktreePreparation = <E extends Error>(deps: {
                       inspected.headSha !== baseOid ||
                       inspected.hasTrackedChanges ||
                       inspected.hasUntrackedChanges ||
+                      inspected.ignoredTruncated ||
                       inspected.ignoredEntries.length > 0
                     )
                       return yield* new PreparationError({
@@ -158,7 +159,11 @@ export const makeWorktreePreparation = <E extends Error>(deps: {
                     yield* deps.receipts.update(receipt, { phase: "checkout_created" });
                   }
                   result = { worktree: { path, branch: input.newBranch } };
-                  if (receipt.phase === "completed" || receipt.phase === "skipped") {
+                  if (
+                    receipt.phase === "completed" ||
+                    receipt.phase === "skipped" ||
+                    (receipt.phase === "setup_running" && receipt.result === '{"async":true}')
+                  ) {
                     const latest = yield* deps.receipts.latest(path);
                     if (
                       latest?.operationId !== receipt.operationId ||
@@ -182,6 +187,7 @@ export const makeWorktreePreparation = <E extends Error>(deps: {
                   inspection.headSha !== baseOid ||
                   inspection.hasTrackedChanges ||
                   inspection.hasUntrackedChanges ||
+                  inspection.ignoredTruncated ||
                   inspection.ignoredEntries.length > 0
                 )
                   return yield* new PreparationError({
@@ -219,6 +225,7 @@ export const makeWorktreePreparation = <E extends Error>(deps: {
                   projectCwd: input.projectCwd,
                   worktreePath: result.worktree.path,
                   preferredTerminalId: `setup-${input.newBranch.replaceAll("/", "-")}`,
+                  ...(input.retryAcknowledged ? { retry: true } : {}),
                 })
                 .pipe(
                   Effect.tapError((error) =>

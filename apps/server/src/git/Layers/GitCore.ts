@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { basename, dirname } from "node:path";
-import { WorktreePreparations } from "../../persistence/Services/WorktreePreparations.ts";
+import {
+  WorktreePreparations,
+  type WorktreePreparationReceipt,
+} from "../../persistence/Services/WorktreePreparations.ts";
 import { lstat as inspectPath } from "node:fs/promises";
 import { parseWorktreeListPorcelain, stripPathTerminator } from "../worktreeList.ts";
 import { networkFailureDetail } from "../networkFailureDetail.ts";
@@ -1128,6 +1131,20 @@ const makeGitCore = Effect.gen(function* () {
       ),
     );
 
+  const releaseFailedWorktreeAllocation = (
+    receipt: WorktreePreparationReceipt,
+    cwd: string,
+    path: string,
+  ) =>
+    Effect.gen(function* () {
+      if (yield* checkoutExists(path)) return;
+      if ((yield* listWorktrees(cwd)).some((entry) => entry.canonicalPath === receipt.path)) return;
+      yield* preparations.update(receipt, {
+        phase: "skipped",
+        error: "Worktree add failed without creating a checkout.",
+      });
+    }).pipe(Effect.ignoreCause({ log: true }));
+
   const ensureWorktree: GitCoreShape["ensureWorktree"] = (input) =>
     withWorktreeLifecycleLock(
       input.path,
@@ -1256,7 +1273,8 @@ const makeGitCore = Effect.gen(function* () {
                 path: target,
                 branch: input.branch,
                 namingIntent: "existing",
-                setupIdentity: prior?.setupIdentity ?? null,
+                // A new checkout adopts the current opted-in script during preparation.
+                setupIdentity: null,
                 runSetupScript: prior?.runSetupScript ?? true,
               })
               .pipe(
@@ -1269,6 +1287,10 @@ const makeGitCore = Effect.gen(function* () {
               input.cwd,
               ["worktree", "add", "--", input.path, input.branch],
               { timeoutMs: 300_000 },
+            ).pipe(
+              Effect.tapError(() =>
+                releaseFailedWorktreeAllocation(receipt, input.cwd, input.path),
+              ),
             );
             yield* preparations
               .update(receipt, { phase: "checkout_created", createdCheckout: true })
@@ -1902,6 +1924,7 @@ const makeGitCore = Effect.gen(function* () {
       const worktreePath =
         input.path ?? (yield* allocateWorktreePath({ cwd: input.cwd, branch: targetBranch }));
       const baseRefName = input.baseRefName ?? input.branch;
+      const operationId = input.preparation?.operationId ?? crypto.randomUUID();
       const create = Effect.gen(function* () {
         const resolvedBase = yield* runGitStdout(
           "GitCore.createWorktree.verifyBaseRef",
@@ -1930,9 +1953,7 @@ const makeGitCore = Effect.gen(function* () {
           worktreePath,
           baseRefName,
         ];
-        // Checked under the lifecycle lock: a path that already existed is never
-        // claimed by a failed add, so cleanup cannot remove a worktree it did
-        // not create.
+        // Reject occupied targets under the lifecycle lock before allocating ownership.
         const existedBefore = yield* fileSystem
           .exists(worktreePath)
           .pipe(Effect.orElseSucceed(() => true));
@@ -1949,7 +1970,7 @@ const makeGitCore = Effect.gen(function* () {
             [],
             "The worktree target escapes the managed root.",
           );
-        if (worktreePathExceedsWindowsLimit(worktreePath))
+        if (!input.preparation?.replaceMissing && worktreePathExceedsWindowsLimit(worktreePath))
           return yield* createGitCommandError(
             "GitCore.createWorktree",
             input.cwd,
@@ -1989,7 +2010,7 @@ const makeGitCore = Effect.gen(function* () {
         }
         const receipt = yield* preparations
           .allocate({
-            operationId: input.preparation?.operationId ?? crypto.randomUUID(),
+            operationId,
             repositoryIdentity: yield* canonicalPath(yield* resolveCommonDir(input.cwd)),
             projectIdentity: yield* canonicalPath(input.preparation?.projectCwd ?? input.cwd),
             owner: input.preparation?.owner ?? `raw:${targetBranch}`,
@@ -2013,9 +2034,6 @@ const makeGitCore = Effect.gen(function* () {
           claimed = true;
           progress?.onWorktreeClaimed?.(worktreePath);
         };
-        const claimIfNew = () => {
-          if (!existedBefore) claim();
-        };
         yield* executeGit("GitCore.createWorktree", input.cwd, args, {
           timeoutMs: 300_000,
           fallbackErrorMessage: "git worktree add failed",
@@ -2024,10 +2042,10 @@ const makeGitCore = Effect.gen(function* () {
                 env: { ...process.env, GIT_PROGRESS_DELAY: "0", LC_ALL: "C" },
                 onStderrChunk: makeProgressLineSplitter((line) => {
                   // "Preparing worktree" is printed once git has registered the path.
-                  if (line.startsWith("Preparing worktree")) claimIfNew();
+                  if (line.startsWith("Preparing worktree")) claim();
                   const checkout = parseCheckoutProgressLine(line);
                   if (checkout) {
-                    claimIfNew();
+                    claim();
                     progress.onCheckoutProgress?.(checkout);
                   }
                 }),
@@ -2035,24 +2053,22 @@ const makeGitCore = Effect.gen(function* () {
             : {}),
         }).pipe(
           Effect.tapError(() =>
-            // A failed add may still have created the directory it was given.
-            fileSystem.exists(worktreePath).pipe(
-              Effect.map((exists) => {
-                if (exists) claimIfNew();
-              }),
-              Effect.ignore,
-            ),
+            Effect.gen(function* () {
+              if (yield* checkoutExists(worktreePath)) claim();
+              else yield* releaseFailedWorktreeAllocation(receipt, input.cwd, worktreePath);
+            }).pipe(Effect.ignoreCause({ log: true })),
           ),
         );
         yield* preparations
           .update(receipt, { phase: "checkout_created", createdCheckout: true })
           .pipe(
+            // Submodule initialization runs outside locks but still owns the checkout.
+            Effect.flatMap((created) => preparations.update(created, { phase: "setup_running" })),
             Effect.mapError((error) =>
               createGitCommandError("GitCore.createWorktree", input.cwd, [], error.message, error),
             ),
           );
-        // A successful add made this a worktree of the repository, even in a
-        // directory that existed (empty) beforehand.
+        // A successful add proves that this operation created the checkout.
         claim();
       });
       yield* withWorktreeLifecycleLock(
@@ -2066,27 +2082,49 @@ const makeGitCore = Effect.gen(function* () {
         ),
       );
 
-      yield* initializeSubmodules(worktreePath, input.submodules, input.progress);
-      if (!input.preparation?.runSetupScript) {
-        const receipt = yield* preparations
-          .latest(yield* canonicalPath(worktreePath))
-          .pipe(
-            Effect.mapError((error) =>
-              createGitCommandError("GitCore.createWorktree", input.cwd, [], error.message),
-            ),
-          );
-        if (receipt?.phase === "checkout_created")
-          yield* preparations
-            .update(receipt, {
-              phase: "skipped",
-              result: JSON.stringify({ path: worktreePath, branch: targetBranch }),
-            })
-            .pipe(
-              Effect.mapError((error) =>
-                createGitCommandError("GitCore.createWorktree", input.cwd, [], error.message),
-              ),
-            );
-      }
+      const finishInitialization = (error: string | null) =>
+        withWorktreeLifecycleLock(
+          worktreePath,
+          Effect.gen(function* () {
+            const receipt = yield* preparations.latest(yield* canonicalPath(worktreePath));
+            if (
+              !receipt ||
+              receipt.operationId !== operationId ||
+              receipt.phase !== "setup_running"
+            )
+              return yield* createGitCommandError(
+                "GitCore.createWorktree",
+                input.cwd,
+                [],
+                "Preparation changed during submodule initialization.",
+              );
+            yield* preparations.update(receipt, {
+              phase: error
+                ? "setup_failed"
+                : input.preparation?.runSetupScript
+                  ? "checkout_created"
+                  : "skipped",
+              error,
+              result: error ? null : JSON.stringify({ path: worktreePath, branch: targetBranch }),
+            });
+          }),
+        ).pipe(
+          Effect.mapError((error) =>
+            Schema.is(GitCommandError)(error)
+              ? error
+              : createGitCommandError("GitCore.createWorktree", input.cwd, [], error.message),
+          ),
+        );
+      yield* initializeSubmodules(worktreePath, input.submodules, input.progress).pipe(
+        Effect.onExit((exit) =>
+          exit._tag === "Failure"
+            ? finishInitialization(
+                "Submodule initialization did not finish. Retry preparation.",
+              ).pipe(Effect.ignoreCause({ log: true }))
+            : Effect.void,
+        ),
+      );
+      yield* finishInitialization(null);
       return {
         worktree: {
           path: worktreePath,
@@ -2579,8 +2617,22 @@ const makeGitCore = Effect.gen(function* () {
       const entry = (yield* listWorktrees(input.cwd)).find(
         (entry) => entry.canonicalPath === target,
       );
-      if (!(yield* checkoutExists(target)))
-        return yield* clearMissingRegistrationUnlocked(input.cwd, target);
+      const finishRemoval = Effect.gen(function* () {
+        const receipt = yield* preparations.latest(target);
+        if (receipt && receipt.phase !== "skipped")
+          yield* preparations.update(receipt, {
+            phase: "skipped",
+            error: "Checkout was safely removed.",
+          });
+      }).pipe(
+        Effect.mapError((error) =>
+          createGitCommandError("GitCore.removeWorktree", input.cwd, [], error.message),
+        ),
+      );
+      if (!(yield* checkoutExists(target))) {
+        yield* clearMissingRegistrationUnlocked(input.cwd, target);
+        return yield* finishRemoval;
+      }
       if (!entry || entry.isMain || entry.locked !== null)
         return yield* createGitCommandError(
           "GitCore.removeWorktree",
@@ -2621,6 +2673,7 @@ const makeGitCore = Effect.gen(function* () {
         ["worktree", "remove", "--", entry.path],
         { timeoutMs: 300_000 },
       );
+      yield* finishRemoval;
     });
 
   const removeWorktree: GitCoreShape["removeWorktree"] = (input) =>

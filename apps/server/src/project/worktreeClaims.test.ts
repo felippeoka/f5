@@ -94,6 +94,66 @@ describe("effective workspace claims and removal gate", () => {
       }).pipe(Effect.provide(automationLayer(world, {}, "f5-removal-state-")), Effect.scoped),
     );
   });
+  it.each(["pr:feature", "workflow:implementation"])(
+    "removes idle pending preparation owned by %s and releases its reservation",
+    async (owner) => {
+      const repo = await makeClonedRepo("f5-pending-removal-");
+      cleanups.push(repo.cleanup);
+      const world = makeWorld();
+      world.projects.push(project("p", repo.root));
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const gitCore = yield* GitCore;
+          const target = path.join((yield* ServerConfig).worktreesDir, "pending");
+          yield* gitCore.createWorktree({
+            cwd: repo.root,
+            branch: "main",
+            newBranch: "pending",
+            path: target,
+            preparation: { owner, runSetupScript: true },
+          });
+          expect((yield* gitCore.readWorktreePreparation(target))?.phase).toBe("checkout_created");
+          const result = yield* removeWorktreeSafely({
+            projectCwd: repo.root,
+            path: target,
+            policy: { kind: "manual", ownThreadId: null },
+          });
+          expect(result.blockedReasons).toEqual([]);
+          expect((yield* gitCore.readWorktreePreparation(target))?.phase).toBe("skipped");
+          yield* gitCore.createWorktree({
+            cwd: repo.root,
+            branch: "pending",
+            path: target,
+            preparation: { owner, runSetupScript: true },
+          });
+          expect((yield* gitCore.readWorktreePreparation(target))?.phase).toBe("checkout_created");
+        }).pipe(
+          Effect.provide(automationLayer(world, {}, "f5-pending-removal-state-")),
+          Effect.scoped,
+        ),
+      );
+    },
+  );
+  it("releases a failed add only after proving no checkout or registration was created", async () => {
+    const repo = await makeClonedRepo("f5-add-failure-");
+    cleanups.push(repo.cleanup);
+    const world = makeWorld();
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const gitCore = yield* GitCore;
+        const target = path.join((yield* ServerConfig).worktreesDir, "failed-add");
+        git(repo.root, "branch", "existing");
+        const failed = yield* gitCore
+          .createWorktree({ cwd: repo.root, branch: "main", newBranch: "existing", path: target })
+          .pipe(Effect.exit);
+        expect(failed._tag).toBe("Failure");
+        expect((yield* gitCore.readWorktreePreparation(target))?.phase).toBe("skipped");
+        yield* gitCore.createWorktree({ cwd: repo.root, branch: "existing", path: target });
+        expect(git(target, "branch", "--show-current")).toBe("existing");
+      }).pipe(Effect.provide(automationLayer(world, {}, "f5-add-failure-state-")), Effect.scoped),
+    );
+  });
+
   it("blocks initialized submodules in both preview and removal, preserving their files", async () => {
     const repo = await makeClonedRepo("f5-submodule-removal-");
     cleanups.push(repo.cleanup);

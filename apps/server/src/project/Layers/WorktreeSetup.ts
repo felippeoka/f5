@@ -1,7 +1,10 @@
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
 import { buildGeneratedWorktreeBranchName } from "../../git/worktreeBranchNames.ts";
 import { isTemporaryWorktreeBranch, canonicalWorktreePath } from "../../git/worktreePaths.ts";
-import { WorktreePreparations } from "../../persistence/Services/WorktreePreparations.ts";
+import {
+  WorktreePreparations,
+  type PreparationError,
+} from "../../persistence/Services/WorktreePreparations.ts";
 import { WorktreePreparation } from "../Services/WorktreePreparation.ts";
 import { readProjectSettings } from "../projectSettings.ts";
 import { existsSync } from "node:fs";
@@ -61,6 +64,7 @@ import { WorktreeSetupGate } from "../Services/WorktreeSetupGate.ts";
 import {
   withRepositoryLifecycleLock,
   withWorktreeLifecycleLock,
+  type RepositoryLifecycleError,
 } from "./WorktreeLifecycleCoordinator.ts";
 
 /** Live pushes coalesce to this interval; the durable activity to the persist interval. */
@@ -76,10 +80,7 @@ interface Tracked {
   fiber: Fiber.Fiber<void, never> | null;
   script: OwnedSetupScript | null;
   naming: Fiber.Fiber<string | null, never> | null;
-  scriptExit: Fiber.Fiber<
-    void,
-    import("../../persistence/Services/WorktreePreparations.ts").PreparationError
-  > | null;
+  scriptExit: Fiber.Fiber<void, PreparationError | RepositoryLifecycleError> | null;
   lastPushAt: number;
   pushTimer: ReturnType<typeof setTimeout> | null;
   lastPersistAt: number;
@@ -392,14 +393,20 @@ export const makeWorktreeSetup = Effect.gen(function* () {
     ON CONFLICT(thread_id) DO UPDATE SET generation = generation + 1 RETURNING generation, sequence
   `.pipe(
       Effect.map((rows) => rows[0]!),
-      Effect.orDie,
+      Effect.mapError(
+        (cause) =>
+          new WorktreeSetupError({ message: `Cannot persist setup generation: ${String(cause)}` }),
+      ),
     );
   const ordering: WorktreeSetupShape["ordering"] = (threadId) =>
     sql<{ generation: number; sequence: number }>`
     SELECT generation, sequence FROM worktree_setup_ordering WHERE thread_id = ${threadId}
   `.pipe(
       Effect.map((rows) => rows[0] ?? { generation: 0, sequence: 0 }),
-      Effect.orDie,
+      Effect.mapError(
+        (cause) =>
+          new WorktreeSetupError({ message: `Cannot read setup ordering: ${String(cause)}` }),
+      ),
     );
 
   const projectFor = (projectCwd: string) =>
@@ -524,6 +531,7 @@ export const makeWorktreeSetup = Effect.gen(function* () {
                 inspected.headSha !== receipt.baseOid ||
                 inspected.hasTrackedChanges ||
                 inspected.hasUntrackedChanges ||
+                inspected.ignoredTruncated ||
                 inspected.ignoredEntries.length > 0))
           )
             return yield* new WorktreeSetupError({
@@ -835,6 +843,7 @@ export const makeWorktreeSetup = Effect.gen(function* () {
           inspected.headSha !== expectedBase ||
           inspected.hasTrackedChanges ||
           inspected.hasUntrackedChanges ||
+          inspected.ignoredTruncated ||
           inspected.ignoredEntries.length > 0
         )
           return yield* new WorktreeSetupError({
@@ -868,24 +877,40 @@ export const makeWorktreeSetup = Effect.gen(function* () {
         !alreadyCompleted &&
         requestedScript &&
         receipt.setupIdentity !== null &&
-        receipt?.setupIdentity !== requestedScript.command
+        receipt?.setupIdentity !== requestedScript.command &&
+        initial.generation < 2
       )
         return yield* new WorktreeSetupError({
           message:
             "The setup script changed. Inspect the retained preparation before retrying with a different script.",
         });
       if (receipt && !alreadyCompleted)
-        receipt = yield* preparations.update(receipt, { phase: "setup_running", error: null });
-      const finishReceipt = (code: number | null) =>
-        Effect.gen(function* () {
-          if (!receipt || alreadyCompleted) return;
-          receipt = yield* preparations.update(receipt, {
-            phase: code === 0 ? "completed" : "setup_failed",
-            result:
-              code === 0 ? JSON.stringify({ path: worktreePath, branch: request.branch }) : null,
-            error: code === 0 ? null : `Setup script exited with ${code ?? "no status"}.`,
-          });
+        receipt = yield* preparations.update(receipt, {
+          phase: "setup_running",
+          error: null,
+          result: null,
+          setupIdentity: requestedScript?.command ?? null,
         });
+      const finishReceipt = (code: number | null) =>
+        withWorktreeLifecycleLock(
+          worktreePath!,
+          Effect.gen(function* () {
+            if (!receipt || alreadyCompleted) return;
+            const latest = yield* preparations.latest(receipt.path);
+            if (
+              !latest ||
+              latest.operationId !== receipt.operationId ||
+              latest.phase !== "setup_running"
+            )
+              return;
+            receipt = yield* preparations.update(latest, {
+              phase: code === 0 ? "completed" : "setup_failed",
+              result:
+                code === 0 ? JSON.stringify({ path: worktreePath, branch: request.branch }) : null,
+              error: code === 0 ? null : `Setup script exited with ${code ?? "no status"}.`,
+            });
+          }),
+        );
       // Setup script, as an owned process.
       const script =
         !alreadyCompleted && request.runSetupScript && project
@@ -902,7 +927,7 @@ export const makeWorktreeSetup = Effect.gen(function* () {
           ),
         );
       } else {
-        const async = false; // Preparation settles before provider handoff.
+        const async = script.async ?? true;
         update(threadId, (snapshot) =>
           stageStatus(
             {
@@ -947,8 +972,13 @@ export const makeWorktreeSetup = Effect.gen(function* () {
             ),
           ),
         );
-        // Preparation settles before the execution gate opens. Failure still proceeds.
-        yield* completion;
+        if (async) {
+          if (receipt) receipt = yield* preparations.update(receipt, { result: '{"async":true}' });
+          const exit = yield* completion.pipe(Effect.forkIn(scope));
+          if (entry) entry.scriptExit = exit;
+        } else {
+          yield* completion;
+        }
       }
 
       if (naming) {
@@ -956,24 +986,41 @@ export const makeWorktreeSetup = Effect.gen(function* () {
         if (Option.isSome(late) && late.value && isTemporaryWorktreeBranch(request.branch)) {
           yield* withWorktreeLifecycleLock(
             worktreePath,
-            Effect.uninterruptible(
-              Effect.gen(function* () {
-                const renamed = yield* git.renameBranch({
-                  cwd: worktreePath!,
-                  oldBranch: request.branch,
-                  newBranch: late.value!,
-                });
-                request = { ...request, branch: renamed.branch, namingIntent: "generated" };
-                if (receipt)
-                  receipt = yield* preparations.update(receipt, { branch: renamed.branch });
-                yield* commit(threadId, (snapshot) => ({ ...snapshot, request }), true);
-                yield* engine.dispatch({
-                  type: "thread.meta.update",
-                  commandId: serverCommandId("late-rename"),
-                  threadId,
-                  branch: renamed.branch,
-                });
-              }),
+            withRepositoryLifecycleLock(
+              config.baseDir,
+              yield* git.resolveCommonDir(request.projectCwd),
+              Effect.uninterruptible(
+                Effect.gen(function* () {
+                  const renamed = yield* git
+                    .renameBranch({
+                      cwd: worktreePath!,
+                      oldBranch: request.branch,
+                      newBranch: late.value!,
+                    })
+                    .pipe(
+                      Effect.catch((error) =>
+                        Effect.logWarning(
+                          "Late worktree rename failed; keeping the temporary branch",
+                          { message: error.message },
+                        ).pipe(Effect.as(null)),
+                      ),
+                    );
+                  if (!renamed) return;
+                  request = { ...request, branch: renamed.branch, namingIntent: "generated" };
+                  if (receipt) {
+                    const latest = yield* preparations.latest(receipt.path);
+                    if (latest?.operationId === receipt.operationId)
+                      receipt = yield* preparations.update(latest, { branch: renamed.branch });
+                  }
+                  yield* commit(threadId, (snapshot) => ({ ...snapshot, request }), true);
+                  yield* engine.dispatch({
+                    type: "thread.meta.update",
+                    commandId: serverCommandId("late-rename"),
+                    threadId,
+                    branch: renamed.branch,
+                  });
+                }),
+              ),
             ),
           );
         }
@@ -1544,7 +1591,8 @@ export const makeWorktreeSetup = Effect.gen(function* () {
           .readWorktreePreparation(nextPath)
           .pipe(Effect.mapError((error) => failFor(error.message)));
         if (
-          receipt?.phase === "allocated" &&
+          receipt &&
+          ["allocated", "skipped"].includes(receipt.phase) &&
           !(yield* git
             .branchExists(snapshot.request.projectCwd, receipt.branch)
             .pipe(Effect.mapError((error) => failFor(error.message)))) &&
@@ -1703,24 +1751,35 @@ export const makeWorktreeSetup = Effect.gen(function* () {
     ),
   );
 
-  const actionLocks = new Map<ThreadId, Semaphore.Semaphore>();
+  const actionLocks = new Map<ThreadId, { lock: Semaphore.Semaphore; users: number }>();
   const serialized =
     (action: typeof cancel): WorktreeSetupShape["cancel"] =>
-    (threadId, expectedOperationId) => {
-      let lock = actionLocks.get(threadId);
-      if (!lock) {
-        lock = Semaphore.makeUnsafe(1);
-        actionLocks.set(threadId, lock);
-      }
-      return lock.withPermits(1)(
-        Effect.gen(function* () {
-          const entry = yield* load(threadId);
-          if (!entry || entry.snapshot.operationId !== expectedOperationId)
-            return yield* failFor("This setup action is obsolete. Refresh and try again.");
-          return yield* action(threadId);
-        }),
-      );
-    };
+    (threadId, expectedOperationId) =>
+      Effect.suspend(() => {
+        let entry = actionLocks.get(threadId);
+        if (!entry) {
+          entry = { lock: Semaphore.makeUnsafe(1), users: 0 };
+          actionLocks.set(threadId, entry);
+        }
+        entry.users++;
+        const owned = entry;
+        return entry.lock
+          .withPermits(1)(
+            Effect.gen(function* () {
+              const current = yield* load(threadId);
+              if (!current || current.snapshot.operationId !== expectedOperationId)
+                return yield* failFor("This setup action is obsolete. Refresh and try again.");
+              return yield* action(threadId);
+            }),
+          )
+          .pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                if (--owned.users === 0) actionLocks.delete(threadId);
+              }),
+            ),
+          );
+      });
   return {
     start,
     get,

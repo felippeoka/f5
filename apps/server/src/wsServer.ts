@@ -3421,7 +3421,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             projectId: project.id,
             worktreePath: input.worktreePath,
             branch: receipt.branch,
-            retry: true,
+            retry: input.retry === true,
           });
         return { status: "no-script" as const };
       }),

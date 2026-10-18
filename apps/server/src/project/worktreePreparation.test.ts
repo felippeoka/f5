@@ -161,6 +161,58 @@ describe("worktree preparation", () => {
     expect(createWorktree).toHaveBeenCalledTimes(1);
     expect(runSetup).toHaveBeenCalledTimes(1);
   });
+  it("replays the pinned checkout when the requested base advances or disappears", async () => {
+    const { scope, git, receipts, createWorktree, runSetup, prepare } = await harness();
+    await Effect.runPromise(prepare(input));
+    for (const tip of ["advanced-base", null]) {
+      const restarted = await Effect.runPromise(
+        makeWorktreePreparation({
+          scope,
+          git: { ...git, resolveCommit: () => Effect.succeed(tip) },
+          receipts,
+          createWorktree,
+          runSetup,
+        }),
+      );
+      expect(await Effect.runPromise(restarted(input))).toEqual(result);
+    }
+    expect(createWorktree).toHaveBeenCalledTimes(1);
+    expect(runSetup).toHaveBeenCalledTimes(1);
+  });
+  it("replays a running asynchronous setup without launching it again", async () => {
+    const { receipts, runSetup, prepare } = await harness();
+    await Effect.runPromise(prepare(input));
+    const receipt = (await Effect.runPromise(receipts.latest(result.worktree.path)))!;
+    await Effect.runPromise(
+      receipts.update(receipt, { phase: "setup_running", result: '{"async":true}' }),
+    );
+    expect(await Effect.runPromise(prepare(input))).toEqual(result);
+    expect(runSetup).toHaveBeenCalledTimes(1);
+  });
+  it("refuses legacy checkout adoption when ignored-file inspection is truncated", async () => {
+    const { scope, git, receipts, createWorktree, runSetup } = await harness();
+    const prepare = await Effect.runPromise(
+      makeWorktreePreparation({
+        scope,
+        git: {
+          ...git,
+          inspectCheckout: (path) =>
+            git
+              .inspectCheckout(path)
+              .pipe(Effect.map((inspection) => ({ ...inspection, ignoredTruncated: true }))),
+        },
+        receipts,
+        createWorktree,
+        runSetup,
+      }),
+    );
+    await expect(Effect.runPromise(prepare({ ...input, retryAcknowledged: true }))).rejects.toThrow(
+      "cannot be verified",
+    );
+    expect(createWorktree).not.toHaveBeenCalled();
+    expect(runSetup).not.toHaveBeenCalled();
+    expect(await Effect.runPromise(receipts.latest(result.worktree.path))).toBeNull();
+  });
   it("requires explicit acknowledgment after a restart during setup", async () => {
     const { scope, git, receipts, createWorktree, runSetup, prepare } = await harness();
     await Effect.runPromise(prepare(input));

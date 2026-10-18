@@ -1,7 +1,7 @@
-import { GitCommandError } from "../../git/Errors.ts";
-import { CommandId, EventId } from "@t3tools/contracts";
+import { lstat } from "node:fs/promises";
+import { CommandId, EventId, WORKTREE_SETUP_TAIL_LINES } from "@t3tools/contracts";
 import { projectScriptRuntimeEnv, setupProjectScript } from "@t3tools/shared/projectScripts";
-import { Cause, Deferred, Effect, Fiber, Layer, Schema, Semaphore } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Schema, Semaphore } from "effect";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { canonicalWorktreePath } from "../../git/worktreePaths.ts";
 import { NextTurnQueueStore } from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
@@ -13,7 +13,7 @@ import {
 } from "../../persistence/Services/WorktreePreparations.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { readProjectSettings } from "../projectSettings.ts";
-import { startOwnedSetupScript } from "../ownedSetupScript.ts";
+import { startOwnedSetupScript, type OwnedSetupScript } from "../ownedSetupScript.ts";
 import {
   WorktreePreparation,
   type PrepareThreadWorktree,
@@ -65,12 +65,23 @@ export const makeWorktreePreparationService = Effect.gen(function* () {
           }
           const done = yield* Deferred.make<void, PreparationError>();
           running.set(path, { fingerprint, done });
+          let ownedScript: OwnedSetupScript | null = null;
+          let scriptHandedOff = false;
+          let preparingOperationId: string | null = null;
           const run = Effect.gen(function* () {
             let receipt = yield* withWorktreeLifecycleLock(
               path,
               Effect.gen(function* () {
                 const receipt = yield* receipts.latest(path);
-                if (!receipt) return null; // Legacy checkouts are never re-prepared.
+                // Readiness is enforced by the caller. Finished receipts need no status scan.
+                if (
+                  !receipt ||
+                  receipt.phase === "completed" ||
+                  receipt.phase === "skipped" ||
+                  (receipt.phase === "setup_running" && receipt.result === '{"async":true}') ||
+                  (receipt.phase === "setup_failed" && !input.retry)
+                )
+                  return null;
                 const inspected = yield* git.inspectCheckout(path);
                 if (
                   inspected.commonDir !== receipt.repositoryIdentity ||
@@ -86,11 +97,12 @@ export const makeWorktreePreparationService = Effect.gen(function* () {
                     recoveryRequired: true,
                   });
                 if (receipt.phase === "allocated") {
-                  const status = yield* git.inspectCheckout(path);
+                  const status = inspected;
                   if (
                     status.headSha !== receipt.baseOid ||
                     status.hasTrackedChanges ||
                     status.hasUntrackedChanges ||
+                    status.ignoredTruncated ||
                     status.ignoredEntries.length > 0
                   )
                     return yield* new PreparationError({
@@ -147,7 +159,8 @@ export const makeWorktreePreparationService = Effect.gen(function* () {
             if (
               script &&
               receipt.setupIdentity !== null &&
-              receipt.setupIdentity !== script.command
+              receipt.setupIdentity !== script.command &&
+              !input.retry
             )
               return yield* new PreparationError({
                 message:
@@ -155,67 +168,124 @@ export const makeWorktreePreparationService = Effect.gen(function* () {
                 path,
                 recoveryRequired: true,
               });
-            receipt = yield* receipts.update(receipt, {
-              phase: "setup_running",
-              error: null,
-              setupIdentity: script?.command ?? receipt.setupIdentity,
-            });
-            // Owned processes run without lifecycle locks or terminal claims.
-            const result = yield* Effect.gen(function* () {
-              yield* git.initializeWorktreeSubmodules(path, resolved.settings.worktreeSubmodules);
-              if (script) {
-                const process = yield* startOwnedSetupScript({
-                  command: script.command,
-                  cwd: path,
-                  env: projectScriptRuntimeEnv({
-                    project: { cwd: project.workspaceRoot },
-                    worktreePath: path,
-                  }),
-                  onLine: () => {},
-                });
-                const code = yield* process.exit.pipe(Effect.onInterrupt(() => process.kill));
-                if (code !== 0)
-                  return yield* new PreparationError({
-                    message: `Worktree setup script failed (${code ?? "interrupted"}).`,
-                    path,
-                  });
-              }
-            }).pipe(Effect.exit);
-            if (result._tag === "Failure" && Cause.hasInterruptsOnly(result.cause)) {
-              yield* receipts
-                .update(receipt, {
-                  phase: "setup_indeterminate",
-                  error:
-                    "Setup was interrupted. Explicit retry acknowledges possible external effects.",
-                })
-                .pipe(Effect.ignoreCause({ log: true }));
-              return yield* Effect.interrupt;
-            }
-            const error = result._tag === "Failure" ? Cause.pretty(result.cause) : null;
-            yield* receipts.update(receipt, { phase: error ? "setup_failed" : "completed", error });
-            if (result._tag === "Failure" && Schema.is(GitCommandError)(Cause.squash(result.cause)))
-              return yield* new PreparationError({ message: error!, path, recoveryRequired: true });
-            const createdAt = new Date().toISOString();
-            if (
-              (yield* engine.getReadModel()).threads.some(
-                (thread) => thread.id === input.threadId && thread.deletedAt === null,
-              )
-            )
-              yield* engine.dispatch({
-                type: "thread.activity.append",
-                commandId: CommandId.makeUnsafe(`worktree-prepared:${crypto.randomUUID()}`),
-                threadId: input.threadId,
-                activity: {
-                  id: EventId.makeUnsafe(`worktree-prepared:${input.threadId}`),
-                  kind: "worktree.prepared",
-                  tone: error ? "error" : "info",
-                  summary: error ?? "Worktree prepared",
-                  payload: { path, operationId: receipt.operationId, error },
-                  turnId: null,
+            receipt = yield* withWorktreeLifecycleLock(
+              path,
+              receipts.update(receipt, {
+                phase: "setup_running",
+                error: null,
+                result: null,
+                setupIdentity: script?.command ?? null,
+              }),
+            );
+            const operationId = receipt.operationId;
+            preparingOperationId = operationId;
+            const outputTail: string[] = [];
+            const report = (error: string | null, started = false) =>
+              Effect.gen(function* () {
+                const createdAt = new Date().toISOString();
+                if (
+                  !(yield* engine.getReadModel()).threads.some(
+                    (thread) => thread.id === input.threadId && thread.deletedAt === null,
+                  )
+                )
+                  return;
+                yield* engine.dispatch({
+                  type: "thread.activity.append",
+                  commandId: CommandId.makeUnsafe(`worktree-prepared:${crypto.randomUUID()}`),
+                  threadId: input.threadId,
+                  activity: {
+                    id: EventId.makeUnsafe(`worktree-prepared:${input.threadId}`),
+                    kind: "worktree.prepared",
+                    tone: error ? "error" : "info",
+                    summary: started
+                      ? "Worktree setup running in the background"
+                      : error
+                        ? "Worktree setup failed"
+                        : "Worktree prepared",
+                    payload: {
+                      path,
+                      operationId,
+                      error,
+                      outputTail: [...outputTail],
+                      setupRunning: started,
+                    },
+                    turnId: null,
+                    createdAt,
+                  },
                   createdAt,
-                },
-                createdAt,
+                });
               });
+            const finish = (result: import("effect").Exit.Exit<void, unknown>) =>
+              Effect.gen(function* () {
+                const interrupted =
+                  result._tag === "Failure" && Cause.hasInterruptsOnly(result.cause);
+                const error = result._tag === "Failure" ? Cause.pretty(result.cause) : null;
+                const latest = yield* receipts.latest(path);
+                if (latest?.operationId === operationId && latest.phase === "setup_running")
+                  yield* receipts.update(latest, {
+                    phase: interrupted
+                      ? "setup_indeterminate"
+                      : error
+                        ? "setup_failed"
+                        : "completed",
+                    error: interrupted
+                      ? "Setup was interrupted. Explicit retry acknowledges possible external effects."
+                      : error,
+                    result: JSON.stringify({ path, outputTail }),
+                  });
+                yield* report(error);
+              });
+            // Scripts run outside lifecycle locks and belong to the service scope.
+            const initialize = yield* git
+              .initializeWorktreeSubmodules(path, resolved.settings.worktreeSubmodules)
+              .pipe(Effect.exit);
+            if (initialize._tag === "Failure") {
+              yield* finish(initialize);
+              return yield* new PreparationError({
+                message: Cause.pretty(initialize.cause),
+                path,
+                recoveryRequired: true,
+              });
+            }
+            if (!script) {
+              yield* finish(Exit.void);
+              return;
+            }
+            const process = yield* startOwnedSetupScript({
+              command: script.command,
+              cwd: path,
+              env: projectScriptRuntimeEnv({
+                project: { cwd: project.workspaceRoot },
+                worktreePath: path,
+              }),
+              onLine: (line) => {
+                outputTail.push(line);
+                if (outputTail.length > WORKTREE_SETUP_TAIL_LINES) outputTail.shift();
+              },
+            });
+            ownedScript = process;
+            const completion = process.exit.pipe(
+              Effect.onInterrupt(() => process.kill),
+              Effect.flatMap((code) =>
+                code === 0
+                  ? Effect.void
+                  : Effect.fail(
+                      new PreparationError({
+                        message: `Worktree setup script failed (${code ?? "interrupted"}).${outputTail.length ? `\n${outputTail.join("\n")}` : ""}`,
+                        path,
+                      }),
+                    ),
+              ),
+              Effect.onExit((result) => finish(result).pipe(Effect.ignoreCause({ log: true }))),
+            );
+            if (script.async ?? true) {
+              receipt = yield* receipts.update(receipt, { result: '{"async":true}' });
+              yield* report(null, true);
+              yield* completion.pipe(Effect.ignoreCause, Effect.forkIn(scope));
+              scriptHandedOff = true;
+            } else {
+              yield* completion.pipe(Effect.ignoreCause); // Script failure is reported; delivery proceeds.
+            }
           }).pipe(
             Effect.mapError((error) =>
               Schema.is(PreparationError)(error)
@@ -226,9 +296,14 @@ export const makeWorktreePreparationService = Effect.gen(function* () {
           ownedFiber = yield* run.pipe(
             Effect.onExit((exit) =>
               Effect.gen(function* () {
-                if (exit._tag === "Failure" && Cause.hasInterruptsOnly(exit.cause)) {
+                if (exit._tag === "Failure") {
+                  // A failure between spawn and background handoff must not orphan the process.
+                  if (ownedScript && !scriptHandedOff) yield* ownedScript.kill;
                   const latest = yield* receipts.latest(path);
-                  if (latest?.phase === "setup_running")
+                  if (
+                    latest?.operationId === preparingOperationId &&
+                    latest?.phase === "setup_running"
+                  )
                     yield* receipts.update(latest, {
                       phase: "setup_indeterminate",
                       error:
@@ -263,7 +338,63 @@ export const makeWorktreePreparationService = Effect.gen(function* () {
     prepare,
     needsPreparation: (path) =>
       canonical(path).pipe(Effect.flatMap(receipts.latest), Effect.map(needsPreparation)),
-    startup: receipts.reconcile,
+    startup: Effect.gen(function* () {
+      yield* receipts.reconcile;
+      // Startup runs before admitting requests. Reclaim only inactive reservations
+      // with no directory or registration; unreadable usage or an ambiguous ref retains them.
+      const model = yield* engine.getReadModel();
+      for (const receipt of yield* receipts.unfinished) {
+        if (receipt.phase !== "allocated" || receipt.createdCheckout) continue;
+        yield* Effect.gen(function* () {
+          for (const thread of model.threads) {
+            const project = model.projects.find((project) => project.id === thread.projectId);
+            const workspace = thread.worktreePath ?? project?.workspaceRoot;
+            if (
+              `thread:${thread.id}` !== receipt.owner &&
+              (!workspace || (yield* canonical(workspace)) !== receipt.path)
+            )
+              continue;
+            const queued = yield* queue.listByThread(thread.id);
+            if (
+              queued.items.length > 0 ||
+              queued.state.worktreeBlockToken !== null ||
+              (thread.session &&
+                !["stopped", "error", "interrupted"].includes(thread.session.status))
+            )
+              return;
+          }
+          const absent = yield* Effect.tryPromise(() => lstat(receipt.path)).pipe(
+            Effect.as(false),
+            Effect.catch((error) =>
+              (error.cause as NodeJS.ErrnoException)?.code === "ENOENT"
+                ? Effect.succeed(true)
+                : Effect.fail(error),
+            ),
+          );
+          if (
+            !absent ||
+            (yield* git.listWorktrees(receipt.projectIdentity)).some(
+              (entry) => entry.canonicalPath === receipt.path,
+            )
+          )
+            return;
+          if (yield* git.branchExists(receipt.projectIdentity, receipt.branch)) {
+            // PR preparation checks out an existing branch; an unchanged ref is
+            // sufficient to release its unmaterialized intent without touching Git.
+            if (
+              receipt.namingIntent !== "existing" ||
+              (yield* git.resolveCommit(receipt.projectIdentity, receipt.branch)) !==
+                receipt.baseOid
+            )
+              return;
+          }
+          yield* receipts.update(receipt, {
+            phase: "skipped",
+            error: "Released an inactive reservation without a checkout.",
+          });
+        }).pipe(Effect.ignoreCause({ log: true }));
+      }
+    }),
     startBackground: (input, notify) =>
       Effect.gen(function* () {
         const token = `preparation:${crypto.randomUUID()}`;

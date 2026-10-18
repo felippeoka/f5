@@ -38,6 +38,10 @@ export const makeWorktreePreparations = Effect.gen(function* () {
       Effect.mapError(queryError),
     );
   return WorktreePreparations.of({
+    unfinished: sql<Row>`${select} WHERE phase NOT IN ('completed', 'skipped')`.pipe(
+      Effect.map((rows) => rows.map(decode)),
+      Effect.mapError(queryError),
+    ),
     latest,
     branchReserved,
     allocate: (input) =>

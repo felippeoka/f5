@@ -1,3 +1,4 @@
+import { setupProjectScript } from "@t3tools/shared/projectScripts";
 import {
   CommandId,
   DOCUMENT_WORKFLOW_TEMPLATE_ID,
@@ -5446,9 +5447,17 @@ export const makeWorkflowService = Effect.gen(function* () {
           );
         }
         const newBranch = buildTemporaryWorktreeBranchName();
+        const preparationScript = setupProjectScript(
+          snapshot.projects.find((project) => project.id === implementationWorkflow.projectId)
+            ?.scripts ?? [],
+        );
         const createdWorktree = yield* gitCore
           .createWorktree({
-            preparation: { owner: `workflow:${implementationWorkflow.id}`, runSetupScript: true },
+            preparation: {
+              owner: `workflow:${implementationWorkflow.id}`,
+              runSetupScript: preparationScript !== null,
+              setupIdentity: preparationScript?.command ?? null,
+            },
             cwd: workspaceRoot,
             branch: input.baseBranch,
             newBranch,

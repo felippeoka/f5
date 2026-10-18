@@ -59,7 +59,7 @@ export interface WorktreeSetupShape {
   ) => Effect.Effect<WorktreeSetupSnapshot | null, WorktreeSetupError>;
   readonly ordering: (
     threadId: ThreadId,
-  ) => Effect.Effect<{ generation: number; sequence: number }>;
+  ) => Effect.Effect<{ generation: number; sequence: number }, WorktreeSetupError>;
   readonly changes: Stream.Stream<WorktreeSetupUpdatedPayload>;
   /** Startup reconciliation: a setup that was running when the server stopped becomes failed. */
   readonly startup: Effect.Effect<void, never, Scope.Scope>;

@@ -4438,6 +4438,52 @@ describe("WebSocket Server", () => {
           expect(generateBranchName).toHaveBeenCalledTimes(1);
         },
       );
+      it("serializes identical late generated names across separate checkout paths", async () => {
+        const repo = makeGitRepo("f5-ws-late-fanout-");
+        const sentTurns: Array<Parameters<ProviderServiceShape["sendTurn"]>[0]> = [];
+        const ws = await startServer({
+          repo,
+          sentTurns,
+          generateBranchName: () =>
+            Effect.sleep("3100 millis").pipe(Effect.as({ branch: "shared-title" })),
+        });
+        await createProject(ws, repo, { command: "sleep 1", async: false });
+        const address = server!.address();
+        const port = typeof address === "object" && address !== null ? address.port : 0;
+        const [secondClient] = await connectAndAwaitWelcome(port);
+        connections.push(secondClient);
+        const requests = ["late-one", "late-two"].map((threadId, index) => {
+          const base = firstSend({ repo, threadId });
+          return {
+            ...base,
+            command: {
+              ...base.command,
+              bootstrap: {
+                ...base.command.bootstrap,
+                prepareWorktree: {
+                  ...base.command.bootstrap.prepareWorktree,
+                  branch: `t3code/1234aa1${index}`,
+                },
+              },
+            },
+          };
+        });
+        for (const result of await Promise.all([
+          sendRequest(ws, WS_METHODS.nextTurnQueueSubmit, requests[0]),
+          sendRequest(secondClient, WS_METHODS.nextTurnQueueSubmit, requests[1]),
+        ]))
+          expect(result.error).toBeUndefined();
+        const snapshots = [];
+        for (const threadId of ["late-one", "late-two"])
+          snapshots.push(
+            await waitForSetup(ws, threadId, (snapshot) => snapshot?.phase === "done"),
+          );
+        expect(new Set(snapshots.map((snapshot) => snapshot?.request.branch)).size).toBe(2);
+        expect(
+          snapshots.every((snapshot) => snapshot?.request.branch.startsWith("f5/shared-title")),
+        ).toBe(true);
+        await vi.waitFor(() => expect(sentTurns).toHaveLength(2), SLOW_WAIT);
+      });
       it("interrupts unfinished naming before the agent starts", async () => {
         const repo = makeGitRepo("f5-ws-naming-timeout-");
         const sentTurns: Array<Parameters<ProviderServiceShape["sendTurn"]>[0]> = [];
@@ -4567,6 +4613,43 @@ describe("WebSocket Server", () => {
         expect(fs.existsSync(path.join(done!.worktreePath!, "setup-was-run"))).toBe(false);
         await vi.waitFor(() => expect(sentTurns).toHaveLength(1), SLOW_WAIT);
       });
+
+      it.each([undefined, true, false])(
+        "honors Agent waits for the first send (async: %s)",
+        async (async) => {
+          const repo = makeGitRepo("f5-ws-async-setup-");
+          const sentTurns: Array<Parameters<ProviderServiceShape["sendTurn"]>[0]> = [];
+          const ws = await startServer({ repo, sentTurns });
+          await createProject(ws, repo, {
+            command: "echo setup-started; sleep 30",
+            ...(async === undefined ? {} : { async }),
+          });
+          const threadId = "async-setup";
+          expect(
+            (await sendRequest(ws, WS_METHODS.nextTurnQueueSubmit, firstSend({ repo, threadId })))
+              .error,
+          ).toBeUndefined();
+          await waitForSetup(
+            ws,
+            threadId,
+            (snapshot) =>
+              snapshot?.stages
+                .find((stage) => stage.id === "setup-script")
+                ?.tail.includes("setup-started") === true,
+          );
+          if (async === false) {
+            expect(sentTurns).toHaveLength(0);
+            await sendSetupAction(ws, WS_METHODS.worktreeSetupCancel, { threadId });
+          } else {
+            await vi.waitFor(() => expect(sentTurns).toHaveLength(1), SLOW_WAIT);
+            const snapshot = await readSetup(ws, threadId);
+            expect(snapshot?.setupScript?.async).toBe(true);
+            expect(snapshot?.stages.find((stage) => stage.id === "setup-script")?.status).toBe(
+              "running",
+            );
+          }
+        },
+      );
 
       it("reports a failed script and still starts the queued turn once", async () => {
         const repo = makeGitRepo("f5-ws-script-failed-");

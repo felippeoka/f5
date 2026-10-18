@@ -8,7 +8,8 @@ each stage: fetching the base branch, checking out files (with a percentage), in
 submodules, running the project setup script and starting the agent. The last few lines of the
 setup script's output are shown while it runs.
 
-The queued message waits for checkout, submodules, and the requested setup script to finish.
+The queued message waits for checkout and submodules. Setup scripts run in the background by
+default; enabling **Agent waits** makes the message wait for the script to finish.
 A failed script is reported on the card and the agent still starts.
 
 From the card you can:
@@ -159,7 +160,7 @@ blocks execution. Archive and delete remain available.
 The recovery controls offer **Recreate now** when the original branch survives, **Recreate from the
 default branch** when it does not, and **Continue in project checkout** as an explicit alternative.
 Recovery stops an idle provider session before switching the reference. Recreation resolves the
-project's submodule setting and runs its opted-in worktree setup script before releasing queued
+project's submodule setting and starts its opted-in worktree setup script before releasing queued
 work. It resumes a queue paused for a missing worktree, or for interrupted recovery when that
 recovery is retried successfully; manual pauses remain in place.
 
