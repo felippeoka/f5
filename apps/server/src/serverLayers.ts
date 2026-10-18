@@ -1,3 +1,5 @@
+import { WorktreePreparationsLive } from "./persistence/Layers/WorktreePreparations.ts";
+import { WorktreePreparationLive } from "./project/Layers/WorktreePreparation.ts";
 import { WorktreeManagerLive } from "./project/Layers/WorktreeManager.ts";
 import {
   ComputerAutomationBroker,
@@ -394,7 +396,14 @@ export function makeServerOrchestrationRuntimeLayer() {
   );
   // One gate instance is shared by the queue dispatcher and the setup service.
   const worktreeSetupGateLayer = WorktreeSetupGateLive;
+  const worktreePreparationLayer = WorktreePreparationLive.pipe(
+    Layer.provideMerge(WorktreePreparationsLive),
+    Layer.provideMerge(worktreeSetupGateLayer),
+    Layer.provideMerge(NextTurnQueueStoreLive),
+    Layer.provideMerge(runtimeServicesLayer),
+  );
   const nextTurnQueueDispatcherLayer = NextTurnQueueDispatcherLive.pipe(
+    Layer.provideMerge(worktreePreparationLayer),
     Layer.provideMerge(ServerSecretStoreLive),
     Layer.provideMerge(usageServiceLayer),
     Layer.provideMerge(worktreeSetupGateLayer),
@@ -425,6 +434,7 @@ export function makeServerOrchestrationRuntimeLayer() {
     Layer.provideMerge(runtimeServicesLayer),
   );
   const providerCommandReactorLayer = ProviderCommandReactorLive.pipe(
+    Layer.provideMerge(worktreePreparationLayer),
     Layer.provideMerge(runtimeServicesLayer),
     Layer.provideMerge(textGenerationLayer),
   );
@@ -477,11 +487,14 @@ export function makeServerOrchestrationRuntimeLayer() {
     Layer.provideMerge(orchestrationLayer),
   );
   const worktreeSetupLayer = WorktreeSetupLive.pipe(
+    Layer.provideMerge(textGenerationLayer),
+    Layer.provideMerge(worktreePreparationLayer),
     Layer.provideMerge(worktreeSetupGateLayer),
     Layer.provideMerge(nextTurnQueueDispatcherLayer),
     Layer.provideMerge(gitLayer),
   );
   const worktreeManagerLayer = WorktreeManagerLive.pipe(
+    Layer.provideMerge(worktreePreparationLayer),
     Layer.provideMerge(nextTurnQueueDispatcherLayer),
     Layer.provideMerge(worktreeSetupGateLayer),
     Layer.provideMerge(gitLayer),

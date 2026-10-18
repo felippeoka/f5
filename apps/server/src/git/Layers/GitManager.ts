@@ -1,3 +1,4 @@
+import { setupProjectScript } from "@t3tools/shared/projectScripts";
 import { readProjectSettings, isInsideProjectWorkspace } from "../../project/projectSettings";
 import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads";
@@ -30,8 +31,6 @@ import { GitHubCli } from "../Services/GitHubCli.ts";
 import { makeGitHubCli } from "./GitHubCli.ts";
 import { GitHubCredentialScope } from "../githubApi.ts";
 import { TextGeneration } from "../Services/TextGeneration.ts";
-import { resolveDefaultWorktreePath } from "../worktreePaths.ts";
-import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import {
   buildDeterministicCommitMessage,
@@ -605,20 +604,23 @@ export const makeGitManager = Effect.gen(function* () {
   ]);
   const githubProvider = yield* sourceControlProviders.get("github");
   const textGeneration = yield* TextGeneration;
-  const serverConfig = yield* ServerConfig;
   const serverSettings = yield* ServerSettingsService;
 
   const projects = yield* ProjectionProjectRepository;
   const threads = yield* ProjectionThreadRepository;
-  const getProjectSettings = (cwd: string) =>
+  const getProject = (cwd: string) =>
     Effect.gen(function* () {
-      const settings = yield* serverSettings.getSettings;
       const candidates = (yield* projects.listAll())
         .filter((p) => p.deletedAt === null)
         .sort((a, b) => b.workspaceRoot.length - a.workspaceRoot.length);
       const root = candidates.find((p) => isInsideProjectWorkspace(p.workspaceRoot, cwd));
       const ids = root ? [] : yield* threads.listProjectIdsByWorktreePath(cwd);
-      const project = root ?? candidates.find((p) => ids.includes(p.projectId));
+      return root ?? candidates.find((p) => ids.includes(p.projectId));
+    }).pipe(Effect.mapError((cause) => gitManagerError("projectSettings", cause.message)));
+  const getProjectSettings = (cwd: string) =>
+    Effect.gen(function* () {
+      const settings = yield* serverSettings.getSettings;
+      const project = yield* getProject(cwd);
       return project
         ? (yield* readProjectSettings(settings, { ...project, id: project.projectId })).settings
         : settings;
@@ -1484,12 +1486,18 @@ export const makeGitManager = Effect.gen(function* () {
         );
       }
 
+      const preparationProject = yield* getProject(input.cwd);
+      const preparationScript = setupProjectScript(preparationProject?.scripts ?? []);
       const worktree = yield* gitCore.createWorktree({
+        preparation: {
+          owner: `pr:${localPullRequestBranch}`,
+          runSetupScript: preparationScript !== null,
+          setupIdentity: preparationScript?.command ?? null,
+        },
         submodules: (yield* getProjectSettings(input.cwd)).worktreeSubmodules,
         cwd: input.cwd,
         branch: localPullRequestBranch,
-        path: resolveDefaultWorktreePath({
-          worktreesDir: serverConfig.worktreesDir,
+        path: yield* gitCore.allocateWorktreePath({
           cwd: input.cwd,
           branch: localPullRequestBranch,
         }),

@@ -102,12 +102,11 @@ export interface RepositoryLockOptions {
   readonly mode?: "user" | "background";
 }
 
+export const repositoryIdentityHash = (canonicalCommonDir: string) =>
+  createHash("sha256").update(canonicalCommonDir).digest("hex");
+
 export const repositoryLockPath = (baseDir: string, canonicalCommonDir: string) =>
-  path.join(
-    baseDir,
-    "locks",
-    createHash("sha256").update(canonicalCommonDir).digest("hex") + ".sqlite",
-  );
+  path.join(baseDir, "locks", repositoryIdentityHash(canonicalCommonDir) + ".sqlite");
 
 /** Git-common-dir mutations are shared by every F5 profile opening this repository. */
 export function withRepositoryLifecycleLock<A, E, R>(

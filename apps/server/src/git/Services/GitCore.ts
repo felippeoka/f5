@@ -184,6 +184,7 @@ export interface GitCoreShape {
   /** Recreate a missing linked worktree from its existing branch under lifecycle locks. */
   readonly ensureWorktree: (input: {
     submodules?: import("@t3tools/contracts").WorktreeSubmodules;
+    owner?: string;
     cwd: string;
     path: string;
     branch: string;
@@ -259,9 +260,34 @@ export interface GitCoreShape {
   /**
    * Create a worktree and branch from a base branch.
    */
+  readonly readWorktreePreparation: (
+    path: string,
+  ) => Effect.Effect<
+    import("../../persistence/Services/WorktreePreparations.ts").WorktreePreparationReceipt | null,
+    GitCommandError
+  >;
+  readonly allocateWorktreePath: (input: {
+    cwd: string;
+    branch: string;
+  }) => Effect.Effect<string, GitCommandError>;
+  readonly isValidBranchName: (name: string) => Effect.Effect<boolean, GitCommandError>;
+  readonly resolveAvailableBranchName: (
+    cwd: string,
+    name: string,
+  ) => Effect.Effect<string, GitCommandError>;
   readonly createWorktree: (
     input: GitCreateWorktreeInput & {
       submodules?: import("@t3tools/contracts").WorktreeSubmodules;
+      preparation?: {
+        owner: string;
+        projectCwd?: string;
+        requestedBase?: string;
+        replaceMissing?: boolean;
+        operationId?: string;
+        namingIntent?: "explicit" | "generated" | "temporary" | "existing";
+        runSetupScript?: boolean;
+        setupIdentity?: string | null;
+      };
       /** Live checkout and submodule progress, for the worktree setup card. */
       progress?: GitWorktreeProgress;
     },

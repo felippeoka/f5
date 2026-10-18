@@ -88,6 +88,7 @@ export const WorktreeSetupRequest = Schema.Struct({
   branch: TrimmedNonEmptyString,
   runSetupScript: Schema.Boolean,
   requireWorktree: Schema.Boolean,
+  namingIntent: Schema.optional(Schema.Literals(["explicit", "generated", "temporary"])),
 });
 export type WorktreeSetupRequest = typeof WorktreeSetupRequest.Type;
 
@@ -127,6 +128,7 @@ export const WorktreeSetupSnapshot = Schema.Struct({
   stages: Schema.Array(WorktreeSetupStage),
   /** Human readable reason when phase is failed or cancelled_kept. */
   error: Schema.NullOr(Schema.String.check(Schema.isMaxLength(WORKTREE_SETUP_ERROR_MAX_LENGTH))),
+  generation: NonNegativeInt.pipe(Schema.withDecodingDefault(() => 0)),
   sequence: NonNegativeInt,
 });
 export type WorktreeSetupSnapshot = typeof WorktreeSetupSnapshot.Type;
@@ -137,17 +139,31 @@ export const worktreeSetupActivityId = (threadId: string) => `worktree-setup:${t
 export const WorktreeSetupThreadInput = Schema.Struct({ threadId: ThreadId });
 export type WorktreeSetupThreadInput = typeof WorktreeSetupThreadInput.Type;
 
+export const WorktreeSetupActionInput = Schema.Struct({
+  threadId: ThreadId,
+  expectedOperationId: TrimmedNonEmptyString,
+});
+export type WorktreeSetupActionInput = typeof WorktreeSetupActionInput.Type;
+
 /** Null means no setup is tracked for that thread. */
-export const WorktreeSetupSubscribeResult = Schema.NullOr(WorktreeSetupSnapshot);
+export const WorktreeSetupSubscribeResult = Schema.Struct({
+  snapshot: Schema.NullOr(WorktreeSetupSnapshot),
+  generation: NonNegativeInt,
+  sequence: NonNegativeInt,
+});
 export type WorktreeSetupSubscribeResult = typeof WorktreeSetupSubscribeResult.Type;
 
 export const WorktreeSetupUpdatedPayload = Schema.Struct({
+  generation: NonNegativeInt,
+  sequence: NonNegativeInt,
   threadId: ThreadId,
   snapshot: Schema.NullOr(WorktreeSetupSnapshot),
 });
 export type WorktreeSetupUpdatedPayload = typeof WorktreeSetupUpdatedPayload.Type;
 
 export const WorktreeSetupActionResult = Schema.Struct({
+  generation: NonNegativeInt,
+  sequence: NonNegativeInt,
   snapshot: Schema.NullOr(WorktreeSetupSnapshot),
 });
 export type WorktreeSetupActionResult = typeof WorktreeSetupActionResult.Type;

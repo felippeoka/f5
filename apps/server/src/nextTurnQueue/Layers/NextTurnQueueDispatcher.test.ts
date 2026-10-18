@@ -1,3 +1,7 @@
+import {
+  WorktreePreparation,
+  type WorktreePreparationShape,
+} from "../../project/Services/WorktreePreparation.ts";
 import { RepositoryBusyError } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import * as fs from "node:fs/promises";
 import { canonicalWorktreePath } from "../../git/worktreePaths.ts";
@@ -123,8 +127,10 @@ const makeTestLayer = (
   resumeThread?: OrchestrationThread,
   automatic?: boolean,
   beforeSessionRead?: Effect.Effect<void>,
+  preparation?: WorktreePreparationShape,
 ) =>
   NextTurnQueueDispatcherLive.pipe(
+    Layer.provideMerge(preparation ? Layer.succeed(WorktreePreparation, preparation) : Layer.empty),
     Layer.provide(Layer.succeed(GitCore, git)),
     Layer.provideMerge(ProjectionTurnRepositoryLive.pipe(Layer.provide(persistence))),
     Layer.provideMerge(storeLayer),
@@ -553,6 +559,7 @@ layer("NextTurnQueueDispatcher", (it) => {
 
 for (const scenario of [
   "recoverable",
+  "preparing",
   "missing-ref",
   "checked-out-elsewhere",
   "repository-busy",
@@ -572,6 +579,20 @@ for (const scenario of [
         prunable: null,
         isMain: false,
       }));
+    let backgroundPreparations = 0;
+    const preparation: WorktreePreparationShape | undefined =
+      scenario === "preparing"
+        ? {
+            startup: Effect.void,
+            needsPreparation: () => Effect.succeed(true),
+            prepare: () =>
+              Effect.die("Preparation scripts must never run on the dispatcher shard."),
+            startBackground: () =>
+              Effect.sync(() => {
+                backgroundPreparations++;
+              }),
+          }
+        : undefined;
     let busy = scenario === "repository-busy";
     let unreadable = scenario === "inspection-error";
     const git = makeFakeGitCore({
@@ -647,6 +668,12 @@ for (const scenario of [
       if (scenario === "recoverable") {
         assert.equal(dispatched.length, 1);
         assert.equal(git.calls.ensureWorktree.length, 1);
+      } else if (scenario === "preparing") {
+        assert.equal(backgroundPreparations, 1);
+        assert.equal(dispatched.length, 0);
+        assert.equal(queue.state.paused, false);
+        assert.equal(queue.items[0]?.status, "queued");
+        assert.equal(git.calls.initializeWorktreeSubmodules.length, 0);
       } else if (scenario === "inspection-error") {
         assert.equal(queue.state.paused, false);
         // Reading snapshots must not consume the worker's bounded retry budget.
@@ -683,7 +710,9 @@ for (const scenario of [
           assert.match(queue.state.pauseDetail ?? "", /checked out at/);
       }
     }).pipe(
-      Effect.provide(makeTestLayer(git.service, target)),
+      Effect.provide(
+        makeTestLayer(git.service, target, undefined, undefined, undefined, preparation),
+      ),
       Effect.ensuring(Effect.promise(() => fs.rm(target, { recursive: true, force: true }))),
     );
   });
