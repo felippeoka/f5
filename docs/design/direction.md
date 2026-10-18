@@ -1,5 +1,7 @@
 # UI/UX overhaul: design direction record
 
+> Contributors: the approved visual direction and its tokens.
+
 **Status: approved (2026-10-02).** Preset B "Canvas", taken in full with no knob changes.
 
 This file records the visual direction chosen in the design lab (Phase D of the overhaul plan). PR 0 implements the values below. The lab was the visual reference during the overhaul and was removed in PR 11; this record stays.

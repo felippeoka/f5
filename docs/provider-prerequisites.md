@@ -1,152 +1,105 @@
 # Provider prerequisites
 
-F5 needs at least one authenticated provider on the machine running the F5 server.
+F5 needs at least one signed-in coding-agent provider on the machine that runs the F5 server.
+You pick the provider and model per thread in the composer.
 
-## Codex
+![Settings → Providers with Codex and Claude signed in](images/settings-providers.webp)
 
-- Install the [Codex CLI](https://github.com/openai/codex) so `codex` is on your PATH.
-- Authenticate it once before running F5, for example:
+## How to
 
-  ```bash
-  codex login
-  ```
+1. Install Git.
+2. Install at least one provider below and sign in once in a terminal.
+3. Open **Settings → Providers**, enable the provider, and check that it shows **Authenticated**.
+4. If F5 can't find the executable, set **Binary path** on the provider.
 
-  Either ChatGPT auth or an API key works — use whichever your Codex install supports.
+Switching providers never needs a server restart. F5 starts a provider session when you first
+send a message with it.
 
-- F5 starts the provider process via `codex app-server` per session. If `codex` is missing or unauthenticated, session startup will fail with a clear error.
+## Providers
 
-## Claude Code
+| Provider    | Install                                                                           | Sign in                                                                                      |
+| ----------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Codex       | [Codex CLI](https://github.com/openai/codex) on your PATH                         | `codex login` (ChatGPT or API key)                                                           |
+| Claude Code | Bundled with F5; no global `claude` needed                                        | `claude auth login` from a [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI |
+| Cursor      | Cursor CLI, so `agent` is on your PATH                                            | `agent login`                                                                                |
+| OpenCode    | `opencode` on your PATH, or an external server URL                                | OpenCode's own provider setup                                                                |
+| Grok        | Grok CLI, so `grok` is on your PATH                                               | `grok login`                                                                                 |
+| Antigravity | **Install Antigravity** in Settings (off by default)                              | **Sign in** with Google in Settings                                                          |
+| Muse Code   | `curl -fsSL https://dev.meta.ai/install.sh \| bash` (F5 never runs the installer) | Run `muse`, `muse auth set`, or set `META_API_KEY`                                           |
 
-- F5 runs the Claude executable bundled with the Claude Agent SDK by default; a separate global
-  `claude` command is not required for sessions or health checks.
-- Authenticate Claude once before running F5. You can use a separately installed
-  [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI for the login:
+Cursor, Grok and Muse Code are Early Access. Provider pages: [Codex](providers/codex.md),
+[Claude](providers/claude.md), [Antigravity](providers/antigravity.md) and
+[Muse Code](providers/muse.md).
 
-  ```bash
-  claude auth login
-  ```
+## Several accounts
 
-- F5 launches Claude sessions through the Claude Agent SDK, which discovers credentials from the standard Claude Code install locations.
-
-## Antigravity
-
-Enable Antigravity in Settings, explicitly install its pinned runtime, then sign in with Google.
-See [Antigravity setup and isolation](providers/antigravity.md). It is disabled by default.
-
-## Muse Code
-
-This is Meta's Muse Code coding CLI, not the Muse personal agent (which has no public API yet;
-F5 does not imitate it).
-
-- Install the CLI yourself so `muse` is on your PATH. F5 never runs the installer:
-
-  ```bash
-  curl -fsSL https://dev.meta.ai/install.sh | bash
-  ```
-
-- Sign in once: run `muse` in a terminal, use `muse auth set`, or set `META_API_KEY` in the
-  provider instance's environment. A set `META_API_KEY` takes precedence over a stored browser
-  sign-in.
-- Muse Code is unavailable in isolated (non-default) profiles. See
-  [Muse Code](providers/muse.md).
-
-## Cursor
-
-Cursor is Early Access.
-
-- Install the Cursor CLI so `agent` is on your PATH. F5 runs it as `agent acp`.
-- Sign in once with `agent login`.
-- If `agent` is missing, set **Binary path** on the instance in **Settings → Providers**. If the
-  status card says Cursor Agent is not authenticated, run `agent login` again.
-
-## OpenCode
-
-OpenCode can run locally or against a server you already operate.
-
-- **Local:** install OpenCode so `opencode` is on your PATH; F5 starts `opencode serve` when a
-  session needs it. Configure models and credentials with OpenCode's own provider setup.
-- **External server:** set **Server URL** on the instance in **Settings → Providers**, and
-  **Server password** if the server needs one. The password is stored in plain text on disk. No
-  local `opencode` binary is needed in this mode.
-- If `opencode` is missing, F5 reports that it is not installed or not on PATH. On macOS, a
-  quarantined download is blocked; fix it with `xattr -d com.apple.quarantine $(which opencode)`.
-
-## Grok
-
-Grok is Early Access.
-
-- Install the Grok CLI so `grok` is on your PATH. F5 talks to it over ACP.
-- Sign in once with `grok login`.
-- If the status card says Grok is not logged in, run `grok login` in a terminal; if `grok` is not
-  found, set **Binary path** on the instance.
-
-## Windows executable overrides
-
-F5 launches provider arguments without a command shell so workspace paths and provider options are
-not reinterpreted by `cmd.exe`. Native `.exe`/`.com` executables, JavaScript CLI entry points, and
-standard npm Node `.cmd` shims are supported. Arbitrary `.bat`, `.ps1`, and non-Node `.cmd` wrappers
-are deliberately rejected; configure the wrapped executable or JavaScript entry point instead.
-
-Custom Claude binary paths are stricter because the Agent SDK uses a direct process launch: use a
-directly runnable executable or the Claude CLI JavaScript entry point, not a `.cmd`/`.bat` shim.
-
-## Picking a provider at runtime
-
-Provider and model are picked per thread from the composer's model picker. Switching providers
-doesn't require restarting the F5 server. F5 starts a fresh provider session on demand when the
-selected provider runtime is available and authenticated.
-
-## Instances and profiles
-
-You can add several instances of one provider in **Settings → Providers**, for example two Codex
-accounts with different homes. Instances share the profile they run in. Isolated F5
+Add several instances of one provider in **Settings → Providers**, for example two Codex accounts
+with different homes. Instances share the profile they run in. Isolated F5
 [profiles](profiles.md) support only managed Codex and the bundled Claude runtime; other providers
 run in the default profile.
 
-## Updating provider versions
+## Updating providers
 
-In **Settings → Providers**, **Check now** checks for updates even when **Automatically check for
-provider updates** is off. **Refresh** rechecks installation and authentication health. Failed update
-checks remain visible and retain the last successfully checked available version. A server rate limit
-shows the time when checking can resume. If F5 cannot read the automatic-check preference, it
-leaves scheduling off until settings are available; explicit checks still work.
+**Check now** in **Settings → Providers** looks for provider updates, even with **Automatically
+check for provider updates** off. F5 updates each installation through its own source (npm,
+Homebrew or the provider's own updater) and shows a command to copy where it can't. The bundled
+Claude runtime updates with F5 itself. Finish or stop active work first: F5 stops idle sessions on
+that installation while it updates.
 
-F5 detects the installation behind each configured executable and keeps its existing source:
+## Good to know
 
-- Public-registry global npm installs (including nvm/fnm prefixes) update the exact available package
-  version using npm and Node from that installation's prefix, including in commands copied from F5.
-  Both the default registry and any package-scoped override are respected; only an effective public
-  npm registry is automated. Custom registries show manual guidance without comparing against the
-  public registry. Failed registry detection is reported separately and can be retried immediately.
-  Prefixes F5 cannot write to offer a copy command instead of an in-app update.
-- Homebrew formulas and casks update through the owning Homebrew installation. Core formulas/casks
-  use the Homebrew API for available versions; other taps use their locally available metadata.
-- Native Claude and OpenCode installs use their built-in updaters. Claude keeps its `latest` or
-  `stable` channel from that instance's effective Claude configuration directory, including a custom
-  home path. An unreadable or unrecognized Claude channel requires a manual update.
-- Default Claude is **Bundled with F5**. Its version changes with an F5 release; **Open F5 updates**
-  opens the application's update settings. There is no independent SDK update button.
-- Other installers (including devbox, Bun, Volta, pnpm, and custom npm registries) remain manual.
-  The dialog gives installation-specific guidance and **Refresh and verify**. Remote OpenCode servers
-  must be updated on their host.
+> [!NOTE]
+> In-app updates run only from the **Default** profile, on macOS and Linux. Windows and isolated
+> profiles show a command to copy instead.
 
-In-app updates run only from the **Default profile**, on macOS and Linux. Isolated profiles display the
-correct command to copy and direct you to Default. Windows provides PowerShell commands to copy;
-Windows installers are not executed inside F5. Standard Node installations with a separate AppData
-global npm prefix are supported for copying commands.
+- If `codex` is missing or signed out, starting a session fails with a clear error.
+- `META_API_KEY` takes precedence over a stored Muse browser sign-in.
+- OpenCode's **Server password** for an external server is stored in plain text on disk.
+- On macOS, a quarantined `opencode` download is blocked; fix it with
+  `xattr -d com.apple.quarantine $(which opencode)`.
 
-An update can affect other instances, profiles, and terminals sharing the same executable. The dialog
-lists other instances on this server using the installation. Finish or stop active work first, and close
-terminal sessions using that CLI. F5 stops idle provider sessions before updating; their next turn uses
-the normal resume path and launches the updated executable. New starts and turns on the affected
-installation are rejected until installation and verification finish. Only one installation can update
-at a time. Installers receive OS, proxy, certificate, and package-manager configuration; provider API
-keys and unrelated application credentials are excluded from their environment.
+<details>
+<summary>Provider updates in detail</summary>
 
-The update continues if you navigate away or disconnect. F5 re-probes every affected instance after
-an attempt and requires a successful probe after the installer finishes to confirm the observed
-version, including unchanged or unverified outcomes. Failed
-installer output is available on the initiating card until dismissed or the card is unmounted (for
-example, when navigating away). Updates and results are not
-persisted as an operation history. Shutting down the F5 server terminates the installer process tree;
-a partial installation is possible and will be detected by the next health probe.
+- **npm:** public-registry global installs (including nvm/fnm prefixes) update the exact version
+  with npm and Node from that prefix. Custom registries and prefixes F5 can't write to show manual
+  guidance or a copy command. Failed registry detection is reported separately and can be retried.
+- **Homebrew:** formulas and casks update through the owning Homebrew. Core packages use the
+  Homebrew API for versions; other taps use local metadata.
+- **Native Claude and OpenCode** use their built-in updaters. Claude keeps its `latest` or `stable`
+  channel from the instance's Claude config directory; an unreadable channel needs a manual update.
+- **Bundled Claude** shows **Bundled with F5**; **Open F5 updates** opens the app's update
+  settings.
+- **Manual:** devbox, Bun, Volta, pnpm and custom registries get installation-specific guidance and
+  **Refresh and verify**. Remote OpenCode servers update on their host.
+- **Safety:** the dialog lists other instances sharing the executable. New starts and turns on it
+  are rejected until the update is verified, and only one installation updates at a time.
+  Installers get OS, proxy, certificate and package-manager settings, never provider API keys.
+- **Verification:** the update continues if you navigate away. F5 re-probes every affected instance
+  afterwards and needs a successful probe to confirm the version. Failed output stays on the card
+  until dismissed. Results aren't kept as history. Stopping the server kills the installer, and the
+  next health probe detects a partial install.
+- **Checks:** a rate limit shows when checking can resume; failed checks keep the last known
+  version. If the auto-check preference can't be read, scheduling stays off.
+
+</details>
+
+<details>
+<summary>Windows executable overrides</summary>
+
+F5 starts providers without a command shell, so `cmd.exe` never reinterprets paths or options.
+Native `.exe`/`.com` files, JavaScript CLI entry points and standard npm Node `.cmd` shims work.
+Other `.bat`, `.ps1` and non-Node `.cmd` wrappers are rejected; point F5 at the wrapped
+executable or JavaScript entry point instead.
+
+Custom Claude binary paths are stricter: use a directly runnable executable or the Claude CLI
+JavaScript entry point, not a `.cmd` or `.bat` shim. Standard Node installations with a separate
+AppData global npm prefix are supported for copied update commands.
+
+</details>
+
+## Related
+
+- [Install F5](install.md)
+- [Getting started](user/getting-started.md)
+- [Runtime modes](runtime-modes.md)

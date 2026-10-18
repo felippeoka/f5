@@ -1,5 +1,7 @@
 # Environment variables
 
+> Operators and contributors: every environment variable F5 reads.
+
 This file is the source of truth for F5's environment-variable surface. A drift test asserts that the table below and `turbo.json`'s `globalEnv` stay in sync; if you add, rename, or remove a variable, update both.
 
 Prefer `F5_*` variables for F5-owned state. The legacy `T3CODE_*` prefix remains supported for upstream compatibility (see [NOTICE.md](../NOTICE.md)).
