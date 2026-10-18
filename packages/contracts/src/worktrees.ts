@@ -107,6 +107,7 @@ export const WorkspaceCheckoutIdentity = Schema.Struct({
 });
 export type WorkspaceCheckoutIdentity = typeof WorkspaceCheckoutIdentity.Type;
 export const WorkspaceTransitionSnapshot = Schema.Struct({
+  errorCode: Schema.optional(Schema.Literal("WorkspaceRequiresNewWorktree")),
   checkoutConflict: Schema.optional(GitCheckoutConflict),
   operationId: Schema.String,
   threadId: ThreadId,
@@ -134,6 +135,7 @@ export const WorkspaceTransitionRecoveryPreview = Schema.Struct({
   transition: WorkspaceTransitionSnapshot,
   actual: Schema.NullOr(WorkspaceCheckoutIdentity),
   original: Schema.NullOr(WorkspaceCheckoutIdentity),
+  projectCheckout: Schema.NullOr(WorkspaceCheckoutIdentity),
   acceptanceToken: Schema.String,
   canRetry: Schema.Boolean,
   blockedReasons: Schema.Array(Schema.String),
@@ -143,6 +145,11 @@ export const WorktreesResolveTransitionInput = Schema.Struct({
   operationId: Schema.String,
   version: NonNegativeInt,
   acceptanceToken: Schema.String,
-  action: Schema.Literals(["accept_inspected_workspace", "keep_original_workspace", "retry"]),
+  action: Schema.Literals([
+    "accept_inspected_workspace",
+    "keep_original_workspace",
+    "use_project_checkout",
+    "retry",
+  ]),
 });
 export type WorktreesResolveTransitionInput = typeof WorktreesResolveTransitionInput.Type;

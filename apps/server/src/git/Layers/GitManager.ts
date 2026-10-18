@@ -12,7 +12,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 
-import { Effect, FileSystem, Layer, Path, Option } from "effect";
+import { Effect, FileSystem, Layer, Path, Option, Schema } from "effect";
 import {
   resolveAutoFeatureBranchName,
   sanitizeBranchFragment,
@@ -759,7 +759,7 @@ export const makeGitManager = Effect.gen(function* () {
       });
     }).pipe(
       Effect.catch((cause) =>
-        provider.kind !== "github"
+        provider.kind !== "github" || Schema.is(GitManagerError)(cause)
           ? Effect.fail(cause)
           : gitCore.fetchPullRequestBranch({
               cwd,

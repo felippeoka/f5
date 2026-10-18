@@ -1,3 +1,4 @@
+import { WorkspaceRequiresNewWorktreeError } from "../../git/workspaceSwitch.ts";
 import { GitCommandError } from "../../git/Errors.ts";
 import { lstat } from "node:fs/promises";
 import { canonicalJsonHash } from "../../canonicalJsonHash.ts";
@@ -143,7 +144,7 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
           usage.setupThreadIds.some((id) => id !== record.threadId))
       )
         return yield* Effect.fail(
-          new Error(
+          new WorkspaceRequiresNewWorktreeError(
             "Another conversation, terminal, session, or queued operation references this checkout. Create a new worktree instead.",
           ),
         );
@@ -152,6 +153,7 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
       if (
         !inPlace &&
         foreign.length &&
+        path !== record.source.path &&
         !record.request.sharedFilesystemConfirmed &&
         record.intent === "attach_existing"
       )
@@ -355,17 +357,17 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
                 new Error("The target checkout changed during workspace switching."),
               );
           }
-          const mutation =
-            inPlace || record.intent === "recreate" || record.intent === "recreate_from_base";
-          record = yield* store.update(record, { phase: "applying", mutationAttempted: mutation });
+          record = yield* store.update(record, { phase: "applying" });
           if (inPlace) {
-            if (!record.request.branch) return yield* Effect.fail(new Error("Choose a branch."));
+            const branch = record.request.branch;
+            if (!branch) return yield* Effect.fail(new Error("Choose a branch."));
+            record = yield* store.update(record, { mutationAttempted: true });
             if (record.intent === "create_branch_and_checkout") {
-              yield* git.createBranch({ cwd: record.source.path, branch: record.request.branch });
+              yield* git.createBranch({ cwd: record.source.path, branch });
             }
             yield* Effect.scoped(
               git.checkoutBranch(
-                { cwd: record.source.path, branch: record.request.branch },
+                { cwd: record.source.path, branch },
                 {
                   refreshUpstream: false,
                   expectedTarget: {
@@ -378,6 +380,7 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
           } else if (record.intent === "recreate") {
             if (!thread.worktreePath || !thread.branch)
               return yield* Effect.fail(new Error("The worktree branch is unavailable."));
+            record = yield* store.update(record, { mutationAttempted: true });
             yield* git.ensureWorktree({
               owner: `thread:${thread.id}`,
               cwd: project.workspaceRoot,
@@ -392,6 +395,7 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
             );
             if (!base || base !== record.target.headSha)
               return yield* Effect.fail(new Error("The recorded recovery base changed."));
+            record = yield* store.update(record, { mutationAttempted: true });
             yield* git.clearMissingRegistration(project.workspaceRoot, record.target.path);
             yield* git.createWorktree({
               cwd: project.workspaceRoot,
@@ -461,6 +465,21 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
         }),
       );
     });
+  const resumeMissingPause = (record: WorkspaceTransitionSnapshot) =>
+    Effect.gen(function* () {
+      if (
+        record.phase !== "completed" ||
+        !["recreate", "recreate_from_base", "use_project_checkout"].includes(record.intent)
+      )
+        return;
+      const state = (yield* queue.listByThread(record.threadId)).state;
+      if (state.paused && state.pauseReasonCode === "worktree_missing")
+        yield* queue.setPaused({
+          threadId: record.threadId,
+          paused: false,
+          expectedRevision: state.revision,
+        });
+    }).pipe(Effect.catch(() => Effect.void));
   const start = (record: WorkspaceTransitionRecord) =>
     Effect.gen(function* () {
       const existing = workers.get(record.operationId);
@@ -479,7 +498,7 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
             const conflict = Schema.is(GitCommandError)(failure)
               ? failure.checkoutConflict
               : undefined;
-            let definitelyUnchanged = !live.mutationAttempted;
+            let definitelyUnchanged = !live.mutationAttempted && live.phase !== "applied";
             if (live.intent === "checkout_branch" && conflict) {
               const actual = yield* locked(live, inspect(live.source.path)).pipe(Effect.option);
               definitelyUnchanged =
@@ -488,13 +507,17 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
             if (transitionIsActive(live))
               return yield* store.update(live, {
                 phase: definitelyUnchanged ? "failed" : "needs_recovery",
-                mutationAttempted: !definitelyUnchanged,
+                mutationAttempted: definitelyUnchanged ? false : live.mutationAttempted,
                 ...(conflict ? { checkoutConflict: conflict } : {}),
+                ...(failure instanceof WorkspaceRequiresNewWorktreeError
+                  ? { errorCode: failure.code }
+                  : {}),
                 error: failure instanceof Error ? failure.message : String(failure),
               });
             return live;
           }),
         ),
+        Effect.tap(resumeMissingPause),
         Effect.tap((value) => Deferred.succeed(result, value)),
         Effect.catch((error) => Deferred.fail(result, error)),
         Effect.asVoid,
@@ -508,7 +531,8 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
             const live = yield* store
               .get(record.operationId)
               .pipe(Effect.orElseSucceed(() => null));
-            if (live?.phase === "cancelled") yield* Deferred.succeed(result, live);
+            if (live && ["cancelled", "needs_recovery"].includes(live.phase))
+              yield* Deferred.succeed(result, live);
             else
               yield* Deferred.fail(
                 result,
@@ -628,7 +652,7 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
         });
         if (!planned.branch || !planned.headSha)
           return yield* Effect.fail(
-            new Error(
+            new WorkspaceRequiresNewWorktreeError(
               "The branch is unavailable or would detach this checkout. Create a new worktree instead.",
             ),
           );
@@ -663,18 +687,30 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
     });
   const recoveryInspection = (record: WorkspaceTransitionRecord) =>
     Effect.gen(function* () {
-      const actual = yield* inspect(record.observed?.path ?? record.target.path).pipe(
-        Effect.option,
-      );
-      const original = yield* inspect(record.source.path).pipe(Effect.option);
+      const actual = yield* git
+        .inspectCheckout(record.observed?.path ?? record.target.path, { recoveryFingerprint: true })
+        .pipe(Effect.option);
+      const original = yield* git
+        .inspectCheckout(record.source.path, { recoveryFingerprint: true })
+        .pipe(Effect.option);
+      const { project } = yield* context(record.threadId);
+      const projectCheckout = yield* git
+        .inspectCheckout(project.workspaceRoot, { recoveryFingerprint: true })
+        .pipe(Effect.option);
       const token = digest({
         secret,
         version: record.version,
         operationId: record.operationId,
         actual: Option.getOrNull(actual),
         original: Option.getOrNull(original),
+        projectCheckout: Option.getOrNull(projectCheckout),
       });
-      return { actual: Option.getOrNull(actual), original: Option.getOrNull(original), token };
+      return {
+        actual: Option.getOrNull(actual),
+        original: Option.getOrNull(original),
+        projectCheckout: Option.getOrNull(projectCheckout),
+        token,
+      };
     });
   const previewRecovery: WorkspaceTransitionShape["previewRecovery"] = ({ operationId }) =>
     Effect.gen(function* () {
@@ -684,6 +720,7 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
         transition: workspaceTransitionSnapshot(record),
         actual: inspected.actual ? identity(inspected.actual) : null,
         original: inspected.original ? identity(inspected.original) : null,
+        projectCheckout: inspected.projectCheckout ? identity(inspected.projectCheckout) : null,
         acceptanceToken: inspected.token,
         canRetry: !record.mutationAttempted && !workers.has(record.operationId),
         blockedReasons: inspected.actual ? [] : ["The target checkout could not be verified."],
@@ -729,7 +766,11 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
             return record;
           }
           const selected =
-            input.action === "keep_original_workspace" ? inspected.original : inspected.actual;
+            input.action === "keep_original_workspace"
+              ? inspected.original
+              : input.action === "use_project_checkout"
+                ? inspected.projectCheckout
+                : inspected.actual;
           if (!selected)
             return yield* Effect.fail(new Error("The selected checkout is unavailable."));
           if (
@@ -751,11 +792,18 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
             selected.canonicalRoot,
             selected.branch,
           );
-          yield* validateClaims(record, selected.canonicalRoot, false);
+          yield* validateClaims(
+            input.action === "use_project_checkout"
+              ? { ...record, intent: "use_project_checkout" }
+              : record,
+            selected.canonicalRoot,
+            false,
+          );
           return yield* commit(record, selected);
         }),
       );
       const result = retry ? yield* start(resolved) : resolved;
+      yield* resumeMissingPause(result);
       yield* dispatcher.notify(record.threadId);
       return result;
     });

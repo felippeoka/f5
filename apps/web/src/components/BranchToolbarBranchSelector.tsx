@@ -246,8 +246,8 @@ export function BranchToolbarBranchSelector({
     if (
       desiredBranch &&
       branchCwd &&
-      error instanceof Error &&
-      /new worktree instead/i.test(error.message)
+      error instanceof WsRequestError &&
+      error.code === "WorkspaceRequiresNewWorktree"
     ) {
       setCheckoutConflict({
         conflict: { cwd: branchCwd, branch: desiredBranch, files: [] },

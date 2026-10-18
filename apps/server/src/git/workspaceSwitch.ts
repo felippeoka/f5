@@ -11,3 +11,8 @@ export const GitWorkspaceSwitch = ServiceMap.Reference<null | GitWorkspaceSwitch
   "t3/git/GitWorkspaceSwitch",
   { defaultValue: () => null },
 );
+
+/** Stable transport classification for checkouts that require isolation instead. */
+export class WorkspaceRequiresNewWorktreeError extends Error {
+  readonly code = "WorkspaceRequiresNewWorktree";
+}

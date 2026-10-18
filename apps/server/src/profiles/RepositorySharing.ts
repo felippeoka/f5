@@ -1,3 +1,4 @@
+import { WorkspaceRequiresNewWorktreeError } from "../git/workspaceSwitch.ts";
 import { stripPathTerminator } from "../git/worktreeList.ts";
 import * as FS from "node:fs/promises";
 import * as Path from "node:path";
@@ -138,7 +139,7 @@ export async function assertExclusiveProfileCheckout(
         if (!row.path)
           throw new Error("Other-profile checkout ownership could not be established.");
         if ((await canonicalWorktreePath(row.path)) === target)
-          throw new Error(
+          throw new WorkspaceRequiresNewWorktreeError(
             "Another profile references this checkout. Create a new worktree instead.",
           );
       }

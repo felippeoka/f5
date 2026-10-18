@@ -29,6 +29,8 @@ export async function switchConversationWorkspace(
       "GitCheckoutConflict",
       result.checkoutConflict,
     );
+  if (result.phase !== "completed" && result.errorCode)
+    throw new WsRequestError(result.error ?? "Create a new worktree instead.", result.errorCode);
   if (result.phase !== "completed")
     throw new Error(result.error ?? "Inspect and resolve the interrupted workspace switch.");
   return result;

@@ -173,7 +173,7 @@ export interface GitCoreShape {
   ) => Effect.Effect<CheckoutIdentity, GitCommandError>;
   readonly inspectCheckout: (
     path: string,
-    options?: { aheadOf?: string; statusTimeoutMs?: number },
+    options?: { aheadOf?: string; statusTimeoutMs?: number; recoveryFingerprint?: boolean },
   ) => Effect.Effect<CheckoutInspection, GitCommandError>;
   readonly clearMissingRegistration: (
     cwd: string,

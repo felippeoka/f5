@@ -1758,6 +1758,28 @@ describe("OrchestrationEngine", () => {
         createdAt,
       }),
     );
+    // A session event can land after a verified branch observation captured its expected context.
+    await system.run(
+      engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("session-during-observation"),
+        threadId,
+        createdAt,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          providerInstanceId: null,
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          lastErrorId: null,
+          lastErrorOccurredAt: null,
+          lastErrorRetryability: null,
+          updatedAt: createdAt,
+        },
+      }),
+    );
     await system.run(
       engine
         .dispatch({
@@ -1797,6 +1819,24 @@ describe("OrchestrationEngine", () => {
       (await system.run(engine.getReadModel())).threads.find((entry) => entry.id === threadId),
     ).toMatchObject({ branch: "feature/current" });
 
+    await system.run(
+      engine.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.makeUnsafe("archive-for-root-guard"),
+        threadId,
+        createdAt,
+      }),
+    );
+    await expect(
+      system.run(
+        engine.dispatch({
+          type: "project.meta.update",
+          commandId: CommandId.makeUnsafe("move-project-root"),
+          projectId,
+          workspaceRoot: "/tmp/moved-checkout",
+        }),
+      ),
+    ).rejects.toThrow("Conversations still reference this project workspace");
     await system.dispose();
   });
 

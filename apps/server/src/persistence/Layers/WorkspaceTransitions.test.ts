@@ -139,6 +139,26 @@ it.layer(WorkspaceTransitionsLive.pipe(Layer.provideMerge(SqlitePersistenceMemor
           expect(yield* restarted.forThread(initial.threadId, true)).toBeNull();
         }),
     );
+    it.effect("returns a reactivated older operation ahead of newer failed history", () =>
+      Effect.gen(function* () {
+        const store = yield* WorkspaceTransitions;
+        yield* seed("retry-history");
+        const threadId = ThreadId.makeUnsafe("retry-history");
+        const a = yield* store.update(
+          yield* store.reserve({ ...record("history-a", threadId), createdAt: "2026-01-01" }),
+          { phase: "failed" },
+        );
+        yield* store.update(
+          yield* store.reserve({ ...record("history-b", threadId), createdAt: "2026-01-02" }),
+          { phase: "failed" },
+        );
+        expect((yield* store.forThread(threadId))?.operationId).toBe("history-b");
+        const retried = yield* store.reactivate(a);
+        expect(yield* store.forThread(threadId)).toEqual(retried);
+        const recovery = yield* store.update(retried, { phase: "needs_recovery" });
+        expect(yield* store.forThread(threadId)).toEqual(recovery);
+      }),
+    );
     it.effect("rechecks pending work before retrying a confirmed pre-mutation failure", () =>
       Effect.gen(function* () {
         const store = yield* WorkspaceTransitions;

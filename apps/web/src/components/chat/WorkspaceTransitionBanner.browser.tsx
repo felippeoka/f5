@@ -57,6 +57,7 @@ it("shows inspected identities and disables retry for ambiguous Git outcomes", a
     transition,
     actual: transition.target,
     original: source,
+    projectCheckout: source,
     acceptanceToken: "token",
     canRetry: false,
     blockedReasons: [],
@@ -78,6 +79,7 @@ it("rejects stale inspection visibly and requires a new preview before retrying 
     transition,
     actual: transition.target,
     original: source,
+    projectCheckout: source,
     acceptanceToken: "stale",
     canRetry: false,
     blockedReasons: [],
@@ -108,4 +110,35 @@ it("reports an active switch without offering recovery actions", async () => {
   await expect
     .element(page.getByRole("button", { name: "Inspect workspace" }))
     .not.toBeInTheDocument();
+});
+
+it("offers the inspected project checkout when a failed recreation left neither recorded checkout available", async () => {
+  api.getTransition
+    .mockResolvedValueOnce(transition)
+    .mockResolvedValue({ ...transition, phase: "completed" });
+  api.previewTransitionRecovery.mockResolvedValue({
+    transition,
+    actual: null,
+    original: null,
+    projectCheckout: source,
+    acceptanceToken: "root-token",
+    canRetry: false,
+    blockedReasons: ["The target checkout could not be verified."],
+  });
+  api.resolveTransition.mockResolvedValue({ ...transition, phase: "completed" });
+  await mount();
+  await page.getByRole("button", { name: "Inspect workspace" }).click();
+  await expect
+    .element(page.getByRole("button", { name: "Accept inspected workspace" }))
+    .toBeDisabled();
+  await expect
+    .element(page.getByRole("button", { name: "Keep original workspace" }))
+    .toBeDisabled();
+  await page.getByRole("button", { name: "Continue in project checkout" }).click();
+  expect(api.resolveTransition).toHaveBeenCalledWith({
+    operationId: "switch",
+    version: 5,
+    acceptanceToken: "root-token",
+    action: "use_project_checkout",
+  });
 });

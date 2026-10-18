@@ -1,3 +1,4 @@
+import { WorkspaceTransitions } from "../../persistence/Services/WorkspaceTransitions.ts";
 import { WorkspaceTransition } from "../Services/WorkspaceTransition.ts";
 import { dispatchVerifiedWorkspace } from "../workspaceTransitionContext.ts";
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
@@ -205,6 +206,7 @@ export const makeWorktreeSetup = Effect.gen(function* () {
   const dispatcher = yield* NextTurnQueueDispatcher;
   const git = yield* GitCore;
   const transitions = yield* Effect.serviceOption(WorkspaceTransition);
+  const transitionStore = yield* Effect.serviceOption(WorkspaceTransitions);
   const config = yield* ServerConfig;
   const settings = yield* ServerSettingsService;
   const gate = yield* WorktreeSetupGate;
@@ -1649,8 +1651,64 @@ export const makeWorktreeSetup = Effect.gen(function* () {
       return entry.snapshot;
     });
 
+  const finishLocalHandoff = (threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const existing = tracked.get(threadId);
+      const snapshot = existing?.snapshot ?? (yield* readPersisted(threadId));
+      if (!snapshot || Option.isNone(transitionStore)) return null;
+      const transition = yield* transitionStore.value.get(`work-locally:${snapshot.operationId}`);
+      if (
+        transition?.phase !== "completed" ||
+        transition.intent !== "use_project_checkout" ||
+        transition.setupOwnerOperationId !== snapshot.operationId ||
+        transition.result?.worktreePath !== null
+      )
+        return null;
+      const entry = existing ?? track(snapshot);
+      if (["cancelled", "cancelled_kept"].includes(entry.snapshot.phase)) return entry.snapshot;
+      const currentThread = (yield* engine.getReadModel()).threads.find(
+        (thread) => thread.id === threadId,
+      );
+      const released =
+        currentThread?.worktreePath === null &&
+        currentThread.deletedAt === null &&
+        currentThread.archivedAt === null
+          ? yield* releaseCreated(entry.snapshot)
+          : {
+              kept: "The conversation changed workspace after the handoff; the old checkout was retained.",
+            };
+      const settled = yield* commit(threadId, (current) => ({
+        ...settle(
+          current,
+          released.kept === null ? "cancelled" : "cancelled_kept",
+          released.kept === null
+            ? "Running in the project checkout instead."
+            : `${released.kept} Running in the project checkout instead.`,
+        ),
+        ...(released.kept === null
+          ? { worktreePath: null, createdWorktree: false, createdBranch: false }
+          : {}),
+      }));
+      yield* store
+        .setWorktreeBlockToken({ threadId, token: null, expectedToken: entry.snapshot.operationId })
+        .pipe(Effect.ignoreCause({ log: true }));
+      const currentPause = (yield* store.listByThread(threadId)).state;
+      if (
+        (currentPause.worktreeBlockToken === null ||
+          currentPause.worktreeBlockToken === entry.snapshot.operationId) &&
+        currentPause.pauseReasonCode?.startsWith("worktree_setup")
+      )
+        yield* store
+          .setPaused({ threadId, paused: false, expectedRevision: currentPause.revision })
+          .pipe(Effect.mapError((error) => failFor(error.message)));
+      yield* dispatcher.notify(threadId);
+      return settled;
+    }).pipe(Effect.mapError((error) => failFor(error.message)));
+
   const workLocally = (threadId: ThreadId) =>
     Effect.gen(function* () {
+      const completed = yield* finishLocalHandoff(threadId);
+      if (completed) return completed;
       const entry = yield* load(threadId);
       if (!entry) return yield* failFor("No worktree setup for this thread.");
       if (entry.snapshot.agentStarted) {
@@ -1710,29 +1768,7 @@ export const makeWorktreeSetup = Effect.gen(function* () {
         .pipe(Effect.mapError((error) => failFor(error.message)));
       if (switched.phase !== "completed")
         return yield* failFor(switched.error ?? "Inspect the interrupted workspace transition.");
-      const released = yield* releaseCreated(entry.snapshot);
-      const settled = yield* commit(threadId, (current) => ({
-        ...settle(
-          current,
-          released.kept === null ? "cancelled" : "cancelled_kept",
-          released.kept === null
-            ? "Running in the project checkout instead."
-            : `${released.kept} Running in the project checkout instead.`,
-        ),
-        ...(released.kept === null
-          ? { worktreePath: null, createdWorktree: false, createdBranch: false }
-          : {}),
-      }));
-      yield* store
-        .setWorktreeBlockToken({ threadId, token: null, expectedToken: entry.snapshot.operationId })
-        .pipe(Effect.ignoreCause({ log: true }));
-      const currentPause = (yield* store.listByThread(threadId)).state;
-      if (!keepPause && currentPause.pauseReasonCode === "worktree_setup_cancelled")
-        yield* store
-          .setPaused({ threadId, paused: false, expectedRevision: currentPause.revision })
-          .pipe(Effect.mapError((error) => failFor(error.message)));
-      yield* dispatcher.notify(threadId);
-      return settled;
+      return yield* finishLocalHandoff(threadId);
     }).pipe(Effect.mapError((error) => failFor(error.message)));
 
   const startup: WorktreeSetupShape["startup"] = Effect.gen(function* () {
@@ -1752,6 +1788,7 @@ export const makeWorktreeSetup = Effect.gen(function* () {
     `.pipe(Effect.orElseSucceed(() => []));
     for (const row of rows) {
       const decoded = Option.getOrNull(decodeSnapshotJson(row.payload));
+      if (decoded && (yield* finishLocalHandoff(row.threadId))) continue;
       if (decoded === null || decoded.phase !== "running" || tracked.has(row.threadId)) continue;
       const order = yield* nextGeneration(row.threadId);
       track({
@@ -1812,6 +1849,24 @@ export const makeWorktreeSetup = Effect.gen(function* () {
             ),
           );
       });
+  yield* Effect.forkIn(
+    Stream.runForEach(engine.streamDomainEvents, (event) => {
+      if (event.type !== "thread.meta-updated" || event.payload.worktreePath !== null)
+        return Effect.void;
+      return Effect.gen(function* () {
+        const entry = yield* load(event.payload.threadId);
+        if (entry)
+          yield* serialized(finishLocalHandoff)(event.payload.threadId, entry.snapshot.operationId);
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Setup workspace handoff will be reconciled on retry", {
+            cause: Cause.pretty(cause),
+          }),
+        ),
+      );
+    }),
+    scope,
+  );
   return {
     start,
     get,

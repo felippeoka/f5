@@ -1,5 +1,9 @@
 import { OrchestrationCommandInvariantError } from "./orchestration/Errors.ts";
-import { GitWorkspaceSwitch, type GitWorkspaceSwitchHandler } from "./git/workspaceSwitch.ts";
+import {
+  WorkspaceRequiresNewWorktreeError,
+  GitWorkspaceSwitch,
+  type GitWorkspaceSwitchHandler,
+} from "./git/workspaceSwitch.ts";
 import { inspectAttachableWorkspace } from "./project/workspaceAttachment.ts";
 import { readWorktreeClaims } from "./project/worktreeClaims.ts";
 import { withRepositoryLifecycleLock } from "./project/Layers/WorktreeLifecycleCoordinator.ts";
@@ -1627,18 +1631,31 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       const project = model.projects.find((entry) => entry.id === command.projectId);
       const workspace = command.worktreePath ?? project?.workspaceRoot;
       if (!workspace)
-        return yield* new RouteRequestError({ message: "Unknown project workspace." });
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Unknown project workspace.",
+        });
       return yield* withWorktreeLifecycleLock(
         workspace,
-        validateCreationAttachment(command).pipe(Effect.andThen(engine.dispatch(command))),
+        validateCreationAttachment(command).pipe(
+          Effect.mapError(
+            (error) =>
+              new OrchestrationCommandInvariantError({
+                commandType: command.type,
+                detail: error.message,
+              }),
+          ),
+          Effect.andThen(engine.dispatch(command)),
+        ),
       );
     }).pipe(
-      Effect.mapError(
-        (error) =>
+      Effect.catchTag("RepositoryLifecycleError", (error) =>
+        Effect.fail(
           new OrchestrationCommandInvariantError({
             commandType: command.type,
             detail: error.message,
           }),
+        ),
       ),
     );
   };
@@ -6023,9 +6040,15 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.worktreesSwitchWorkspace: {
         const { workspaceTransition } = yield* awaitOrchestrationRuntimeForRoute;
-        return yield* workspaceTransition
-          .switchWorkspace(stripRequestTag(request.body))
-          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+        return yield* workspaceTransition.switchWorkspace(stripRequestTag(request.body)).pipe(
+          Effect.mapError(
+            (error) =>
+              new RouteRequestError({
+                message: error.message,
+                ...(error instanceof WorkspaceRequiresNewWorktreeError ? { code: error.code } : {}),
+              }),
+          ),
+        );
       }
       case WS_METHODS.worktreesGetTransition: {
         const { workspaceTransition } = yield* awaitOrchestrationRuntimeForRoute;

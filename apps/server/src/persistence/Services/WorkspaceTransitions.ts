@@ -56,6 +56,7 @@ export interface WorkspaceTransitionsShape {
         | "error"
         | "commandId"
         | "checkoutConflict"
+        | "errorCode"
       >
     >,
   ) => Effect.Effect<WorkspaceTransitionRecord, WorkspaceTransitionError>;
@@ -84,4 +85,5 @@ export const workspaceTransitionSnapshot = (
   createdAt: record.createdAt,
   updatedAt: record.updatedAt,
   ...(record.checkoutConflict ? { checkoutConflict: record.checkoutConflict } : {}),
+  ...(record.errorCode ? { errorCode: record.errorCode } : {}),
 });

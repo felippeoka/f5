@@ -1,3 +1,10 @@
+import { WorktreePreparations } from "../../persistence/Services/WorktreePreparations.ts";
+import { GitCore } from "../../git/Services/GitCore.ts";
+import { GitCommandError } from "../../git/Errors.ts";
+import { WorktreeSetupLive } from "./WorktreeSetup.ts";
+import { WorktreeSetup } from "../Services/WorktreeSetup.ts";
+import { TextGeneration } from "../../git/Services/TextGeneration.ts";
+import { makeFakeTextGeneration } from "../../git/testDoubles.ts";
 import { PreparationError } from "../../persistence/Services/WorktreePreparations.ts";
 import { makeWorktreeManager } from "./WorktreeManager.ts";
 import { ProfileRegistryStore } from "../../profiles/ProfileRegistryStore.ts";
@@ -9,6 +16,9 @@ import {
   ProjectId,
   ThreadId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  EventId,
+  MessageId,
+  type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
 import { Effect, Layer, ManagedRuntime, Deferred } from "effect";
 import {
@@ -55,6 +65,39 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
     const failPhase: { current: string | null } = { current: null };
     const preparationControl = { fail: false, block: false };
     const preparationEntered = Deferred.makeUnsafe<void>();
+    const mutationEntered = Deferred.makeUnsafe<void>();
+    const mutationControl = { fail: false, block: false };
+    const gitLayer = Layer.effect(
+      GitCore,
+      Effect.gen(function* () {
+        const gitCore = yield* GitCore;
+        const beforeMutation = Effect.suspend(() =>
+          Deferred.succeed(mutationEntered, undefined).pipe(
+            Effect.andThen(
+              mutationControl.block
+                ? Effect.never
+                : mutationControl.fail
+                  ? Effect.fail(
+                      new GitCommandError({
+                        operation: "test-worktree-add",
+                        cwd: repo.root,
+                        command: "git worktree add",
+                        detail: "Git add failed before creating a checkout",
+                      }),
+                    )
+                  : Effect.void,
+            ),
+          ),
+        );
+        return {
+          ...gitCore,
+          ensureWorktree: (input: Parameters<typeof gitCore.ensureWorktree>[0]) =>
+            beforeMutation.pipe(Effect.andThen(gitCore.ensureWorktree(input))),
+          createWorktree: (input: Parameters<typeof gitCore.createWorktree>[0]) =>
+            beforeMutation.pipe(Effect.andThen(gitCore.createWorktree(input))),
+        };
+      }),
+    ).pipe(Layer.provide(base));
     const storeLayer = Layer.effect(
       WorkspaceTransitions,
       makeWorkspaceTransitions.pipe(
@@ -85,34 +128,50 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
       Layer.provideMerge(NextTurnQueueStoreLive),
     );
     const preparations: string[] = [];
-    const layer = WorkspaceTransitionLive.pipe(
+    const transitionLayer = WorkspaceTransitionLive.pipe(
       Layer.provideMerge(engineLayer),
       Layer.provideMerge(WorktreeSetupGateLive),
       Layer.provideMerge(
-        Layer.succeed(WorktreePreparation, {
-          startup: Effect.void,
-          needsPreparation: () => Effect.succeed(false),
-          startBackground: () => Effect.void,
-          prepare: ({ worktreePath }) =>
-            Effect.gen(function* () {
-              expect(yield* holdsWorktreeLifecycleLock(worktreePath).pipe(Effect.orDie)).toBe(
-                false,
-              );
-              preparations.push(worktreePath);
-              yield* Deferred.succeed(preparationEntered, undefined);
-              if (preparationControl.fail)
-                return yield* new PreparationError({
-                  message: "setup interrupted",
-                  path: worktreePath,
-                });
-              if (preparationControl.block) return yield* Effect.never;
-            }),
-        }),
+        Layer.effect(
+          WorktreePreparation,
+          Effect.gen(function* () {
+            const receipts = yield* WorktreePreparations;
+            return {
+              startup: Effect.void,
+              needsPreparation: () => Effect.succeed(false),
+              startBackground: () => Effect.void,
+              prepare: ({ worktreePath }) =>
+                Effect.gen(function* () {
+                  expect(yield* holdsWorktreeLifecycleLock(worktreePath).pipe(Effect.orDie)).toBe(
+                    false,
+                  );
+                  preparations.push(worktreePath);
+                  yield* Deferred.succeed(preparationEntered, undefined);
+                  if (preparationControl.fail)
+                    return yield* new PreparationError({
+                      message: "setup interrupted",
+                      path: worktreePath,
+                    });
+                  if (preparationControl.block) return yield* Effect.never;
+                  const receipt = yield* receipts.latest(
+                    yield* Effect.promise(() => fs.realpath(worktreePath)),
+                  );
+                  if (receipt) yield* receipts.update(receipt, { phase: "completed" });
+                }),
+            };
+          }),
+        ),
       ),
       Layer.provideMerge(
         Layer.succeed(NextTurnQueueDispatcher, { notify: () => Effect.void } as never),
       ),
+      Layer.provideMerge(gitLayer),
       Layer.provideMerge(base),
+    );
+    const layer = WorktreeSetupLive.pipe(
+      Layer.provideMerge(Layer.succeed(TextGeneration, makeFakeTextGeneration())),
+      Layer.provideMerge(OrchestrationCommandReceiptRepositoryLive),
+      Layer.provideMerge(transitionLayer),
     );
     const runtime = ManagedRuntime.make(layer);
     cleanups.push(() => runtime.dispose());
@@ -120,6 +179,7 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
       Effect.gen(function* () {
         return {
           transition: yield* WorkspaceTransition,
+          setupService: yield* WorktreeSetup,
           engine: yield* OrchestrationEngineService,
           store: yield* WorkspaceTransitions,
           queue: yield* NextTurnQueueStore,
@@ -192,6 +252,8 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
       failPhase,
       preparationControl,
       preparationEntered,
+      mutationControl,
+      mutationEntered,
       manager: await runtime.runPromise(makeWorktreeManager),
     };
   }
@@ -236,6 +298,26 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
     expect(result.error).toMatch(/references this checkout/);
     expect(git(f.repo.root, "branch", "--show-current")).toBe("main");
   });
+  it.each(["checkout_branch", "create_branch_and_checkout"] as const)(
+    "refuses %s when the conversation's own terminal is live",
+    async (intent) => {
+      const f = await fixture();
+      if (intent === "checkout_branch") git(f.repo.root, "branch", "topic");
+      f.world.terminals.push({
+        threadId: f.threadId,
+        terminalId: "own-shell",
+        cwd: f.repo.root,
+        status: "running",
+      });
+      const result = await f.runtime.runPromise(
+        f.transition.switchWorkspace(await f.request(intent, { branch: "topic" })),
+      );
+      expect(result.phase).toBe("failed");
+      expect(result.errorCode).toBe("WorkspaceRequiresNewWorktree");
+      expect(git(f.repo.root, "branch", "--show-current")).toBe("main");
+    },
+  );
+
   it("requires explicit sharing confirmation and rejects external attachments", async () => {
     const f = await fixture();
     const target = path.join(f.config.worktreesDir, "shared");
@@ -445,32 +527,38 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
     );
     expect(accepted.phase).toBe("completed");
   });
-  it("rejects a preview after already-dirty file contents change", async () => {
-    const f = await fixture();
-    git(f.repo.root, "branch", "topic");
-    f.failPhase.current = "applied";
-    const result = await f.runtime.runPromise(
-      f.transition.switchWorkspace(await f.request("checkout_branch", { branch: "topic" })),
-    );
-    expect(result.phase).toBe("needs_recovery");
-    f.failPhase.current = null;
-    const file = path.join(f.repo.root, "dirty.txt");
-    await fs.writeFile(file, "first");
-    const preview = await f.runtime.runPromise(
-      f.transition.previewRecovery({ operationId: result.operationId }),
-    );
-    await fs.writeFile(file, "changed contents");
-    await expect(
-      f.runtime.runPromise(
-        f.transition.resolve({
-          operationId: result.operationId,
-          version: preview.transition.version,
-          acceptanceToken: preview.acceptanceToken,
-          action: "accept_inspected_workspace",
-        }),
-      ),
-    ).rejects.toThrow(/changed/);
-  });
+  it.each(["dirty.txt", "untracked/nested.txt", "ignored/nested.txt"])(
+    "rejects a preview after contents change in %s",
+    async (relative) => {
+      const f = await fixture();
+      git(f.repo.root, "branch", "topic");
+      f.failPhase.current = "applied";
+      const result = await f.runtime.runPromise(
+        f.transition.switchWorkspace(await f.request("checkout_branch", { branch: "topic" })),
+      );
+      expect(result.phase).toBe("needs_recovery");
+      f.failPhase.current = null;
+      const file = path.join(f.repo.root, relative);
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      if (relative.startsWith("ignored/"))
+        await fs.appendFile(path.join(f.repo.root, ".git", "info", "exclude"), "\nignored/\n");
+      await fs.writeFile(file, "first");
+      const preview = await f.runtime.runPromise(
+        f.transition.previewRecovery({ operationId: result.operationId }),
+      );
+      await fs.writeFile(file, "changed contents");
+      await expect(
+        f.runtime.runPromise(
+          f.transition.resolve({
+            operationId: result.operationId,
+            version: preview.transition.version,
+            acceptanceToken: preview.acceptanceToken,
+            action: "accept_inspected_workspace",
+          }),
+        ),
+      ).rejects.toThrow(/changed/);
+    },
+  );
   it("allows archive to interrupt preparation, settle its caller, and retain checkout files", async () => {
     const f = await fixture();
     const target = path.join(f.config.worktreesDir, "cancel");
@@ -562,5 +650,254 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
     expect(result.checkoutConflict?.files).toContain(".env");
     expect(await fs.readFile(path.join(f.repo.root, ".env"), "utf8")).toBe("local secret");
     expect(git(f.repo.root, "branch", "--show-current")).toBe("main");
+  });
+  it("refreshes the recorded branch in the same shared checkout without confirming a new attachment", async () => {
+    const f = await fixture();
+    await f.create(ThreadId.makeUnsafe("archived-peer"));
+    await f.runtime.runPromise(
+      f.engine.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.makeUnsafe("archive-peer"),
+        threadId: ThreadId.makeUnsafe("archived-peer"),
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    git(f.repo.root, "checkout", "-qb", "changed-outside");
+    const result = await f.runtime.runPromise(
+      f.transition.switchWorkspace(
+        await f.request("attach_existing", { targetPath: f.repo.root, branch: "changed-outside" }),
+      ),
+    );
+    expect(result.phase).toBe("completed");
+    expect(result.result?.branch).toBe("changed-outside");
+  });
+
+  for (const intent of ["recreate", "recreate_from_base"] as const) {
+    it.each(["failure", "cancel"] as const)(
+      `can leave a missing checkout after ${intent} %s without repeating Git`,
+      async (outcome) => {
+        const f = await fixture();
+        const target = path.join(f.config.worktreesDir, "missing");
+        git(f.repo.root, "worktree", "add", "-q", "-b", "missing", target, "main");
+        await f.runtime.runPromise(
+          f.transition.switchWorkspace(await f.request("attach_existing", { targetPath: target })),
+        );
+        await fs.rm(target, { recursive: true });
+        await f.runtime.runPromise(
+          f.queue.setPaused({ threadId: f.threadId, paused: true, reasonCode: "worktree_missing" }),
+        );
+        f.mutationControl.fail = outcome === "failure";
+        f.mutationControl.block = outcome === "cancel";
+        const request = await f.request(intent);
+        const running = f.runtime.runPromise(f.transition.switchWorkspace(request));
+        await f.runtime.runPromise(Deferred.await(f.mutationEntered));
+        if (outcome === "cancel") await f.runtime.runPromise(f.transition.cancel(f.threadId, true));
+        expect((await running).phase).toBe("needs_recovery");
+        const preview = await f.runtime.runPromise(
+          f.transition.previewRecovery({ operationId: request.operationId }),
+        );
+        expect(preview.actual).toBeNull();
+        expect(preview.original).toBeNull();
+        expect(preview.canRetry).toBe(false);
+        const resolved = await f.runtime.runPromise(
+          f.transition.resolve({
+            operationId: request.operationId,
+            version: preview.transition.version,
+            acceptanceToken: preview.acceptanceToken,
+            action: "use_project_checkout",
+          }),
+        );
+        expect(resolved.phase).toBe("completed");
+        expect(resolved.result?.worktreePath).toBeNull();
+        expect((await f.runtime.runPromise(f.queue.listByThread(f.threadId))).state.paused).toBe(
+          false,
+        );
+        expect(
+          await fs.stat(target).then(
+            () => true,
+            () => false,
+          ),
+        ).toBe(false);
+      },
+    );
+    it(`${intent} does not claim a Git mutation when applying fails before its first mutating call`, async () => {
+      const f = await fixture();
+      const target = path.join(f.config.worktreesDir, "preflight");
+      git(f.repo.root, "worktree", "add", "-q", "-b", "preflight", target, "main");
+      await f.runtime.runPromise(
+        f.transition.switchWorkspace(await f.request("attach_existing", { targetPath: target })),
+      );
+      await fs.rm(target, { recursive: true });
+      f.failPhase.current = "applying";
+      const result = await f.runtime.runPromise(
+        f.transition.switchWorkspace(await f.request(intent)),
+      );
+      expect(result.phase).toBe("failed");
+      expect((await f.runtime.runPromise(f.store.get(result.operationId)))?.mutationAttempted).toBe(
+        false,
+      );
+      expect(await f.runtime.runPromise(f.store.forThread(f.threadId, true))).toBeNull();
+    });
+  }
+
+  it("finishes a recovered Work locally handoff with a real setup token and replays the setup action", async () => {
+    const f = await fixture();
+    const target = path.join(f.config.worktreesDir, "handoff");
+    git(f.repo.root, "worktree", "add", "-q", "-b", "handoff", target, "main");
+    await f.runtime.runPromise(
+      f.transition.switchWorkspace(await f.request("attach_existing", { targetPath: target })),
+    );
+    const at = new Date().toISOString();
+    const operationId = "setup-handoff";
+    const itemId = CommandId.makeUnsafe("setup-first-turn");
+    const snapshot: WorktreeSetupSnapshot = {
+      threadId: f.threadId,
+      operationId,
+      itemId,
+      phase: "failed",
+      startedAt: at,
+      endedAt: at,
+      request: {
+        projectCwd: f.repo.root,
+        baseBranch: "main",
+        branch: "handoff",
+        requireWorktree: true,
+        runSetupScript: true,
+      },
+      baseRef: "main",
+      baseSha: git(f.repo.root, "rev-parse", "HEAD"),
+      worktreePath: target,
+      createdBranch: false,
+      createdWorktree: false,
+      setupScript: null,
+      agentStarted: false,
+      stages: [],
+      error: "setup failed",
+      generation: 0,
+      sequence: 1,
+    };
+    await f.runtime.runPromise(
+      f.engine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.makeUnsafe("seed-setup"),
+        threadId: f.threadId,
+        activity: {
+          id: EventId.makeUnsafe(`worktree-setup:${f.threadId}`),
+          kind: "worktree-setup",
+          tone: "error",
+          summary: "Failed setup",
+          payload: snapshot,
+          turnId: null,
+          createdAt: at,
+        },
+        createdAt: at,
+      }),
+    );
+    await f.runtime.runPromise(
+      f.queue.insertSubmission({
+        submissionId: itemId,
+        itemId,
+        atHead: true,
+        requestHash: "setup",
+        worktreeBlockToken: operationId,
+        command: {
+          type: "thread.turn.start",
+          commandId: itemId,
+          threadId: f.threadId,
+          message: {
+            messageId: MessageId.makeUnsafe("message"),
+            role: "user",
+            text: "hello",
+            attachments: [],
+          },
+          interactionMode: "default",
+          runtimeMode: "approval-required",
+          createdAt: at,
+        },
+      }),
+    );
+    await f.runtime.runPromise(
+      f.queue.setPaused({
+        threadId: f.threadId,
+        paused: true,
+        reasonCode: "worktree_setup_failed",
+      }),
+    );
+    f.failPhase.current = "completed";
+    await expect(
+      f.runtime.runPromise(f.setupService.workLocally(f.threadId, operationId)),
+    ).rejects.toThrow();
+    expect(
+      (await f.runtime.runPromise(f.queue.listByThread(f.threadId))).state.worktreeBlockToken,
+    ).toBe(operationId);
+    f.failPhase.current = null;
+    const transitionId = `work-locally:${operationId}`;
+    const preview = await f.runtime.runPromise(
+      f.transition.previewRecovery({ operationId: transitionId }),
+    );
+    const result = await f.runtime.runPromise(
+      f.transition.resolve({
+        operationId: transitionId,
+        version: preview.transition.version,
+        acceptanceToken: preview.acceptanceToken,
+        action: "accept_inspected_workspace",
+      }),
+    );
+    expect(result.phase).toBe("completed");
+    expect((await f.runtime.runPromise(f.queue.listByThread(f.threadId))).state).toMatchObject({
+      worktreeBlockToken: null,
+      paused: false,
+    });
+    const settled = await f.runtime.runPromise(f.setupService.workLocally(f.threadId, operationId));
+    expect(settled?.phase).toBe("cancelled_kept");
+    expect(await fs.stat(target)).toBeTruthy();
+    expect(await f.runtime.runPromise(f.setupService.workLocally(f.threadId, operationId))).toEqual(
+      settled,
+    );
+  });
+  it("retries indeterminate async preparation after its old setup token was cleared, preserving the existing setup pause", async () => {
+    const f = await fixture();
+    const target = path.join(f.config.worktreesDir, "async-restart");
+    await f.runtime.runPromise(
+      Effect.gen(function* () {
+        const gitCore = yield* GitCore;
+        const receipts = yield* WorktreePreparations;
+        yield* gitCore.createWorktree({
+          cwd: f.repo.root,
+          branch: "main",
+          newBranch: "async-restart",
+          path: target,
+          preparation: { owner: "workflow:async", runSetupScript: true },
+        });
+        const receipt = (yield* gitCore.readWorktreePreparation(target))!;
+        yield* receipts.update(receipt, { phase: "setup_running", result: '{"async":true}' });
+        yield* receipts.reconcile;
+      }),
+    );
+    await f.runtime.runPromise(
+      f.transition.switchWorkspace(await f.request("attach_existing", { targetPath: target })),
+    );
+    await f.runtime.runPromise(
+      f.queue.setPaused({
+        threadId: f.threadId,
+        paused: true,
+        reasonCode: "worktree_setup_failed",
+      }),
+    );
+    expect(
+      (await f.runtime.runPromise(f.manager.threadState({ threadId: f.threadId }))).recovery,
+    ).toBe("interrupted");
+    const queue = await f.runtime.runPromise(f.queue.listByThread(f.threadId));
+    const state = await f.runtime.runPromise(
+      f.manager.recover({
+        threadId: f.threadId,
+        action: "recreate",
+        expectedQueueRevision: queue.state.revision,
+      }),
+    );
+    expect(state.recovery).toBe("none");
+    expect(
+      (await f.runtime.runPromise(f.queue.listByThread(f.threadId))).state.pauseReasonCode,
+    ).toBe("worktree_setup_failed");
   });
 });

@@ -1,3 +1,4 @@
+import { checkoutFingerprint } from "../checkoutFingerprint.ts";
 import { createHash } from "node:crypto";
 import { basename, dirname } from "node:path";
 import {
@@ -2251,7 +2252,7 @@ const makeGitCore = Effect.gen(function* () {
         // Stream the index: ordinary repositories can exceed the buffered output cap.
         // Retain only gitlinks and the current (possibly split) NUL-delimited record.
         const gitlinks: string[] = [];
-        const indexFingerprint = createHash("sha256");
+        const indexFingerprint = options?.recoveryFingerprint ? createHash("sha256") : null;
         const decoder = new TextDecoder();
         let pending = "";
         yield* git.execute({
@@ -2259,7 +2260,7 @@ const makeGitCore = Effect.gen(function* () {
           cwd,
           args: ["ls-files", "--stage", "-z"],
           onStdoutChunk: (chunk) => {
-            indexFingerprint.update(chunk);
+            indexFingerprint?.update(chunk);
             const records = (pending + decoder.decode(chunk, { stream: true })).split("\0");
             pending = records.pop()!;
             for (const entry of records)
@@ -2310,37 +2311,26 @@ const makeGitCore = Effect.gen(function* () {
           }
         }
         const ignored = yield* listIgnoredEntries(cwd);
-        const localFiles = yield* Effect.forEach(
-          [...new Set([...changedPaths, ...ignored.entries])].sort(),
-          (path) =>
-            Effect.tryPromise({
-              try: async () => {
-                try {
-                  const stat = await inspectPath(joinPath(cwd, path), { bigint: true });
-                  return [
-                    path,
-                    String(stat.dev),
-                    String(stat.ino),
-                    String(stat.size),
-                    String(stat.mtimeNs),
-                    String(stat.ctimeNs),
-                    String(stat.mode),
-                  ];
-                } catch (error) {
-                  if ((error as NodeJS.ErrnoException).code === "ENOENT") return [path, "missing"];
-                  throw error;
-                }
-              },
+        if (options?.recoveryFingerprint && ignored.truncated)
+          return yield* createGitCommandError(
+            "GitCore.inspectCheckout",
+            cwd,
+            [],
+            "The ignored-file listing is incomplete; recovery inspection cannot verify all local files.",
+          );
+        const localFingerprint = indexFingerprint
+          ? yield* Effect.tryPromise({
+              try: () =>
+                checkoutFingerprint(
+                  cwd,
+                  [...changedPaths, ...ignored.entries],
+                  indexFingerprint.digest(),
+                  status,
+                ),
               catch: (cause) =>
                 createGitCommandError("GitCore.inspectCheckout", cwd, [], String(cause)),
-            }),
-          { concurrency: 4 },
-        );
-        const localFingerprint = createHash("sha256")
-          .update(indexFingerprint.digest())
-          .update(status)
-          .update(JSON.stringify(localFiles))
-          .digest("hex");
+            })
+          : null;
         const upstream = yield* executeGit(
           "GitCore.inspectCheckout",
           cwd,
@@ -2364,7 +2354,7 @@ const makeGitCore = Effect.gen(function* () {
             )
           : null;
         return {
-          localFingerprint,
+          ...(localFingerprint ? { localFingerprint } : {}),
           canonicalRoot,
           commonDir,
           registration: entries.find((entry) => entry.canonicalPath === canonicalRoot) ?? null,

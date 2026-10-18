@@ -45,7 +45,9 @@ Worktree switching Release 3 uses version 25. It adds `worktrees.switchWorkspace
 `worktrees.resolveTransition`, plus derived `workspace_switch` / `workspace_switch_failed`
 queue reasons and transition snapshots. Raw checkout accepts conversation context;
 initial attachment accepts explicit shared-filesystem confirmation. Recovery delegates to
-transitions. An active transition is independent of queue pauses and cannot be cleared by resume.
+transitions. Recovery can also accept the inspected project checkout when recreation left no
+checkout to adopt. Workspace isolation failures have a stable error code. An active transition
+is independent of queue pauses and cannot be cleared by resume.
 
 The authenticated `GET /api/bootstrap` response and WebSocket welcome advertise
 current capabilities, upload support, and global send limits. Today

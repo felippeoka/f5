@@ -386,6 +386,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             thread.branch !== write.expected.branch ||
             thread.worktreePath !== write.expected.worktreePath ||
             (!write.operationId &&
+              !write.observation &&
               (thread.session?.updatedAt ?? null) !== write.expected.sessionUpdatedAt)
           )
             return yield* new OrchestrationCommandInvariantError({
@@ -694,6 +695,23 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                     commandType: envelope.command.type,
                     detail: "Workspace transition completion lost its reservation.",
                   });
+                if (
+                  record.intent === "use_project_checkout" &&
+                  record.setupOwnerOperationId &&
+                  record.operationId === `work-locally:${record.setupOwnerOperationId}` &&
+                  record.result?.worktreePath === null
+                ) {
+                  // Consume only this setup handoff's ownership in the completion transaction.
+                  // Manual and unrelated pauses remain untouched.
+                  yield* sql`UPDATE next_turn_queue_state SET
+                    worktree_block_token=NULL,
+                    paused=CASE WHEN pause_reason_code IN ('worktree_setup','worktree_setup_failed','worktree_setup_cancelled','worktree_setup_cancelled_kept') THEN 0 ELSE paused END,
+                    pause_detail=CASE WHEN pause_reason_code IN ('worktree_setup','worktree_setup_failed','worktree_setup_cancelled','worktree_setup_cancelled_kept') THEN NULL ELSE pause_detail END,
+                    resumed_at=CASE WHEN pause_reason_code IN ('worktree_setup','worktree_setup_failed','worktree_setup_cancelled','worktree_setup_cancelled_kept') THEN ${lastSavedEvent.occurredAt} ELSE resumed_at END,
+                    pause_reason_code=CASE WHEN pause_reason_code IN ('worktree_setup','worktree_setup_failed','worktree_setup_cancelled','worktree_setup_cancelled_kept') THEN NULL ELSE pause_reason_code END,
+                    revision=revision+1
+                    WHERE thread_id=${record.threadId} AND (worktree_block_token IS NULL OR worktree_block_token=${record.setupOwnerOperationId})`;
+                }
                 yield* transitions.value
                   .update(record, { phase: "completed", error: null })
                   .pipe(Effect.orDie);

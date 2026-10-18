@@ -127,6 +127,14 @@ export function WorkspaceTransitionBanner({ threadId }: { threadId: ThreadId }) 
             <Button
               size="sm"
               variant="outline"
+              disabled={busy || !preview.projectCheckout || preview.transition.phase === "failed"}
+              onClick={() => void resolve("use_project_checkout")}
+            >
+              Continue in project checkout
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
               disabled={busy || !preview.canRetry}
               onClick={() => void resolve("retry")}
             >

@@ -52,7 +52,7 @@ export const makeWorkspaceTransitions = Effect.gen(function* () {
         phase: string;
         version: number;
       }>`SELECT record_json AS record,phase,version FROM workspace_transitions WHERE thread_id = ${threadId}
-    AND (${activeOnly ? 1 : 0} = 0 OR phase IN ('reserved','stopping','applying','applied','needs_recovery')) ORDER BY created_at DESC, rowid DESC LIMIT 1`.pipe(
+    AND (${activeOnly ? 1 : 0} = 0 OR phase IN ('reserved','stopping','applying','applied','needs_recovery')) ORDER BY CASE WHEN phase IN ('reserved','stopping','applying','applied','needs_recovery') THEN 0 ELSE 1 END, created_at DESC, rowid DESC LIMIT 1`.pipe(
         Effect.flatMap(decode),
         Effect.mapError(error),
       );
