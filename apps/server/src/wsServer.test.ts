@@ -4115,14 +4115,18 @@ describe("WebSocket Server", () => {
       const relative = (value: string | null | undefined) => {
         if (value == null) return null;
         // Resolve short Windows temp paths and separators before comparing routes.
-        const canonicalValue = fs.realpathSync(value);
+        const canonicalValue = fs.realpathSync.native(value);
         const canonicalWorktreesDir = path.join(
-          fs.realpathSync(path.dirname(stateDir)),
+          fs.realpathSync.native(path.dirname(stateDir)),
           "worktrees",
         );
-        return canonicalValue.startsWith(`${canonicalWorktreesDir}${path.sep}`)
+        const relativePath = path.relative(canonicalWorktreesDir, canonicalValue);
+        return relativePath !== "" &&
+          relativePath !== ".." &&
+          !relativePath.startsWith(`..${path.sep}`) &&
+          !path.isAbsolute(relativePath)
           ? `<worktrees>/<repo>/${path.basename(canonicalValue)}`
-          : canonicalValue === fs.realpathSync(repo)
+          : canonicalValue === fs.realpathSync.native(repo)
             ? "<repo>"
             : value;
       };
