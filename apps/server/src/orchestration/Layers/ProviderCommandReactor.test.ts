@@ -2753,17 +2753,19 @@ describe("ProviderCommandReactor", () => {
         providerInstanceId: ProviderInstanceId.make("valid"),
       }),
     );
-    const mismatch = await Effect.runPromise(
-      harness.reactor
-        .applyMcpConfigToLiveSessions({
-          scope: "common",
-          instanceId: ProviderInstanceId.make("valid"),
-          threadIds: [threadId],
-        })
-        .pipe(Effect.result),
-    );
-    expect(mismatch._tag).toBe("Failure");
-    expect(harness.reloadMcpConfigForProject).not.toHaveBeenCalled();
+    for (const threadIds of [undefined, [threadId]]) {
+      const mismatch = await Effect.runPromise(
+        harness.reactor
+          .applyMcpConfigToLiveSessions({
+            scope: "common",
+            instanceId: ProviderInstanceId.make("valid"),
+            ...(threadIds ? { threadIds } : {}),
+          })
+          .pipe(Effect.result),
+      );
+      expect(mismatch._tag).toBe("Failure");
+      expect(harness.reloadMcpConfigForProject).not.toHaveBeenCalled();
+    }
   });
 
   it("validates every requested conversation before mutation and supports forced targeted retries", async () => {

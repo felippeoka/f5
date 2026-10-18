@@ -2182,6 +2182,22 @@ const make = Effect.gen(function* () {
           projectScopeProjectId !== null
             ? yield* providerSessionDirectory.listBindingsByProject(projectScopeProjectId)
             : yield* providerSessionDirectory.listBindings();
+        if (
+          selectedInstance &&
+          bindings.some(
+            (binding) =>
+              binding.status !== "stopped" &&
+              resolveBindingInstanceId(binding) === input.instanceId &&
+              (!input.threadIds || input.threadIds.includes(binding.threadId)) &&
+              binding.provider !== selectedInstance.driver,
+          )
+        ) {
+          return yield* new ProjectMcpConfigServiceError({
+            code: "validation",
+            message:
+              "A selected MCP session belongs to a different provider driver. Restart it before applying.",
+          });
+        }
         if (input.retryUnchanged !== undefined && input.threadIds === undefined) {
           return yield* new ProjectMcpConfigServiceError({
             code: "validation",
