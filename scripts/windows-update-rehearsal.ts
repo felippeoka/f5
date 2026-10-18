@@ -82,10 +82,17 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
+/**
+ * Any error fails loudly. Even a silenced non-terminating error (such as
+ * `Get-Process -Name x` finding nothing) makes powershell.exe exit 1, so
+ * queries must express "none found" without raising one.
+ */
 function powershell(script: string): string {
-  return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
-    encoding: "utf8",
-  }).trim();
+  return execFileSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", `$ErrorActionPreference = 'Stop'; ${script}`],
+    { encoding: "utf8" },
+  ).trim();
 }
 
 interface UninstallEntry {
@@ -96,7 +103,8 @@ interface UninstallEntry {
 }
 function uninstallEntry(): UninstallEntry | null {
   const json = powershell(
-    "Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match '^F5( \\d|$)' } | Select-Object DisplayName,DisplayVersion,UninstallString,PSPath | ConvertTo-Json -Compress",
+    // A fresh runner may have no per-user Uninstall key at all.
+    "$key = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall'; if (Test-Path $key) { Get-ChildItem $key | Get-ItemProperty | Where-Object { $_.DisplayName -match '^F5( \\d|$)' } | Select-Object DisplayName,DisplayVersion,UninstallString,PSPath | ConvertTo-Json -Compress }",
   );
   if (!json) return null;
   const parsed = JSON.parse(json) as UninstallEntry | UninstallEntry[];
@@ -177,7 +185,7 @@ async function hideRuntimes(): Promise<() => void> {
 /** No node.exe/bun.exe other than this script may run while F5 is under test. */
 function assertNoForeignRuntime(): void {
   const json = powershell(
-    `@(Get-Process -Name node,bun -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne ${process.pid} } | ForEach-Object { $_.Path }) | ConvertTo-Json -Compress`,
+    `@(Get-Process | Where-Object { $_.ProcessName -in 'node','bun' -and $_.Id -ne ${process.pid} } | ForEach-Object { $_.Path }) | ConvertTo-Json -Compress`,
   );
   const paths = json ? (JSON.parse(json) as string[] | string) : [];
   const list = (Array.isArray(paths) ? paths : [paths]).filter(Boolean);
@@ -200,7 +208,7 @@ function stopApplication(): void {
 }
 function f5ProcessIds(): number[] {
   const json = powershell(
-    "@(Get-Process -Name F5 -ErrorAction SilentlyContinue | ForEach-Object { $_.Id }) | ConvertTo-Json -Compress",
+    "@(Get-Process | Where-Object { $_.ProcessName -eq 'F5' } | ForEach-Object { $_.Id }) | ConvertTo-Json -Compress",
   );
   if (!json) return [];
   const ids = JSON.parse(json) as number[] | number;
