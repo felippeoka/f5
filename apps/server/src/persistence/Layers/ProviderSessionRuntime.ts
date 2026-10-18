@@ -254,7 +254,32 @@ const makeProviderSessionRuntimeRepository = Effect.gen(function* () {
       ),
     );
 
+  const updateMcpStateIfCurrent: ProviderSessionRuntimeRepositoryShape["updateMcpStateIfCurrent"] =
+    (input) =>
+      sql`
+      UPDATE provider_session_runtime
+      SET mcp_config_version = CASE WHEN ${input.effectiveVersion !== undefined} THEN ${input.effectiveVersion ?? null} ELSE mcp_config_version END,
+          runtime_payload_json = json_set(CASE WHEN json_type(runtime_payload_json) = 'object' THEN runtime_payload_json ELSE '{}' END,
+            '$.mcpUnconvergedConfigVersion', ${input.unconvergedVersion})
+      WHERE thread_id = ${input.threadId}
+        AND COALESCE(provider_instance_id, provider_name) = ${input.instanceId}
+        AND status <> 'stopped'
+        AND CASE
+          WHEN json_type(runtime_payload_json, '$.sessionGeneration') IN ('integer', 'real')
+            AND json_extract(runtime_payload_json, '$.sessionGeneration') >= 0
+            AND CAST(json_extract(runtime_payload_json, '$.sessionGeneration') AS INTEGER) = json_extract(runtime_payload_json, '$.sessionGeneration')
+          THEN json_extract(runtime_payload_json, '$.sessionGeneration') ELSE 0
+        END = ${input.generation}
+      RETURNING thread_id
+    `.pipe(
+        Effect.map((rows) => rows.length === 1),
+        Effect.mapError(
+          toPersistenceSqlError("ProviderSessionRuntimeRepository.updateMcpStateIfCurrent"),
+        ),
+      );
+
   return {
+    updateMcpStateIfCurrent,
     upsert,
     getByThreadId,
     list,

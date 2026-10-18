@@ -2667,7 +2667,10 @@ export default function ChatView({
           : null;
       setWorktreeSetupBusy(true);
       try {
-        await api.worktreeSetup[action]({ threadId: setupThreadId });
+        await api.worktreeSetup[action]({
+          threadId: setupThreadId,
+          expectedOperationId: worktreeSetup.operationId,
+        });
         if (discardedText !== null && activeProject) {
           const draft = await createProjectDraftThread(activeProject.id);
           useComposerDraftStore.getState().setPrompt(draft.threadId, discardedText);

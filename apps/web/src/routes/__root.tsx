@@ -52,7 +52,6 @@ import { useRecoveryStateStore } from "../recoveryStateStore";
 import { nextRewindDraftReadTicket, useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import {
-  onMcpStatusUpdated,
   onProviderAdvisoriesUpdated,
   onServerConfigUpdated,
   onServerWelcome,
@@ -64,7 +63,6 @@ import {
   invalidateThreadCommandExecutionDetailQueries,
   orchestrationQueryKeys,
 } from "../lib/orchestrationReactQuery";
-import { mcpQueryKeys } from "../lib/mcpReactQuery";
 import { invalidateGitQueries } from "../lib/gitReactQuery";
 import { invalidateReviewQueries } from "../lib/reviewReactQuery";
 import { useAppSettings } from "../appSettings";
@@ -1279,9 +1277,6 @@ function EventRouter() {
         applyProviderAdvisoriesToServerConfig(existing, payload),
       );
     });
-    const unsubMcpStatusUpdated = onMcpStatusUpdated(() => {
-      void queryClient.invalidateQueries({ queryKey: mcpQueryKeys.all });
-    });
     const unsubGitStatusInvalidated = api.git.onStatusInvalidated((payload) => {
       void invalidateGitQueries(queryClient, { cwd: payload.cwd });
       void invalidateReviewQueries(queryClient);
@@ -1301,7 +1296,6 @@ function EventRouter() {
       unsubWelcome();
       unsubServerConfigUpdated();
       unsubProviderAdvisoriesUpdated();
-      unsubMcpStatusUpdated();
       unsubGitStatusInvalidated();
     };
   }, [

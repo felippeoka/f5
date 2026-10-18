@@ -1,3 +1,4 @@
+import { makeOperationGate } from "../operationGate.ts";
 import {
   isKnownProviderKind,
   ProviderInstanceId,
@@ -80,6 +81,7 @@ function toRuntimeBinding(
 
 const makeProviderSessionDirectory = Effect.gen(function* () {
   const repository = yield* ProviderSessionRuntimeRepository;
+  const withWrite = makeOperationGate<ThreadId>();
 
   const getBinding = (threadId: ThreadId) =>
     repository.getByThreadId({ threadId }).pipe(
@@ -95,7 +97,7 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
       ),
     );
 
-  const upsert: ProviderSessionDirectoryShape["upsert"] = Effect.fn(function* (binding) {
+  const upsertUnlocked: ProviderSessionDirectoryShape["upsert"] = Effect.fn(function* (binding) {
     const existing = yield* repository
       .getByThreadId({ threadId: binding.threadId })
       .pipe(Effect.mapError(toPersistenceError("ProviderSessionDirectory.upsert:getByThreadId")));
@@ -149,6 +151,9 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
       .pipe(Effect.mapError(toPersistenceError("ProviderSessionDirectory.upsert:upsert")));
   });
 
+  const upsert: ProviderSessionDirectoryShape["upsert"] = (binding) =>
+    withWrite(binding.threadId, upsertUnlocked(binding));
+
   const getProvider: ProviderSessionDirectoryShape["getProvider"] = (threadId) =>
     getBinding(threadId).pipe(
       Effect.flatMap((binding) =>
@@ -196,6 +201,15 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
     );
 
   return {
+    updateMcpStateIfCurrent: (input) =>
+      withWrite(
+        input.threadId,
+        repository
+          .updateMcpStateIfCurrent(input)
+          .pipe(
+            Effect.mapError(toPersistenceError("ProviderSessionDirectory.updateMcpStateIfCurrent")),
+          ),
+      ),
     upsert,
     getProvider,
     getBinding,

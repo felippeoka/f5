@@ -1,3 +1,4 @@
+import { setupProjectScript } from "@t3tools/shared/projectScripts";
 import {
   CommandId,
   DOCUMENT_WORKFLOW_TEMPLATE_ID,
@@ -35,12 +36,10 @@ import {
 import { isArchivedWorkflow, isDeletedWorkflow } from "@t3tools/shared/workflowArchive";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/worktree";
 
-import { ServerConfig } from "../../config.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { CheckpointDiffQuery } from "../../checkpointing/Services/CheckpointDiffQuery.ts";
 import { truncatePatchAtFileBoundary } from "../../git/patchTruncation.ts";
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
-import { resolveDefaultWorktreePath } from "../../git/worktreePaths.ts";
 import { buildFallbackTitle, resolveBestEffortGeneratedTitle } from "../../threadTitle.ts";
 import {
   OrchestrationEngineService,
@@ -1297,7 +1296,6 @@ export const makeWorkflowService = Effect.gen(function* () {
   const baseOrchestrationEngine = yield* OrchestrationEngineService;
   const textGeneration = yield* TextGeneration;
   const gitCore = yield* GitCore;
-  const serverConfig = yield* ServerConfig;
   const providerRegistry = yield* Effect.serviceOption(ProviderRegistry);
   const providerTurnDeliveryWorker = yield* Effect.serviceOption(ProviderTurnDeliveryWorker);
   const providerTurnDeliveryRepository = yield* Effect.serviceOption(
@@ -5449,16 +5447,21 @@ export const makeWorkflowService = Effect.gen(function* () {
           );
         }
         const newBranch = buildTemporaryWorktreeBranchName();
+        const preparationScript = setupProjectScript(
+          snapshot.projects.find((project) => project.id === implementationWorkflow.projectId)
+            ?.scripts ?? [],
+        );
         const createdWorktree = yield* gitCore
           .createWorktree({
+            preparation: {
+              owner: `workflow:${implementationWorkflow.id}`,
+              runSetupScript: preparationScript !== null,
+              setupIdentity: preparationScript?.command ?? null,
+            },
             cwd: workspaceRoot,
             branch: input.baseBranch,
             newBranch,
-            path: resolveDefaultWorktreePath({
-              worktreesDir: serverConfig.worktreesDir,
-              cwd: workspaceRoot,
-              branch: newBranch,
-            }),
+            path: yield* gitCore.allocateWorktreePath({ cwd: workspaceRoot, branch: newBranch }),
           })
           .pipe(
             Effect.mapError(

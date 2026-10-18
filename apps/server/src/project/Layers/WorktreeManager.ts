@@ -1,3 +1,4 @@
+import { WorktreePreparation } from "../Services/WorktreePreparation.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import {
   CommandId,
@@ -6,19 +7,15 @@ import {
   type WorktreesInspectInput,
   type WorktreesInspectResult,
 } from "@t3tools/contracts";
-import { projectScriptRuntimeEnv, setupProjectScript } from "@t3tools/shared/projectScripts";
 import { Deferred, Effect, FileSystem, Layer, Option } from "effect";
 import { ServerConfig } from "../../config.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
-import { canonicalWorktreePath, resolveDefaultWorktreePath } from "../../git/worktreePaths.ts";
+import { canonicalWorktreePath } from "../../git/worktreePaths.ts";
 import { NextTurnQueueDispatcher } from "../../nextTurnQueue/Services/NextTurnQueueDispatcher.ts";
 import { NextTurnQueueStore } from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
 import { TerminalManager } from "../../terminal/Services/Manager.ts";
-import { startOwnedSetupScript } from "../ownedSetupScript.ts";
-import { readProjectSettings } from "../projectSettings.ts";
 import {
   evaluateWorktreeRemoval,
   removeWorktreeSafely,
@@ -50,7 +47,7 @@ export const makeWorktreeManager = Effect.gen(function* () {
   const queue = yield* NextTurnQueueStore;
   const setup = yield* WorktreeSetupGate;
   const dispatcher = yield* NextTurnQueueDispatcher;
-  const settings = yield* ServerSettingsService;
+  const preparation = yield* WorktreePreparation;
   const turns = yield* ProjectionTurnRepository;
   const fileSystem = yield* FileSystem.FileSystem;
   const activeRecoveries = new Map<
@@ -277,11 +274,21 @@ export const makeWorktreeManager = Effect.gen(function* () {
             };
       const data = yield* queue.listByThread(thread.id);
       const token = data.state.worktreeBlockToken;
-      const recovery = token?.startsWith("recovery:")
-        ? (yield* setup.check(thread.id, token)) === "gating"
-          ? "running"
-          : "interrupted"
-        : "none";
+      const receipt =
+        token === null && thread.worktreePath
+          ? yield* git.readWorktreePreparation(thread.worktreePath)
+          : null;
+      const preparationInterrupted =
+        receipt !== null &&
+        ["allocated", "setup_failed", "setup_indeterminate"].includes(receipt.phase);
+      const recovery =
+        token?.startsWith("recovery:") || token?.startsWith("preparation:")
+          ? (yield* setup.check(thread.id, token)) === "gating"
+            ? "running"
+            : "interrupted"
+          : preparationInterrupted
+            ? "interrupted"
+            : "none";
       return { ...state, recovery } as const;
     });
   const recover: WorktreeManagerShape["recover"] = (input) =>
@@ -326,14 +333,19 @@ export const makeWorktreeManager = Effect.gen(function* () {
         const setupState = yield* setup.check(thread.id, data.state.worktreeBlockToken);
         if (
           (setupState === "gating" && !reserved) ||
-          (setupState === "orphaned" && !data.state.worktreeBlockToken?.startsWith("recovery:"))
+          (setupState === "orphaned" &&
+            !data.state.worktreeBlockToken?.startsWith("recovery:") &&
+            !data.state.worktreeBlockToken?.startsWith("preparation:"))
         )
           return yield* Effect.fail(new Error("Workspace setup is already in progress."));
         return { thread, project, data };
       });
       const beforeRecovery = yield* check;
       const retryingRecovery =
-        beforeRecovery.data.state.worktreeBlockToken?.startsWith("recovery:") === true;
+        beforeRecovery.data.state.worktreeBlockToken?.startsWith("recovery:") === true ||
+        beforeRecovery.data.state.worktreeBlockToken?.startsWith("preparation:") === true ||
+        (beforeRecovery.data.state.worktreeBlockToken === null &&
+          (yield* threadState(input)).recovery === "interrupted");
       const path = initial.thread.worktreePath ?? initial.project.workspaceRoot;
       const plannedState = input.action === "recreateFromBase" ? yield* threadState(input) : null;
       const plannedBranch =
@@ -349,8 +361,7 @@ export const makeWorktreeManager = Effect.gen(function* () {
       const destination = plannedBranch
         ? old && old !== managed && pathContains(managed, old) && !plannedState?.directoryExists
           ? initial.thread.worktreePath!
-          : resolveDefaultWorktreePath({
-              worktreesDir: config.worktreesDir,
+          : yield* git.allocateWorktreePath({
               cwd: initial.project.workspaceRoot,
               branch: plannedBranch,
             })
@@ -420,6 +431,7 @@ export const makeWorktreeManager = Effect.gen(function* () {
                   new Error("The branch is missing. Recreate from the default branch instead."),
                 );
               yield* git.ensureWorktree({
+                owner: `thread:${thread.id}`,
                 cwd: project.workspaceRoot,
                 path: thread.worktreePath,
                 branch: thread.branch,
@@ -463,6 +475,11 @@ export const makeWorktreeManager = Effect.gen(function* () {
                     createdAt: new Date().toISOString(),
                   });
                   const created = yield* git.createWorktree({
+                    preparation: {
+                      owner: `thread:${thread.id}`,
+                      runSetupScript: true,
+                      replaceMissing: true,
+                    },
                     cwd: project.workspaceRoot,
                     branch: base,
                     baseRefName: baseSha,
@@ -486,95 +503,49 @@ export const makeWorktreeManager = Effect.gen(function* () {
         // Scripts run with the durable queue barrier set and no lifecycle lock held.
         if (prepared !== null) {
           const workspace = prepared as { path: string; project: typeof initial.project };
-          const tail: string[] = [];
-          yield* Effect.gen(function* () {
-            const submodules = (yield* readProjectSettings(
-              yield* settings.getSettings,
-              workspace.project,
-            )).settings.worktreeSubmodules;
-            yield* git.initializeWorktreeSubmodules(workspace.path, submodules);
-            const script = setupProjectScript(workspace.project.scripts);
-            let setupError: string | null = null;
-            if (script)
-              yield* Effect.scoped(
-                Effect.gen(function* () {
-                  const owned = yield* Effect.acquireRelease(
-                    startOwnedSetupScript({
-                      command: script.command,
-                      cwd: workspace.path,
-                      env: projectScriptRuntimeEnv({
-                        project: { cwd: workspace.project.workspaceRoot },
-                        worktreePath: workspace.path,
-                      }),
-                      onLine: (line) => {
-                        tail.push(line);
-                        if (tail.length > 20) tail.shift();
-                      },
-                    }),
-                    (process) => process.kill,
-                  );
-                  const code = yield* owned.exit;
-                  if (code !== 0) {
-                    setupError = `Setup script exited with code ${code}.`;
-                    yield* Effect.logWarning("worktree recovery setup script failed", {
-                      threadId: input.threadId,
-                      code,
-                    });
-                  }
-                }),
-              );
-            yield* engine.dispatch({
-              type: "thread.activity.append",
-              commandId: CommandId.makeUnsafe(`${token}:prepared`),
+          const current = (yield* context(input.threadId)).thread;
+          if (!current.branch)
+            return yield* Effect.fail(new Error("The recovered branch is unavailable."));
+          yield* preparation
+            .prepare({
               threadId: input.threadId,
-              activity: {
-                id: EventId.makeUnsafe(`worktree-prepared:${input.threadId}`),
-                tone: setupError ? "error" : "info",
-                kind: "worktree.prepared",
-                summary: setupError ? `Worktree recreated; ${setupError}` : "Worktree prepared",
-                payload: {
-                  worktreePath: workspace.path,
-                  operationId: token,
-                  error: setupError,
-                  outputTail: tail,
-                },
-                turnId: null,
-                createdAt: new Date().toISOString(),
-              },
-              createdAt: new Date().toISOString(),
-            });
-          }).pipe(
-            Effect.timeout("10 minutes"),
-            Effect.raceFirst(
-              Deferred.await(cancellation).pipe(
-                Effect.andThen(
-                  Effect.fail(
-                    new Error("Worktree preparation was cancelled. Retry recovery when ready."),
+              projectId: workspace.project.id,
+              worktreePath: workspace.path,
+              branch: current.branch,
+              retry: true,
+            })
+            .pipe(
+              Effect.timeout("10 minutes"),
+              Effect.raceFirst(
+                Deferred.await(cancellation).pipe(
+                  Effect.andThen(
+                    Effect.fail(
+                      new Error("Worktree preparation was cancelled. Retry recovery when ready."),
+                    ),
                   ),
                 ),
               ),
-            ),
-            Effect.tapError((error) => {
-              const createdAt = new Date().toISOString();
-              return engine
-                .dispatch({
-                  type: "thread.activity.append",
-                  commandId: CommandId.makeUnsafe(`${token}:failed`),
-                  threadId: input.threadId,
-                  activity: {
-                    id: EventId.makeUnsafe(`${token}:failed`),
-                    tone: "error",
-                    kind: "worktree.recovery",
-                    summary: `Recovery stopped: ${error.message}`,
-                    payload: { operationId: token, outputTail: tail },
-                    turnId: null,
+              Effect.tapError((error) => {
+                const createdAt = new Date().toISOString();
+                return engine
+                  .dispatch({
+                    type: "thread.activity.append",
+                    commandId: CommandId.makeUnsafe(`${token}:failed`),
+                    threadId: input.threadId,
+                    activity: {
+                      id: EventId.makeUnsafe(`${token}:failed`),
+                      tone: "error",
+                      kind: "worktree.recovery",
+                      summary: `Recovery stopped: ${error.message}`,
+                      payload: { operationId: token },
+                      turnId: null,
+                      createdAt,
+                    },
                     createdAt,
-                  },
-                  createdAt,
-                })
-                .pipe(Effect.ignore);
-            }),
-          );
+                  })
+                  .pipe(Effect.ignore);
+              }),
+            );
         }
         yield* setup.open(input.threadId, token);
         yield* queue.setWorktreeBlockToken({

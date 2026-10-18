@@ -20,8 +20,8 @@ clean up idle worktrees and keep backups.
 The first message is queued immediately while F5 prepares the worktree in the background. The
 setup card shows each stage: fetching the base branch, checking out files, initializing
 submodules, running the project setup script and starting the agent. The message goes out once
-the checkout is ready, or after the setup script finishes if the script is marked **Agent waits
-for this script**.
+checkout and submodules are ready. Setup scripts run in the background unless you enable **Agent
+waits**; a failed script is reported on the card and the agent still starts.
 
 From the card you can **Cancel**, **Retry** after a failure, **Work locally** to send the message
 in the project root instead, or **Discard** a failed setup to get your message back as a draft.
@@ -72,7 +72,7 @@ Restoring a backup takes effect on restart.
 | Topic               | Detail                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Fan-out             | Up to 6 models; threads start 3 at a time; attachments are copied to each thread                                                                                                                                                                                                                                                                                                                                             |
-| Cancel during setup | A new worktree and branch are removed only if nothing was written and nothing else uses them; the message stays queued and paused                                                                                                                                                                                                                                                                                            |
+| Cancel during setup | A checkout is removed only if its receipt proves F5 created it, its base commit and files are unchanged and nothing else uses it; generated `.env` files and databases keep it. The message stays queued and paused                                                                                                                                                                                                          |
 | Cleanup schedule    | Hourly, at startup, after a thread is deleted and when settings change                                                                                                                                                                                                                                                                                                                                                       |
 | Cleanup scope       | Only worktrees inside this profile's worktrees directory; never a directory containing a project root. Unreadable identity, claims, locked registrations and in-progress Git operations also block removal. Idle and archived conversations may stay linked and recreate the checkout on their next send. Checks repeat right before removal, and removal never forces                                                       |
 | Provider logs       | Removed after the configured number of days; the live event log is never removed                                                                                                                                                                                                                                                                                                                                             |
@@ -90,10 +90,26 @@ referenced by other conversations can't be deleted. An open provider session blo
 between turns; stop it first. Initialized submodules block removal: save their work and
 deinitialize them first.
 
-**Recovery.** Recovery stops an idle provider session, reruns the project's submodule setting and
-opted-in setup script, then releases queued work. Setup preparation has a 10-minute timeout and a
-**Cancel preparation** action. A failed or interrupted recovery keeps its retry controls visible.
-Automatic recreation initializes submodules but doesn't rerun setup scripts.
+**Recovery.** Recovery stops an idle provider session, applies the project's submodule setting and
+starts its opted-in setup script, then releases queued work. Setup preparation has a 10-minute
+timeout and a **Cancel preparation** action. A failed or interrupted recovery keeps its retry
+controls visible.
+
+**Names and paths.** New worktrees live at
+`<repository-slug>-<repository-hash>/<branch-slug>-<branch-hash>` in the profile's worktrees
+directory, so `fix/login` and `fix-login` never collide; existing worktrees keep their paths and
+occupied targets are rejected. Automatic branch names are generated while the base is fetched; a
+name ready within 3 seconds names both branch and directory, and a later one may rename only the
+branch. Explicit names must be valid, unused branch names outside F5's temporary-name pattern.
+Each model in a multi-model send gets its own allocation.
+
+**Preparation receipts.** F5 records preparation in the profile database before creating a
+checkout, so a repeated request reuses its receipt and completed preparation never runs twice.
+Recreating a missing checkout initializes submodules and runs the opted-in setup script unless
+setup was explicitly skipped; checkouts older than receipts are never prepared again
+automatically. A restart during a setup script leaves preparation indeterminate, and **Retry**
+asks you to confirm rerunning the script. A changed checkout, repository identity or conflicting
+request is kept for inspection.
 
 **Kept on disk.** Cancel and rollback keep checkouts with ignored files created by setup (such as
 `.env` or a local database) and report them as retained artifacts. Legacy worktrees with

@@ -35,6 +35,11 @@ removes public force removal, and preserves filesystem paths without trimming. T
 also reports whether recovery is running or interrupted so a retained recovery barrier stays actionable.
 `worktrees.recover` accepts `cancel` to stop active preparation while retaining the barrier for explicit retry.
 
+Worktree creation Release 2 uses version 24. Setup snapshots and subscribe/action/push envelopes
+carry a persisted `(generation, sequence)` ordering. Setup mutation requests require the expected
+operation ID. Bootstrap preparation accepts explicit naming intent and a setup-script override;
+raw preparation accepts an acknowledgment for retrying interrupted scripts.
+
 The authenticated `GET /api/bootstrap` response and WebSocket welcome advertise
 current capabilities, upload support, and global send limits. Today
 image attachments retain the existing eight-image, 10 MiB/image and 120,000-character
