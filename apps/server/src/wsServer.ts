@@ -1,3 +1,7 @@
+import {
+  withProviderThreadAccess,
+  tryWithProviderThreadAccess,
+} from "./provider/providerThreadAccess.ts";
 import { OrchestrationCommandInvariantError } from "./orchestration/Errors.ts";
 import {
   WorkspaceRequiresNewWorktreeError,
@@ -141,7 +145,6 @@ import {
   ProviderInstanceId,
   WS_CHANNELS,
   WS_METHODS,
-  type StorageCleanupProgressPayload,
   WebSocketRequest,
   type WsResponse as WsResponseMessage,
   WsResponse,
@@ -190,7 +193,7 @@ import {
   inspectWorkflowPlatformRun,
 } from "./workflowPlatform.ts";
 import { GitManager } from "./git/Services/GitManager.ts";
-import { TerminalManager } from "./terminal/Services/Manager.ts";
+import { TerminalManager, type TerminalError } from "./terminal/Services/Manager.ts";
 import { Keybindings } from "./keybindings";
 import {
   browseWorkspaceEntries,
@@ -2812,6 +2815,34 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       yield* Scope.provide(worktreeSetup.startup, subscriptionsScope);
       yield* Scope.provide(orchestrationReactor.start, subscriptionsScope);
       yield* Scope.provide(providerSessionReaper.start(), subscriptionsScope);
+      let lastStorageRevision = -1;
+      let lastCompletedOperation: string | null = null;
+      yield* Effect.forever(
+        Effect.gen(function* () {
+          const status = yield* storageMaintenance.getStatus;
+          if (status.revision !== lastStorageRevision) {
+            lastStorageRevision = status.revision;
+            const bounded =
+              Buffer.byteLength(JSON.stringify(status)) > 7 * 1024 && status.cleanup
+                ? { ...status, cleanup: { ...status.cleanup, result: null } }
+                : status;
+            yield* pushBus.publishAll(WS_CHANNELS.storageStatusUpdated, bounded);
+            if (
+              status.cleanup?.completedAt &&
+              status.cleanup.operationId !== lastCompletedOperation
+            ) {
+              lastCompletedOperation = status.cleanup.operationId;
+              yield* pushBus.publishAll(WS_CHANNELS.storageInvalidated, {
+                reason: "cleanup-completed",
+                operationId: status.cleanup.operationId,
+              });
+              if (diskSpaceMonitor._tag === "Some")
+                yield* diskSpaceMonitor.value.noteStorageChanged;
+            }
+          }
+          yield* Effect.sleep("500 millis");
+        }),
+      ).pipe(Effect.forkIn(subscriptionsScope));
       yield* Scope.provide(storageCleanupWorker.start, subscriptionsScope);
       yield* Scope.provide(defaultBranchAutoPull.start, subscriptionsScope);
       if (diskSpaceMonitor._tag === "Some")
@@ -2992,6 +3023,37 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         ),
     }),
   );
+  const withTerminalThreadAccess = <A>(threadId: string, action: Effect.Effect<A, TerminalError>) =>
+    tryWithProviderThreadAccess(
+      threadId,
+      Effect.gen(function* () {
+        const { orchestrationEngine } = yield* awaitOrchestrationRuntimeForRoute;
+        const thread = (yield* orchestrationEngine.getReadModel()).threads.find(
+          (entry) => entry.id === threadId,
+        );
+        if (thread && thread.deletedAt !== null)
+          return yield* new RouteRequestError({ message: "This conversation has been deleted." });
+        // Draft terminals may precede a persisted thread. Persisted deleted threads
+        // cannot restart while storage holds provider access through file/row removal.
+        return yield* thread?.worktreePath
+          ? withWorktreeLifecycleLock(thread.worktreePath, action).pipe(
+              Effect.catchTag("RepositoryLifecycleError", (error) =>
+                Effect.fail(new RouteRequestError({ message: error.message })),
+              ),
+            )
+          : action;
+      }),
+    ).pipe(
+      Effect.flatMap((result) =>
+        Option.isSome(result)
+          ? Effect.succeed(result.value)
+          : Effect.fail(
+              new RouteRequestError({
+                message: "This conversation is busy. Try opening the terminal again shortly.",
+              }),
+            ),
+      ),
+    );
   const awaitOrchestrationRuntimeForOptionalBackground = Deferred.await(orchestrationRuntime).pipe(
     Effect.option,
   );
@@ -5447,20 +5509,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.terminalOpen: {
         const body = stripRequestTag(request.body);
-        // Opening a terminal inside a worktree is serialized with cleanup and
-        // setup cancellation, which treat a live terminal as a claim.
-        const { orchestrationEngine } = yield* awaitOrchestrationRuntimeForRoute;
-        const thread = (yield* orchestrationEngine.getReadModel()).threads.find(
-          (entry) => entry.id === body.threadId,
-        );
-        const worktreePath = thread?.worktreePath ?? null;
-        return yield* worktreePath
-          ? withWorktreeLifecycleLock(worktreePath, terminalManager.open(body)).pipe(
-              Effect.catchTag("RepositoryLifecycleError", (error) =>
-                Effect.fail(new RouteRequestError({ message: error.message })),
-              ),
-            )
-          : terminalManager.open(body);
+        return yield* withTerminalThreadAccess(body.threadId, terminalManager.open(body));
       }
 
       case WS_METHODS.terminalWrite: {
@@ -5480,7 +5529,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.terminalRestart: {
         const body = stripRequestTag(request.body);
-        return yield* terminalManager.restart(body);
+        return yield* withTerminalThreadAccess(body.threadId, terminalManager.restart(body));
       }
 
       case WS_METHODS.terminalClose: {
@@ -5959,7 +6008,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case WS_METHODS.storageGetUsage: {
         const { storageMaintenance } = yield* awaitOrchestrationRuntimeForRoute;
         const body = stripRequestTag(request.body);
-        return yield* storageMaintenance.inspect(body).pipe(
+        return yield* storageMaintenance.getUsage(body).pipe(
           Effect.mapError(
             (error) =>
               new RouteRequestError({
@@ -5969,25 +6018,26 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         );
       }
 
+      case WS_METHODS.storageGetStatus: {
+        const { storageMaintenance } = yield* awaitOrchestrationRuntimeForRoute;
+        return yield* storageMaintenance.getStatus;
+      }
+      case WS_METHODS.storageGetTargets: {
+        const { storageMaintenance } = yield* awaitOrchestrationRuntimeForRoute;
+        return yield* storageMaintenance
+          .getTargets(stripRequestTag(request.body))
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+      }
+      case WS_METHODS.storageGetOperation: {
+        const { storageMaintenance } = yield* awaitOrchestrationRuntimeForRoute;
+        return yield* storageMaintenance
+          .getOperation(stripRequestTag(request.body))
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+      }
       case WS_METHODS.storageCleanup: {
         const { storageMaintenance } = yield* awaitOrchestrationRuntimeForRoute;
         const body = stripRequestTag(request.body);
-        const publishProgress = (event: StorageCleanupProgressPayload) =>
-          pushBus.publishClient(ws, WS_CHANNELS.storageCleanupProgress, event).pipe(Effect.asVoid);
-        const result = yield* storageMaintenance.cleanup(body, { publishProgress }).pipe(
-          Effect.tap(() =>
-            pushBus.publishAll(WS_CHANNELS.storageInvalidated, {
-              reason: "cleanup-completed",
-              operationId: body.operationId,
-            }),
-          ),
-          // Freed space releases held turns and clears the banner right away,
-          // including when the cleanup failed or was cancelled partway.
-          Effect.ensuring(
-            diskSpaceMonitor._tag === "Some"
-              ? diskSpaceMonitor.value.noteStorageChanged
-              : Effect.void,
-          ),
+        const result = yield* storageMaintenance.acceptCleanup(body).pipe(
           Effect.mapError(
             (error) =>
               new RouteRequestError({
@@ -6025,7 +6075,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.storageAutomationAudit: {
         const body = stripRequestTag(request.body);
-        const entries = yield* listStorageAutomationAudit(body.limit ?? 100).pipe(
+        const entries = yield* listStorageAutomationAudit(body.limit ?? 100, body.source).pipe(
           Effect.mapError(
             (error) => new RouteRequestError({ message: `Cannot read audit: ${error.message}` }),
           ),

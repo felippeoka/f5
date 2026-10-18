@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type {
   ServerSettingsPatch,
   StorageAutomationAuditEntry,
@@ -97,9 +98,15 @@ export function StorageAutomationSettings() {
         description: errorMessage(error),
       }),
   });
+  const [activityLimit, setActivityLimit] = useState(10);
+  const [activitySource, setActivitySource] = useState<"automatic" | "manual" | "all">("all");
   const audit = useQuery({
-    queryKey: auditQueryKey,
-    queryFn: () => ensureNativeApi().storage.automationAudit({ limit: 50 }),
+    queryKey: [...auditQueryKey, activityLimit, activitySource],
+    queryFn: () =>
+      ensureNativeApi().storage.automationAudit({
+        limit: activityLimit,
+        ...(activitySource !== "all" ? { source: activitySource } : {}),
+      }),
     refetchInterval: 30_000,
   });
 
@@ -315,8 +322,24 @@ export function StorageAutomationSettings() {
         </div>
       ) : null}
 
-      <div>
-        <h3 className="text-xs font-medium text-muted-foreground">Recent activity</h3>
+      <details>
+        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+          Activity
+        </summary>
+        <label className="mt-2 block text-xs text-muted-foreground">
+          Source{" "}
+          <select
+            aria-label="Activity source"
+            value={activitySource}
+            onChange={(event) =>
+              setActivitySource(event.currentTarget.value as typeof activitySource)
+            }
+          >
+            <option value="all">All</option>
+            <option value="automatic">Automatic</option>
+            <option value="manual">Manual</option>
+          </select>
+        </label>
         {audit.data && audit.data.entries.length > 0 ? (
           <ul aria-label="Automatic cleanup activity" className="mt-1 space-y-1 text-xs">
             {audit.data.entries.map((entry) => (
@@ -325,11 +348,15 @@ export function StorageAutomationSettings() {
                   {new Date(entry.createdAt).toLocaleString()}
                 </time>
                 <span className="shrink-0 font-medium">
-                  {JOB_LABELS[entry.job]}: {RESULT_LABELS[entry.result]}
+                  {entry.source === "manual" ? entry.target : JOB_LABELS[entry.job]}:{" "}
+                  {RESULT_LABELS[entry.result]}
                 </span>
                 <span className="truncate font-mono">{entry.target}</span>
                 {entry.reason ? (
-                  <span className="text-muted-foreground">{entry.reason}</span>
+                  <details className="min-w-0 text-muted-foreground">
+                    <summary className="line-clamp-2 cursor-pointer">{entry.reason}</summary>
+                    <p>{entry.reason}</p>
+                  </details>
                 ) : null}
               </li>
             ))}
@@ -339,7 +366,16 @@ export function StorageAutomationSettings() {
             {audit.isError ? errorMessage(audit.error) : "No automatic cleanup or pulls yet."}
           </p>
         )}
-      </div>
+        {activityLimit < 200 ? (
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() => setActivityLimit(activityLimit === 10 ? 50 : 200)}
+          >
+            Show more activity
+          </Button>
+        ) : null}
+      </details>
     </section>
   );
 }

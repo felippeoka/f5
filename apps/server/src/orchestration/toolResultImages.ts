@@ -1,3 +1,4 @@
+import { acquireAttachmentOwner, requireAttachmentOwner } from "../attachmentOwnership.ts";
 import { createHash } from "node:crypto";
 
 import type { ChatAttachment } from "@t3tools/contracts";
@@ -172,11 +173,12 @@ export const ingestToolResultImage = Effect.fnUntraced(function* (input: {
     WHERE attachment_id = ${attachment.id}
   `;
   const existingRow = existing[0];
+  if (existingRow?.lifecycle === "deleting") return null;
   if (existingRow) {
-    yield* sql`
-      INSERT OR IGNORE INTO attachment_owners (attachment_id, owner_kind, owner_id, created_at)
-      VALUES (${attachment.id}, 'activity', ${input.activityId}, ${createdAt})
-    `;
+    if (
+      !(yield* acquireAttachmentOwner(sql, attachment.id, "activity", input.activityId, createdAt))
+    )
+      return null;
     if (existingRow.lifecycle === "staged") {
       // An earlier promotion failed. The id is content-addressed, so these bytes are the
       // staged ones: finish promotion now instead of returning a ref to a missing file.
@@ -241,10 +243,7 @@ export const ingestToolResultImage = Effect.fnUntraced(function* (input: {
             ${finalPath}, 'staged', ${createdAt}, ${createdAt}
           )
         `;
-        yield* sql`
-          INSERT INTO attachment_owners (attachment_id, owner_kind, owner_id, created_at)
-          VALUES (${attachment.id}, 'activity', ${input.activityId}, ${createdAt})
-        `;
+        yield* requireAttachmentOwner(sql, attachment.id, "activity", input.activityId, createdAt);
         return true;
       }),
     )

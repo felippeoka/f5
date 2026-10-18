@@ -2,6 +2,14 @@ import type { SettingsItemDescriptor } from "../settingsSearch";
 
 export const STORAGE_SETTINGS_DESCRIPTORS = [
   {
+    id: "storage.attachments",
+    category: "storage",
+    label: "Attachments",
+    description: "Review unowned images and files before reclaiming space.",
+    keywords: ["images", "files", "orphan", "screenshots"],
+    targetSelector: '[data-settings-search-target="storage.attachments"]',
+  },
+  {
     id: "storage.automation",
     category: "storage",
     label: "Automatic cleanup",
@@ -39,11 +47,22 @@ export const STORAGE_SETTINGS_DESCRIPTORS = [
     targetSelector: '[aria-label="Include encrypted credentials"]',
   },
   {
-    id: "storage.usage",
+    id: "storage.overview",
     category: "storage",
     label: "Storage usage",
     description: "Inspect local data and reclaim selected storage categories.",
-    keywords: ["cleanup", "disk", "database", "logs", "worktrees", "codex", "marketplace"],
-    targetSelector: '[data-settings-search-target="storage.usage"]',
+    keywords: [
+      "disk",
+      "free space",
+      "usage",
+      "size",
+      "cleanup",
+      "database",
+      "logs",
+      "worktrees",
+      "codex",
+      "marketplace",
+    ],
+    targetSelector: '[data-settings-search-target="storage.overview"]',
   },
 ] as const satisfies ReadonlyArray<SettingsItemDescriptor>;

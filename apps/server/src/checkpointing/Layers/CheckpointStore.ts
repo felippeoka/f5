@@ -20,6 +20,15 @@ import { GitService, type ExecuteGitInput } from "../../git/Services/GitService.
 import { CheckpointStore, type CheckpointStoreShape } from "../Services/CheckpointStore.ts";
 import { CheckpointRef } from "@t3tools/contracts";
 
+function isSafeCheckpointRef(ref: string): boolean {
+  if (!ref.startsWith("refs/") || /\s/.test(ref)) return false;
+  for (const character of ref) {
+    const code = character.charCodeAt(0);
+    if (code < 32 || code === 127) return false;
+  }
+  return true;
+}
+
 const makeCheckpointStore = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -388,6 +397,40 @@ const makeCheckpointStore = Effect.gen(function* () {
       Effect.map((commit) => commit !== null),
     );
 
+  const readCheckpointRefs: CheckpointStoreShape["readCheckpointRefs"] = (input) =>
+    Effect.gen(function* () {
+      const refs = new Set(input.checkpointRefs);
+      if (!refs.size) return {};
+      let prefix: string = input.checkpointRefs[0]!;
+      for (const ref of refs) {
+        if (!isSafeCheckpointRef(ref))
+          return yield* new CheckpointInvariantError({
+            operation: "CheckpointStore.readCheckpointRefs",
+            detail: "Invalid checkpoint ref for inspection.",
+          });
+        while (!ref.startsWith(prefix)) prefix = prefix.slice(0, -1);
+      }
+      prefix = prefix.slice(0, prefix.lastIndexOf("/") + 1);
+      const result = yield* git.execute({
+        operation: "CheckpointStore.readCheckpointRefs",
+        cwd: input.cwd,
+        args: ["for-each-ref", "--format=%(refname)%09%(objectname)", prefix],
+        maxOutputBytes: 16 * 1024 * 1024,
+      });
+      const resolved: Record<string, string> = {};
+      for (const line of result.stdout.split("\n")) {
+        const [ref, oid] = line.split("\t");
+        if (!ref || !refs.has(CheckpointRef.makeUnsafe(ref))) continue;
+        if (!oid || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(oid))
+          return yield* new CheckpointInvariantError({
+            operation: "CheckpointStore.readCheckpointRefs",
+            detail: "Git returned an invalid checkpoint object id.",
+          });
+        resolved[ref] = oid;
+      }
+      return resolved;
+    });
+
   const restoreCheckpoint: CheckpointStoreShape["restoreCheckpoint"] = (input) =>
     Effect.gen(function* () {
       const operation = "CheckpointStore.restoreCheckpoint";
@@ -476,23 +519,35 @@ const makeCheckpointStore = Effect.gen(function* () {
     Effect.gen(function* () {
       const operation = "CheckpointStore.deleteCheckpointRefs";
 
-      yield* Effect.forEach(
-        input.checkpointRefs,
-        (checkpointRef) =>
-          git.execute({
+      if (input.checkpointRefs.length === 0) return;
+      const deletions: string[] = [];
+      for (const ref of new Set(input.checkpointRefs)) {
+        if (!isSafeCheckpointRef(ref))
+          return yield* new CheckpointInvariantError({
             operation,
-            cwd: input.cwd,
-            args: ["update-ref", "-d", checkpointRef],
-            allowNonZeroExit: true,
-          }),
-        { discard: true },
-      );
+            detail: "Invalid checkpoint ref for deletion.",
+          });
+        const expected = input.expectedOids?.[ref];
+        if (expected !== undefined && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(expected))
+          return yield* new CheckpointInvariantError({
+            operation,
+            detail: "Invalid checkpoint object id for deletion.",
+          });
+        deletions.push(`delete ${ref}${expected ? ` ${expected}` : ""}\n`);
+      }
+      yield* git.execute({
+        operation,
+        cwd: input.cwd,
+        args: ["update-ref", "--stdin"],
+        stdin: `start\n${deletions.join("")}prepare\ncommit\n`,
+      });
     });
 
   return {
     isGitRepository,
     captureCheckpoint,
     hasCheckpointRef,
+    readCheckpointRefs,
     restoreCheckpoint,
     diffCheckpoints,
     deleteCheckpointRefs,

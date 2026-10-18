@@ -1,3 +1,4 @@
+import { userFacingCauseMessage } from "../../causeMessage.ts";
 import {
   CodeReviewWorkflowId,
   CommandId,
@@ -79,12 +80,6 @@ type CodeReviewWorkflowTitleGenerationWorkItem = {
 };
 
 const MAX_PROFILE_TIMEOUT_RETRIES = 1;
-
-function userFacingCauseMessage(cause: Cause.Cause<unknown>, fallback: string): string {
-  const squashed = Cause.squash(cause);
-  const message = squashed instanceof Error ? squashed.message : String(squashed);
-  return message.trim() || fallback;
-}
 
 type CodeReviewStage = {
   readonly status: CodeReviewReviewer["status"] | CodeReviewWorkflow["consolidation"]["status"];

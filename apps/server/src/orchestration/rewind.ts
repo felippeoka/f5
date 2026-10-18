@@ -1,3 +1,4 @@
+import { requireAttachmentOwner } from "../attachmentOwnership.ts";
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import path from "node:path";
@@ -267,7 +268,13 @@ export const makeConversationRewind = Effect.gen(function* () {
               yield* sql`INSERT INTO rewind_operations(operation_id, thread_id, target_message_id, target_turn_id, provider_session_id, mode, expected_revision, state, relative_count, retained_count, boundary_json, draft_json, created_at, updated_at)
           VALUES (${request.operationId}, ${thread.id}, ${source.id}, ${boundary.at(-1) ?? null}, ${identity}, ${request.restoreFiles ? "conversation-and-files" : "conversation"}, ${request.expectedRevision ?? model.snapshotSequence}, 'prepared', ${relativeCount}, ${target}, ${JSON.stringify(boundary)}, ${JSON.stringify({ text: source.text, attachments: source.attachments ?? [] })}, ${at}, ${at})`;
               for (const attachment of source.attachments ?? []) {
-                yield* sql`INSERT OR IGNORE INTO attachment_owners VALUES (${attachment.id}, 'rewind_draft', ${request.operationId}, ${at})`;
+                yield* requireAttachmentOwner(
+                  sql,
+                  attachment.id,
+                  "rewind_draft",
+                  request.operationId,
+                  at,
+                );
                 yield* sql`DELETE FROM attachment_owners WHERE attachment_id = ${attachment.id} AND owner_kind = 'message' AND owner_id = ${source.id}`;
               }
             }),

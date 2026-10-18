@@ -156,3 +156,36 @@ Archiving or deleting the conversation cancels its switch and keeps checkout fil
 - [Project settings](project-settings.md)
 - [Codex marketplace cleanup](../providers/codex.md#good-to-know)
 - [Getting started](getting-started.md)
+
+## Reviewing and reclaiming storage
+
+Settings → Storage opens immediately while F5 measures the current profile. The last
+measurement remains visible during updates and after restart. Rescan joins an existing
+scan; repeated clicks do not start competing directory walks. A report from an earlier
+backend or from before a cleanup must be refreshed before it can authorize deletion.
+
+The overview separates worktrees, provider homes, database files, logs, attachments,
+legacy data, and other state. Reclaimable space counts each file once; individual cleanup
+categories can overlap. Sizes use allocated filesystem blocks where available; compressed
+files and APFS clones remain estimates. Deleting database rows alone does not reclaim
+database file bytes. Compaction runs in a separate process: F5 stays responsive while
+conversations wait for the database connection.
+An independent lifetime watchdog terminates the helper if its backend exits, including
+while SQLite is doing synchronous work. Completed cleanup results remain available if
+optional compaction fails or is cancelled.
+
+Expand a cleanup category to inspect targets, select individual threads, files or worktrees,
+and copy their paths. Orphan attachments are never selected by default. Provider homes
+are shown for inspection only; manage their sessions, transcripts and caches from the
+provider CLI. Purged threads cannot be restored from Archive. Busy or blocked archived
+threads stay in Archive; failures after deletion remain retryable deleted-thread candidates.
+Unreadable provider homes show unavailable usage without preventing cleanup of accessible
+categories. Refused attachment removals retain their registry entry until a confirmed retry
+successfully removes the file, or confirms it is absent.
+
+Cleanup belongs to the profile backend and continues if its window disconnects or you
+leave Settings. Progress and results reappear on reconnect. Cancel stops before the next
+target; an irreversible thread cleanup finishes its current target. After a backend restart,
+rescan and confirm again. **Review remaining work** creates a fresh review and never replays
+a previous destructive request. Activity includes manual and automatic cleanup and can be
+filtered by source. Backup audit rows are history and never resume cleanup after restore.

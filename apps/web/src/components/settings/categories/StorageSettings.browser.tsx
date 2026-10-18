@@ -1,3 +1,4 @@
+import { toastManager } from "../../ui/toast";
 import "../../../index.css";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -9,6 +10,9 @@ import {
   type StorageCleanupCategoryUsage,
   type StorageCleanupResult,
   type StorageUsageReport,
+  type StorageStatus,
+  type StorageCleanupStatus,
+  type StorageCleanupRequest,
 } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
@@ -94,6 +98,8 @@ function category(
   },
 ): StorageCleanupCategoryUsage {
   return {
+    measurement: "complete",
+    eligibleThreadCount: 0,
     id: input.id,
     section: input.section,
     title: input.title,
@@ -154,8 +160,6 @@ function usageReport(input: Partial<StorageUsageReport> = {}): StorageUsageRepor
 
   return {
     scanId: "scan-storage",
-    confirmationNonce: "nonce-storage",
-    nonceExpiresAt: "2026-05-08T12:05:00.000Z",
     scannedAt: NOW_ISO,
     stateDir: "/tmp/f5/userdata",
     totalUsedBytes: 47 * GIB,
@@ -165,6 +169,10 @@ function usageReport(input: Partial<StorageUsageReport> = {}): StorageUsageRepor
     logsBytes: 2 * GIB,
     attachmentsBytes: 128 * 1024 * 1024,
     legacyBytes: 33 * GIB,
+    providerHomesBytes: 0,
+    otherBytes: 0,
+    providerHomes: [],
+    warningsTruncated: false,
     threadCount: 12,
     archivedThreadCount: 3,
     deletedThreadCount: 0,
@@ -203,12 +211,55 @@ function createNativeApiMock(
   report: StorageUsageReport,
   result: StorageCleanupResult = cleanupResult(),
 ) {
-  const getUsage = vi.fn(async () => report);
-  const cleanup = vi.fn(async () => result);
+  let status: StorageStatus = {
+    backendEpoch: "backend-test",
+    revision: 1,
+    updatedAt: NOW_ISO,
+    scan: { state: "idle", phase: null, entriesVisited: 0, startedAt: null, error: null },
+    cleanup: null,
+  };
+  const getUsage = vi.fn(async () => ({
+    report,
+    confirmation: {
+      scanId: report.scanId,
+      nonce: "nonce-storage",
+      expiresAt: "2099-05-08T12:05:00.000Z",
+    },
+    status,
+  }));
+  const getStatus = vi.fn(async () => status);
+  const cleanup = vi.fn(async (request?: StorageCleanupRequest): Promise<StorageCleanupStatus> => {
+    const operation: StorageCleanupStatus = {
+      operationId: request?.operationId ?? result.operationId,
+      state: "succeeded" as const,
+      completedAt: result.completedAt,
+      startedAt: result.startedAt,
+      result: { ...result, operationId: request?.operationId ?? result.operationId },
+      progress: null,
+      error: null,
+      omittedCount: 0,
+    };
+    status = { ...status, revision: status.revision + 1, cleanup: operation };
+    return operation;
+  });
   const cancelCleanup = vi.fn(async () => undefined);
   const confirm = vi.fn(async () => true);
   const onInvalidated = vi.fn(() => () => undefined);
-  const onCleanupProgress = vi.fn(() => () => undefined);
+  const statusListeners = new Set<(status: StorageStatus) => void>();
+  const onStatusUpdated = vi.fn((listener: (status: StorageStatus) => void) => {
+    statusListeners.add(listener);
+    return () => {
+      statusListeners.delete(listener);
+    };
+  });
+  const emitStatus = (next: StorageStatus) => {
+    status = next;
+    for (const listener of statusListeners) listener(next);
+  };
+  const getOperation = vi.fn(async ({ operationId }: { operationId: string }) => {
+    if (status.cleanup?.operationId !== operationId) throw new Error("operation_unknown");
+    return { status: status.cleanup, results: [], nextCursor: null };
+  });
   const automationDryRun = vi.fn(
     async (): Promise<StorageAutomationDryRunResult> => ({
       storageCleanupEnabled: true,
@@ -238,6 +289,10 @@ function createNativeApiMock(
       entries: [
         {
           auditId: "audit-1",
+          source: "automatic",
+          category: null,
+          reasonCode: null,
+          summary: null,
           operationId: "op-1",
           job: "auto-pull",
           policyVersion: 1,
@@ -266,10 +321,21 @@ function createNativeApiMock(
   nativeApiRef.current = {
     storage: {
       getUsage,
+      getStatus,
+      getOperation,
+      getDiskSpace: async () => ({
+        level: "ok",
+        checkedAt: NOW_ISO,
+        lowThresholdBytes: 0,
+        criticalThresholdBytes: 0,
+        volumes: [],
+        reclaimable: [],
+      }),
+      onDiskSpaceUpdated: () => () => {},
       cleanup,
       cancelCleanup,
       onInvalidated,
-      onCleanupProgress,
+      onStatusUpdated,
       automationDryRun,
       automationAudit,
     },
@@ -284,11 +350,14 @@ function createNativeApiMock(
 
   return {
     getUsage,
+    getStatus,
+    getOperation,
+    emitStatus,
     cleanup,
     cancelCleanup,
     confirm,
     onInvalidated,
-    onCleanupProgress,
+    onStatusUpdated,
     automationDryRun,
     automationAudit,
     updateSettings,
@@ -333,9 +402,347 @@ function getDisabledState(element: Element | null) {
 }
 
 describe("StorageSettings", () => {
+  it("keeps another window's active cleanup while resolving our earlier completion", async () => {
+    const { screen, queryClient, nativeApi } = await renderStorageSettings();
+    let ownId = "";
+    nativeApi.cleanup.mockImplementationOnce(async (request) => {
+      ownId = request!.operationId;
+      const operation: StorageCleanupStatus = {
+        operationId: ownId,
+        state: "running",
+        startedAt: NOW_ISO,
+        completedAt: null,
+        result: null,
+        error: null,
+        omittedCount: 0,
+        progress: null,
+      };
+      nativeApi.emitStatus({ ...(await nativeApi.getStatus()), revision: 2, cleanup: operation });
+      return operation;
+    });
+    try {
+      await page.getByRole("button", { name: "Reclaim selected" }).click();
+      await page.getByPlaceholder("DELETE").fill("DELETE");
+      await page.getByRole("dialog").getByRole("button", { name: "Reclaim", exact: true }).click();
+      await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+      const completed: StorageCleanupStatus = {
+        operationId: ownId,
+        state: "succeeded",
+        startedAt: NOW_ISO,
+        completedAt: NOW_ISO,
+        result: { ...cleanupResult(), operationId: ownId },
+        error: null,
+        omittedCount: 0,
+        progress: null,
+      };
+      nativeApi.getOperation.mockResolvedValueOnce({
+        status: completed,
+        results: [],
+        nextCursor: null,
+      });
+      nativeApi.emitStatus({
+        ...(await nativeApi.getStatus()),
+        revision: 3,
+        cleanup: {
+          ...completed,
+          operationId: "other-window",
+          state: "running",
+          completedAt: null,
+          result: null,
+          progress: {
+            operationId: "other-window",
+            phase: "deleting",
+            message: "Other window is cleaning",
+            completedTargets: 1,
+            totalTargets: 10,
+          },
+        },
+      });
+      await vi.waitFor(() => expect(document.body.textContent).toContain("Last cleanup result"));
+      await expect.element(page.getByText("Other window is cleaning")).toBeVisible();
+      await expect.element(page.getByRole("button", { name: "Reclaim selected" })).toBeDisabled();
+      expect(nativeApi.cleanup).toHaveBeenCalledTimes(1);
+    } finally {
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
+  it("does not become busy again when acceptance arrives after a completed status push", async () => {
+    const { screen, queryClient, nativeApi } = await renderStorageSettings();
+    let acknowledge!: (operation: StorageCleanupStatus) => void;
+    nativeApi.cleanup.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          acknowledge = resolve;
+        }),
+    );
+    try {
+      await page.getByRole("button", { name: "Reclaim selected" }).click();
+      await page.getByPlaceholder("DELETE").fill("DELETE");
+      await page.getByRole("dialog").getByRole("button", { name: "Reclaim", exact: true }).click();
+      await vi.waitFor(() => expect(nativeApi.cleanup).toHaveBeenCalledTimes(1));
+      const request = nativeApi.cleanup.mock.calls[0]![0]!;
+      const completed: StorageCleanupStatus = {
+        operationId: request.operationId,
+        state: "succeeded",
+        startedAt: NOW_ISO,
+        completedAt: NOW_ISO,
+        result: { ...cleanupResult(), operationId: request.operationId },
+        progress: null,
+        error: null,
+        omittedCount: 0,
+      };
+      nativeApi.emitStatus({ ...(await nativeApi.getStatus()), revision: 2, cleanup: completed });
+      await expect.element(page.getByRole("button", { name: "Rescan", exact: true })).toBeEnabled();
+      acknowledge({ ...completed, state: "queued", completedAt: null, result: null });
+      await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+      await expect.element(page.getByRole("button", { name: "Rescan", exact: true })).toBeEnabled();
+      expect(nativeApi.cleanup).toHaveBeenCalledTimes(1);
+    } finally {
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
+  it("shows unavailable provider usage while leaving accessible cleanup usable", async () => {
+    const { screen, queryClient } = await renderStorageSettings(
+      usageReport({ providerHomesMeasurement: "unavailable" }),
+    );
+    try {
+      await expect
+        .element(page.getByRole("heading", { name: "Provider homes (Unavailable)" }))
+        .toBeVisible();
+      await expect.element(page.getByRole("button", { name: "Reclaim selected" })).toBeEnabled();
+    } finally {
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
+  it("recovers from backend restart after accepting cleanup without replaying the request", async () => {
+    const { screen, queryClient, nativeApi } = await renderStorageSettings();
+    const toast = vi.spyOn(toastManager, "add");
+    nativeApi.cleanup.mockImplementationOnce(async (request) => {
+      const operation: StorageCleanupStatus = {
+        operationId: request!.operationId,
+        state: "running",
+        startedAt: NOW_ISO,
+        completedAt: null,
+        result: null,
+        error: null,
+        omittedCount: 0,
+        progress: {
+          operationId: request!.operationId,
+          phase: "deleting",
+          message: "Removing reviewed targets",
+          completedTargets: 0,
+          totalTargets: 10,
+        },
+      };
+      nativeApi.emitStatus({ ...(await nativeApi.getStatus()), revision: 2, cleanup: operation });
+      return operation;
+    });
+    try {
+      await page.getByRole("button", { name: "Reclaim selected" }).click();
+      await page.getByPlaceholder("DELETE").fill("DELETE");
+      await page.getByRole("dialog").getByRole("button", { name: "Reclaim", exact: true }).click();
+      await expect.element(page.getByText("Removing reviewed targets")).toBeVisible();
+      nativeApi.emitStatus({
+        backendEpoch: "restarted-backend",
+        revision: 0,
+        updatedAt: "2099-01-01T00:00:00.000Z",
+        cleanup: null,
+        scan: { state: "idle", phase: null, entriesVisited: 0, error: null, startedAt: null },
+      });
+      await vi.waitFor(() =>
+        expect(toast).toHaveBeenCalledWith(
+          expect.objectContaining({
+            title: "F5 restarted. The previous cleanup status is unavailable.",
+          }),
+        ),
+      );
+      await expect.element(page.getByRole("button", { name: "Rescan", exact: true })).toBeEnabled();
+      await expect.element(page.getByRole("button", { name: "Reclaim selected" })).toBeEnabled();
+      expect(nativeApi.cleanup).toHaveBeenCalledTimes(1);
+    } finally {
+      toast.mockRestore();
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
+
+  it("resolves a missing acknowledged operation after reconnect and releases local pending state", async () => {
+    const { screen, queryClient, nativeApi } = await renderStorageSettings();
+    const toast = vi.spyOn(toastManager, "add");
+    nativeApi.cleanup.mockImplementationOnce(async (request) => {
+      const operation: StorageCleanupStatus = {
+        operationId: request!.operationId,
+        state: "running",
+        startedAt: NOW_ISO,
+        completedAt: null,
+        result: null,
+        error: null,
+        omittedCount: 0,
+        progress: null,
+      };
+      nativeApi.emitStatus({ ...(await nativeApi.getStatus()), revision: 2, cleanup: operation });
+      return operation;
+    });
+    try {
+      await page.getByRole("button", { name: "Reclaim selected" }).click();
+      await page.getByPlaceholder("DELETE").fill("DELETE");
+      await page.getByRole("dialog").getByRole("button", { name: "Reclaim", exact: true }).click();
+      await vi.waitFor(() => expect(nativeApi.cleanup).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+      nativeApi.emitStatus({ ...(await nativeApi.getStatus()), revision: 3, cleanup: null });
+      await vi.waitFor(() =>
+        expect(toast).toHaveBeenCalledWith(
+          expect.objectContaining({ title: "The previous cleanup is no longer available." }),
+        ),
+      );
+      expect(nativeApi.getOperation).toHaveBeenCalledTimes(1);
+      await expect.element(page.getByRole("button", { name: "Rescan", exact: true })).toBeEnabled();
+      expect(nativeApi.cleanup).toHaveBeenCalledTimes(1);
+    } finally {
+      toast.mockRestore();
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
+
+  it("keeps Cancel usable before acceptance and repeats it after the acknowledgement", async () => {
+    const { screen, queryClient, nativeApi } = await renderStorageSettings();
+    type Accepted = Awaited<ReturnType<typeof nativeApi.cleanup>>;
+    let acknowledge!: (operation: Accepted) => void;
+    nativeApi.cleanup.mockImplementationOnce(
+      () =>
+        new Promise<Accepted>((resolve) => {
+          acknowledge = resolve;
+        }),
+    );
+    try {
+      await page.getByRole("button", { name: "Reclaim selected" }).click();
+      await page.getByPlaceholder("DELETE").fill("DELETE");
+      await page.getByRole("dialog").getByRole("button", { name: "Reclaim", exact: true }).click();
+      await vi.waitFor(() => expect(nativeApi.cleanup).toHaveBeenCalledTimes(1));
+      const request = (
+        nativeApi.cleanup.mock.calls as unknown as [[{ operationId: string }]]
+      )[0][0];
+      await expect.element(page.getByRole("dialog").getByText("Starting…")).toBeVisible();
+      await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
+      expect(nativeApi.cancelCleanup).toHaveBeenCalledWith({ operationId: request.operationId });
+      const result = { ...cleanupResult(), operationId: request.operationId };
+      acknowledge({
+        operationId: request.operationId,
+        state: "succeeded",
+        startedAt: result.startedAt,
+        completedAt: result.completedAt,
+        result,
+        progress: null,
+        error: null,
+        omittedCount: 0,
+      });
+      await vi.waitFor(() => expect(nativeApi.cancelCleanup).toHaveBeenCalledTimes(2));
+    } finally {
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
   afterEach(() => {
     nativeApiRef.current = undefined;
     document.body.innerHTML = "";
+  });
+
+  it("renders orphan attachments without selecting them by default", async () => {
+    const { screen, queryClient } = await renderStorageSettings(
+      usageReport({
+        categories: [
+          category({
+            id: "orphanAttachments",
+            section: "attachments",
+            title: "Delete orphaned attachments",
+            bytes: 4096,
+            reclaimableBytes: 4096,
+            targets: [
+              {
+                id: "orphan",
+                label: "unowned.png",
+                path: "/tmp/attachments/unowned.png",
+                bytes: 4096,
+                safeToDelete: true,
+              },
+            ],
+            targetCount: 1,
+          }),
+        ],
+      }),
+    );
+    try {
+      await expect.element(page.getByRole("heading", { name: /^Attachments/ })).toBeInTheDocument();
+      await expect.element(page.getByRole("checkbox", { name: /unowned\.png/ })).not.toBeChecked();
+      await expect
+        .element(page.getByRole("button", { name: "Reclaim selected", exact: true }))
+        .toBeDisabled();
+      await page.getByRole("checkbox", { name: /unowned\.png/ }).click();
+      await expect
+        .element(page.getByRole("button", { name: "Reclaim selected", exact: true }))
+        .not.toBeDisabled();
+    } finally {
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
+  it("toasts a rejected cleanup, closes its dialog, and refreshes usage", async () => {
+    const { screen, queryClient, nativeApi } = await renderStorageSettings();
+    const toast = vi.spyOn(toastManager, "add");
+    nativeApi.cleanup.mockRejectedValueOnce(new Error("Storage changed since review."));
+    try {
+      await page.getByRole("button", { name: "Reclaim selected", exact: true }).click();
+      await page.getByPlaceholder("DELETE").fill("DELETE");
+      await page.getByRole("button", { name: "Reclaim", exact: true }).click();
+      await vi.waitFor(() => {
+        expect(toast).toHaveBeenCalledWith(
+          expect.objectContaining({
+            title: "Cleanup failed",
+            description: "Storage changed since review.",
+          }),
+        );
+        expect(nativeApi.getUsage.mock.calls.length).toBeGreaterThan(1);
+      });
+      await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+    } finally {
+      toast.mockRestore();
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
+  it("requires DELETE for a large database even when few bytes can be reclaimed", async () => {
+    const screen = await render(
+      <StorageActionConfirmDialog
+        action={{
+          title: "Compact database",
+          confirmation: { scanId: "scan", nonce: "nonce", expiresAt: "2099-01-01T00:00:00.000Z" },
+          categories: [
+            category({
+              id: "databaseVacuum",
+              section: "database",
+              title: "Compact database",
+              bytes: 2 * GIB,
+              reclaimableBytes: 4096,
+            }),
+          ],
+        }}
+        open
+        pending={false}
+        lastResult={null}
+        onOpenChange={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    try {
+      await expect.element(page.getByPlaceholder("DELETE")).toBeInTheDocument();
+      await expect.element(page.getByText(/F5 stays responsive/)).toBeInTheDocument();
+    } finally {
+      await screen.unmount();
+    }
   });
 
   it("saves automatic cleanup settings and previews targets with exact skip reasons", async () => {
@@ -518,6 +925,7 @@ describe("StorageSettings", () => {
     );
 
     try {
+      await page.getByText("Advanced legacy cleanup").click();
       await expect.element(page.getByRole("button", { name: "Reclaim selected" })).toBeDisabled();
       const targetCheckbox = document.querySelector<HTMLElement>(
         '[aria-label="Select f3-code/t3code-a"]',
@@ -605,6 +1013,7 @@ describe("StorageSettings", () => {
     );
 
     try {
+      await page.getByText("Advanced legacy cleanup").click();
       document.querySelector<HTMLElement>('[aria-label="Select f3-code/t3code-a"]')?.click();
       await page.getByRole("button", { name: "Reclaim selected" }).click();
       await page.getByPlaceholder("DELETE").fill("DELETE");
@@ -626,6 +1035,11 @@ describe("StorageSettings", () => {
   it("requires typed DELETE confirmation for cleanup actions over 1 GB", async () => {
     const onConfirm = vi.fn();
     const action = {
+      confirmation: {
+        scanId: "scan-storage",
+        nonce: "nonce-storage",
+        expiresAt: "2099-05-08T12:05:00.000Z",
+      },
       title: "Prune logs for terminal threads",
       categories: [
         category({
@@ -663,6 +1077,11 @@ describe("StorageSettings", () => {
   it("requires typed DELETE confirmation for high-impact legacy actions under 1 GB", async () => {
     const onConfirm = vi.fn();
     const action = {
+      confirmation: {
+        scanId: "scan-storage",
+        nonce: "nonce-storage",
+        expiresAt: "2099-05-08T12:05:00.000Z",
+      },
       title: "Delete legacy caches",
       categories: [
         category({

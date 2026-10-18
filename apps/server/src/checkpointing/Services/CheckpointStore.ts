@@ -40,6 +40,7 @@ export interface DiffCheckpointsInput {
 export interface DeleteCheckpointRefsInput {
   readonly cwd: string;
   readonly checkpointRefs: ReadonlyArray<CheckpointRef>;
+  readonly expectedOids?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -67,6 +68,12 @@ export interface CheckpointStoreShape {
     input: Omit<RestoreCheckpointInput, "fallbackToHead">,
   ) => Effect.Effect<boolean, CheckpointStoreError>;
 
+  /** Resolve an exact set of owned refs in one read-only Git invocation. */
+  readonly readCheckpointRefs: (input: {
+    readonly cwd: string;
+    readonly checkpointRefs: ReadonlyArray<CheckpointRef>;
+  }) => Effect.Effect<Readonly<Record<string, string>>, CheckpointStoreError>;
+
   /**
    * Restore workspace/staging state to a checkpoint.
    *
@@ -88,7 +95,7 @@ export interface CheckpointStoreShape {
   /**
    * Delete the provided checkpoint refs.
    *
-   * Best-effort delete: missing refs are tolerated.
+   * Checked transaction: missing refs are tolerated; changed expected refs fail atomically.
    */
   readonly deleteCheckpointRefs: (
     input: DeleteCheckpointRefsInput,

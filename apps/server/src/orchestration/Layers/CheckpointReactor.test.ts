@@ -268,6 +268,7 @@ const fakeCheckpointStore: CheckpointStoreShape = {
       }
       return createUnifiedDiff(before, after);
     }),
+  readCheckpointRefs: () => Effect.succeed({}),
   deleteCheckpointRefs: ({ cwd, checkpointRefs }) =>
     Effect.sync(() => {
       const snapshots = fakeCheckpointSnapshots.get(cwd);

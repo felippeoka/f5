@@ -268,6 +268,7 @@ export function automationLayer(
       return result();
     });
   const maintenance = Layer.succeed(StorageMaintenance, {
+    noteStorageMutated: Effect.void,
     purgeThreads: (input: unknown) => call("purgeThreads", input, () => world.purgeResult),
     reclaimDatabaseSpace: (input: unknown) =>
       call("reclaimDatabaseSpace", input, () => world.spaceResult),

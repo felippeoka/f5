@@ -37,7 +37,7 @@ import {
   type ServerProviderAdvisoriesUpdatedPayload,
   ServerConfigUpdatedPayload,
   type DiskSpaceStatus,
-  type StorageCleanupProgressPayload,
+  type StorageStatus,
   type StorageInvalidatedPayload,
   WS_CHANNELS,
   WS_METHODS,
@@ -88,7 +88,7 @@ const previewLocalServersUpdatedListeners = new Set<(payload: DiscoveredLocalSer
 const previewAutomationRequestListeners = new Set<(payload: PreviewAutomationRequest) => void>();
 const mcpStatusUpdatedListeners = new Set<(payload: McpStatusUpdatedPayload) => void>();
 const storageInvalidatedListeners = new Set<(payload: StorageInvalidatedPayload) => void>();
-const storageCleanupProgressListeners = new Set<(payload: StorageCleanupProgressPayload) => void>();
+const storageStatusUpdatedListeners = new Set<(payload: StorageStatus) => void>();
 const storageDiskSpaceUpdatedListeners = new Set<(payload: DiskSpaceStatus) => void>();
 const nextTurnQueueUpdatedListeners = new Set<(payload: NextTurnQueueSnapshot) => void>();
 const nextTurnQueueSummaryUpdatedListeners = new Set<(payload: NextTurnQueueSummary) => void>();
@@ -381,9 +381,9 @@ export function createWsNativeApi(): NativeApi {
       }
     }
   });
-  transport.subscribe(WS_CHANNELS.storageCleanupProgress, (message) => {
+  transport.subscribe(WS_CHANNELS.storageStatusUpdated, (message) => {
     const payload = message.data;
-    for (const listener of storageCleanupProgressListeners) {
+    for (const listener of storageStatusUpdatedListeners) {
       try {
         listener(payload);
       } catch {
@@ -749,7 +749,10 @@ export function createWsNativeApi(): NativeApi {
     },
     storage: {
       getUsage: (input = {}) => transport.request(WS_METHODS.storageGetUsage, input),
-      cleanup: (input) => transport.request(WS_METHODS.storageCleanup, input, { timeoutMs: null }),
+      getStatus: () => transport.request(WS_METHODS.storageGetStatus, {}),
+      getTargets: (input) => transport.request(WS_METHODS.storageGetTargets, input),
+      getOperation: (input) => transport.request(WS_METHODS.storageGetOperation, input),
+      cleanup: (input) => transport.request(WS_METHODS.storageCleanup, input),
       cancelCleanup: (input) => transport.request(WS_METHODS.storageCancelCleanup, input),
       automationDryRun: () => transport.request(WS_METHODS.storageAutomationDryRun, {}),
       automationAudit: (input = {}) => transport.request(WS_METHODS.storageAutomationAudit, input),
@@ -759,10 +762,10 @@ export function createWsNativeApi(): NativeApi {
           storageInvalidatedListeners.delete(callback);
         };
       },
-      onCleanupProgress: (callback) => {
-        storageCleanupProgressListeners.add(callback);
+      onStatusUpdated: (callback) => {
+        storageStatusUpdatedListeners.add(callback);
         return () => {
-          storageCleanupProgressListeners.delete(callback);
+          storageStatusUpdatedListeners.delete(callback);
         };
       },
       getDiskSpace: (input = {}) => transport.request(WS_METHODS.storageGetDiskSpace, input),

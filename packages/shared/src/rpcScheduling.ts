@@ -7,6 +7,7 @@ export function rpcLane(body: { readonly _tag: string; readonly command?: unknow
       ? String(body.command.type)
       : "";
   if (
+    body._tag === "storage.cancelCleanup" ||
     command === "thread.turn.interrupt" ||
     command === "thread.session.stop" ||
     /(?:cancel|interrupt|stopSession|revoke)$/i.test(body._tag)
@@ -25,7 +26,8 @@ export function rpcLane(body: { readonly _tag: string; readonly command?: unknow
   if (
     /^orchestration\.(?:getStartupSnapshot|getSnapshot|replayEvents)$/.test(body._tag) ||
     body._tag === "terminal.snapshot" ||
-    body._tag === "server.probe"
+    body._tag === "server.probe" ||
+    body._tag === "storage.getStatus"
   )
     return "recovery";
   return "ordinary";
@@ -70,6 +72,10 @@ export class RpcAdmission {
 }
 
 const READ_ONLY_METHODS = new Set([
+  "storage.getUsage",
+  "storage.getStatus",
+  "storage.getOperation",
+  "storage.getTargets",
   "agentBridge.getState",
   "agentBridge.getTask",
   "agentBridge.getTaskActivities",

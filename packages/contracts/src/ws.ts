@@ -212,10 +212,13 @@ import {
   StorageAutomationAuditInput,
   StorageAutomationDryRunInput,
   StorageCancelCleanupRequest,
-  StorageCleanupProgressPayload,
   StorageCleanupRequest,
   StorageGetDiskSpaceRequest,
   StorageGetUsageRequest,
+  StorageGetStatusRequest,
+  StorageGetTargetsRequest,
+  StorageGetOperationRequest,
+  StorageStatus,
   StorageInvalidatedPayload,
 } from "./storage";
 import {
@@ -434,6 +437,9 @@ export const WS_METHODS = {
 
   // Storage maintenance
   storageGetUsage: "storage.getUsage",
+  storageGetStatus: "storage.getStatus",
+  storageGetTargets: "storage.getTargets",
+  storageGetOperation: "storage.getOperation",
   storageCleanup: "storage.cleanup",
   storageCancelCleanup: "storage.cancelCleanup",
   // Automatic cleanup and auto-pull: read-only preview and the audit trail
@@ -529,7 +535,7 @@ export const WS_CHANNELS = {
   providerAdvisoriesUpdated: "provider.advisoriesUpdated",
   mcpStatusUpdated: "mcp.statusUpdated",
   storageInvalidated: "storage.invalidated",
-  storageCleanupProgress: "storage.cleanupProgress",
+  storageStatusUpdated: "storage.statusUpdated",
   storageDiskSpaceUpdated: "storage.diskSpaceUpdated",
   nextTurnQueueUpdated: "nextTurnQueue.updated",
   nextTurnQueueSummaryUpdated: "nextTurnQueue.summaryUpdated",
@@ -807,6 +813,9 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.serverRemoveKeybinding, ServerRemoveKeybindingInput),
   tagRequestBody(WS_METHODS.serverResetKeybindings, ServerResetKeybindingsInput),
   tagRequestBody(WS_METHODS.storageGetUsage, StorageGetUsageRequest),
+  tagRequestBody(WS_METHODS.storageGetStatus, StorageGetStatusRequest),
+  tagRequestBody(WS_METHODS.storageGetTargets, StorageGetTargetsRequest),
+  tagRequestBody(WS_METHODS.storageGetOperation, StorageGetOperationRequest),
   tagRequestBody(WS_METHODS.storageCleanup, StorageCleanupRequest),
   tagRequestBody(WS_METHODS.storageCancelCleanup, StorageCancelCleanupRequest),
   tagRequestBody(WS_METHODS.storageAutomationDryRun, StorageAutomationDryRunInput),
@@ -1022,7 +1031,7 @@ export interface WsPushPayloadByChannel {
   readonly [WS_CHANNELS.computerActivity]: typeof ComputerActivity.Type;
   readonly [WS_CHANNELS.mcpStatusUpdated]: McpStatusUpdatedPayload;
   readonly [WS_CHANNELS.storageInvalidated]: StorageInvalidatedPayload;
-  readonly [WS_CHANNELS.storageCleanupProgress]: StorageCleanupProgressPayload;
+  readonly [WS_CHANNELS.storageStatusUpdated]: StorageStatus;
   readonly [WS_CHANNELS.storageDiskSpaceUpdated]: typeof DiskSpaceStatus.Type;
   readonly [WS_CHANNELS.nextTurnQueueUpdated]: typeof NextTurnQueueSnapshot.Type;
   readonly [WS_CHANNELS.nextTurnQueueSummaryUpdated]: typeof NextTurnQueueSummary.Type;
@@ -1181,9 +1190,9 @@ export const WsPushStorageInvalidated = makeWsPushSchema(
   WS_CHANNELS.storageInvalidated,
   StorageInvalidatedPayload,
 );
-export const WsPushStorageCleanupProgress = makeWsPushSchema(
-  WS_CHANNELS.storageCleanupProgress,
-  StorageCleanupProgressPayload,
+export const WsPushStorageStatusUpdated = makeWsPushSchema(
+  WS_CHANNELS.storageStatusUpdated,
+  StorageStatus,
 );
 export const WsPushStorageDiskSpaceUpdated = makeWsPushSchema(
   WS_CHANNELS.storageDiskSpaceUpdated,
@@ -1237,7 +1246,7 @@ export const WsPushChannelSchema = Schema.Literals([
   WS_CHANNELS.computerObservationsInvalidated,
   WS_CHANNELS.mcpStatusUpdated,
   WS_CHANNELS.storageInvalidated,
-  WS_CHANNELS.storageCleanupProgress,
+  WS_CHANNELS.storageStatusUpdated,
   WS_CHANNELS.storageDiskSpaceUpdated,
   WS_CHANNELS.nextTurnQueueUpdated,
   WS_CHANNELS.nextTurnQueueSummaryUpdated,
@@ -1274,7 +1283,7 @@ export const WsPush = Schema.Union([
   WsPushComputerObservationsInvalidated,
   WsPushMcpStatusUpdated,
   WsPushStorageInvalidated,
-  WsPushStorageCleanupProgress,
+  WsPushStorageStatusUpdated,
   WsPushStorageDiskSpaceUpdated,
   WsPushNextTurnQueueUpdated,
   WsPushNextTurnQueueSummaryUpdated,

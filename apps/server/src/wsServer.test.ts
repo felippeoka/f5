@@ -41,6 +41,7 @@ import {
   Stream,
 } from "effect";
 import { describe, expect, it, afterEach, vi } from "vitest";
+import { withProviderThreadAccess } from "./provider/providerThreadAccess.ts";
 import { createServer, readWebSocketRequestId, resolveWorkspaceReadPath } from "./wsServer";
 import WebSocket from "ws";
 import { ServerConfig, type ServerConfigShape } from "./config";
@@ -5717,6 +5718,41 @@ describe("WebSocket Server", () => {
     const [ws] = await connectAndAwaitWelcome(port);
     connections.push(ws);
 
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const unlock = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const launch = Effect.runPromise(
+      withProviderThreadAccess(
+        "thread-1",
+        Effect.promise(async () => {
+          entered();
+          await unlock;
+        }),
+      ),
+    );
+    await held;
+    try {
+      for (const method of [WS_METHODS.terminalOpen, WS_METHODS.terminalRestart]) {
+        const blocked = await sendRequest(ws, method, {
+          threadId: "thread-1",
+          cwd,
+          cols: 100,
+          rows: 24,
+        });
+        expect(blocked.error).toEqual(
+          expect.objectContaining({ message: expect.stringContaining("conversation is busy") }),
+        );
+      }
+    } finally {
+      release();
+      await launch;
+    }
+
     const open = await sendRequest(ws, WS_METHODS.terminalOpen, {
       threadId: "thread-1",
       cwd,
@@ -6660,7 +6696,7 @@ describe("WebSocket Server", () => {
     );
   });
 
-  it.each([null, "0", "999", "1&protocol=1"])(
+  it.each([null, "0", "25", "26", "999", "1&protocol=1"])(
     "rejects incompatible protocol %s without sending any domain data",
     async (protocol) => {
       server = await createTestServer({ cwd: "/test", authToken: "secret-token" });

@@ -339,6 +339,10 @@
     "./computerAction": {
       "types": "./src/computerAction.ts",
       "import": "./src/computerAction.ts"
+    },
+    "./storageCleanup": {
+      "types": "./src/storageCleanup.ts",
+      "import": "./src/storageCleanup.ts"
     }
   },
   "scripts": {
