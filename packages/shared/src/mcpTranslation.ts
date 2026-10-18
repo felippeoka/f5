@@ -152,18 +152,93 @@ export function filterEnabledMcpServers(
   );
 }
 
+export const CODEX_SSE_TRANSPORT_HINT =
+  "Codex connects to this URL with streamable HTTP. SSE-only endpoints fail under Codex; switch the type to HTTP if the server supports it.";
+
+export interface McpToolFilter {
+  readonly enabled: ReadonlySet<string>;
+  readonly disabled: ReadonlySet<string>;
+}
+
+export type McpToolFilters = ReadonlyMap<string, McpToolFilter>;
+
+export function normalizeClaudeMcpName(name: string): string {
+  return name.replace(/[^A-Za-z0-9_-]/g, "_");
+}
+
+export function buildMcpToolFilters(
+  servers: McpProjectServersConfig | null | undefined,
+): McpToolFilters {
+  return new Map(
+    Object.entries(filterEnabledMcpServers(servers)).map(([name, server]) => [
+      name,
+      {
+        enabled: new Set(normalizeOptionalStringArray(server.enabledTools) ?? []),
+        disabled: new Set(normalizeOptionalStringArray(server.disabledTools) ?? []),
+      },
+    ]),
+  );
+}
+
+export function claudeDisallowedMcpToolNames(filters: McpToolFilters): string[] {
+  return [
+    ...new Set(
+      [...filters].flatMap(([name, filter]) =>
+        [...filter.disabled].map((tool) => `mcp__${normalizeClaudeMcpName(name)}__${tool}`),
+      ),
+    ),
+  ];
+}
+
+/** Returns a denial reason; undefined leaves native permission evaluation intact. */
+export function evaluateMcpToolFilter(
+  filters: McpToolFilters,
+  ownedNames: ReadonlySet<string>,
+  toolName: string,
+  mcpServer?: { readonly name: string; readonly source?: string },
+): string | undefined {
+  if (mcpServer?.source !== undefined && mcpServer.source !== "dynamic") return;
+  // Older hook messages omit provenance. Match exact prefixes, preserving '__'
+  // inside both the server and tool names. Check every match to fail closed on
+  // aliases that normalize to the same Claude name.
+  const names = mcpServer
+    ? [mcpServer.name]
+    : [...ownedNames].filter((name) =>
+        toolName.startsWith(`mcp__${normalizeClaudeMcpName(name)}__`),
+      );
+  for (const name of names) {
+    const filter = filters.get(name);
+    if (!ownedNames.has(name) || !filter) continue;
+    const prefix = `mcp__${normalizeClaudeMcpName(name)}__`;
+    const tool = toolName.startsWith(prefix) ? toolName.slice(prefix.length) : undefined;
+    if (
+      tool === undefined ||
+      filter.disabled.has(tool) ||
+      (filter.enabled.size > 0 && !filter.enabled.has(tool))
+    ) {
+      return `Tool '${tool ?? toolName}' from MCP server '${name}' is blocked by F5 MCP settings. Review this server's enabled and disabled tools in F5 MCP settings.`;
+    }
+  }
+}
+
 export function translateMcpForClaudeAgent(
   servers: McpProjectServersConfig | null | undefined,
 ): Record<string, ClaudeAgentMcpServerConfig> | undefined {
   const translated = Object.create(null) as Record<string, ClaudeAgentMcpServerConfig>;
   for (const [name, definition] of Object.entries(filterEnabledMcpServers(servers))) {
     const normalized = normalizeCommonEntry(definition);
+    // Claude ignores sub-second values, including the saved zero/default value.
+    const timeout =
+      normalized.toolTimeoutSec && normalized.toolTimeoutSec > 0
+        ? { timeout: normalized.toolTimeoutSec * 1000 }
+        : {};
     if (definition.type === "stdio") {
       if (!normalized.command) {
         continue;
       }
       translated[name] = {
         type: "stdio",
+        ...timeout,
         command: normalized.command,
         ...(normalized.args ? { args: normalized.args } : {}),
         ...(normalized.env ? { env: normalized.env } : {}),
@@ -176,6 +251,7 @@ export function translateMcpForClaudeAgent(
     }
     translated[name] = {
       type: definition.type,
+      ...timeout,
       url: normalized.url,
       ...(normalized.headers ? { headers: normalized.headers } : {}),
     };
@@ -237,7 +313,7 @@ export function translateMcpForCodex(
     translated[name] = {
       type: definition.type,
       url: normalized.url,
-      ...(normalized.headers ? { headers: normalized.headers } : {}),
+      ...(normalized.headers ? { http_headers: normalized.headers } : {}),
       ...shared,
     };
   }

@@ -50,6 +50,7 @@ import { toCodexProviderStartOptions } from "../provider/codexProviderOptions.ts
 import { buildCodexCliEnvOverrides, runCodexCliCommand } from "../provider/providerCli.ts";
 import { ProviderService } from "../provider/Services/ProviderService.ts";
 import {
+  CODEX_SSE_TRANSPORT_HINT,
   readCodexMcpOAuthCallbackConfig,
   translateMcpForCodex,
 } from "@t3tools/shared/mcpTranslation";
@@ -104,7 +105,9 @@ function readCliMessage(output: {
 }
 
 function loginStatusKey(input: McpGetLoginStatusRequest): string {
-  return [input.provider, input.projectId, input.serverName ?? ""].join("\u0000");
+  return [input.provider, input.instanceId ?? "", input.projectId, input.serverName ?? ""].join(
+    "\u0000",
+  );
 }
 
 function readIdleLoginStatus(
@@ -122,6 +125,21 @@ function readIdleLoginStatus(
 }
 
 function mapCodexServerStatus(
+  ...args: Parameters<typeof readCodexServerStatus>
+): McpServerStatusEntry {
+  return withCodexSseTransportHint(args[1], readCodexServerStatus(...args));
+}
+
+function withCodexSseTransportHint(
+  server: McpServerDefinition,
+  status: McpServerStatusEntry,
+): McpServerStatusEntry {
+  return server.type === "sse" && status.state !== "ready"
+    ? { ...status, message: combineStatusMessage(status.message, CODEX_SSE_TRANSPORT_HINT) }
+    : status;
+}
+
+function readCodexServerStatus(
   name: string,
   server: McpServerDefinition,
   controlStatus: CodexControlMcpServerStatus | undefined,
@@ -531,6 +549,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
 
   const runBackgroundCodexReloadAfterLogin = (input: {
     readonly projectId: McpStartLoginRequest["projectId"];
+    readonly instanceId?: ProviderInstanceId;
     readonly serverName?: string;
     readonly providerOptions?: ProviderStartOptions;
     readonly configVersion: string;
@@ -548,6 +567,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
               const statusInput = {
                 provider: "codex" as const,
                 projectId: input.projectId,
+                ...(input.instanceId ? { instanceId: input.instanceId } : {}),
                 ...(input.serverName ? { serverName: input.serverName } : {}),
               };
               const current = loginStatuses.get(loginStatusKey(statusInput));
@@ -761,7 +781,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
             (status) => mcpServerNameKey(status.name) === mcpServerNameKey(name),
           );
           if (matches.length > 1)
-            return {
+            return withCodexSseTransportHint(server, {
               name,
               state: "unknown" as const,
               authStatus: "unknown" as const,
@@ -769,7 +789,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
               resourceCount: 0,
               resourceTemplateCount: 0,
               message: `Provider reports conflicting MCP names: ${matches.map((status) => status.name).join(", ")}. No observation can be assigned to this configured server.`,
-            };
+            });
           return mapCodexServerStatus(
             name,
             server,
@@ -939,6 +959,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
               });
               runBackgroundCodexReloadAfterLogin({
                 projectId: input.projectId,
+                ...(input.instanceId ? { instanceId: input.instanceId } : {}),
                 serverName: input.serverName!,
                 ...(providerOptions ? { providerOptions } : {}),
                 configVersion: stored.effectiveVersion,
@@ -1028,7 +1049,9 @@ const makeMcpRuntimeService = Effect.gen(function* () {
                       projectId: input.projectId,
                       serverName: input.serverName!,
                       status: "failed",
-                      error: `MCP login failed: ${String(cause)}`,
+                      error: `MCP login failed: ${cause.message}`,
+                      startedAt: loginStatuses.get(loginStatusKey(input))?.startedAt ?? nowIso(),
+                      completedAt: nowIso(),
                     }),
                   ),
                 ),
