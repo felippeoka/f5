@@ -1,5 +1,7 @@
 import type {
   McpConfigScope,
+  McpServerStatusesResult,
+  McpSessionReloadOutcome,
   McpProjectServersConfig,
   McpProviderStatusResult,
   McpServerStatusEntry,
@@ -13,6 +15,8 @@ import { McpServerRow } from "./McpServerRow";
 
 export function McpServerList({
   selectedScope,
+  observation,
+  outcomes,
   orderedServers,
   beginCreate,
   isSavingConfig,
@@ -30,6 +34,8 @@ export function McpServerList({
   removeServer,
 }: {
   readonly selectedScope: McpConfigScope;
+  readonly observation?: McpServerStatusesResult | undefined;
+  readonly outcomes?: ReadonlyArray<McpSessionReloadOutcome> | undefined;
   readonly orderedServers: ReadonlyArray<readonly [string, McpProjectServersConfig[string]]>;
   readonly beginCreate: () => void;
   readonly isSavingConfig: boolean;
@@ -66,7 +72,9 @@ export function McpServerList({
         <div className="space-y-3">
           {orderedServers.map(([name, server]) => (
             <McpServerRow
-              key={name}
+              key={`${selectedInstanceId}:${projectId}:${name}`}
+              observation={observation}
+              outcomes={outcomes}
               selectedProvider={selectedProvider}
               instanceId={selectedInstanceId}
               projectId={projectId}

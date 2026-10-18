@@ -3470,12 +3470,17 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     },
   >(
     body: T,
-  ): Promise<T> => {
+  ): Promise<
+    T & {
+      provider: import("@t3tools/contracts").ProviderKind;
+      instanceId: import("@t3tools/contracts").ProviderInstanceId;
+    }
+  > => {
     if (body.binaryPath !== undefined || body.homePath !== undefined)
       throw new Error(
         "Client-supplied provider executable and home paths are not accepted. Select a provider instance.",
       );
-    const { ProviderInstanceId } = await import("@t3tools/contracts");
+    const { ProviderInstanceId, isKnownProviderKind } = await import("@t3tools/contracts");
     const configured = deriveProviderInstanceConfigMap(
       await Effect.runPromise(serverSettings.getSettings),
     );
@@ -3494,8 +3499,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     const account = await accountService.resolve(ProviderInstanceId.make(selected));
     if (body.provider && body.provider !== account.instance.driver)
       throw new Error("Provider instance does not match the requested provider.");
+    const provider = account.instance.driver;
+    if (!isKnownProviderKind(provider))
+      throw new Error("This provider does not support MCP account operations.");
     return {
       ...body,
+      provider,
       instanceId: ProviderInstanceId.make(selected),
       ...(account.config.binaryPath ? { binaryPath: account.config.binaryPath } : {}),
       ...(account.config.homePath ? { homePath: account.config.homePath } : {}),
@@ -6691,6 +6700,75 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
               }),
           ),
         );
+      }
+
+      case WS_METHODS.mcpInspectServer: {
+        const requestBody = stripRequestTag(request.body);
+        const body = yield* profileCall(() => resolveMcpAccount(requestBody));
+        return yield* mcpRuntimeService
+          .inspectServer(body)
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+      }
+
+      case WS_METHODS.mcpReconnectServer: {
+        const requestBody = stripRequestTag(request.body);
+        const body = yield* profileCall(() => resolveMcpAccount(requestBody));
+        const targetResult =
+          body.provider === "codex" && providerService.getMcpReconnectTargets
+            ? yield* providerService
+                .getMcpReconnectTargets(body)
+                .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })))
+            : { threadIds: [], failures: [] };
+        const targets = targetResult.threadIds;
+        const result = yield* mcpRuntimeService
+          .reconnectServer(body)
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+        if (body.provider === "claudeAgent") return result;
+        if (targets.length === 0)
+          return yield* mcpRuntimeService
+            .sanitizeReconnectResult(body, {
+              ...result,
+              failures: [...result.failures, ...targetResult.failures],
+            })
+            .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+        const { providerCommandReactor } = yield* awaitOrchestrationRuntimeForRoute;
+        const applied = yield* providerCommandReactor
+          .applyMcpConfigToLiveSessions({
+            scope: "project",
+            projectId: body.projectId,
+            instanceId: body.instanceId,
+            threadIds: targets,
+            retryUnchanged: true,
+          })
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+        yield* codexMcpEventBus.publishStatusUpdated({
+          scope: "project",
+          projectId: body.projectId,
+          ...(body.instanceId ? { instanceId: body.instanceId } : {}),
+          reason: "reloaded",
+        });
+        const sessions = applied.sessions ?? [];
+        return yield* mcpRuntimeService
+          .sanitizeReconnectResult(body, {
+            ...result,
+            sessionsMatched: targets.length,
+            sessionsReconnected: sessions.filter((session) => session.disposition === "applied")
+              .length,
+            sessions,
+            failures: [
+              ...result.failures,
+              ...targetResult.failures,
+              ...sessions
+                .filter((session) => session.disposition !== "applied")
+                .map((session) => ({
+                  threadId: session.threadId,
+                  message:
+                    session.result.errors.map((error) => error.message).join("; ") ||
+                    session.disposition,
+                })),
+            ],
+          })
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
       }
 
       case WS_METHODS.mcpStartLogin: {

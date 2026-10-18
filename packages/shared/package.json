@@ -332,6 +332,10 @@
       "types": "./src/workflowSummary.ts",
       "import": "./src/workflowSummary.ts"
     },
+    "./mcpDiagnostics": {
+      "types": "./src/mcpDiagnostics.ts",
+      "import": "./src/mcpDiagnostics.ts"
+    },
     "./agentAutomationSupport": {
       "types": "./src/agentAutomationSupport.ts",
       "import": "./src/agentAutomationSupport.ts"

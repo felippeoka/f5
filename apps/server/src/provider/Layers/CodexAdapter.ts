@@ -1,3 +1,5 @@
+import { observeCodexMcpServers } from "../codexMcpObservation.ts";
+import { mcpProviderReads, mcpContextKey } from "../../mcp/McpReadCoordinator.ts";
 import {
   assertMcpRuntimeConfig,
   mcpConfigErrorMessage,
@@ -62,9 +64,11 @@ import {
   readCodexMcpOAuthCallbackConfig,
   translateMcpForCodex,
 } from "@t3tools/shared/mcpTranslation";
-import { codexServerNamesMatch } from "../../codex/codexMcpServerStatus.ts";
 import {
-  codexObservedMcpStatus,
+  codexServerNamesMatch,
+  decodeCodexMcpServerStatus,
+} from "../../codex/codexMcpServerStatus.ts";
+import {
   restartRequiredMcpReload,
   stableMcpConfigKey,
   summarizeMcpReload,
@@ -274,11 +278,12 @@ function codexThreadTokenUsageSnapshot(payload: Record<string, unknown> | undefi
 
 function asMcpStartupStatus(
   value: unknown,
-): "starting" | "ready" | "failed" | "cancelled" | undefined {
+): "starting" | "ready" | "failed" | "cancelled" | "needs-auth" | undefined {
   switch (value) {
     case "starting":
     case "ready":
     case "failed":
+    case "needs-auth":
     case "cancelled":
       return value;
     default:
@@ -2167,6 +2172,16 @@ function mapToRuntimeEvents(
           status: {
             name,
             status,
+            ...(typeof payload?.sessionGeneration === "number"
+              ? { sessionGeneration: payload.sessionGeneration }
+              : {}),
+            ...(asString(payload?.providerInstanceId)
+              ? {
+                  providerInstanceId: ProviderInstanceId.makeUnsafe(
+                    asString(payload?.providerInstanceId)!,
+                  ),
+                }
+              : {}),
             ...(asString(payload?.error) ? { error: asString(payload?.error) } : {}),
           },
         },
@@ -2607,6 +2622,7 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
             })
           : {};
         const managerInput: CodexAppServerStartSessionInput = {
+          ...(input.mcpEventIdentity ? { mcpEventIdentity: input.mcpEventIdentity } : {}),
           threadId: input.threadId,
           provider: "codex",
           ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
@@ -2924,6 +2940,43 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
     const getSessionDiscovery: NonNullable<CodexAdapterShape["getSessionDiscovery"]> = (threadId) =>
       Effect.sync(() => manager.getSessionDiscovery?.(threadId));
 
+    const builtInMcpServerNames = (threadId: ThreadId) =>
+      new Set(
+        [
+          previewMcpSessions.get(threadId)?.serverName,
+          computerMcpSessions.get(threadId)?.serverName,
+        ].filter((name): name is string => Boolean(name)),
+      );
+
+    const getMcpServerStatuses: NonNullable<CodexAdapterShape["getMcpServerStatuses"]> = (
+      threadId,
+    ) =>
+      Effect.tryPromise({
+        try: () =>
+          mcpProviderReads.read(
+            JSON.stringify([
+              "codex",
+              mcpContextKey(manager.getMcpObservationContext(threadId)),
+              threadId,
+            ]),
+            async (signal, deadline) => {
+              const pages = await manager.getMcpServerStatuses(threadId, { signal, deadline });
+              const launched = launchedMcpConfigKeys.get(threadId);
+              const owned = new Set<string>(
+                launched ? Object.keys(JSON.parse(launched) as object) : [],
+              );
+              const builtIns = builtInMcpServerNames(threadId);
+              return {
+                servers: observeCodexMcpServers(pages.entries, owned, builtIns),
+                complete: pages.complete,
+                ...(pages.anomaly ? { omissions: [pages.anomaly] } : {}),
+                capabilities: { tools: true, inputSchemas: true, resources: true },
+              };
+            },
+          ),
+        catch: (cause) => toRequestError(threadId, "mcpServerStatus/list", cause),
+      });
+
     const reloadMcpConfig: CodexAdapterShape["reloadMcpConfig"] = ({ threadId, mcpServers }) =>
       Effect.gen(function* () {
         yield* Effect.try({
@@ -2953,29 +3006,17 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
         });
         return summarizeMcpReload({
           desired: Object.keys(filterEnabledMcpServers(mcpServers)),
-          observed: statuses?.flatMap((status) => {
-            const name = typeof status.name === "string" ? status.name : undefined;
-            if (!name) return [];
-            const text = (value: unknown) => (typeof value === "string" ? value : undefined);
-            const error = text(status.error);
-            return [
-              {
-                name,
-                status: codexObservedMcpStatus({
-                  ...(text(status.startupStatus)
-                    ? { startupStatus: text(status.startupStatus)! }
-                    : {}),
-                  ...(text(status.authStatus) ? { authStatus: text(status.authStatus)! } : {}),
-                  ...(error ? { error } : {}),
-                  hasTools:
-                    status.tools !== null &&
-                    typeof status.tools === "object" &&
-                    Object.keys(status.tools).length > 0,
-                }),
-                ...(error ? { error } : {}),
-              },
-            ];
-          }),
+          observed:
+            statuses === undefined
+              ? undefined
+              : observeCodexMcpServers(
+                  statuses.flatMap((status) => {
+                    const decoded = decodeCodexMcpServerStatus(status);
+                    return decoded ? [decoded] : [];
+                  }),
+                  new Set(Object.keys(filterEnabledMcpServers(mcpServers))),
+                  builtInMcpServerNames(threadId),
+                ),
           sameName: codexServerNamesMatch,
         });
       });
@@ -3143,6 +3184,11 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
       hasSession,
       getSessionDiscovery,
       reloadMcpConfig,
+      getMcpServerStatuses,
+      getOwnedMcpServerNames: (threadId) =>
+        Effect.sync(() =>
+          Object.keys(JSON.parse(launchedMcpConfigKeys.get(threadId) ?? "{}") as object),
+        ),
       stopAll,
       streamEvents: Stream.fromQueue(runtimeEventQueue),
     } satisfies CodexAdapterShape;

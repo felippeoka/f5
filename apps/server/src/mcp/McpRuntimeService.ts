@@ -1,3 +1,11 @@
+import { projectMcpStatuses, boundMcpObservation, capMcpResponse } from "./mcpInspection.ts";
+import { mcpProviderReads, mcpContextKey } from "./McpReadCoordinator.ts";
+import { observeCodexMcpServers } from "../provider/codexMcpObservation.ts";
+import type { McpAdapterObservation } from "../provider/mcpObservation.ts";
+import {
+  createMcpDiagnosticsSanitizer,
+  sanitizeMcpReconnectResult,
+} from "@t3tools/shared/mcpDiagnostics";
 import { makeMcpAccountExecutionResolver } from "./accountExecution.ts";
 import { mcpServerNameKey } from "@t3tools/shared/mcpValidation";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome";
@@ -8,11 +16,14 @@ import { instanceLock, ProfileBusyError } from "../profiles/InstanceLock";
 import * as NodePath from "node:path";
 import {
   type McpGetLoginStatusRequest,
+  type McpInspectServerRequest,
+  type McpInspectServerResult,
+  type McpReconnectServerRequest,
+  type McpReconnectServerResult,
   type McpGetProviderStatusRequest,
   type McpGetServerStatusesRequest,
   type McpLoginStatusResult,
   type McpProviderStatusResult,
-  type McpServerStatusEntry,
   type McpServerStatusesResult,
   type McpStartLoginRequest,
   type McpStatusUpdatedReason,
@@ -22,24 +33,15 @@ import {
 import { Effect, FiberSet, FileSystem, Layer, Option, Path, Schema, ServiceMap } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
-import { type CodexControlMcpServerStatus } from "../codex/CodexControlClient.ts";
 import { CodexControlClientRegistry } from "../codex/CodexControlClientRegistry.ts";
 import { CodexMcpEventBus } from "../codex/CodexMcpEventBus.ts";
 import { CodexMcpSyncService } from "../codex/CodexMcpSyncService.ts";
 import { CodexOAuthManager } from "../codex/CodexOAuthManager.ts";
-import {
-  findCodexServerStatusByName,
-  listAllCodexServerStatuses,
-} from "../codex/codexMcpServerStatus.ts";
+import { readCodexServerStatusPages } from "../codex/codexMcpServerStatus.ts";
 import { ProjectMcpConfigService } from "./ProjectMcpConfigService.ts";
 import { combineStatusMessage } from "./combineStatusMessage.ts";
 import { reloadCodexMcpConfigAfterLogin } from "./reloadCodexMcpConfigAfterLogin.ts";
-import {
-  indexMcpRuntimeServerDiagnostics,
-  type McpRuntimeServerDiagnostic,
-  McpRuntimeDiagnostics,
-  normalizeMcpRuntimeDiagnosticName,
-} from "./McpRuntimeDiagnostics.ts";
+import { McpRuntimeDiagnostics } from "./McpRuntimeDiagnostics.ts";
 import {
   checkClaudeProviderPreflight,
   checkCodexProviderPreflight,
@@ -49,7 +51,6 @@ import { toCodexProviderStartOptions } from "../provider/codexProviderOptions.ts
 import { buildCodexCliEnvOverrides, runCodexCliCommand } from "../provider/providerCli.ts";
 import { ProviderService } from "../provider/Services/ProviderService.ts";
 import {
-  CODEX_SSE_TRANSPORT_HINT,
   readCodexMcpOAuthCallbackConfig,
   translateMcpForCodex,
 } from "@t3tools/shared/mcpTranslation";
@@ -121,227 +122,6 @@ function readIdleLoginStatus(
     ...(input.instanceId ? { instanceId: input.instanceId } : {}),
     ...(input.serverName ? { serverName: input.serverName } : {}),
     status: "idle",
-  };
-}
-
-function mapCodexServerStatus(
-  ...args: Parameters<typeof readCodexServerStatus>
-): McpServerStatusEntry {
-  return withCodexSseTransportHint(args[1], readCodexServerStatus(...args));
-}
-
-function withCodexSseTransportHint(
-  server: McpServerDefinition,
-  status: McpServerStatusEntry,
-): McpServerStatusEntry {
-  return server.type === "sse" && ["failed", "unknown", "login-required"].includes(status.state)
-    ? { ...status, message: combineStatusMessage(status.message, CODEX_SSE_TRANSPORT_HINT) }
-    : status;
-}
-
-function readCodexServerStatus(
-  name: string,
-  server: McpServerDefinition,
-  controlStatus: CodexControlMcpServerStatus | undefined,
-  providerStatus: McpProviderStatusResult,
-  runtimeDiagnostic: McpRuntimeServerDiagnostic | undefined,
-): McpServerStatusEntry {
-  if (server.enabled === false) {
-    return {
-      name,
-      state: "disabled",
-      authStatus: "unknown",
-      toolCount: 0,
-      resourceCount: 0,
-      resourceTemplateCount: 0,
-      message: "Disabled in the shared MCP config.",
-    };
-  }
-
-  if (providerStatus.support !== "supported") {
-    return {
-      name,
-      state: "unknown",
-      authStatus: providerStatus.authStatus,
-      toolCount: 0,
-      resourceCount: 0,
-      resourceTemplateCount: 0,
-      ...(providerStatus.supportMessage ? { message: providerStatus.supportMessage } : {}),
-    };
-  }
-
-  if (!controlStatus) {
-    return {
-      name,
-      state: "unknown",
-      authStatus: "unknown",
-      toolCount: 0,
-      resourceCount: 0,
-      resourceTemplateCount: 0,
-      message: "Codex did not report a live status for this MCP server.",
-    };
-  }
-
-  const toolCount = Object.keys(controlStatus.tools ?? {}).length;
-  const resourceCount = controlStatus.resources?.length ?? 0;
-  const resourceTemplateCount = controlStatus.resourceTemplates?.length ?? 0;
-  const controlAuthStatus =
-    controlStatus.authStatus === "notLoggedIn"
-      ? "unauthenticated"
-      : controlStatus.authStatus
-        ? "authenticated"
-        : "unknown";
-  if (controlStatus.startupStatus === "failed" || controlStatus.startupStatus === "cancelled") {
-    return {
-      name,
-      state: "failed",
-      authStatus: controlAuthStatus,
-      toolCount,
-      resourceCount,
-      resourceTemplateCount,
-      message:
-        controlStatus.error ??
-        (controlStatus.startupStatus === "cancelled"
-          ? "Codex cancelled startup for this MCP server."
-          : "Codex reported that this MCP server failed to start."),
-    };
-  }
-  if (controlStatus.startupStatus === "starting") {
-    return {
-      name,
-      state: "starting",
-      authStatus: controlAuthStatus,
-      toolCount,
-      resourceCount,
-      resourceTemplateCount,
-    };
-  }
-  if (controlStatus.authStatus === "notLoggedIn") {
-    return {
-      name,
-      state: "login-required",
-      authStatus: "unauthenticated",
-      toolCount,
-      resourceCount,
-      resourceTemplateCount,
-      message: "Codex can see this server, but it is not logged in yet.",
-    };
-  }
-
-  if (
-    controlStatus.startupStatus !== "ready" &&
-    (runtimeDiagnostic?.status === "failed" || runtimeDiagnostic?.status === "cancelled")
-  ) {
-    return {
-      name,
-      state: "failed",
-      authStatus: controlAuthStatus,
-      toolCount,
-      resourceCount,
-      resourceTemplateCount,
-      message:
-        runtimeDiagnostic.message ??
-        (runtimeDiagnostic.status === "cancelled"
-          ? "Codex cancelled startup for this MCP server."
-          : "Codex reported that this MCP server failed to start."),
-    };
-  }
-
-  if (
-    controlStatus.startupStatus !== "ready" &&
-    runtimeDiagnostic?.status === "starting" &&
-    toolCount === 0 &&
-    resourceCount === 0 &&
-    resourceTemplateCount === 0
-  ) {
-    return {
-      name,
-      state: "starting",
-      authStatus: controlAuthStatus,
-      toolCount,
-      resourceCount,
-      resourceTemplateCount,
-    };
-  }
-
-  if (
-    controlStatus.startupStatus !== "ready" &&
-    toolCount === 0 &&
-    resourceCount === 0 &&
-    resourceTemplateCount === 0
-  ) {
-    return {
-      name,
-      state: "failed",
-      authStatus: controlAuthStatus,
-      toolCount,
-      resourceCount,
-      resourceTemplateCount,
-      message:
-        runtimeDiagnostic?.message ??
-        "Codex authenticated this MCP server, but did not report any tools or resources. It may have failed during startup; check the work log for the exact error.",
-    };
-  }
-
-  return {
-    name,
-    state: "ready",
-    authStatus: "authenticated",
-    toolCount,
-    resourceCount,
-    resourceTemplateCount,
-  };
-}
-
-function mapClaudeServerStatus(
-  name: string,
-  server: McpServerDefinition,
-  providerStatus: McpProviderStatusResult,
-): McpServerStatusEntry {
-  if (server.enabled === false) {
-    return {
-      name,
-      state: "disabled",
-      authStatus: "unknown",
-      toolCount: 0,
-      resourceCount: 0,
-      resourceTemplateCount: 0,
-      message: "Disabled in the shared MCP config.",
-    };
-  }
-
-  if (!providerStatus.available) {
-    return {
-      name,
-      state: "unknown",
-      authStatus: providerStatus.authStatus,
-      toolCount: 0,
-      resourceCount: 0,
-      resourceTemplateCount: 0,
-      ...(providerStatus.supportMessage ? { message: providerStatus.supportMessage } : {}),
-    };
-  }
-
-  if (providerStatus.authStatus === "unauthenticated") {
-    return {
-      name,
-      state: "login-required",
-      authStatus: "unauthenticated",
-      toolCount: 0,
-      resourceCount: 0,
-      resourceTemplateCount: 0,
-      message:
-        "Claude is not authenticated yet. Run `claude auth login` in a terminal, then refresh this page.",
-    };
-  }
-
-  return {
-    name,
-    state: "unknown",
-    authStatus: providerStatus.authStatus,
-    toolCount: 0,
-    resourceCount: 0,
-    resourceTemplateCount: 0,
   };
 }
 
@@ -429,6 +209,18 @@ export interface McpRuntimeServiceShape {
   readonly getServerStatuses: (
     input: McpGetServerStatusesRequest,
   ) => Effect.Effect<McpServerStatusesResult, McpRuntimeServiceError>;
+  readonly inspectServer: (
+    input: McpInspectServerRequest & { readonly provider: McpGetProviderStatusRequest["provider"] },
+  ) => Effect.Effect<McpInspectServerResult, McpRuntimeServiceError>;
+  readonly reconnectServer: (
+    input: McpReconnectServerRequest & {
+      readonly provider: McpGetProviderStatusRequest["provider"];
+    },
+  ) => Effect.Effect<McpReconnectServerResult, McpRuntimeServiceError>;
+  readonly sanitizeReconnectResult: (
+    input: McpGetServerStatusesRequest,
+    result: McpReconnectServerResult,
+  ) => Effect.Effect<McpReconnectServerResult, McpRuntimeServiceError>;
   readonly startLogin: (
     input: McpStartLoginRequest,
   ) => Effect.Effect<McpLoginStatusResult, McpRuntimeServiceError>;
@@ -660,126 +452,247 @@ const makeMcpRuntimeService = Effect.gen(function* () {
       } satisfies McpProviderStatusResult;
     });
 
-  const getServerStatuses: McpRuntimeServiceShape["getServerStatuses"] = (input) =>
+  const runtimeError = (cause: unknown) =>
+    new McpRuntimeServiceError({
+      message: cause instanceof Error ? cause.message : "MCP observation failed.",
+    });
+  const readRedactionContext = (input: McpGetServerStatusesRequest) =>
     Effect.gen(function* () {
-      const providerStatus = yield* getProviderStatus(input);
-      const effectiveConfig = yield* projectMcpConfigService
+      const effective = yield* projectMcpConfigService
         .readEffectiveStoredConfig(input.projectId)
-        .pipe(
-          Effect.mapError(
-            (error) =>
-              new McpRuntimeServiceError({
-                message: error.message,
-              }),
-          ),
+        .pipe(Effect.mapError(runtimeError));
+      const identity = yield* resolveExecution(input).pipe(Effect.option);
+      const environment = Option.isSome(identity) ? identity.value.environment : {};
+      const additionalValues = Object.values(effective.servers).flatMap((server) =>
+        server.bearerTokenEnvVar && environment[server.bearerTokenEnvVar]
+          ? [environment[server.bearerTokenEnvVar]!]
+          : [],
+      );
+      return { servers: effective.servers, additionalValues };
+    });
+  const sanitizeReconnectResult: McpRuntimeServiceShape["sanitizeReconnectResult"] = (
+    input,
+    result,
+  ) =>
+    readRedactionContext(input).pipe(
+      Effect.map(({ servers, additionalValues }) =>
+        sanitizeMcpReconnectResult(result, servers, additionalValues),
+      ),
+    );
+
+  const observe = (input: McpGetServerStatusesRequest) =>
+    Effect.gen(function* () {
+      const identity = yield* resolveExecution(input).pipe(Effect.mapError(runtimeError));
+      const effective = yield* projectMcpConfigService
+        .readEffectiveStoredConfig(input.projectId)
+        .pipe(Effect.mapError(runtimeError));
+      const additionalValues = Object.values(effective.servers).flatMap((server) =>
+        server.bearerTokenEnvVar && identity.environment[server.bearerTokenEnvVar]
+          ? [identity.environment[server.bearerTokenEnvVar]!]
+          : [],
+      );
+      // This branch must precede provider preflight: a conversation read never creates a control client.
+      const live = providerService.readMcpSessionStatuses
+        ? yield* providerService
+            .readMcpSessionStatuses({
+              ...input,
+              instanceId: identity.instanceId,
+              desiredVersion: effective.effectiveVersion,
+            })
+            .pipe(Effect.mapError(runtimeError))
+        : { sessions: [], selected: undefined, observation: undefined };
+      let observation: McpAdapterObservation | undefined = live.observation;
+      let support: McpServerStatusesResult["support"] = "supported";
+      let supportMessage: string | undefined;
+      if (!live.selected && input.threadId)
+        return yield* runtimeError(new Error("The requested conversation is unavailable."));
+      if (!live.selected && input.provider === "codex") {
+        const providerStatus = yield* getProviderStatus(input);
+        support = providerStatus.support;
+        supportMessage = providerStatus.supportMessage;
+        if (support === "supported") {
+          const callback = yield* readCodexMcpOAuthCallbackConfigOrError(effective.servers);
+          const client = yield* codexControlClientRegistry
+            .getAdminClient({
+              projectId: input.projectId,
+              instanceId: identity.instanceId,
+              mcpEffectiveConfigVersion: effective.effectiveVersion,
+              mcpServers: translateMcpForCodex(effective.servers) ?? {},
+              ...(callback.port ? { mcpOAuthCallbackPort: callback.port } : {}),
+              ...(callback.url ? { mcpOAuthCallbackUrl: callback.url } : {}),
+            })
+            .pipe(Effect.mapError(runtimeError));
+          const pages = yield* Effect.tryPromise({
+            try: () =>
+              mcpProviderReads.read(
+                JSON.stringify([
+                  "configurationCheck",
+                  input.projectId,
+                  identity.instanceId,
+                  identity.fingerprint,
+                  effective.effectiveVersion,
+                  mcpContextKey(client.getMcpObservationContext?.() ?? client),
+                ]),
+                (signal, deadline) => readCodexServerStatusPages(client, { signal, deadline }),
+              ),
+            catch: runtimeError,
+          });
+          observation = {
+            servers: observeCodexMcpServers(
+              pages.entries,
+              new Set(
+                Object.keys(effective.servers).filter(
+                  (name) => effective.servers[name]?.enabled !== false,
+                ),
+              ),
+            ),
+            complete: pages.complete,
+            capabilities: { tools: true, inputSchemas: true, resources: true },
+            ...(pages.anomaly ? { omissions: [pages.anomaly] } : {}),
+          };
+        }
+      }
+      const currentIdentity = yield* resolveExecution
+        .readIdentity(input)
+        .pipe(Effect.mapError(runtimeError));
+      if (identity.identity !== currentIdentity.identity)
+        return yield* runtimeError(
+          new Error("MCP account or project changed while reading status. Refresh."),
         );
+      const latest = yield* projectMcpConfigService
+        .readEffectiveStoredConfig(input.projectId)
+        .pipe(Effect.mapError(runtimeError));
+      if (latest.effectiveVersion !== effective.effectiveVersion)
+        return yield* runtimeError(
+          new Error("The MCP observation was superseded by a newer saved version. Refresh."),
+        );
+      if (observation)
+        observation = boundMcpObservation(observation, effective.servers, additionalValues);
+      const result: McpServerStatusesResult = {
+        provider: input.provider,
+        projectId: input.projectId,
+        instanceId: identity.instanceId,
+        fingerprint: identity.fingerprint,
+        source: live.selected ? "conversation" : "configurationCheck",
+        observedAt: nowIso(),
+        desiredVersion: effective.effectiveVersion,
+        configVersion: effective.effectiveVersion,
+        ...(live.selected
+          ? {
+              threadId: live.selected.threadId,
+              generation: live.selected.generation,
+              ...(live.selected.appliedVersion
+                ? { appliedVersion: live.selected.appliedVersion }
+                : {}),
+            }
+          : {}),
+        complete: observation?.complete ?? (input.provider === "claudeAgent" && !live.selected),
+        sessions: live.sessions,
+        ...(observation?.omissions ? { omissions: observation.omissions } : {}),
+        support,
+        ...(supportMessage ? { supportMessage } : {}),
+        statuses: projectMcpStatuses(effective.servers, observation, input.provider),
+      };
+      return { result, observation, effective, additionalValues };
+    });
 
-      const orderedServers = Object.entries(effectiveConfig.servers).toSorted(([left], [right]) =>
-        left.localeCompare(right),
-      );
+  const getServerStatuses: McpRuntimeServiceShape["getServerStatuses"] = (input) =>
+    observe(input).pipe(Effect.map(({ result }) => capMcpResponse(result)));
 
+  const inspectServer: McpRuntimeServiceShape["inspectServer"] = (input) =>
+    Effect.gen(function* () {
+      const { result, observation, effective, additionalValues } = yield* observe(input);
+      const ownership =
+        input.ownership ??
+        (Object.keys(effective.servers).some(
+          (name) => mcpServerNameKey(name) === mcpServerNameKey(input.serverName),
+        )
+          ? "managed"
+          : undefined);
+      const matches =
+        observation?.servers.filter(
+          (server) =>
+            mcpServerNameKey(server.name) === mcpServerNameKey(input.serverName) &&
+            (!ownership || server.ownership === ownership),
+        ) ?? [];
+      const server = matches.length === 1 ? matches[0] : undefined;
+      const sanitizer = createMcpDiagnosticsSanitizer(effective.servers, additionalValues);
+      const historical =
+        result.threadId && result.instanceId && result.generation !== undefined
+          ? yield* mcpRuntimeDiagnostics.listLatestServerDiagnostics({
+              projectId: input.projectId,
+              provider: input.provider,
+              instanceId: result.instanceId,
+              threadId: result.threadId,
+              sessionGeneration: result.generation,
+            })
+          : [];
+      return capMcpResponse({
+        ...result,
+        serverName: input.serverName,
+        capabilities: observation?.capabilities ?? {
+          tools: false,
+          inputSchemas: false,
+          resources: false,
+        },
+        tools: server?.tools ?? [],
+        resources: server?.resources ?? [],
+        resourceTemplates: server?.resourceTemplates ?? [],
+        diagnostics: historical.slice(0, 20).map((diagnostic) => ({
+          ...diagnostic,
+          ...(diagnostic.message
+            ? { message: sanitizer.text(diagnostic.message).slice(0, 2000) }
+            : {}),
+        })),
+      });
+    });
+
+  // Codex Apply is performed by the reactor at the transport boundary, after this admin reload.
+  const reconnectServer: McpRuntimeServiceShape["reconnectServer"] = (input) =>
+    Effect.gen(function* () {
+      const identity = yield* resolveExecution
+        .readIdentity(input)
+        .pipe(Effect.mapError(runtimeError));
+      const effective = yield* projectMcpConfigService
+        .readEffectiveStoredConfig(input.projectId)
+        .pipe(Effect.mapError(runtimeError));
       if (input.provider === "claudeAgent") {
-        return {
-          provider: input.provider,
-          projectId: input.projectId,
-          ...(input.instanceId ? { instanceId: input.instanceId } : {}),
-          support: providerStatus.support,
-          ...(providerStatus.supportMessage
-            ? { supportMessage: providerStatus.supportMessage }
-            : {}),
-          configVersion: effectiveConfig.effectiveVersion,
-          statuses: orderedServers.map(([name, server]) =>
-            mapClaudeServerStatus(name, server, providerStatus),
-          ),
-        } satisfies McpServerStatusesResult;
+        if (!providerService.reconnectMcpServerForProject)
+          return yield* runtimeError(new Error("This provider does not support reconnect."));
+        const result = yield* providerService
+          .reconnectMcpServerForProject({ ...input, instanceId: identity.instanceId })
+          .pipe(Effect.mapError(runtimeError));
+        return result;
       }
 
-      if (providerStatus.support !== "supported") {
-        return {
-          provider: input.provider,
-          projectId: input.projectId,
-          ...(input.instanceId ? { instanceId: input.instanceId } : {}),
-          support: providerStatus.support,
-          ...(providerStatus.supportMessage
-            ? { supportMessage: providerStatus.supportMessage }
-            : {}),
-          configVersion: effectiveConfig.effectiveVersion,
-          statuses: orderedServers.map(([name, server]) =>
-            mapCodexServerStatus(name, server, undefined, providerStatus, undefined),
-          ),
-        } satisfies McpServerStatusesResult;
-      }
-
-      const providerOptions = readProviderOptions(input);
-      const translatedServers = translateMcpForCodex(effectiveConfig.servers) ?? {};
-      const oauthCallbackConfig = yield* readCodexMcpOAuthCallbackConfigOrError(
-        effectiveConfig.servers,
-      );
+      const callback = yield* readCodexMcpOAuthCallbackConfigOrError(effective.servers);
       const client = yield* codexControlClientRegistry
         .getAdminClient({
           projectId: input.projectId,
-          ...(input.instanceId ? { instanceId: input.instanceId } : {}),
-          ...(providerOptions ? { providerOptions } : {}),
-          mcpEffectiveConfigVersion: effectiveConfig.effectiveVersion,
-          mcpServers: translatedServers,
-          ...(oauthCallbackConfig.port ? { mcpOAuthCallbackPort: oauthCallbackConfig.port } : {}),
-          ...(oauthCallbackConfig.url ? { mcpOAuthCallbackUrl: oauthCallbackConfig.url } : {}),
+          instanceId: identity.instanceId,
+          mcpEffectiveConfigVersion: effective.effectiveVersion,
+          mcpServers: translateMcpForCodex(effective.servers) ?? {},
+          ...(callback.port ? { mcpOAuthCallbackPort: callback.port } : {}),
+          ...(callback.url ? { mcpOAuthCallbackUrl: callback.url } : {}),
         })
-        .pipe(
-          Effect.mapError(
-            (error) =>
-              new McpRuntimeServiceError({
-                message: error.message,
-              }),
-          ),
-        );
-
-      const controlStatuses = yield* Effect.tryPromise({
-        try: () => listAllCodexServerStatuses(client),
-        catch: (cause) =>
-          new McpRuntimeServiceError({
-            message:
-              cause instanceof Error ? cause.message : "Failed to load Codex MCP server statuses.",
-          }),
-      });
-      const runtimeDiagnostics = yield* mcpRuntimeDiagnostics.listLatestServerDiagnostics({
-        projectId: input.projectId,
-        ...(input.instanceId ? { instanceId: input.instanceId } : {}),
-        provider: "codex",
-        configVersion: effectiveConfig.effectiveVersion,
-      });
-      const runtimeDiagnosticsByName = indexMcpRuntimeServerDiagnostics(runtimeDiagnostics);
-
+        .pipe(Effect.mapError(runtimeError));
+      const reloaded = yield* Effect.tryPromise({
+        try: () => client.reloadMcpServer(),
+        catch: runtimeError,
+      }).pipe(Effect.result);
       return {
-        provider: input.provider,
-        projectId: input.projectId,
-        ...(input.instanceId ? { instanceId: input.instanceId } : {}),
-        support: providerStatus.support,
-        ...(providerStatus.supportMessage ? { supportMessage: providerStatus.supportMessage } : {}),
-        configVersion: effectiveConfig.effectiveVersion,
-        statuses: orderedServers.map(([name, server]) => {
-          const matches = controlStatuses.filter(
-            (status) => mcpServerNameKey(status.name) === mcpServerNameKey(name),
-          );
-          if (matches.length > 1)
-            return withCodexSseTransportHint(server, {
-              name,
-              state: "unknown" as const,
-              authStatus: "unknown" as const,
-              toolCount: 0,
-              resourceCount: 0,
-              resourceTemplateCount: 0,
-              message: `Provider reports conflicting MCP names: ${matches.map((status) => status.name).join(", ")}. No observation can be assigned to this configured server.`,
-            });
-          return mapCodexServerStatus(
-            name,
-            server,
-            findCodexServerStatusByName(controlStatuses, name),
-            providerStatus,
-            runtimeDiagnosticsByName.get(normalizeMcpRuntimeDiagnosticName(name)),
-          );
-        }),
-      } satisfies McpServerStatusesResult;
+        settingsConnectionReloaded: reloaded._tag === "Success",
+        sessionsMatched: 0,
+        sessionsReconnected: 0,
+        failures:
+          reloaded._tag === "Failure"
+            ? [
+                {
+                  message: reloaded.failure.message,
+                },
+              ]
+            : [],
+      };
     });
 
   const startCliLogin = (
@@ -1112,9 +1025,54 @@ const makeMcpRuntimeService = Effect.gen(function* () {
       return readIdleLoginStatus(input, "cli");
     });
 
+  const safeObservationRequest = <A>(
+    input: McpGetServerStatusesRequest,
+    request: Effect.Effect<A, McpRuntimeServiceError>,
+    bounded = true,
+  ) => {
+    const timed = bounded
+      ? request.pipe(
+          Effect.timeoutOption("10 seconds"),
+          Effect.flatMap((result) =>
+            Option.isSome(result)
+              ? Effect.succeed(result.value)
+              : Effect.fail(
+                  new McpRuntimeServiceError({ message: "MCP read timed out. Try Refresh." }),
+                ),
+          ),
+        )
+      : request;
+    return timed.pipe(
+      Effect.catch((error) =>
+        readRedactionContext(input).pipe(
+          Effect.orElseSucceed(() => ({ servers: {}, additionalValues: [] as string[] })),
+          Effect.flatMap(({ servers, additionalValues }) =>
+            Effect.fail(
+              new McpRuntimeServiceError({
+                message: createMcpDiagnosticsSanitizer(servers, additionalValues).text(
+                  error.message,
+                ),
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+  };
+
   return {
     getProviderStatus,
-    getServerStatuses,
+    getServerStatuses: (input) => safeObservationRequest(input, getServerStatuses(input)),
+    inspectServer: (input) => safeObservationRequest(input, inspectServer(input)),
+    reconnectServer: (input) =>
+      safeObservationRequest(
+        input,
+        reconnectServer(input).pipe(
+          Effect.flatMap((result) => sanitizeReconnectResult(input, result)),
+        ),
+        false,
+      ),
+    sanitizeReconnectResult,
     startLogin,
     getLoginStatus,
   } satisfies McpRuntimeServiceShape;

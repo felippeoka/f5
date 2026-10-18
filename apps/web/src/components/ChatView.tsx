@@ -89,7 +89,7 @@ import {
   resolveSelectableModel,
 } from "@t3tools/shared/model";
 import {
-  readMcpStatusActivityPayload,
+  latestMcpStatusActivities,
   readRuntimeConfiguredPayload,
 } from "@t3tools/shared/orchestrationActivityPayload";
 import { areProviderModelOptionsEqual } from "@t3tools/shared/providerOptions";
@@ -1799,18 +1799,7 @@ export default function ChatView({
     return null;
   }, [threadActivities]);
   const mcpRuntimeSummary = useMemo(() => {
-    const latestStatusByServer = new Map<string, ReturnType<typeof readMcpStatusActivityPayload>>();
-
-    for (const activity of threadActivities) {
-      if (activity.kind !== "mcp.status.updated") {
-        continue;
-      }
-      const payload = readMcpStatusActivityPayload(activity.payload);
-      if (!payload) {
-        continue;
-      }
-      latestStatusByServer.set(payload.name ?? "__unnamed__", payload);
-    }
+    const latestStatusByServer = latestMcpStatusActivities(threadActivities);
 
     if (latestStatusByServer.size === 0) {
       return null;

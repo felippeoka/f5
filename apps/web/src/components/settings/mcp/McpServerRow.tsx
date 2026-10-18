@@ -1,3 +1,5 @@
+import { reconnectMcpServer } from "./mcpActions";
+import { LazyMcpServerInspector as McpServerInspector } from "./LazyMcpServerInspector";
 import type {
   ProviderKind,
   ProviderInstanceId,
@@ -5,6 +7,8 @@ import type {
   McpProjectServersConfig,
   McpProviderStatusResult,
   McpServerStatusEntry,
+  McpServerStatusesResult,
+  McpSessionReloadOutcome,
 } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -19,6 +23,8 @@ import { readErrorMessage } from "./mcpSettingsHelpers";
 
 export function McpServerRow(props: {
   readonly selectedProvider: ProviderKind;
+  readonly observation?: McpServerStatusesResult | undefined;
+  readonly outcomes?: ReadonlyArray<McpSessionReloadOutcome> | undefined;
   readonly instanceId: ProviderInstanceId;
   readonly projectId: ProjectId | null;
   readonly name: string;
@@ -33,6 +39,10 @@ export function McpServerRow(props: {
   readonly onRemove: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [reconnectOutcomes, setReconnectOutcomes] =
+    useState<ReadonlyArray<McpSessionReloadOutcome>>();
   const [loginError, setLoginError] = useState<string | null>(null);
   const loginStatusQuery = useQuery(
     mcpLoginStatusQueryOptions({
@@ -58,6 +68,7 @@ export function McpServerRow(props: {
     isCodexProvider &&
     !props.isOverridden &&
     (props.serverStatus?.state === "login-required" ||
+      props.serverStatus?.state === "needs-auth" ||
       (supportsCodexOauthLogin && props.serverStatus?.state === "failed") ||
       loginStatusQuery.data?.status === "pending" ||
       loginStatusQuery.data?.status === "failed");
@@ -94,7 +105,13 @@ export function McpServerRow(props: {
           })
           .then(async (result) => {
             if (result.authorizationUrl) {
-              await ensureNativeApi().shell.openExternal(result.authorizationUrl);
+              await ensureNativeApi()
+                .shell.openExternal(result.authorizationUrl)
+                .catch(() =>
+                  setLoginError(
+                    "Could not open the browser. Sign-in is still pending; use Reopen sign-in.",
+                  ),
+                );
             }
           })
           .catch((error) => {
@@ -122,6 +139,9 @@ export function McpServerRow(props: {
           <div className="flex flex-wrap items-center gap-2">
             <p className="truncate text-sm font-medium text-foreground">{props.name.trim()}</p>
             <Badge variant="outline">{props.server.type}</Badge>
+            <Badge variant="outline">
+              Saved: {props.server.enabled === false ? "Disabled" : "Enabled"}
+            </Badge>
             <McpServerStatusBadge
               provider={props.selectedProvider}
               status={props.serverStatus}
@@ -153,6 +173,42 @@ export function McpServerRow(props: {
               loginButton
             )
           ) : null}
+          {props.projectId && !props.isOverridden ? (
+            <>
+              <Button size="xs" variant="outline" onClick={() => setInspectorOpen((open) => !open)}>
+                {inspectorOpen ? "Close inspector" : "Inspect"}
+              </Button>
+              {["failed", "needs-auth", "login-required", "unknown"].includes(
+                props.serverStatus?.state ?? "",
+              ) ? (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={reconnecting}
+                  title={
+                    isCodexProvider
+                      ? "Reloads MCP connections for every server in the affected Codex sessions."
+                      : undefined
+                  }
+                  onClick={() => {
+                    setReconnecting(true);
+                    setLoginError(null);
+                    void reconnectMcpServer(queryClient, {
+                      provider: props.selectedProvider,
+                      instanceId: props.instanceId,
+                      projectId: props.projectId!,
+                      serverName: props.name,
+                    })
+                      .then((result) => setReconnectOutcomes(result.sessions))
+                      .catch((error) => setLoginError(readErrorMessage(error, "Reconnect failed.")))
+                      .finally(() => setReconnecting(false));
+                  }}
+                >
+                  {reconnecting ? "Reconnecting…" : "Reconnect"}
+                </Button>
+              ) : null}
+            </>
+          ) : null}
           <Button size="xs" variant="outline" onClick={props.onEdit}>
             Edit
           </Button>
@@ -161,6 +217,23 @@ export function McpServerRow(props: {
           </Button>
         </div>
       </div>
+      {loginStatusQuery.data?.status === "pending" && loginStatusQuery.data.authorizationUrl ? (
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() => {
+            void ensureNativeApi()
+              .shell.openExternal(loginStatusQuery.data!.authorizationUrl!)
+              .catch((error) =>
+                setLoginError(
+                  readErrorMessage(error, "Could not open sign-in. The login is still pending."),
+                ),
+              );
+          }}
+        >
+          Reopen sign-in
+        </Button>
+      ) : null}
       {loginError ? <p className="text-xs text-destructive">{loginError}</p> : null}
       {loginStatusQuery.data?.error ? (
         <p className="text-xs text-destructive">{loginStatusQuery.data.error}</p>
@@ -172,6 +245,18 @@ export function McpServerRow(props: {
         <p className="text-xs text-destructive">
           {readErrorMessage(loginStatusQuery.error, "Failed to read MCP login status.")}
         </p>
+      ) : null}
+      {inspectorOpen && props.projectId ? (
+        <McpServerInspector
+          key={`${props.observation?.threadId}:${props.observation?.generation}`}
+          provider={props.selectedProvider}
+          instanceId={props.instanceId}
+          projectId={props.projectId}
+          serverName={props.name}
+          observation={props.observation}
+          outcomes={reconnectOutcomes ?? props.outcomes}
+          outcomeAction={reconnectOutcomes ? "reconnect" : "apply"}
+        />
       ) : null}
       {props.serverStatus?.message ? (
         <p className="text-xs text-muted-foreground">{props.serverStatus.message}</p>

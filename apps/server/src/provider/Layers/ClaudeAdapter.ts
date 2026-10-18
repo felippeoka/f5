@@ -1,3 +1,6 @@
+import type { ProviderAdapterSessionStartInput } from "../Services/ProviderAdapter.ts";
+import { classifyMcpOwnership } from "../mcpObservation.ts";
+import { mcpProviderReads, mcpContextKey } from "../../mcp/McpReadCoordinator.ts";
 import {
   assertMcpRuntimeConfig,
   mcpConfigErrorMessage,
@@ -26,7 +29,11 @@ import {
   effectiveClaudeApprovalDecision,
 } from "../claudeApprovalPresentation.ts";
 import { ElicitationRegistry, type ElicitationTerminalReceipt } from "../elicitationRegistry.ts";
-import { reconcileClaudeMcpServers, stableMcpConfigKey } from "../mcpReconcile.ts";
+import {
+  reconcileClaudeMcpServers,
+  stableMcpConfigKey,
+  claudeObservedMcpStatus,
+} from "../mcpReconcile.ts";
 import {
   CLAUDE_AUTO_UNAVAILABLE_WARNING,
   claudeAutoModeRecheck,
@@ -397,7 +404,7 @@ interface ClaudeSessionContext {
     string,
     { operationId: string; settlement?: Deferred.Deferred<unknown, ProviderAdapterRequestError> }
   >;
-  readonly startInput: ProviderSessionStartInput;
+  readonly startInput: ProviderAdapterSessionStartInput;
   readonly turnBoundaries: Array<import("../claudeResumeState.ts").ClaudeTurnBoundary>;
   latestUsage?: Record<string, unknown> | undefined;
   requestedRuntime?: Record<string, unknown>;
@@ -436,6 +443,9 @@ interface ClaudeSessionContext {
   /** Dynamic MCP servers F5 set on this query; the only ones reconcile may replace or remove. */
   ownedMcpServerNames: ReadonlySet<string>;
   mcpToolFilters: McpToolFilters;
+  mcpStatusFiber?: Fiber.Fiber<void>;
+  mcpStatusEmitted?: Map<string, string>;
+  mcpObservationEpoch?: number;
   readonly internalMcpServers: NonNullable<ClaudeQueryOptions["mcpServers"]>;
   readonly turns: Array<{
     id: TurnId;
@@ -793,8 +803,8 @@ type ClaudeResumeSettlement =
 // Bounds how long the first turn after a resume waits for the CLI to confirm
 // the saved conversation. On timeout the send is reported as before.
 const DEFAULT_CLAUDE_RESUME_CONFIRMATION_TIMEOUT_MS = 20_000;
-/** One status read per second for up to 15 s after init. */
-const AGENT_BROWSER_STATUS_POLL_ATTEMPTS = 15;
+/** One status read per second for up to 30 s after init. */
+const AGENT_BROWSER_STATUS_POLL_ATTEMPTS = 30;
 
 const CLAUDE_MISSING_SESSION_PATTERNS = [
   "no conversation found",
@@ -2234,6 +2244,7 @@ function sdkNativeItemId(message: SDKMessage): string | undefined {
 
 export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
   return Effect.gen(function* () {
+    const adapterScope = yield* Effect.scope;
     const fileSystem = yield* FileSystem.FileSystem;
     const serverConfig = yield* ServerConfig;
     const reportedCapabilitiesFor = (
@@ -2494,113 +2505,307 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
 
     /**
      * After init: verify the preview server's `sdk` provenance once, then poll
-     * Claude in Chrome's connection (1 s, up to 15 s) until nothing is pending.
+     * Claude in Chrome's connection (1 s, up to 30 s) until nothing is pending.
      * Re-emits `session.configured` only when the reported state changes.
      */
-    const watchAgentBrowserStatus = (context: ClaudeSessionContext): Effect.Effect<void> =>
+    const readMcpStatus = async (context: ClaudeSessionContext) => {
+      const query = context.query;
+      const epoch = context.mcpObservationEpoch ?? 0;
+      if (!query.mcpServerStatus) throw new Error("This Claude runtime cannot report MCP status.");
+      const result = await mcpProviderReads.read(
+        "claude:" + mcpContextKey(query),
+        async () => ({ statuses: await query.mcpServerStatus!(), epoch }),
+        5_000,
+        "claude",
+      );
+      if (
+        context.stopped ||
+        context.query !== query ||
+        result.epoch !== (context.mcpObservationEpoch ?? 0)
+      )
+        throw new Error("The MCP observation was superseded.");
+      return result.statuses;
+    };
+
+    const emitMcpStatuses = (
+      context: ClaudeSessionContext,
+      statuses: ReadonlyArray<{
+        name: string;
+        status: string;
+        error?: string;
+        source?: string;
+        scope?: string;
+        tools?: ReadonlyArray<unknown>;
+      }>,
+    ) =>
+      Effect.gen(function* () {
+        context.mcpStatusEmitted ??= new Map();
+        for (const server of statuses) {
+          if (classifyMcpOwnership(server, context.ownedMcpServerNames) !== "managed") continue;
+          const status =
+            server.status === "connected"
+              ? "ready"
+              : server.status === "pending"
+                ? "starting"
+                : server.status === "needs-auth"
+                  ? "needs-auth"
+                  : server.status === "disabled"
+                    ? "cancelled"
+                    : server.status === "failed"
+                      ? "failed"
+                      : undefined;
+          if (!status) continue;
+          const toolCount = server.tools?.length;
+          const key = JSON.stringify([status, server.error, toolCount]);
+          if (context.mcpStatusEmitted.get(server.name) === key) continue;
+          context.mcpStatusEmitted.set(server.name, key);
+          const stamp = yield* makeEventStamp(context.session.threadId);
+          yield* offerRuntimeEvent({
+            ...stamp,
+            type: "mcp.status.updated",
+            provider: PROVIDER,
+            threadId: context.session.threadId,
+            payload: {
+              status: {
+                name: server.name,
+                status,
+                ...context.startInput.mcpEventIdentity,
+                ...(server.error ? { error: server.error } : {}),
+                ...(toolCount !== undefined ? { toolCount } : {}),
+              },
+            },
+          });
+        }
+      });
+
+    const watchMcpStatus = (context: ClaudeSessionContext): Effect.Effect<void> =>
       Effect.gen(function* () {
         const state = context.agentBrowser;
         // Keep the receiver: the SDK's Query methods are class methods that need `this`.
         const query = context.query;
-        if (!state || !query.mcpServerStatus) return;
-        const readStatus = () => query.mcpServerStatus!();
+        if (!query.mcpServerStatus) return;
+        const readStatus = () => readMcpStatus(context);
         const isCurrent = () =>
-          !context.stopped && sessions.get(context.session.threadId) === context;
+          !context.stopped &&
+          sessions.get(context.session.threadId) === context &&
+          context.query === query;
         if (context.query.initializationResult) {
-          yield* Effect.tryPromise(() => context.query.initializationResult!()).pipe(Effect.ignore);
+          yield* Effect.tryPromise(() => query.initializationResult!()).pipe(
+            Effect.timeoutOption("5 seconds"),
+            Effect.ignore,
+          );
         }
         // Provenance is checked on the first successful status read, not the first attempt.
         let previewChecked = false;
-        for (let attempt = 0; attempt <= AGENT_BROWSER_STATUS_POLL_ATTEMPTS; attempt += 1) {
+        for (let attempt = 0; attempt < AGENT_BROWSER_STATUS_POLL_ATTEMPTS; attempt += 1) {
           if (!isCurrent()) return;
           const statuses = yield* Effect.tryPromise(() => readStatus()).pipe(
             Effect.orElseSucceed(() => undefined),
           );
           if (!isCurrent()) return;
           if (statuses) {
-            const before = JSON.stringify(agentBrowserConfigPayload(state));
-            if (state.computer && state.computer.verified === undefined) {
-              state.computer.verified = isVerifiedSdkServer(statuses, state.computer.serverName);
-              automationEventSanitizer.register(context.session.threadId, {
-                serverName: state.computer.serverName,
-                verified: true,
-                kind: "f5-computer",
-              });
-            }
-            if (!previewChecked && state.preview) {
-              previewChecked = true;
-              state.preview.verified = isVerifiedSdkServer(statuses, state.preview.serverName);
-              if (!state.preview.verified) {
-                yield* emitRuntimeWarning(
-                  context,
-                  "F5 could not verify its browser preview tools in this Claude session; they will be treated like any other MCP server.",
-                  { category: "provider", actionable: false },
+            yield* emitMcpStatuses(context, statuses);
+            if (state) {
+              const before = JSON.stringify(agentBrowserConfigPayload(state));
+              if (state.computer && state.computer.verified === undefined) {
+                state.computer.verified = isVerifiedSdkServer(statuses, state.computer.serverName);
+                automationEventSanitizer.register(context.session.threadId, {
+                  serverName: state.computer.serverName,
+                  verified: true,
+                  kind: "f5-computer",
+                });
+              }
+              if (!previewChecked && state.preview) {
+                previewChecked = true;
+                state.preview.verified = isVerifiedSdkServer(statuses, state.preview.serverName);
+                if (!state.preview.verified) {
+                  yield* emitRuntimeWarning(
+                    context,
+                    "F5 could not verify its browser preview tools in this Claude session; they will be treated like any other MCP server.",
+                    { category: "provider", actionable: false },
+                  );
+                }
+              }
+              if (
+                state.chrome &&
+                state.chrome.state !== "off" &&
+                state.chrome.state !== "unavailable"
+              ) {
+                const chrome = statuses.find(
+                  (entry) => entry.name === CLAUDE_IN_CHROME_SERVER_NAME,
                 );
+                const verified = context.chromeRuntime?.verifyServer(chrome) === true;
+                state.chrome =
+                  chrome?.status === "connected" && verified
+                    ? { state: "connected", verified }
+                    : chrome?.status === "pending"
+                      ? { state: "pending" }
+                      : chrome
+                        ? {
+                            state: "failed",
+                            detail:
+                              chrome.error ??
+                              (chrome.status === "connected" && !verified
+                                ? "F5 could not verify the Chrome server's provenance."
+                                : chrome.status === "needs-auth"
+                                  ? "Claude in Chrome needs you to sign in to claude.ai."
+                                  : `Claude in Chrome is ${chrome.status}.`),
+                          }
+                        : {
+                            state: "failed",
+                            detail:
+                              "Claude in Chrome did not start. Install the Claude in Chrome extension and sign in with a claude.ai account.",
+                          };
+                if (
+                  chrome?.status === "connected" &&
+                  context.chromeRuntime &&
+                  context.chromeGeneration
+                )
+                  yield* Effect.tryPromise(() =>
+                    context.chromeRuntime!.connected(
+                      context.session.threadId,
+                      context.chromeGeneration!,
+                    ),
+                  ).pipe(
+                    Effect.catch(() =>
+                      Effect.sync(() => {
+                        state.chrome = {
+                          state: "failed",
+                          detail: "Chrome native-host verification failed.",
+                        };
+                      }),
+                    ),
+                  );
+                if (state.chrome.state === "failed" && context.chromeGeneration)
+                  context.chromeRuntime?.markUnhealthy(
+                    context.session.threadId,
+                    context.chromeGeneration,
+                  );
+              }
+              if (JSON.stringify(agentBrowserConfigPayload(state)) !== before) {
+                yield* emitSessionConfigured(context, context.configuredBase);
               }
             }
             if (
-              state.chrome &&
-              state.chrome.state !== "off" &&
-              state.chrome.state !== "unavailable"
-            ) {
-              const chrome = statuses.find((entry) => entry.name === CLAUDE_IN_CHROME_SERVER_NAME);
-              const verified = context.chromeRuntime?.verifyServer(chrome) === true;
-              state.chrome =
-                chrome?.status === "connected" && verified
-                  ? { state: "connected", verified }
-                  : chrome?.status === "pending"
-                    ? { state: "pending" }
-                    : chrome
-                      ? {
-                          state: "failed",
-                          detail:
-                            chrome.error ??
-                            (chrome.status === "connected" && !verified
-                              ? "F5 could not verify the Chrome server's provenance."
-                              : chrome.status === "needs-auth"
-                                ? "Claude in Chrome needs you to sign in to claude.ai."
-                                : `Claude in Chrome is ${chrome.status}.`),
-                        }
-                      : {
-                          state: "failed",
-                          detail:
-                            "Claude in Chrome did not start. Install the Claude in Chrome extension and sign in with a claude.ai account.",
-                        };
-              if (
-                chrome?.status === "connected" &&
-                context.chromeRuntime &&
-                context.chromeGeneration
+              !statuses.some(
+                (entry) =>
+                  classifyMcpOwnership(entry, context.ownedMcpServerNames) === "managed" &&
+                  entry.status === "pending",
+              ) &&
+              !statuses.some(
+                (entry) =>
+                  entry.name === CLAUDE_IN_CHROME_SERVER_NAME && entry.status === "pending",
               )
-                yield* Effect.tryPromise(() =>
-                  context.chromeRuntime!.connected(
-                    context.session.threadId,
-                    context.chromeGeneration!,
-                  ),
-                ).pipe(
-                  Effect.catch(() =>
-                    Effect.sync(() => {
-                      state.chrome = {
-                        state: "failed",
-                        detail: "Chrome native-host verification failed.",
-                      };
-                    }),
-                  ),
-                );
-              if (state.chrome.state === "failed" && context.chromeGeneration)
-                context.chromeRuntime?.markUnhealthy(
-                  context.session.threadId,
-                  context.chromeGeneration,
-                );
-            }
-            if (JSON.stringify(agentBrowserConfigPayload(state)) !== before) {
-              yield* emitSessionConfigured(context, context.configuredBase);
-            }
-            if (!statuses.some((entry) => entry.status === "pending")) {
+            ) {
               return;
             }
           }
           yield* Effect.sleep(Duration.seconds(1));
         }
+      });
+
+    const startMcpStatusWatcher = (context: ClaudeSessionContext) =>
+      Effect.gen(function* () {
+        if (context.mcpStatusFiber) yield* Fiber.interrupt(context.mcpStatusFiber);
+        context.mcpStatusFiber = yield* Effect.forkIn(watchMcpStatus(context), adapterScope);
+      });
+
+    const getMcpServerStatuses: NonNullable<ClaudeAdapterShape["getMcpServerStatuses"]> = (
+      threadId,
+    ) =>
+      Effect.gen(function* () {
+        const context = yield* requireSession(threadId);
+        const statuses = yield* Effect.tryPromise({
+          try: () => readMcpStatus(context),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "mcpServerStatus",
+              detail: toMessage(cause, "Could not read MCP status."),
+            }),
+        });
+        return {
+          complete: true,
+          capabilities: { tools: true, inputSchemas: false, resources: false },
+          servers: statuses.map((server) => ({
+            name: server.name,
+            status: claudeObservedMcpStatus(server.status),
+            ownership: classifyMcpOwnership(
+              server,
+              context.ownedMcpServerNames,
+              new Set(Object.keys(context.internalMcpServers)),
+            ),
+            ...((server.source ?? server.scope) ? { origin: server.source ?? server.scope! } : {}),
+            ...(server.error ? { error: server.error } : {}),
+            ...(server.tools
+              ? {
+                  tools: server.tools.map((tool) => ({
+                    name: tool.name,
+                    ...(tool.description ? { description: tool.description } : {}),
+                    ...(tool.annotations ? { annotations: tool.annotations } : {}),
+                  })),
+                  toolCount: server.tools.length,
+                }
+              : {}),
+          })),
+        };
+      });
+
+    const reconnectMcpServer: NonNullable<ClaudeAdapterShape["reconnectMcpServer"]> = ({
+      threadId,
+      serverName,
+    }) =>
+      Effect.gen(function* () {
+        const context = yield* requireSession(threadId);
+        const query = context.query;
+        if (!context.ownedMcpServerNames.has(serverName)) return false;
+        const statuses = yield* Effect.tryPromise({
+          try: () => readMcpStatus(context),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "mcpServerStatus",
+              detail: toMessage(cause, "Could not verify MCP ownership."),
+            }),
+        });
+        if (
+          !statuses.some(
+            (server) =>
+              server.name === serverName &&
+              classifyMcpOwnership(server, context.ownedMcpServerNames) === "managed",
+          )
+        )
+          return false;
+        if (context.query !== query)
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "reconnectMcpServer",
+            detail: "The MCP session was replaced before reconnect.",
+          });
+        if (!query.reconnectMcpServer)
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "reconnectMcpServer",
+            detail: "This Claude runtime does not support reconnect.",
+          });
+        context.mcpObservationEpoch = (context.mcpObservationEpoch ?? 0) + 1;
+        yield* Effect.tryPromise({
+          try: () => query.reconnectMcpServer!(serverName),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "reconnectMcpServer",
+              detail: toMessage(cause, "Could not reconnect MCP server."),
+            }),
+        });
+        if (context.query !== query || context.stopped)
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "reconnectMcpServer",
+            detail: "The MCP session was replaced during reconnect.",
+          });
+        yield* startMcpStatusWatcher(context);
+        return true;
       });
 
     const refreshSupportedCommands = (context: ClaudeSessionContext): Effect.Effect<void> =>
@@ -4760,6 +4965,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           case "init":
             {
               const previousModel = getClaudeSessionModel(context);
+              yield* emitMcpStatuses(context, message.mcp_servers ?? []);
               context.configuredBase = message as Record<string, unknown>;
               const configuredModel = getClaudeSessionModel(context);
               if (configuredModel !== undefined && configuredModel !== previousModel) {
@@ -5465,6 +5671,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                     cause,
                   }),
               });
+              context.mcpStatusEmitted?.clear();
+              yield* startMcpStatusWatcher(context);
               context.activeDisallowedTools = recoveryOptions.disallowedTools ?? [];
               for (const message of context.pendingPrompts)
                 yield* Queue.offer(context.promptQueue, { type: "message", message });
@@ -5656,6 +5864,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         if (context.stopped) return;
 
         context.stopped = true;
+        if (context.mcpStatusFiber) yield* Fiber.interrupt(context.mcpStatusFiber);
         // Stop input immediately; retain provenance until final tool events are queued safely.
         if (context.turnState) context.computerEndTurn?.(context.turnState.turnId);
         for (const stop of context.nativeTaskStops.values()) {
@@ -7533,7 +7742,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         );
         context.streamFiber = streamFiber;
         yield* refreshSupportedCommands(context);
-        Effect.runFork(watchAgentBrowserStatus(context));
+        yield* startMcpStatusWatcher(context);
         streamFiber.addObserver(() => {
           if (context.streamFiber === streamFiber) {
             context.streamFiber = undefined;
@@ -8090,6 +8299,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             }),
         });
         const owned = context.ownedMcpServerNames;
+        context.mcpObservationEpoch = (context.mcpObservationEpoch ?? 0) + 1;
         // Restrict existing and lingering servers before any provider I/O.
         context.mcpToolFilters = buildMcpToolFilters(mcpServers);
         context.queryOptions.disallowedTools = [
@@ -8123,6 +8333,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             context.queryOptions.mcpServers = recoveryServers;
           else delete context.queryOptions.mcpServers;
         }
+        yield* startMcpStatusWatcher(context);
         const denyListChanged =
           stableMcpConfigKey([...context.activeDisallowedTools].sort()) !==
           stableMcpConfigKey([...context.queryOptions.disallowedTools].sort());
@@ -8686,6 +8897,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       respondToUserInput,
       respondToElicitation,
       reloadMcpConfig,
+      getMcpServerStatuses,
+      getOwnedMcpServerNames: (threadId) =>
+        requireSession(threadId).pipe(Effect.map((context) => [...context.ownedMcpServerNames])),
+      reconnectMcpServer,
       stopSession,
       listSessions,
       hasSession,
