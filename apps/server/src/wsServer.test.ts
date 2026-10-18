@@ -4527,9 +4527,14 @@ describe("WebSocket Server", () => {
             },
           };
         });
-        const results = await Promise.all(
-          requests.map((request) => sendRequest(ws, WS_METHODS.nextTurnQueueSubmit, request)),
-        );
+        const address = server!.address();
+        const port = typeof address === "object" && address !== null ? address.port : 0;
+        const [secondClient] = await connectAndAwaitWelcome(port);
+        connections.push(secondClient);
+        const results = await Promise.all([
+          sendRequest(ws, WS_METHODS.nextTurnQueueSubmit, requests[0]),
+          sendRequest(secondClient, WS_METHODS.nextTurnQueueSubmit, requests[1]),
+        ]);
         expect(results.filter((result) => result.error === undefined)).toHaveLength(1);
         expect(results.find((result) => result.error)?.error?.code).toBe(
           BOOTSTRAP_THREAD_NOT_CREATED_ERROR_CODE,
