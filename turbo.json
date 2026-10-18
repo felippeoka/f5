@@ -74,7 +74,13 @@
       "cache": false
     },
     "test": {
-      "passThroughEnv": ["F5_TEST_MAX_WORKERS", "F5_TEST_LOGS", "VITEST_MAX_WORKERS"],
+      "passThroughEnv": [
+        "F5_TEST_MAX_WORKERS",
+        "F5_TEST_LOGS",
+        "VITEST_MAX_WORKERS",
+        "F5_CI_REPORT_DIR",
+        "F5_CI_SUITE_ID"
+      ],
       "cache": false,
       "outputs": []
     }

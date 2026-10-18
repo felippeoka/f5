@@ -21,6 +21,7 @@ import { inspect } from "node:util";
 import { DatabaseSync } from "node:sqlite";
 import { execFileSync } from "node:child_process";
 import { PassThrough } from "node:stream";
+import { AGENT_BRIDGE_LISTENER_AVAILABLE } from "./agentBridge/AgentBridgeService.ts";
 import { runAgentBridgeStdio } from "./agentBridge/stdioShim.ts";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -3576,158 +3577,167 @@ describe("WebSocket Server", () => {
       }
     };
 
-    it("admits supervised automation turns idempotently and keeps the WS route human", async () => {
-      const repo = makeBridgeRepo();
-      const stateDir = makeTempDir("f5-agent-bridge-state-");
-      const dbPath = path.join(stateDir, "state.sqlite");
-      const sentTurns: Array<Parameters<ProviderServiceShape["sendTurn"]>[0]> = [];
-      server = await createTestServer({
-        cwd: repo,
-        stateDir,
-        persistenceLayer: makeSqlitePersistenceLive(dbPath).pipe(Layer.provide(NodeServices.layer)),
-        providerLayer: Layer.succeed(ProviderService, makeTurnCapturingProviderService(sentTurns)),
-      });
-      const addr = server.address();
-      const [ws] = await connectAndAwaitWelcome(
-        typeof addr === "object" && addr !== null ? addr.port : 0,
-      );
-      connections.push(ws);
-      const createdAt = new Date().toISOString();
-      await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
-        type: "project.create",
-        commandId: "command-bridge-project",
-        projectId: "project-bridge",
-        title: "Bridge",
-        workspaceRoot: repo,
-        defaultModel: "gpt-5-codex",
-        createdAt,
-      });
-      await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
-        type: "project.create",
-        commandId: "command-hidden-project",
-        projectId: "project-hidden",
-        title: "Hidden",
-        workspaceRoot: makeTempDir("f5-agent-bridge-hidden-"),
-        defaultModel: "gpt-5-codex",
-        createdAt,
-      });
-      const credentialsPath = path.join(stateDir, "agent-bridge", "local.json");
-      expect(fs.existsSync(credentialsPath)).toBe(false);
-      await sendRequest(ws, WS_METHODS.serverUpdateSettings, {
-        agentBridge: { enabled: true, exposedProjectIds: ["project-bridge"] },
-      });
-      await vi.waitFor(() => expect(fs.existsSync(credentialsPath)).toBe(true), SLOW_WAIT);
-      if (process.platform !== "win32")
-        expect(fs.statSync(credentialsPath).mode & 0o777).toBe(0o600);
+    // #148 shelved the listener; this test re-enables itself when the flag flips.
+    it.skipIf(!AGENT_BRIDGE_LISTENER_AVAILABLE)(
+      "admits supervised automation turns idempotently and keeps the WS route human",
+      async () => {
+        const repo = makeBridgeRepo();
+        const stateDir = makeTempDir("f5-agent-bridge-state-");
+        const dbPath = path.join(stateDir, "state.sqlite");
+        const sentTurns: Array<Parameters<ProviderServiceShape["sendTurn"]>[0]> = [];
+        server = await createTestServer({
+          cwd: repo,
+          stateDir,
+          persistenceLayer: makeSqlitePersistenceLive(dbPath).pipe(
+            Layer.provide(NodeServices.layer),
+          ),
+          providerLayer: Layer.succeed(
+            ProviderService,
+            makeTurnCapturingProviderService(sentTurns),
+          ),
+        });
+        const addr = server.address();
+        const [ws] = await connectAndAwaitWelcome(
+          typeof addr === "object" && addr !== null ? addr.port : 0,
+        );
+        connections.push(ws);
+        const createdAt = new Date().toISOString();
+        await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+          type: "project.create",
+          commandId: "command-bridge-project",
+          projectId: "project-bridge",
+          title: "Bridge",
+          workspaceRoot: repo,
+          defaultModel: "gpt-5-codex",
+          createdAt,
+        });
+        await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+          type: "project.create",
+          commandId: "command-hidden-project",
+          projectId: "project-hidden",
+          title: "Hidden",
+          workspaceRoot: makeTempDir("f5-agent-bridge-hidden-"),
+          defaultModel: "gpt-5-codex",
+          createdAt,
+        });
+        const credentialsPath = path.join(stateDir, "agent-bridge", "local.json");
+        expect(fs.existsSync(credentialsPath)).toBe(false);
+        await sendRequest(ws, WS_METHODS.serverUpdateSettings, {
+          agentBridge: { enabled: true, exposedProjectIds: ["project-bridge"] },
+        });
+        await vi.waitFor(() => expect(fs.existsSync(credentialsPath)).toBe(true), SLOW_WAIT);
+        if (process.platform !== "win32")
+          expect(fs.statSync(credentialsPath).mode & 0o777).toBe(0o600);
 
-      const projects = await callTool(stateDir, "list_projects", {});
-      expect(
-        projects.structuredContent.projects.map((project: { id: string }) => project.id),
-      ).toEqual(["project-bridge"]);
-      const hidden = await callTool(stateDir, "create_thread", {
-        projectId: "project-hidden",
-        prompt: "No.",
-      });
-      expect(hidden.isError).toBe(true);
-      expect(hidden.structuredContent.error).toBe("Project not found.");
-
-      // Checkout bootstrap.
-      const args = {
-        projectId: "project-bridge",
-        prompt: "Fix the README.",
-        useWorktree: false,
-        clientRequestId: "checkout-1",
-      };
-      const [first, concurrent] = await Promise.all([
-        callTool(stateDir, "create_thread", args),
-        callTool(stateDir, "create_thread", args),
-      ]);
-      expect(first.isError).toBeUndefined();
-      expect(concurrent.structuredContent).toEqual(first.structuredContent);
-      const { threadId, submissionId } = first.structuredContent;
-      await vi.waitFor(() => expect(sentTurns).toHaveLength(1), SLOW_WAIT);
-      expect(sentTurns[0]?.submissionSource).toBe("automation");
-      const retry = await callTool(stateDir, "create_thread", args);
-      expect(retry.structuredContent).toEqual(first.structuredContent);
-      const conflict = await callTool(stateDir, "create_thread", { ...args, prompt: "Other." });
-      expect(conflict.isError).toBe(true);
-
-      let snapshot = (await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot))
-        .result as OrchestrationReadModel;
-      const created = snapshot.threads.find((thread) => thread.id === threadId);
-      expect(created?.runtimeMode).toBe("approval-required");
-      await vi.waitFor(async () => {
-        snapshot = (await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot))
-          .result as OrchestrationReadModel;
+        const projects = await callTool(stateDir, "list_projects", {});
         expect(
-          snapshot.threads
-            .find((thread) => thread.id === threadId)
-            ?.activities.filter((activity) => activity.kind === "agent-bridge.turn-submitted"),
-        ).toHaveLength(1);
-      }, SLOW_WAIT);
+          projects.structuredContent.projects.map((project: { id: string }) => project.id),
+        ).toEqual(["project-bridge"]);
+        const hidden = await callTool(stateDir, "create_thread", {
+          projectId: "project-hidden",
+          prompt: "No.",
+        });
+        expect(hidden.isError).toBe(true);
+        expect(hidden.structuredContent.error).toBe("Project not found.");
 
-      // Worktree bootstrap.
-      const worktree = await callTool(stateDir, "create_thread", {
-        projectId: "project-bridge",
-        prompt: "Work in a worktree.",
-      });
-      expect(worktree.structuredContent.disposition).toBe("queued");
-      await vi.waitFor(() => expect(sentTurns).toHaveLength(2), SLOW_WAIT);
-      expect(sentTurns[1]?.submissionSource).toBe("automation");
+        // Checkout bootstrap.
+        const args = {
+          projectId: "project-bridge",
+          prompt: "Fix the README.",
+          useWorktree: false,
+          clientRequestId: "checkout-1",
+        };
+        const [first, concurrent] = await Promise.all([
+          callTool(stateDir, "create_thread", args),
+          callTool(stateDir, "create_thread", args),
+        ]);
+        expect(first.isError).toBeUndefined();
+        expect(concurrent.structuredContent).toEqual(first.structuredContent);
+        const { threadId, submissionId } = first.structuredContent;
+        await vi.waitFor(() => expect(sentTurns).toHaveLength(1), SLOW_WAIT);
+        expect(sentTurns[0]?.submissionSource).toBe("automation");
+        const retry = await callTool(stateDir, "create_thread", args);
+        expect(retry.structuredContent).toEqual(first.structuredContent);
+        const conflict = await callTool(stateDir, "create_thread", { ...args, prompt: "Other." });
+        expect(conflict.isError).toBe(true);
 
-      // Existing-thread queueing; the first turn never settles, so it waits.
-      const queued = await callTool(stateDir, "send_message", {
-        threadId,
-        prompt: "Also update the docs.",
-      });
-      expect(queued.structuredContent.disposition).toBe("queued");
-      const waited = await callTool(stateDir, "wait_for_submission", {
-        submissionId: queued.structuredContent.submissionId,
-        timeoutSeconds: 0,
-      });
-      expect(waited.structuredContent).toMatchObject({ status: "queued", timedOut: true });
+        let snapshot = (await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot))
+          .result as OrchestrationReadModel;
+        const created = snapshot.threads.find((thread) => thread.id === threadId);
+        expect(created?.runtimeMode).toBe("approval-required");
+        await vi.waitFor(async () => {
+          snapshot = (await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot))
+            .result as OrchestrationReadModel;
+          expect(
+            snapshot.threads
+              .find((thread) => thread.id === threadId)
+              ?.activities.filter((activity) => activity.kind === "agent-bridge.turn-submitted"),
+          ).toHaveLength(1);
+        }, SLOW_WAIT);
 
-      // A human send on the WS route.
-      await sendRequest(ws, WS_METHODS.nextTurnQueueSubmit, {
-        submissionId: "human-submission",
-        intent: "queue-tail",
-        command: {
-          type: "thread.turn.start",
-          commandId: "human-submission",
+        // Worktree bootstrap.
+        const worktree = await callTool(stateDir, "create_thread", {
+          projectId: "project-bridge",
+          prompt: "Work in a worktree.",
+        });
+        expect(worktree.structuredContent.disposition).toBe("queued");
+        await vi.waitFor(() => expect(sentTurns).toHaveLength(2), SLOW_WAIT);
+        expect(sentTurns[1]?.submissionSource).toBe("automation");
+
+        // Existing-thread queueing; the first turn never settles, so it waits.
+        const queued = await callTool(stateDir, "send_message", {
           threadId,
-          message: { messageId: "human-message", role: "user", text: "Me.", attachments: [] },
-          runtimeMode: "approval-required",
-          interactionMode: "default",
+          prompt: "Also update the docs.",
+        });
+        expect(queued.structuredContent.disposition).toBe("queued");
+        const waited = await callTool(stateDir, "wait_for_submission", {
+          submissionId: queued.structuredContent.submissionId,
+          timeoutSeconds: 0,
+        });
+        expect(waited.structuredContent).toMatchObject({ status: "queued", timedOut: true });
+
+        // A human send on the WS route.
+        await sendRequest(ws, WS_METHODS.nextTurnQueueSubmit, {
+          submissionId: "human-submission",
+          intent: "queue-tail",
+          command: {
+            type: "thread.turn.start",
+            commandId: "human-submission",
+            threadId,
+            message: { messageId: "human-message", role: "user", text: "Me.", attachments: [] },
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            createdAt: new Date().toISOString(),
+          },
+        });
+
+        const provenance = new Map(
+          readProvenance(dbPath).map((row) => [row.command_id, row.source] as const),
+        );
+        expect(provenance.get(submissionId)).toBe("automation");
+        expect(provenance.get(worktree.structuredContent.submissionId)).toBe("automation");
+        expect(provenance.get(queued.structuredContent.submissionId)).toBe("automation");
+        expect(provenance.get("human-submission")).toBe("human");
+
+        // Supervision: a full-access thread refuses bridge messages.
+        await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+          type: "thread.runtime-mode.set",
+          commandId: "command-bridge-full-access",
+          threadId,
+          runtimeMode: "full-access",
           createdAt: new Date().toISOString(),
-        },
-      });
+        });
+        await vi.waitFor(async () => {
+          const refused = await callTool(stateDir, "send_message", { threadId, prompt: "Again." });
+          expect(refused.structuredContent.error).toContain("not supervised");
+        }, SLOW_WAIT);
 
-      const provenance = new Map(
-        readProvenance(dbPath).map((row) => [row.command_id, row.source] as const),
-      );
-      expect(provenance.get(submissionId)).toBe("automation");
-      expect(provenance.get(worktree.structuredContent.submissionId)).toBe("automation");
-      expect(provenance.get(queued.structuredContent.submissionId)).toBe("automation");
-      expect(provenance.get("human-submission")).toBe("human");
-
-      // Supervision: a full-access thread refuses bridge messages.
-      await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
-        type: "thread.runtime-mode.set",
-        commandId: "command-bridge-full-access",
-        threadId,
-        runtimeMode: "full-access",
-        createdAt: new Date().toISOString(),
-      });
-      await vi.waitFor(async () => {
-        const refused = await callTool(stateDir, "send_message", { threadId, prompt: "Again." });
-        expect(refused.structuredContent.error).toContain("not supervised");
-      }, SLOW_WAIT);
-
-      await sendRequest(ws, WS_METHODS.serverUpdateSettings, {
-        agentBridge: { enabled: false },
-      });
-      await vi.waitFor(() => expect(fs.existsSync(credentialsPath)).toBe(false), SLOW_WAIT);
-    });
+        await sendRequest(ws, WS_METHODS.serverUpdateSettings, {
+          agentBridge: { enabled: false },
+        });
+        await vi.waitFor(() => expect(fs.existsSync(credentialsPath)).toBe(false), SLOW_WAIT);
+      },
+    );
 
     /** One tools/call through the STDIO shim, as a generic MCP client would. */
     async function shimCall(stateDir: string, name: string, args: Record<string, unknown>) {
@@ -3760,130 +3770,136 @@ describe("WebSocket Server", () => {
       };
     }
 
-    it("runs a task lifecycle through the STDIO shim across a restart", async () => {
-      const repo = makeBridgeRepo();
-      const stateDir = makeTempDir("f5-agent-bridge-tasks-");
-      const dbPath = path.join(stateDir, "state.sqlite");
-      const start = async () => {
-        server = await createTestServer({
-          cwd: repo,
-          stateDir,
-          persistenceLayer: makeSqlitePersistenceLive(dbPath).pipe(
-            Layer.provide(NodeServices.layer),
-          ),
+    // #148 shelved the listener; this test re-enables itself when the flag flips.
+    it.skipIf(!AGENT_BRIDGE_LISTENER_AVAILABLE)(
+      "runs a task lifecycle through the STDIO shim across a restart",
+      async () => {
+        const repo = makeBridgeRepo();
+        const stateDir = makeTempDir("f5-agent-bridge-tasks-");
+        const dbPath = path.join(stateDir, "state.sqlite");
+        const start = async () => {
+          server = await createTestServer({
+            cwd: repo,
+            stateDir,
+            persistenceLayer: makeSqlitePersistenceLive(dbPath).pipe(
+              Layer.provide(NodeServices.layer),
+            ),
+          });
+          const addr = server.address();
+          const [ws] = await connectAndAwaitWelcome(
+            typeof addr === "object" && addr !== null ? addr.port : 0,
+          );
+          connections.push(ws);
+          return ws;
+        };
+        let ws = await start();
+        await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+          type: "project.create",
+          commandId: "command-task-project",
+          projectId: "project-tasks",
+          title: "Tasks",
+          workspaceRoot: repo,
+          defaultModel: "gpt-5-codex",
+          createdAt: new Date().toISOString(),
         });
-        const addr = server.address();
-        const [ws] = await connectAndAwaitWelcome(
-          typeof addr === "object" && addr !== null ? addr.port : 0,
-        );
-        connections.push(ws);
-        return ws;
-      };
-      let ws = await start();
-      await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
-        type: "project.create",
-        commandId: "command-task-project",
-        projectId: "project-tasks",
-        title: "Tasks",
-        workspaceRoot: repo,
-        defaultModel: "gpt-5-codex",
-        createdAt: new Date().toISOString(),
-      });
-      await sendRequest(ws, WS_METHODS.serverUpdateSettings, {
-        agentBridge: { enabled: true, exposedProjectIds: ["project-tasks"] },
-      });
-      const credentialsPath = path.join(stateDir, "agent-bridge", "local.json");
-      await vi.waitFor(() => expect(fs.existsSync(credentialsPath)).toBe(true), SLOW_WAIT);
+        await sendRequest(ws, WS_METHODS.serverUpdateSettings, {
+          agentBridge: { enabled: true, exposedProjectIds: ["project-tasks"] },
+        });
+        const credentialsPath = path.join(stateDir, "agent-bridge", "local.json");
+        await vi.waitFor(() => expect(fs.existsSync(credentialsPath)).toBe(true), SLOW_WAIT);
 
-      const created = await sendRequest(ws, AGENT_BRIDGE_WS_METHODS.createTask, {
-        operationId: "create-1",
-        clientId: "local",
-        projectId: "project-tasks",
-        title: "Summarize",
-        instructions: "Summarize the README.",
-      });
-      const taskId = (created.result as { id: string }).id;
-      const listed = await shimCall(stateDir, "list_tasks", {});
-      expect(listed.structuredContent.tasks.map((task: { taskId: string }) => task.taskId)).toEqual(
-        [taskId],
-      );
-      const claimed = await shimCall(stateDir, "claim_task", { taskId, operationId: "claim-1" });
-      const epoch = claimed.structuredContent.executionEpoch as number;
-      expect(
-        (
-          await shimCall(stateDir, "report_task_progress", {
-            taskId,
-            executionEpoch: epoch,
-            operationId: "progress-1",
-            summary: "Reading",
-          })
-        ).isError,
-      ).toBeUndefined();
-      const asked = await shimCall(stateDir, "request_task_input", {
-        taskId,
-        executionEpoch: epoch,
-        operationId: "question-1",
-        question: "Short or long?",
-      });
-      const questionId = asked.structuredContent.questionId as string;
+        const created = await sendRequest(ws, AGENT_BRIDGE_WS_METHODS.createTask, {
+          operationId: "create-1",
+          clientId: "local",
+          projectId: "project-tasks",
+          title: "Summarize",
+          instructions: "Summarize the README.",
+        });
+        const taskId = (created.result as { id: string }).id;
+        const listed = await shimCall(stateDir, "list_tasks", {});
+        expect(
+          listed.structuredContent.tasks.map((task: { taskId: string }) => task.taskId),
+        ).toEqual([taskId]);
+        const claimed = await shimCall(stateDir, "claim_task", { taskId, operationId: "claim-1" });
+        const epoch = claimed.structuredContent.executionEpoch as number;
+        expect(
+          (
+            await shimCall(stateDir, "report_task_progress", {
+              taskId,
+              executionEpoch: epoch,
+              operationId: "progress-1",
+              summary: "Reading",
+            })
+          ).isError,
+        ).toBeUndefined();
+        const asked = await shimCall(stateDir, "request_task_input", {
+          taskId,
+          executionEpoch: epoch,
+          operationId: "question-1",
+          question: "Short or long?",
+        });
+        const questionId = asked.structuredContent.questionId as string;
 
-      // Restart: the task board and the revision survive.
-      const revisionBefore = (
-        (await sendRequest(ws, AGENT_BRIDGE_WS_METHODS.getTasks, {})).result as {
+        // Restart: the task board and the revision survive.
+        const revisionBefore = (
+          (await sendRequest(ws, AGENT_BRIDGE_WS_METHODS.getTasks, {})).result as {
+            revision: number;
+          }
+        ).revision;
+        for (const socket of connections.splice(0)) socket.close();
+        await closeTestServer();
+        ws = await start();
+        await vi.waitFor(() => expect(fs.existsSync(credentialsPath)).toBe(true), SLOW_WAIT);
+        const afterRestart = (await sendRequest(ws, AGENT_BRIDGE_WS_METHODS.getTasks, {}))
+          .result as {
           revision: number;
-        }
-      ).revision;
-      for (const socket of connections.splice(0)) socket.close();
-      await closeTestServer();
-      ws = await start();
-      await vi.waitFor(() => expect(fs.existsSync(credentialsPath)).toBe(true), SLOW_WAIT);
-      const afterRestart = (await sendRequest(ws, AGENT_BRIDGE_WS_METHODS.getTasks, {})).result as {
-        revision: number;
-        tasks: Array<{ id: string; status: string; version: number }>;
-      };
-      expect(afterRestart.revision).toBe(revisionBefore);
-      const waiting = afterRestart.tasks.find((task) => task.id === taskId);
-      expect(waiting?.status).toBe("waiting-for-user");
+          tasks: Array<{ id: string; status: string; version: number }>;
+        };
+        expect(afterRestart.revision).toBe(revisionBefore);
+        const waiting = afterRestart.tasks.find((task) => task.id === taskId);
+        expect(waiting?.status).toBe("waiting-for-user");
 
-      await sendRequest(ws, AGENT_BRIDGE_WS_METHODS.replyToTask, {
-        operationId: "reply-1",
-        taskId,
-        questionId,
-        expectedVersion: waiting?.version,
-        text: "Short.",
-      });
-      const read = await shimCall(stateDir, "get_task", { taskId });
-      expect(read.structuredContent.status).toBe("running");
-      expect(
-        read.structuredContent.history.find((entry: { type: string }) => entry.type === "reply")
-          ?.content,
-      ).toBe("Short.");
-      const completed = await shimCall(stateDir, "complete_task", {
-        taskId,
-        executionEpoch: epoch,
-        operationId: "complete-1",
-        result: "It says hello.",
-      });
-      expect(completed.isError).toBeUndefined();
-      const final = (await sendRequest(ws, AGENT_BRIDGE_WS_METHODS.getTask, { taskId })).result as {
-        status: string;
-        result: string;
-      };
-      expect(final).toMatchObject({ status: "completed", result: "It says hello." });
-      const activities = (
-        (await sendRequest(ws, AGENT_BRIDGE_WS_METHODS.getTaskActivities, { taskId })).result as {
-          activities: Array<{ type: string }>;
-        }
-      ).activities.map((activity) => activity.type);
-      expect(activities).toEqual([
-        "completed",
-        "reply",
-        "question",
-        "progress",
-        "claimed",
-        "created",
-      ]);
-    });
+        await sendRequest(ws, AGENT_BRIDGE_WS_METHODS.replyToTask, {
+          operationId: "reply-1",
+          taskId,
+          questionId,
+          expectedVersion: waiting?.version,
+          text: "Short.",
+        });
+        const read = await shimCall(stateDir, "get_task", { taskId });
+        expect(read.structuredContent.status).toBe("running");
+        expect(
+          read.structuredContent.history.find((entry: { type: string }) => entry.type === "reply")
+            ?.content,
+        ).toBe("Short.");
+        const completed = await shimCall(stateDir, "complete_task", {
+          taskId,
+          executionEpoch: epoch,
+          operationId: "complete-1",
+          result: "It says hello.",
+        });
+        expect(completed.isError).toBeUndefined();
+        const final = (await sendRequest(ws, AGENT_BRIDGE_WS_METHODS.getTask, { taskId }))
+          .result as {
+          status: string;
+          result: string;
+        };
+        expect(final).toMatchObject({ status: "completed", result: "It says hello." });
+        const activities = (
+          (await sendRequest(ws, AGENT_BRIDGE_WS_METHODS.getTaskActivities, { taskId })).result as {
+            activities: Array<{ type: string }>;
+          }
+        ).activities.map((activity) => activity.type);
+        expect(activities).toEqual([
+          "completed",
+          "reply",
+          "question",
+          "progress",
+          "claimed",
+          "created",
+        ]);
+      },
+    );
   });
 
   describe("first sends through nextTurnQueue.submit", { timeout: 90_000 }, () => {
