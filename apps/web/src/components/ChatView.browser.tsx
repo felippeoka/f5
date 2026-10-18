@@ -1428,6 +1428,7 @@ function resolveWsRpc(body: WsRequestEnvelope["body"]): unknown {
       reclaimable: [],
     };
   }
+  if (tag === WS_METHODS.worktreesGetTransition) return null;
   return {};
 }
 
