@@ -1,3 +1,4 @@
+import { WorktreePreparations } from "../persistence/Services/WorktreePreparations.ts";
 import { ThreadId } from "@t3tools/contracts";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -113,6 +114,17 @@ describe("effective workspace claims and removal gate", () => {
             preparation: { owner, runSetupScript: true },
           });
           expect((yield* gitCore.readWorktreePreparation(target))?.phase).toBe("checkout_created");
+          const receipts = yield* WorktreePreparations;
+          const pending = (yield* gitCore.readWorktreePreparation(target))!;
+          const interrupted = yield* receipts.update(pending, { phase: "setup_indeterminate" });
+          expect(
+            (yield* evaluateWorktreeRemoval({
+              projectCwd: repo.root,
+              path: target,
+              policy: { kind: "manual", ownThreadId: null },
+            })).blockedReasons.join(" "),
+          ).toContain("preparation operation owns");
+          yield* receipts.update(interrupted, { phase: "checkout_created" });
           const result = yield* removeWorktreeSafely({
             projectCwd: repo.root,
             path: target,

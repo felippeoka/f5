@@ -310,7 +310,7 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
   );
   if (
     preparation &&
-    ["allocated", "setup_running"].includes(preparation.phase) &&
+    ["allocated", "setup_running", "setup_indeterminate"].includes(preparation.phase) &&
     !(
       input.policy.kind === "ownedRollback" &&
       preparation.owner === `thread:${input.policy.ownThreadId}`
