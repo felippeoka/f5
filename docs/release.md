@@ -1,5 +1,9 @@
 # Releasing F5
 
+> Maintainers: one-time setup, the release procedure and checklist, and CLI archive builds.
+
+**Contents:** [Desktop release profiles](#desktop-release-profiles) · [One-time maintainer setup](#one-time-maintainer-setup) · [Prepare and publish](#prepare-and-publish) · [Windows-only checklist (`windows` profile; record results in the PR)](#windows-only-checklist-windows-profile-record-results-in-the-pr) · [Full checklist (`all` profile; record results in the PR)](#full-checklist-all-profile-record-results-in-the-pr) · [Build and validate CLI archives](#build-and-validate-cli-archives) · [Signing hardening and remaining backend limitation](#signing-hardening-and-remaining-backend-limitation)
+
 Every release includes all five CLI archives (darwin-arm64, linux-x64/arm64, win32-x64/arm64) and `f5-cli-release.json`. Never publish desktop-only: `f5 install` and `f5 update` use the stable release's `f5-cli-release.json`.
 
 ## Desktop release profiles
@@ -84,6 +88,32 @@ Releases across both channels must increase globally. If a higher beta is alread
 - Confirm the global monotonicity check rejects a lower stable release when a higher beta exists. Automated provider tests also document that unsupported feed order.
 
 Apple credentials, the release environment, and tag ruleset are prerequisites for publication. Local tests cannot substitute for the signed multi-OS rehearsal.
+
+## Build and validate CLI archives
+
+The user guide for the standalone CLI is [Standalone F5 CLI](user/standalone-cli.md). Use a matching native runner and Node **26.10.0** for each target:
+
+```sh
+bun run dist:cli:archive --target darwin-arm64 --node /path/to/node
+bun run test:cli-smoke release-cli/f5-0.0.10-darwin-arm64.tar.gz release-cli/f5-0.0.10-darwin-arm64.json
+bun run dist:cli:manifest release-cli/f5-cli-release.json release-cli/f5-0.0.10-{darwin-arm64,linux-x64,linux-arm64,win32-x64,win32-arm64}.json
+```
+
+`--output PATH` selects an artifact directory; `--skip-build` uses existing server web assets. The script bundles the standalone server, builds a SEA with snapshots/code cache disabled, pins native dependency roots and transitive overrides to the repository lockfile, resolves with scripts disabled, verifies every resulting package version and integrity against that lock, then installs with `--frozen-lockfile`, and emits an archive plus its manifest fragment. It rejects unsupported and cross-architecture native builds. A universal macOS Node is thinned to arm64 before injection. macOS artifacts are ad hoc signed for local execution; public distribution signing/notarization is a separate release workflow. Desktop's narrow ASAR unpack policy is unchanged.
+
+The merge script requires all five targets and matching versions. Release publishing automation and credentials belong in a separate PR; these scripts do not publish, change secrets, or configure repository access.
+
+Validation in the CLI PR: macOS arm64 archive build and smoke with a disposable home and restricted PATH; native PTY and native file search; update rollback after a failing migration; interrupted trial/restoration and durable-commit recovery; architecture rejection; required workspace and real-Git checks. Packaged Windows/Linux and clean-machine VM smoke runs remain release gates and are not certified by a macOS-only run.
+
+The real archive integration test can also run on each release runner with `F5_CLI_SMOKE_ARCHIVE` and `F5_CLI_SMOKE_MANIFEST` set, using `bun run --cwd apps/server test:file integration/standaloneArchive.integration.test.ts`. It stages the archive, preflights the stable launcher, verifies that a prepared trial has no HTTP listener, rejects an activation message for another update ID, and checks the correlated bootstrap after activation. It also starts the installed stable service launcher, verifies that malformed update metadata is quarantined without stopping the server, and checks graceful shutdown. It uses a disposable state directory and leaves the user profile untouched.
+
+### Standalone update internals
+
+`update` stages and verifies the same-architecture release and queues a unique update ID. It does not replace a running executable or run npm. The stable built-in-only launcher preflights the candidate, stops the old child, and snapshots SQLite main/WAL/SHM. The trial completes migrations and service acquisition before reporting prepared. Background workers and HTTP activation wait for the launcher to durably commit the new version. Failure before the durable commit stops the trial, restores the snapshot, and restarts the old runtime. After the commit, recovery always rolls forward and preserves the new database, including activation and journal-cleanup failures.
+
+`current.json`, `pending.json`, `handoff.json`, and `outcome.json` record the handoff. The journal records the canonical database path and rejects recovery with another `--state-dir`. An incomplete snapshot or a live previous child blocks recovery. The child exits when its launcher's IPC channel disappears. Reconnect bootstrap carries the update ID, terminal outcome, and actual version; the UI reports success or rollback from those fields, never from a connection opening alone.
+
+Installer archives are downloaded with bounded size/time, checked against exact byte length and SHA-256, inspected for traversal and links, then staged into immutable version directories. Native PTY/search, version, architecture, and launcher protocol are checked before use. A launcher owns the default profile of its explicit state directory; it rejects `--profile` overrides and validates the actual database path before migrations.
 
 ## Signing hardening and remaining backend limitation
 

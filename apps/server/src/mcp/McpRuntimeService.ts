@@ -1,10 +1,9 @@
+import { makeMcpAccountExecutionResolver } from "./accountExecution.ts";
 import { mcpServerNameKey } from "@t3tools/shared/mcpValidation";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome";
 import { assertOAuthPortAvailable } from "../profiles/ProviderAccountService";
-import { ServerSettingsService } from "../serverSettings";
 import { ProviderInstanceId } from "@t3tools/contracts";
 import { ServerConfig } from "../config";
-import { buildAccountExecutionEnvironment } from "../providerProcessEnv";
 import { instanceLock, ProfileBusyError } from "../profiles/InstanceLock";
 import * as NodePath from "node:path";
 import {
@@ -119,6 +118,7 @@ function readIdleLoginStatus(
     mode,
     provider: input.provider,
     projectId: input.projectId,
+    ...(input.instanceId ? { instanceId: input.instanceId } : {}),
     ...(input.serverName ? { serverName: input.serverName } : {}),
     status: "idle",
   };
@@ -442,43 +442,12 @@ export class McpRuntimeService extends ServiceMap.Service<
 
 const makeMcpRuntimeService = Effect.gen(function* () {
   const accountConfig = yield* Effect.serviceOption(ServerConfig);
-  const accountEnvironment = Option.isSome(accountConfig)
-    ? buildAccountExecutionEnvironment({
-        purpose: "account",
-        profile: accountConfig.value.profile,
-        stateDir: accountConfig.value.stateDir,
-        baseEnv: process.env,
-      })
-    : { ...process.env };
-  const accountSettings = yield* Effect.serviceOption(ServerSettingsService);
-  const environmentFor = (input: {
-    instanceId?: ProviderInstanceId | undefined;
-    provider: string;
-    homePath?: string | undefined;
-  }) =>
-    Effect.gen(function* () {
-      const settings = Option.isSome(accountSettings)
-        ? yield* accountSettings.value.getSettings.pipe(Effect.orDie)
-        : undefined;
-      const instance = input.instanceId
-        ? settings?.providerInstances[input.instanceId]
-        : input.homePath
-          ? Object.values(settings?.providerInstances ?? {}).find(
-              (value) =>
-                value.driver === input.provider &&
-                (value.config as { homePath?: string } | undefined)?.homePath === input.homePath,
-            )
-          : settings?.providerInstances[ProviderInstanceId.make(input.provider)];
-      return Option.isSome(accountConfig)
-        ? buildAccountExecutionEnvironment({
-            purpose: "account",
-            profile: accountConfig.value.profile,
-            stateDir: accountConfig.value.stateDir,
-            baseEnv: process.env,
-            instance: instance?.environment,
-          })
-        : accountEnvironment;
-    });
+  const resolveExecution = yield* makeMcpAccountExecutionResolver;
+  const environmentFor = (input: McpGetProviderStatusRequest) =>
+    resolveExecution({ ...input, providerOptions: readProviderOptions(input) }).pipe(
+      Effect.map((execution) => execution.environment),
+      Effect.mapError((cause) => new McpRuntimeServiceError({ message: cause.message })),
+    );
   const projectMcpConfigService = yield* ProjectMcpConfigService;
   const codexMcpSyncService = yield* CodexMcpSyncService;
   const codexControlClientRegistry = yield* CodexControlClientRegistry;
@@ -536,6 +505,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
 
   const publishLoginCompletion = (input: {
     readonly provider: McpStartLoginRequest["provider"];
+    readonly instanceId?: ProviderInstanceId;
     readonly projectId: McpStartLoginRequest["projectId"];
     readonly configVersion?: string;
   }) =>
@@ -543,6 +513,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
       provider: input.provider,
       scope: "project",
       projectId: input.projectId,
+      ...(input.instanceId ? { instanceId: input.instanceId } : {}),
       reason: "login-completed" satisfies McpStatusUpdatedReason,
       ...(input.configVersion ? { configVersion: input.configVersion } : {}),
     });
@@ -558,6 +529,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
       reloadCodexMcpConfigAfterLogin({
         providerService,
         projectId: input.projectId,
+        ...(input.instanceId ? { instanceId: input.instanceId } : {}),
         ...(input.serverName ? { serverName: input.serverName } : {}),
         ...(input.providerOptions ? { providerOptions: input.providerOptions } : {}),
       }).pipe(
@@ -582,6 +554,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
             yield* publishLoginCompletion({
               provider: "codex",
               projectId: input.projectId,
+              ...(input.instanceId ? { instanceId: input.instanceId } : {}),
               configVersion: input.configVersion,
             });
           }),
@@ -659,12 +632,14 @@ const makeMcpRuntimeService = Effect.gen(function* () {
         const providerOptions = readProviderOptions(input);
         const codexStatus = yield* codexMcpSyncService.getStatus({
           projectId: input.projectId,
+          ...(input.instanceId ? { instanceId: input.instanceId } : {}),
           ...(providerOptions ? { providerOptions } : {}),
         });
 
         return {
           provider: input.provider,
           projectId: input.projectId,
+          ...(input.instanceId ? { instanceId: input.instanceId } : {}),
           support: codexStatus.support,
           available: preflight.available,
           authStatus: preflight.authStatus,
@@ -676,6 +651,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
       return {
         provider: input.provider,
         projectId: input.projectId,
+        ...(input.instanceId ? { instanceId: input.instanceId } : {}),
         support: preflight.available ? "supported" : "unavailable",
         available: preflight.available,
         authStatus: preflight.authStatus,
@@ -706,6 +682,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
         return {
           provider: input.provider,
           projectId: input.projectId,
+          ...(input.instanceId ? { instanceId: input.instanceId } : {}),
           support: providerStatus.support,
           ...(providerStatus.supportMessage
             ? { supportMessage: providerStatus.supportMessage }
@@ -721,6 +698,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
         return {
           provider: input.provider,
           projectId: input.projectId,
+          ...(input.instanceId ? { instanceId: input.instanceId } : {}),
           support: providerStatus.support,
           ...(providerStatus.supportMessage
             ? { supportMessage: providerStatus.supportMessage }
@@ -740,6 +718,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
       const client = yield* codexControlClientRegistry
         .getAdminClient({
           projectId: input.projectId,
+          ...(input.instanceId ? { instanceId: input.instanceId } : {}),
           ...(providerOptions ? { providerOptions } : {}),
           mcpEffectiveConfigVersion: effectiveConfig.effectiveVersion,
           mcpServers: translatedServers,
@@ -765,6 +744,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
       });
       const runtimeDiagnostics = yield* mcpRuntimeDiagnostics.listLatestServerDiagnostics({
         projectId: input.projectId,
+        ...(input.instanceId ? { instanceId: input.instanceId } : {}),
         provider: "codex",
         configVersion: effectiveConfig.effectiveVersion,
       });
@@ -773,6 +753,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
       return {
         provider: input.provider,
         projectId: input.projectId,
+        ...(input.instanceId ? { instanceId: input.instanceId } : {}),
         support: providerStatus.support,
         ...(providerStatus.supportMessage ? { supportMessage: providerStatus.supportMessage } : {}),
         configVersion: effectiveConfig.effectiveVersion,
@@ -814,6 +795,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
         mode: details.mode,
         provider: input.provider,
         projectId: input.projectId,
+        ...(input.instanceId ? { instanceId: input.instanceId } : {}),
         ...(input.serverName ? { serverName: input.serverName } : {}),
         status: "pending",
         startedAt: nowIso(),
@@ -862,6 +844,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
         return yield* codexOAuthManager
           .startLogin({
             projectId: input.projectId,
+            ...(input.instanceId ? { instanceId: input.instanceId } : {}),
             serverName: input.serverName!,
             ...(input.binaryPath ? { binaryPath: input.binaryPath } : {}),
             ...(input.homePath ? { homePath: input.homePath } : {}),
@@ -872,6 +855,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
               mode: "oauth" as const,
               provider: "codex" as const,
               projectId: input.projectId,
+              ...(input.instanceId ? { instanceId: input.instanceId } : {}),
               serverName: input.serverName!,
               status: status.status,
               ...(status.authorizationUrl ? { authorizationUrl: status.authorizationUrl } : {}),
@@ -889,9 +873,13 @@ const makeMcpRuntimeService = Effect.gen(function* () {
           );
       }
 
-      const providerOptions = readProviderOptions(input);
-      const binaryPath = trimToUndefined(input.binaryPath);
-      const homePath = trimToUndefined(input.homePath);
+      const execution = yield* resolveExecution({
+        ...input,
+        providerOptions: readProviderOptions(input),
+      }).pipe(Effect.mapError((cause) => new McpRuntimeServiceError({ message: cause.message })));
+      const providerOptions = execution.providerOptions;
+      const binaryPath = providerOptions?.codex?.binaryPath;
+      const homePath = providerOptions?.codex?.homePath;
       const windowsValidationError = validateWindowsCliLoginInput({
         serverName: input.serverName!,
         ...(server.scopes ? { scopes: server.scopes } : {}),
@@ -902,7 +890,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
       }
       const translatedServers = translateMcpForCodex(stored.servers) ?? {};
       const oauthCallbackConfig = yield* readCodexMcpOAuthCallbackConfigOrError(stored.servers);
-      const resolvedAccountEnvironment = yield* environmentFor(input);
+      const resolvedAccountEnvironment = execution.environment;
       const execute = runCodexCliCommand(
         [
           "mcp",
@@ -914,6 +902,10 @@ const makeMcpRuntimeService = Effect.gen(function* () {
         ],
         {
           baseEnvironment: resolvedAccountEnvironment,
+          cwd: execution.cwd,
+          ...(providerOptions?.codex?.launchArgs
+            ? { launchArgs: providerOptions.codex.launchArgs }
+            : {}),
           ...(binaryPath ? { binaryPath } : {}),
           ...(homePath ? { envOverrides: buildCodexCliEnvOverrides({ homePath }) } : {}),
           mcpServers: translatedServers,
@@ -921,6 +913,19 @@ const makeMcpRuntimeService = Effect.gen(function* () {
           ...(oauthCallbackConfig.url ? { mcpOAuthCallbackUrl: oauthCallbackConfig.url } : {}),
         },
       ).pipe(
+        Effect.raceFirst(
+          Effect.gen(function* () {
+            while (true) {
+              yield* Effect.sleep("1 second");
+              const current = yield* resolveExecution.readIdentity(input);
+              if (current.identity !== execution.identity)
+                return yield* new McpRuntimeServiceError({
+                  message:
+                    "MCP login cancelled because the account execution settings or project directory changed.",
+                });
+            }
+          }),
+        ),
         Effect.timeoutOption(LOGIN_TIMEOUT_MS),
         Effect.flatMap((result) =>
           Effect.gen(function* () {
@@ -930,6 +935,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
                 mode: "cli",
                 provider: input.provider,
                 projectId: input.projectId,
+                ...(input.instanceId ? { instanceId: input.instanceId } : {}),
                 serverName: input.serverName!,
                 status: "failed",
                 startedAt: loginStatuses.get(loginStatusKey(input))?.startedAt ?? nowIso(),
@@ -946,6 +952,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
                 mode: "cli",
                 provider: input.provider,
                 projectId: input.projectId,
+                ...(input.instanceId ? { instanceId: input.instanceId } : {}),
                 serverName: input.serverName!,
                 status: "completed",
                 startedAt: loginStatuses.get(loginStatusKey(input))?.startedAt ?? nowIso(),
@@ -955,6 +962,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
               yield* publishLoginCompletion({
                 provider: input.provider,
                 projectId: input.projectId,
+                ...(input.instanceId ? { instanceId: input.instanceId } : {}),
                 configVersion: stored.effectiveVersion,
               });
               runBackgroundCodexReloadAfterLogin({
@@ -972,6 +980,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
               mode: "cli",
               provider: input.provider,
               projectId: input.projectId,
+              ...(input.instanceId ? { instanceId: input.instanceId } : {}),
               serverName: input.serverName!,
               status: "failed",
               startedAt: loginStatuses.get(loginStatusKey(input))?.startedAt ?? nowIso(),
@@ -984,6 +993,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
           Effect.logError("Failed to start Codex MCP login.", {
             cause,
             projectId: input.projectId,
+            ...(input.instanceId ? { instanceId: input.instanceId } : {}),
             serverName: input.serverName!,
           }).pipe(
             Effect.tap(() =>
@@ -993,6 +1003,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
                   mode: "cli",
                   provider: input.provider,
                   projectId: input.projectId,
+                  ...(input.instanceId ? { instanceId: input.instanceId } : {}),
                   serverName: input.serverName!,
                   status: "failed",
                   startedAt: loginStatuses.get(loginStatusKey(input))?.startedAt ?? nowIso(),
@@ -1047,6 +1058,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
                       mode: "cli",
                       provider: input.provider,
                       projectId: input.projectId,
+                      ...(input.instanceId ? { instanceId: input.instanceId } : {}),
                       serverName: input.serverName!,
                       status: "failed",
                       error: `MCP login failed: ${cause.message}`,
@@ -1070,6 +1082,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
         if (server && supportsCodexOauthLogin(server)) {
           const status = yield* codexOAuthManager.getStatus({
             projectId: input.projectId,
+            ...(input.instanceId ? { instanceId: input.instanceId } : {}),
             serverName: input.serverName,
             ...(input.binaryPath ? { binaryPath: input.binaryPath } : {}),
             ...(input.homePath ? { homePath: input.homePath } : {}),
@@ -1079,6 +1092,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
             mode: "oauth",
             provider: "codex",
             projectId: input.projectId,
+            ...(input.instanceId ? { instanceId: input.instanceId } : {}),
             serverName: input.serverName,
             status: status.status,
             ...(status.authorizationUrl ? { authorizationUrl: status.authorizationUrl } : {}),

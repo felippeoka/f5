@@ -206,7 +206,7 @@ export function createBrowserFixture(protocolVersion = 1) {
         case "orchestration.getRewindDrafts":
           return { threadId: id, drafts: [] };
         case "worktreeSetup.subscribe":
-          return null;
+          return { snapshot: null, generation: 0, sequence: 0 };
         case "projects.cloneList":
           return [];
         case "server.getProjectSettings":
@@ -247,7 +247,7 @@ export function createBrowserFixture(protocolVersion = 1) {
         case "orchestration.getRewindDrafts":
           return { threadId: id, drafts: [] };
         case "worktreeSetup.subscribe":
-          return null;
+          return { snapshot: null, generation: 0, sequence: 0 };
         case "orchestration.getSnapshot":
           return snapshot();
         case "orchestration.getStartupSnapshot":

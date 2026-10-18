@@ -79,6 +79,7 @@ it("ingests a Claude subscription failure, schedules one durable head continue, 
     Effect.die(new Error("No live provider call is permitted in this integration test")) as never;
   const provider: ProviderServiceShape = {
     startSession: unsupported,
+    replaceSession: unsupported,
     sendTurn: unsupported,
     interruptTurn: unsupported,
     respondToRequest: unsupported,

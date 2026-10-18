@@ -2,6 +2,13 @@
 
 This guide covers the tools F5 hands to the agents it runs: MCP servers, skills, native provider inventories and project memory.
 
+## How to
+
+1. Open **Settings → Tools → MCP servers** and click **Add server**.
+2. Choose a transport and fill in the command or URL.
+3. If the server shows **Login required**, click **Connect**.
+4. Start a new thread; the agent receives the effective config for its project.
+
 ## MCP servers
 
 Configure MCP servers under **Settings → Tools → MCP servers**.
@@ -49,4 +56,4 @@ The **Agents** panel in a thread follows subagents and background workflows that
 
 - [Threads and workspaces](threads-and-workspaces.md)
 - [Provider prerequisites](../provider-prerequisites.md)
-- [Agent browser and computer use](../agent-browser.md)
+- [Agent browser and computer use](agent-browser-and-computer-use.md)

@@ -1,5 +1,9 @@
 # Profiles
 
+> Operators and contributors: isolated F5 profiles, their storage, accounts and lifecycle.
+
+**Contents:** [Existing data and layout](#existing-data-and-layout) · [Browser, CLI and remote access](#browser-cli-and-remote-access) · [Desktop lifecycle](#desktop-lifecycle) · [GitHub authentication](#github-authentication) · [Removal and restore](#removal-and-restore) · [Real-provider release gate](#real-provider-release-gate) · [Shell startup and recovery storage](#shell-startup-and-recovery-storage)
+
 A Profile is an independent F5 environment with its own accounts, projects, conversations, settings, secrets, attachments, logs and worktrees. A project's `workspaceRoot` remains its source directory. **Display profile** remains the appearance-density setting. Electron session storage is called a **partition**.
 
 Create a profile in **Settings → Profiles & Accounts**, then open it and use its account panels to sign in. Account setup works before adding a project. Login output is streamed in memory and is never written to terminal history or server logs. Cancel terminates the owned login process. Only one provider or MCP OAuth login can run per installation at a time; another login receives a visible conflict. F5 never terminates an unrelated callback-port owner.

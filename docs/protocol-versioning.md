@@ -1,5 +1,7 @@
 # Client/server protocol compatibility
 
+> Contributors: when and how to bump the client/server protocol version.
+
 `F5_PROTOCOL_VERSION` in `packages/contracts/src/protocol.ts` is the exact wire
 version shared by the bundled server, desktop renderer, and web client. It starts
 at 1. Increment it when adding a union variant or state shape that a client must
@@ -32,6 +34,11 @@ Worktree safety Release 1 uses version 23 (the preceding version was 22). It add
 removes public force removal, and preserves filesystem paths without trimming. Thread state
 also reports whether recovery is running or interrupted so a retained recovery barrier stays actionable.
 `worktrees.recover` accepts `cancel` to stop active preparation while retaining the barrier for explicit retry.
+
+Worktree creation Release 2 uses version 24. Setup snapshots and subscribe/action/push envelopes
+carry a persisted `(generation, sequence)` ordering. Setup mutation requests require the expected
+operation ID. Bootstrap preparation accepts explicit naming intent and a setup-script override;
+raw preparation accepts an acknowledgment for retrying interrupted scripts.
 
 The authenticated `GET /api/bootstrap` response and WebSocket welcome advertise
 current capabilities, upload support, and global send limits. Today

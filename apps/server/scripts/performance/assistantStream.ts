@@ -81,6 +81,7 @@ function makeProviderService() {
   const unsupported = () => Effect.die(new Error("Unsupported provider call in perf")) as never;
   const service: ProviderServiceShape = {
     startSession: () => unsupported(),
+    replaceSession: () => unsupported(),
     sendTurn: () => unsupported(),
     interruptTurn: () => unsupported(),
     respondToRequest: () => unsupported(),
