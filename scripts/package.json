@@ -11,7 +11,8 @@
     "@muse-code/sdk": "1.4.8",
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "yaml": "^2.8.2"
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",

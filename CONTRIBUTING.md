@@ -8,10 +8,6 @@ You can still open an issue or PR, but please do so knowing there is a high chan
 
 If that sounds annoying, that is because it is. This project is still early and we are trying to keep scope, quality, and direction under control.
 
-PRs are automatically labeled with a `vouch:*` trust status and a `size:*` diff size based on changed lines.
-
-If you are an external contributor, expect `vouch:unvouched` until we explicitly add you to [.github/VOUCHED.td](.github/VOUCHED.td).
-
 ## What We Are Most Likely To Accept
 
 Small, focused bug fixes.
@@ -102,3 +98,17 @@ Audit research covers Claude SDK 0.2.113–0.3.295 and Codex 0.89.0–0.162.0. E
 versions are checked only for a specifically retained behavior, and recorded explicitly.
 Release 0 keeps the browser queue contract and wire protocol unchanged; submission
 provenance is stamped and stored solely on the server.
+
+## CI and dependency maintenance
+
+See [docs/ci.md](docs/ci.md) for the parallel jobs and the single `CI result` gate.
+Dependabot opens reviewed updates, without automatic merges. Runtime and provider
+harness upgrades stay manual and follow the audit procedure above, including Muse
+protocol auditing (`bun run protocol:audit:muse`) when its SDK changes. Codex protocol
+manifest pins are source constants and also stay manual.
+
+MSW worker regeneration is explicit so frozen installs leave tracked files unchanged.
+When upgrading MSW, run `node apps/web/node_modules/msw/cli/index.js init apps/web/public --no-save`, then
+`bun fmt`, and commit the generated worker with the dependency update. The worker
+install test rejects a version mismatch so an MSW upgrade cannot silently keep an
+outdated worker.

@@ -1,3 +1,4 @@
+import { COMPUTER_ACTION_VERB } from "@t3tools/shared/computerAction";
 import type { ComputerActivity, ComputerAppTier, ComputerBackendKind } from "@t3tools/contracts";
 
 export type ComputerStatusTone = "ok" | "pending" | "warning" | "error" | "off";
@@ -22,24 +23,6 @@ export function computerBackendLabel(backend: ComputerBackendKind | undefined): 
 }
 
 /** Ongoing and finished wording, so a completed action does not read as still running. */
-const COMPUTER_ACTION_VERB: Record<string, readonly [ongoing: string, done: string]> = {
-  screenshot: ["Taking a screenshot", "Took a screenshot"],
-  zoom: ["Zooming in", "Zoomed in"],
-  inspect: ["Reading the screen", "Read the screen"],
-  click: ["Clicking", "Clicked"],
-  move: ["Moving the pointer", "Moved the pointer"],
-  drag: ["Dragging", "Dragged"],
-  scroll: ["Scrolling", "Scrolled"],
-  type: ["Typing", "Typed"],
-  key: ["Pressing a key", "Pressed a key"],
-  elementAction: ["Using a control", "Used a control"],
-  openApp: ["Opening app", "Opened app"],
-  activateApp: ["Switching app", "Switched app"],
-  listApps: ["Listing apps", "Listed apps"],
-  resolveApps: ["Finding apps", "Found apps"],
-  status: ["Checking status", "Checked status"],
-  requestAccess: ["Requesting access", "Requested access"],
-};
 
 function humanizeOp(op: string): string {
   return op

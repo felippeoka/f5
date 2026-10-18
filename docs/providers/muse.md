@@ -42,6 +42,8 @@ resends a decision on its own. Pending approvals and questions come back after a
 - Rollback is not supported.
 - F5 never passes `--yolo`, `--disable-approval` or `--disable-sandbox`.
 
+- F5 preview and computer catalogs are unavailable: the pinned Muse SDK session API does not accept MCP configuration.
+
 <details>
 <summary>Details and limits</summary>
 

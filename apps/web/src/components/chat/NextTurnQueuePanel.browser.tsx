@@ -10,7 +10,10 @@ import { NextTurnQueuePanel } from "./NextTurnQueuePanel";
 import { useNextTurnQueueStore } from "../../nextTurnQueueStore";
 
 const nativeApiMock = vi.hoisted(() => ({ current: null as unknown }));
-vi.mock("~/nativeApi", () => ({ readNativeApi: () => nativeApiMock.current }));
+vi.mock("~/nativeApi", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../nativeApi")>()),
+  readNativeApi: () => nativeApiMock.current,
+}));
 
 let active: Awaited<ReturnType<typeof render>> | undefined;
 

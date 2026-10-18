@@ -1,3 +1,4 @@
+import * as Path from "node:path";
 import { makeFakeGitCore } from "../git/testDoubles.ts";
 import { makeMemoryWorktreePreparations } from "../persistence/worktreePreparations.testUtils.ts";
 import { ThreadId, type GitPrepareWorktreeInput } from "@t3tools/contracts";
@@ -7,14 +8,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProjectSetupScriptRunnerShape } from "./Services/ProjectSetupScriptRunner.ts";
 import { makeWorktreePreparation } from "./worktreePreparation.ts";
 
+const projectRoot = Path.resolve("/repo");
 const input: GitPrepareWorktreeInput = {
-  cwd: "/repo/old-worktree",
-  projectCwd: "/repo",
+  cwd: Path.join(projectRoot, "old-worktree"),
+  projectCwd: projectRoot,
   threadId: ThreadId.makeUnsafe("draft-1"),
   branch: "origin/feature",
   newBranch: "t3code/12345678",
 };
-const result = { worktree: { branch: input.newBranch, path: "/repo/new-worktree" } };
+const result = {
+  worktree: { branch: input.newBranch, path: Path.join(projectRoot, "new-worktree") },
+};
 const scopes: Scope.Closeable[] = [];
 afterEach(async () => {
   for (const scope of scopes.splice(0)) await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -25,7 +29,7 @@ async function harness() {
   scopes.push(scope);
   const receipts = makeMemoryWorktreePreparations();
   const git = makeFakeGitCore({
-    resolveCommonDir: () => Effect.succeed("/repo/.git"),
+    resolveCommonDir: () => Effect.succeed(Path.join(projectRoot, ".git")),
     resolveCommit: () => Effect.succeed("base-oid"),
     allocateWorktreePath: () => Effect.succeed(result.worktree.path),
     inspectCheckout: (path) =>
@@ -35,7 +39,7 @@ async function harness() {
           Effect.map((inspection) => ({
             ...inspection,
             canonicalRoot: result.worktree.path,
-            commonDir: "/repo/.git",
+            commonDir: Path.join(projectRoot, ".git"),
             branch: input.newBranch,
             headSha: "base-oid",
             registration: {
@@ -56,8 +60,8 @@ async function harness() {
     Effect.gen(function* () {
       const receipt = yield* receipts.allocate({
         operationId: request.operationId,
-        repositoryIdentity: "/repo/.git",
-        projectIdentity: "/repo",
+        repositoryIdentity: Path.join(projectRoot, ".git"),
+        projectIdentity: projectRoot,
         owner: `thread:${request.threadId}`,
         requestedBase: request.branch,
         baseOid: "base-oid",
@@ -87,7 +91,7 @@ describe("worktree preparation", () => {
       await Effect.runPromise(prepare({ ...input, threadId, newBranch: `t3code/${threadId}` }));
       expect(runSetup).toHaveBeenLastCalledWith({
         threadId,
-        projectCwd: "/repo",
+        projectCwd: projectRoot,
         worktreePath: result.worktree.path,
         preferredTerminalId: `setup-t3code-${threadId}`,
       });
@@ -242,8 +246,8 @@ describe("worktree preparation", () => {
     await Effect.runPromise(
       receipts.allocate({
         operationId: "before-add",
-        repositoryIdentity: "/repo/.git",
-        projectIdentity: "/repo",
+        repositoryIdentity: Path.join(projectRoot, ".git"),
+        projectIdentity: projectRoot,
         owner: `thread:${input.threadId}`,
         requestedBase: input.branch,
         baseOid: "base-oid",

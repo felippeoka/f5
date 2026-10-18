@@ -1,3 +1,4 @@
+import { useAgentComputerActivityStore } from "../agentComputerActivityStore";
 import { useAgentBrowserActivityStore } from "../agentBrowserActivityStore";
 import { ThreadId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -10,10 +11,18 @@ vi.mock("../nativeApi", () => ({
   }),
 }));
 afterEach(() => {
+  useAgentComputerActivityStore.getState().resetConnection();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 describe("computer controls", () => {
+  it("confirms a successful Stop when there is no lease to release", async () => {
+    vi.stubGlobal("window", {
+      desktopBridge: { computerAutomation: { setPaused: vi.fn(async () => {}) } },
+    });
+    await stopComputerTurn(ThreadId.makeUnsafe("no-lease"));
+    expect(useAgentComputerActivityStore.getState().stopUnconfirmed["no-lease"]).toBeUndefined();
+  });
   it("suspends native input before interrupting the provider turn", async () => {
     let suspend: () => void = () => {};
     const native = vi.fn(
@@ -42,7 +51,7 @@ describe("computer controls", () => {
         },
       },
     });
-    await expect(stopComputerTurn(ThreadId.makeUnsafe("t"))).rejects.toThrow("Host lost");
+    await expect(stopComputerTurn(ThreadId.makeUnsafe("t"))).rejects.toThrow("Stop unconfirmed");
     expect(mocks.dispatch).toHaveBeenCalledOnce();
   });
   it("waits for authoritative native resume without clearing the server pause locally", async () => {

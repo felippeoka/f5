@@ -12,6 +12,7 @@ class Ipc extends EventEmitter {
   messages: DesktopComputerHostMessage[] = [];
   holdRequests = false;
   appResults: unknown[] | undefined;
+  inspectResults: unknown[] = [];
   busy = false;
   send(raw: unknown, callback: (error: Error | null) => void) {
     const message = raw as DesktopComputerHostMessage;
@@ -41,9 +42,11 @@ class Ipc extends EventEmitter {
           type: "response",
           requestId: message.request.requestId,
           result:
-            message.request.op === "resolveApps" && this.appResults
-              ? this.appResults
-              : { ok: true },
+            message.request.op === "inspect" && this.inspectResults.length
+              ? this.inspectResults.shift()
+              : message.request.op === "resolveApps" && this.appResults
+                ? this.appResults
+                : { ok: true },
         }),
       );
     return true;
@@ -145,6 +148,7 @@ describe("computer broker safety boundaries", () => {
         data: {
           threadId: "t",
           backend: "native",
+          source: "tool",
           op: "elementAction",
           status: "failed",
           outcome: "app-resolution-failed",
@@ -330,6 +334,7 @@ describe("computer broker safety boundaries", () => {
     const off = h.broker.subscribe((event) => events.push(event));
     try {
       await h.broker.invoke("t", "s", { op: "type", text: "x" });
+      events.length = 0;
       h.ipc.emit("message", {
         type: "killSwitch",
         threadId: "t",
@@ -338,6 +343,7 @@ describe("computer broker safety boundaries", () => {
       });
       expect(events).toEqual([]);
       h.broker.endTurn("t", "turn", "s");
+      events.length = 0;
       h.ipc.emit("message", {
         type: "killSwitch",
         threadId: "t",
@@ -753,6 +759,249 @@ it("refuses screenshots, zoom and inspection while paused", async () => {
       });
     expect(h.ipc.messages.filter((message) => message.type === "request")).toEqual([]);
   } finally {
+    h.broker.close();
+  }
+});
+
+describe("computer_wait", () => {
+  it("cancels while initial context resolution is still held", async () => {
+    const h = await harness();
+    const original = h.broker.context.bind(h.broker);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(h.broker, "context").mockImplementation(async (...args) => {
+      await held;
+      return original(...args);
+    });
+    try {
+      const pending = h.broker.wait("t", "s", { deadlineMs: performance.now() + 10_000 });
+      const rejected = expect(pending).rejects.toMatchObject({
+        error: { _tag: "Interrupted", cause: "turn-ended" },
+      });
+      h.broker.endTurn("t", "turn", "s");
+      await rejected;
+      release();
+      await expect(
+        h.broker.wait("t", "s", { deadlineMs: performance.now() + 100 }),
+      ).rejects.toMatchObject({ error: { _tag: "Interrupted", cause: "turn-ended" } });
+    } finally {
+      release();
+      h.broker.close();
+    }
+  });
+
+  it("settles once under a monotonic deadline and rejects concurrent waits", async () => {
+    const h = await harness();
+    const events: string[] = [];
+    h.broker.subscribe((event) => {
+      if (event.channel === "computer.activity" && event.data.op === "wait")
+        events.push(event.data.status);
+    });
+    try {
+      const wait = h.broker.wait("t", "s", { deadlineMs: performance.now() + 100 });
+      await expect(
+        h.broker.wait("t", "s", { deadlineMs: performance.now() + 100 }),
+      ).rejects.toMatchObject({ error: { _tag: "Busy" } });
+      expect(await wait).toMatchObject({ waitedMs: expect.any(Number) });
+      expect(events).toEqual(["started", "completed"]);
+    } finally {
+      h.broker.close();
+    }
+  });
+  it.each(["paused", "turn-ended", "released", "policy-changed"] as const)(
+    "cancels promptly on %s and never carries a loop into a replacement turn",
+    async (cause) => {
+      const h = await harness();
+      try {
+        const wait = h.broker.wait("t", "s", { deadlineMs: performance.now() + 10_000 });
+        const rejected = expect(wait).rejects.toMatchObject({
+          error: { _tag: "Interrupted", cause: cause === "released" ? "turn-ended" : cause },
+        });
+        await vi.waitFor(() => expect(h.broker.matchesTurn("t", "s", "turn")).toBe(true));
+        const startedAt = performance.now();
+        if (cause === "paused") h.broker.pause.set("t", true);
+        else if (cause === "turn-ended") h.broker.endTurn("t", "turn", "s");
+        else if (cause === "released") h.broker.releaseSession("t", "s");
+        else await h.broker.policyTransition(async () => {});
+        await rejected;
+        expect(performance.now() - startedAt).toBeLessThan(50);
+      } finally {
+        h.broker.close();
+      }
+    },
+  );
+  it("rejects without an active turn and matches partial trees with bounded inspections", async () => {
+    const h = await harness();
+    try {
+      h.set({ turnId: "observation" });
+      await expect(
+        h.broker.wait("t", "s", { deadlineMs: performance.now() + 100 }),
+      ).rejects.toMatchObject({ error: { _tag: "Interrupted" } });
+      h.set({ turnId: "turn" });
+      h.ipc.appResults = [{ appId: "com.apple.TextEdit", name: "TextEdit" }];
+      h.ipc.inspectResults = [
+        {
+          accessible: true,
+          snapshotId: "snapshot",
+          nodes: [{ elementRef: "one", role: "AXButton", name: "Ready" }],
+        },
+      ];
+      const result = await h.broker.wait("t", "s", {
+        deadlineMs: performance.now() + 500,
+        condition: { app: "TextEdit", role: "AXButton", name: "Ready" },
+      });
+      expect(result).toMatchObject({ matched: true, snapshotId: "snapshot", elementRefs: ["one"] });
+      const inspections = h.ipc.messages.filter(
+        (message) => message.type === "request" && message.request.op === "inspect",
+      );
+      expect(inspections).toHaveLength(1);
+      expect(inspections[0]).toMatchObject({ request: { maxNodes: 100 } });
+    } finally {
+      h.broker.close();
+    }
+  });
+  it("uses a single deadline even when resolution never replies and cancels its native request", async () => {
+    const h = await harness();
+    h.ipc.holdRequests = true;
+    try {
+      const result = await h.broker.wait("t", "s", {
+        deadlineMs: performance.now() + 100,
+        condition: { app: "TextEdit", name: "Ready" },
+      });
+      expect(result).toMatchObject({ timedOut: true, matched: false });
+      expect(result.waitedMs).toBeLessThan(200);
+      expect(h.ipc.messages.some((message) => message.type === "cancel")).toBe(true);
+    } finally {
+      h.broker.close();
+    }
+  });
+});
+
+it("suppresses stale and legacy thumbnails while preserving correlated current activity", async () => {
+  const h = await harness();
+  const activity: unknown[] = [];
+  h.broker.subscribe((event) => {
+    if (event.channel === "computer.activity") activity.push(event.data);
+  });
+  try {
+    h.ipc.holdRequests = true;
+    const invocation = h.broker.invoke("t", "s", { op: "type", text: "test" });
+    await vi.waitFor(() =>
+      expect(h.ipc.messages.some((message) => message.type === "request")).toBe(true),
+    );
+    const request = h.ipc.messages.findLast((message) => message.type === "request");
+    if (request?.type !== "request") throw new Error("missing request");
+    const completed = {
+      type: "activity",
+      activity: {
+        threadId: "t",
+        backend: "native",
+        op: "type",
+        status: "completed",
+        requestId: request.request.requestId,
+        sessionGeneration: "s",
+        thumbnailDataUrl: "capture",
+      },
+    };
+    h.ipc.emit("message", completed);
+    expect(activity.at(-1)).not.toHaveProperty("thumbnailDataUrl");
+    h.ipc.emit("message", {
+      type: "hostCapabilities",
+      capabilities: ["computer-activity-correlation-v1"],
+    });
+    h.ipc.emit("message", completed);
+    expect(activity.at(-1)).toHaveProperty("thumbnailDataUrl", "capture");
+    h.broker.setPaused("t", true);
+    h.ipc.emit("message", completed);
+    expect(activity.at(-1)).not.toHaveProperty("thumbnailDataUrl");
+    h.ipc.finish();
+    await invocation;
+  } finally {
+    h.broker.close();
+  }
+});
+
+it("preserves observations on an idle turn completion", async () => {
+  const h = await harness();
+  try {
+    await h.broker.invoke("t", "s", { op: "status" });
+    const invalidated: unknown[] = [];
+    h.broker.subscribe((event) => {
+      if (event.channel === "computer.observations.invalidated") invalidated.push(event);
+    });
+    h.broker.endTurn("t", "turn", "s");
+    expect(invalidated).toHaveLength(0);
+  } finally {
+    h.broker.close();
+  }
+});
+
+it("ignores a late previous turn completion while the next wait is resolving context", async () => {
+  const h = await harness();
+  const original = h.broker.context.bind(h.broker);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  try {
+    h.broker.beginTurn("t", "previous");
+    h.broker.beginTurn("t", "next");
+    h.set({ turnId: "next" });
+    vi.spyOn(h.broker, "context").mockImplementation(async (...args) => {
+      await held;
+      return original(...args);
+    });
+    const pending = h.broker.wait("t", "s", { deadlineMs: performance.now() + 100 });
+    h.broker.endTurn("t", "previous", "s");
+    release();
+    await expect(pending).resolves.toMatchObject({ waitedMs: expect.any(Number) });
+  } finally {
+    release();
+    h.broker.close();
+  }
+});
+
+it("rejects a lease acquisition that outlives two turn transitions", async () => {
+  const h = await harness();
+  let release!: () => void;
+  let acquired!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    acquired = resolve;
+  });
+  const original = h.broker.host.correlated.bind(h.broker.host);
+  const spy = vi
+    .spyOn(h.broker.host, "correlated")
+    .mockImplementation(async (message, timeout, mutating) => {
+      const result = await original(message, timeout, mutating);
+      if (message.type === "leaseAcquire") {
+        acquired();
+        await held;
+      }
+      return result;
+    });
+  try {
+    h.broker.beginTurn("t", "turn");
+    const pending = h.broker.invoke("t", "s", { op: "type", text: "must not dispatch" });
+    const rejected = expect(pending).rejects.toMatchObject({
+      error: { _tag: "Interrupted", cause: "turn-ended" },
+    });
+    await started;
+    h.broker.beginTurn("t", "next");
+    h.broker.endTurn("t", "next", "s");
+    release();
+    await rejected;
+    expect(
+      h.ipc.messages.some((message) => message.type === "request" && message.request.op === "type"),
+    ).toBe(false);
+    expect(h.ipc.messages.some((message) => message.type === "leaseRelease")).toBe(true);
+  } finally {
+    release();
+    spy.mockRestore();
     h.broker.close();
   }
 });

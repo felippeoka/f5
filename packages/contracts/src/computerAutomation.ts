@@ -120,13 +120,22 @@ export type ComputerElementAction = typeof ComputerElementAction.Type;
 /** Background acts inside one app through accessibility; foreground posts system input. */
 export const ComputerDelivery = Schema.Literals(["background", "foreground"]);
 export type ComputerDelivery = typeof ComputerDelivery.Type;
+export const COMPUTER_AGENT_IDENTITY_CAPABILITY = "computer-agent-identity-v1";
+export const COMPUTER_ACTIVITY_CORRELATION_CAPABILITY = "computer-activity-correlation-v1";
+export const ComputerAgentProviderSchema = Schema.Literals([
+  "claude",
+  "codex",
+  "cursor",
+  "grok",
+  "antigravity",
+]);
 const Envelope = {
   requestId: Id,
   payloadHash: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   authorization: ComputerAuthorization,
   deadlineAtMs: Positive,
   agent: Schema.Struct({
-    provider: Schema.Literals(["claude", "codex"]),
+    provider: ComputerAgentProviderSchema,
     threadTitle: Schema.String.check(Schema.isMaxLength(200)),
   }),
   screenshot: Schema.optional(Schema.Boolean),
@@ -300,6 +309,7 @@ export const ComputerAutomationError = Schema.Union([
       "user-input",
       "kill-switch",
       "access-changed",
+      "policy-changed",
       "turn-ended",
       "permit-expired",
     ]),
@@ -474,7 +484,12 @@ export const ComputerToolOutcomeCode = Schema.Literals([
   "app-required",
 ]);
 export type ComputerToolOutcomeCode = typeof ComputerToolOutcomeCode.Type;
+export const COMPUTER_TAKEOVER_CONSENT_TIMEOUT_MS = 300_000;
+
 export const ComputerActivity = Schema.Struct({
+  source: Schema.optional(Schema.Literal("tool")),
+  requestId: Schema.optionalKey(Id),
+  sessionGeneration: Schema.optionalKey(Id),
   threadId: Id,
   backend: ComputerBackendKind,
   op: Id,

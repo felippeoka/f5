@@ -1,3 +1,4 @@
+import { COMPUTER_TAKEOVER_CONSENT_TIMEOUT_MS } from "@t3tools/contracts";
 import { randomUUID } from "node:crypto";
 import type {
   ComputerAccessAnswer,
@@ -35,6 +36,7 @@ interface Pending {
   request: ComputerAccessRequested;
   generation: string;
   turnId: string;
+  expiresAtMs: number;
   timer: ReturnType<typeof setTimeout>;
   resolve: (value: ComputerAccessAnswer | null) => void;
 }
@@ -54,7 +56,7 @@ export class ComputerAccessService {
       platform: ComputerPlatform;
       backendIncarnation: string;
       storage: ComputerAccessStorage;
-      request: (request: ComputerAccessRequested) => void;
+      request: (request: ComputerAccessRequested, expiresAtMs: number) => void;
       settled: (requestId: string, threadId: string, allowed: boolean) => void;
       changed: (threadId: string) => void;
       timeoutMs?: number;
@@ -143,10 +145,11 @@ export class ComputerAccessService {
         request,
         generation: binding.generation,
         turnId: takeover.turnId,
+        expiresAtMs: Date.now() + COMPUTER_TAKEOVER_CONSENT_TIMEOUT_MS,
         timer,
         resolve: (answer) => resolve(answer?.allowForegroundTakeover === true),
       });
-      this.options.request(request);
+      this.options.request(request, this.pending.get(request.requestId)!.expiresAtMs);
     });
   }
   cancelRequest(requestId: string): void {
@@ -161,8 +164,11 @@ export class ComputerAccessService {
   actionsApproved(threadId: string): boolean {
     return this.bindings.get(threadId)?.actionsApproved ?? false;
   }
-  pendingRequests(): ReadonlyArray<ComputerAccessRequested> {
-    return [...this.pending.values()].map((entry) => entry.request);
+  pendingRequests(): ReadonlyArray<ComputerAccessRequested & { expiresAtMs: number }> {
+    return [...this.pending.values()].map((entry) => ({
+      ...entry.request,
+      expiresAtMs: entry.expiresAtMs,
+    }));
   }
   grants(threadId: string): ReadonlyArray<ComputerGrant> {
     const binding = this.bindings.get(threadId);
@@ -260,10 +266,11 @@ export class ComputerAccessService {
         request,
         generation: binding.generation,
         turnId,
+        expiresAtMs: Date.now() + (this.options.timeoutMs ?? 300_000),
         timer,
         resolve,
       });
-      this.options.request(request);
+      this.options.request(request, this.pending.get(request.requestId)!.expiresAtMs);
     });
   }
   /** Only DesktopComputerHost's listener calls this method. No WebSocket answer method exists. */

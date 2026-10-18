@@ -514,6 +514,7 @@ export const WS_CHANNELS = {
   computerAccessSettled: "computer.access.settled",
   computerAccessGrantsChanged: "computer.access.grantsChanged",
   computerActivity: "computer.activity",
+  computerObservationsInvalidated: "computer.observations.invalidated",
   serverWelcome: "server.welcome",
   serverConfigUpdated: "server.configUpdated",
   providerAdvisoriesUpdated: "provider.advisoriesUpdated",
@@ -1000,6 +1001,7 @@ export interface WsPushPayloadByChannel {
   readonly [WS_CHANNELS.computerAccessRequested]: typeof ComputerAccessPush.Type;
   readonly [WS_CHANNELS.computerAccessSettled]: typeof ComputerAccessSettled.Type;
   readonly [WS_CHANNELS.computerAccessGrantsChanged]: typeof ComputerGrantsChanged.Type;
+  readonly [WS_CHANNELS.computerObservationsInvalidated]: { readonly threadId: string };
   readonly [WS_CHANNELS.computerActivity]: typeof ComputerActivity.Type;
   readonly [WS_CHANNELS.mcpStatusUpdated]: McpStatusUpdatedPayload;
   readonly [WS_CHANNELS.storageInvalidated]: StorageInvalidatedPayload;
@@ -1087,6 +1089,8 @@ export const WsPushPreviewAutomationPauseChanged = makeWsPushSchema(
   PreviewAutomationPauseChanged,
 );
 export const AgentComputerUseHolder = Schema.Struct({
+  /** False for retained pause/recovery summaries after authoritative release. */
+  leaseHeld: Schema.optional(Schema.Boolean),
   threadId: ThreadId,
   /** Absent for browser-integration (Chrome) holders. */
   backend: Schema.optional(ComputerBackendKind),
@@ -1118,6 +1122,7 @@ export const WsPushAgentComputerUseChanged = makeWsPushSchema(
   AgentComputerUseChanged,
 );
 export const ComputerAccessPush = Schema.Struct({
+  expiresAtMs: Schema.optionalKey(Schema.Number),
   ...ComputerAccessRequested.fields,
   backendIncarnation: Schema.String,
 });
@@ -1142,6 +1147,10 @@ export const WsPushComputerAccessSettled = makeWsPushSchema(
 export const WsPushComputerGrantsChanged = makeWsPushSchema(
   WS_CHANNELS.computerAccessGrantsChanged,
   ComputerGrantsChanged,
+);
+export const WsPushComputerObservationsInvalidated = makeWsPushSchema(
+  WS_CHANNELS.computerObservationsInvalidated,
+  Schema.Struct({ threadId: Schema.String }),
 );
 export const WsPushComputerActivity = makeWsPushSchema(
   WS_CHANNELS.computerActivity,
@@ -1208,6 +1217,7 @@ export const WsPushChannelSchema = Schema.Literals([
   WS_CHANNELS.computerAccessSettled,
   WS_CHANNELS.computerAccessGrantsChanged,
   WS_CHANNELS.computerActivity,
+  WS_CHANNELS.computerObservationsInvalidated,
   WS_CHANNELS.mcpStatusUpdated,
   WS_CHANNELS.storageInvalidated,
   WS_CHANNELS.storageCleanupProgress,
@@ -1244,6 +1254,7 @@ export const WsPush = Schema.Union([
   WsPushComputerAccessSettled,
   WsPushComputerGrantsChanged,
   WsPushComputerActivity,
+  WsPushComputerObservationsInvalidated,
   WsPushMcpStatusUpdated,
   WsPushStorageInvalidated,
   WsPushStorageCleanupProgress,

@@ -36,7 +36,7 @@ it("serves the complete computer catalog through consent, image, input, interrup
           return { status: response.status, body: (await response.json()) as any };
         };
         yield* Effect.promise(async () => {
-          expect((await rpc("tools/list")).body.result.tools).toHaveLength(16);
+          expect((await rpc("tools/list")).body.result.tools).toHaveLength(17);
           expect(
             (await rpc("tools/call", { name: "computer_status", arguments: {} })).body.result
               .isError,
@@ -62,6 +62,15 @@ it("serves the complete computer catalog through consent, image, input, interrup
           expect(JSON.stringify(replay.body)).toContain("ReplayRejected");
           expect(fixture.seen.filter((request) => request.op === "click")).toHaveLength(1);
           expect(click.body.result.isError).toBeFalsy();
+          expect(click.body.result.content.some((block: any) => block.type === "image")).toBe(true);
+          const secondClick = await rpc("tools/call", {
+            name: "computer_click",
+            arguments: { x: 0, y: 0 },
+          });
+          expect(secondClick.body.result.isError).toBeFalsy();
+          expect(fixture.seen.filter((request) => request.op === "click")).toHaveLength(2);
+          expect(fixture.seen.filter((request) => request.op === "screenshot")).toHaveLength(1);
+
           expect(
             fixture.seen.find((request) => request.op === "click")?.authorization.grants,
           ).toHaveLength(1);

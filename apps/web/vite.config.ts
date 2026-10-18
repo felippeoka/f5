@@ -2,7 +2,9 @@ import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
+
+import { ciTestReports } from "../../scripts/lib/ci-test-reports";
 import pkg from "./package.json" with { type: "json" };
 
 const port = Number(process.env.PORT ?? 5733);
@@ -16,6 +18,7 @@ const buildSourcemap =
       : false;
 
 export default defineConfig({
+  test: ciTestReports(),
   plugins: [
     tanstackRouter({
       // Route components are the largest independent UI surfaces in F5.

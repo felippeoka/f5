@@ -1,3 +1,6 @@
+import { Option } from "effect";
+import { PreviewMcpHttpServer } from "../../mcp/PreviewMcpHttpServer";
+import { ComputerAutomationBroker } from "../../computer/ComputerAutomationBroker";
 import * as NodeOS from "node:os";
 import { makeProviderLimits } from "../../usage/providerLimits.ts";
 import { acquireAccountAdmission } from "../../profiles/ProviderAccountGuard.ts";
@@ -63,10 +66,16 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
       let models: ReadonlyArray<ServerProviderModel> | undefined;
       let refreshSnapshot: Effect.Effect<void> = Effect.void;
       let readModelChoices: Effect.Effect<void> = Effect.void;
+      const previewMcp = Option.getOrUndefined(yield* Effect.serviceOption(PreviewMcpHttpServer));
+      const computerBroker = Option.getOrUndefined(
+        yield* Effect.serviceOption(ComputerAutomationBroker),
+      );
       const adapter = yield* makeGrokAdapter(
         { enabled, binaryPath: "", customModels: config.customModels },
         {
           provider: "antigravity",
+          ...(previewMcp ? { previewMcpHttpServer: previewMcp } : {}),
+          ...(computerBroker ? { computerAutomationBroker: computerBroker } : {}),
           nativeCompaction: config.nativeCompaction,
           onRuntimeReady: (runtime) =>
             Effect.gen(function* () {

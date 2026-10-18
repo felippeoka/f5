@@ -11,6 +11,8 @@ export interface ChromeNativeHostDescriptor {
   readonly verifyServer?: (status: unknown) => boolean;
   readonly runtime?: {
     readonly platform: "darwin" | "win32";
+    readonly sdkVersion: string;
+    readonly arch: string;
     readonly executableSha256: string;
     readonly evidence: string;
     readonly locations: (

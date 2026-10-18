@@ -1,3 +1,13 @@
+import { isSyntheticOneOffThreadId } from "../../codexAppServerManager";
+import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
+import {
+  prepareAcpAutomationCatalogs,
+  classifyAcpToolEvent,
+  type AcpAutomationCatalogs,
+} from "../acp/AcpAutomationCatalogs";
+import type { PreviewMcpHttpServerShape } from "../../mcp/PreviewMcpHttpServer";
+import type { ComputerAutomationBrokerRuntime } from "../../computer/ComputerAutomationBroker";
+import { makeAutomationRuntimeEventPreparer } from "../prepareAutomationRuntimeEvent";
 import { providerRuntimeCapabilities } from "@t3tools/shared/providerRuntimeCapabilities";
 import { AntigravityTasks } from "../acp/AntigravityTasks.ts";
 import {
@@ -68,7 +78,7 @@ import {
   makeAcpToolCallEvent,
 } from "../acp/AcpCoreRuntimeEvents.ts";
 import { parsePermissionRequest } from "../acp/AcpRuntimeModel.ts";
-import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
+import { makeAcpNativeLoggers, redactAcpLogPayload } from "../acp/AcpNativeLogging.ts";
 import {
   applyGrokAcpModelSelection,
   currentGrokModelIdFromSessionSetup,
@@ -94,6 +104,10 @@ const PROVIDER: ProviderKind = "grok";
 const GROK_RESUME_VERSION = 1 as const;
 
 export interface GrokAdapterLiveOptions {
+  /** Certification/test seam; production drivers leave this unset. */
+  readonly automationCatalogVerification?: { preview?: boolean; computer?: boolean };
+  readonly previewMcpHttpServer?: PreviewMcpHttpServerShape;
+  readonly computerAutomationBroker?: ComputerAutomationBrokerRuntime;
   readonly provider?: ProviderKind;
   readonly nativeCompaction?: boolean;
   readonly discoverSkillCommands?: (
@@ -287,8 +301,51 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         ),
       );
 
-    const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
-      PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid);
+    const automationCatalogs = new Map<string, AcpAutomationCatalogs>();
+    const prepareRuntimeEvent = yield* makeAutomationRuntimeEventPreparer;
+    const offerRuntimeEvent = (event: ProviderRuntimeEvent) => {
+      const release = automationEventSanitizer.retain(event.threadId);
+      const catalogs = automationCatalogs.get(event.threadId);
+      if (event.type === "turn.completed" && event.turnId) catalogs?.endTurn(event.turnId);
+      const hiddenPermission =
+        event.type === "request.opened" &&
+        event.payload.detail === "Tool inputs hidden while computer control is enabled";
+      return (
+        event.type === "session.configured" && catalogs
+          ? Effect.promise(catalogs.refresh)
+          : Effect.void
+      ).pipe(
+        Effect.andThen(
+          Effect.suspend(() => {
+            if (event.type === "session.configured" && catalogs)
+              event = {
+                ...event,
+                payload: {
+                  ...event.payload,
+                  config: { ...event.payload.config, agentBrowser: catalogs.agentBrowser() },
+                },
+              };
+            return prepareRuntimeEvent(event);
+          }),
+        ),
+        Effect.map((prepared) =>
+          hiddenPermission && prepared.type === "request.opened"
+            ? {
+                ...prepared,
+                payload: {
+                  ...prepared.payload,
+                  detail: "Tool inputs hidden while computer control is enabled",
+                },
+              }
+            : prepared,
+        ),
+        Effect.flatMap((prepared) =>
+          PubSub.publish(runtimeEventPubSub, catalogs?.sanitizeEvent(prepared) ?? prepared),
+        ),
+        Effect.asVoid,
+        Effect.ensuring(Effect.sync(release)),
+      );
+    };
 
     const getThreadSemaphore = (threadId: string) =>
       SynchronizedRef.modifyEffect(threadLocksRef, (current) => {
@@ -325,7 +382,9 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               createdAt: observedAt,
               method,
               threadId,
-              payload,
+              payload: (automationCatalogs.get(threadId)?.redactForLog ?? redactAcpLogPayload)(
+                payload,
+              ),
             },
           },
           threadId,
@@ -504,10 +563,41 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             options?.discoverSkillCommands?.(cwd) ?? Effect.succeed([])
           );
           const resumeSessionId = parseGrokResume(input.resumeCursor)?.sessionId;
+          const catalogs = yield* prepareAcpAutomationCatalogs({
+            threadId: input.threadId,
+            provider: PROVIDER as "cursor" | "grok" | "antigravity",
+            scope: sessionScope,
+            ...(options?.previewMcpHttpServer ? { preview: options.previewMcpHttpServer } : {}),
+            ...(options?.computerAutomationBroker
+              ? { computer: options.computerAutomationBroker }
+              : {}),
+            ...(options?.automationCatalogVerification
+              ? { verification: options.automationCatalogVerification }
+              : {}),
+            readOnlyWorkflow: !!input.workflowExecutionProfile,
+            ordinarySession:
+              serverConfig.mode === "desktop" &&
+              !isSyntheticOneOffThreadId(input.threadId) &&
+              !input.workflowExecutionProfile,
+            computerCapableLineage: !!(
+              input.resumeCursor &&
+              typeof input.resumeCursor === "object" &&
+              "computerCapable" in input.resumeCursor &&
+              input.resumeCursor.computerCapable === true
+            ),
+          });
+          automationCatalogs.set(input.threadId, catalogs);
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              if (automationCatalogs.get(input.threadId) === catalogs)
+                automationCatalogs.delete(input.threadId);
+            }),
+          ).pipe(Effect.provideService(Scope.Scope, sessionScope));
           const acpNativeLoggers = makeAcpNativeLoggers({
             nativeEventLogger,
             provider: PROVIDER,
             threadId: input.threadId,
+            redactForLog: catalogs.redactForLog,
           });
 
           const acp = yield* (options?.makeRuntime ?? makeGrokAcpRuntime)({
@@ -522,15 +612,18 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               provider: PROVIDER,
             },
             ...acpNativeLoggers,
+            mcpServers: catalogs.mcpServers,
+            sanitizeStderr: catalogs.scrubDiagnostic,
+            hasSensitiveConfiguration: catalogs.hasSensitiveConfiguration,
           }).pipe(
             Effect.provideService(Scope.Scope, sessionScope),
             Effect.mapError(
-              (cause) =>
+              (error) =>
                 new ProviderAdapterProcessError({
                   provider: PROVIDER,
                   threadId: input.threadId,
-                  detail: cause.message,
-                  cause,
+                  detail: catalogs.scrubDiagnostic(error.message).slice(0, 2000),
+                  cause: undefined,
                 }),
             ),
           );
@@ -663,7 +756,15 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   )
                     return { outcome: { outcome: "cancelled" as const } };
                   yield* logNative(input.threadId, "session/request_permission", params);
+                  const computerRequest = catalogs.classify(params.toolCall);
+                  if (computerRequest)
+                    params = {
+                      ...params,
+                      toolCall: { toolCallId: params.toolCall.toolCallId, title: "Tool activity" },
+                    };
+
                   if (
+                    !computerRequest &&
                     PROVIDER === "antigravity" &&
                     params.toolCall.toolCallId.startsWith("interaction_")
                   ) {
@@ -711,7 +812,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                         PROVIDER === "antigravity"
                           ? selectPermissionOptionId(params, "accept")
                           : selectAutoApprovedPermissionOption(params);
-                      if (autoApprovedOptionId !== undefined) {
+                      if (!computerRequest && autoApprovedOptionId !== undefined) {
                         return {
                           outcome: {
                             outcome: "selected" as const,
@@ -744,10 +845,11 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                       turnId: sessions.get(input.threadId)?.activeTurnId,
                       requestId: runtimeRequestId,
                       permissionRequest,
-                      detail:
-                        permissionRequest.detail ??
-                        encodeJsonStringForDiagnostics(params)?.slice(0, 2000) ??
-                        "[unserializable params]",
+                      detail: computerRequest
+                        ? "Tool inputs hidden while computer control is enabled"
+                        : (permissionRequest.detail ??
+                          encodeJsonStringForDiagnostics(params)?.slice(0, 2000) ??
+                          "[unserializable params]"),
                       ...(PROVIDER === "antigravity"
                         ? {
                             approvalOptions: antigravityApprovalOptions(params),
@@ -788,7 +890,14 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             return yield* acp.start();
           }).pipe(
             Effect.mapError((error) =>
-              mapAcpToAdapterError(PROVIDER, input.threadId, "session/start", error),
+              mapAcpToAdapterError(
+                PROVIDER,
+                input.threadId,
+                "session/start",
+                error,
+                automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+                automationCatalogs.get(input.threadId)?.hasSensitiveConfiguration() ?? false,
+              ),
             ),
           );
 
@@ -797,7 +906,14 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               .configureRuntime(acp, input.runtimeMode)
               .pipe(
                 Effect.mapError((cause) =>
-                  mapAcpToAdapterError(PROVIDER, input.threadId, "session/configure", cause),
+                  mapAcpToAdapterError(
+                    PROVIDER,
+                    input.threadId,
+                    "session/configure",
+                    cause,
+                    automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+                    automationCatalogs.get(input.threadId)?.hasSensitiveConfiguration() ?? false,
+                  ),
                 ),
               );
           if (options?.onRuntimeReady) yield* options.onRuntimeReady(acp);
@@ -812,7 +928,14 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 ? undefined
                 : requestedStartModelId,
             mapError: (cause) =>
-              mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
+              mapAcpToAdapterError(
+                PROVIDER,
+                input.threadId,
+                "session/set_model",
+                cause,
+                automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+                automationCatalogs.get(input.threadId)?.hasSensitiveConfiguration() ?? false,
+              ),
           });
 
           const now = yield* nowIso;
@@ -827,6 +950,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             resumeCursor: {
               schemaVersion: GROK_RESUME_VERSION,
               sessionId: started.sessionId,
+              ...(catalogs.computerCapable() ? { computerCapable: true } : {}),
             },
             createdAt: now,
             updatedAt: now,
@@ -853,9 +977,27 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           };
 
           let nativeSkillCommands: typeof discoveredSkillCommands = [];
+          const offCatalogStatus = catalogs.onChanged(() => {
+            void Effect.runPromise(
+              Effect.gen(function* () {
+                yield* offerRuntimeEvent({
+                  type: "session.configured",
+                  ...(yield* makeEventStamp()),
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  payload: { config: {} },
+                });
+              }),
+            );
+          });
+          yield* Effect.addFinalizer(() => Effect.sync(offCatalogStatus)).pipe(
+            Effect.provideService(Scope.Scope, sessionScope),
+          );
           const nf = yield* Stream.runDrain(
             Stream.mapEffect(acp.getEvents(), (event) =>
               Effect.gen(function* () {
+                const computerCall =
+                  event._tag === "ToolCallUpdated" && classifyAcpToolEvent(catalogs, event);
                 switch (event._tag) {
                   case "ModeChanged":
                     return;
@@ -889,7 +1031,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     return;
                   case "ToolCallUpdated":
                     if (ctx.stopped) return;
-                    if (PROVIDER === "antigravity" && ctx.activeTurnId) {
+                    if (!computerCall && PROVIDER === "antigravity" && ctx.activeTurnId) {
                       for (const eventData of ctx.antigravityTasks.update(
                         event.toolCall,
                         event.rawPayload,
@@ -902,14 +1044,16 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                           turnId: ctx.activeTurnId,
                         } as ProviderRuntimeEvent);
                     }
-                    for (const task of buildGrokBackgroundTaskEvents({
-                      tasks: ctx.backgroundTasks,
-                      toolCallId: event.toolCall.toolCallId,
-                      rawInput: event.toolCall.data.rawInput,
-                      rawOutput: event.toolCall.data.rawOutput,
-                      toolCallStatus: event.toolCall.status,
-                      turnId: ctx.activeTurnId,
-                    })) {
+                    for (const task of computerCall
+                      ? []
+                      : buildGrokBackgroundTaskEvents({
+                          tasks: ctx.backgroundTasks,
+                          toolCallId: event.toolCall.toolCallId,
+                          rawInput: event.toolCall.data.rawInput,
+                          rawOutput: event.toolCall.data.rawOutput,
+                          toolCallStatus: event.toolCall.status,
+                          turnId: ctx.activeTurnId,
+                        })) {
                       yield* offerRuntimeEvent({
                         ...task,
                         ...(yield* makeEventStamp()),
@@ -1062,7 +1206,14 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     ? undefined
                     : requestedTurnModelId,
                 mapError: (cause) =>
-                  mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
+                  mapAcpToAdapterError(
+                    PROVIDER,
+                    input.threadId,
+                    "session/set_model",
+                    cause,
+                    automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+                    automationCatalogs.get(input.threadId)?.hasSensitiveConfiguration() ?? false,
+                  ),
               });
 
               const text = input.input?.trim();
@@ -1186,7 +1337,14 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             })
             .pipe(
               Effect.mapError((error) =>
-                mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
+                mapAcpToAdapterError(
+                  PROVIDER,
+                  input.threadId,
+                  "session/prompt",
+                  error,
+                  automationCatalogs.get(input.threadId)?.scrubDiagnostic,
+                  automationCatalogs.get(input.threadId)?.hasSensitiveConfiguration() ?? false,
+                ),
               ),
             );
 

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -8,24 +8,14 @@ import { fileURLToPath } from "node:url";
 const desktopDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const requireDesktop = createRequire(join(desktopDir, "package.json"));
 const requireWeb = createRequire(resolve(desktopDir, "../web/package.json"));
+const { writeDiagnostics } = createRequire(import.meta.url)(
+  "../../../scripts/lib/ci-diagnostics.cjs",
+);
+const artifactDirectory = process.env.F5_CI_ARTIFACT_DIR;
 const { _electron } = requireWeb("playwright");
 const directory = mkdtempSync(join(tmpdir(), "f5-desktop-smoke-"));
 const overlayModule = join(directory, "computer-overlay.cjs");
-if (process.platform === "darwin") {
-  execFileSync(
-    "bun",
-    [
-      "build",
-      join(desktopDir, "src/computer/ComputerOverlay.ts"),
-      "--target=node",
-      "--format=cjs",
-      "--external=electron",
-      "--outfile",
-      overlayModule,
-    ],
-    { cwd: desktopDir, stdio: "pipe" },
-  );
-}
+
 const state = join(directory, "app", "userdata");
 mkdirSync(state, { recursive: true });
 writeFileSync(
@@ -58,7 +48,39 @@ env.F5_HOME = join(directory, "app");
 let application;
 let electronProcess;
 let output = "";
+let failure = "";
+let screenshot;
+const exportDiagnostics = () => {
+  writeDiagnostics(artifactDirectory || directory, "desktop-smoke", {
+    logs: output,
+    failure,
+    screenshot,
+    paths: [directory, resolve(desktopDir, "../.."), process.env.HOME, process.env.USERPROFILE],
+  });
+};
+// Preserve diagnostics for an unhandled rejection in Playwright's launch internals.
+// Monitoring does not swallow the exception or change its failing exit status.
+process.on("uncaughtExceptionMonitor", (error) => {
+  failure = String(error?.stack ?? error);
+  console.error(`Desktop smoke artifacts: ${artifactDirectory || directory}`);
+  exportDiagnostics();
+});
 try {
+  if (process.platform === "darwin") {
+    execFileSync(
+      "bun",
+      [
+        "build",
+        join(desktopDir, "src/computer/ComputerOverlay.ts"),
+        "--target=node",
+        "--format=cjs",
+        "--external=electron",
+        "--outfile",
+        overlayModule,
+      ],
+      { cwd: desktopDir, stdio: "pipe" },
+    );
+  }
   application = await _electron.launch({
     executablePath: requireDesktop("electron"),
     args: [wrapper],
@@ -100,7 +122,7 @@ try {
     undefined,
     { timeout: 60_000 },
   );
-  await page.screenshot({ path: join(directory, "welcome.png") });
+  screenshot = await page.screenshot();
   if (process.platform === "darwin") {
     await application.evaluate(async ({ app, BrowserWindow, screen }, modulePath) => {
       const require = process.getBuiltinModule("module").createRequire(modulePath);
@@ -542,11 +564,35 @@ try {
   await pressQuit();
   await pressQuit();
   await closed;
-  console.log(`Desktop smoke test passed. Isolated artifacts: ${directory}`);
+  console.log(
+    artifactDirectory
+      ? "Desktop smoke test passed."
+      : `Desktop smoke test passed. Isolated artifacts: ${directory}`,
+  );
 } catch (error) {
+  failure = String(error?.stack ?? error);
+  try {
+    screenshot = await application?.windows()[0]?.screenshot({ timeout: 5000 });
+  } catch {}
   console.error("Desktop smoke test failed:", error, output);
+  console.error(`Desktop smoke artifacts: ${artifactDirectory || directory}`);
   process.exitCode = 1;
 } finally {
-  writeFileSync(join(directory, "desktop.log"), output);
-  if (electronProcess?.exitCode === null) await application.close();
+  try {
+    exportDiagnostics();
+  } finally {
+    try {
+      if (electronProcess?.exitCode === null) await application.close();
+    } finally {
+      // Preserve local state for debugging. Locked Crashpad/helper files on CI
+      // must not turn successful assertions into a failing smoke verdict.
+      if (artifactDirectory) {
+        try {
+          rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+        } catch (error) {
+          console.warn(`Could not remove desktop smoke temp state at ${directory}:`, error);
+        }
+      }
+    }
+  }
 }

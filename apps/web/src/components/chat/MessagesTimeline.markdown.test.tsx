@@ -136,3 +136,17 @@ describe("MessagesTimeline markdown streaming", () => {
     expect(markup).not.toContain("chat-markdown-codeblock");
   });
 });
+
+it("uses computer headings only with the authenticated provenance marker", async () => {
+  const { toolWorkEntryHeading } = await import("./MessagesTimeline");
+  const entry = {
+    itemType: "mcp_tool_call",
+    mcpServerName: "f5_computer",
+    mcpToolName: "computer_wait",
+    status: "completed",
+    label: "Tool activity",
+  } as Parameters<typeof toolWorkEntryHeading>[0];
+  expect(toolWorkEntryHeading({ ...entry, computerTool: true })).toBe("Computer · Waited");
+  expect(toolWorkEntryHeading(entry)).toMatch(/^MCP Call - /);
+  expect(toolWorkEntryHeading({ ...entry, mcpToolName: "arbitrary_tool" })).toMatch(/^MCP Call - /);
+});

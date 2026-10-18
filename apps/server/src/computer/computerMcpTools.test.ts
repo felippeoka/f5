@@ -36,6 +36,8 @@ function setup(displays = [display], delivery: "foreground" | "background" = "fo
     classify: vi.fn(async () => delivery),
     access: { grants: () => [{ appId: "one", tier: "full" }] },
     reportToolFailure: vi.fn(),
+    reportToolCompleted: vi.fn(),
+    wait: vi.fn(async () => ({ waitedMs: 100, timedOut: true })),
   };
   return {
     invoke,
@@ -118,8 +120,8 @@ describe("shared computer tool catalog", () => {
       COMPUTER_TOOL_DEFINITIONS.find((tool) => tool.name === "computer_scroll")?.description,
     ).toContain("Positive deltaY scrolls down; positive deltaX scrolls right.");
   });
-  it("installs one catalog of sixteen tools, with only discovery tools always loaded", () => {
-    expect(COMPUTER_TOOL_DEFINITIONS).toHaveLength(16);
+  it("installs one catalog of seventeen tools, with only discovery tools always loaded", () => {
+    expect(COMPUTER_TOOL_DEFINITIONS).toHaveLength(17);
     expect(COMPUTER_TOOL_DEFINITIONS.map((tool) => tool.name)).toContain(
       "computer_request_foreground",
     );
@@ -150,6 +152,8 @@ describe("shared computer tool catalog", () => {
         geometryGeneration: "g",
         screenshot: true,
       }),
+      undefined,
+      expect.objectContaining({ onDispatch: expect.any(Function) }),
     );
     h.context.geometry.clear();
     expect((await callComputerTool(h.context, "computer_move", { x: 3, y: 4 })).isError).toBe(true);
@@ -277,4 +281,103 @@ describe("shared computer tool catalog", () => {
     });
     expect(h.invoke).not.toHaveBeenCalled();
   });
+});
+
+import {
+  COMPUTER_GUIDANCE,
+  COMPUTER_SAFETY_CLAUSE,
+  classifyComputerTool,
+} from "./computerMcpTools";
+it("keeps guidance on discovery, safety on actions, and the serialized catalog below budget", () => {
+  const baselineDescriptionCharacters = 16 * 1300; // Lower bound on the original repeated guidance alone.
+  expect(
+    COMPUTER_TOOL_DEFINITIONS.filter((tool) => tool.description.includes(COMPUTER_GUIDANCE)).map(
+      (tool) => tool.name,
+    ),
+  ).toEqual(["computer_status"]);
+  const length = JSON.stringify(COMPUTER_TOOL_DEFINITIONS.map((tool) => tool.description)).length;
+  expect(length).toBeLessThanOrEqual(6000);
+  expect(length).toBeLessThan(baselineDescriptionCharacters / 2);
+  for (const tool of COMPUTER_TOOL_DEFINITIONS) {
+    if (
+      classifyComputerTool(tool.name) === "mutate" ||
+      ["computer_screenshot", "computer_zoom", "computer_inspect", "computer_wait"].includes(
+        tool.name,
+      )
+    )
+      expect(tool.description).toContain(COMPUTER_SAFETY_CLAUSE);
+  }
+  expect(
+    COMPUTER_TOOL_DEFINITIONS.find((tool) => tool.name === "computer_wait")?.annotations,
+  ).toMatchObject({ readOnlyHint: true, idempotentHint: true });
+});
+it("merges wait metadata with the trailing image or capture failure and publishes exactly one history row", async () => {
+  const h = setup();
+  const result = await callComputerTool(h.context, "computer_wait", {
+    screenshot: true,
+    timeoutMs: 100,
+  });
+  expect(result.structuredContent).toMatchObject({ waitedMs: 100 });
+  expect(result.content.some((block) => block.type === "image")).toBe(true);
+  expect(h.broker.reportToolCompleted).toHaveBeenCalledExactlyOnceWith(
+    "t",
+    "s",
+    "wait",
+    undefined,
+    undefined,
+  );
+  h.invoke.mockRejectedValue(new Error("capture-failed"));
+  const failed = await callComputerTool(h.context, "computer_wait", { screenshot: true });
+  expect(failed).toMatchObject({ isError: true, structuredContent: { waitedMs: 100 } });
+  expect(h.broker.reportToolFailure).toHaveBeenCalledExactlyOnceWith("t", "s", "wait", "Execution");
+  const invalid = await callComputerTool(h.context, "computer_wait", { role: "AXButton" });
+  expect(invalid.isError).toBe(true);
+});
+
+it("records delivery per invocation and leaves a plain wait unbadged", async () => {
+  const h = setup();
+  h.context.geometry.rememberApps([
+    { appId: "one", name: "Fixture", tier: "full", running: true, frontmost: true },
+  ]);
+  vi.spyOn(h.context.broker, "classify").mockImplementation(
+    async (_thread, _generation, _op, _app, input) =>
+      input.executionMode === "background" ? "background" : "foreground",
+  );
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let dispatched!: () => void;
+  const admitted = new Promise<void>((resolve) => {
+    dispatched = resolve;
+  });
+  vi.spyOn(h.context.broker, "invoke").mockImplementation(
+    async (_thread, _generation, input, _timeout, options) => {
+      options?.onDispatch?.(input.executionMode === "background" ? "background" : "foreground");
+      if (input.executionMode === "background") {
+        dispatched();
+        await held;
+      }
+      return {};
+    },
+  );
+  const first = callComputerTool(h.context, "computer_type", {
+    app: "one",
+    text: "first",
+    executionMode: "background",
+  });
+  await admitted;
+  await callComputerTool(h.context, "computer_type", {
+    app: "one",
+    text: "second",
+    executionMode: "foreground",
+  });
+  release();
+  await first;
+  await callComputerTool(h.context, "computer_wait", { timeoutMs: 100 });
+  expect(h.broker.reportToolCompleted.mock.calls).toEqual([
+    ["t", "s", "type", "Fixture", "foreground"],
+    ["t", "s", "type", "Fixture", "background"],
+    ["t", "s", "wait", undefined, undefined],
+  ]);
 });

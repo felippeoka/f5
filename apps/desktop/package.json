@@ -10,7 +10,7 @@
     "build": "node ../../scripts/build-computer-helper.ts && node node_modules/tsdown/dist/run.mjs --config tsdown.config.mts",
     "start": "bun run scripts/start-electron.mjs",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
-    "test": "node node_modules/vitest/vitest.mjs run --passWithNoTests",
+    "test": "node node_modules/vitest/vitest.mjs run",
     "smoke-test": "node scripts/smoke-test.mjs"
   },
   "dependencies": {

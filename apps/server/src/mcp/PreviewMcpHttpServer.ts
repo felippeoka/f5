@@ -1,4 +1,8 @@
-import { automationEventSanitizer } from "@t3tools/shared/automationActivitySanitizer";
+import type { ComputerAgentProvider } from "@t3tools/shared/agentAutomationSupport";
+import {
+  createComputerSessionScope,
+  type ComputerSessionScope,
+} from "../computer/ComputerSessionScope";
 import {
   ComputerAutomationBroker,
   type ComputerAutomationBrokerRuntime,
@@ -6,10 +10,10 @@ import {
 import {
   callComputerTool,
   COMPUTER_TOOL_DEFINITIONS,
+  COMPUTER_GUIDANCE,
   COMPUTER_TOOL_TIMEOUT_MS,
   ComputerToolGeometry,
   computerToolInputJsonSchema,
-  subscribeComputerObservationInvalidation,
 } from "../computer/computerMcpTools";
 import { Option } from "effect";
 import http from "node:http";
@@ -63,6 +67,7 @@ interface PreviewMcpSessionScope {
   readonly issuedAt: string;
   readonly catalog: "preview" | "computer";
   geometry: ComputerToolGeometry;
+  computerScope?: ComputerSessionScope;
   rpcIncarnation?: string;
 }
 
@@ -81,6 +86,8 @@ export interface PreviewMcpHttpServerShape {
     readonly providerInstanceId?: ProviderInstanceId;
     readonly existingServerNames?: ReadonlySet<string>;
     readonly catalog?: "preview" | "computer";
+    readonly provider?: ComputerAgentProvider;
+    readonly serverName?: string;
   }) => PreviewMcpSessionConfig;
 }
 
@@ -125,7 +132,7 @@ function makeToolCallHandler(
           broker: computer,
           threadId: scope.threadId,
           sessionGeneration: scope.automationSessionId,
-          geometry: scope.geometry,
+          geometry: scope.computerScope?.geometry ?? scope.geometry,
           ...(invocationId !== undefined ? { invocationId } : {}),
         },
         name,
@@ -178,6 +185,7 @@ function handleRpcRequest(input: {
       return Promise.resolve(
         jsonRpcSuccess(request.id, {
           protocolVersion: MCP_PROTOCOL_VERSION,
+          ...(input.catalog === "computer" ? { instructions: COMPUTER_GUIDANCE } : {}),
           capabilities: {
             tools: {},
           },
@@ -282,7 +290,9 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
         const initializes = requests.some((entry) => asObject(entry).method === "initialize");
         if (initializes) {
           scope.rpcIncarnation = randomUUID();
+          scope.geometry.clear();
           scope.geometry = new ComputerToolGeometry();
+          scope.computerScope?.resetConnection();
           response.setHeader("Mcp-Session-Id", scope.rpcIncarnation);
         } else if (
           scope.rpcIncarnation &&
@@ -379,27 +389,31 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
         catalog === "computer"
           ? `F5_COMPUTER_MCP_TOKEN_${randomUUID().replaceAll("-", "_").toUpperCase()}`
           : nextEnvVarName();
-      const serverName = chooseServerName(
-        catalog === "computer" ? "__f5_computer" : PREVIEW_MCP_SERVER_NAME,
-        input.existingServerNames,
-      );
-      const generation = `codex:${randomUUID()}`;
-      const releaseProvenance =
-        catalog === "computer" ? automationEventSanitizer.retain(input.threadId) : undefined;
-      if (catalog === "computer") computer!.bindSession(input.threadId, generation, "codex");
-      const geometry = new ComputerToolGeometry();
-      const offComputer =
-        catalog === "computer" && computer
-          ? subscribeComputerObservationInvalidation(computer, input.threadId, () =>
-              sessionsByToken.get(token)?.geometry.clear(),
-            )
+      const serverName =
+        input.serverName ??
+        chooseServerName(
+          catalog === "computer" ? "__f5_computer" : PREVIEW_MCP_SERVER_NAME,
+          input.existingServerNames,
+        );
+      const computerScope =
+        catalog === "computer"
+          ? createComputerSessionScope({
+              broker: computer!,
+              threadId: input.threadId,
+              provider: input.provider ?? "codex",
+              serverName,
+            })
           : undefined;
+      const generation =
+        computerScope?.generation ?? `${input.provider ?? "codex"}:${randomUUID()}`;
+      const geometry = computerScope?.geometry ?? new ComputerToolGeometry();
       sessionsByToken.set(token, {
         threadId: input.threadId,
         ...(input.providerInstanceId ? { providerInstanceId: input.providerInstanceId } : {}),
         automationSessionId: generation,
         catalog,
         geometry,
+        ...(computerScope ? { computerScope } : {}),
         issuedAt: new Date().toISOString(),
       });
       tokenByEnvVar.set(envVarName, token);
@@ -408,14 +422,13 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
       const dispose = () => {
         if (disposed) return;
         disposed = true;
-        offComputer?.();
-        if (catalog === "computer") computer?.releaseSession(input.threadId, generation);
-        releaseProvenance?.();
+        geometry.clear();
         const storedToken = tokenByEnvVar.get(envVarName);
         tokenByEnvVar.delete(envVarName);
         if (storedToken) {
           sessionsByToken.delete(storedToken);
         }
+        computerScope?.dispose();
       };
 
       return {
@@ -436,7 +449,7 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
         },
         dispose,
         ...(catalog === "computer"
-          ? { endTurn: (turnId: string) => computer?.endTurn(input.threadId, turnId, generation) }
+          ? { endTurn: (turnId: string) => computerScope?.endTurn(turnId) }
           : {}),
       };
     },

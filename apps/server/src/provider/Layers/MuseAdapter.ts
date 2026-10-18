@@ -1,3 +1,4 @@
+import { AGENT_AUTOMATION_SUPPORT } from "@t3tools/shared/agentAutomationSupport";
 /**
  * MuseAdapter — F5 provider adapter for Muse Code over the Muse Session
  * Protocol (MSP), through Meta's `@muse-code/sdk`.
@@ -1417,6 +1418,20 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
               type: "session.started",
               ...(yield* stamp(input.threadId)),
               payload: { resume: { mspSessionId: ctx.mspSessionId } },
+            });
+            yield* offer({
+              type: "session.configured",
+              ...(yield* stamp(input.threadId)),
+              payload: {
+                config: {
+                  agentBrowser: {
+                    computerUse: {
+                      state: "unavailable",
+                      detail: AGENT_AUTOMATION_SUPPORT.muse.computer.reason,
+                    },
+                  },
+                },
+              },
             });
             yield* offer({
               type: "session.state.changed",
