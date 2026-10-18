@@ -134,7 +134,7 @@ function withCodexSseTransportHint(
   server: McpServerDefinition,
   status: McpServerStatusEntry,
 ): McpServerStatusEntry {
-  return server.type === "sse" && status.state !== "ready"
+  return server.type === "sse" && ["failed", "unknown", "login-required"].includes(status.state)
     ? { ...status, message: combineStatusMessage(status.message, CODEX_SSE_TRANSPORT_HINT) }
     : status;
 }

@@ -208,9 +208,14 @@ export function evaluateMcpToolFilter(
       );
   for (const name of names) {
     const filter = filters.get(name);
-    if (!ownedNames.has(name) || !filter) continue;
+    if (!ownedNames.has(name)) continue;
     const prefix = `mcp__${normalizeClaudeMcpName(name)}__`;
     const tool = toolName.startsWith(prefix) ? toolName.slice(prefix.length) : undefined;
+    // A removed or disabled launch-time server can stay connected until restart.
+    // Ownership outlives its filter, so absence must deny rather than allow.
+    if (!filter) {
+      return `Tool '${tool ?? toolName}' from MCP server '${name}' is blocked because the server was removed or disabled in F5 MCP settings. Apply the saved settings to restart this session.`;
+    }
     if (
       tool === undefined ||
       filter.disabled.has(tool) ||

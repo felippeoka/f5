@@ -316,7 +316,7 @@ describe("Claude MCP tool filters", () => {
     }
   });
 
-  it("ignores SDK, external, unowned and unconfigured servers", () => {
+  it("ignores SDK, external and unowned servers", () => {
     for (const source of ["sdk", "project", "user", "plugin"]) {
       expect(
         evaluateMcpToolFilter(filters, owned, "mcp__team__docs__blocked", {
@@ -328,10 +328,33 @@ describe("Claude MCP tool filters", () => {
     expect(
       evaluateMcpToolFilter(filters, new Set(), "mcp__team__docs__blocked", { name: "team__docs" }),
     ).toBeUndefined();
-    expect(
-      evaluateMcpToolFilter(new Map(), owned, "mcp__team__docs__blocked", { name: "team__docs" }),
-    ).toBeUndefined();
     expect(evaluateMcpToolFilter(filters, owned, "Read")).toBeUndefined();
+  });
+
+  it("denies every tool from an owned server whose filter was removed", () => {
+    for (const provenance of [
+      undefined,
+      { name: "team__docs", source: "dynamic" },
+      { name: "team__docs" },
+    ]) {
+      for (const tool of ["a__b", "write"]) {
+        const reason = evaluateMcpToolFilter(
+          new Map(),
+          owned,
+          `mcp__team__docs__${tool}`,
+          provenance,
+        );
+        expect(reason).toContain(tool);
+        expect(reason).toContain("team__docs");
+        expect(reason).toContain("removed or disabled in F5 MCP settings");
+      }
+    }
+    expect(
+      evaluateMcpToolFilter(new Map(), owned, "mcp__team__docs__write", {
+        name: "team__docs",
+        source: "sdk",
+      }),
+    ).toBeUndefined();
   });
 
   it("fails closed on a mismatched prefix", () => {

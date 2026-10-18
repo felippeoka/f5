@@ -266,43 +266,57 @@ describe("McpRuntimeService", () => {
     "cancelled",
     "missing",
     "disabled",
+    "login-required",
   ] as const) {
-    it.effect(`adds the SSE transport hint only to non-ready Codex statuses (${state})`, () =>
-      Effect.gen(function* () {
-        const service = yield* McpRuntimeService;
-        const result = yield* service.getServerStatuses({ provider: "codex", projectId });
-        const sse = result.statuses.find((server) => server.name === "sse");
-        const http = result.statuses.find((server) => server.name === "http");
-        assert.equal(sse?.message?.includes(CODEX_SSE_TRANSPORT_HINT) ?? false, state !== "ready");
-        assert.equal(http?.message?.includes(CODEX_SSE_TRANSPORT_HINT) ?? false, false);
-        if (state === "failed") assert.include(sse?.message, "fixture startup failure");
-      }).pipe(
-        Effect.provide(
-          makeRuntimeLayer({
-            servers: {
-              sse: { type: "sse", url: "https://example.test/sse", enabled: state !== "disabled" },
-              http: { type: "http", url: "https://example.test/mcp" },
-            },
-            controlStatuses:
-              state === "missing" || state === "disabled"
-                ? []
-                : [
-                    {
-                      name: "sse",
-                      startupStatus: state,
-                      authStatus: "oAuth",
-                      ...(state === "failed" ? { error: "fixture startup failure" } : {}),
-                    },
-                    { name: "http", startupStatus: state, authStatus: "oAuth" },
-                  ],
-            spawnerLayer: mockSpawnerLayer((args) =>
-              args.join(" ").endsWith("--version")
-                ? { stdout: "codex 1.2.3\n", stderr: "", code: 0 }
-                : { stdout: '{"loggedIn":true}\n', stderr: "", code: 0 },
-            ),
-          }),
+    it.effect(
+      `adds the SSE transport hint only to failure, unknown or auth states (${state})`,
+      () =>
+        Effect.gen(function* () {
+          const service = yield* McpRuntimeService;
+          const result = yield* service.getServerStatuses({ provider: "codex", projectId });
+          const sse = result.statuses.find((server) => server.name === "sse");
+          const http = result.statuses.find((server) => server.name === "http");
+          assert.equal(
+            sse?.message?.includes(CODEX_SSE_TRANSPORT_HINT) ?? false,
+            ["failed", "cancelled", "missing", "login-required"].includes(state),
+          );
+          assert.equal(http?.message?.includes(CODEX_SSE_TRANSPORT_HINT) ?? false, false);
+          if (state === "failed") assert.include(sse?.message, "fixture startup failure");
+        }).pipe(
+          Effect.provide(
+            makeRuntimeLayer({
+              servers: {
+                sse: {
+                  type: "sse",
+                  url: "https://example.test/sse",
+                  enabled: state !== "disabled",
+                },
+                http: { type: "http", url: "https://example.test/mcp" },
+              },
+              controlStatuses:
+                state === "missing" || state === "disabled"
+                  ? []
+                  : [
+                      {
+                        name: "sse",
+                        ...(state === "login-required" ? {} : { startupStatus: state }),
+                        authStatus: state === "login-required" ? "notLoggedIn" : "oAuth",
+                        ...(state === "failed" ? { error: "fixture startup failure" } : {}),
+                      },
+                      {
+                        name: "http",
+                        ...(state === "login-required" ? {} : { startupStatus: state }),
+                        authStatus: state === "login-required" ? "notLoggedIn" : "oAuth",
+                      },
+                    ],
+              spawnerLayer: mockSpawnerLayer((args) =>
+                args.join(" ").endsWith("--version")
+                  ? { stdout: "codex 1.2.3\n", stderr: "", code: 0 }
+                  : { stdout: '{"loggedIn":true}\n', stderr: "", code: 0 },
+              ),
+            }),
+          ),
         ),
-      ),
     );
   }
 

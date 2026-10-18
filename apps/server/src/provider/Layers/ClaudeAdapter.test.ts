@@ -718,14 +718,172 @@ describe("ClaudeAdapter agent browser", () => {
               },
             },
           });
-          assert.equal(reloaded.converged, true);
+          assert.equal(reloaded.converged, false);
+          assert.equal(reloaded.restartRequired, true);
+          assert.ok(reloaded.errors.some((error) => error.message.includes("tool deny list")));
           assert.equal(setMcpServers.mock.calls.length, 1);
           assert.equal(hookDecision(yield* call("a__b")), "deny");
           assert.notEqual(hookDecision(yield* call("write")), "deny");
           assert.notEqual(hookDecision(yield* call("unlisted")), "deny");
-          // Model-visible names catch up at the next restart; the live hook already changed.
-          assert.deepEqual(options.disallowedTools, ["Agent", "Task", "mcp__team__docs__write"]);
+          // Recovery uses the new list, but the current SDK query still needs a restart.
+          assert.deepEqual(options.disallowedTools, ["Agent", "Task", "mcp__team__docs__a__b"]);
+          const repeated = yield* adapter.reloadMcpConfig!({
+            threadId: THREAD_ID,
+            mcpServers: { team__docs: { type: "stdio", command: "node", disabledTools: ["a__b"] } },
+          });
+          assert.equal(repeated.restartRequired, true);
+          assert.equal(repeated.converged, false);
         }).pipe(Effect.provide(harness.layer));
+      },
+    );
+  }
+
+  for (const change of ["removed", "disabled"] as const) {
+    for (const activeTurn of [false, true]) {
+      it.effect(`denies lingering ${change} MCP servers (active turn: ${activeTurn})`, () => {
+        const harness = makeHarness();
+        Object.assign(harness.query, {
+          setMcpServers: async () => ({ added: [], removed: [], errors: {} }),
+        });
+        harness.query.mcpServerStatusValue = [
+          { name: "docs", status: "connected", source: "dynamic" },
+        ];
+        return Effect.gen(function* () {
+          const adapter = yield* ClaudeAdapter;
+          yield* adapter.startSession({
+            threadId: THREAD_ID,
+            runtimeMode: "full-access",
+            providerOptions: {
+              mcpServers: { docs: { type: "stdio", command: "node", enabledTools: ["read"] } },
+            },
+          });
+          if (activeTurn) yield* adapter.sendTurn({ threadId: THREAD_ID, input: "Read the docs" });
+          const hook = harness.getLastCreateQueryInput()!.options.hooks!.PreToolUse!.at(-1)!
+            .hooks[0]!;
+          const call = (tool: string, source?: string) =>
+            Effect.promise(() =>
+              hook(
+                preToolUse(`mcp__docs__${tool}`, source ? { name: "docs", source } : undefined),
+                undefined,
+                { signal: new AbortController().signal },
+              ),
+            );
+          assert.notEqual(hookDecision(yield* call("read", "dynamic")), "deny");
+          assert.equal(hookDecision(yield* call("write", "dynamic")), "deny");
+          const result = yield* adapter.reloadMcpConfig!({
+            threadId: THREAD_ID,
+            mcpServers:
+              change === "removed"
+                ? {}
+                : {
+                    docs: {
+                      type: "stdio",
+                      command: "node",
+                      enabled: false,
+                      enabledTools: ["read"],
+                    },
+                  },
+          });
+          assert.equal(result.restartRequired, true);
+          for (const tool of ["read", "write"]) {
+            assert.equal(hookDecision(yield* call(tool, "dynamic")), "deny");
+            assert.equal(hookDecision(yield* call(tool)), "deny");
+          }
+          assert.notEqual(hookDecision(yield* call("write", "sdk")), "deny");
+        }).pipe(Effect.provide(harness.layer));
+      });
+    }
+  }
+
+  for (const rejectSet of [false, true]) {
+    it.effect(
+      `enforces narrowed and new MCP filters throughout provider I/O (reject set: ${rejectSet})`,
+      () => {
+        const harness = makeHarness();
+        const listEntered = Promise.withResolvers<void>();
+        const releaseList = Promise.withResolvers<void>();
+        const setEntered = Promise.withResolvers<void>();
+        const releaseSet = Promise.withResolvers<void>();
+        const external = { name: "external", status: "connected" as const, source: "plugin" };
+        harness.query.mcpServerStatusValue = [
+          { name: "docs", status: "connected", source: "dynamic" },
+          external,
+        ];
+        let reads = 0;
+        Object.assign(harness.query, {
+          mcpServerStatus: async () => {
+            if (reads++ === 0) {
+              listEntered.resolve();
+              await releaseList.promise;
+            }
+            return harness.query.mcpServerStatusValue;
+          },
+          setMcpServers: async (servers: Record<string, unknown>) => {
+            assert.deepEqual(Object.keys(servers).sort(), ["docs", "new"]);
+            harness.query.mcpServerStatusValue = [
+              external,
+              ...Object.keys(servers).map((name) => ({
+                name,
+                status: "connected" as const,
+                source: "dynamic",
+              })),
+            ];
+            setEntered.resolve();
+            await releaseSet.promise;
+            if (rejectSet) throw new Error("reply failed after partial installation");
+            return { added: ["new"], removed: [], errors: {} };
+          },
+        });
+        return Effect.gen(function* () {
+          const adapter = yield* ClaudeAdapter;
+          yield* adapter.startSession({
+            threadId: THREAD_ID,
+            runtimeMode: "full-access",
+            providerOptions: { mcpServers: { docs: { type: "stdio", command: "node" } } },
+          });
+          const hook = harness.getLastCreateQueryInput()!.options.hooks!.PreToolUse!.at(-1)!
+            .hooks[0]!;
+          const call = (name: string, tool: string, source?: string) =>
+            Effect.promise(() =>
+              hook(
+                preToolUse(`mcp__${name}__${tool}`, source ? { name, source } : undefined),
+                undefined,
+                { signal: new AbortController().signal },
+              ),
+            );
+          const reload = yield* adapter.reloadMcpConfig!({
+            threadId: THREAD_ID,
+            mcpServers: {
+              docs: { type: "stdio", command: "node", enabledTools: ["read"] },
+              new: { type: "stdio", command: "node", enabledTools: ["read"] },
+              external: { type: "stdio", command: "node", enabledTools: ["read"] },
+            },
+          }).pipe(Effect.forkChild);
+          yield* Effect.promise(() => listEntered.promise);
+          assert.equal(hookDecision(yield* call("docs", "write", "dynamic")), "deny");
+          releaseList.resolve();
+          yield* Effect.promise(() => setEntered.promise);
+          for (const name of ["docs", "new"]) {
+            assert.equal(hookDecision(yield* call(name, "write", "dynamic")), "deny");
+            assert.equal(hookDecision(yield* call(name, "write")), "deny");
+            assert.notEqual(hookDecision(yield* call(name, "read", "dynamic")), "deny");
+          }
+          assert.notEqual(hookDecision(yield* call("external", "write", "plugin")), "deny");
+          assert.notEqual(hookDecision(yield* call("external", "write")), "deny");
+          releaseSet.resolve();
+          const result = yield* Fiber.join(reload);
+          assert.equal(result.restartRequired, rejectSet);
+          assert.equal(result.converged, !rejectSet);
+          assert.equal(hookDecision(yield* call("new", "write", "dynamic")), "deny");
+        }).pipe(
+          Effect.provide(harness.layer),
+          Effect.ensuring(
+            Effect.sync(() => {
+              releaseList.resolve();
+              releaseSet.resolve();
+            }),
+          ),
+        );
       },
     );
   }
@@ -813,7 +971,11 @@ describe("ClaudeAdapter agent browser", () => {
                 source: "dynamic",
               })),
             ];
-            return { added: Object.keys(servers), removed: ["old"], errors: {} };
+            return {
+              added: Object.keys(servers),
+              removed: "old" in servers ? [] : ["old"],
+              errors: {},
+            };
           },
         });
         return Effect.gen(function* () {
@@ -838,7 +1000,10 @@ describe("ClaudeAdapter agent browser", () => {
                 { turnId: "old", assistantUuid: checkpoint },
               ],
             },
-            providerOptions: { mcpServers: { old: { type: "stdio", command: "node" } } },
+            providerOptions: {
+              claudeAgent: { subagentsEnabled: false },
+              mcpServers: { old: { type: "stdio", command: "node", disabledTools: ["write"] } },
+            },
           });
           const internal = Object.fromEntries(
             Object.entries(harness.getLastCreateQueryInput()!.options.mcpServers!).filter(
@@ -853,8 +1018,19 @@ describe("ClaudeAdapter agent browser", () => {
           }));
           const servers = removeAll
             ? {}
-            : { replacement: { type: "stdio" as const, command: "replacement-command" } };
-          yield* adapter.reloadMcpConfig!({ threadId: THREAD_ID, mcpServers: servers });
+            : {
+                old: {
+                  type: "stdio" as const,
+                  command: "updated-command",
+                  disabledTools: ["delete"],
+                },
+              };
+          const reload = yield* adapter.reloadMcpConfig!({
+            threadId: THREAD_ID,
+            mcpServers: servers,
+          });
+          assert.equal(reload.restartRequired, true);
+          assert.equal(reload.converged, false);
           harness.query.emit({
             type: "result",
             subtype: "error_during_execution",
@@ -879,6 +1055,34 @@ describe("ClaudeAdapter agent browser", () => {
           );
           for (const [name, config] of Object.entries(internal))
             assert.strictEqual(recovered[name], config);
+          assert.deepEqual(harness.getLastCreateQueryInput()!.options.disallowedTools, [
+            "Agent",
+            "Task",
+            ...(removeAll ? [] : ["mcp__old__delete"]),
+          ]);
+          // Once recovery actually installs the new deny list, the same reload converges.
+          const query = harness.queries[1]!;
+          query.mcpServerStatusValue = [
+            ...Object.keys(internal).map((name) => ({
+              name,
+              status: "connected" as const,
+              source: "sdk",
+            })),
+            ...Object.keys(servers).map((name) => ({
+              name,
+              status: "connected" as const,
+              source: "dynamic",
+            })),
+          ];
+          Object.assign(query, {
+            setMcpServers: async () => ({ added: [], removed: [], errors: {} }),
+          });
+          const repeated = yield* adapter.reloadMcpConfig!({
+            threadId: THREAD_ID,
+            mcpServers: servers,
+          });
+          assert.equal(repeated.restartRequired, false);
+          assert.equal(repeated.converged, true);
         }).pipe(
           Effect.provide(harness.layer),
           Effect.ensuring(

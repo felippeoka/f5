@@ -141,6 +141,8 @@ export async function reconcileClaudeMcpServers<TConfig>(input: {
   readonly query: ClaudeMcpControl<TConfig>;
   readonly desired: Readonly<Record<string, TConfig>>;
   readonly owned: ReadonlySet<string>;
+  /** Install host policy for the actual payload before the CLI can expose its tools. */
+  readonly beforeSetServers?: (names: ReadonlySet<string>) => void;
 }): Promise<{
   readonly result: McpReloadResult;
   readonly owned: ReadonlySet<string>;
@@ -170,6 +172,8 @@ export async function reconcileClaudeMcpServers<TConfig>(input: {
     payload[name] = config;
   }
 
+  const attemptedOwned = new Set([...input.owned, ...Object.keys(payload)]);
+  input.beforeSetServers?.(attemptedOwned);
   let setResult: Awaited<ReturnType<NonNullable<ClaudeMcpControl<TConfig>["setMcpServers"]>>>;
   try {
     setResult = await query.setMcpServers(payload);
@@ -179,7 +183,9 @@ export async function reconcileClaudeMcpServers<TConfig>(input: {
       result: restartRequiredMcpReload(
         `Claude could not change MCP servers in place${detail ? ` (${detail})` : ""}.`,
       ),
-      owned: input.owned,
+      // A rejected request may have partially installed its payload. Keep those
+      // names covered by host policy until a later read confirms removal.
+      owned: attemptedOwned,
     };
   }
 
