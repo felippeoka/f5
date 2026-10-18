@@ -16,7 +16,7 @@ import {
   readCodexEnvironmentOptions,
 } from "@t3tools/shared/providerOptions";
 import { CODEX_MCP_OAUTH_CLIENT_TTL_MS } from "@t3tools/shared/codexOAuthTiming";
-import { Effect, Layer, Option, Schema, ServiceMap, Stream } from "effect";
+import { Cause, Effect, Layer, Option, Schema, ServiceMap, Stream } from "effect";
 
 import { ServerConfig } from "../config.ts";
 import { CodexControlClient, type CodexControlEnvironmentConfig } from "./CodexControlClient.ts";
@@ -325,6 +325,17 @@ const makeCodexControlClientRegistry = Effect.gen(function* () {
                 Effect.catch(() => retireIdentity(entry.input)),
               );
             }),
+          ).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning(
+                "Failed to retire stale MCP control identity; monitoring continues.",
+                {
+                  projectId: entry.input.projectId,
+                  instanceId: entry.input.instanceId,
+                  cause: Cause.pretty(cause),
+                },
+              ),
+            ),
           ),
         { concurrency: 1 },
       ).pipe(Effect.asVoid),

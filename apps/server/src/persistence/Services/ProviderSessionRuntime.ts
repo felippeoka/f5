@@ -60,7 +60,8 @@ export interface ProviderMcpStateUpdate {
   readonly threadId: ThreadId;
   readonly instanceId: ProviderInstanceId;
   readonly generation: number;
-  readonly effectiveVersion: string | null;
+  /** Omit to preserve the current applied version on an unreached/restart-required attempt. */
+  readonly effectiveVersion?: string | null;
   readonly unconvergedVersion: string | null;
 }
 

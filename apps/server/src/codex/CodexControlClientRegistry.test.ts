@@ -245,6 +245,88 @@ describe("CodexControlClientRegistry", () => {
     );
   });
 
+  it("keeps identity monitoring alive after an OAuth cleanup rejects", async () => {
+    const instanceId = ProviderInstanceId.make("monitor-work");
+    const projectId = ProjectId.makeUnsafe("monitor-project");
+    vi.spyOn(CodexControlClient, "create").mockImplementation(async () =>
+      makeFakeControlClient("monitor"),
+    );
+    const layer = CodexControlClientRegistryLive.pipe(
+      Layer.provideMerge(
+        ServerSettingsService.layerTest(
+          Schema.decodeUnknownSync(ServerSettings)({
+            providerInstances: {
+              [instanceId]: { driver: ProviderDriverKind.make("codex"), config: {} },
+            },
+          }),
+        ),
+      ),
+      Layer.provideMerge(
+        ProjectionProjectRepositoryLive.pipe(Layer.provide(SqlitePersistenceMemory)),
+      ),
+      Layer.provideMerge(Layer.succeed(ServerConfig, makeServerConfigStub())),
+    );
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* CodexControlClientRegistry;
+          const settings = yield* ServerSettingsService;
+          const projects = yield* ProjectionProjectRepository;
+          const project = {
+            projectId,
+            title: "Monitor",
+            workspaceRoot: "/tmp/monitor-a",
+            defaultModel: null,
+            scripts: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            deletedAt: null,
+          };
+          yield* projects.upsert(project);
+          const input = { projectId, instanceId, mcpEffectiveConfigVersion: "v1" };
+          const lease = yield* registry.acquireOauthClient({ ...input, serverName: "docs" });
+          vi.mocked(lease.client.closeAndWait).mockRejectedValueOnce(
+            new Error("simulated cleanup rejection"),
+          );
+          // A settings event causes the cleanup defect; later events must still be handled.
+          const current = yield* settings.getSettings;
+          yield* settings.updateSettings({
+            providerInstances: {
+              ...current.providerInstances,
+              [instanceId]: {
+                ...current.providerInstances[instanceId]!,
+                environment: [{ name: "ACCOUNT_LABEL", value: "changed" }],
+              },
+            },
+          });
+          yield* Effect.promise(() =>
+            vi.waitFor(() => expect(lease.client.closeAndWait).toHaveBeenCalled()),
+          );
+          const afterFailure = yield* registry.getAdminClient(input);
+          const changed = yield* settings.getSettings;
+          yield* settings.updateSettings({
+            providerInstances: {
+              ...changed.providerInstances,
+              [instanceId]: {
+                ...changed.providerInstances[instanceId]!,
+                environment: [{ name: "ACCOUNT_LABEL", value: "changed-again" }],
+              },
+            },
+          });
+          yield* Effect.promise(() =>
+            vi.waitFor(() => expect(afterFailure.close).toHaveBeenCalled()),
+          );
+          const beforeMove = yield* registry.getAdminClient(input);
+          yield* projects.upsert({ ...project, workspaceRoot: "/tmp/monitor-b" });
+          // Project changes have no settings event and exercise the periodic watcher.
+          yield* Effect.promise(() =>
+            vi.waitFor(() => expect(beforeMove.close).toHaveBeenCalled(), { timeout: 3500 }),
+          );
+        }).pipe(Effect.provide(layer)),
+      ),
+    );
+  });
+
   it("includes MCP OAuth callback port in the Codex control environment", () => {
     expect(
       readCodexControlEnvironmentConfig(

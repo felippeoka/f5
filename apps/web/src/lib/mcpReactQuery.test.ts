@@ -22,6 +22,18 @@ describe("MCP status event scoping", () => {
     expect(isMcpQueryAffected(mcpQueryKeys.oauthStatus(project, "docs", work, null), event)).toBe(
       true,
     );
+    expect(
+      isMcpQueryAffected(mcpQueryKeys.loginStatus("codex", project, "docs", work, null), event),
+    ).toBe(true);
+    expect(
+      isMcpQueryAffected(mcpQueryKeys.loginStatus("codex", project, work, "personal", null), event),
+    ).toBe(false);
+    expect(
+      isMcpQueryAffected(mcpQueryKeys.loginStatus("codex", project, "docs", work, null), {
+        ...event,
+        projectId: ProjectId.makeUnsafe("other"),
+      }),
+    ).toBe(false);
     expect(isMcpQueryAffected(mcpQueryKeys.commonConfig(), event)).toBe(false);
     expect(
       isMcpQueryAffected(

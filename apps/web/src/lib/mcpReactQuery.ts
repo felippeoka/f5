@@ -70,7 +70,7 @@ export function isMcpQueryAffected(
   ].includes(String(kind));
   if (event.instanceId) {
     if (!accountScoped) return false;
-    const instance = queryKey[kind === "codexStatus" ? 3 : 4];
+    const instance = queryKey[kind === "codexStatus" ? 3 : kind === "loginStatus" ? 5 : 4];
     if (instance !== event.instanceId) return false;
   }
   if (event.projectId && event.scope === "project") {

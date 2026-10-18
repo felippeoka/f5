@@ -29,6 +29,7 @@ import {
   EventId,
   MessageId,
   ProviderInstanceId,
+  ProviderDriverKind,
   ProjectId,
   PlanningWorkflowId,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
@@ -2645,7 +2646,17 @@ describe("ProviderCommandReactor", () => {
   });
 
   it("applies to both providers across accounts by default, narrowing only for explicit targets", async () => {
-    const harness = await createHarness();
+    const harness = await createHarness({
+      settings: {
+        providerInstances: {
+          [ProviderInstanceId.make("claudeAgent-work")]: {
+            driver: ProviderDriverKind.make("claudeAgent"),
+            displayName: "Work",
+            config: {},
+          },
+        },
+      },
+    });
     harness.mcpReload.result = { converged: true, restartRequired: false, servers: [], errors: [] };
     const projectId = asProjectId("project-1");
     for (const provider of ["codex", "claudeAgent"] as const) {
@@ -2684,6 +2695,75 @@ describe("ProviderCommandReactor", () => {
       instanceId: "claudeAgent-work",
       threadIds: ["claudeAgent-work"],
     });
+  });
+
+  it("rejects unknown, disabled, and unsupported explicit instances before applying", async () => {
+    const harness = await createHarness({
+      settings: {
+        providerInstances: {
+          [ProviderInstanceId.make("disabled")]: {
+            driver: ProviderDriverKind.make("codex"),
+            displayName: "Disabled",
+            enabled: false,
+            config: {},
+          },
+          [ProviderInstanceId.make("disabled-config")]: {
+            driver: ProviderDriverKind.make("codex"),
+            displayName: "Disabled config",
+            config: { enabled: false },
+          },
+          [ProviderInstanceId.make("cursor")]: {
+            driver: ProviderDriverKind.make("cursor"),
+            displayName: "Cursor",
+            config: {},
+          },
+          [ProviderInstanceId.make("valid")]: {
+            driver: ProviderDriverKind.make("codex"),
+            displayName: "Valid",
+            config: {},
+          },
+        },
+      },
+    });
+    for (const id of ["unknown", "disabled", "disabled-config", "cursor"]) {
+      const result = await Effect.runPromise(
+        harness.reactor
+          .applyMcpConfigToLiveSessions({
+            scope: "common",
+            instanceId: ProviderInstanceId.make(id),
+          })
+          .pipe(Effect.result),
+      );
+      expect(result._tag).toBe("Failure");
+      expect(harness.reloadMcpConfigForProject).not.toHaveBeenCalled();
+    }
+    const result = await Effect.runPromise(
+      harness.reactor.applyMcpConfigToLiveSessions({
+        scope: "common",
+        instanceId: ProviderInstanceId.make("valid"),
+      }),
+    );
+    expect(result.sessions).toEqual([]);
+    const threadId = ThreadId.makeUnsafe("wrong-driver");
+    await Effect.runPromise(
+      harness.startSession(threadId, {
+        threadId,
+        projectId: asProjectId("project-1"),
+        provider: "claudeAgent",
+        providerInstanceId: ProviderInstanceId.make("valid"),
+      }),
+    );
+    const mismatch = await Effect.runPromise(
+      harness.reactor
+        .applyMcpConfigToLiveSessions({
+          scope: "common",
+          instanceId: ProviderInstanceId.make("valid"),
+          threadIds: [threadId],
+        })
+        .pipe(Effect.result),
+    );
+    expect(mismatch._tag).toBe("Failure");
+    expect(harness.reloadMcpConfigForProject).not.toHaveBeenCalled();
   });
 
   it("validates every requested conversation before mutation and supports forced targeted retries", async () => {
@@ -2907,6 +2987,105 @@ describe("ProviderCommandReactor", () => {
 
       expect(result).toMatchObject({ claudeRestarted: 0, deferred: 1 });
       expect(harness.stopSession).not.toHaveBeenCalled();
+    });
+
+    it("delivers a turn while MCP reconciliation is waiting", async () => {
+      const harness = await createHarness({ threadModel: "claude-sonnet-4-6" });
+      const threadId = await startClaudeTurn(harness);
+      await harness.waitForDeliveries();
+      let release!: () => void;
+      let entered!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const waiting = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      harness.reloadMcpConfigForProject.mockImplementation((input) =>
+        Effect.promise(async () => {
+          entered();
+          await waiting;
+          return {
+            sessions: [
+              {
+                threadId,
+                instanceId: ProviderInstanceId.make("claudeAgent"),
+                generation: 0,
+                requestedVersion: input.requestedVersion!,
+                attemptedVersion: input.requestedVersion!,
+                disposition: "applied" as const,
+                result: { converged: true, restartRequired: false, servers: [], errors: [] },
+              },
+            ],
+          };
+        }),
+      );
+      const applying = Effect.runPromise(
+        harness.reactor.applyMcpConfigToLiveSessions({
+          scope: "project",
+          projectId: asProjectId("project-1"),
+        }),
+      );
+      await ready;
+      try {
+        harness.upsertBinding({
+          ...harness.getBinding(threadId)!,
+          mcpEffectiveConfigVersion: "mcp-version-test",
+        });
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.makeUnsafe("during-mcp-retry"),
+            threadId,
+            message: {
+              messageId: asMessageId("during-mcp-retry-message"),
+              role: "user",
+              text: "continue",
+              attachments: [],
+            },
+            provider: "claudeAgent",
+            model: "claude-sonnet-4-6",
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt: new Date().toISOString(),
+          }),
+        );
+        await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      } finally {
+        release();
+        await applying;
+      }
+    });
+
+    it("reports superseded when Claude replacement loses the generation race", async () => {
+      const harness = await createHarness({ threadModel: "claude-sonnet-4-6" });
+      const threadId = await startClaudeTurn(harness);
+      await harness.waitForDeliveries();
+      const replace = vi.spyOn(harness.actualProvider, "replaceSession").mockImplementation(() =>
+        Effect.sync(() => {
+          const binding = harness.getBinding(threadId)!;
+          harness.upsertBinding({
+            ...binding,
+            runtimePayload: {
+              ...(binding.runtimePayload as Record<string, unknown>),
+              sessionGeneration: 1,
+            },
+            mcpEffectiveConfigVersion: "replacement-version",
+          });
+          return null;
+        }),
+      );
+      const result = await Effect.runPromise(
+        harness.reactor.applyMcpConfigToLiveSessions({
+          scope: "project",
+          projectId: asProjectId("project-1"),
+        }),
+      );
+      expect(replace).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({ claudeRestarted: 0, deferred: 0 });
+      expect(result.sessions?.[0]?.disposition).toBe("superseded");
+      expect(harness.stopSession).not.toHaveBeenCalled();
+      expect(harness.getBinding(threadId)?.mcpEffectiveConfigVersion).toBe("replacement-version");
     });
 
     it("never interrupts a busy session that needs a restart; it waits for the next turn", async () => {

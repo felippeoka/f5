@@ -2943,6 +2943,8 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           launched !== undefined &&
           launched !== stableMcpConfigKey(translateMcpForCodex(mcpServers) ?? {})
         ) {
+          // This also applies after login: never reload a launch config that differs
+          // from the saved snapshot. Credentials take effect at the safe restart boundary.
           return restartRequiredMcpReload("Codex fixes its MCP servers when the session starts.");
         }
         const statuses = yield* Effect.tryPromise({

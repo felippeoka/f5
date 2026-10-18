@@ -1193,6 +1193,21 @@ describe("WebSocket Server", () => {
     });
   });
 
+  it.each(["binaryPath", "homePath"])("rejects client-supplied %s in MCP Apply", async (field) => {
+    server = await createTestServer({ cwd: "/test/project" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+    const response = await sendRequest(ws, WS_METHODS.mcpApplyToLiveSessions, {
+      scope: "common",
+      [field]: "/tmp/untrusted",
+    });
+    expect(response.error?.message).toContain("Invalid request format");
+    expect(response.error?.message).toContain(`["body"]["${field}"]`);
+    expect(response.result).toBeUndefined();
+  });
+
   it("returns a bounded usage summary with explicit coverage", async () => {
     server = await createTestServer({ cwd: "/test/project" });
     const addr = server.address();

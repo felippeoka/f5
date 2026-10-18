@@ -65,6 +65,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderSession,
   type McpReloadResult,
+  type McpSessionReloadOutcome,
   PROVIDER_DISPLAY_NAMES,
   TrimmedNonEmptyString,
 } from "@t3tools/contracts";
@@ -101,6 +102,7 @@ import {
 } from "../../observability/Metrics.ts";
 import {
   type ProviderAdapterError,
+  type ProviderServiceError,
   ProviderSessionActionUnavailableError,
   ProviderValidationError,
   ProviderTurnDeliveryError,
@@ -2683,6 +2685,8 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         })),
       );
 
+    // A newer reconciliation supersedes sleeping retries even within the same generation.
+    const mcpReloadAttempts = new Map<ThreadId, symbol>();
     const reloadMcpConfigForProject: ProviderServiceShape["reloadMcpConfigForProject"] = (input) =>
       Effect.gen(function* () {
         const bindings = yield* directory.listBindingsByProject(input.projectId);
@@ -2692,70 +2696,73 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             binding.status !== "stopped" &&
             (!input.instanceId || resolveBindingInstanceId(binding) === input.instanceId) &&
             (!input.threadIds || input.threadIds.includes(binding.threadId)) &&
-            (input.instanceId ||
+            (input.instanceId !== undefined ||
               !input.providerOptions ||
               getProviderEnvironmentKey(
                 binding.provider,
                 readPersistedProviderOptions(binding.runtimePayload),
               ) === getProviderEnvironmentKey(binding.provider, input.providerOptions)),
         );
-        const sessions = yield* Effect.forEach(
-          matchingBindings,
-          (selected) =>
-            withSessionOperation(
+        const reloadSession = (
+          selected: ProviderRuntimeBinding,
+        ): Effect.Effect<ReadonlyArray<McpSessionReloadOutcome>, ProviderServiceError> => {
+          const token = Symbol("mcp-reload");
+          const instanceId = resolveBindingInstanceId(selected);
+          const generation = readPersistedSessionGeneration(selected.runtimePayload);
+          const emptyResult: McpReloadResult = {
+            converged: false,
+            restartRequired: false,
+            servers: [],
+            errors: [],
+          };
+          const base = {
+            threadId: selected.threadId,
+            instanceId,
+            generation,
+            requestedVersion: input.requestedVersion ?? "",
+            attemptedVersion: "",
+          };
+          const isCurrent = (binding: ProviderRuntimeBinding | undefined) =>
+            binding !== undefined &&
+            binding.status !== "stopped" &&
+            binding.projectId === input.projectId &&
+            binding.provider === input.provider &&
+            resolveBindingInstanceId(binding) === instanceId &&
+            readPersistedSessionGeneration(binding.runtimePayload) === generation;
+          return Effect.gen(function* () {
+            const prepared = yield* withSessionOperation(
               selected.threadId,
               Effect.gen(function* () {
-                const instanceId = resolveBindingInstanceId(selected);
-                const generation = readPersistedSessionGeneration(selected.runtimePayload);
                 const current = Option.getOrUndefined(
                   yield* directory.getBinding(selected.threadId),
                 );
-                const superseded =
-                  !current ||
-                  current.status === "stopped" ||
-                  resolveBindingInstanceId(current) !== instanceId ||
-                  readPersistedSessionGeneration(current.runtimePayload) !== generation;
-                const base = {
-                  threadId: selected.threadId,
-                  instanceId,
-                  generation,
-                  requestedVersion: input.requestedVersion ?? "",
-                  attemptedVersion: "",
-                };
-                if (superseded)
-                  return [
-                    {
-                      ...base,
-                      disposition: "superseded" as const,
-                      result: {
-                        converged: false,
-                        restartRequired: false,
-                        servers: [],
-                        errors: [],
-                      },
-                    },
-                  ];
+                if (!isCurrent(current))
+                  return {
+                    sessions: [
+                      { ...base, disposition: "superseded" as const, result: emptyResult },
+                    ],
+                  };
                 const adapter = Option.getOrUndefined(
                   yield* registry.getByInstance(instanceId).pipe(Effect.option),
                 );
-                if (!adapter?.reloadMcpConfig) return [];
-                // One immutable snapshot per gated attempt, including every bounded retry.
+                if (!adapter?.reloadMcpConfig) return { sessions: [] };
                 const config = yield* projectMcpConfigService
                   .readEffectiveStoredConfig(input.projectId)
                   .pipe(Effect.result);
                 if (config._tag === "Failure")
-                  return [
-                    {
-                      ...base,
-                      disposition: "failed" as const,
-                      result: {
-                        converged: false,
-                        restartRequired: false,
-                        servers: [],
-                        errors: [{ message: mcpConfigErrorMessage(config.failure) }],
+                  return {
+                    sessions: [
+                      {
+                        ...base,
+                        disposition: "failed" as const,
+                        result: {
+                          ...emptyResult,
+                          errors: [{ message: mcpConfigErrorMessage(config.failure) }],
+                        },
                       },
-                    },
-                  ];
+                    ],
+                  };
+                // Capture once; never replace this snapshot during a backoff window.
                 const snapshot = {
                   ...config.success,
                   servers: structuredClone(config.success.servers),
@@ -2774,21 +2781,32 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                   catch: mcpConfigErrorMessage,
                 }).pipe(Effect.result);
                 if (valid._tag === "Failure")
-                  return [
-                    {
-                      ...metadata,
-                      disposition: "failed" as const,
-                      result: {
-                        converged: false,
-                        restartRequired: false,
-                        servers: [],
-                        errors: [{ message: valid.failure }],
+                  return {
+                    sessions: [
+                      {
+                        ...metadata,
+                        disposition: "failed" as const,
+                        result: { ...emptyResult, errors: [{ message: valid.failure }] },
                       },
-                    },
-                  ];
-                if (!(yield* adapter.hasSession(selected.threadId))) return [];
-                const reloadOnce = () =>
-                  adapter.reloadMcpConfig!({
+                    ],
+                  };
+                if (!(yield* adapter.hasSession(selected.threadId))) return { sessions: [] };
+                mcpReloadAttempts.set(selected.threadId, token);
+                return { metadata, snapshot, reload: adapter.reloadMcpConfig };
+              }),
+            );
+            if ("sessions" in prepared) return prepared.sessions;
+            const { metadata, snapshot, reload } = prepared;
+            const stillCurrent = Effect.gen(function* () {
+              const binding = Option.getOrUndefined(yield* directory.getBinding(selected.threadId));
+              return mcpReloadAttempts.get(selected.threadId) === token && isCurrent(binding);
+            });
+            const reloadOnce = () =>
+              withSessionOperation(
+                selected.threadId,
+                Effect.gen(function* () {
+                  if (!(yield* stillCurrent)) return null;
+                  return yield* reload({
                     threadId: selected.threadId,
                     mcpServers: snapshot.servers,
                   }).pipe(
@@ -2797,45 +2815,45 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                       Effect.succeed({
                         reached: false,
                         result: {
-                          converged: false,
-                          restartRequired: false,
-                          servers: [],
+                          ...emptyResult,
                           errors: [
                             { message: error.message.trim() || "The MCP reload request failed." },
                           ],
-                        } satisfies McpReloadResult,
+                        },
                       }),
                     ),
                   );
-                const delays =
-                  input.retry === false ? [] : (input.retryDelaysMs ?? MCP_RELOAD_RETRY_DELAYS_MS);
-                let outcome = yield* reloadOnce();
-                for (const delay of delays) {
-                  if (outcome.result.converged || outcome.result.restartRequired) break;
-                  yield* Effect.sleep(Duration.millis(delay));
-                  const latest = Option.getOrUndefined(
-                    yield* directory.getBinding(selected.threadId),
-                  );
-                  if (
-                    !latest ||
-                    latest.status === "stopped" ||
-                    resolveBindingInstanceId(latest) !== instanceId ||
-                    readPersistedSessionGeneration(latest.runtimePayload) !== generation
-                  )
-                    return [
-                      { ...metadata, disposition: "superseded" as const, result: outcome.result },
-                    ];
-                  outcome = yield* reloadOnce();
-                }
-                const { result, reached } = outcome;
+                }),
+              );
+            let outcome = yield* reloadOnce();
+            if (!outcome)
+              return [{ ...metadata, disposition: "superseded" as const, result: emptyResult }];
+            const delays =
+              input.retry === false ? [] : (input.retryDelaysMs ?? MCP_RELOAD_RETRY_DELAYS_MS);
+            for (const delay of delays) {
+              if (outcome.result.converged || outcome.result.restartRequired) break;
+              // Stop, replacement, recovery, and turn delivery can proceed while we wait.
+              yield* Effect.sleep(Duration.millis(delay));
+              const retried = yield* reloadOnce();
+              if (!retried)
+                return [
+                  { ...metadata, disposition: "superseded" as const, result: outcome.result },
+                ];
+              outcome = retried;
+            }
+            const { result, reached } = outcome;
+            return yield* withSessionOperation(
+              selected.threadId,
+              Effect.gen(function* () {
+                if (!(yield* stillCurrent))
+                  return [{ ...metadata, disposition: "superseded" as const, result }];
                 const committed = yield* directory.updateMcpStateIfCurrent({
                   threadId: selected.threadId,
                   instanceId,
                   generation,
-                  effectiveVersion:
-                    reached && !result.restartRequired
-                      ? snapshot.effectiveVersion
-                      : (current.mcpEffectiveConfigVersion ?? null),
+                  ...(reached && !result.restartRequired
+                    ? { effectiveVersion: snapshot.effectiveVersion }
+                    : {}),
                   unconvergedVersion: result.converged ? null : snapshot.effectiveVersion,
                 });
                 if (!committed)
@@ -2866,9 +2884,17 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                   },
                 ];
               }),
+            );
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                if (mcpReloadAttempts.get(selected.threadId) === token)
+                  mcpReloadAttempts.delete(selected.threadId);
+              }),
             ),
-          { concurrency: 4 },
-        );
+          );
+        };
+        const sessions = yield* Effect.forEach(matchingBindings, reloadSession, { concurrency: 4 });
         return { sessions: sessions.flat() };
       });
 
