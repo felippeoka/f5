@@ -8,7 +8,8 @@
  *   1. Creates a fresh sandbox root (`f5-screenshots-*` under the OS temp dir)
  *      with its own state dir, an empty HOME and an allowlisted environment.
  *      On macOS and Linux, Codex and Claude point at a shim that only answers
- *      version and auth probes, so no real provider binary runs.
+ *      version and auth probes; on Windows they are disabled. All other
+ *      providers are disabled, so no real provider binary runs.
  *   2. Builds the server and web app (skip with `--skip-build`).
  *   3. Seeds demo data, starts the built server in web mode on loopback and
  *      drives Playwright through `apps/web/scripts/capture-readme-screenshots.mjs`
@@ -75,33 +76,58 @@ exit 1
 `;
 
 function providerShimSettings(root: string): Record<string, unknown> {
-  if (process.platform === "win32") return {};
+  const disabled = { enabled: false };
+  const otherProviders = {
+    cursor: disabled,
+    opencode: disabled,
+    grok: disabled,
+    antigravity: disabled,
+    muse: disabled,
+  };
+  // The shim is a POSIX shell script. Windows has no equivalent here, so every
+  // provider is disabled there instead and shots show them as disabled.
+  if (process.platform === "win32") {
+    log("Windows: no provider shim; Codex and Claude are disabled for this capture");
+    return { providers: { codex: disabled, claudeAgent: disabled, ...otherProviders } };
+  }
   const binDir = path.join(root, "bin");
   fs.mkdirSync(binDir, { recursive: true });
   const codex = path.join(binDir, "codex");
   const claude = path.join(binDir, "claude");
   for (const file of [codex, claude]) fs.writeFileSync(file, PROVIDER_SHIM, { mode: 0o755 });
-  const disabled = { enabled: false };
   return {
     providers: {
       codex: { binaryPath: codex },
       claudeAgent: { binaryPath: claude },
-      cursor: disabled,
-      opencode: disabled,
-      grok: disabled,
-      antigravity: disabled,
-      muse: disabled,
+      ...otherProviders,
     },
   };
 }
 
 // The seeder creates plain workspace folders; commit them so the UI shows the
-// normal Git actions instead of "Initialize Git".
-function initWorkspaceRepos(root: string, env: Record<string, string>): void {
+// normal Git actions instead of "Initialize Git", and create every branch a
+// seeded thread names so no thread points at a missing branch.
+function initWorkspaceRepos(root: string, env: Record<string, string>, dbPath: string): void {
+  const db = openDb(dbPath);
+  let threadBranches: ReadonlyArray<{ workspaceRoot: string; branch: string }>;
+  try {
+    threadBranches = db
+      .query<{ workspaceRoot: string; branch: string }, []>(
+        `SELECT DISTINCT p.workspace_root AS workspaceRoot, t.branch AS branch
+         FROM projection_threads t JOIN projection_projects p ON p.project_id = t.project_id
+         WHERE t.branch IS NOT NULL AND t.branch <> 'main'`,
+      )
+      .all();
+  } finally {
+    db.close();
+  }
   const workspacesDir = path.join(root, "workspaces");
   for (const name of fs.readdirSync(workspacesDir)) {
     const cwd = path.join(workspacesDir, name);
     fs.writeFileSync(path.join(cwd, "README.md"), `# ${name}\n`);
+    const branches = threadBranches
+      .filter((entry) => path.resolve(entry.workspaceRoot) === path.resolve(cwd))
+      .map((entry) => ["branch", entry.branch]);
     for (const gitArgs of [
       ["init", "-q", "-b", "main"],
       ["add", "-A"],
@@ -115,6 +141,7 @@ function initWorkspaceRepos(root: string, env: Record<string, string>): void {
         "-m",
         "Initial commit",
       ],
+      ...branches,
     ]) {
       const result = spawnSync("git", gitArgs, { cwd, env, encoding: "utf8" });
       if (result.status !== 0) {
@@ -323,7 +350,7 @@ try {
   });
   checkInterrupted();
   if (seeded.status !== 0) throw new Error(`seed-demo failed with exit code ${seeded.status}`);
-  initWorkspaceRepos(root, env);
+  initWorkspaceRepos(root, env, dbPath);
   const before = snapshot(dbPath);
   seededSnapshot = before;
   log(`seeded ${before.deliveries} delivery rows, max event sequence ${before.maxSequence}`);

@@ -50,12 +50,13 @@ Applications) and Linux from an x64 AppImage.
 
 Open **Settings → About** to check for an update, download it, and restart to install. Restarting
 stops all windows and running agents, so F5 asks first. Beta updates are opt-in (on by default for
-beta installs). Turning beta off keeps your version until a newer stable release; F5 never
-downgrades.
+beta installs), and the beta preference survives installing a stable build. Turning beta off keeps
+your version until a newer stable release; F5 never downgrades.
 
 ## Good to know
 
-- Your data under `~/.f5` is never touched by installing or upgrading.
+- Moving from F5 (Alpha) doesn't touch your data under `~/.f5`. Regular updates do: they migrate
+  the database on first launch.
 - Screen Recording and Accessibility are only needed for the opt-in macOS
   [computer use preview](user/agent-browser-and-computer-use.md).
 - F5 and upstream T3 Code can run side by side.
@@ -79,7 +80,7 @@ computer use, grant Screen Recording and Accessibility again.
 **Settings import.** The first launch copies Chromium settings from `T3 Code (Alpha)` (or
 `t3code`) into the new `f5` directory and keeps the old one. CacheStorage, service-worker caches
 and blob caches are skipped. A large import runs before the window opens and needs room for another
-copy plus 64 MiB. Chromium Safe Storage keys aren't copied, so preview-browser sign-ins may need
+copy plus 64 MiB. If the import fails, quit the legacy app and retry. Chromium Safe Storage keys aren't copied, so preview-browser sign-ins may need
 redoing on macOS and Linux; localStorage and IndexedDB are kept. Windows also copies `Local State`.
 
 **Existing profiles.** A non-empty `f5` Chromium profile is never replaced. An empty folder, or one
@@ -91,7 +92,8 @@ nothing.
 development), where `<appDataBase>` is `~/Library/Application Support`, `%APPDATA%` or
 `$XDG_CONFIG_HOME` (`~/.config`). F5 reclaims locks from dead processes, from before the current
 boot, and incomplete records after 5 seconds; a live owner never expires. If a lock still blocks
-launch, quit every F5 instance first and remove only a lock you've confirmed is abandoned.
+launch, quit every F5 instance first and remove only a lock you've confirmed is abandoned. The
+`F5_SKIP_USERDATA_IMPORT` escape hatch also respects an active import lock.
 
 </details>
 

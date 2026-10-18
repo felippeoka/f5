@@ -7,11 +7,13 @@ clean up idle worktrees and keep backups.
 
 ## How to
 
-1. In the composer of a new thread, switch the workspace to **Worktree**.
-2. Optionally, Shift+click (or Shift+Enter) up to six models in the model picker. A plain click
-   goes back to a single model.
-3. Send. F5 creates one thread per model, each with its own worktree and branch.
-4. Follow the setup card above the composer until the agent starts.
+1. Start a new thread in a project that is a Git repository.
+2. To work in one isolated checkout, switch the workspace under the composer to **Worktree**.
+3. To send to several models, Shift+click (or Shift+Enter) up to six models in the model picker
+   instead. A plain click goes back to a single model.
+4. Send. With several models, F5 creates one thread per model, each with its own worktree and
+   branch, whatever the workspace switch says.
+5. Follow the setup card above the composer until the agent starts.
 
 ## Worktree setup
 

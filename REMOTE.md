@@ -3,36 +3,35 @@
 Run the F5 server on one machine and open it from another device, such as a phone, tablet or
 another laptop.
 
+> [!WARNING]
+> F5 doesn't provide TLS. Over plain HTTP, the token and session cookie travel in cleartext, and
+> anyone holding them controls agents that can run commands on this machine. Bind to a trusted,
+> encrypted interface such as Tailscale, or put an HTTPS/WSS reverse proxy in front. Don't bind to
+> `0.0.0.0` on an untrusted network.
+
 ## How to
 
-1. Build the web app: `bun run build`.
+1. Build the web app: `bun run build`. Remote access needs the built app, not Vite dev mode.
 2. Generate a token: `TOKEN="$(openssl rand -hex 24)"`.
-3. Start the server on a reachable address:
+3. Start the server on a trusted interface, here your Tailnet address:
 
    ```bash
-   bun run --cwd apps/server start -- --host 0.0.0.0 --port 3773 --auth-token "$TOKEN" --no-browser
+   bun run --cwd apps/server start -- --host "$(tailscale ip -4)" --port 3773 --auth-token "$TOKEN" --no-browser
    ```
 
-4. On the other device, open `http://<your-machine-ip>:3773/#token=<token>`. Get the token with
+4. On the other device, open `http://<tailnet-ip>:3773/#token=<token>`. Get the token with
    `printf '%s\n' "$TOKEN"`.
 5. Make sure your firewall allows inbound TCP on that port.
-
-Remote access needs the built web app, not Vite dev-server mode.
 
 > [!IMPORTANT]
 > F5 listens on `127.0.0.1` by default and refuses any other address without `--auth-token`.
 > Older setups that relied on binding to every interface must now set `--host` and a token.
 
-## Tailscale
+## Other interfaces
 
-Bind to your Tailnet address so only devices on your tailnet can connect:
-
-```bash
-TOKEN="$(openssl rand -hex 24)"
-bun run --cwd apps/server start -- --host "$(tailscale ip -4)" --port 3773 --auth-token "$TOKEN" --no-browser
-```
-
-Then open `http://<tailnet-ip>:3773/#token=<token>` from any device on the tailnet.
+To use a LAN address instead, pass that address (for example `--host 192.168.1.42`) and open
+`http://<that-address>:3773/#token=<token>`. `--host 0.0.0.0` listens on every IPv4 interface;
+use it only behind a TLS reverse proxy or on a network you fully trust.
 
 ## Multiple profiles
 
@@ -42,12 +41,7 @@ ports, keeping origins separate is up to you.
 
 ## Good to know
 
-> [!WARNING]
-> F5 doesn't provide TLS. Over plain LAN HTTP, the token and session cookie travel in cleartext.
-> Use an encrypted network such as Tailscale, or an HTTPS/WSS reverse proxy.
-
 - Tokens must be at least 24 bytes. Generate one; don't use a password.
-- Bind to a trusted interface (LAN or Tailnet IP) rather than `0.0.0.0` when you can.
 - Reverse proxies should keep the original `Host` header and set `X-Forwarded-Proto: https`, so F5
   marks the session cookie `Secure`.
 

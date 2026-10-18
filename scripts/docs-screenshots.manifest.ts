@@ -87,8 +87,9 @@ export const DOCS_SHOTS: ReadonlyArray<DocsShot> = [
     target: { union: [COMPOSER, { css: '[role="menu"]' }], padding: 16 },
   },
   {
-    // Inline file-change cards carry their own patch; the Diff panel needs real
-    // git checkpoints, which the demo seed does not create.
+    // The inline file-change card the guide describes. The Diff panel itself
+    // is shown in assets/screenshots/thread.png, captured by
+    // apps/web/scripts/capture-readme-screenshots.mjs.
     id: "getting-started-diff",
     route: THREAD_OPML,
     waitFor: { text: "Edit src/cli/mod.rs" },
@@ -98,18 +99,18 @@ export const DOCS_SHOTS: ReadonlyArray<DocsShot> = [
   // Usage.
   {
     id: "usage-activity",
-    route: "/usage?tab=activity&range=7d",
+    route: "/usage?tab=activity&range=24h",
     waitFor: { text: "Usage over time" },
   },
   {
     id: "usage-breakdown",
-    route: "/usage?tab=activity&range=7d",
+    route: "/usage?tab=activity&range=24h",
     waitFor: { text: "Usage over time" },
     steps: [{ scrollIntoView: { text: "Projects and threads" } }],
   },
   {
     id: "usage-prices",
-    route: "/usage?tab=activity&range=7d",
+    route: "/usage?tab=activity&range=24h",
     waitFor: { text: "Usage over time" },
     steps: [{ click: { text: "Usage prices" } }, { scrollIntoView: { text: "Usage prices" } }],
   },

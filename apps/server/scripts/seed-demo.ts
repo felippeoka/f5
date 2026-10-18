@@ -213,7 +213,7 @@ interface DemoUsageFact {
   readonly projectId: typeof ProjectId.Type;
   readonly provider: "codex" | "claudeAgent";
   readonly model: string;
-  readonly hoursAgo: number;
+  readonly completedAt: string;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cacheReadTokens: number;
@@ -255,7 +255,15 @@ const USAGE_THREADS: ReadonlyArray<
   },
 ];
 
-const DEMO_USAGE_FACTS: ReadonlyArray<DemoUsageFact> = (() => {
+const USAGE_FACT_COUNT = 36;
+
+/**
+ * Deterministic usage history. Each fact completes between its thread's
+ * creation and now, so no thread reports usage from before it existed.
+ */
+const demoUsageFacts = (
+  threadCreatedAt: (threadId: typeof ThreadId.Type) => string,
+): ReadonlyArray<DemoUsageFact> => {
   // Small LCG so every seed produces the same history.
   let state = 0x5eed;
   const next = () => {
@@ -263,29 +271,28 @@ const DEMO_USAGE_FACTS: ReadonlyArray<DemoUsageFact> = (() => {
     return state / 2_147_483_648;
   };
   const facts: DemoUsageFact[] = [];
-  for (let day = 0; day < 7; day++) {
-    const turnsToday = 3 + Math.floor(next() * 5);
-    for (let turn = 0; turn < turnsToday; turn++) {
-      const thread = USAGE_THREADS[Math.floor(next() * USAGE_THREADS.length)]!;
-      const inputTokens = 8_000 + Math.floor(next() * 60_000);
-      const outputTokens = 1_200 + Math.floor(next() * 9_000);
-      const cacheReadTokens = Math.floor(inputTokens * (0.4 + next() * 0.4));
-      facts.push({
-        ...thread,
-        hoursAgo: day * 24 + 1 + Math.floor(next() * 20),
-        inputTokens,
-        outputTokens,
-        cacheReadTokens,
-        // Codex reports no cost, so the Usage page shows it as unpriced.
-        costUsd:
-          thread.provider === "claudeAgent"
-            ? Math.round(((inputTokens - cacheReadTokens) * 3 + outputTokens * 15) / 10_000) / 100
-            : null,
-      });
-    }
+  for (let index = 0; index < USAGE_FACT_COUNT; index++) {
+    const thread = USAGE_THREADS[Math.floor(next() * USAGE_THREADS.length)]!;
+    const createdMs = Date.parse(threadCreatedAt(thread.threadId));
+    const completedMs = createdMs + next() * (now.getTime() - createdMs);
+    const inputTokens = 8_000 + Math.floor(next() * 60_000);
+    const outputTokens = 1_200 + Math.floor(next() * 9_000);
+    const cacheReadTokens = Math.floor(inputTokens * (0.4 + next() * 0.4));
+    facts.push({
+      ...thread,
+      completedAt: new Date(completedMs).toISOString(),
+      inputTokens,
+      outputTokens,
+      cacheReadTokens,
+      // Codex reports no cost, so the Usage page shows it as unpriced.
+      costUsd:
+        thread.provider === "claudeAgent"
+          ? Math.round(((inputTokens - cacheReadTokens) * 3 + outputTokens * 15) / 10_000) / 100
+          : null,
+    });
   }
   return facts;
-})();
+};
 
 // ---------------------------------------------------------------------------
 // Hand-written demo conversations. No proprietary references.
@@ -1598,9 +1605,10 @@ const seedProgram = Effect.gen(function* () {
         runtimeMode: "approval-required",
         interactionMode,
         branch: chat.branch ?? null,
-        // Every demo chat works in its project root, i.e. a local thread. A
+        // Every demo thread works in its project root, i.e. a local thread. A
         // recorded worktree path makes `thread.turn.start` verify Git worktree
-        // identity, which the seed's engine (no GitCore) cannot do.
+        // identity, which the seed's engine (no GitCore) cannot do, and makes
+        // startup cleanup check it against the real repository.
         worktreePath: null,
         createdAt: chat.createdAt,
       });
@@ -1916,7 +1924,7 @@ const seedProgram = Effect.gen(function* () {
     runtimeMode: "approval-required",
     interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
     branch: null,
-    worktreePath: project2Dir,
+    worktreePath: null,
     createdAt: isoHoursAgo(3),
   });
   yield* engine.dispatch({
@@ -1929,7 +1937,7 @@ const seedProgram = Effect.gen(function* () {
     runtimeMode: "approval-required",
     interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
     branch: null,
-    worktreePath: project2Dir,
+    worktreePath: null,
     createdAt: isoHoursAgo(3),
   });
   // Implementation phase: an implementer thread plus two code-review threads.
@@ -1945,7 +1953,7 @@ const seedProgram = Effect.gen(function* () {
     runtimeMode: "approval-required",
     interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
     branch: "feat/parallel-feed-refresh",
-    worktreePath: project2Dir,
+    worktreePath: null,
     createdAt: isoMinutesAgo(70),
   });
   yield* engine.dispatch({
@@ -1958,7 +1966,7 @@ const seedProgram = Effect.gen(function* () {
     runtimeMode: "approval-required",
     interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
     branch: "feat/parallel-feed-refresh",
-    worktreePath: project2Dir,
+    worktreePath: null,
     createdAt: isoMinutesAgo(45),
   });
   yield* engine.dispatch({
@@ -1971,7 +1979,7 @@ const seedProgram = Effect.gen(function* () {
     runtimeMode: "approval-required",
     interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
     branch: "feat/parallel-feed-refresh",
-    worktreePath: project2Dir,
+    worktreePath: null,
     createdAt: isoMinutesAgo(45),
   });
 
@@ -2032,8 +2040,13 @@ const seedProgram = Effect.gen(function* () {
   });
 
   // 5. Usage history for the Usage page.
-  for (const [index, fact] of DEMO_USAGE_FACTS.entries()) {
-    const completedAt = isoHoursAgo(fact.hoursAgo);
+  const chatCreatedAt = (threadId: typeof ThreadId.Type): string => {
+    const chat = DEMO_CHATS.find((entry) => entry.threadId === threadId);
+    if (!chat) throw new Error(`[seed-demo] usage thread ${threadId} is not a demo chat`);
+    return chat.createdAt;
+  };
+  for (const [index, fact] of demoUsageFacts(chatCreatedAt).entries()) {
+    const completedAt = fact.completedAt;
     yield* engine.dispatch({
       type: "thread.usage.record",
       commandId: cmd(`usage-${index}`),
