@@ -1,3 +1,6 @@
+import { fallbackDefaultProfile } from "@t3tools/shared/profileIdentity";
+import { profileStateDir } from "@t3tools/shared/profilePaths";
+import * as fs from "node:fs/promises";
 import { WorktreePreparations } from "../../persistence/Services/WorktreePreparations.ts";
 import { WorktreePreparation } from "../Services/WorktreePreparation.ts";
 import { makeWorktreePreparationService } from "./WorktreePreparation.ts";
@@ -9,7 +12,7 @@ import type { OrchestrationCommand } from "@t3tools/contracts";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import { ProjectId, ThreadId } from "@t3tools/contracts";
+import { ProjectId, ProfileId, ThreadId } from "@t3tools/contracts";
 import { ServerConfig } from "../../config.ts";
 import { NextTurnQueueDispatcher } from "../../nextTurnQueue/Services/NextTurnQueueDispatcher.ts";
 import {
@@ -41,7 +44,7 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
         manager: Effect.Success<typeof makeWorktreeManager>,
         root: string,
         gate: typeof WorktreeSetupGate.Service,
-      ) => Effect.Effect<A, E, GitCore | WorktreePreparations>,
+      ) => Effect.Effect<A, E, GitCore | WorktreePreparations | ServerConfig>,
       overrides: Partial<GitCoreShape> = {},
       hooks: {
         beforeStop?: () => Effect.Effect<void>;
@@ -88,6 +91,13 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
             Effect.provideService(GitCore, { ...originalGit, ...overrides }),
           );
           const config = yield* ServerConfig;
+          yield* Effect.promise(async () => {
+            await fs.mkdir(config.profilesRoot!, { recursive: true });
+            await fs.writeFile(
+              path.join(config.profilesRoot!, "profiles.json"),
+              JSON.stringify({ version: 1, retiredPorts: [], profiles: [config.profile] }),
+            );
+          });
           return yield* effect(manager, config.worktreesDir, yield* WorktreeSetupGate);
         }).pipe(
           Effect.provide(WorktreeSetupGateLive),
@@ -103,6 +113,166 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
       );
     return { repo, world, projectId, run, notified };
   }
+  it("lists project, referenced, unreferenced, missing and external checkouts without changing files", async () => {
+    const { repo, world, projectId, run } = await fixture();
+    await run((manager, root) =>
+      Effect.gen(function* () {
+        const target = path.join(root, "referenced ");
+        const unused = path.join(root, "unused");
+        const missing = path.join(root, "recorded-only");
+        const external = path.join(repo.dir, "external");
+        git(repo.root, "worktree", "add", "-q", "-b", "referenced", target, "main");
+        git(repo.root, "worktree", "add", "-q", "-b", "unused", unused, "main");
+        git(repo.root, "worktree", "add", "-q", "-b", "external", external, "main");
+        yield* Effect.promise(() => fs.writeFile(path.join(target, "local.txt"), "keep me"));
+        world.threads.push(
+          thread({ id: "local", projectId, branch: "main", worktreePath: null }),
+          {
+            ...thread({ id: "linked", projectId, branch: "referenced", worktreePath: target }),
+            archivedAt: new Date().toISOString(),
+          },
+          thread({ id: "missing", projectId, branch: "missing", worktreePath: missing }),
+          thread({
+            id: "deleted",
+            projectId,
+            branch: "unused",
+            worktreePath: unused,
+            deletedAt: new Date().toISOString(),
+          }),
+        );
+        const result = yield* manager.list({ projectId });
+        const entries = result.projects[0]!.entries;
+        expect(result.projects[0]!.error).toBeNull();
+        expect(entries[0]).toMatchObject({
+          classification: "projectCheckout",
+          path: repo.root,
+          hasChanges: false,
+          linkedThreads: [{ threadId: "local" }],
+        });
+        expect(entries.find((e) => e.branch === "referenced")).toMatchObject({
+          classification: "managed",
+          hasChanges: true,
+          linkedThreads: [{ threadId: "linked", archived: true }],
+        });
+        expect(entries.find((e) => e.path === missing)).toMatchObject({
+          registration: null,
+          missing: true,
+          hasChanges: null,
+          branch: "missing",
+        });
+        expect(entries.find((e) => e.path === external)?.classification).toBe("external");
+        expect(entries.find((e) => e.branch === "unused")?.linkedThreads).toEqual([]);
+        const referencedEnd = entries.findIndex((e) => e.linkedThreads.length === 0);
+        expect(entries.slice(referencedEnd).every((e) => e.linkedThreads.length === 0)).toBe(true);
+        expect(
+          yield* Effect.promise(() => fs.readFile(path.join(target, "local.txt"), "utf8")),
+        ).toBe("keep me");
+      }),
+    );
+  });
+  it("isolates project failures, skips non-Git/deleted projects, and reports unknown dirty status", async () => {
+    const { repo, world, projectId, run } = await fixture();
+    world.projects.push(
+      project("missing", path.join(repo.dir, "absent")),
+      project("plain", repo.dir),
+      { ...project("deleted", repo.root), deletedAt: new Date().toISOString() },
+    );
+    await run(
+      (manager) =>
+        Effect.gen(function* () {
+          const result = yield* manager.list({});
+          expect(result.projects.map((p) => p.projectId)).toEqual([projectId, "missing"]);
+          expect(result.projects[0]!.entries[0]!.hasChanges).toBeNull();
+          expect(result.projects[1]!.error).toBeTruthy();
+          expect((yield* manager.list({ projectId })).projects).toHaveLength(1);
+        }),
+      { isDirty: () => Effect.succeed(null) },
+    );
+  });
+
+  it("bounds dirty inspections to four across all projects in a request", async () => {
+    const { repo, world, run } = await fixture();
+    world.projects.push(project("alias", repo.root));
+    let active = 0;
+    let peak = 0;
+    await run(
+      (manager, root) =>
+        Effect.gen(function* () {
+          for (let i = 0; i < 6; i++)
+            git(
+              repo.root,
+              "worktree",
+              "add",
+              "-q",
+              "-b",
+              `parallel-${i}`,
+              path.join(root, `parallel-${i}`),
+              "main",
+            );
+          const result = yield* manager.list({});
+          expect(result.projects).toHaveLength(2);
+          expect(result.projects.every((p) => p.error === null)).toBe(true);
+          expect(peak).toBe(4);
+          expect(active).toBe(0);
+        }),
+      {
+        isDirty: () =>
+          Effect.gen(function* () {
+            active++;
+            peak = Math.max(peak, active);
+            yield* Effect.sleep("10 millis");
+            active--;
+            return false;
+          }),
+      },
+    );
+  });
+
+  it("classifies other profiles and preserves locked and detached registrations for inspection", async () => {
+    const { repo, projectId, run } = await fixture();
+    await run((manager, root) =>
+      Effect.gen(function* () {
+        const config = yield* ServerConfig;
+        const current = fallbackDefaultProfile(config.defaultStateDir!);
+        const other = {
+          ...current,
+          id: ProfileId.makeUnsafe("a".repeat(32)),
+          slug: "other",
+          name: "Other",
+          isDefault: false,
+          port: current.port + 1,
+        };
+        yield* Effect.promise(() =>
+          fs.writeFile(
+            path.join(config.profilesRoot!, "profiles.json"),
+            JSON.stringify({ version: 1, retiredPorts: [], profiles: [config.profile, other] }),
+          ),
+        );
+        const otherPath = path.join(
+          profileStateDir(config.defaultStateDir!, other),
+          "worktrees",
+          "other",
+        );
+        const lockedPath = path.join(root, "locked");
+        const detachedPath = path.join(root, "detached");
+        git(repo.root, "worktree", "add", "-q", "-b", "other", otherPath, "main");
+        git(repo.root, "worktree", "add", "-q", "-b", "locked", lockedPath, "main");
+        git(repo.root, "worktree", "lock", "--reason", "keep this registration", lockedPath);
+        git(repo.root, "worktree", "add", "-q", "--detach", detachedPath, "main");
+        const entries = (yield* manager.list({ projectId })).projects[0]!.entries;
+        expect(entries.find((e) => e.branch === "other")?.classification).toBe("otherProfile");
+        expect(entries.find((e) => e.branch === "locked")).toMatchObject({
+          locked: true,
+          registration: { locked: "keep this registration" },
+        });
+        expect(entries.find((e) => e.branch === null)).toMatchObject({
+          detached: true,
+          classification: "managed",
+        });
+      }),
+    );
+  });
+
   it("rechecks HEAD and claims, then deletes only an unreferenced merged branch", async () => {
     const { repo, world, projectId, run } = await fixture();
     await run((manager, root) =>

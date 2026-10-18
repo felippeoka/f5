@@ -72,6 +72,7 @@ it("allows only explicitly audited reads during recovery", () => {
     "review.previewDiff",
     "nextTurnQueue.summary",
     "globalSearch.query",
+    "worktrees.list",
     "projects.cloneList",
     "githubAccount.cliCandidates",
   ])

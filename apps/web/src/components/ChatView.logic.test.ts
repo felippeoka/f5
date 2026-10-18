@@ -994,6 +994,40 @@ describe("buildExpiredTerminalContextToastCopy", () => {
 });
 
 describe("buildFirstSendBootstrap", () => {
+  it("keeps the base separate from an explicit name and sends an explicit setup opt-out", () => {
+    const result = buildFirstSendBootstrap({
+      isLocalDraftThread: true,
+      projectId: ProjectId.makeUnsafe("project-1"),
+      projectCwd: "/repo",
+      projectModel: null,
+      projectScripts: [
+        {
+          id: "setup",
+          name: "Setup",
+          command: "bun install",
+          icon: "configure",
+          runOnWorktreeCreate: true,
+        },
+      ],
+      selectedModel: null,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      thread: { branch: "main", worktreePath: null, createdAt: "2026-01-01" },
+      baseBranchForWorktree: "main",
+      worktreeBranchName: "feature/named",
+      runSetupScript: false,
+    });
+    expect(result?.prepareWorktree).toMatchObject({
+      baseBranch: "main",
+      branch: "feature/named",
+      namingIntent: "explicit",
+      runSetupScript: false,
+      requireWorktree: true,
+    });
+    expect(result?.runSetupScript).toBeUndefined();
+    expect(result?.createThread?.branch).toBe("main");
+  });
+
   it("carries an explicit shared-workspace confirmation into thread creation", () => {
     const result = buildFirstSendBootstrap({
       isLocalDraftThread: true,

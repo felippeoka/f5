@@ -1,3 +1,4 @@
+import { listWorktreeInventory } from "../worktreeInventory.ts";
 import { WorkspaceTransition } from "../Services/WorkspaceTransition.ts";
 import {
   type ThreadId,
@@ -33,6 +34,7 @@ export const makeWorktreeManager = Effect.gen(function* () {
     | WorktreeSetupGate
   >();
   const git = yield* GitCore;
+  const config = yield* ServerConfig;
   const engine = yield* OrchestrationEngineService;
   const queue = yield* NextTurnQueueStore;
   const setup = yield* WorktreeSetupGate;
@@ -339,6 +341,12 @@ export const makeWorktreeManager = Effect.gen(function* () {
       yield* dispatcher.notify(thread.id);
       return yield* threadState(input);
     });
-  return { inspect, remove, threadState, recover } satisfies WorktreeManagerShape;
+  const list: WorktreeManagerShape["list"] = (input) =>
+    engine
+      .getReadModel()
+      .pipe(
+        Effect.flatMap((model) => listWorktreeInventory(input, model, git, config, fileSystem)),
+      );
+  return { list, inspect, remove, threadState, recover } satisfies WorktreeManagerShape;
 });
 export const WorktreeManagerLive = Layer.effect(WorktreeManager, makeWorktreeManager);

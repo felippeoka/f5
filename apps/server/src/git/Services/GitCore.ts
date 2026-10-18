@@ -164,6 +164,8 @@ export interface GitWorktreeProgress {
  * GitCoreShape - Service API for low-level Git repository interactions.
  */
 export interface GitCoreShape {
+  /** Local, bounded inventory status. Unknown/unreadable returns null. */
+  readonly isDirty: (cwd: string) => Effect.Effect<boolean | null>;
   readonly listWorktrees: (
     cwd: string,
   ) => Effect.Effect<ReadonlyArray<RegisteredWorktree>, GitCommandError>;

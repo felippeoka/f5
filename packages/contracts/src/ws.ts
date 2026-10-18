@@ -3,6 +3,7 @@ import {
   WorktreesGetTransitionInput,
   WorktreesPreviewTransitionRecoveryInput,
   WorktreesResolveTransitionInput,
+  WorktreesListInput,
   WorktreesInspectInput,
   WorktreesRemoveInput,
   WorktreesThreadStateInput,
@@ -465,6 +466,7 @@ export const WS_METHODS = {
   nextTurnQueueDiscardDelivery: "nextTurnQueue.discardDelivery",
 
   // Background worktree setup for a new thread's first send
+  worktreesList: "worktrees.list",
   worktreesInspect: "worktrees.inspect",
   worktreesRemove: "worktrees.remove",
   worktreesThreadState: "worktrees.threadState",
@@ -847,6 +849,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.nextTurnQueueRecheckDelivery, NextTurnQueueRecheckDeliveryInput),
   tagRequestBody(WS_METHODS.nextTurnQueueRetryDelivery, NextTurnQueueRetryDeliveryInput),
   tagRequestBody(WS_METHODS.nextTurnQueueDiscardDelivery, NextTurnQueueDiscardDeliveryInput),
+  tagRequestBody(WS_METHODS.worktreesList, WorktreesListInput),
   tagRequestBody(WS_METHODS.worktreesInspect, WorktreesInspectInput),
   tagRequestBody(WS_METHODS.worktreesRemove, WorktreesRemoveInput),
   tagRequestBody(WS_METHODS.worktreesThreadState, WorktreesThreadStateInput),

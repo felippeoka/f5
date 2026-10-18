@@ -159,6 +159,7 @@ const READ_ONLY_METHODS = new Set([
   "terminal.snapshot",
   "usage.getAccounts",
   "usage.getSummary",
+  "worktrees.list",
   "workflowPlatform.inspectRun",
   "workflowPlatform.listTemplates",
 ]);

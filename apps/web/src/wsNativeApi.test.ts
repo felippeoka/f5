@@ -139,6 +139,17 @@ describe("wsNativeApi", () => {
     });
   });
 
+  it("forwards the project-scoped worktree inventory request", async () => {
+    const { createWsNativeApi } = await import("./wsNativeApi");
+    requestMock.mockResolvedValue({ projects: [] });
+    const api = createWsNativeApi();
+    await expect(api.worktrees.list({})).resolves.toEqual({ projects: [] });
+    expect(requestMock).toHaveBeenCalledWith(WS_METHODS.worktreesList, {});
+    const projectId = ProjectId.makeUnsafe("inventory");
+    await api.worktrees.list({ projectId });
+    expect(requestMock).toHaveBeenLastCalledWith(WS_METHODS.worktreesList, { projectId });
+  });
+
   it("loads and subscribes to durable agents snapshots", async () => {
     const snapshot = { entries: [], generatedAt: "2026-01-01T00:00:00.000Z" } as const;
     requestMock.mockResolvedValue(snapshot);

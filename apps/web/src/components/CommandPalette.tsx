@@ -969,6 +969,16 @@ function OpenCommandPaletteDialog(props: {
     },
     {
       kind: "action",
+      value: "action:worktrees",
+      title: "Open worktrees",
+      searchTerms: ["worktrees", "branches", "workspace"],
+      icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await navigate({ to: "/worktrees" });
+      },
+    },
+    {
+      kind: "action",
       value: "action:usage",
       title: "Open Usage",
       searchTerms: ["usage", "cost", "tokens", "limits"],

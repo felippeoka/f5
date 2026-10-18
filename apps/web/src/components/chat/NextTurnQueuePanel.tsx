@@ -1,3 +1,4 @@
+import { WorkspaceTransitionSummary } from "./WorkspaceTransitionBanner";
 import { WorktreeMissingBanner } from "./WorktreeMissingBanner";
 import type {
   CommandId,
@@ -241,7 +242,13 @@ export function NextTurnQueuePanel({
   }
   if (!snapshot) return null;
   const itemCount = snapshot.items.length - hiddenIds.size + state.optimistic.length;
-  if (itemCount === 0 && !snapshot.paused && !state.syncError && snapshot.quarantinedCount === 0) {
+  if (
+    itemCount === 0 &&
+    !snapshot.paused &&
+    !state.syncError &&
+    snapshot.quarantinedCount === 0 &&
+    !snapshot.workspaceTransition
+  ) {
     return null;
   }
   const blockedDescription = describeQueueBlockedState(snapshot);
@@ -399,6 +406,9 @@ export function NextTurnQueuePanel({
           className={`mt-1 rounded px-2 py-1 text-xs ${snapshot.blockedKind === "waiting" ? "text-muted-foreground" : "bg-warning/10 text-warning-foreground"}`}
         >
           {blockedDescription}
+          {snapshot.workspaceTransition && (
+            <WorkspaceTransitionSummary transition={snapshot.workspaceTransition} />
+          )}
           {snapshot.reasonCode === "worktree_missing" ||
           snapshot.reasonCode === "worktree_setup_failed" ? (
             <WorktreeMissingBanner

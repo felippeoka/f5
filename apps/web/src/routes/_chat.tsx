@@ -1,4 +1,4 @@
-import { WorktreeRemovalDialogHost } from "../components/WorktreeRemovalDialog";
+import { WorktreeRemovalDialogHost } from "../components/WorktreeRemovalDialogHost";
 import { ComputerAccessInbox } from "../components/ComputerAccessCard";
 import { useServerUpdateOutcome } from "../hooks/useServerUpdateOutcome";
 import { useSnapShotRouting } from "../hooks/useSnapShotRouting";

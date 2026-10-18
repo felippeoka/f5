@@ -86,6 +86,17 @@ import {
 } from "../lib/workspaceInvalidation";
 import { startWorkspaceWatchSync } from "../lib/workspaceWatch";
 
+const WORKTREE_INVENTORY_EVENT_TYPES = new Set<OrchestrationEvent["type"]>([
+  "thread.created",
+  "thread.meta-updated",
+  "thread.deleted",
+  "thread.archived",
+  "thread.unarchived",
+  "project.created",
+  "project.meta-updated",
+  "project.deleted",
+]);
+
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
@@ -994,6 +1005,7 @@ function EventRouter() {
       } else {
         clearSnapshotRetry();
         noteWsSynchronized();
+        void queryClient.invalidateQueries({ queryKey: ["worktrees"] });
       }
       const recoveredBootstrapThreadId = await completeWelcomeRecovery();
       const onboardingLiteState = deriveOnboardingLiteState({
@@ -1078,9 +1090,9 @@ function EventRouter() {
     };
 
     const unsubDomainEvent = api.orchestration.onDomainEvent((event) => {
-      if (event.sequence <= latestSequence) {
-        return;
-      }
+      if (event.sequence <= latestSequence) return;
+      if (WORKTREE_INVENTORY_EVENT_TYPES.has(event.type))
+        void queryClient.invalidateQueries({ queryKey: ["worktrees"] });
       if (event.type === "project.created" || event.type === "project.meta-updated")
         void refreshProfiles()
           .then(() => {

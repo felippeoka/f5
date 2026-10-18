@@ -153,3 +153,32 @@ export const WorktreesResolveTransitionInput = Schema.Struct({
   ]),
 });
 export type WorktreesResolveTransitionInput = typeof WorktreesResolveTransitionInput.Type;
+
+/** Inventory is informational; every mutation revalidates identity and claims. */
+export const WorktreesListInput = Schema.Struct({ projectId: Schema.optional(ProjectId) });
+export type WorktreesListInput = typeof WorktreesListInput.Type;
+export const WorktreeListEntry = Schema.Struct({
+  path: FilesystemPath,
+  canonicalPath: FilesystemPath,
+  registration: Schema.NullOr(WorktreeRegistration),
+  branch: Schema.NullOr(Schema.String),
+  classification: Schema.Literals(["projectCheckout", "managed", "external", "otherProfile"]),
+  missing: Schema.Boolean,
+  locked: Schema.Boolean,
+  detached: Schema.Boolean,
+  hasChanges: Schema.NullOr(Schema.Boolean),
+  linkedThreads: WorktreesInspectResult.fields.linkedThreads,
+});
+export type WorktreeListEntry = typeof WorktreeListEntry.Type;
+export const WorktreesListResult = Schema.Struct({
+  projects: Schema.Array(
+    Schema.Struct({
+      projectId: ProjectId,
+      name: Schema.String,
+      workspaceRoot: FilesystemPath,
+      entries: Schema.Array(WorktreeListEntry),
+      error: Schema.NullOr(Schema.String),
+    }),
+  ),
+});
+export type WorktreesListResult = typeof WorktreesListResult.Type;

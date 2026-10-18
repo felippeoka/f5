@@ -2968,6 +2968,21 @@ describe("WebSocket Server", () => {
     const workspaceRoot = makeTempDir("t3code-reveal-workspace-");
     fs.mkdirSync(path.join(workspaceRoot, "src"));
     fs.writeFileSync(path.join(workspaceRoot, "src", "app.ts"), "export {};\n", "utf8");
+    const git = (...args: string[]) =>
+      execFileSync("git", args, { cwd: workspaceRoot, stdio: "pipe" });
+    git("init", "-q", "--initial-branch=main");
+    git("add", ".");
+    git(
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.com",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-qm",
+      "initial",
+    );
     const revealCalls: string[] = [];
     const openService: OpenShape = {
       openBrowser: () => Effect.void,
@@ -3024,6 +3039,42 @@ describe("WebSocket Server", () => {
     });
     expect(response.error).toBeUndefined();
     expect(revealCalls).toEqual([path.join(fs.realpathSync(workspaceRoot), "src", "app.ts")]);
+    const rootResponse = await sendRequest(ws, WS_METHODS.shellRevealInFileManager, {
+      projectId,
+      threadId,
+      relativePath: ".",
+      kind: "directory",
+    });
+    expect(rootResponse.error).toBeUndefined();
+    expect(revealCalls[1]).toBe(fs.realpathSync(workspaceRoot));
+    const escapeResponse = await sendRequest(ws, WS_METHODS.shellRevealInFileManager, {
+      projectId,
+      threadId,
+      relativePath: "..",
+      kind: "directory",
+    });
+    expect(escapeResponse.error).toBeDefined();
+    expect(revealCalls).toHaveLength(2);
+    const inventory = await sendRequest(ws, WS_METHODS.worktreesList, { projectId });
+    expect(inventory.error).toBeUndefined();
+    expect(inventory.result).toMatchObject({
+      projects: [
+        {
+          projectId,
+          entries: [
+            {
+              classification: "projectCheckout",
+              branch: "main",
+              missing: false,
+              hasChanges: false,
+              linkedThreads: [{ threadId, title: "Reveal thread", archived: false }],
+            },
+          ],
+        },
+      ],
+    });
+    const unknown = await sendRequest(ws, WS_METHODS.worktreesList, { projectId: "unknown" });
+    expect(unknown.error).toBeDefined();
   });
 
   it("reads keybindings from the configured state directory", async () => {

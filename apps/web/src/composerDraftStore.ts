@@ -439,6 +439,8 @@ interface PersistedDraftThreadState {
   branch: string | null;
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
+  worktreeBranchName?: string | null;
+  runSetupScript?: boolean | null;
 }
 
 interface PersistedComposerDraftStoreState {
@@ -519,6 +521,8 @@ export interface DraftThreadState {
   worktreePath: string | null;
   sharedFilesystemConfirmed?: boolean;
   envMode: DraftThreadEnvMode;
+  worktreeBranchName?: string | null;
+  runSetupScript?: boolean | null;
 }
 
 export interface ProjectDraftThread extends DraftThreadState {
@@ -657,6 +661,8 @@ interface ComposerDraftStoreState {
       worktreePath?: string | null;
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
+      worktreeBranchName?: string | null;
+      runSetupScript?: boolean | null;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
     },
@@ -670,6 +676,8 @@ interface ComposerDraftStoreState {
       projectId?: ProjectId;
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
+      worktreeBranchName?: string | null;
+      runSetupScript?: boolean | null;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
     },
@@ -1379,6 +1387,16 @@ function normalizePersistedComposerDraftState(value: unknown): PersistedComposer
           ? { sharedFilesystemConfirmed: true }
           : {}),
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
+        worktreeBranchName:
+          typeof candidateDraftThread.worktreeBranchName === "string" &&
+          candidateDraftThread.worktreeBranchName.length > 0 &&
+          !/\s/.test(candidateDraftThread.worktreeBranchName)
+            ? candidateDraftThread.worktreeBranchName
+            : null,
+        runSetupScript:
+          typeof candidateDraftThread.runSetupScript === "boolean"
+            ? candidateDraftThread.runSetupScript
+            : null,
       };
     }
   }
@@ -1407,6 +1425,8 @@ function normalizePersistedComposerDraftState(value: unknown): PersistedComposer
             branch: null,
             worktreePath: null,
             envMode: "local",
+            worktreeBranchName: null,
+            runSetupScript: null,
           };
         } else if (draftThreadsByThreadId[threadId as ThreadId]?.projectId !== projectId) {
           draftThreadsByThreadId[threadId as ThreadId] = {
@@ -1828,6 +1848,14 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
                 ? (existingThread?.branch ?? null)
                 : (options.branch ?? null),
             worktreePath: nextWorktreePath,
+            worktreeBranchName:
+              options?.worktreeBranchName === undefined
+                ? (existingThread?.worktreeBranchName ?? null)
+                : options.worktreeBranchName,
+            runSetupScript:
+              options?.runSetupScript === undefined
+                ? (existingThread?.runSetupScript ?? null)
+                : options.runSetupScript,
             envMode:
               options?.envMode ??
               (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
@@ -1844,7 +1872,9 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             existingThread.interactionMode === nextDraftThread.interactionMode &&
             existingThread.branch === nextDraftThread.branch &&
             existingThread.worktreePath === nextDraftThread.worktreePath &&
-            existingThread.envMode === nextDraftThread.envMode;
+            existingThread.envMode === nextDraftThread.envMode &&
+            existingThread.worktreeBranchName === nextDraftThread.worktreeBranchName &&
+            existingThread.runSetupScript === nextDraftThread.runSetupScript;
           if (hasSameProjectMapping && hasSameDraftThread) {
             return state;
           }
@@ -1947,6 +1977,14 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             interactionMode: options.interactionMode ?? existing.interactionMode,
             branch: options.branch === undefined ? existing.branch : (options.branch ?? null),
             worktreePath: nextWorktreePath,
+            worktreeBranchName:
+              options.worktreeBranchName === undefined
+                ? (existing.worktreeBranchName ?? null)
+                : options.worktreeBranchName,
+            runSetupScript:
+              options.runSetupScript === undefined
+                ? (existing.runSetupScript ?? null)
+                : options.runSetupScript,
             ...((options.sharedFilesystemConfirmed ??
             (nextProjectId === existing.projectId &&
               nextWorktreePath === existing.worktreePath &&
@@ -1965,6 +2003,8 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             nextDraftThread.branch === existing.branch &&
             nextDraftThread.worktreePath === existing.worktreePath &&
             nextDraftThread.envMode === existing.envMode &&
+            nextDraftThread.worktreeBranchName === existing.worktreeBranchName &&
+            nextDraftThread.runSetupScript === existing.runSetupScript &&
             nextDraftThread.sharedFilesystemConfirmed === existing.sharedFilesystemConfirmed;
           if (isUnchanged) {
             return state;

@@ -1,3 +1,6 @@
+import { WorktreeChip } from "./WorktreeChip";
+import { WorktreeCreationOptions } from "./worktrees/WorktreeCreationOptions";
+import { setupProjectScript } from "../projectScripts";
 import { switchConversationWorkspace } from "../lib/workspaceTransitions";
 import { toastManager } from "./ui/toast";
 import type { ThreadId } from "@t3tools/contracts";
@@ -26,6 +29,8 @@ interface BranchToolbarProps {
   threadId: ThreadId;
   onEnvModeChange: (mode: EnvMode) => void;
   envLocked: boolean;
+  multiModel?: boolean;
+  onOpenTerminal?: () => void;
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
 }
@@ -34,6 +39,8 @@ export default function BranchToolbar({
   threadId,
   onEnvModeChange,
   envLocked,
+  multiModel = false,
+  onOpenTerminal,
   onCheckoutPullRequestRequest,
   onComposerFocusRequest,
 }: BranchToolbarProps) {
@@ -101,6 +108,7 @@ export default function BranchToolbar({
         void switchConversationWorkspace(activeThreadId, {
           intent: "attach_existing",
           targetPath: worktreePath ?? activeProject!.cwd,
+          sharedFilesystemConfirmed,
           ...(branch ? { branch } : {}),
         }).catch((error) =>
           toastManager.add({
@@ -140,22 +148,20 @@ export default function BranchToolbar({
   return (
     <div
       data-slot="branch-toolbar"
-      className="mx-auto flex h-7 w-full max-w-(--chat-content-max-width) shrink-0 items-center justify-between gap-2 px-1 text-2xs text-muted-foreground"
+      className="mx-auto flex min-h-7 w-full flex-wrap max-w-(--chat-content-max-width) shrink-0 items-center justify-between gap-2 px-1 text-2xs text-muted-foreground"
     >
-      {envLocked || activeWorktreePath ? (
-        <span className="inline-flex items-center gap-1 px-2 text-2xs text-muted-foreground">
-          {activeWorktreePath ? (
-            <>
-              <GitForkIcon className="size-3" />
-              Worktree
-            </>
-          ) : (
-            <>
-              <FolderIcon className="size-3" />
-              Local
-            </>
-          )}
-        </span>
+      {envLocked || activeWorktreePath || effectiveEnvMode === "local" ? (
+        <WorktreeChip
+          threadId={threadId}
+          projectId={activeProject.id}
+          branch={activeThreadBranch}
+          path={activeWorktreePath ?? activeProject.cwd}
+          isWorktree={Boolean(activeWorktreePath)}
+          {...(!envLocked && !activeWorktreePath
+            ? { onNewWorktree: () => onEnvModeChange("worktree") }
+            : {})}
+          {...(onOpenTerminal ? { onOpenTerminal } : {})}
+        />
       ) : (
         <Select
           value={effectiveEnvMode}
@@ -192,6 +198,13 @@ export default function BranchToolbar({
         </Select>
       )}
 
+      {!envLocked && !activeWorktreePath && effectiveEnvMode === "worktree" && (
+        <WorktreeCreationOptions
+          threadId={threadId}
+          multiModel={multiModel}
+          hasSetupScript={Boolean(setupProjectScript(activeProject.scripts))}
+        />
+      )}
       <BranchToolbarBranchSelector
         key={threadId}
         threadId={threadId}

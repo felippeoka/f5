@@ -1,4 +1,4 @@
-import type { ThreadId } from "@t3tools/contracts";
+import type { ProjectId, ThreadId } from "@t3tools/contracts";
 import type { GitStackedAction } from "@t3tools/contracts";
 import { mutationOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
 import { ensureNativeApi } from "../nativeApi";
@@ -10,6 +10,7 @@ const GIT_BRANCHES_REFETCH_INTERVAL_MS = 60_000;
 
 export const gitQueryKeys = {
   all: ["git"] as const,
+  worktrees: (projectId: ProjectId | null) => ["worktrees", "list", projectId] as const,
   status: (cwd: string | null) => ["git", "status", cwd] as const,
   branches: (cwd: string | null) => ["git", "branches", cwd] as const,
 };
@@ -223,5 +224,16 @@ export function gitPreparePullRequestThreadMutationOptions(input: {
     onSettled: async () => {
       await invalidateGitQueries(input.queryClient, { cwd: input.cwd });
     },
+  });
+}
+
+export function worktreesListQueryOptions(projectId: ProjectId | null = null) {
+  return queryOptions({
+    queryKey: gitQueryKeys.worktrees(projectId),
+    queryFn: () => ensureNativeApi().worktrees.list(projectId ? { projectId } : {}),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    refetchInterval: false,
   });
 }

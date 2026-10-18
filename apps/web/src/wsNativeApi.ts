@@ -769,6 +769,7 @@ export function createWsNativeApi(): NativeApi {
       onDiskSpaceUpdated: (callback) => onStorageDiskSpaceUpdated(callback),
     },
     worktrees: {
+      list: (input) => transport.request(WS_METHODS.worktreesList, input),
       switchWorkspace: (input) => transport.request(WS_METHODS.worktreesSwitchWorkspace, input),
       getTransition: (input) => transport.request(WS_METHODS.worktreesGetTransition, input),
       previewTransitionRecovery: (input) =>
