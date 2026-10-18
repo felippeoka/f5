@@ -158,7 +158,7 @@ describe.concurrent("real Git smoke", () => {
     expect(await git(service, cwd, ["status", "--short"])).toBe("?? ignored.txt");
   });
 
-  it("creates and force-removes a dirty worktree", async () => {
+  it("preserves a dirty worktree even with force, then removes it after committing", async () => {
     const { git: service, core } = await makeServices();
     const cwd = await initRepository(service, core);
     const worktreePath = makeTempDirectory("f5-git-smoke-worktree-");
@@ -173,7 +173,13 @@ describe.concurrent("real Git smoke", () => {
       }),
     );
     fs.writeFileSync(path.join(worktreePath, "dirty.txt"), "dirty\n", "utf8");
-    await Effect.runPromise(core.removeWorktree({ cwd, path: worktreePath, force: true }));
+    await expect(
+      Effect.runPromise(core.removeWorktree({ cwd, path: worktreePath, force: true })),
+    ).rejects.toThrow("local changes");
+    expect(fs.readFileSync(path.join(worktreePath, "dirty.txt"), "utf8")).toBe("dirty\n");
+    await git(service, worktreePath, ["add", "dirty.txt"]);
+    await git(service, worktreePath, ["commit", "-m", "Preserve worktree changes"]);
+    await Effect.runPromise(core.removeWorktree({ cwd, path: worktreePath }));
 
     expect(created.worktree.branch).toBe("feature/worktree");
     expect(fs.existsSync(worktreePath)).toBe(false);

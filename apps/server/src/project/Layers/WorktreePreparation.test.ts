@@ -1,3 +1,4 @@
+import * as Path from "node:path";
 import { ProjectId, ThreadId, WORKTREE_SETUP_TAIL_LINES } from "@t3tools/contracts";
 import { Deferred, Effect, Fiber, Layer } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,10 +23,11 @@ vi.mock("../ownedSetupScript.ts", () => ({ startOwnedSetupScript: vi.fn() }));
 beforeEach(() => {
   vi.mocked(startOwnedSetupScript).mockReset();
 });
+const projectRoot = Path.resolve("/missing-f5-test");
 const input = {
   threadId: ThreadId.makeUnsafe("thread"),
   projectId: ProjectId.makeUnsafe("project"),
-  worktreePath: "/missing-f5-test/wt",
+  worktreePath: Path.join(projectRoot, "wt"),
   branch: "feature",
 };
 
@@ -42,7 +44,7 @@ const fixture = (
 ) => {
   const world = makeWorld();
   world.projects.push({
-    ...project("project", "/missing-f5-test"),
+    ...project("project", projectRoot),
     scripts: [
       {
         id: "setup",
@@ -69,7 +71,7 @@ const fixture = (
         Effect.map((status) => ({
           ...status,
           canonicalRoot: input.worktreePath,
-          commonDir: "/missing-f5-test/.git",
+          commonDir: Path.join(projectRoot, ".git"),
           branch: input.branch,
           headSha: "base",
           ignoredTruncated: options.ignoredTruncated ?? false,
@@ -120,8 +122,8 @@ const fixture = (
         });
         const allocated = yield* receipts.allocate({
           operationId: "operation",
-          repositoryIdentity: "/missing-f5-test/.git",
-          projectIdentity: "/missing-f5-test",
+          repositoryIdentity: Path.join(projectRoot, ".git"),
+          projectIdentity: projectRoot,
           owner: options.owner ?? "thread:thread",
           requestedBase: "main",
           baseOid: "base",

@@ -1,0 +1,8 @@
+paths:
+  .github/workflows/release.yml:
+    ignore:
+      # Single-quoted node -e template literals intentionally reach Node unchanged.
+      - "SC2016:"
+  .github/workflows/windows-release-checks.yml:
+    ignore:
+      - "SC2016:"

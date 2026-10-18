@@ -20,7 +20,7 @@
     "start": "node dist/index.mjs",
     "prepare": "node node_modules/@effect/language-service/cli.js patch",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
-    "test": "bun run test:unit && bun run test:git:smoke && bun run test:integration",
+    "test": "bun run test:unit && bun run test:non-unit",
     "test:full": "bun run test && bun run test:git:extended",
     "test:unit": "node node_modules/vitest/vitest.mjs run src",
     "test:git": "bun run test:git:smoke && bun run test:git:extended",
@@ -33,7 +33,8 @@
     "test:claude:live": "F5_CLAUDE_LIVE_TEST=1 node node_modules/vitest/vitest.mjs run integration/claudeRuntime.live.test.ts integration/claudeReleaseZero.live.test.ts integration/claudePreviewMcp.live.test.ts integration/claudeCompaction.live.test.ts integration/claudeComputerMcp.live.test.ts --no-file-parallelism",
     "test:codex:compaction:live": "F5_CODEX_LIVE_TEST=1 bun scripts/certify-native-compaction.ts",
     "test:unit:shard": "node node_modules/vitest/vitest.mjs run src",
-    "test:codex:live": "F5_CODEX_LIVE_TEST=1 bun scripts/certify-codex-rewind.ts && F5_CODEX_LIVE_TEST=1 node node_modules/vitest/vitest.mjs run integration/codexComputerMcp.live.test.ts --no-file-parallelism"
+    "test:codex:live": "F5_CODEX_LIVE_TEST=1 bun scripts/certify-codex-rewind.ts && F5_CODEX_LIVE_TEST=1 node node_modules/vitest/vitest.mjs run integration/codexComputerMcp.live.test.ts --no-file-parallelism",
+    "test:non-unit": "bun run test:git:smoke && bun run test:integration"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.295",

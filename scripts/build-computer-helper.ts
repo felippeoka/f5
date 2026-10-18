@@ -74,7 +74,7 @@ async function main(): Promise<void> {
     if (arch === "universal") throw new Error("Windows requires one architecture.");
     const cwd = join(root, "apps/desktop/native/windows");
     const target = `${arch === "x64" ? "x86_64" : "aarch64"}-pc-windows-msvc`;
-    if (!run("cargo", ["build", "--release", "--target", target], cwd)) return;
+    if (!run("cargo", ["build", "--locked", "--release", "--target", target], cwd)) return;
     stageComputerHelper(binary, (staged) => {
       copyFileSync(join(cwd, "target", target, "release", "f5-computer-helper.exe"), staged);
       return true;

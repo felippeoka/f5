@@ -1,10 +1,168 @@
-# CI quality gates
+# Continuous integration
 
 > Contributors: what CI runs and which checks to run locally.
 
-- `.github/workflows/ci.yml` runs `bun run fmt:check`, `bun run lint`, `bun run typecheck`, and `bun run test:full` for pull requests and pushes to `main`.
-- Use the fast `bun run test` suite for local feedback; CI runs the extended real-Git matrix before a change can merge.
-- Agents and contributors must run `bun run test:full` at least once before declaring work complete. It is also required before releases and after major Git subsystem changes.
-- `.github/workflows/release.yml` builds macOS (`arm64` and `x64`), Linux (`x64`), and Windows (`x64`) desktop artifacts from a single `v*.*.*` tag and publishes one GitHub release.
-- The release workflow auto-enables signing only when secrets are present: Apple credentials for macOS and Azure Trusted Signing credentials for Windows. Without secrets, it still releases unsigned artifacts.
-- See `docs/release.md` for full release/signing setup checklist.
+`.github/workflows/ci.yml` runs on pull requests, every main push, nightly at
+03:17 UTC, and manual dispatch. `CI result` is the single intended required check.
+It waits for all validation jobs and rejects failed, cancelled, or missing verdicts;
+intentionally skipped jobs pass. A policy test ensures new jobs join this gate,
+matrices finish every shard, and all jobs have timeouts.
+
+| Job                 | Scope                   | Work                                                                                                     | Timeout |
+| ------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------- | ------- |
+| changes             | Every run               | PR code-change filter                                                                                    | 5 min   |
+| static              | Every run               | Formatting, lint, workflow lint, types, server boot, SDK/protocol audits, release smoke, tier/port drift | 15 min  |
+| test                | Every run               | Seven workspace suites, server Git smoke, integration, extended Git matrix                               | 20 min  |
+| server-unit         | Code changes            | Two Linux unit shards, four workers each                                                                 | 15 min  |
+| browser             | Code changes            | Discovered browser tests in Chromium                                                                     | 15 min  |
+| desktop             | Code changes            | Sandboxed Electron smoke, profile lifecycle, marketing build                                             | 20 min  |
+| windows-build       | Code changes            | Strict Rust checks, workspace/Git/integration suites, desktop build and smoke, profiles                  | 30 min  |
+| windows-server-unit | Code changes            | Two Windows unit shards, two workers each                                                                | 20 min  |
+| macos-profiles      | Code changes            | Swift, strict universal helper, selected profile tests                                                   | 15 min  |
+| macos-suite         | Main, nightly, dispatch | Strict native checks, all workspace/server suites, desktop and profile smoke                             | 60 min  |
+| CI result           | Every run               | Aggregate verdict                                                                                        | 5 min   |
+| main-status         | Current main only       | Reconcile the `ci-main-red` issue                                                                        | 5 min   |
+
+A docs-only PR (only Markdown or `docs/**`) skips the heavy jobs. Static checks
+and workspace/Git/integration tests still run, including environment documentation
+drift tests. Main pushes, nightly runs and dispatches always run heavy jobs.
+The full macOS suite never runs on PRs. It feeds `CI result`, so release eligibility
+waits for it after each merge (with a 60-minute job timeout). Hosted timing targets for
+non-packaging PRs are at most 10 minutes on Linux and 12 minutes on Windows;
+measure these on Actions before treating them as achieved. TypeScript is checked once
+on Linux, whose case-sensitive filesystem catches import-casing errors. TypeScript
+output is host-independent; Windows and macOS still run their native build and
+runtime checks.
+
+Only superseded PR runs are cancelled. Main commits use separate concurrency groups
+by SHA, so a later merge cannot cancel an earlier commit's release-eligibility run.
+Release preflight currently checks the exact SHA's successful main push run. The
+stricter explicit gate/attempt check and distribution workflow are deferred until
+PR #157 merges; see the existing release documentation for the current behavior.
+
+`main-status` ignores stale SHAs and deduplicates comments by run attempt. It has
+no shared concurrency group: [GitHub's concurrency rules](https://docs.github.com/en/actions/concepts/workflows-and-actions/concurrency)
+allow a new pending notification to cancel a previous pending job, cancelling
+that SHA's otherwise successful push run. Overlapping
+notifications may rarely create duplicate issues; preserving each push verdict takes
+priority over serializing issue updates.
+
+A failed current main run creates or comments on `CI failing on main`, labelled
+`ci-main-red`, once per run attempt. The notifier only selects an issue with that
+exact title; other issues carrying the label are left alone. A successful current-main run closes it with
+the green SHA and run URL. API errors do not change the CI verdict. Nightly
+failures use the same issue. GitHub can disable schedules after 60 days without
+repository activity; the maintainer checks schedule activity monthly.
+
+## Reproducing failures
+
+Use Node from `.node-version` and Bun from `packageManager` in `package.json`.
+Install with `bun install --frozen-lockfile`. The shared setup action caches Bun's
+download cache and Electron downloads, never `node_modules`, native or Turbo outputs.
+Rust caches are scoped to the Windows helper and fixture. The full macOS desktop
+build steps request a 4 GiB Node heap for contract declaration generation, which
+exceeds the ARM64 runtime's default 2 GiB limit. Turbo forwards `NODE_OPTIONS` to
+build tasks. MSW worker regeneration
+is explicit: its postinstall hook overwrites the worker with vendor bytes even when
+the version already matches. A formatting difference alone can dirty the tracked
+worker during installation. `scripts/msw-worker-install.test.ts` reproduces that behavior,
+checks that the current install policy preserves the worker, and rejects a worker
+version that differs from the installed MSW package. See `CONTRIBUTING.md` for the
+regeneration command. Every test job checks for tracked changes and untracked
+files at the end.
+
+```sh
+bun fmt
+bun lint
+bun typecheck
+env -i PATH="$PATH" HOME="$HOME" bun run test:ci:workspaces
+env -i PATH="$PATH" HOME="$HOME" bun run test:server:shard --shard=1/2
+env -i PATH="$PATH" HOME="$HOME" bun run test:server:shard --shard=2/2
+env -i PATH="$PATH" HOME="$HOME" bun run test:full
+```
+
+Always use `bun run test`, never `bun test`. `env -i` prevents F5 profile and provider
+variables inherited from a running session from altering test fixtures. CI runs
+server smoke and integration suites as independent steps. A failing suite does not
+hide later suites; workspace Turbo execution also continues after failures.
+
+Workflow lint uses the pinned actionlint Docker image with shellcheck enabled.
+The image digest is maintained manually; Dependabot does not update it. The only
+suppression is `SC2016` in release workflows for intentional single-quoted Node
+template literals. The composite setup action is validated by executing it on the
+hosted runners, since actionlint does not lint composite action definitions.
+
+## Reports and diagnostics
+
+Test jobs set `F5_CI_REPORT_DIR` to a job-specific runner-temp directory. Vitest
+emits console output plus JSON and JUnit under encoded package/lifecycle names.
+Direct server, shard, profile and browser invocations set `F5_CI_SUITE_ID` explicitly.
+`ci-test-summary.ts` compares JSON reports against an expected inventory and fails
+on missing, malformed, truncated, duplicate, unexpected, or unexecuted ordinary
+suites, and on unfinished assertions or suites. Skipped live-provider tests remain visible in counts and skipped file details.
+Reports upload even after failure for seven days with unique platform/job/attempt names.
+
+At restructure review, both the former list and the glob covered 85 real browser
+files. The larger count in the planning inventory included screenshot directories.
+The glob automatically discovers future files; this change adds no existing test
+coverage.
+
+Browser tests discover `src/**/*.browser.{ts,tsx}` and keep failure
+screenshots in `F5_CI_ARTIFACT_DIR`; local artifacts stay in the ignored
+`apps/web/.playwright/` directory. Routine Playwright tracing is disabled because
+recording every test slowed the suite beyond the job timeout. Browser execution
+has an eight-minute process limit inside the fifteen-minute job, leaving time to
+summarize and upload diagnostics. Uploads read a staging copy after execution ends,
+so writers cannot remove files from underneath the uploader. Screenshot directories
+under source are not globally ignored, allowing future golden baselines to be tracked.
+Desktop/profile harnesses read the artifact
+variable themselves and do not pass it into the app. They export bounded sanitized
+process logs, fixture screenshots and lifecycle failure details before cleanup.
+Local desktop smoke runs retain their temporary state and print its path for
+debugging. CI exports diagnostics before attempting cleanup; locked temporary files
+produce a cleanup warning without changing the smoke verdict.
+Only these explicit files are uploaded. Profile directories, databases, provider
+homes, auth files and cookies must never be uploaded.
+
+## Maintainer rollout
+
+PR #163 combines the Agent Bridge fix, workflow restructure, reports/diagnostics
+and dependency maintenance. The original staged rollout was not followed. Review
+corrections use focused additive commits, and all included CI jobs must pass on
+hosted runners before merge. Muse auditing, the marketing build, Dependabot and
+main-status reconciliation are part of the approved CI scope. Local checks do not
+establish hosted macOS/Windows behavior, cache hits or wall-clock targets.
+
+The full macOS rehearsal passed on PR #163 in
+[run 39155081320](https://github.com/lopes-felipe/f5/actions/runs/39155081320):
+6m38s for strict native checks, all workspace/server suites, desktop build/smoke
+and profile lifecycle. The normal non-PR condition was restored in a follow-up
+commit without rewriting history. That run also passed all 85 browser files and
+854 tests; an earlier failed browser assertion successfully uploaded its screenshot.
+These observations establish the rehearsal, not a guarantee of future timings.
+
+Exercise the throwaway PR cases from
+the implementation plan: docs-only, docs plus code, failing server assertion,
+failing browser assertion, and native lock-file drift. Record cold/warm cache
+behavior and Linux/Windows job timings. The permanent full macOS gate remains
+limited to main, nightly and dispatch; an unverified gate is not ready to merge.
+
+After the workflow merges and main has three consecutive green push runs at distinct
+SHAs, activate the Main ruleset manually: require PRs with no approval count, require
+`CI result` from GitHub Actions with up-to-date disabled, block force pushes/deletion,
+and allow Repository admin bypass for pull requests only. Agents do not edit these
+settings. Enable Dependabot alerts/security updates, secret scanning with push
+protection and CodeQL default setup for JavaScript/TypeScript and Actions separately;
+these do not become required checks during stabilization.
+
+Hosted verification must cover cold/warm cache installs, the macOS suite, docs-only
+and code PR filters, independent execution after intentional failures, diagnostic
+uploads and two successive non-cancelled main push runs. Temporary validation PRs
+and branches are closed and deleted by the maintainer. Flake issues remain drafts
+until explicitly approved; no blanket Vitest retries are configured.
+
+## Certification limits
+
+CI does not certify authenticated model turns, physical computer input, account
+permissions, or signed installed-upgrade behavior beyond protected release rehearsals.
+Performance collection remains the manual workflow in `docs/performance.md`.
