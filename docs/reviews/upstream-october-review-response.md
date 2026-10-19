@@ -1361,3 +1361,20 @@ The WebSocket baseline comes from `d4d6991e764631bc825a3e4061651d6ff1ab484f`.
 All eight typechecks, formatter, lint and whitespace checks pass. The ledger records
 this individual implementation proof while keeping the broader 15a audit and
 required release gates open. This correctness fix makes no CPU performance claim.
+
+After the RPC isolation change, the complete server suite passes 5,435 cases and
+skips 12; only the same three launcher process-identity cases fail. The required
+full run again fails the two scripts process-identity recovery cases (332 pass),
+so its exhaustive Git phase is not reached. The six-task build passes, and a fresh
+built Node 26.12.0/SQLite/Chromium Pi rewind regression passes on protocol 38: two
+native assistant messages, one live child, three intentional prompts, no extra
+prompt or fork, exact rewind reconciliation, an empty paused queue and zero page
+errors. The new fixture root is `/tmp/f5-pi-production-bq19g4pc`. This exercises a
+real process and browser with the deterministic Pi fixture, not an installed Pi
+account. Required release gates remain open.
+
+The next 15a source pass reads 40 additional full compiler patches and records 31
+further code-shape exclusions, each with an individual result. Nine patches with
+save/error cleanup, state timing, late theme adoption, retry fencing or SSH-specific
+behavior stay open for runtime/subsystem review. The strict ledger and all 12 plan
+tests pass with 1,252 planned records; no delivery dispositions are promoted.

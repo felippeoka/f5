@@ -2,7 +2,7 @@
 
 This artifact tracks triage separately from delivery. `scripts/upstream-ports.json` is the only delivery authority. A `planned` classification remains deferred until a scenario has implementation or equivalence evidence.
 
-## Current review handoff (2026-10-19)
+## Current review handoff (2026-10-20)
 
 Implementation is on `fix/upstream-october-review` in the isolated checkout
 `../f5-upstream-october-review`. Main `83e054f412` is integrated additively after the preceding `f711d43051`
@@ -14,7 +14,7 @@ per-item forge permissions, thread-owned PR panels, reference chips and opt-in
 merge-message attribution cleanup, forge-aware quick actions opt-in branch cleanup and custom local ACP agents. It also repairs cross-feature migration and
 runtime integration and attaches per-SHA implementation evidence. Saved-branch settlement
 now verifies ref identity and exact PR heads, and Find in thread searches persisted
-messages and plans through a dedicated read connection. Migration 127 and protocol 37 extend the merged baseline. Coverage remains 4,084 ledger records;
+messages and plans through a dedicated read connection. Migration 130 and protocol 38 extend the merged baseline. Pi native continuation/rewind, persisted Find, Agents lifecycle/account metadata and shared ACP failure isolation now have focused evidence; their remaining workstream and release obligations stay open. Coverage remains 4,084 ledger records;
 implementation work does not automatically promote deferred obligations.
 
 The full gate and verify-first/security obligations remain incomplete. See
@@ -54,7 +54,7 @@ The artifact deliberately retains runtime changes whose source/scenario review i
 | `equivalent:packages/shared/src/model.ts:591`                   |       1 |
 | `equivalent:packages/shared/src/model.ts:71`                    |       2 |
 | `not-applicable:devices`                                        |      12 |
-| `not-applicable:maintenance`                                    |      91 |
+| `not-applicable:maintenance`                                    |     122 |
 | `not-applicable:marketing`                                      |       3 |
 | `not-applicable:mobile`                                         |     136 |
 | `not-applicable:multi-environment`                              |       1 |
@@ -68,7 +68,7 @@ The artifact deliberately retains runtime changes whose source/scenario review i
 | `planned:11a`                                                   |      46 |
 | `planned:12a`                                                   |     102 |
 | `planned:13b`                                                   |      57 |
-| `planned:15a`                                                   |     286 |
+| `planned:15a`                                                   |     255 |
 | `planned:15b`                                                   |      16 |
 | `planned:15c`                                                   |      21 |
 | `planned:15d`                                                   |      11 |
@@ -257,3 +257,41 @@ The following 33 full patches were read individually. Their changes fit the user
 | `c7fe6d37b3a328fb5427b330d1cb11ae66a6da14` | device controls inline the same host/device request fields and depend on their primitive values instead of a memoized object.        |
 | `68b47e71c057164b9ee40681a7a73681c39659cf` | ThreadNotificationCoordinator unwraps its callback and retains the same notification cleanup loop.                                   |
 | `687f1e94872e7b7191355a536aac3f3070379f1c` | ZoomableImage unwraps the same zoom callback without changing clamp or viewport calculations.                                        |
+
+## Further source-inspected compiler maintenance (2026-10-20)
+
+This second source pass reads 40 more full patches and closes 31 compiler-only cases. Each result below records the unchanged computation, guard or subscription body. It grants no runtime port or performance credit. License reload state (#20608), source-control save cleanup (#20498), late theme adoption (#20574), first-run state timing (#20637), notification permission cleanup (#20504), breadcrumb state timing (#20651), SSH prompt cleanup (#20490), index-route retry fencing (#20580), and telemetry-save cleanup (#20500) remain open for runtime or subsystem review.
+
+| Upstream SHA                               | Source result                                                                                                                   |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `3603057fe437658c6d427e587f25688b6114a317` | onboarding completion hoists the unchanged async callback into a module function.                                               |
+| `35548e27e875577f10d263d4a532fcd214540fdd` | command output moves the same terminal span calculation from useMemo to a compiler-memoized helper.                             |
+| `92b896710b43e4e4f0a3cec73eb246658979a102` | ExpandedImageDialog unwraps the unchanged image-navigation callback.                                                            |
+| `506955372a24ec02c5dea6b5803add87ff0107ae` | server update banners construct the same Atom and environment projection without useMemo.                                       |
+| `fea5380159feb04b6d21233fadfb0705b30fa67d` | find reveal keeps the same beforematch listener and cleanup in a compiler-memoized ref callback.                                |
+| `ed866ae1489b84d5e0a81f49749111b735a66654` | turn diff summaries keep the same null case and derivations under a compiler memo directive.                                    |
+| `855cd1650c73487b07ba6ee2cbf830670bc311c7` | FontFamilyPicker captures the same mount-only initialOpen value in state and unwraps unchanged font filtering.                  |
+| `3ba121e9e843fbbc66111e65c18e37b6f102a56d` | chat shortcuts compute the same sidebar project-group count without useMemo.                                                    |
+| `3f5c16fa2b97597f85ec31dff5dc4db06f377483` | settings project groups construct and sort the same snapshots without useMemo.                                                  |
+| `de89a7a76dfae79c1defbd7baa9cd7abd5154a6f` | live refresh reads the same latest callback through useEffectEvent instead of a ref; listener and throttle rules are unchanged. |
+| `d42681d06ff6417f510a4fe70d31cc7739a3fe8b` | resizable widths unwrap the unchanged finite-value and min/max clamp callback.                                                  |
+| `e3a578f2d1f888776e64153c12ceb5d9e32edd35` | environment hooks unwrap the same presentation projections without useMemo.                                                     |
+| `63318a5d817871deeecb6e7a58ecff7cba52b1d9` | GuideTour computes the same stop paths and diff-loader options without useMemo.                                                 |
+| `66eee62db101625fc62d1185fb49677720a3dc0b` | port discovery hooks unwrap the same query projection and thread-port filter without useMemo.                                   |
+| `745ca81b9d8acc447ba0336984fbca85e9698ed4` | useAtomQueryRunner unwraps the same command execution callback and options.                                                     |
+| `567bc559acbf3d092cdf35855fe0df9b14497f46` | useActiveThreadRef retains the same id-keyed thread-ref conversion with guarded lazy state instead of useMemo.                  |
+| `e544a4a1f6dc599eea71e9b2fb7f28d0ed9cbe02` | useMediaQuery unwraps the same matchMedia subscription, cleanup and snapshot callbacks.                                         |
+| `b413396fe8c7f202a52351bc4eff2d7c88ebee2e` | toast route refs unwrap the same server/draft/null selection without useMemo.                                                   |
+| `4e8b5eeb05d0e9bde82407594e4fe1e373ca6a10` | discovered local servers unwrap the same scanner/configured URL merge without useMemo.                                          |
+| `f63f0261d1223cf59f58a288cefc2cb1f91e53f0` | HTML render themes unwrap the same color and font projection without useMemo.                                                   |
+| `ef2d631a556318be0b0342262a4b6224323efc8e` | environment-mode selector builds the same local/worktree/previous-worktree options without useMemo.                             |
+| `97a9ca11d224f43701f9fdcffe29444a4f7536db` | session scope hooks build the same permission-set Atom without useMemo.                                                         |
+| `15a8774dbad09c63f7517e63279cfa9197afe1e7` | code-block languages inline the unchanged language-list and query filtering without useMemo.                                    |
+| `65ebf8f86e33a1f65edfb371b7d5bcc0d96a0f3f` | primary cloud links unwrap the same connection target and refresh callback without memoization.                                 |
+| `cba00ae1971fb42e140527ce4755a7a01976cfbf` | highlighted tokens extract the same tokenizer and keyed-line calculation into a compiler-memoized helper.                       |
+| `452d032a2a2e47bced99ba662a1eda18f9edd116` | project-file scripts inline the same missing/loading/invalid/valid branches and unchanged parser call.                          |
+| `02d48aec5c75e6abb90d06fd2c63939a82bd3718` | guide file diffs unwrap the same defensive metadata clone and view options without useMemo.                                     |
+| `2bb92ba474f311644137dcb1b6eac604c504bbee` | environment selector unwraps the same active lookup and option construction without useMemo.                                    |
+| `242ec0ea2b89a1d5f28a5baa8bf5f89fe9835cbf` | highlighted search lines extract the same try/catch tokenization fallback and unwrap range normalization.                       |
+| `dd1ab3f059f16cc46b59c5620bd2df706df2e4f8` | orchestration commands unwrap the same authorization guard and execution callback without useCallback.                          |
+| `41f56d96d8e6dc92129ef156f6a8372510d410db` | project scans construct the same query Atom and registry refresh callbacks without useMemo.                                     |
