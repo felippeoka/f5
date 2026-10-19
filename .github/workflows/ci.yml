@@ -22,14 +22,45 @@ jobs:
       pull-requests: read
     outputs:
       heavy: ${{ github.event_name != 'pull_request' || steps.paths.outputs.code == 'true' }}
+      packaging: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.paths.outputs.packaging == 'true' }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: paths
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         with:
+          base: ${{ github.event_name == 'push' && github.event.before || github.base_ref }}
           predicate-quantifier: some-with-excludes
           filters: |
             code: ['**', '!**/*.md', '!docs/**']
+            packaging:
+              - .github/workflows/release.yml
+              - .github/workflows/windows-release-checks.yml
+              - apps/desktop/**
+              - apps/server/package.json
+              - apps/server/src/distribution/**
+              - apps/server/tsdown*.ts
+              - assets/**
+              - bun.lock
+              - package.json
+              - packages/shared/src/cliRelease.ts
+              - packages/shared/src/windowsPath.ts
+              - scripts/build-cli-archive.ts
+              - scripts/build-computer-helper.ts
+              - scripts/build-desktop-artifact.ts
+              - scripts/cli-archive-smoke.ts
+              - scripts/lib/**
+              - scripts/update-release-package-versions.ts
+              - scripts/verify-staged-lockfile.ts
+              - scripts/windows-update-rehearsal.ts
+              - .github/workflows/ci.yml
+              - .github/workflows/build-cli.yml
+              - .github/workflows/distribution-checks.yml
+              - apps/server/integration/standaloneArchive.integration.test.ts
+              - scripts/release-preflight.ts
   static:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -629,6 +660,46 @@ jobs:
           if-no-files-found: ignore
       - uses: ./.github/actions/assert-clean-worktree
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+  windows-release-checks:
+    needs: changes
+    if: needs.changes.outputs.packaging == 'true'
+    uses: ./.github/workflows/windows-release-checks.yml
+    # TEMP: the five-target rehearsal below includes the Windows archives.
+    with:
+      check-cli: false
+  # TEMP: validate every archive and unsigned Linux packaging before the shared workflows land.
+  cli-rehearsal:
+    uses: ./.github/workflows/build-cli.yml
+  linux-packaging-rehearsal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      T3CODE_DESKTOP_UPDATE_CHANNEL: latest
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Read current version
+        run: echo "VERSION=$(node -p 'require("./apps/desktop/package.json").version')" >> "$GITHUB_ENV"
+      - run: |
+          node scripts/update-release-package-versions.ts "$VERSION"
+          bun run build:desktop
+          node scripts/build-desktop-artifact.ts --skip-build --platform linux --arch x64 --target AppImage --build-version "$VERSION" --output-dir distribution-linux
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: distribution-linux-appimage-${{ github.run_attempt }}
+          path: |
+            distribution-linux/*
+            !distribution-linux/builder-debug.yml
+            !distribution-linux/builder-effective-config.yaml
+          retention-days: 7
+          if-no-files-found: ignore
   ci-result:
     name: CI result
     runs-on: ubuntu-latest
@@ -646,6 +717,9 @@ jobs:
         windows-build,
         macos-profiles,
         macos-suite,
+        windows-release-checks,
+        cli-rehearsal,
+        linux-packaging-rehearsal,
       ]
     steps:
       - name: Require every job verdict
