@@ -2790,9 +2790,13 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           ),
         );
 
-    const readMcpSessionStatuses: NonNullable<ProviderServiceShape["readMcpSessionStatuses"]> = (
-      input,
-    ) =>
+    /** Live sessions, preferring the desired config version, then the most recently seen. */
+    const listLiveMcpSessions = (input: {
+      projectId: ProjectId;
+      provider: ProviderKind;
+      instanceId?: ProviderInstanceId | undefined;
+      desiredVersion?: string | undefined;
+    }) =>
       Effect.gen(function* () {
         const bindings = yield* readMcpScopeBindings(input).pipe(
           Effect.flatMap((bindings) => Effect.filter(bindings, hasLiveMcpSession)),
@@ -2826,6 +2830,14 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 Number(a.appliedVersion === input.desiredVersion) ||
               b.lastSeenAt.localeCompare(a.lastSeenAt),
           );
+        return sessions;
+      });
+
+    const readMcpSessionStatuses: NonNullable<ProviderServiceShape["readMcpSessionStatuses"]> = (
+      input,
+    ) =>
+      Effect.gen(function* () {
+        const sessions = yield* listLiveMcpSessions(input);
         const selected = input.threadId
           ? sessions.find((session) => session.threadId === input.threadId)
           : sessions[0];
@@ -2935,7 +2947,9 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             "Every conversation must be running in the selected project and account.",
           );
         const targets = bindings.filter(
-          (binding) => !input.threadIds || input.threadIds.includes(binding.threadId),
+          (binding) =>
+            (!input.threadIds || input.threadIds.includes(binding.threadId)) &&
+            !input.excludeThreadIds?.includes(binding.threadId),
         );
         const failures: Array<{ threadId: ThreadId; message: string }> = [];
         let matched = 0;
@@ -2973,16 +2987,16 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                   const owned = adapter.getOwnedMcpServerNames
                     ? yield* adapter.getOwnedMcpServerNames(target.threadId)
                     : [];
-                  const serverName = resolveOwnedMcpServerName(
-                    owned,
-                    input.serverName,
-                    input.provider,
-                  );
+                  // External names are passed exactly; the adapter verifies ownership itself.
+                  const serverName =
+                    resolveOwnedMcpServerName(owned, input.serverName, input.provider) ??
+                    (input.allowExternal ? input.serverName : undefined);
                   if (!adapter.reconnectMcpServer || !serverName) return false;
                   const result = yield* adapter
                     .reconnectMcpServer({
                       threadId: target.threadId,
                       serverName,
+                      ...(input.allowExternal ? { allowExternal: true } : {}),
                     })
                     .pipe(Effect.timeoutOption("10 seconds"));
                   if (Option.isNone(result))
@@ -3028,6 +3042,69 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           failures,
           sessions,
         };
+      });
+
+    const getLiveMcpSession: NonNullable<ProviderServiceShape["getLiveMcpSession"]> = (input) =>
+      listLiveMcpSessions(input).pipe(
+        Effect.map((sessions) => sessions.find((session) => session.threadId === input.threadId)),
+      );
+
+    const authenticateMcpServerForProject: NonNullable<
+      ProviderServiceShape["authenticateMcpServerForProject"]
+    > = (input) =>
+      Effect.gen(function* () {
+        const sessions = yield* listLiveMcpSessions(input);
+        const selected = input.threadId
+          ? sessions.find((session) => session.threadId === input.threadId)
+          : sessions[0];
+        if (!selected)
+          return yield* toValidationError(
+            "mcp.authenticate",
+            input.threadId
+              ? "The conversation is not running in this project and account."
+              : "Start a conversation in this project to sign in to MCP servers.",
+          );
+        return yield* withSessionOperation(
+          selected.threadId,
+          Effect.gen(function* () {
+            const binding = Option.getOrUndefined(yield* directory.getBinding(selected.threadId));
+            if (
+              !binding ||
+              binding.status !== "running" ||
+              binding.projectId !== input.projectId ||
+              binding.provider !== input.provider ||
+              resolveBindingInstanceId(binding) !== selected.instanceId ||
+              readPersistedSessionGeneration(binding.runtimePayload) !== selected.generation
+            )
+              return yield* toValidationError(
+                "mcp.authenticate",
+                "The session was replaced before sign-in. Try again.",
+              );
+            const adapter = yield* registry.getByInstance(selected.instanceId);
+            if (!adapter.authenticateMcpServer)
+              return yield* toValidationError(
+                "mcp.authenticate",
+                "This provider does not support MCP sign-in from a conversation.",
+              );
+            const result = yield* adapter
+              .authenticateMcpServer({
+                threadId: selected.threadId,
+                serverName: input.serverName,
+              })
+              .pipe(Effect.timeoutOption("30 seconds"));
+            if (Option.isNone(result))
+              return yield* toValidationError(
+                "mcp.authenticate",
+                "MCP sign-in did not start in time. Try again.",
+              );
+            return {
+              ...result.value,
+              threadId: selected.threadId,
+              instanceId: selected.instanceId,
+              generation: selected.generation,
+            };
+          }),
+        );
       });
 
     // A newer reconciliation supersedes sleeping retries even within the same generation.
@@ -3449,6 +3526,8 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       readMcpSessionStatuses,
       getMcpReconnectTargets,
       reconnectMcpServerForProject,
+      authenticateMcpServerForProject,
+      getLiveMcpSession,
       // Each access creates a fresh PubSub subscription so that multiple
       // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
       // independently receive all runtime events.

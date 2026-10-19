@@ -7273,6 +7273,7 @@ export default function ChatView({
                   entries={providerRuntimeInfoEntries}
                   mcpServers={mcpRuntimeSummary?.servers}
                   projectId={activeThread.projectId}
+                  threadId={activeThread.id}
                 />
               ) : null}
             </div>

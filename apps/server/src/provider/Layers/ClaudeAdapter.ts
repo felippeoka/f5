@@ -526,6 +526,12 @@ function claudeTurnCost(
   return { totalCostUsd: Number(delta.toFixed(6)) };
 }
 
+interface ClaudeMcpAuthenticateResponse {
+  readonly authUrl?: string;
+  readonly requiresUserAction?: boolean;
+  readonly callbackExpected?: boolean;
+}
+
 interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   /** Shipped native control helper; it uses the running child's isolated environment. */
   readonly renameSession?: (title: string, sessionId?: string) => Promise<void>;
@@ -559,6 +565,11 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
     servers: Record<string, McpServerConfig>,
   ) => Promise<McpSetServersResult>;
   readonly reconnectMcpServer?: (serverName: string) => Promise<void>;
+  /** Undocumented SDK control request (`mcp_authenticate`); feature-detected at runtime. */
+  readonly mcpAuthenticate?: (
+    serverName: string,
+    redirectUri?: string,
+  ) => Promise<ClaudeMcpAuthenticateResponse | undefined>;
   readonly close: () => void;
 }
 
@@ -2724,6 +2735,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               detail: toMessage(cause, "Could not read MCP status."),
             }),
         });
+        // Keeps the chat MCP chip current when the CLI reconnects on its own (e.g. after sign-in).
+        yield* emitMcpStatuses(context, statuses);
         return {
           complete: true,
           capabilities: { tools: true, inputSchemas: false, resources: false },
@@ -2751,31 +2764,39 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         };
       });
 
+    const readMcpServerOwnership = (context: ClaudeSessionContext, serverName: string) =>
+      Effect.tryPromise({
+        try: () => readMcpStatus(context),
+        catch: (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "mcpServerStatus",
+            detail: toMessage(cause, "Could not verify MCP ownership."),
+          }),
+      }).pipe(
+        Effect.map((statuses) => {
+          const matches = statuses.filter((server) => server.name === serverName);
+          return matches.length === 1
+            ? classifyMcpOwnership(
+                matches[0]!,
+                context.ownedMcpServerNames,
+                new Set(Object.keys(context.internalMcpServers)),
+              )
+            : undefined;
+        }),
+      );
+
     const reconnectMcpServer: NonNullable<ClaudeAdapterShape["reconnectMcpServer"]> = ({
       threadId,
       serverName,
+      allowExternal,
     }) =>
       Effect.gen(function* () {
         const context = yield* requireSession(threadId);
         const query = context.query;
-        if (!context.ownedMcpServerNames.has(serverName)) return false;
-        const statuses = yield* Effect.tryPromise({
-          try: () => readMcpStatus(context),
-          catch: (cause) =>
-            new ProviderAdapterRequestError({
-              provider: PROVIDER,
-              method: "mcpServerStatus",
-              detail: toMessage(cause, "Could not verify MCP ownership."),
-            }),
-        });
-        if (
-          !statuses.some(
-            (server) =>
-              server.name === serverName &&
-              classifyMcpOwnership(server, context.ownedMcpServerNames) === "managed",
-          )
-        )
-          return false;
+        if (!allowExternal && !context.ownedMcpServerNames.has(serverName)) return false;
+        const ownership = yield* readMcpServerOwnership(context, serverName);
+        if (ownership !== "managed" && !(allowExternal && ownership === "external")) return false;
         if (context.query !== query)
           return yield* new ProviderAdapterRequestError({
             provider: PROVIDER,
@@ -2806,6 +2827,63 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           });
         yield* startMcpStatusWatcher(context);
         return true;
+      });
+
+    const authenticateMcpServer: NonNullable<ClaudeAdapterShape["authenticateMcpServer"]> = ({
+      threadId,
+      serverName,
+    }) =>
+      Effect.gen(function* () {
+        const context = yield* requireSession(threadId);
+        const query = context.query;
+        if (!query.mcpAuthenticate)
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "mcpAuthenticate",
+            detail: "This Claude runtime does not support MCP sign-in.",
+          });
+        const ownership = yield* readMcpServerOwnership(context, serverName);
+        if (ownership !== "managed" && ownership !== "external")
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "mcpAuthenticate",
+            detail:
+              ownership === "built-in"
+                ? "F5 built-in MCP servers do not use sign-in."
+                : `MCP server '${serverName}' is not available in this conversation.`,
+          });
+        if (context.query !== query || context.stopped)
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "mcpAuthenticate",
+            detail: "The MCP session was replaced before sign-in.",
+          });
+        context.mcpObservationEpoch = (context.mcpObservationEpoch ?? 0) + 1;
+        // No redirectUri: the CLI owns the localhost callback listener and token storage.
+        const response = yield* Effect.tryPromise({
+          try: () => query.mcpAuthenticate!(serverName),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "mcpAuthenticate",
+              detail: toMessage(cause, "Could not start MCP sign-in."),
+            }),
+        });
+        if (context.query !== query || context.stopped)
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "mcpAuthenticate",
+            detail: "The MCP session was replaced during sign-in.",
+          });
+        const authUrl =
+          typeof response?.authUrl === "string" && response.authUrl.trim().length > 0
+            ? response.authUrl.trim()
+            : undefined;
+        return {
+          ...(authUrl ? { authUrl } : {}),
+          callbackExpected: authUrl !== undefined && response?.callbackExpected !== false,
+          ownership,
+        };
       });
 
     const refreshSupportedCommands = (context: ClaudeSessionContext): Effect.Effect<void> =>
@@ -8901,6 +8979,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       getOwnedMcpServerNames: (threadId) =>
         requireSession(threadId).pipe(Effect.map((context) => [...context.ownedMcpServerNames])),
       reconnectMcpServer,
+      authenticateMcpServer,
       stopSession,
       listSessions,
       hasSession,

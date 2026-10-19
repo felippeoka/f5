@@ -1196,6 +1196,119 @@ it("shows Claude CLI preflight failures without starting a conversation", async 
   }
 });
 
+it("offers Claude sign-in for managed and external needs-auth servers via the observed conversation", async () => {
+  const mocks = createNativeApiMock();
+  const threadId = ThreadId.make("claude-conversation");
+  const needsAuth = {
+    state: "needs-auth" as const,
+    authStatus: "unauthenticated" as const,
+    toolCount: 0,
+    resourceCount: 0,
+    resourceTemplateCount: 0,
+  };
+  mocks.getServerStatuses.mockImplementation(async (input) => ({
+    provider: input.provider,
+    projectId: PROJECT_ID,
+    support: "supported",
+    configVersion: "effective-v1",
+    ...(input.provider === "claudeAgent" ? { source: "conversation" as const, threadId } : {}),
+    statuses: [
+      { name: "project-server", ownership: "managed" as const, ...needsAuth },
+      { name: "linear", ownership: "external" as const, ...needsAuth },
+    ],
+  }));
+  mocks.startLogin.mockImplementation(async (input: { serverName: string }) => ({
+    target: "server",
+    mode: "oauth",
+    provider: "claudeAgent",
+    projectId: PROJECT_ID,
+    serverName: input.serverName,
+    status: "pending",
+    authorizationUrl: `https://auth.example.test/${input.serverName}`,
+  }));
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("button", { name: "Claude", exact: true }).click();
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await vi.waitFor(() =>
+      expect(mocks.startLogin).toHaveBeenCalledWith({
+        provider: "claudeAgent",
+        instanceId: "claudeAgent",
+        projectId: PROJECT_ID,
+        serverName: "project-server",
+        threadId,
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(mocks.openExternal).toHaveBeenCalledWith("https://auth.example.test/project-server"),
+    );
+    await page.getByRole("button", { name: "Sign in to linear", exact: true }).click();
+    await vi.waitFor(() =>
+      expect(mocks.startLogin).toHaveBeenCalledWith({
+        provider: "claudeAgent",
+        instanceId: "claudeAgent",
+        projectId: PROJECT_ID,
+        serverName: "linear",
+        threadId,
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(mocks.openExternal).toHaveBeenCalledWith("https://auth.example.test/linear"),
+    );
+  } finally {
+    screen.unmount();
+    queryClient.clear();
+  }
+});
+
+it("offers Codex sign-in for external needs-auth servers", async () => {
+  const mocks = createNativeApiMock();
+  mocks.getServerStatuses.mockResolvedValue({
+    provider: "codex",
+    projectId: PROJECT_ID,
+    support: "supported",
+    configVersion: "effective-v1",
+    statuses: [
+      {
+        name: "linear",
+        state: "needs-auth",
+        ownership: "external",
+        authStatus: "unauthenticated",
+        toolCount: 0,
+        resourceCount: 0,
+        resourceTemplateCount: 0,
+      },
+    ],
+  });
+  mocks.startLogin.mockResolvedValue({
+    target: "server",
+    mode: "oauth",
+    provider: "codex",
+    projectId: PROJECT_ID,
+    serverName: "linear",
+    status: "pending",
+    authorizationUrl: "https://auth.example.test/codex-linear",
+  });
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("button", { name: "Sign in to linear", exact: true }).click();
+    await vi.waitFor(() =>
+      expect(mocks.startLogin).toHaveBeenCalledWith({
+        provider: "codex",
+        instanceId: "codex",
+        projectId: PROJECT_ID,
+        serverName: "linear",
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(mocks.openExternal).toHaveBeenCalledWith("https://auth.example.test/codex-linear"),
+    );
+  } finally {
+    screen.unmount();
+    queryClient.clear();
+  }
+});
+
 it("observes only the selected conversation, refreshes on runtime push, and loads inspector data lazily", async () => {
   const mocks = createNativeApiMock();
   const first = ThreadId.make("conversation-one"),

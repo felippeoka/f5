@@ -6,7 +6,7 @@ import type { McpAdapterObservation, ObservedMcpServer } from "../provider/mcpOb
 import { CODEX_SSE_TRANSPORT_HINT } from "@t3tools/shared/mcpTranslation";
 
 export const CLAUDE_MCP_AUTH_MESSAGE =
-  "Claude reports this server needs sign-in. Authenticate it from an interactive Claude Code session (/mcp) using the same account, then click Reconnect.";
+  "Claude reports this server needs sign-in. Click Sign in to authenticate in your browser.";
 
 export function projectMcpStatuses(
   servers: McpProjectServersConfig,
