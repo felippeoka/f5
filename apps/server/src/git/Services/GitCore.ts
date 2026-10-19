@@ -168,6 +168,9 @@ export interface GitWorktreeProgress {
  * GitCoreShape - Service API for low-level Git repository interactions.
  */
 export interface GitCoreShape extends MoveSnapshotOperations {
+  /** Await refreshes admitted for an owned checkout before releasing its files. */
+  readonly drainUpstreamRefreshes?: (cwd: string) => Effect.Effect<void>;
+
   /** Fires only after an actual successful upstream refresh, never on a cache hit. */
   readonly subscribeStatusRefresh?: (listener: (cwd: string) => void) => Effect.Effect<() => void>;
 

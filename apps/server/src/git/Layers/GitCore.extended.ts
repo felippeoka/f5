@@ -42,7 +42,11 @@ function makeTmpDir(
 ): Effect.Effect<string, PlatformError.PlatformError, FileSystem.FileSystem | Scope.Scope> {
   return Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
-    return yield* fileSystem.makeTempDirectoryScoped({ prefix });
+    const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix });
+    const core = yield* Effect.serviceOption(GitCore);
+    if (core._tag === "Some" && core.value.drainUpstreamRefreshes)
+      yield* Effect.addFinalizer(() => core.value.drainUpstreamRefreshes!(directory));
+    return directory;
   });
 }
 

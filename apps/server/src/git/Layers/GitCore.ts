@@ -31,6 +31,8 @@ import {
 import {
   Cache,
   Data,
+  Deferred,
+  Fiber,
   Duration,
   Effect,
   Exit,
@@ -259,6 +261,30 @@ function missingCwdErrorDetail(cwd: string): string {
 
 const makeGitCore = Effect.gen(function* () {
   const serviceScope = yield* Effect.scope;
+  const upstreamRefreshJobs = new Map<string, Set<Fiber.Fiber<void>>>();
+  const launchUpstreamRefresh = (cwd: string, work: Effect.Effect<void, GitCommandError>) =>
+    Effect.gen(function* () {
+      const ready = yield* Deferred.make<void>();
+      let job: Fiber.Fiber<void>;
+      job = yield* Deferred.await(ready).pipe(
+        Effect.andThen(work),
+        Effect.ignoreCause({ log: true }),
+        withoutLifecycleLocks,
+        Effect.ensuring(
+          Effect.sync(() => {
+            const jobs = upstreamRefreshJobs.get(cwd);
+            jobs?.delete(job);
+            if (jobs?.size === 0) upstreamRefreshJobs.delete(cwd);
+          }),
+        ),
+        Effect.forkIn(serviceScope),
+      );
+      const jobs = upstreamRefreshJobs.get(cwd) ?? new Set<Fiber.Fiber<void>>();
+      jobs.add(job);
+      upstreamRefreshJobs.set(cwd, jobs);
+      yield* Deferred.succeed(ready, undefined);
+    });
+
   const statusRefreshListeners = new Set<(cwd: string) => void>();
   yield* Effect.addFinalizer(() => Effect.sync(() => statusRefreshListeners.clear()));
   const git = yield* GitService;
@@ -959,11 +985,7 @@ const makeGitCore = Effect.gen(function* () {
         }
       }
 
-      yield* refreshStatusUpstreamIfStale(cwd).pipe(
-        Effect.ignoreCause({ log: true }),
-        withoutLifecycleLocks,
-        Effect.forkIn(serviceScope),
-      );
+      yield* launchUpstreamRefresh(cwd, refreshStatusUpstreamIfStale(cwd));
 
       const [statusStdout, unstagedNumstatStdout, stagedNumstatStdout, headNumstatResult] =
         yield* Effect.all(
@@ -2906,11 +2928,7 @@ const makeGitCore = Effect.gen(function* () {
 
       // Refresh upstream refs in the background so checkout remains responsive.
       if (options?.refreshUpstream !== false)
-        yield* refreshCheckedOutBranchUpstream(input.cwd).pipe(
-          Effect.ignoreCause({ log: true }),
-          withoutLifecycleLocks,
-          Effect.forkIn(serviceScope),
-        );
+        yield* launchUpstreamRefresh(input.cwd, refreshCheckedOutBranchUpstream(input.cwd));
     });
 
   const initRepo: GitCoreShape["initRepo"] = (input) =>
@@ -3011,6 +3029,13 @@ const makeGitCore = Effect.gen(function* () {
     initRepo,
     listLocalBranchNames,
     readDefaultBranch: (cwd) => resolveDefaultBranchName(cwd, "origin"),
+    drainUpstreamRefreshes: (cwd) =>
+      Effect.suspend(() =>
+        Effect.forEach([...(upstreamRefreshJobs.get(cwd) ?? [])], Fiber.await, {
+          concurrency: "unbounded",
+          discard: true,
+        }),
+      ),
     subscribeStatusRefresh: (listener) =>
       Effect.sync(() => {
         statusRefreshListeners.add(listener);
