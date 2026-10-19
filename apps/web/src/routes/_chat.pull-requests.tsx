@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { parseSourceControlPullRequestUrl } from "@t3tools/shared/sourceControl";
+import { parsePullRequestReference } from "../lib/pullRequestReference";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { RouteErrorView } from "../components/RouteErrorView";
@@ -34,7 +34,7 @@ function PullRequestsRouteView() {
 export const Route = createFileRoute("/_chat/pull-requests")({
   validateSearch: (input): { pr?: string; url?: string } => {
     const url = (input as { url?: unknown }).url;
-    if (typeof url === "string" && url.length <= 4096 && parseSourceControlPullRequestUrl(url))
+    if (typeof url === "string" && url.length <= 4096 && parsePullRequestReference(url))
       return { url };
     const raw = (input as { pr?: unknown }).pr;
     return typeof raw === "string" && raw.trim().length > 0 ? { pr: raw } : {};

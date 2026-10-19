@@ -1,3 +1,4 @@
+import { writePullRequestReferenceDrag } from "../lib/pullRequestReference";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resetProtocolStateForTests, setServerBootstrap } from "../protocolState";
 import { serverBootstrapFixture as baseServerBootstrapFixture } from "../test/serverBootstrap";
@@ -4842,6 +4843,52 @@ describe("ChatView timeline (full app)", () => {
       ).toEqual([]);
       const command = getSubmittedTurnCommand(getDispatchCommandRequests("thread.turn.start")[0]!);
       expect(command?.message?.text).toBe(prompt.trim());
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("drops a linked PR as a context chip and sends only after explicit submission", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-pr-drag" as MessageId,
+        targetText: "PR target",
+      }),
+    });
+    try {
+      const transfer = new DataTransfer();
+      const url = "https://github.com/org/repo/pull/7";
+      const raw = `[PR #7](${url})`;
+      expect(writePullRequestReferenceDrag(transfer, url)).toBe(true);
+      (await waitForComposerShell()).dispatchEvent(
+        new DragEvent("drop", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer: transfer,
+        }),
+      );
+      await vi.waitFor(() => {
+        expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt).toBe(
+          `${raw} `,
+        );
+        expect(document.querySelector("[data-composer-pr-reference]")?.textContent).toBe(
+          "org/repo#7",
+        );
+      });
+      expect(getDispatchCommandRequests("thread.turn.start")).toHaveLength(0);
+      expect(
+        wsRequests.filter((request) => request._tag === WS_METHODS.projectsAuthorizeEntry),
+      ).toEqual([]);
+      (await waitForSendButton()).click();
+      await vi.waitFor(() =>
+        expect(getDispatchCommandRequests("thread.turn.start")).toHaveLength(1),
+      );
+      const command = getSubmittedTurnCommand(getDispatchCommandRequests("thread.turn.start")[0]!);
+      expect(command?.message?.text).toBe(raw);
+      expect(
+        wsRequests.filter((request) => request._tag === WS_METHODS.projectsAuthorizeEntry),
+      ).toEqual([]);
     } finally {
       await mounted.cleanup();
     }

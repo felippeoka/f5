@@ -133,3 +133,7 @@ resolved conversations. These choices persist locally. A thread with hidden bot
 comments keeps **Load more comments** available for unloaded human replies.
 Host restrictions on individual comments and threads can disable editing or
 resolution even when the repository generally supports them.
+
+Drag a linked PR from the thread header into the composer to add a PR context chip.
+It keeps the PR URL in your draft and sends that reference only when you submit
+the prompt. Deleting the chip removes the reference; undo restores it.

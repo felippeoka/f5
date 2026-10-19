@@ -1,4 +1,8 @@
 import {
+  ComposerPullRequestReferenceNode,
+  $createPullRequestReferenceNode,
+} from "./chat/composer/ComposerPullRequestReferenceNode";
+import {
   ComposerAssistantQuoteNode,
   $createAssistantQuoteNode,
   type AssistantQuote,
@@ -284,11 +288,16 @@ function $createComposerTerminalContextNode(
   return $applyNodeReplacement(new ComposerTerminalContextNode(context));
 }
 
-type ComposerInlineTokenNode = ComposerMentionNode | ComposerTerminalContextNode;
+type ComposerInlineTokenNode =
+  | ComposerMentionNode
+  | ComposerTerminalContextNode
+  | ComposerPullRequestReferenceNode;
 
 function isComposerInlineTokenNode(candidate: unknown): candidate is ComposerInlineTokenNode {
   return (
-    candidate instanceof ComposerMentionNode || candidate instanceof ComposerTerminalContextNode
+    candidate instanceof ComposerMentionNode ||
+    candidate instanceof ComposerTerminalContextNode ||
+    candidate instanceof ComposerPullRequestReferenceNode
   );
 }
 
@@ -621,6 +630,10 @@ function $setComposerEditorPrompt(
 
   const segments = splitPromptIntoComposerSegments(prompt, terminalContexts, mentions);
   for (const segment of segments) {
+    if (segment.type === "pull-request") {
+      paragraph.append($createPullRequestReferenceNode(segment.raw));
+      continue;
+    }
     if (segment.type === "mention") {
       paragraph.append($createComposerMentionNode(segment.path, segment.raw, segment.id));
       continue;
@@ -1354,7 +1367,12 @@ export const ComposerPromptEditor = forwardRef<
     () => ({
       namespace: "t3tools-composer-editor",
       editable: true,
-      nodes: [ComposerMentionNode, ComposerTerminalContextNode, ComposerAssistantQuoteNode],
+      nodes: [
+        ComposerMentionNode,
+        ComposerTerminalContextNode,
+        ComposerAssistantQuoteNode,
+        ComposerPullRequestReferenceNode,
+      ],
       editorState: () => {
         $setComposerEditorPrompt(
           initialValueRef.current,

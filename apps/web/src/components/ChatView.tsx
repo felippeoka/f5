@@ -1,3 +1,7 @@
+import {
+  hasPullRequestReferenceDrag,
+  readPullRequestReferenceDrag,
+} from "../lib/pullRequestReference";
 import { projectProviderSnapshots } from "@t3tools/shared/serverSettings";
 import { WorkspaceTransitionBanner } from "./chat/WorkspaceTransitionBanner";
 import { flushSync } from "react-dom";
@@ -4595,7 +4599,11 @@ export default function ChatView({
   };
 
   const claimFileTreeMentionDrag = (event: React.DragEvent<HTMLDivElement>): boolean => {
-    if (!dataTransferHasFileTreeMention(event.dataTransfer.types)) return false;
+    if (
+      !dataTransferHasFileTreeMention(event.dataTransfer.types) &&
+      !hasPullRequestReferenceDrag(event.dataTransfer.types)
+    )
+      return false;
     event.preventDefault();
     event.stopPropagation();
     event.nativeEvent.stopPropagation();
@@ -4613,7 +4621,11 @@ export default function ChatView({
   };
 
   const onComposerFileMentionDragLeaveCapture = (event: React.DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasFileTreeMention(event.dataTransfer.types)) return;
+    if (
+      !dataTransferHasFileTreeMention(event.dataTransfer.types) &&
+      !hasPullRequestReferenceDrag(event.dataTransfer.types)
+    )
+      return;
     event.stopPropagation();
     const nextTarget = event.relatedTarget;
     if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
@@ -4621,7 +4633,34 @@ export default function ChatView({
   };
 
   const onComposerFileMentionDropCapture = (event: React.DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasFileTreeMention(event.dataTransfer.types)) return;
+    if (hasPullRequestReferenceDrag(event.dataTransfer.types)) {
+      claimFileTreeMentionDrag(event);
+      dragDepthRef.current = 0;
+      setIsDragOverComposer(false);
+      const reference = readPullRequestReferenceDrag(event.dataTransfer);
+      if (
+        !reference ||
+        isConnecting ||
+        isComposerApprovalState ||
+        isPendingTurnDispatchBlocked ||
+        blockingUserInputs.length > 0
+      ) {
+        toastManager.add({ type: "error", title: "Unable to add the PR reference to chat." });
+        return;
+      }
+      const current = promptRef.current;
+      applyPromptReplacement(
+        current.length,
+        current.length,
+        `${current && !/\s$/.test(current) ? " " : ""}${reference} `,
+      );
+      return;
+    }
+    if (
+      !dataTransferHasFileTreeMention(event.dataTransfer.types) &&
+      !hasPullRequestReferenceDrag(event.dataTransfer.types)
+    )
+      return;
     const payload = readFileTreeDragMention(event.dataTransfer);
     claimFileTreeMentionDrag(event);
     dragDepthRef.current = 0;

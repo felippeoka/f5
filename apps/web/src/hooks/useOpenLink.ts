@@ -1,9 +1,7 @@
 import { createContext, useContext, useCallback } from "react";
 import { useRouter } from "@tanstack/react-router";
-import {
-  formatSourceControlPullRequestKey,
-  parseSourceControlPullRequestUrl,
-} from "@t3tools/shared/sourceControl";
+import { formatSourceControlPullRequestKey } from "@t3tools/shared/sourceControl";
+import { parsePullRequestReference } from "../lib/pullRequestReference";
 import { ThreadId } from "@t3tools/contracts";
 import { useAppSettings } from "../appSettings";
 import * as nativeApi from "../nativeApi";
@@ -21,7 +19,7 @@ export function useOpenLink(threadId?: ThreadId) {
       const target = new URL(url, window.location.href);
       if (!["http:", "https:", "mailto:"].includes(target.protocol)) return;
       const owner = threadId;
-      const pr = parseSourceControlPullRequestUrl(target.href);
+      const pr = parsePullRequestReference(target.href);
       if (!options?.external && settings.pullRequestLinksOpenInApp && pr) {
         if (owner) {
           useRightPanelStore.getState().openPullRequest(owner, {

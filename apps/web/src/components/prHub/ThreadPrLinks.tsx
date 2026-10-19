@@ -1,3 +1,4 @@
+import { writePullRequestReferenceDrag } from "../../lib/pullRequestReference";
 import { EyeIcon, EllipsisIcon } from "lucide-react";
 import { formatSourceControlPullRequestKey } from "@t3tools/shared/sourceControl";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -59,6 +60,11 @@ function ThreadPrLinksContent({ threadId }: { threadId: ThreadId }) {
     <span className="flex items-center gap-1 text-xs">
       {query.data?.map((link) => (
         <span
+          draggable
+          onDragStart={(event) => {
+            if (!writePullRequestReferenceDrag(event.dataTransfer, link.url))
+              event.preventDefault();
+          }}
           key={`${link.provider}:${link.host}/${link.repository}#${link.number}`}
           className="flex items-center gap-1 rounded border border-border px-1"
         >

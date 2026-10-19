@@ -121,3 +121,21 @@ it("keeps a failed watch start visible as an error without a watched indicator",
   expect(page.getByRole("button", { name: "Stop watching PR #7", exact: true }).query()).toBeNull();
   expect(page.getByText("private provider details").query()).toBeNull();
 });
+
+it("exports a linked PR drag as a reference without starting a watch or sending a turn", async () => {
+  await mount();
+  await expect.element(page.getByRole("link", { name: "github #7", exact: true })).toBeVisible();
+  const transfer = new DataTransfer();
+  page
+    .getByRole("link", { name: "github #7", exact: true })
+    .element()
+    .dispatchEvent(
+      new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: transfer }),
+    );
+  expect(JSON.parse(transfer.getData("application/x-f5-pull-request-reference"))).toEqual({
+    version: 1,
+    url,
+  });
+  expect(transfer.getData("text/plain")).toBe(`[PR #7](${url})`);
+  expect(api.start).not.toHaveBeenCalled();
+});

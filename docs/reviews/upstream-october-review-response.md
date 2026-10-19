@@ -659,3 +659,21 @@ permission regression also preserves a host's separate reply, resolve and reopen
 answers through shared native normalization; all 23 focused model/operation cases
 pass. The exhaustive real-Git matrix from the prior integration run remains 162
 passing cases; this UI continuation does not change Git execution.
+
+## Linked PR context chip continuation (2026-10-19)
+
+Linked PRs export a bounded, versioned drag payload. The composer claims that
+payload before the editor's native drop handler and inserts a PR reference chip.
+The complete Markdown PR reference is the persisted and sent prompt source;
+no extra host read or file-authorization grant is inferred. Cursor conversion,
+selection protection, materialization, deletion and undo treat it as one token.
+Malformed and oversized payloads are rejected. The shared syntax parser also
+recognizes self-hosted forge paths for in-app PR links. This is the F5-native
+implementation of #20102 using its existing persisted prompt path.
+
+Validation passes 160 parser/cursor/draft cases and 21 Chromium editor/header/link
+scenarios. A real ChatView regression drops the chip, verifies no turn started,
+then explicitly sends and asserts that the complete PR URL reaches the turn
+command with no file authorization. All eight TypeScript checks passed before
+the final browser fixtures; the final check includes those fixtures. The full
+release gate remains failed and ledger obligations stay deferred.
