@@ -1,4 +1,6 @@
 import { WorkspaceWriteContext } from "../../project/workspaceTransitionContext.ts";
+import { workflowArchiveFixture } from "../workflowArchive.testUtils.ts";
+import { workflowEntries, reconcileWorkflowArchives } from "../workflowArchiveLifecycle.ts";
 import { WorkspaceTransitionsLive } from "../../persistence/Layers/WorkspaceTransitions.ts";
 import { WorkspaceTransitions } from "../../persistence/Services/WorkspaceTransitions.ts";
 import {
@@ -163,7 +165,7 @@ async function createPersistentOrchestrationSystem(input: {
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(input.eventStoreLayer ?? OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
-    Layer.provide(persistenceLayer),
+    Layer.provideMerge(persistenceLayer),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
     Layer.provideMerge(NodeServices.layer),
   );
@@ -171,6 +173,7 @@ async function createPersistentOrchestrationSystem(input: {
   const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
   return {
     engine,
+    sql: await runtime.runPromise(Effect.service(SqlClient.SqlClient)),
     run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
     dispose: () => runtime.dispose(),
   };
@@ -197,6 +200,173 @@ function now() {
 }
 
 describe("OrchestrationEngine", () => {
+  it.each(["planning", "codeReview", "investigation"] as const)(
+    "persists and replays an atomic %s workflow archive and restore",
+    async (kind) => {
+      const fixture = workflowArchiveFixture(kind);
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "f5-workflow-archive-"));
+      const dbPath = path.join(directory, "state.sqlite");
+      let system = await createPersistentOrchestrationSystem({ dbPath });
+      try {
+        const project = fixture.model.projects[0]!;
+        await system.run(
+          system.engine.dispatch({
+            type: "project.create",
+            commandId: CommandId.makeUnsafe("project"),
+            projectId: project.id,
+            title: project.title,
+            workspaceRoot: project.workspaceRoot,
+            createdAt: project.createdAt,
+          }),
+        );
+        for (const thread of fixture.model.threads) {
+          await system.run(
+            system.engine.dispatch({
+              type: "thread.create",
+              commandId: CommandId.makeUnsafe(thread.id),
+              threadId: thread.id,
+              projectId: thread.projectId,
+              title: thread.title,
+              model: thread.model,
+              runtimeMode: thread.runtimeMode,
+              interactionMode: thread.interactionMode,
+              branch: null,
+              worktreePath: null,
+              createdAt: thread.createdAt,
+            }),
+          );
+        }
+        const entry = fixture.entry;
+        const commandId = CommandId.makeUnsafe("seed-workflow");
+        if (entry.kind === "planning")
+          await system.run(
+            system.engine.dispatch({
+              type: "project.workflow.upsert",
+              commandId,
+              projectId: project.id,
+              workflow: entry.workflow,
+              createdAt: project.createdAt,
+            }),
+          );
+        else if (entry.kind === "codeReview")
+          await system.run(
+            system.engine.dispatch({
+              type: "project.code-review-workflow.upsert",
+              commandId,
+              projectId: project.id,
+              workflow: entry.workflow,
+              updatedAt: project.createdAt,
+            }),
+          );
+        else
+          await system.run(
+            system.engine.dispatch({
+              type: "project.investigation-workflow.upsert",
+              commandId,
+              projectId: project.id,
+              workflow: entry.workflow,
+              updatedAt: project.createdAt,
+            }),
+          );
+        const archive = fixture.archive();
+        const accepted = await system.run(system.engine.dispatch(archive));
+        expect(await system.run(system.engine.dispatch(archive))).toEqual(accepted);
+        let model = await system.run(system.engine.getReadModel());
+        expect(model.threads.every((thread) => thread.archivedAt !== null)).toBe(true);
+        expect(workflowEntries(model)[0]!.workflow.archiveRestorations).toHaveLength(2);
+        const pauses = await system.run(system.sql<{
+          threadId: string;
+          paused: number;
+          reason: string;
+        }>`SELECT thread_id AS "threadId", paused, pause_reason_code AS reason
+          FROM next_turn_queue_state ORDER BY thread_id`);
+        expect(pauses).toEqual([
+          { threadId: fixture.a, paused: 1, reason: "thread_archived" },
+          { threadId: fixture.b, paused: 1, reason: "thread_archived" },
+        ]);
+        await system.dispose();
+        system = await createPersistentOrchestrationSystem({ dbPath });
+        model = await system.run(system.engine.getReadModel());
+        expect(model.threads.every((thread) => thread.archivedAt !== null)).toBe(true);
+        expect(workflowEntries(model)[0]!.workflow.archiveRestorations).toHaveLength(2);
+        await system.run(reconcileWorkflowArchives(system.engine));
+        await system.run(system.engine.dispatch(fixture.archive(true)));
+        model = await system.run(system.engine.getReadModel());
+        expect(model.threads.every((thread) => thread.archivedAt === null)).toBe(true);
+        expect(workflowEntries(model)[0]!.workflow.archiveRestorations).toEqual([]);
+        expect(await system.run(system.sql`SELECT paused FROM next_turn_queue_state`)).toEqual([
+          { paused: 1 },
+          { paused: 1 },
+        ]);
+      } finally {
+        await system.dispose();
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("rolls back the workflow and all children if an archive projection fails", async () => {
+    const system = await createOrchestrationSystem();
+    const fixture = workflowArchiveFixture("planning");
+    try {
+      const project = fixture.model.projects[0]!;
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("project"),
+          projectId: project.id,
+          title: project.title,
+          workspaceRoot: project.workspaceRoot,
+          createdAt: project.createdAt,
+        }),
+      );
+      for (const thread of fixture.model.threads)
+        await system.run(
+          system.engine.dispatch({
+            type: "thread.create",
+            commandId: CommandId.makeUnsafe(thread.id),
+            threadId: thread.id,
+            projectId: project.id,
+            title: thread.title,
+            model: thread.model,
+            runtimeMode: thread.runtimeMode,
+            interactionMode: thread.interactionMode,
+            branch: null,
+            worktreePath: null,
+            createdAt: thread.createdAt,
+          }),
+        );
+      await system.run(
+        system.engine.dispatch({
+          type: "project.workflow.upsert",
+          commandId: CommandId.makeUnsafe("workflow"),
+          projectId: project.id,
+          workflow: fixture.model.planningWorkflows[0]!,
+          createdAt: project.createdAt,
+        }),
+      );
+      await system.run(
+        system.sql.unsafe(
+          "CREATE TRIGGER refuse_archive BEFORE UPDATE OF archived_at ON projection_threads " +
+            "WHEN NEW.thread_id = 'archive-b' AND NEW.archived_at IS NOT NULL " +
+            "BEGIN SELECT RAISE(ABORT, 'injected archive failure'); END",
+        ),
+      );
+      await expect(system.run(system.engine.dispatch(fixture.archive()))).rejects.toThrow();
+      const model = await system.run(system.engine.getReadModel());
+      expect(model.planningWorkflows[0]!.archivedAt).toBeNull();
+      expect(model.threads.every((thread) => thread.archivedAt === null)).toBe(true);
+      const rows = await system.run(
+        system.sql.unsafe<{ archivedAt: string | null }>(
+          "SELECT archived_at AS archivedAt FROM projection_threads",
+        ),
+      );
+      expect(rows.every((row) => row.archivedAt === null)).toBe(true);
+    } finally {
+      await system.dispose();
+    }
+  });
+
   it("commits transition completion, metadata and receipt atomically and replays a lost response", async () => {
     const system = await createOrchestrationSystem();
     const threadId = ThreadId.makeUnsafe("transition-thread");

@@ -364,7 +364,7 @@ export function toProviderTurnDeliveryError(error: unknown): ProviderTurnDeliver
 }
 
 const make = Effect.gen(function* () {
-  // Serializes turn delivery with MCP-apply restarts per thread, so Apply
+  // Serializes turn delivery with archive stops and MCP-apply restarts per thread, so Apply
   // never stops a session between its idle check and a new turn. Separate
   // from `withProviderThreadAccess`, which startSession takes itself.
   const activeSubmissions = new Map<ThreadId, number>();
@@ -390,6 +390,17 @@ const make = Effect.gen(function* () {
       return project ? (yield* readProjectSettings(global, project)).settings : global;
     });
   const threadModelOptions = new Map<string, ProviderModelOptions>();
+
+  const requireDeliverableThread = Effect.fnUntraced(function* (threadId: ThreadId) {
+    const thread = yield* resolveThread(threadId);
+    if (!thread || thread.deletedAt !== null || thread.archivedAt !== null)
+      return yield* new ProviderTurnDeliveryError({
+        certainty: "not_sent",
+        retryable: false,
+        detail: "The queued turn's thread is missing, deleted, or archived.",
+      });
+    return thread;
+  });
 
   const appendProviderFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -902,6 +913,7 @@ const make = Effect.gen(function* () {
             ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
             runtimeMode: desiredRuntimeMode,
           };
+          yield* requireDeliverableThread(threadId);
           const started = yield* providerService.startSession(threadId, startInput);
           const nativeIdentity = (cursor: unknown) => {
             if (!cursor || typeof cursor !== "object") return undefined;
@@ -919,6 +931,7 @@ const make = Effect.gen(function* () {
             recoverySummary = yield* recoverSummary();
             if (recoverySummary) {
               yield* providerService.stopSession({ threadId });
+              yield* requireDeliverableThread(threadId);
               return yield* providerService.startSession(threadId, {
                 ...startInput,
                 resumeCursor: {
@@ -1262,6 +1275,7 @@ const make = Effect.gen(function* () {
       projects: (yield* orchestrationEngine.getReadModel()).projects,
     });
     if (workspace) yield* ensureWorkspaceDirectory(workspace);
+    yield* requireDeliverableThread(input.threadId);
     yield* ensureSessionForThread(input.threadId, input.createdAt, {
       ...(input.provider !== undefined ? { provider: input.provider } : {}),
       ...(input.model !== undefined ? { model: input.model } : {}),
@@ -1339,6 +1353,7 @@ const make = Effect.gen(function* () {
       },
     });
 
+    yield* requireDeliverableThread(input.threadId);
     return yield* providerService.sendTurn({
       threadId: input.threadId,
       ...(input.submissionSource ? { submissionSource: input.submissionSource } : {}),
@@ -1650,15 +1665,18 @@ const make = Effect.gen(function* () {
     >,
   ) {
     const thread = yield* resolveThread(event.payload.threadId);
-    if (!thread) {
-      yield* Effect.logWarning("provider turn start ignored because the thread is missing", {
-        threadId: event.payload.threadId,
-        messageId: event.payload.messageId,
-      });
+    if (!thread || thread.deletedAt !== null || thread.archivedAt !== null) {
+      yield* Effect.logWarning(
+        "provider turn start rejected: thread is missing, deleted, or archived",
+        {
+          threadId: event.payload.threadId,
+          messageId: event.payload.messageId,
+        },
+      );
       return yield* new ProviderTurnDeliveryError({
         certainty: "not_sent",
         retryable: false,
-        detail: "The queued turn's thread no longer exists.",
+        detail: "The queued turn's thread is missing, deleted, or archived.",
       });
     }
 
@@ -1701,6 +1719,7 @@ const make = Effect.gen(function* () {
         worktreePath: thread.worktreePath,
         branch: thread.branch,
       }).pipe(Effect.mapError(toProviderTurnDeliveryError));
+      yield* requireDeliverableThread(thread.id);
       return yield* providerService.sendTurn({
         threadId: thread.id,
         ...(event.commandId ? { deliveryId: event.commandId } : {}),
@@ -2065,10 +2084,13 @@ const make = Effect.gen(function* () {
   const processThreadArchived = Effect.fnUntraced(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.archived" }>,
   ) {
-    yield* stopThreadSession({
-      threadId: event.payload.threadId,
-      createdAt: event.payload.archivedAt,
-    });
+    yield* withThreadTurnGate(
+      event.payload.threadId,
+      stopThreadSession({
+        threadId: event.payload.threadId,
+        createdAt: event.payload.archivedAt,
+      }),
+    );
   });
 
   const restartClaudeSessionForMcpApply = Effect.fnUntraced(function* (
@@ -2796,23 +2818,23 @@ const make = Effect.gen(function* () {
   });
 
   const deliverTurnStart: ProviderCommandReactorShape["deliverTurnStart"] = (event) =>
-    Effect.acquireUseRelease(
-      withThreadTurnGate(
-        event.payload.threadId,
+    withThreadTurnGate(
+      event.payload.threadId,
+      Effect.acquireUseRelease(
         Effect.sync(() =>
           activeSubmissions.set(
             event.payload.threadId,
             (activeSubmissions.get(event.payload.threadId) ?? 0) + 1,
           ),
         ),
+        () => processTurnStartRequested(event),
+        () =>
+          Effect.sync(() => {
+            const remaining = (activeSubmissions.get(event.payload.threadId) ?? 1) - 1;
+            if (remaining > 0) activeSubmissions.set(event.payload.threadId, remaining);
+            else activeSubmissions.delete(event.payload.threadId);
+          }),
       ),
-      () => processTurnStartRequested(event),
-      () =>
-        Effect.sync(() => {
-          const remaining = (activeSubmissions.get(event.payload.threadId) ?? 1) - 1;
-          if (remaining > 0) activeSubmissions.set(event.payload.threadId, remaining);
-          else activeSubmissions.delete(event.payload.threadId);
-        }),
     ).pipe(
       Effect.tap(() =>
         increment(orchestrationEventsProcessedTotal, {

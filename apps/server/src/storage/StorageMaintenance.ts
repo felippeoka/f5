@@ -1,4 +1,8 @@
 import { purgeThreadRows } from "./threadPurgePolicy.ts";
+import {
+  retainedWorkflowThreadIds as workflowRetention,
+  workflowEntries,
+} from "../orchestration/workflowArchiveLifecycle.ts";
 import { storageLstat, storageReadDir } from "./diskUsage.ts";
 import { recordStorageAutomationAudit, pruneStorageAutomationAudit } from "./automationAudit.ts";
 import { databaseMaintenanceEffect } from "./databaseMaintenance.ts";
@@ -47,7 +51,18 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { defaultF5BaseDir, legacyT3BaseDir } from "@t3tools/shared/appStatePaths";
-import { Cause, Effect, Exit, Layer, Option, Schema, Scope, Semaphore, ServiceMap } from "effect";
+import {
+  Cause,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Schema,
+  Scope,
+  Semaphore,
+  ServiceMap,
+  Stream,
+} from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
@@ -722,6 +737,8 @@ const makeStorageMaintenance = Effect.gen(function* () {
       ORDER BY thread.thread_id ASC
     `;
 
+  const retainedWorkflowThreadIds = () => engine.getReadModel().pipe(Effect.map(workflowRetention));
+
   const inspectWorktreeRemovalReadiness = (input: {
     readonly targetPath: string;
     readonly metadataOperation: string;
@@ -1171,7 +1188,10 @@ const makeStorageMaintenance = Effect.gen(function* () {
       const warnings: StoragePathWarning[] = [];
       const allThreads = yield* queryThreadRows();
       const archivedThreadCutoffIso = new Date(nowMs - ARCHIVED_THREAD_RETENTION_MS).toISOString();
-      const deletedThreads = allThreads.filter((thread) => thread.deletedAt !== null);
+      const retained = yield* retainedWorkflowThreadIds();
+      const deletedThreads = allThreads.filter(
+        (thread) => thread.deletedAt !== null && !retained.has(thread.threadId),
+      );
       const busySegments = yield* readBusyThreadSegments(allThreads);
       const purgeDeletedThreadCandidates = deletedThreads.filter((thread) => {
         const segment = toSafeThreadAttachmentSegment(thread.threadId);
@@ -1181,6 +1201,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
         if (
           thread.deletedAt !== null ||
           thread.archivedAt === null ||
+          retained.has(thread.threadId) ||
           thread.archivedAt > archivedThreadCutoffIso
         ) {
           return false;
@@ -1874,6 +1895,36 @@ const makeStorageMaintenance = Effect.gen(function* () {
     Effect.sleep("30 seconds").pipe(Effect.andThen(Effect.sync(pruneConfirmations))),
   ).pipe(Effect.forkIn(scope));
   const noteStorageMutated = coordinator.noteMutated;
+  const workflowEligibilityFingerprint = () =>
+    engine.getReadModel().pipe(
+      Effect.map((model) =>
+        canonicalJsonHash(
+          workflowEntries(model)
+            .map((entry) => ({
+              kind: entry.kind,
+              id: entry.workflow.id,
+              archivedAt: entry.workflow.archivedAt,
+              deletedAt: entry.workflow.deletedAt,
+              threadIds: entry.threadIds.toSorted(),
+            }))
+            .toSorted((a, b) => a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id)),
+        ),
+      ),
+    );
+  let workflowEligibility = yield* workflowEligibilityFingerprint();
+  yield* Stream.runForEach(engine.streamDomainEvents, (event) =>
+    Effect.gen(function* () {
+      if (event.type === "thread.archived" || event.type === "thread.unarchived") {
+        yield* noteStorageMutated;
+      } else if (event.type.startsWith("project.") && event.type.includes("workflow")) {
+        const next = yield* workflowEligibilityFingerprint();
+        if (next !== workflowEligibility) {
+          workflowEligibility = next;
+          yield* noteStorageMutated;
+        }
+      }
+    }),
+  ).pipe(Effect.forkIn(scope));
   const getStatus: StorageMaintenanceShape["getStatus"] = Effect.gen(function* () {
     const state = yield* coordinator.snapshot;
     return {
@@ -2213,6 +2264,8 @@ const makeStorageMaintenance = Effect.gen(function* () {
 
   const purgeBlockReason = (thread: ThreadRow) =>
     Effect.gen(function* () {
+      if ((yield* retainedWorkflowThreadIds()).has(thread.threadId))
+        return "Referenced by a workflow; delete the workflow before permanently purging its threads.";
       const rows = yield* sql<{ reason: string }>`
       SELECT 'Provider delivery needs recovery.' AS reason WHERE EXISTS (
         SELECT 1 FROM provider_turn_deliveries WHERE thread_id = ${thread.threadId}
@@ -2416,6 +2469,13 @@ const makeStorageMaintenance = Effect.gen(function* () {
                 crossedBoundary = true;
                 markStorageMutation(request.operationId);
               }
+              // thread.delete validates ownership atomically; deleted threads cannot
+              // acquire a new workflow owner while files are being removed.
+              const retainedReason = yield* purgeBlockReason(thread);
+              if (retainedReason) {
+                warnings.push(warningFor(thread.threadId, retainedReason));
+                return false;
+              }
               if (cwd) {
                 crossedBoundary = true;
                 markStorageMutation(request.operationId);
@@ -2510,8 +2570,9 @@ const makeStorageMaintenance = Effect.gen(function* () {
                       operation: "purge.recheck",
                       message: "Provider session remained active after stop.",
                     });
-                  const lockScope = yield* engine.acquireMaintenanceLock();
                   return yield* Effect.gen(function* () {
+                    const purgeGate = yield* engine.acquireMaintenanceLock();
+                    yield* Effect.addFinalizer(() => Scope.close(purgeGate, Exit.void));
                     const finalBlock = yield* purgeBlockReason(thread);
                     if (
                       (yield* terminals.listSessions).some(
@@ -2547,10 +2608,10 @@ const makeStorageMaintenance = Effect.gen(function* () {
                       return yield* Effect.failCause(transactionExit.cause);
                     markStorageMutation(request.operationId);
                     return true;
-                  }).pipe(Effect.ensuring(Scope.close(lockScope, Exit.void).pipe(Effect.ignore)));
+                  }).pipe(Effect.scoped);
                 }),
               );
-            }),
+            }).pipe(Effect.scoped),
           ),
         );
         if (Exit.isFailure(outcome)) {
@@ -3659,6 +3720,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
   const purgeThreads: StorageMaintenanceShape["purgeThreads"] = (input) =>
     Effect.gen(function* () {
       const allThreads = yield* queryThreadRows();
+      const retained = yield* retainedWorkflowThreadIds();
       const busySegments = yield* readBusyThreadSegments(allThreads);
       const nowMs = Date.now();
       for (const [threadId, retryAtMs] of purgeRetryAtMs) {
@@ -3666,6 +3728,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
       }
       const { deletedBefore, archivedBefore } = input;
       const purgeable = (thread: ThreadRow) => {
+        if (retained.has(thread.threadId)) return false;
         const segment = toSafeThreadAttachmentSegment(thread.threadId);
         return segment === null || !busySegments.has(segment);
       };

@@ -19,6 +19,7 @@ import { SessionNotesService } from "../Services/SessionNotesService.ts";
 import { WorkflowService } from "../Services/WorkflowService.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { startThreadSnoozeReactor } from "../threadSnoozeReactor.ts";
+import { reconcileWorkflowArchives } from "../workflowArchiveLifecycle.ts";
 
 export const makeOrchestrationReactor = Effect.gen(function* () {
   const providerRuntimeIngestion = yield* ProviderRuntimeIngestionService;
@@ -38,6 +39,8 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const start: OrchestrationReactorShape["start"] = Effect.gen(function* () {
     yield* providerRuntimeIngestion.start;
     yield* providerCommandReactor.start;
+    yield* startThreadSnoozeReactor(orchestrationEngine);
+    yield* reconcileWorkflowArchives(orchestrationEngine);
     yield* Stream.runForEach(providerTurnDeliveryWorker.outcomes, (outcome) =>
       Effect.gen(function* () {
         let projectionSucceeded = true;
@@ -113,7 +116,6 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
     yield* investigationWorkflowService.start;
     yield* nextTurnQueueDispatcher.start;
     yield* nativeSessionCleanupReactor.start;
-    yield* startThreadSnoozeReactor(orchestrationEngine);
   });
 
   return {

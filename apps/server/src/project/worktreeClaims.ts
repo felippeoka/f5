@@ -14,7 +14,7 @@ import {
   worktreeSetupGatesTurn,
   WorkspaceTransitionSnapshot,
 } from "@t3tools/contracts";
-import { Effect, Option, Schema } from "effect";
+import { Effect, Exit, Option, Schema, Scope } from "effect";
 
 import { GitCore, type GitCoreShape, type RegisteredWorktree } from "../git/Services/GitCore.ts";
 import { canonicalWorktreePath } from "../git/worktreePaths.ts";
@@ -409,6 +409,18 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
       ["applying", "applied", "needs_recovery"].includes(operation.phase);
     if (ownedTransition) originalMoveSnapshot = operation?.moveData?.snapshot;
   }
+  if (input.policy.kind === "storageMaintenance") {
+    const model = yield* engine.getReadModel();
+    if (
+      model.threads.some(
+        (thread) =>
+          claims.threadIds.includes(thread.id) &&
+          thread.deletedAt === null &&
+          thread.archivedAt === null,
+      )
+    )
+      blockedReasons.push("Referenced by an active thread.");
+  }
   blockedReasons.push(
     ...foreignClaims(
       {
@@ -544,6 +556,7 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
   readonly afterRemoval?: (registration: RegisteredWorktree | null) => Effect.Effect<void>;
 }) {
   const git = yield* GitCore;
+  const engine = yield* OrchestrationEngineService;
   const config = yield* ServerConfig;
   if (input.isCancelled?.())
     return {
@@ -561,58 +574,114 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
     withRepositoryLifecycleLock(
       config.baseDir,
       common,
-      Effect.gen(function* () {
-        if (input.isCancelled?.())
-          return { ...preview, blockedReasons: ["Cleanup was cancelled."] };
-        const checked = yield* evaluateWorktreeRemoval(input);
-        if (
-          input.expectedHead !== undefined &&
-          (checked.registration?.headSha ?? null) !== input.expectedHead
-        )
-          checked.blockedReasons.push("HEAD changed since inspection. Review the checkout again.");
-        const claims = yield* readWorktreeClaims(input.path);
-        if (claims.unknown) checked.blockedReasons.push("workspace usage could not be verified");
-        // The caller must stop all processes belonging to deleted/owned threads before locking.
-        const owned = new Set<string>([
-          ...checked.deletedThreadClaims,
-          ...(input.policy.kind === "ownedRollback" && input.policy.ownThreadId
-            ? [input.policy.ownThreadId]
-            : []),
-        ]);
-        if (
-          claims.sessions.some((session) => owned.has(session.threadId)) ||
-          claims.terminals.some((terminal) => owned.has(terminal.threadId))
-        )
-          checked.blockedReasons.push(
-            "owned or deleted conversation processes still use the checkout",
+      Effect.scoped(
+        Effect.gen(function* () {
+          if (input.isCancelled?.())
+            return { ...preview, blockedReasons: ["Cleanup was cancelled."] };
+          const inspectedProjectRoots = new Set(
+            (yield* engine.getReadModel()).projects
+              .filter((project) => project.deletedAt === null)
+              .map((project) => project.workspaceRoot),
           );
-        if (checked.blockedReasons.length === 0) {
-          if (input.expectedRootIdentity !== undefined) {
-            const stat = yield* Effect.tryPromise(() => FS.lstat(input.path)).pipe(
-              Effect.orElseSucceed(() => null),
+          const checked = yield* evaluateWorktreeRemoval(input);
+          // Git inspection can be slow. Only freeze orchestration writes for the
+          // final state/claim check and removal, inside the lifecycle locks.
+          const maintenanceGate =
+            input.policy.kind === "storageMaintenance"
+              ? yield* engine.acquireMaintenanceLock()
+              : null;
+          if (maintenanceGate)
+            yield* Effect.addFinalizer(() => Scope.close(maintenanceGate, Exit.void));
+          const finalModel = yield* engine.getReadModel();
+          const claims = yield* readWorktreeClaims(input.path);
+          if (input.policy.kind === "storageMaintenance") {
+            if (
+              finalModel.threads.some(
+                (thread) =>
+                  claims.threadIds.includes(thread.id) &&
+                  thread.deletedAt === null &&
+                  thread.archivedAt === null,
+              )
+            )
+              checked.blockedReasons.push("Referenced by an active thread.");
+            const finalProjectRoots = new Set(
+              finalModel.projects
+                .filter((project) => project.deletedAt === null)
+                .map((project) => project.workspaceRoot),
             );
             if (
-              !input.expectedRootIdentity ||
-              !stat?.isDirectory() ||
-              stat.isSymbolicLink() ||
-              stat.dev !== input.expectedRootIdentity.dev ||
-              stat.ino !== input.expectedRootIdentity.ino
-            ) {
+              finalProjectRoots.size !== inspectedProjectRoots.size ||
+              [...finalProjectRoots].some((root) => !inspectedProjectRoots.has(root))
+            )
               checked.blockedReasons.push(
-                "Worktree directory was replaced since inspection. Rescan before removal.",
+                "Project roots changed during inspection. Rescan before removal.",
               );
+            checked.blockedReasons.push(
+              ...foreignClaims(
+                {
+                  ...claims,
+                  sessions: claims.sessions.filter(
+                    (session) => !claims.deletedThreadIds.some((id) => id === session.threadId),
+                  ),
+                  terminals: claims.terminals.filter(
+                    (terminal) => !claims.deletedThreadIds.some((id) => id === terminal.threadId),
+                  ),
+                },
+                null,
+              ),
+            );
+          }
+          if (
+            input.expectedHead !== undefined &&
+            (checked.registration?.headSha ?? null) !== input.expectedHead
+          )
+            checked.blockedReasons.push(
+              "HEAD changed since inspection. Review the checkout again.",
+            );
+          if (claims.unknown) checked.blockedReasons.push("workspace usage could not be verified");
+          // The caller must stop all processes belonging to deleted/owned threads before locking.
+          const owned = new Set<string>([
+            ...checked.deletedThreadClaims,
+            ...(input.policy.kind === "ownedRollback" && input.policy.ownThreadId
+              ? [input.policy.ownThreadId]
+              : []),
+          ]);
+          if (
+            claims.sessions.some((session) => owned.has(session.threadId)) ||
+            claims.terminals.some((terminal) => owned.has(terminal.threadId))
+          )
+            checked.blockedReasons.push(
+              "owned or deleted conversation processes still use the checkout",
+            );
+          if (checked.blockedReasons.length === 0) {
+            if (input.expectedRootIdentity !== undefined) {
+              const stat = yield* Effect.tryPromise(() => FS.lstat(input.path)).pipe(
+                Effect.orElseSucceed(() => null),
+              );
+              if (
+                !input.expectedRootIdentity ||
+                !stat?.isDirectory() ||
+                stat.isSymbolicLink() ||
+                stat.dev !== input.expectedRootIdentity.dev ||
+                stat.ino !== input.expectedRootIdentity.ino
+              ) {
+                checked.blockedReasons.push(
+                  "Worktree directory was replaced since inspection. Rescan before removal.",
+                );
+                return checked;
+              }
+            }
+            if (input.isCancelled?.()) {
+              checked.blockedReasons.push("Cleanup was cancelled.");
               return checked;
             }
+            yield* git.removeWorktree({ cwd: input.projectCwd, path: input.path });
+            if (maintenanceGate) yield* Scope.close(maintenanceGate, Exit.void);
+            if (input.afterRemoval) yield* input.afterRemoval(checked.registration);
           }
-          if (input.isCancelled?.()) {
-            checked.blockedReasons.push("Cleanup was cancelled.");
-            return checked;
-          }
-          yield* git.removeWorktree({ cwd: input.projectCwd, path: input.path });
-          if (input.afterRemoval) yield* input.afterRemoval(checked.registration);
-        }
-        return checked;
-      }),
+          return checked;
+        }),
+      ),
     ),
   );
 });

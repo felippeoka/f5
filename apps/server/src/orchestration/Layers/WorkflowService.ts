@@ -1,4 +1,5 @@
 import { setupProjectScript } from "@t3tools/shared/projectScripts";
+import { makeWorkflowArchiveLifecycle } from "../workflowArchiveLifecycle.ts";
 import {
   CommandId,
   DOCUMENT_WORKFLOW_TEMPLATE_ID,
@@ -2593,6 +2594,7 @@ export const makeWorkflowService = Effect.gen(function* () {
       const snapshot = yield* orchestrationEngine.getReadModel();
       const persisted = snapshot.planningWorkflows.find((entry) => entry.id === workflow.id);
       if (persisted) current = persisted;
+      if (isArchivedWorkflow(current)) return;
       const pass = current.readerPass;
       if (!pass || current.merge.status !== "merged") return;
       const stage =
@@ -2823,6 +2825,7 @@ export const makeWorkflowService = Effect.gen(function* () {
     updatedAt: string,
   ) =>
     Effect.gen(function* () {
+      if (isArchivedWorkflow(workflow)) return;
       yield* maybeStartReviews(workflow, snapshot, updatedAt);
       yield* maybeStartRevisions(workflow, snapshot, updatedAt);
       yield* maybeStartMerge(workflow, snapshot, updatedAt);
@@ -3558,6 +3561,14 @@ export const makeWorkflowService = Effect.gen(function* () {
     updatedAt: string,
   ) =>
     Effect.gen(function* () {
+      if (isArchivedWorkflow(workflow)) {
+        if (
+          workflow.implementation?.status === "implemented" &&
+          !workflow.implementation.codeReviewEnabled
+        )
+          yield* upsertWorkflow(markImplementationCompleted(workflow, null, updatedAt));
+        return;
+      }
       if (!workflow.implementation) {
         return;
       }
@@ -5373,6 +5384,10 @@ export const makeWorkflowService = Effect.gen(function* () {
       const workflow = yield* readWorkflow(orchestrationEngine, input.workflowId).pipe(
         Effect.mapError((error) => new Error(`Failed to load workflow: ${String(error)}`)),
       );
+      if (workflow && isArchivedWorkflow(workflow))
+        return yield* Effect.fail(
+          new Error("Restore the workflow before starting implementation."),
+        );
       if (!workflow) {
         return yield* Effect.fail(new Error(`Workflow '${input.workflowId}' does not exist.`));
       }
@@ -5529,49 +5544,21 @@ export const makeWorkflowService = Effect.gen(function* () {
       });
     });
 
-  const archiveWorkflow: WorkflowServiceShape["archiveWorkflow"] = (workflowId) =>
-    Effect.gen(function* () {
-      const workflow = yield* readWorkflow(orchestrationEngine, workflowId).pipe(
-        Effect.mapError(
-          (error) => new Error(`Failed to load workflow '${workflowId}': ${String(error)}`),
-        ),
-      );
-      if (!workflow) {
-        return yield* Effect.fail(new Error(`Workflow '${workflowId}' does not exist.`));
-      }
-      if (isArchivedWorkflow(workflow)) {
-        return yield* Effect.fail(new Error(`Workflow '${workflowId}' is already archived.`));
-      }
+  const changeWorkflowArchive = makeWorkflowArchiveLifecycle(orchestrationEngine, "planning");
 
-      const updatedAt = new Date().toISOString();
-      yield* upsertWorkflow({
-        ...workflow,
-        archivedAt: updatedAt,
-        updatedAt,
-      });
-    });
+  const archiveWorkflow: WorkflowServiceShape["archiveWorkflow"] = (workflowId) =>
+    changeWorkflowArchive(workflowId, true);
 
   const unarchiveWorkflow: WorkflowServiceShape["unarchiveWorkflow"] = (workflowId) =>
-    Effect.gen(function* () {
-      const workflow = yield* readWorkflow(orchestrationEngine, workflowId).pipe(
-        Effect.mapError(
-          (error) => new Error(`Failed to load workflow '${workflowId}': ${String(error)}`),
-        ),
-      );
-      if (!workflow) {
-        return yield* Effect.fail(new Error(`Workflow '${workflowId}' does not exist.`));
-      }
-      if (!isArchivedWorkflow(workflow)) {
-        return yield* Effect.fail(new Error(`Workflow '${workflowId}' is not archived.`));
-      }
-
-      const updatedAt = new Date().toISOString();
-      yield* upsertWorkflow({
-        ...workflow,
-        archivedAt: null,
-        updatedAt,
-      });
-    });
+    changeWorkflowArchive(workflowId, false, (snapshot) =>
+      Effect.gen(function* () {
+        const workflow = snapshot.planningWorkflows.find((entry) => entry.id === workflowId);
+        if (workflow) yield* reconcileStuckWorkflow(workflow, snapshot);
+        const latest = yield* orchestrationEngine.getReadModel();
+        const current = latest.planningWorkflows.find((entry) => entry.id === workflowId);
+        if (current) yield* reconcileWorkflowImplementationLifecycle(current, latest);
+      }),
+    );
 
   const retryWorkflow: WorkflowServiceShape["retryWorkflow"] = (input) =>
     Effect.gen(function* () {
@@ -5583,6 +5570,8 @@ export const makeWorkflowService = Effect.gen(function* () {
       if (!workflow) {
         return yield* Effect.fail(new Error(`Workflow '${input.workflowId}' does not exist.`));
       }
+      if (isArchivedWorkflow(workflow))
+        return yield* Effect.fail(new Error("Restore the workflow before retrying it."));
 
       const updatedAt = new Date().toISOString();
       const failedThreadIds = new Set<ThreadId>();

@@ -3,7 +3,9 @@ import { ThreadId } from "@t3tools/contracts";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Deferred, Effect, Fiber, Scope } from "effect";
+import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { makeStorageMaintenanceLock } from "../storage/StorageMaintenanceLock.ts";
 import { ServerConfig } from "../config.ts";
 import {
   automationLayer,
@@ -25,6 +27,103 @@ describe("effective workspace claims and removal gate", () => {
   const cleanups: Array<() => Promise<unknown>> = [];
   afterEach(async () => {
     for (const cleanup of cleanups.splice(0)) await cleanup();
+  });
+  it("rechecks archive state after acquiring the maintenance gate", async () => {
+    const repo = await makeClonedRepo("f5-archive-recheck-");
+    cleanups.push(repo.cleanup);
+    const world = makeWorld();
+    world.projects.push(project("p", repo.root));
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const target = path.join((yield* ServerConfig).worktreesDir, "archive-race");
+        git(repo.root, "worktree", "add", "-q", "-b", "archive-race", target, "main");
+        world.threads.push({
+          ...thread({ id: "archived", projectId: "p", worktreePath: target }),
+          archivedAt: "2026-10-19T10:00:00.000Z",
+        });
+        const engine = yield* OrchestrationEngineService;
+        const result = yield* removeWorktreeSafely({
+          projectCwd: repo.root,
+          path: target,
+          policy: { kind: "storageMaintenance", ownThreadId: null },
+        }).pipe(
+          Effect.provideService(OrchestrationEngineService, {
+            ...engine,
+            acquireMaintenanceLock: () =>
+              Effect.gen(function* () {
+                world.threads = world.threads.map((thread) => ({ ...thread, archivedAt: null }));
+                return yield* Scope.make("sequential");
+              }),
+          }),
+        );
+        expect(result.blockedReasons).toContain("Referenced by an active thread.");
+        expect((yield* Effect.promise(() => fs.stat(target))).isDirectory()).toBe(true);
+      }).pipe(
+        Effect.provide(automationLayer(world, {}, "f5-archive-recheck-state-")),
+        Effect.scoped,
+      ),
+    );
+  });
+
+  it("serializes restoration against the final worktree removal", async () => {
+    const repo = await makeClonedRepo("f5-archive-serialization-");
+    cleanups.push(repo.cleanup);
+    const world = makeWorld();
+    world.projects.push(project("p", repo.root));
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const target = path.join((yield* ServerConfig).worktreesDir, "archive-serialization");
+        git(repo.root, "worktree", "add", "-q", "-b", "archive-serialization", target, "main");
+        world.threads.push({
+          ...thread({ id: "archived", projectId: "p", worktreePath: target }),
+          archivedAt: "2026-10-19T10:00:00.000Z",
+        });
+        const engine = yield* OrchestrationEngineService;
+        const gitService = yield* GitCore;
+        const lock = yield* makeStorageMaintenanceLock;
+        const entered = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        let restored = false;
+        const removal = yield* removeWorktreeSafely({
+          projectCwd: repo.root,
+          path: target,
+          policy: { kind: "storageMaintenance", ownThreadId: null },
+        }).pipe(
+          Effect.provideService(OrchestrationEngineService, {
+            ...engine,
+            acquireMaintenanceLock: lock.acquireExclusive,
+          }),
+          Effect.provideService(GitCore, {
+            ...gitService,
+            removeWorktree: (input) =>
+              Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(Deferred.await(release)),
+                Effect.andThen(gitService.removeWorktree(input)),
+              ),
+          }),
+          Effect.forkChild,
+        );
+        yield* Deferred.await(entered).pipe(Effect.timeout("5 seconds"));
+        const restoration = yield* lock
+          .withShared(
+            Effect.sync(() => {
+              restored = true;
+              world.threads = world.threads.map((thread) => ({ ...thread, archivedAt: null }));
+            }),
+          )
+          .pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        const restoredDuringRemoval = restored;
+        yield* Deferred.succeed(release, undefined);
+        expect((yield* Fiber.join(removal)).blockedReasons).toEqual([]);
+        yield* Fiber.join(restoration);
+        expect(restoredDuringRemoval).toBe(false);
+        expect(restored).toBe(true);
+      }).pipe(
+        Effect.provide(automationLayer(world, {}, "f5-archive-serialization-state-")),
+        Effect.scoped,
+      ),
+    );
   });
   it("checks the reviewed root identity under both locks before removal", async () => {
     const repo = await makeClonedRepo("f5-root-identity-");
