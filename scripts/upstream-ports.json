@@ -7998,10 +7998,16 @@
     {
       "upstreamSha": "3b2ebcee2f6eeb4ed3dde6c89fc59f2eb5bd996d",
       "subject": "perf(server): streamed events no longer rewrite the whole thread row (#18890)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(server): streamed events no longer rewrite the whole thread row (#18890).",
+      "reason": "Planned: individual implementation or baseline proof exists; a valid failing-before reproduction observes seven whole-thread metadata reads in a short stream/activity sequence. F5 now patches only activity timestamps and the estimate, reads narrow accounting state through one indexed join, and preserves unrelated metadata byte-for-byte. Missing threads are not inserted, omitted estimates are preserved, null explicitly clears, and reasoning status leaves activity timestamps unchanged. The 194 focused server cases pass; measured improvement is not yet established. The remaining per-SHA audit, comparative performance and required release gates are open. Upstream change: perf(server): streamed events no longer rewrite the whole thread row (#18890).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "plannedWorkstream": "15a",
+      "f5Shas": ["1338d41a6cbe2c66d5fd54ec52ef4deb3d7f61cd"],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/ProjectionPipeline.test.ts:2795",
+        "apps/server/src/persistence/Layers/ProjectionThreads.ts:158",
+        "apps/server/src/persistence/Layers/ProjectionThreads.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "3b3465f2a9dbc541a8806e39d2889abb77b93f5d",
@@ -34067,10 +34073,18 @@
     {
       "upstreamSha": "fd9cdaed17f615e364ee113829ec39b2bd2ed6fa",
       "subject": "perf(server): Codex plan streaming no longer commits every token (#19317)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(server): Codex plan streaming no longer commits every token (#19317).",
+      "reason": "Planned: individual implementation or baseline proof exists; F5 already buffers proposed-plan deltas until successful completion. Three strengthened baseline cases publish 100 deltas each, wait for a subsequent projected marker proving ordered consumption, then assert zero proposed-plan event writes before completion, one complete exact plan on success and zero on interruption or failure. The baseline provenance is the initial F5 commit; no runtime fix or CPU improvement is claimed. The remaining per-SHA audit, comparative performance and required release gates are open. Upstream change: perf(server): Codex plan streaming no longer commits every token (#19317).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "plannedWorkstream": "15a",
+      "f5Shas": [
+        "8168bd456ae23521e21bf68b08d0d860a6abd901",
+        "1338d41a6cbe2c66d5fd54ec52ef4deb3d7f61cd"
+      ],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts:3017",
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts:3537"
+      ]
     },
     {
       "upstreamSha": "fda6486233e0b2f07ecfea166e1a94533cb923c4",

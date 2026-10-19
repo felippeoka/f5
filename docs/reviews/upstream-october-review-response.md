@@ -1460,3 +1460,26 @@ of 20. The host also rejects `/bin/ps` with operation-not-permitted. The activit
 failure is consistent with that restriction but is not independently diagnosed.
 No complete interactive report or successful coverage certification is claimed;
 no guard is relaxed, and no measurements are reconstructed as a successful report.
+
+The streamed-thread scenario #18890 reproduces: the valid failing-before test
+observes seven full metadata reads during a short message/activity sequence.
+`1338d41a6c` introduces repository operations that read only token-accounting state
+and patch only timestamps/estimates. The regression retains a large task payload
+byte-for-byte, preserves other thread ownership, refuses missing-thread insertion,
+keeps reasoning status from updating activity, and checks nullable versus omitted
+estimates. Compaction retains its existing full metadata update. All 194 focused
+server cases and all eight typechecks pass; formatter and lint pass (29 warnings,
+zero errors). The six-task production build passes. This is implementation proof;
+comparative performance acceptance remains pending.
+
+The same checkpoint strengthens the existing #19317 baseline proof. Each of three
+cases sends 100 proposed-plan deltas and waits for a later projected marker before
+checking event counts: zero proposal writes before completion, one exact complete
+plan on success, and zero on interruption/failure. F5's buffer-until-completion
+behavior originates in `8168bd456ae23521e21bf68b08d0d860a6abd901` and is preserved.
+No redundant runtime coalescer or CPU improvement is claimed. Both per-SHA ledger
+records retain their planned disposition until the 15a audit and gates close.
+
+The required full run after this change again fails the same two scripts recovery
+identity cases, with 333 passing scripts cases. It does not reach the exhaustive
+Git matrix. No waiver or permission bypass is applied.
