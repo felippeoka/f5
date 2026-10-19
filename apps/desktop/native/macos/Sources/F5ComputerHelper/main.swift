@@ -76,10 +76,8 @@ func axElement(_ value: CFTypeRef?) -> AXUIElement? {
   return unsafeBitCast(value, to: AXUIElement.self)
 }
 func axRect(_ element: AXUIElement) -> CGRect? {
-  axRect(position: attribute(element, kAXPositionAttribute), size: attribute(element, kAXSizeAttribute))
-}
-func axRect(position: CFTypeRef?, size: CFTypeRef?) -> CGRect? {
-  guard let position, let size, CFGetTypeID(position) == AXValueGetTypeID(),
+  guard let position = attribute(element, kAXPositionAttribute),
+    let size = attribute(element, kAXSizeAttribute), CFGetTypeID(position) == AXValueGetTypeID(),
     CFGetTypeID(size) == AXValueGetTypeID()
   else { return nil }
   var point = CGPoint.zero
@@ -89,33 +87,16 @@ func axRect(position: CFTypeRef?, size: CFTypeRef?) -> CGRect? {
   else { return nil }
   return CGRect(origin: point, size: dimensions)
 }
-/// The AX error a batched attribute read returned in place of a value, if any.
-func axBatchError(_ value: CFTypeRef) -> AXError? {
-  guard CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
-  let wrapped = unsafeBitCast(value, to: AXValue.self)
-  var error = AXError.success
-  guard AXValueGetType(wrapped) == .axError, AXValueGetValue(wrapped, .axError, &error)
-  else { return nil }
-  return error
-}
-let secureAuditAttributes =
-  [kAXRoleAttribute, kAXSubroleAttribute, kAXPositionAttribute, kAXSizeAttribute,
-    kAXChildrenAttribute] as CFArray
 /// Reads one element for the secure-field audit in a single AX round trip.
 func secureAuditNode(_ element: AXUIElement) -> ComputerSecureAuditNode<AXUIElement>? {
   var values: CFArray?
   guard
     AXUIElementCopyMultipleAttributeValues(
-      element, secureAuditAttributes, AXCopyMultipleAttributeOptions(rawValue: 0), &values)
+      element, computerSecureAuditAttributes, AXCopyMultipleAttributeOptions(rawValue: 0), &values)
       == .success,
-    let list = values as [AnyObject]?, list.count == 5
+    let list = values as [AnyObject]?
   else { return nil }
-  let childrenError = axBatchError(list[4])
-  return ComputerSecureAuditNode(
-    role: list[0] as? String, subrole: list[1] as? String,
-    frame: axRect(position: list[2], size: list[3]),
-    children: childrenError == nil ? list[4] as? [AXUIElement] ?? [] : [],
-    childrenReadable: childrenError.map { $0 == .attributeUnsupported || $0 == .noValue } ?? true)
+  return computerSecureAuditNode(list)
 }
 func tier(_ id: String) -> String { computerAppTier(id) }
 func browser(_ id: String) -> Bool { computerAppIsBrowser(id) }
@@ -1373,15 +1354,12 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
     captureApps.contains { $0.processID == window.owningApplication?.processID }
       && computerCaptureWindowIntersectsDisplay(window: window.frame, display: target.bounds)
   }
-  // Each window gets a fair share of what remains of the audit budget.
   let maskDeadline = ProcessInfo.processInfo.systemUptime + 2
   var appWindows: [pid_t: [AXUIElement]] = [:]
   let masks = computerSecureCaptureMasks(windows: capturedWindows.map(\.frame)) { index in
     let captured = capturedWindows[index]
-    let now = ProcessInfo.processInfo.systemUptime
-    let windowDeadline =
-      now + max(0, maskDeadline - now) / Double(capturedWindows.count - index)
-    guard now < maskDeadline, let pid = captured.owningApplication?.processID else { return nil }
+    guard ProcessInfo.processInfo.systemUptime < maskDeadline,
+      let pid = captured.owningApplication?.processID else { return nil }
     if appWindows[pid] == nil {
       let root = applicationElement(pid)
       appWindows[pid] = attribute(root, kAXWindowsAttribute) as? [AXUIElement] ?? []
@@ -1395,8 +1373,13 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
         && abs(rect.height - captured.frame.height) < 1
     }
     guard matches.count == 1 else { return nil }
+    // The node budget bounds the walk; the depth limit only guards pathological trees, since
+    // a cutoff masks the whole enclosing web or scroll area.
+    let windowDeadline = computerSecureAuditDeadline(
+      now: ProcessInfo.processInfo.systemUptime, end: maskDeadline,
+      windowsLeft: capturedWindows.count - index)
     return computerSecureAudit(
-      root: matches[0], read: secureAuditNode, maxDepth: 80, maxNodes: 20000,
+      root: matches[0], read: secureAuditNode, maxDepth: 256, maxNodes: 20000,
       expired: { ProcessInfo.processInfo.systemUptime >= windowDeadline })
   }
   maskIncomplete = masks.incomplete

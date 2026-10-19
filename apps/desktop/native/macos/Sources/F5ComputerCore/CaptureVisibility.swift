@@ -8,7 +8,8 @@ public func computerCaptureWindowIntersectsDisplay(window: CGRect, display: CGRe
 
 /// Each captured window needs its own audit, regardless of the foreground app.
 /// A missing or invalid audit hides that entire window; a partial audit hides only the
-/// regions it could not establish as safe.
+/// regions it could not establish as safe. A window's content cannot render outside its
+/// frame, so masks are clipped to it and never cover other granted windows.
 public func computerSecureCaptureMasks(
   windows: [CGRect], audit: (Int) -> ComputerSecureAudit?
 ) -> (rects: [CGRect], incomplete: Bool) {
@@ -21,7 +22,8 @@ public func computerSecureCaptureMasks(
       incomplete = true
       continue
     }
-    masks.append(contentsOf: result.rects)
+    masks.append(
+      contentsOf: result.rects.map { $0.intersection(window) }.filter { !$0.isNull && !$0.isEmpty })
     if !result.complete { incomplete = true }
   }
   return (masks, incomplete)
