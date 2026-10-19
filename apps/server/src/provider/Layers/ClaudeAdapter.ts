@@ -327,6 +327,7 @@ interface AssistantTextBlockState {
 }
 
 interface PendingApproval {
+  readonly agentId?: string;
   readonly requestType: CanonicalRequestType;
   readonly detail?: string;
   readonly suggestions?: ReadonlyArray<PermissionUpdate>;
@@ -341,6 +342,7 @@ interface PendingApproval {
 }
 
 interface PendingUserInput {
+  readonly agentId?: string;
   readonly questions: ReadonlyArray<UserInputQuestion>;
   readonly answers: Deferred.Deferred<ProviderUserInputAnswers>;
   readonly cancel: () => void;
@@ -3685,6 +3687,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         const turnId = state.turnId ?? context.turnState?.turnId;
 
         if (taskUpdated.patch.terminalStatus) {
+          yield* resolvePendingInteractions(context, state.taskId);
           reduceClaudeTurnLifecycle(context.lifecycle, {
             type: "task-completed",
             taskId: state.taskId,
@@ -5330,6 +5333,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                 context.nativeTaskRuns.get(message.task_id)!
             )
               return;
+            yield* resolvePendingInteractions(context, message.task_id);
             // Either terminal notification can arrive first. Close the tool
             // while its launch metadata still exists, then publish the task edge.
             if (context.taskStates.get(message.task_id)?.tool) {
@@ -6001,9 +6005,14 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         });
       });
 
-    const resolvePendingInteractions = (context: ClaudeSessionContext): Effect.Effect<void> =>
+    const resolvePendingInteractions = (
+      context: ClaudeSessionContext,
+      agentId?: string,
+    ): Effect.Effect<void> =>
       Effect.gen(function* () {
         for (const [requestId, pending] of context.pendingApprovals) {
+          if (agentId !== undefined && pending.agentId !== agentId) continue;
+          context.pendingApprovals.delete(requestId);
           // Mark resolved BEFORE signalling the deferred so the awaiting
           // canUseTool handler (which may resume synchronously) sees the
           // flag and skips its own terminal emission. Otherwise callers see
@@ -6026,9 +6035,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             providerRefs: nativeProviderRefs(context),
           });
         }
-        context.pendingApprovals.clear();
 
         for (const [requestId, pending] of context.pendingUserInputs) {
+          if (agentId !== undefined && pending.agentId !== agentId) continue;
+          context.pendingUserInputs.delete(requestId);
           const emptyAnswers = {} as ProviderUserInputAnswers;
           pending.resolvedExternally = true;
           pending.cancel();
@@ -6050,7 +6060,9 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             },
           });
         }
-        context.pendingUserInputs.clear();
+
+        // Private elicitation receipts belong to the whole session, not a native task.
+        if (agentId !== undefined) return;
 
         // Unanswered requests are cancelled; answers already handed to the
         // SDK without a native completion become indeterminate, never resent.
@@ -6594,7 +6606,11 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         const handleAskUserQuestion = (
           context: ClaudeSessionContext,
           toolInput: Record<string, unknown>,
-          callbackOptions: { readonly signal: AbortSignal; readonly toolUseID?: string },
+          callbackOptions: {
+            readonly signal: AbortSignal;
+            readonly toolUseID?: string;
+            readonly agentID?: string;
+          },
         ) =>
           Effect.gen(function* () {
             const requestId = ApprovalRequestId.makeUnsafe(yield* Random.nextUUIDv4);
@@ -6627,6 +6643,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               Effect.runFork(Deferred.succeed(answersDeferred, {} as ProviderUserInputAnswers));
             };
             const pendingInput: PendingUserInput = {
+              ...(callbackOptions.agentID ? { agentId: callbackOptions.agentID } : {}),
               questions,
               answers: answersDeferred,
               cancel: markAborted,
@@ -7122,6 +7139,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               const presentation = claudeApprovalPresentation(callbackOptions);
               const decisionDeferred = yield* Deferred.make<ProviderApprovalDecision>();
               const pendingApproval: PendingApproval = {
+                ...(callbackOptions.agentID ? { agentId: callbackOptions.agentID } : {}),
                 requestType,
                 detail,
                 decision: decisionDeferred,
@@ -7179,9 +7197,14 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               callbackOptions.signal.addEventListener("abort", onAbort, {
                 once: true,
               });
+              if (callbackOptions.signal.aborted) onAbort();
 
               const decision = effectiveClaudeApprovalDecision(
-                yield* Deferred.await(decisionDeferred),
+                yield* Deferred.await(decisionDeferred).pipe(
+                  Effect.ensuring(
+                    Effect.sync(() => callbackOptions.signal.removeEventListener("abort", onAbort)),
+                  ),
+                ),
                 pendingApproval.presentation,
               );
               pendingApprovals.delete(requestId);

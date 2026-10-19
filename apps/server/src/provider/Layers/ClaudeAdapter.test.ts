@@ -13491,3 +13491,94 @@ it.effect("fails MCP sign-in cleanly when the Claude runtime lacks mcpAuthentica
     assert.include(error.message, "does not support MCP sign-in");
   }).pipe(Effect.provide(harness.layer));
 });
+
+for (const terminal of ["task_notification", "task_updated"] as const) {
+  for (const toolName of ["AskUserQuestion", "Bash"] as const) {
+    it.effect(`clears only the finished native agent's pending ${toolName} on ${terminal}`, () => {
+      const h = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const events: ProviderRuntimeEvent[] = [];
+        const listener = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+          Effect.sync(() => {
+            events.push(event);
+          }),
+        ).pipe(Effect.forkChild);
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeAgent",
+          runtimeMode: "approval-required",
+        });
+        const canUseTool = h.getLastCreateQueryInput()!.options.canUseTool!;
+        const input =
+          toolName === "AskUserQuestion"
+            ? {
+                questions: [
+                  { question: "Continue?", header: "Next", options: [], multiSelect: false },
+                ],
+              }
+            : { command: "pwd" };
+        let childResult: PermissionResult | null | undefined;
+        const child = Promise.resolve(
+          canUseTool(toolName, input, {
+            signal: new AbortController().signal,
+            toolUseID: "child-question",
+            requestId: "child-question",
+            agentID: "native-child",
+          }),
+        ).then((result) => {
+          childResult = result;
+          return result;
+        });
+        let parentResult: PermissionResult | null | undefined;
+        const parent = Promise.resolve(
+          canUseTool(toolName, input, {
+            signal: new AbortController().signal,
+            toolUseID: "parent-question",
+            requestId: "parent-question",
+          }),
+        ).then((result) => {
+          parentResult = result;
+          return result;
+        });
+        const requestedType =
+          toolName === "AskUserQuestion" ? "user-input.requested" : "request.opened";
+        yield* Effect.promise(() =>
+          vi.waitFor(() =>
+            assert.equal(events.filter((event) => event.type === requestedType).length, 2),
+          ),
+        );
+        if (terminal === "task_updated")
+          emitClaudeTaskUpdated(h.query, {
+            taskId: "native-child",
+            patch: { status: "completed" },
+          });
+        else
+          h.query.emit({
+            type: "system",
+            subtype: "task_notification",
+            task_id: "native-child",
+            status: "completed",
+            output_file: "native-output",
+            summary: "Finished",
+            uuid: "123e4567-e89b-42d3-a456-426614174011",
+            session_id: "123e4567-e89b-42d3-a456-426614174000",
+          } as SDKMessage);
+        yield* Effect.promise(() => vi.waitFor(() => assert.equal(childResult?.behavior, "deny")));
+        assert.equal(parentResult, undefined);
+        const resolvedType =
+          toolName === "AskUserQuestion" ? "user-input.resolved" : "request.resolved";
+        assert.equal(events.filter((event) => event.type === resolvedType).length, 1);
+        yield* adapter.stopSession(THREAD_ID);
+        yield* Effect.promise(() => Promise.all([child, parent]));
+        yield* Effect.promise(() =>
+          vi.waitFor(() =>
+            assert.equal(events.filter((event) => event.type === resolvedType).length, 2),
+          ),
+        );
+        assert.equal(parentResult?.behavior, "deny");
+        yield* Fiber.interrupt(listener);
+      }).pipe(Effect.provide(h.layer));
+    });
+  }
+}
