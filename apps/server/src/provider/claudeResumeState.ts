@@ -148,6 +148,7 @@ export function readClaudeNativeResumeMetadata(cursor: unknown) {
     taskId: string;
     toolUseId?: string;
     model?: string;
+    effort?: string;
     description?: string;
     taskType?: string;
   }> = [];
@@ -162,8 +163,9 @@ export function readClaudeNativeResumeMetadata(cursor: unknown) {
     )
       continue;
     const task: (typeof tasks)[number] = { taskId: value.taskId };
-    for (const key of ["toolUseId", "model", "description", "taskType"] as const)
+    for (const key of ["toolUseId", "model", "effort", "description", "taskType"] as const)
       if (typeof value[key] === "string" && value[key].length <= 4000) task[key] = value[key];
+    if (task.effort && task.effort.length > 64) delete task.effort;
     tasks.push(task);
   }
   const receipts: Array<[string, { state: "completed" | "failed"; result?: unknown }]> = [];

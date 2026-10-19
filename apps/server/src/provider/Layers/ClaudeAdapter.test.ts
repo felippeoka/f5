@@ -7322,6 +7322,107 @@ describe("ClaudeAdapterLive", () => {
     },
   );
 
+  it.effect("reports a subagent's effective effort with its own model", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const collected = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil(
+          (event) => event.type === "task.started" && event.payload.taskId === "nested-effort",
+        ),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+        model: "claude-opus-5-5",
+        modelOptions: { claudeAgent: { effort: "high" } },
+      });
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "Review with a subagent",
+        attachments: [],
+      });
+      harness.query.emit({
+        type: "assistant",
+        parent_tool_use_id: null,
+        session_id: BACKGROUND_SESSION_ID,
+        uuid: "agent-launch",
+        message: {
+          model: "claude-opus-5-5",
+          content: [
+            {
+              type: "tool_use",
+              id: "agent-effort-tool",
+              name: "Agent",
+              input: {
+                description: "Review",
+                prompt: "Review the patch",
+                model: "claude-opus-5-5",
+                effort: "low",
+              },
+            },
+          ],
+        },
+      } as unknown as SDKMessage);
+      harness.query.emit({
+        type: "assistant",
+        parent_tool_use_id: "agent-effort-tool",
+        session_id: BACKGROUND_SESSION_ID,
+        uuid: "agent-snapshot",
+        message: {
+          model: "claude-sonnet-4-6",
+          content: [
+            { type: "text", text: "Private child output" },
+            {
+              type: "tool_use",
+              id: "nested-effort-tool",
+              name: "Agent",
+              input: { description: "Nested", prompt: "Check the result", model: "inherit" },
+            },
+          ],
+        },
+      } as unknown as SDKMessage);
+      emitClaudeTaskStarted(harness.query, {
+        taskId: "agent-effort",
+        toolUseId: "agent-effort-tool",
+        description: "Review",
+      });
+      emitClaudeTaskStarted(harness.query, {
+        taskId: "nested-effort",
+        toolUseId: "nested-effort-tool",
+        description: "Nested",
+      });
+      const events = Array.from(yield* Fiber.join(collected));
+      const started = events.find((event) => event.type === "task.started");
+      assert.equal(started?.type, "task.started");
+      if (started?.type === "task.started") {
+        assert.equal(started.payload.model, "claude-sonnet-4-6");
+        assert.equal(started.payload.effort, "low");
+      }
+      const nested = events.find(
+        (event) => event.type === "task.started" && event.payload.taskId === "nested-effort",
+      );
+      assert.equal(nested?.type, "task.started");
+      if (nested?.type === "task.started") {
+        assert.equal(nested.payload.model, "claude-sonnet-4-6");
+        assert.equal(nested.payload.effort, "low");
+      }
+      assert.ok(
+        !events.some(
+          (event) =>
+            event.type === "content.delta" && event.payload.delta.includes("Private child output"),
+        ),
+      );
+      yield* adapter.stopSession(THREAD_ID);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("forwards Claude task progress summaries for subagent updates", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

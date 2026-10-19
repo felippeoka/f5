@@ -290,6 +290,11 @@ function AgentDetail(props: {
             <span className="font-mono">{entry.model}</span>
           </MetadataRow>
         ) : null}
+        {entry.effort ? (
+          <MetadataRow label="Effort">
+            <span className="font-mono">{entry.effort}</span>
+          </MetadataRow>
+        ) : null}
         <MetadataRow label="Provider">
           <span className="font-mono">{entry.provider}</span>
         </MetadataRow>

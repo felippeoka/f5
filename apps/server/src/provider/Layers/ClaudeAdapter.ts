@@ -1,3 +1,8 @@
+import {
+  rememberClaudeSubagentLaunch,
+  resolveClaudeSubagentEffort,
+  type ClaudeSubagentLaunch,
+} from "../claudeSubagentSelection.ts";
 import type { ThreadMcpBroker } from "../../mcp/threadMcpTools.ts";
 import { makeClaudeThreadMcpServer } from "./claudeThreadTools.ts";
 import type { ProviderAdapterSessionStartInput } from "../Services/ProviderAdapter.ts";
@@ -364,6 +369,7 @@ type ClaudeBackgroundStatus = "running" | ClaudeTaskTerminalStatus;
 
 interface ClaudeTaskState {
   readonly model?: string;
+  readonly effort?: string;
   readonly taskId: string;
   readonly toolUseId?: string;
   readonly turnId?: TurnId;
@@ -462,6 +468,7 @@ interface ClaudeSessionContext {
   readonly inFlightTools: Map<number, ToolInFlight>;
   readonly taskStates: Map<string, ClaudeTaskState>;
   readonly taskModelsByTool: Map<string, string>;
+  readonly taskLaunchesByTool: Map<string, ClaudeSubagentLaunch>;
   readonly lifecycle: ClaudeTurnLifecycle;
   settlementWatchdog: { resultId: string; cancel: Deferred.Deferred<void> } | undefined;
   turnState: ClaudeTurnState | undefined;
@@ -3022,10 +3029,11 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             ? {
                 backgroundTasks: [...context.taskStates.values()]
                   .slice(-512)
-                  .map(({ taskId, toolUseId, model, description, taskType }) => ({
+                  .map(({ taskId, toolUseId, model, effort, description, taskType }) => ({
                     taskId,
                     toolUseId,
                     model,
+                    effort,
                     description,
                     taskType,
                   })),
@@ -3509,13 +3517,20 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       const launchResult = input.launchResult ?? existing?.launchResult;
       const backgrounded = input.backgrounded ?? existing?.backgrounded;
 
+      const launch = toolUseId ? context.taskLaunchesByTool.get(toolUseId) : undefined;
+      const requestedModel = normalizeOptionalString(tool?.input.model);
       const model =
         (toolUseId ? context.taskModelsByTool.get(toolUseId) : undefined) ??
         existing?.model ??
-        normalizeOptionalString(tool?.input.model);
+        launch?.model ??
+        (requestedModel && requestedModel !== "inherit" ? requestedModel : undefined);
+      // A persisted task keeps its launch's effort across later parent model changes.
+      const effort =
+        launch?.effort ?? existing?.effort ?? normalizeOptionalString(tool?.input.effort);
       const state: ClaudeTaskState = {
         taskId: input.taskId,
         ...(model ? { model } : {}),
+        ...(effort ? { effort } : {}),
         ...(toolUseId ? { toolUseId } : {}),
         ...(turnId ? { turnId } : {}),
         ...(description ? { description } : {}),
@@ -4656,15 +4671,48 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         }
 
         const parentToolUseId = normalizeOptionalString(message.parent_tool_use_id);
+        const rawChildModel = normalizeOptionalString(message.message.model);
+        const childModel =
+          rawChildModel && !rawChildModel.startsWith("<")
+            ? (normalizeModelSlug(rawChildModel, "claudeAgent") ?? undefined)
+            : undefined;
+        // A nested Agent call inherits the speaker's reported model, including agent-file overrides.
+        if (parentToolUseId && childModel) {
+          context.taskModelsByTool.set(parentToolUseId, childModel);
+          if (context.taskModelsByTool.size > 64)
+            context.taskModelsByTool.delete(context.taskModelsByTool.keys().next().value!);
+        }
+        for (const block of Array.isArray(message.message?.content)
+          ? message.message.content
+          : []) {
+          const record = asUnknownRecord(block);
+          if (
+            record?.type !== "tool_use" ||
+            (record.name !== "Agent" && record.name !== "Task") ||
+            typeof record.id !== "string"
+          )
+            continue;
+          rememberClaudeSubagentLaunch({
+            pending: context.taskLaunchesByTool,
+            reportedModels: context.taskModelsByTool,
+            tasks: context.taskStates.values(),
+            toolUseId: record.id,
+            ownerToolUseId: parentToolUseId ?? null,
+            arguments: asUnknownRecord(record.input) ?? {},
+            sessionModel: context.session.model,
+            defaultSubagentModel: normalizeOptionalString(
+              context.processEnvironment.CLAUDE_CODE_SUBAGENT_MODEL,
+            ),
+            sessionEffort: normalizeOptionalString(context.configuredBase.effort),
+          });
+        }
         if (parentToolUseId) {
-          const model = normalizeOptionalString(message.message.model);
+          const model = childModel;
           if (model) {
-            context.taskModelsByTool.set(parentToolUseId, model);
-            if (context.taskModelsByTool.size > 64)
-              context.taskModelsByTool.delete(context.taskModelsByTool.keys().next().value!);
             for (const [taskId, task] of context.taskStates) {
               if (task.toolUseId !== parentToolUseId || task.model === model) continue;
               context.taskStates.set(taskId, { ...task, model });
+              yield* updateResumeCursor(context);
               yield* offerRuntimeEvent({
                 type: "task.progress",
                 ...(yield* makeEventStamp(context.session.threadId)),
@@ -4675,6 +4723,11 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                   taskId: RuntimeTaskId.make(taskId),
                   description: task.description ?? "Subagent",
                   model,
+                  effort: resolveClaudeSubagentEffort(
+                    model,
+                    task.effort,
+                    yield* reportedCapabilitiesFor(model),
+                  ),
                 },
               });
             }
@@ -5228,6 +5281,11 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                 ...(context.taskStates.get(message.task_id)?.model
                   ? { model: context.taskStates.get(message.task_id)!.model! }
                   : {}),
+                effort: resolveClaudeSubagentEffort(
+                  context.taskStates.get(message.task_id)?.model,
+                  context.taskStates.get(message.task_id)?.effort,
+                  yield* reportedCapabilitiesFor(context.taskStates.get(message.task_id)?.model),
+                ),
                 description: message.description,
                 ...(message.task_type ? { taskType: message.task_type } : {}),
               },
@@ -5252,6 +5310,11 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                 ...(context.taskStates.get(message.task_id)?.model
                   ? { model: context.taskStates.get(message.task_id)!.model! }
                   : {}),
+                effort: resolveClaudeSubagentEffort(
+                  context.taskStates.get(message.task_id)?.model,
+                  context.taskStates.get(message.task_id)?.effort,
+                  yield* reportedCapabilitiesFor(context.taskStates.get(message.task_id)?.model),
+                ),
                 description: message.description,
                 ...(message.summary ? { summary: message.summary } : {}),
                 ...(message.usage ? { usage: message.usage } : {}),
@@ -6070,6 +6133,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         }
         context.taskStates.clear();
         context.taskModelsByTool.clear();
+        context.taskLaunchesByTool.clear();
 
         if (context.turnState) {
           yield* completeTurn(context, "interrupted", "Session stopped.");
@@ -7781,6 +7845,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           inFlightTools,
           taskStates,
           taskModelsByTool: new Map(),
+          taskLaunchesByTool: new Map(),
           lifecycle: createClaudeTurnLifecycle(),
           settlementWatchdog: undefined,
           turnState: undefined,

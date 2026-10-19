@@ -37,6 +37,7 @@ function entry(overrides: Partial<AgentsPanelEntry> = {}): AgentsPanelEntry {
     live: true,
     provider: "claudeAgent",
     model: "claude-sonnet",
+    effort: "high",
     phase: "Explore",
     title: "Review pagination",
     prompt: "Find every cursor bug in the pagination code.",
@@ -183,6 +184,8 @@ describe("AgentsPanelView", () => {
         .element(detail.getByText("Find every cursor bug in the pagination code."))
         .toBeVisible();
       await expect.element(detail.getByText("claude-sonnet")).toBeVisible();
+      await expect.element(detail.getByText("Effort", { exact: true })).toBeVisible();
+      await expect.element(detail.getByText("high", { exact: true })).toBeVisible();
       await expect.element(detail.getByText("provider-work-1")).toBeVisible();
       await expect.element(detail.getByText("Inspecting activity cursors")).toBeVisible();
     } finally {

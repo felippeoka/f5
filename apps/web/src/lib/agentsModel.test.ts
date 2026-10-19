@@ -278,6 +278,39 @@ function derive(entries: ReadonlyArray<AgentsSnapshot["entries"][number]>) {
 }
 
 describe("agents panel model", () => {
+  it("counts live agents from earlier turns while the parent is idle or working on a later turn", () => {
+    const model = derive([
+      workEntry({
+        workItemId: "older-live",
+        turnId: TurnId.make("earlier-turn"),
+        status: "running",
+        active: true,
+        completedAt: null,
+      }),
+      workEntry({
+        workItemId: "current-live",
+        turnId: TURN_ID,
+        status: "running",
+        active: true,
+        completedAt: null,
+      }),
+      workEntry({
+        workItemId: "older-done",
+        turnId: TurnId.make("earlier-turn"),
+        status: "completed",
+        active: false,
+      }),
+    ]);
+    expect(model.liveCount).toBe(2);
+    expect(model.threads[0]?.liveCount).toBe(2);
+    expect(
+      model.agents
+        .filter((entry) => entry.live)
+        .map((entry) => entry.nativeWorkItemId)
+        .toSorted(),
+    ).toEqual(["current-live", "older-live"]);
+  });
+
   it("prefers the durable title and humanizes the type only as a fallback", () => {
     const model = derive([
       workEntry({ workItemId: "titled", phase: "local_bash", title: "Run browser suite" }),

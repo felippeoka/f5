@@ -59,6 +59,8 @@ export interface AgentsPanelEntry {
   readonly live: boolean;
   readonly provider: ThreadBackgroundWorkEntry["provider"];
   readonly model: string | null;
+  /** Effective effort reported by this agent, independent of its parent's current selection. */
+  readonly effort?: string | null;
   /** Task or subagent type recorded at start. */
   readonly phase: string | null;
   readonly title: string;
@@ -605,6 +607,7 @@ export function deriveAgentsPanelModel(input: {
       live: isLiveEntry(group.entry),
       provider: group.entry.provider,
       model: group.entry.model ?? group.detail?.model ?? null,
+      ...(group.entry.effort !== undefined ? { effort: group.entry.effort } : {}),
       phase: group.entry.phase ?? group.detail?.type ?? null,
       title: panelEntryTitle(group.entry, group.detail),
       prompt,
