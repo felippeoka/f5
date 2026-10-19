@@ -1391,6 +1391,15 @@ export function projectEvent(
         const shouldPreserveRunningLatestTurn =
           thread.latestTurn?.turnId === payload.turnId &&
           (thread.latestTurn.state === "running" || thread.latestTurn.state === "interrupted");
+        // A "missing" placeholder carries no outcome. Keep the state the session
+        // already settled, matching ProjectionPipeline; otherwise a completed
+        // turn reads as interrupted until the next restart.
+        const settledLatestTurnState =
+          payload.status === "missing" &&
+          thread.latestTurn?.turnId === payload.turnId &&
+          (thread.latestTurn.state === "completed" || thread.latestTurn.state === "error")
+            ? thread.latestTurn.state
+            : null;
         const nextLatestTurn = shouldPreserveRunningLatestTurn
           ? {
               ...thread.latestTurn,
@@ -1399,7 +1408,7 @@ export function projectEvent(
             }
           : {
               turnId: payload.turnId,
-              state: checkpointStatusToLatestTurnState(payload.status),
+              state: settledLatestTurnState ?? checkpointStatusToLatestTurnState(payload.status),
               requestedAt:
                 thread.latestTurn?.turnId === payload.turnId
                   ? thread.latestTurn.requestedAt
