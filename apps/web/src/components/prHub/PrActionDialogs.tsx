@@ -200,6 +200,14 @@ export function PrActionDialogs({
               onSucceeded={() => setPendingAction(null)}
             />
           ) : null}
+          {pendingAction === "close" || pendingAction === "reopen" ? (
+            <ForgeOperationPanel
+              pr={pr}
+              payload={{ kind: "action", action: pendingAction }}
+              label={pendingAction === "close" ? "Close pull request" : "Reopen pull request"}
+              onSucceeded={() => setPendingAction(null)}
+            />
+          ) : null}
           {pendingAction === "snooze" ? (
             <SnoozePresetPicker value={snoozeUntil} onChange={setSnoozeUntil} />
           ) : null}
@@ -208,7 +216,9 @@ export function PrActionDialogs({
           <Button variant="outline" onClick={() => setPendingAction(null)}>
             Cancel
           </Button>
-          {pendingAction !== "approve" &&
+          {pendingAction !== "close" &&
+          pendingAction !== "reopen" &&
+          pendingAction !== "approve" &&
           pendingAction !== "requestChanges" &&
           pendingAction !== "comment" &&
           (!native || pendingAction === "snooze") ? (

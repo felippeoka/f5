@@ -23,6 +23,8 @@ export type PrPendingAction =
   | "comment"
   | "requestChanges"
   | "merge"
+  | "close"
+  | "reopen"
   | "markReady"
   | "reRequestReview"
   | "snooze"
@@ -184,6 +186,10 @@ export function usePrActions(
         return "Request changes";
       case "merge":
         return "Merge pull request";
+      case "close":
+        return "Close pull request";
+      case "reopen":
+        return "Reopen pull request";
       case "markReady":
         return "Mark ready for review";
       case "reRequestReview":

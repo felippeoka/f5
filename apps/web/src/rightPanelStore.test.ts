@@ -300,3 +300,26 @@ it("keeps one PR tab per reference and restores it through normal close history"
     url: "https://github.com/org/repo/pull/7#discussion",
   });
 });
+
+it("consumes a quick action once without switching tabs or retaining it in closed history", () => {
+  const thread = ThreadId.makeUnsafe("quick-action-owner");
+  const key = "github:github.com/org/repo#8" as import("@t3tools/contracts").PullRequestKey;
+  const store = useRightPanelStore.getState();
+  store.openPullRequest(thread, {
+    key,
+    url: "https://github.com/org/repo/pull/8",
+    initialAction: { kind: "close", id: "request-1" },
+  });
+  store.open(thread, "diff");
+  store.consumePullRequestAction(thread, `pr:${key}`, "old-request");
+  expect(useRightPanelStore.getState().byThreadId[thread]?.surfaces[0]).toHaveProperty(
+    "initialAction",
+  );
+  store.consumePullRequestAction(thread, `pr:${key}`, "request-1");
+  expect(useRightPanelStore.getState().byThreadId[thread]?.activeSurfaceId).toBe("diff");
+  expect(useRightPanelStore.getState().byThreadId[thread]?.surfaces[0]).not.toHaveProperty(
+    "initialAction",
+  );
+  store.closeSurface(thread, `pr:${key}`);
+  expect(store.reopenClosed(thread)).not.toHaveProperty("initialAction");
+});

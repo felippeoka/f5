@@ -706,3 +706,27 @@ It still stops at the two migration process-identity failures (330 script cases
 pass). Seven PR UX records now carry concrete implementation SHAs and scenario
 files in both October artifacts; every disposition remains deferred. The ten
 September/October artifact reconciliation tests and pinned ledger validation pass.
+
+## PR quick actions and row menus continuation (2026-10-19)
+
+The inbox and linked-PR header expose Shift-only quick actions and right-click
+menus (#15549, #16612, #16627). Forge capabilities now live in one shared runtime
+module used by server adapters and web action selection (#17774). Server-reported
+permissions narrow those defaults. Archived/merged PRs expose no quick mutations;
+known closed PRs offer only supported reopening. Unknown/unsupported forges stay
+conservative. The header has only stored link metadata, so its action request
+opens the thread-owned PR panel for a current account/state read before admission.
+No new remote read occurs merely to render or reveal quick actions.
+
+F5 retains explicit preparation and confirmation for remote changes. A quick
+request opens the existing form, rechecks the loaded PR capabilities and is
+consumed once without changing other tabs. Canceling, tab changes or restoring a
+closed tab cannot replay that request. Shift state clears on other modifiers,
+blur and visibility changes. Inbox keyboard navigation remains intact, including
+the virtualized list.
+
+All 22 Chromium scenarios across the header, inbox, quick-action forms, spine and
+PR panel pass. The focused web run passes 35 cases and the broad web run passes
+2,320 cases in 238 files. All 85 focused server capability/model/operation cases
+pass. Formatting, lint and all eight TypeScript checks pass. The last required
+full run still fails its two process-identity checks; no release waiver is claimed.

@@ -1,3 +1,4 @@
+import { useRightPanelStore } from "../../rightPanelStore";
 import "../../index.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -7,7 +8,7 @@ import {
   type PullRequestWatchEntry,
 } from "@t3tools/contracts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
 import { ThreadPrLinks } from "./ThreadPrLinks";
 
@@ -45,6 +46,7 @@ let changed: ((input: PullRequestWatchChanged) => void) | undefined;
 let saved: PullRequestWatchEntry[];
 let active: Awaited<ReturnType<typeof render>> | undefined;
 beforeEach(() => {
+  useRightPanelStore.setState({ byThreadId: {}, closedByThreadId: {} });
   saved = [];
   api.list.mockReset().mockImplementation(async () => saved);
   api.start.mockReset().mockImplementation(async () => {
@@ -138,4 +140,44 @@ it("exports a linked PR drag as a reference without starting a watch or sending 
   });
   expect(transfer.getData("text/plain")).toBe(`[PR #7](${url})`);
   expect(api.start).not.toHaveBeenCalled();
+});
+
+it("opens the same linked-PR actions on right-click without a host read", async () => {
+  await mount();
+  await expect.element(page.getByRole("link", { name: "github #7", exact: true })).toBeVisible();
+  page
+    .getByRole("link", { name: "github #7", exact: true })
+    .element()
+    .dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 30, clientY: 30 }),
+    );
+  await expect
+    .element(page.getByRole("menuitem", { name: "Copy link", exact: true }))
+    .toBeVisible();
+  await expect.element(page.getByRole("menuitem", { name: "Watch", exact: true })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Close…", exact: true }).click();
+  expect(useRightPanelStore.getState().byThreadId[threadId]).toMatchObject({
+    activeSurfaceId: `pr:${key}`,
+    surfaces: [
+      expect.objectContaining({
+        kind: "pull-request",
+        initialAction: { kind: "close", id: expect.any(String) },
+      }),
+    ],
+  });
+  expect(api.start).not.toHaveBeenCalled();
+});
+it("shows Shift-only linked PR actions and clears them on blur", async () => {
+  await mount();
+  await expect.element(page.getByRole("link", { name: "github #7", exact: true })).toBeVisible();
+  expect(page.getByRole("button", { name: "Close PR #7", exact: true }).query()).toBeNull();
+  await userEvent.keyboard("{Shift>}");
+  await expect
+    .element(page.getByRole("button", { name: "Close PR #7", exact: true }))
+    .toBeVisible();
+  window.dispatchEvent(new Event("blur"));
+  await expect
+    .element(page.getByRole("button", { name: "Close PR #7", exact: true }))
+    .not.toBeInTheDocument();
+  await userEvent.keyboard("{/Shift}");
 });

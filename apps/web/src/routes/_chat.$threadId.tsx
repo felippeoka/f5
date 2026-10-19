@@ -661,7 +661,17 @@ function ChatThreadRouteView() {
               <DiffPanelLoadingState label="Loading pull request..." />
             ) : (
               <Suspense fallback={<DiffPanelLoadingState label="Loading pull request..." />}>
-                <PrLinkedPanel url={surface.url} threadId={threadId} />
+                <PrLinkedPanel
+                  url={surface.url}
+                  threadId={threadId}
+                  initialAction={surface.initialAction}
+                  onInitialActionHandled={() => {
+                    if (surface.initialAction)
+                      useRightPanelStore
+                        .getState()
+                        .consumePullRequestAction(threadId, surface.id, surface.initialAction.id);
+                  }}
+                />
               </Suspense>
             );
           case "diff":

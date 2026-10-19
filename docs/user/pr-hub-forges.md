@@ -146,3 +146,16 @@ merge and squash commit messages, including auto-merge. Human co-authors, quoted
 examples and original commits retain their text. Merge queues and native stack
 merges keep their host-generated messages. The setting applies to this profile;
 other forges retain their existing merge-message behavior.
+
+## Quick actions and row menus
+
+Hold **Shift** without another modifier to show quick actions in the PR inbox and
+on linked PRs in the thread header. Right-click either row to open its action menu.
+Linked PR menus also include **Copy link**, **Open in F5**, **Open on forge** and
+**Watch**.
+
+A quick action opens its confirmation view; it does not send a remote change.
+Linked PRs load their current state when opened, and unavailable actions are
+refused. **Prepare** shows the saved operation and **Confirm** submits it once.
+Only actions supported by that forge are offered. Releasing Shift, changing
+modifiers or leaving the window hides quick actions.

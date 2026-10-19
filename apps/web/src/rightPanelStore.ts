@@ -1,8 +1,15 @@
+import type { PrQuickActionRequest } from "./lib/prQuickActions";
 import type { PullRequestKey, ThreadId } from "@t3tools/contracts";
 import { create } from "zustand";
 
 export type RightPanelSurface =
-  | { id: `pr:${string}`; kind: "pull-request"; key: PullRequestKey; url: string }
+  | {
+      id: `pr:${string}`;
+      kind: "pull-request";
+      key: PullRequestKey;
+      url: string;
+      initialAction?: PrQuickActionRequest | undefined;
+    }
   | { id: "diff"; kind: "diff" }
   | { id: "files"; kind: "files"; revealPath?: string }
   | {
@@ -49,8 +56,12 @@ interface RightPanelStoreState {
     kind: Exclude<RightPanelSurfaceKind, "file" | "pull-request">,
     options?: { readonly activate?: boolean },
   ) => void;
+  consumePullRequestAction: (threadId: ThreadId, surfaceId: string, requestId: string) => void;
   openDirectory: (threadId: ThreadId, relativePath: string) => void;
-  openPullRequest: (threadId: ThreadId, input: { key: PullRequestKey; url: string }) => void;
+  openPullRequest: (
+    threadId: ThreadId,
+    input: { key: PullRequestKey; url: string; initialAction?: PrQuickActionRequest | undefined },
+  ) => void;
   openFile: (threadId: ThreadId, input: OpenFileSurfaceInput) => RightPanelSurface;
   activateSurface: (threadId: ThreadId, surfaceId: string) => void;
   closeSurface: (threadId: ThreadId, surfaceId: string) => void;
@@ -253,6 +264,22 @@ export const useRightPanelStore = create<RightPanelStoreState>()((set, get) => (
       byThreadId: updateThread(state.byThreadId, threadId, (current) =>
         upsertSurface(current, { id: `pr:${input.key}`, kind: "pull-request", ...input }),
       ),
+    })),
+  consumePullRequestAction: (threadId, surfaceId, requestId) =>
+    set((state) => ({
+      byThreadId: updateThread(state.byThreadId, threadId, (current) => {
+        const target = current.surfaces.find((surface) => surface.id === surfaceId);
+        if (target?.kind !== "pull-request" || target.initialAction?.id !== requestId)
+          return current;
+        return {
+          ...current,
+          surfaces: current.surfaces.map((surface) => {
+            if (surface !== target) return surface;
+            const { initialAction: _consumed, ...rest } = surface;
+            return rest;
+          }),
+        };
+      }),
     })),
   openDirectory: (threadId, relativePath) =>
     set((state) => ({

@@ -1,3 +1,4 @@
+import type { PrQuickActionRequest } from "../../lib/prQuickActions";
 import { useQuery } from "@tanstack/react-query";
 import type { ThreadId } from "@t3tools/contracts";
 import { useAppSettings } from "../../appSettings";
@@ -13,7 +14,17 @@ import { Button } from "../ui/button";
 import { PrDetailPanel } from "./PrDetailPanel";
 
 /** Uses the normal PR model and write paths while retaining the thread and its draft. */
-export default function PrLinkedPanel({ url, threadId }: { url: string; threadId?: ThreadId }) {
+export default function PrLinkedPanel({
+  url,
+  threadId,
+  initialAction,
+  onInitialActionHandled,
+}: {
+  url: string;
+  threadId?: ThreadId;
+  initialAction?: PrQuickActionRequest | undefined;
+  onInitialActionHandled?: (() => void) | undefined;
+}) {
   const { settings } = useAppSettings();
   const openLink = useOpenLink();
   setPrHubSelectedAccountId(settings.prHubAccountId ?? undefined);
@@ -64,7 +75,13 @@ export default function PrLinkedPanel({ url, threadId }: { url: string; threadId
           </div>
         ) : null}
         {value ? (
-          <PrDetailPanel key={`${generation}:${value.key}`} pr={value} confirmationMode="inline" />
+          <PrDetailPanel
+            key={`${generation}:${value.key}`}
+            pr={value}
+            confirmationMode="inline"
+            initialAction={initialAction}
+            onInitialActionHandled={onInitialActionHandled}
+          />
         ) : null}
       </div>
     </OpenLinkThread.Provider>
