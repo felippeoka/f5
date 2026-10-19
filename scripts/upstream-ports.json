@@ -578,10 +578,18 @@
     {
       "upstreamSha": "050690d1bc048c1f94096c17a1c9231c3ad61a83",
       "subject": "fix(server): settle threads using actual pull request terminal timestamps (#9934)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Planned: implementation and focused evidence exist for actual terminal timestamps without an updatedAt fallback, exact-head direct detail admission and post-read account/policy checks. Delivery remains deferred pending individual final settlement reconciliation and the required full gate.",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "plannedWorkstream": "15c",
+      "f5Shas": ["6c616720e30d676f26bcc561a03bcb6598b1567b"],
+      "evidence": [
+        "apps/server/src/git/branchPullRequestLookup.test.ts:1",
+        "apps/server/src/git/Layers/GitManager.extended.ts:620",
+        "apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:1",
+        "apps/server/src/sourceControl/ForgeSourceControlProvider.test.ts:1",
+        "apps/server/src/prHub/forgeModel.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "0508792c572abd39b1afd6f68cd420f2ca00a484",
@@ -28042,10 +28050,18 @@
     {
       "upstreamSha": "d3d4ea42ee569f20d8a79562974355f659dc46d9",
       "subject": "fix(server): skip disabled settlement lookups (#10424)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Planned: implementation and focused evidence exist for disabled settlement skips branch and PR reads, local inactivity precedes remote reads and policy is rechecked after waits. Delivery remains deferred pending individual final settlement reconciliation and the required full gate.",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "plannedWorkstream": "15c",
+      "f5Shas": ["6c616720e30d676f26bcc561a03bcb6598b1567b"],
+      "evidence": [
+        "apps/server/src/git/branchPullRequestLookup.test.ts:1",
+        "apps/server/src/git/Layers/GitManager.extended.ts:620",
+        "apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:1",
+        "apps/server/src/sourceControl/ForgeSourceControlProvider.test.ts:1",
+        "apps/server/src/prHub/forgeModel.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "d3de2c17c0ce086aab482a219c89c1ed5d6f5cb4",
@@ -32471,10 +32487,18 @@
     {
       "upstreamSha": "f32f9a2f41342bf8a1a109d6ebe9b70044c5311b",
       "subject": "fix(server): settle threads server-side (#8600)",
-      "reason": "Reclassified 2026-10 by user decision",
+      "reason": "Planned: implementation and focused evidence exist for saved-branch PR lookup without a status scan, exact local/tracking-head proof, newer-open blocking, coalescing and bounded fair sweeps. Delivery remains deferred pending individual final settlement reconciliation and the required full gate.",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15c"
+      "plannedWorkstream": "15c",
+      "f5Shas": ["6c616720e30d676f26bcc561a03bcb6598b1567b"],
+      "evidence": [
+        "apps/server/src/git/branchPullRequestLookup.test.ts:1",
+        "apps/server/src/git/Layers/GitManager.extended.ts:620",
+        "apps/server/src/orchestration/Layers/ThreadSettlementService.test.ts:1",
+        "apps/server/src/sourceControl/ForgeSourceControlProvider.test.ts:1",
+        "apps/server/src/prHub/forgeModel.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "f33b060cafc96d7c3229744315c230a3b8d1f631",
