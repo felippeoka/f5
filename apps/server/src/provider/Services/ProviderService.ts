@@ -254,6 +254,16 @@ export interface ProviderServiceShape {
       readonly excludeThreadIds?: ReadonlyArray<ThreadId>;
     },
   ) => Effect.Effect<import("@t3tools/contracts").McpReconnectServerResult, ProviderServiceError>;
+  /** The conversation's live session summary without provider I/O; `undefined` once it ends. */
+  readonly getLiveMcpSession?: (input: {
+    readonly provider: ProviderKind;
+    readonly projectId: ProjectId;
+    readonly instanceId?: ProviderInstanceId;
+    readonly threadId: ThreadId;
+  }) => Effect.Effect<
+    import("@t3tools/contracts").McpSessionSummary | undefined,
+    ProviderServiceError
+  >;
   /**
    * Starts a user-initiated MCP sign-in through one running session: the requested
    * conversation, or the session `readMcpSessionStatuses` would select.

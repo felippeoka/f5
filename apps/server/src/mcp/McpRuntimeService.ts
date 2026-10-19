@@ -32,7 +32,18 @@ import {
   type ProviderStartOptions,
   type ThreadId,
 } from "@t3tools/contracts";
-import { Effect, FiberSet, FileSystem, Layer, Option, Path, Schema, ServiceMap } from "effect";
+import {
+  Clock,
+  Effect,
+  Exit,
+  FiberSet,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Schema,
+  ServiceMap,
+} from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { CodexControlClientRegistry } from "../codex/CodexControlClientRegistry.ts";
@@ -63,7 +74,7 @@ const LOGIN_STATUS_RETENTION_MS = 10 * 60_000;
 const CLAUDE_LOGIN_POLL_MS = 2_000;
 /** claude.ai connectors authorize on claude.ai without a callback, so F5 retries the connection. */
 const CLAUDE_CONNECTOR_RECONNECT_MS = 5_000;
-const CLAUDE_LOGIN_READ_FAILURE_LIMIT = 3;
+const CLAUDE_CONNECTOR_RECONNECT_MAX_MS = 30_000;
 const WINDOWS_SHELL_META_PATTERN = /[&|><^%!`"'\r\n]/u;
 const WINDOWS_SAFE_SERVER_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/u;
 const WINDOWS_SAFE_SCOPE_PATTERN = /^[A-Za-z0-9_./:-]+$/u;
@@ -816,24 +827,14 @@ const makeMcpRuntimeService = Effect.gen(function* () {
           if (!isCurrent()) return;
           setLoginStatus(input, { ...attempt, status: "failed", completedAt: nowIso(), error });
         });
-      const intervalMs = started.callbackExpected
-        ? CLAUDE_LOGIN_POLL_MS
-        : CLAUDE_CONNECTOR_RECONNECT_MS;
-      let readFailures = 0;
-      for (let elapsed = 0; elapsed < LOGIN_TIMEOUT_MS; elapsed += intervalMs) {
-        yield* Effect.sleep(intervalMs);
+      const ended = "The conversation ended before sign-in completed.";
+      const startedAtMs = yield* Clock.currentTimeMillis;
+      const deadline = startedAtMs + LOGIN_TIMEOUT_MS;
+      let reconnectDelayMs = CLAUDE_CONNECTOR_RECONNECT_MS;
+      let nextReconnectAtMs = startedAtMs + reconnectDelayMs;
+      while ((yield* Clock.currentTimeMillis) < deadline) {
+        yield* Effect.sleep(CLAUDE_LOGIN_POLL_MS);
         if (!isCurrent()) return;
-        if (!started.callbackExpected && providerService.reconnectMcpServerForProject)
-          yield* providerService
-            .reconnectMcpServerForProject({
-              provider: "claudeAgent",
-              projectId: input.projectId,
-              instanceId: input.instanceId,
-              serverName: input.serverName,
-              threadIds: [started.threadId],
-              allowExternal: true,
-            })
-            .pipe(Effect.ignore);
         if (!providerService.readMcpSessionStatuses)
           return yield* fail("This provider runtime cannot report MCP status.");
         const live = yield* providerService
@@ -847,15 +848,28 @@ const makeMcpRuntimeService = Effect.gen(function* () {
           .pipe(Effect.option);
         if (!isCurrent()) return;
         const selected = Option.isSome(live) ? live.value.selected : undefined;
-        if (selected && selected.generation !== started.generation)
-          return yield* fail("The conversation ended before sign-in completed.");
+        if (selected && selected.generation !== started.generation) return yield* fail(ended);
         if (Option.isNone(live) || !selected) {
-          readFailures += 1;
-          if (readFailures >= CLAUDE_LOGIN_READ_FAILURE_LIMIT)
-            return yield* fail("The conversation ended before sign-in completed.");
+          // Reads also fail transiently (timeouts, superseded observations, a newly applied
+          // config version). Only a missing or replaced session ends the attempt.
+          const session = providerService.getLiveMcpSession
+            ? yield* providerService
+                .getLiveMcpSession({
+                  provider: "claudeAgent",
+                  projectId: input.projectId,
+                  instanceId: input.instanceId,
+                  threadId: started.threadId,
+                })
+                .pipe(Effect.option)
+            : Option.none();
+          if (!isCurrent()) return;
+          if (
+            Option.isSome(session) &&
+            (!session.value || session.value.generation !== started.generation)
+          )
+            return yield* fail(ended);
           continue;
         }
-        readFailures = 0;
         const server = live.value.observation?.servers.find(
           (entry) => entry.name === input.serverName,
         );
@@ -877,18 +891,52 @@ const makeMcpRuntimeService = Effect.gen(function* () {
               server.error ?? "The server failed to connect after sign-in.",
             ),
           );
+        // claude.ai connectors never call back. Retry the connection with backoff, and never
+        // while a turn is running, since a reconnect holds the conversation's session gate.
+        const now = yield* Clock.currentTimeMillis;
+        if (
+          !started.callbackExpected &&
+          !selected.busy &&
+          now >= nextReconnectAtMs &&
+          providerService.reconnectMcpServerForProject
+        ) {
+          yield* providerService
+            .reconnectMcpServerForProject({
+              provider: "claudeAgent",
+              projectId: input.projectId,
+              instanceId: input.instanceId,
+              serverName: input.serverName,
+              threadIds: [started.threadId],
+              allowExternal: true,
+            })
+            .pipe(Effect.ignore);
+          reconnectDelayMs = Math.min(reconnectDelayMs * 2, CLAUDE_CONNECTOR_RECONNECT_MAX_MS);
+          nextReconnectAtMs = (yield* Clock.currentTimeMillis) + reconnectDelayMs;
+        }
       }
       yield* fail("Sign-in timed out. Try again.");
     });
 
+  /** Ends an attempt that stopped without settling (interruption or defect) so it can't stick. */
+  const failIfStillCurrent = (
+    input: McpGetLoginStatusRequest,
+    attempt: McpLoginStatusResult,
+    error: string,
+  ) =>
+    Effect.sync(() => {
+      if (loginStatuses.get(loginStatusKey(input)) !== attempt) return;
+      setLoginStatus(input, { ...attempt, status: "failed", completedAt: nowIso(), error });
+    });
+
   const startClaudeServerLogin = (
     rawInput: McpStartLoginRequest & { readonly serverName: string },
-  ) =>
-    Effect.gen(function* () {
-      const input = {
-        ...rawInput,
-        instanceId: rawInput.instanceId ?? ProviderInstanceId.make(rawInput.provider),
-      };
+  ) => {
+    const input = {
+      ...rawInput,
+      instanceId: rawInput.instanceId ?? ProviderInstanceId.make(rawInput.provider),
+    };
+    let claimed: McpLoginStatusResult | undefined;
+    return Effect.gen(function* () {
       const key = loginStatusKey(input);
       const existing = loginStatuses.get(key);
       if (existing?.status === "pending") return existing;
@@ -907,6 +955,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
       };
       // Claim the key before any I/O so concurrent clicks share one sign-in.
       setLoginStatus(input, placeholder);
+      claimed = placeholder;
       // A start rejected before reaching the provider restores the previous outcome.
       const release = Effect.sync(() => {
         if (loginStatuses.get(key) !== placeholder) return;
@@ -976,9 +1025,22 @@ const makeMcpRuntimeService = Effect.gen(function* () {
       }
       const pending: McpLoginStatusResult = { ...placeholder, authorizationUrl: started.authUrl };
       setLoginStatus(input, pending);
-      runLoginTask(watchClaudeServerLogin(input, pending, started, effective.effectiveVersion));
+      runLoginTask(
+        watchClaudeServerLogin(input, pending, started, effective.effectiveVersion).pipe(
+          Effect.ensuring(
+            failIfStillCurrent(input, pending, "Sign-in stopped unexpectedly. Try again."),
+          ),
+        ),
+      );
       return pending;
-    });
+    }).pipe(
+      Effect.onExit((exit) =>
+        Exit.isSuccess(exit) || !claimed
+          ? Effect.void
+          : failIfStillCurrent(input, claimed, "Sign-in was interrupted. Try again."),
+      ),
+    );
+  };
 
   const toCodexOauthLoginResult = (
     input: McpStartLoginRequest & { readonly serverName: string },

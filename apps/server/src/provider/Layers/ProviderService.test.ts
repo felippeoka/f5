@@ -3778,6 +3778,16 @@ it.effect("routes MCP sign-in to the requested or default-selected live conversa
       projectId: ProjectId.make("empty-project"),
     }).pipe(Effect.flip);
     assert.include(noSession.message, "Start a conversation in this project");
+    const lookup = { provider: "claudeAgent" as const, projectId, instanceId };
+    assert.equal(
+      (yield* service.getLiveMcpSession!({ ...lookup, threadId: asThreadId("current") }))
+        ?.generation,
+      4,
+    );
+    assert.equal(
+      yield* service.getLiveMcpSession!({ ...lookup, threadId: asThreadId("not-in-scope") }),
+      undefined,
+    );
     assert.deepEqual(calls, [
       { threadId: asThreadId("current"), serverName: "docs" },
       { threadId: asThreadId("newer-stale"), serverName: "docs" },

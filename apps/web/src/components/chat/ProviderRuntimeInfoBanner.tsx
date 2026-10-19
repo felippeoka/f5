@@ -134,7 +134,8 @@ function McpRuntimeChip({
                     instanceId={server.providerInstanceId}
                     projectId={projectId ?? null}
                     serverName={server.name}
-                    threadId={threadId}
+                    // Only Claude sign-in is routed through a conversation; Codex is account-scoped.
+                    threadId={provider === "claudeAgent" ? threadId : undefined}
                   />
                 ) : null}
               </div>

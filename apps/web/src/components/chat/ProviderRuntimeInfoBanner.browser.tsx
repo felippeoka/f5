@@ -196,7 +196,7 @@ it.each(["codex", "claudeAgent"] as ProviderKind[])(
           instanceId,
           projectId: "project-1",
           serverName: "search",
-          threadId,
+          ...(provider === "claudeAgent" ? { threadId } : {}),
         }),
       );
       await vi.waitFor(() =>

@@ -3044,6 +3044,11 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         };
       });
 
+    const getLiveMcpSession: NonNullable<ProviderServiceShape["getLiveMcpSession"]> = (input) =>
+      listLiveMcpSessions(input).pipe(
+        Effect.map((sessions) => sessions.find((session) => session.threadId === input.threadId)),
+      );
+
     const authenticateMcpServerForProject: NonNullable<
       ProviderServiceShape["authenticateMcpServerForProject"]
     > = (input) =>
@@ -3522,6 +3527,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       getMcpReconnectTargets,
       reconnectMcpServerForProject,
       authenticateMcpServerForProject,
+      getLiveMcpSession,
       // Each access creates a fresh PubSub subscription so that multiple
       // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
       // independently receive all runtime events.
