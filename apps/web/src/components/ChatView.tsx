@@ -1812,7 +1812,10 @@ export default function ChatView({
       }
     }
 
-    return `${connectedCount}/${latestStatusByServer.size} connected`;
+    return {
+      summary: `${connectedCount}/${latestStatusByServer.size} connected`,
+      servers: [...latestStatusByServer.values()],
+    };
   }, [threadActivities]);
   const openRewindOperationIds = useMemo(
     () => new Set((activeThread?.rewindDrafts ?? []).map((draft) => draft.operationId as string)),
@@ -2610,7 +2613,7 @@ export default function ChatView({
       rerouteActivity: latestModelRerouteActivity,
       activities: threadActivities,
       cliVersion: activeProviderStatus?.version ?? null,
-      mcpSummary: mcpRuntimeSummary,
+      mcpSummary: mcpRuntimeSummary?.summary ?? null,
     });
   }, [
     activeProviderStatus?.version,
@@ -7268,6 +7271,8 @@ export default function ChatView({
                 <ProviderRuntimeInfoBanner
                   provider={sessionProvider ?? selectedProviderByThreadId ?? null}
                   entries={providerRuntimeInfoEntries}
+                  mcpServers={mcpRuntimeSummary?.servers}
+                  projectId={activeThread.projectId}
                 />
               ) : null}
             </div>

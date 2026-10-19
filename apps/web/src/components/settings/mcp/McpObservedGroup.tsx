@@ -1,14 +1,18 @@
+import { McpErrorDetails } from "./McpErrorDetails";
 import type {
   McpServerStatusesResult,
+  McpProjectServersConfig,
   ProjectId,
   ProviderInstanceId,
   ProviderKind,
 } from "@t3tools/contracts";
+import { createMcpDiagnosticsSanitizer } from "@t3tools/shared/mcpDiagnostics";
 import { useState } from "react";
 import { Button } from "../../ui/button";
 import { LazyMcpServerInspector as McpServerInspector } from "./LazyMcpServerInspector";
 
 export function McpObservedGroup(props: {
+  servers: McpProjectServersConfig;
   group: "external" | "built-in" | "managed";
   observation?: McpServerStatusesResult | undefined;
   removedNames?: ReadonlyArray<string>;
@@ -43,8 +47,20 @@ export function McpObservedGroup(props: {
             {entry.origin ??
               (props.group === "built-in" ? "Registered by F5" : "Provider configuration")}
           </p>
+          {entry.state === "ready" || entry.toolCount > 0 || entry.resourceCount > 0 ? (
+            <p>
+              {entry.toolCount} tools
+              {props.provider !== "claudeAgent" ? ` · ${entry.resourceCount} resources` : ""}
+            </p>
+          ) : null}
           {entry.message ? (
-            <p className="whitespace-pre-wrap break-words">{entry.message}</p>
+            ["failed", "needs-auth", "login-required", "unknown"].includes(entry.state) ? (
+              <McpErrorDetails message={entry.message} servers={props.servers} />
+            ) : (
+              <p className="whitespace-pre-wrap break-words text-muted-foreground">
+                {createMcpDiagnosticsSanitizer(props.servers).text(entry.message)}
+              </p>
+            )
           ) : null}
           {props.projectId ? (
             <Button

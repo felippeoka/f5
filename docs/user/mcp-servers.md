@@ -1,12 +1,59 @@
 # MCP servers
 
-MCP settings store server definitions in a common scope and a project scope. An exact-name project entry overrides the whole common entry. In project settings, **Use in this project** opts out of an inherited common server without changing other projects. **Override** opens a project draft using the common definition. Each scope accepts 16 servers.
+Open **Settings → Tools → MCP servers** for common configuration, or choose a project in Settings and open its MCP section. MCP connects coding agents to tools and context supplied by servers you configure.
+
+## Scopes and editing
+
+MCP settings store server definitions in a common scope and a project scope. Common entries are inherited by every project. In project settings, **Use in this project** opts out of an inherited common server without changing other projects. **Override** opens a project draft using the common definition.
+
+Names are trimmed and compared without case. An exact-name project entry replaces the entire common definition; a differently cased alias is a conflict. Each scope accepts 16 entries, with at most 32 effective entries and four reserved slots for F5's built-in servers. An oversized legacy layer stays intact while you repair or remove entries; it cannot accept new names.
+
+Opt-outs compare names without case and remain recorded when a common server is removed. Reusing that name keeps the project opted out; explicitly enable it in that project if desired.
+
+Arguments are separate, ordered rows. Use the arrows to reorder them; empty arguments, spaces, newlines, and `=` in values are preserved. Environment variables and HTTP headers use key/value rows. Duplicate keys block saving and are marked inline. Removing a server asks you to confirm its name and scope. Switching scope, project, provider account, or server with an unsaved draft asks whether to discard it; **Keep editing** preserves the draft.
+
+## Provider support
+
+Common and project configuration is shared by Codex and Claude. Support labels in Advanced identify provider-specific fields.
+
+| Field or capability                                         | Codex                                                   | Claude                                                      |
+| ----------------------------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------- |
+| stdio command, ordered args, environment, working directory | Supported                                               | Supported                                                   |
+| HTTP URL and literal headers                                | Supported                                               | Supported                                                   |
+| SSE URL                                                     | Connects using streamable HTTP; SSE-only endpoints fail | Supported                                                   |
+| Tool timeout, enabled tools, disabled tools                 | Supported                                               | Supported                                                   |
+| Startup timeout, parallel tool calls                        | Supported                                               | Ignored                                                     |
+| Scopes, OAuth fields, bearer token environment variable     | Supported                                               | Ignored                                                     |
+| Inspector tools                                             | Names, descriptions, annotations, input schemas         | Names, descriptions, annotations; input schemas unavailable |
+| Inspector resources and templates                           | Metadata available                                      | Unavailable from Claude                                     |
+
+Selecting SSE shows the transport warning. If the endpoint supports streamable HTTP, choose HTTP. Authentication is provider-owned. For Claude's **needs-auth** status, use `/mcp` in an interactive Claude Code session with the same account, then click **Reconnect** in F5.
+
+## Saved configuration and live status
+
+**Saved: Enabled/Disabled** is the desired state. The adjacent observed badge describes the selected running conversation or configuration check. A saved disabled server can still be connected in a conversation until changes are applied. **Ready**, **Starting**, **Failed**, **Login required**, and **Unknown** describe readiness; applying a version does not guarantee readiness.
+
+Settings labels live results **Observed in <conversation> at <time>** and lets you choose another running conversation for the project and account. Only that conversation receives a live read. Without a running conversation, Codex performs a labeled **Configuration check**. Claude shows **Configured** and explains that live status appears when a session runs. F5 never starts a conversation just to observe status. **External** entries belong to the provider, plugins, or managed configuration; **Built-in** entries are registered by F5. Neither is assigned to a same-name configured row.
+
+Rows show tool and resource counts when known. Expand **Connection details** to read or copy an error with supplemental redaction. Open **Inspect** for Overview, Tools, Resources, and Diagnostics. Unsupported capabilities and incomplete listings are marked explicitly. Inspection never runs tools or fetches resource contents. The chat's MCP chip summarizes the latest session generation for Codex and Claude; click it or focus it and press Enter for each server's name, state, error, and a keyboard-accessible **Open MCP settings** link.
+
+## Apply, Reconnect, and Test
+
+After saving, the banner says: **Saved. Running sessions pick up MCP changes on their next message, restarting if needed.** Use **Apply to all live sessions** to apply now across all eligible Codex and Claude accounts in the selected scope: this project for project scope, or every project for common scope. Sessions already on that version are skipped unless they need a retry. Active-turn protections still apply. Per-session outcomes and targeted Retry appear in the inspector. The banner clears after Apply or a scope change.
+
+**Reconnect** appears on failed, login-required, and unknown rows. It recovers connections used by running sessions for the selected project and account. Claude reconnects the selected owned server; Codex reloads its settings connection and applies through the normal session path, which can reload every MCP server in the affected sessions. The result distinguishes reconnected sessions, no running session using the server, and failures. Reconnect does not perform Claude sign-in. Pending Codex sign-in can be reopened without cancelling the login if the browser fails to open.
+
+## Import
 
 **Import configuration** opens a preview for pasted F5/Claude JSON, Codex JSON, or Codex TOML. **Detected → Detect configurations** explicitly reads the selected account's Claude state (including project entries), the project's `.mcp.json`, and Codex's `config.toml`. Files must be regular files of at most 1 MiB. Detection never applies configuration. Choose entries, review warnings, and explicitly choose **Replace** for any conflict; existing entries are kept by default. A version conflict refreshes the preview without discarding your text or choices, and requires confirmation again.
 
+## Connection test results
+
 **Test** checks either the saved server or the editor draft. A stdio test executes the configured command with the selected account's environment and the draft's environment overrides. Remote tests use the configured headers and bearer environment variable. Tests initialize the connection and list advertised tools, resources, and prompts; they never invoke tools or fetch resource contents. Tests have a 60-second deadline and clean up their child processes. Results show latency, server information, bounded tool summaries, and sanitized errors and stderr. Sign-in requirements remain owned by the provider; a test does not start OAuth.
 
-The inspector's **Tools** tab lets you disable individual tools. Switches change the disabled-tools list. A non-empty enabled-tools list still restricts availability and cannot be broadened by a switch; edit that list under Advanced. Live tool data is preferred, with the last connection test as a fallback. Saving does not prove that a running conversation has applied the configuration. Apply to all live sessions to reconcile immediately, or let sessions pick up the saved version at their next message. Readiness and the applied configuration version are separate observations.
+## Tools
+
+The inspector's **Tools** tab lets you disable individual tools. Switches change the disabled-tools list. Leave enabled tools empty to allow all tools. A disabled-tools entry takes precedence when a tool is listed in both lists. A non-empty enabled-tools list still restricts availability and cannot be broadened by a switch; edit that list under Advanced. Live tool data is preferred, with the last connection test as a fallback. Saving does not prove that a running conversation has applied the configuration. Apply to all live sessions to reconcile immediately, or let sessions pick up the saved version at their next message. Readiness and the applied configuration version are separate observations.
 
 ## Stored secrets
 
@@ -18,6 +65,6 @@ Resolved values still reach providers through their process arguments and may be
 
 If a referenced secret is missing, F5 skips that server, reports a warning, and continues the session with other servers. Replace the missing value in settings. Startup cleanup removes only unreferenced MCP secrets older than 24 hours; saving never deletes secrets.
 
-Opt-outs compare names without case and remain recorded when a common server is removed. Reusing that name keeps the project opted out; explicitly enable it in that project if desired.
-
 Secret masking prevents accidental display and export of values; it is not access control against an authenticated F5 client. Clients can use stored references in unsaved probes and provider configuration, including commands or endpoints they control. Only connect clients you trust with the profile's credentials. MCP secret storage is bounded to 4,096 files (at most 64 MiB of values), including unsaved writes; startup collection frees unreferenced entries older than 24 hours.
+
+Error redaction is supplemental, not a guarantee. Settings scrubs values from the available effective configuration as well as generic credential patterns and URL credentials, queries, and fragments. The chat details fetch the current project configuration on explicit open and withhold errors if it cannot load. Values from older configurations, external servers, resolved stored secrets unavailable to the browser, or transformed credentials may not match the available values. Do not share copied errors without reviewing them.

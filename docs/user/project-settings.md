@@ -96,4 +96,4 @@ once per profile, and the first client wins.
 - [Runtime modes](../runtime-modes.md)
 - [PR Hub and forges](pr-hub-forges.md)
 
-See [MCP servers](mcp-servers.md) for common and project configuration, import previews, connection tests, tools, and stored-secret protection.
+See [MCP servers](mcp-servers.md) for common and project inheritance, provider support, live status, Apply, Reconnect, connection tests, tool filters, and the limits of stored-secret protection.

@@ -1,3 +1,5 @@
+import { McpArgumentFields } from "./McpArgumentFields";
+import { readMcpKeyValueRows, mcpDuplicateKeys } from "./mcpEditorValues";
 import { McpKeyValueFields } from "./McpKeyValueFields";
 import { McpTestConnection } from "./McpTestConnection";
 import { decodeDraftServer } from "./mcpDraft";
@@ -22,6 +24,7 @@ export function McpServerEditor({
   isAdvancedOpen,
   onAdvancedOpenChange,
   isSavingConfig,
+  saveBlocked,
   beginCreate,
   saveDraft,
 }: {
@@ -35,9 +38,13 @@ export function McpServerEditor({
   readonly isAdvancedOpen: boolean;
   readonly onAdvancedOpenChange: (open: boolean) => void;
   readonly isSavingConfig: boolean;
+  readonly saveBlocked: boolean;
   readonly beginCreate: () => void;
   readonly saveDraft: () => void;
 }) {
+  const duplicateKeys = mcpDuplicateKeys(
+    readMcpKeyValueRows(draft.type === "stdio" ? draft.env : draft.headers),
+  );
   return (
     <div className="space-y-3 rounded-lg border border-border bg-background p-4">
       <div className="flex items-center justify-between gap-3">
@@ -46,8 +53,7 @@ export function McpServerEditor({
             {editingServerName ? `Edit ${editingServerName}` : "Add MCP server"}
           </p>
           <p className="text-xs text-muted-foreground">
-            Shared fields apply to all providers. Codex-only options stay saved in either scope but
-            Claude ignores them today.
+            Shared fields apply to Codex and Claude. Codex-only options stay saved in either scope.
           </p>
         </div>
         {editingServerName ? (
@@ -125,33 +131,7 @@ export function McpServerEditor({
               placeholder="npx"
             />
           </label>
-          <label className="space-y-1">
-            <span className="text-xs font-medium text-foreground">Argument format</span>
-            <select
-              value={draft.argsFormat}
-              onChange={(event) =>
-                onDraftChange({ argsFormat: event.target.value as ServerDraft["argsFormat"] })
-              }
-              className="block rounded border border-border bg-background px-2 py-1 text-xs"
-            >
-              <option value="lines">One argument per line</option>
-              <option value="json">JSON array</option>
-            </select>
-          </label>
-          <label className="space-y-1">
-            <span className="text-xs font-medium text-foreground">Args</span>
-            <Textarea
-              value={draft.args}
-              onChange={(event) => {
-                onDraftChange({ args: event.target.value });
-              }}
-              className="min-h-20 font-mono"
-              placeholder="@modelcontextprotocol/server-filesystem&#10;/path/to/project"
-            />
-            <span className="text-xs text-muted-foreground">
-              Empty lines are empty arguments. Use JSON for arguments containing line breaks.
-            </span>
-          </label>
+          <McpArgumentFields draft={draft} onChange={onDraftChange} />
           <div className="grid gap-3 sm:grid-cols-2">
             <McpKeyValueFields
               key={`${editingServerName}:${draft.original?.name}:env`}
@@ -208,9 +188,12 @@ export function McpServerEditor({
           <div className="mt-3 space-y-3 rounded-lg border border-border/70 bg-card/40 p-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1">
-                <span className="text-xs font-medium text-foreground">Bearer token env var</span>
+                <span className="text-xs font-medium text-foreground">
+                  Bearer token env var <Badge variant="outline">Codex only</Badge>
+                </span>
                 <Input
                   className="font-mono"
+                  aria-label="Bearer token env var"
                   value={draft.bearerTokenEnvVar}
                   onChange={(event) =>
                     onAdvancedDraftChange({ bearerTokenEnvVar: event.target.value })
@@ -219,9 +202,12 @@ export function McpServerEditor({
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs font-medium text-foreground">OAuth client ID</span>
+                <span className="text-xs font-medium text-foreground">
+                  OAuth client ID <Badge variant="outline">Codex only</Badge>
+                </span>
                 <Input
                   className="font-mono"
+                  aria-label="OAuth client ID"
                   value={draft.oauthClientId}
                   onChange={(event) => onAdvancedDraftChange({ oauthClientId: event.target.value })}
                   placeholder="client_id"
@@ -231,9 +217,12 @@ export function McpServerEditor({
 
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1">
-                <span className="text-xs font-medium text-foreground">OAuth callback port</span>
+                <span className="text-xs font-medium text-foreground">
+                  OAuth callback port <Badge variant="outline">Codex only</Badge>
+                </span>
                 <Input
                   className="font-mono"
+                  aria-label="OAuth callback port"
                   value={draft.oauthCallbackPort}
                   onChange={(event) =>
                     onAdvancedDraftChange({ oauthCallbackPort: event.target.value })
@@ -242,8 +231,11 @@ export function McpServerEditor({
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs font-medium text-foreground">OAuth callback URL</span>
+                <span className="text-xs font-medium text-foreground">
+                  OAuth callback URL <Badge variant="outline">Codex only</Badge>
+                </span>
                 <Input
+                  aria-label="OAuth callback URL"
                   value={draft.oauthCallbackUrl}
                   onChange={(event) =>
                     onAdvancedDraftChange({ oauthCallbackUrl: event.target.value })
@@ -255,16 +247,22 @@ export function McpServerEditor({
 
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1">
-                <span className="text-xs font-medium text-foreground">OAuth resource</span>
+                <span className="text-xs font-medium text-foreground">
+                  OAuth resource <Badge variant="outline">Codex only</Badge>
+                </span>
                 <Input
+                  aria-label="OAuth resource"
                   value={draft.oauthResource}
                   onChange={(event) => onAdvancedDraftChange({ oauthResource: event.target.value })}
                   placeholder="https://example.com"
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs font-medium text-foreground">Startup timeout (sec)</span>
+                <span className="text-xs font-medium text-foreground">
+                  Startup timeout (sec) <Badge variant="outline">Codex only</Badge>
+                </span>
                 <Input
+                  aria-label="Startup timeout (sec)"
                   value={draft.startupTimeoutSec}
                   onChange={(event) =>
                     onAdvancedDraftChange({ startupTimeoutSec: event.target.value })
@@ -273,8 +271,11 @@ export function McpServerEditor({
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs font-medium text-foreground">Tool timeout (sec)</span>
+                <span className="text-xs font-medium text-foreground">
+                  Tool timeout (sec) <Badge variant="outline">Codex + Claude</Badge>
+                </span>
                 <Input
+                  aria-label="Tool timeout (sec)"
                   value={draft.toolTimeoutSec}
                   onChange={(event) =>
                     onAdvancedDraftChange({ toolTimeoutSec: event.target.value })
@@ -286,7 +287,9 @@ export function McpServerEditor({
 
             <div className="flex items-center justify-between border-b border-border py-2 last:border-b-0">
               <div>
-                <p className="text-xs font-medium text-foreground">Parallel tool calls</p>
+                <p className="text-xs font-medium text-foreground">
+                  Parallel tool calls <Badge variant="outline">Codex only</Badge>
+                </p>
                 <p className="text-xs text-muted-foreground">
                   Declare that this server supports concurrent tool execution.
                 </p>
@@ -310,17 +313,26 @@ export function McpServerEditor({
 
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1">
-                <span className="text-xs font-medium text-foreground">Enabled tools</span>
+                <span className="text-xs font-medium text-foreground">
+                  Enabled tools <Badge variant="outline">Codex + Claude</Badge>
+                </span>
                 <Textarea
+                  aria-label="Enabled tools"
                   value={draft.enabledTools}
                   onChange={(event) => onAdvancedDraftChange({ enabledTools: event.target.value })}
                   className="min-h-20"
                   placeholder="search&#10;read_file"
                 />
+                <span className="text-xs text-muted-foreground">
+                  Leave empty to allow all tools.
+                </span>
               </label>
               <label className="space-y-1">
-                <span className="text-xs font-medium text-foreground">Disabled tools</span>
+                <span className="text-xs font-medium text-foreground">
+                  Disabled tools <Badge variant="outline">Codex + Claude</Badge>
+                </span>
                 <Textarea
+                  aria-label="Disabled tools"
                   value={draft.disabledTools}
                   onChange={(event) => onAdvancedDraftChange({ disabledTools: event.target.value })}
                   className="min-h-20"
@@ -330,8 +342,11 @@ export function McpServerEditor({
             </div>
 
             <label className="space-y-1">
-              <span className="text-xs font-medium text-foreground">Scopes</span>
+              <span className="text-xs font-medium text-foreground">
+                Scopes <Badge variant="outline">Codex only</Badge>
+              </span>
               <Textarea
+                aria-label="Scopes"
                 value={draft.scopes}
                 onChange={(event) => onAdvancedDraftChange({ scopes: event.target.value })}
                 className="min-h-20"
@@ -362,7 +377,11 @@ export function McpServerEditor({
               Cancel
             </Button>
           ) : null}
-          <Button size="sm" onClick={saveDraft} disabled={isSavingConfig}>
+          <Button
+            size="sm"
+            onClick={saveDraft}
+            disabled={isSavingConfig || saveBlocked || duplicateKeys.size > 0}
+          >
             {editingServerName ? "Save changes" : "Add server"}
           </Button>
         </div>

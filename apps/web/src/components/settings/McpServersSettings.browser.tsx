@@ -1,3 +1,6 @@
+import { Schema } from "effect";
+import { useProfileState } from "../../profileState";
+import { ProfileId } from "@t3tools/contracts";
 import "../../index.css";
 import { StrictMode, useState } from "react";
 import { McpKeyValueFields } from "./mcp/McpKeyValueFields";
@@ -290,7 +293,8 @@ async function renderSettings(withProject = true) {
 
 async function captureSettingsScreenshot() {
   await page.viewport(1280, 1800);
-  window.scrollTo(0, 0);
+  window.scrollTo({ top: 0, behavior: "instant" });
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   await page.screenshot({ fullPage: true });
 }
 
@@ -657,6 +661,7 @@ describe("McpServersSettings", () => {
         .element(page.getByRole("switch", { name: "Enable MCP server", exact: true }))
         .not.toBeChecked();
       await page.getByRole("button", { name: "Remove", exact: true }).click();
+      await page.getByRole("button", { name: "Remove server", exact: true }).click();
       await vi.waitFor(() => {
         expect(mocks.replaceProjectConfig).toHaveBeenLastCalledWith({
           projectId: PROJECT_ID,
@@ -790,7 +795,7 @@ describe("McpServersSettings", () => {
     }
   });
 
-  it("resets the editor, errors, and import dialog on scope changes", async () => {
+  it("resets the editor, errors, and import dialog after confirming a scope change", async () => {
     const mocks = createNativeApiMock();
     const { screen, queryClient } = await renderSettings();
     const importText = '{"mcpServers":';
@@ -818,6 +823,7 @@ describe("McpServersSettings", () => {
       expect(errorMessages).toHaveLength(2);
       await page.getByRole("button", { name: "Close", exact: true }).click();
       clickButtonWithExactText("Common");
+      await page.getByRole("button", { name: "Discard changes", exact: true }).click();
       await vi.waitFor(() => {
         expect(document.body.textContent).toContain("Common servers (1/16)");
         expect(document.body.textContent).not.toContain("Edit project-server");
@@ -918,6 +924,7 @@ describe("McpServersSettings", () => {
         ),
       );
       await page.getByRole("button", { name: "Remove", exact: true }).last().click();
+      await page.getByRole("button", { name: "Remove server", exact: true }).click();
       const remaining = { ...servers };
       delete remaining["legacy-17"];
       await vi.waitFor(() =>
@@ -1729,6 +1736,480 @@ it("marks cross-source duplicate selections on each affected candidate", async (
       .element(page.getByRole("button", { name: "Import 2 into project" }))
       .toBeDisabled();
     expect(document.body.textContent?.match(/Duplicate selected name/g)).toHaveLength(2);
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("edits arguments in order and preserves multiline key/value content while blocking duplicate keys", async () => {
+  const mocks = createNativeApiMock();
+  mocks.getProjectConfig.mockResolvedValue({
+    ...projectConfig,
+    servers: {
+      "project-server": {
+        type: "stdio",
+        command: "node",
+        args: ["", " spaced ", "line\nbreak"],
+        env: { TOKEN: " a=b\nc " },
+      },
+    },
+  });
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect
+      .element(page.getByRole("textbox", { name: "Argument 1", exact: true }))
+      .toHaveValue("");
+    await expect
+      .element(page.getByRole("textbox", { name: "Environment value 1" }))
+      .toHaveValue(" a=b\nc ");
+    await page.getByRole("button", { name: "Move argument 3 up" }).click();
+    await expect
+      .element(page.getByRole("textbox", { name: "Argument 2", exact: true }))
+      .toHaveValue("line\nbreak");
+    await page.getByRole("button", { name: "Add argument", exact: true }).click();
+    await page.getByRole("textbox", { name: "Argument 4", exact: true }).fill("last=arg");
+    await page.getByRole("button", { name: "Add environment value" }).click();
+    await page.getByRole("textbox", { name: "Environment key 2" }).fill("TOKEN");
+    await expect
+      .element(page.getByRole("textbox", { name: "Environment key 2" }))
+      .toHaveAttribute("aria-invalid", "true");
+    await expect
+      .element(page.getByRole("button", { name: "Save changes", exact: true }))
+      .toBeDisabled();
+    await page.getByRole("textbox", { name: "Environment key 2" }).fill("OTHER");
+    await page.getByRole("textbox", { name: "Environment value 2" }).fill(" x=y\nz ");
+    await page.getByRole("button", { name: "Save changes", exact: true }).click();
+    await vi.waitFor(() =>
+      expect(mocks.replaceProjectConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          servers: {
+            "project-server": {
+              type: "stdio",
+              command: "node",
+              args: ["", "line\nbreak", " spaced ", "last=arg"],
+              env: { TOKEN: " a=b\nc ", OTHER: " x=y\nz " },
+            },
+          },
+        }),
+      ),
+    );
+    await captureSettingsScreenshot();
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("confirms removal with the server and scope, and leaves config intact on cancellation", async () => {
+  const mocks = createNativeApiMock();
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("button", { name: "Remove", exact: true }).click();
+    await expect
+      .element(page.getByRole("alertdialog"))
+      .toHaveTextContent("Remove “project-server”?");
+    await expect
+      .element(page.getByRole("alertdialog"))
+      .toHaveTextContent("project scope (Project One)");
+    expect(mocks.replaceProjectConfig).not.toHaveBeenCalled();
+    await captureSettingsScreenshot();
+    await page.getByRole("button", { name: "Keep editing", exact: true }).click();
+    expect(mocks.replaceProjectConfig).not.toHaveBeenCalled();
+    await page.getByRole("button", { name: "Remove", exact: true }).click();
+    await page.getByRole("button", { name: "Remove server", exact: true }).click();
+    await vi.waitFor(() =>
+      expect(mocks.replaceProjectConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ servers: {} }),
+      ),
+    );
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("guards editing another server, Add server, scope, and provider changes", async () => {
+  createNativeApiMock();
+  const { screen, queryClient } = await renderSettings();
+  try {
+    const name = page.getByRole("textbox", { name: "Name", exact: true });
+    await name.fill("unsaved");
+    for (const action of [
+      () => page.getByRole("button", { name: "Edit", exact: true }).click(),
+      () => page.getByRole("button", { name: "Add server", exact: true }).first().click(),
+      () => page.getByRole("button", { name: "Common", exact: true }).click(),
+      () => page.getByRole("button", { name: "Claude", exact: true }).click(),
+    ]) {
+      await action();
+      await expect
+        .element(page.getByRole("alertdialog"))
+        .toHaveTextContent("Discard unsaved MCP changes?");
+      await page.getByRole("button", { name: "Keep editing", exact: true }).click();
+      await expect.element(name).toHaveValue("unsaved");
+    }
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await captureSettingsScreenshot();
+    await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+    await expect.element(name).toHaveValue("project-server");
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("keeps newer typing when a save completes and clears the save banner after Apply or scope change", async () => {
+  const mocks = createNativeApiMock();
+  const { screen, queryClient } = await renderSettings();
+  let finish!: (result: Awaited<ReturnType<typeof mocks.replaceProjectConfig>>) => void;
+  mocks.replaceProjectConfig.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  try {
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    const command = page.getByRole("textbox", { name: "Command", exact: true });
+    await command.fill("saved-command");
+    await page.getByRole("button", { name: "Save changes", exact: true }).click();
+    await command.fill("newer-command");
+    finish({
+      projectId: PROJECT_ID,
+      version: "project-v2",
+      servers: { "project-server": { type: "stdio", command: "saved-command" } },
+    });
+    const banner =
+      "Saved. Running sessions pick up MCP changes on their next message, restarting if needed.";
+    await vi.waitFor(() => expect(document.body.textContent).toContain(banner));
+    await expect.element(command).toHaveValue("newer-command");
+    await captureSettingsScreenshot();
+    await page
+      .getByRole("button", { name: "Apply to all live sessions", exact: true })
+      .last()
+      .click();
+    await vi.waitFor(() => expect(document.body.textContent).not.toContain(banner));
+    await page.getByRole("button", { name: "Save changes", exact: true }).click();
+    await vi.waitFor(() => expect(document.body.textContent).toContain(banner));
+    await page.getByRole("button", { name: "Common", exact: true }).click();
+    await vi.waitFor(() => expect(document.body.textContent).not.toContain(banner));
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("shows known row counts and copies sanitized expandable errors", async () => {
+  const mocks = createNativeApiMock();
+  mocks.getProjectConfig.mockResolvedValue({
+    ...projectConfig,
+    servers: {
+      "project-server": { type: "stdio", command: "node", env: { TOKEN: "private-token-value" } },
+    },
+  });
+  mocks.getServerStatuses.mockResolvedValue({
+    provider: "codex",
+    projectId: PROJECT_ID,
+    support: "supported",
+    configVersion: "effective-v1",
+    statuses: [
+      {
+        name: "project-server",
+        state: "failed",
+        authStatus: "unknown",
+        toolCount: 3,
+        resourceCount: 2,
+        resourceTemplateCount: 0,
+        message:
+          "Failed private-token-value at https://user:pass@example.test/mcp?token=abc#secret",
+      },
+    ],
+  });
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await vi.waitFor(() => expect(document.body.textContent).toContain("3 tools · 2 resources"));
+    await page.getByText("Connection details", { exact: true }).click();
+    await page.getByRole("button", { name: "Copy error" }).click();
+    expect(copyToClipboard).toHaveBeenCalledWith(
+      "Failed [redacted] at https://example.test/mcp",
+      undefined,
+    );
+    expect(document.body.textContent).not.toContain("private-token-value");
+    await captureSettingsScreenshot();
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("guards account changes without overwriting the current draft", async () => {
+  createNativeApiMock();
+  useProfileState.setState({
+    active: {
+      id: Schema.decodeUnknownSync(ProfileId)("a".repeat(32)),
+      slug: "default",
+      name: "Default",
+      isDefault: true,
+      isActive: true,
+      status: "ready",
+      port: 3773,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      stateDir: "/tmp/f5",
+      providerAccounts: ["one", "two"].map((name) => ({
+        driver: "codex",
+        instanceId: ProviderInstanceId.make(name),
+        displayName: name,
+        status: "authenticated",
+      })),
+    },
+  });
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("textbox", { name: "Name", exact: true }).fill("unsaved-account-draft");
+    await page.getByRole("combobox", { name: "MCP provider account" }).selectOptions("two");
+    await page.getByRole("button", { name: "Keep editing", exact: true }).click();
+    await expect
+      .element(page.getByRole("textbox", { name: "Name", exact: true }))
+      .toHaveValue("unsaved-account-draft");
+    await expect
+      .element(page.getByRole("combobox", { name: "MCP provider account" }))
+      .toHaveValue("one");
+    await page.getByRole("combobox", { name: "MCP provider account" }).selectOptions("two");
+    await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+    await expect
+      .element(page.getByRole("combobox", { name: "MCP provider account" }))
+      .toHaveValue("two");
+    await expect.element(page.getByRole("textbox", { name: "Name", exact: true })).toHaveValue("");
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+    useProfileState.setState({ active: null });
+  }
+});
+
+it("does not apply a late secret-store response to a new draft with the same key and value", async () => {
+  createNativeApiMock();
+  let complete!: (result: { placeholder: string }) => void;
+  nativeApiRef.current!.mcp.storeSecret = vi.fn(
+    () =>
+      new Promise<{ placeholder: string }>((resolve) => {
+        complete = resolve;
+      }),
+  );
+  const { screen, queryClient } = await renderSettings();
+  const enterValue = async (name: string) => {
+    await page.getByRole("textbox", { name: "Name", exact: true }).fill(name);
+    await page.getByRole("button", { name: "Add environment value" }).click();
+    await page.getByRole("textbox", { name: "Environment key 1" }).fill("TOKEN");
+    await page.getByRole("textbox", { name: "Environment value 1" }).fill("same-draft-value");
+    await page.getByRole("checkbox", { name: "Secret", exact: true }).click();
+  };
+  try {
+    await enterValue("first-draft");
+    await page.getByRole("button", { name: "Store secret", exact: true }).click();
+    await page.getByRole("button", { name: "Add server", exact: true }).first().click();
+    await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+    await enterValue("second-draft");
+    complete({ placeholder: "${f5-secret:00000000-0000-4000-8000-000000000000}" });
+    await expect
+      .element(page.getByRole("textbox", { name: "Environment value 1" }))
+      .toHaveValue("same-draft-value");
+    await expect
+      .element(page.getByRole("button", { name: "Store secret", exact: true }))
+      .toBeEnabled();
+    expect(document.body.textContent).not.toContain("•••••• (stored secret)");
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("requires explicit creation when the edited server is deleted elsewhere", async () => {
+  const mocks = createNativeApiMock();
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await page.getByRole("textbox", { name: "Command", exact: true }).fill("preserved-draft");
+    mocks.getProjectConfig.mockResolvedValue({
+      projectId: PROJECT_ID,
+      version: "deleted-v2",
+      servers: {},
+    });
+    await queryClient.invalidateQueries({ queryKey: ["mcp", "projectConfig"] });
+    await expect
+      .element(page.getByRole("button", { name: "Save changes", exact: true }))
+      .toBeDisabled();
+    await expect
+      .element(page.getByRole("textbox", { name: "Command", exact: true }))
+      .toHaveValue("preserved-draft");
+    expect(mocks.replaceProjectConfig).not.toHaveBeenCalled();
+    await page.getByRole("button", { name: "Create from this draft", exact: true }).click();
+    await page.getByRole("button", { name: "Add server", exact: true }).last().click();
+    await vi.waitFor(() =>
+      expect(mocks.replaceProjectConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          expectedVersion: "deleted-v2",
+          servers: { "project-server": { type: "stdio", command: "preserved-draft" } },
+        }),
+      ),
+    );
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("merges an enable toggle with typing during its save", async () => {
+  const mocks = createNativeApiMock();
+  const { screen, queryClient } = await renderSettings();
+  let finish!: (result: Awaited<ReturnType<typeof mocks.replaceProjectConfig>>) => void;
+  mocks.replaceProjectConfig.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  try {
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await page
+      .getByRole("switch", { name: "Enable MCP server project-server", exact: true })
+      .click();
+    await page.getByRole("textbox", { name: "Command", exact: true }).fill("typed-during-toggle");
+    const toggled = {
+      projectId: PROJECT_ID,
+      version: "toggle-v2",
+      servers: {
+        "project-server": { type: "stdio" as const, command: "project-command", enabled: false },
+      },
+    };
+    mocks.getProjectConfig.mockResolvedValue(toggled);
+    finish(toggled);
+    await expect
+      .element(page.getByRole("switch", { name: "Enable MCP server", exact: true }))
+      .not.toBeChecked();
+    await page.getByRole("button", { name: "Save changes", exact: true }).click();
+    await vi.waitFor(() =>
+      expect(mocks.replaceProjectConfig).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          servers: {
+            "project-server": { type: "stdio", command: "typed-during-toggle", enabled: false },
+          },
+        }),
+      ),
+    );
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("explains pending saves when an editor-replacing action is blocked", async () => {
+  const mocks = createNativeApiMock();
+  const { screen, queryClient } = await renderSettings();
+  let finish!: (result: Awaited<ReturnType<typeof mocks.replaceProjectConfig>>) => void;
+  mocks.replaceProjectConfig.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  try {
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await page.getByRole("button", { name: "Save changes", exact: true }).click();
+    await page.getByRole("button", { name: "Common", exact: true }).click();
+    await expect.element(page.getByRole("alertdialog")).toHaveTextContent("Saving MCP changes…");
+    finish({ projectId: PROJECT_ID, version: "v2", servers: projectConfig.servers });
+    await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')).toBeNull());
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("treats adding then removing an argument as a no-op and keeps focus with moved arguments", async () => {
+  createNativeApiMock();
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("button", { name: "Add argument", exact: true }).click();
+    await page.getByRole("button", { name: "Remove argument 1", exact: true }).click();
+    await expect
+      .element(page.getByRole("button", { name: "Add argument", exact: true }))
+      .toHaveFocus();
+    await page.getByRole("button", { name: "Common", exact: true }).click();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Common servers (1/16)"));
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    await page.getByRole("button", { name: "Add argument", exact: true }).click();
+    await page.getByRole("textbox", { name: "Argument 1", exact: true }).fill("first");
+    await page.getByRole("button", { name: "Add argument", exact: true }).click();
+    await page.getByRole("textbox", { name: "Argument 2", exact: true }).fill("second");
+    await page.getByRole("button", { name: "Move argument 1 down", exact: true }).click();
+    await expect
+      .element(page.getByRole("textbox", { name: "Argument 2", exact: true }))
+      .toHaveValue("first");
+    await expect
+      .element(page.getByRole("textbox", { name: "Argument 2", exact: true }))
+      .toHaveFocus();
+    await page.getByRole("button", { name: "Remove argument 1", exact: true }).click();
+    await expect
+      .element(page.getByRole("textbox", { name: "Argument 1", exact: true }))
+      .toHaveFocus();
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("scrubs observed-group messages with effective values and keeps informational messages neutral", async () => {
+  const mocks = createNativeApiMock();
+  mocks.getEffectiveConfig.mockResolvedValue({
+    ...effectiveConfig,
+    servers: {
+      ...effectiveConfig.servers,
+      remote: {
+        type: "http",
+        url: "https://example.test",
+        headers: { "X-Custom": "configured-group-secret" },
+      },
+    },
+  });
+  mocks.getServerStatuses.mockResolvedValue({
+    provider: "codex",
+    projectId: PROJECT_ID,
+    support: "supported",
+    configVersion: "effective-v1",
+    statuses: [
+      {
+        name: "external",
+        state: "ready",
+        ownership: "external",
+        authStatus: "unknown",
+        toolCount: 1,
+        resourceCount: 0,
+        resourceTemplateCount: 0,
+        message: "configured-group-secret connected",
+      },
+      {
+        name: "builtin",
+        state: "failed",
+        ownership: "built-in",
+        authStatus: "unknown",
+        toolCount: 0,
+        resourceCount: 0,
+        resourceTemplateCount: 0,
+        message: "configured-group-secret failed",
+      },
+    ],
+  });
+  const { screen, queryClient } = await renderSettings();
+  try {
+    const info = page.getByText("[redacted] connected", { exact: true });
+    await expect.element(info).toBeVisible();
+    expect(info.element().closest("details")).toBeNull();
+    expect(document.querySelectorAll("details > summary")).toHaveLength(1);
+    await page.getByText("Connection details", { exact: true }).click();
+    await page.getByRole("button", { name: "Copy error", exact: true }).click();
+    expect(copyToClipboard).toHaveBeenCalledWith("[redacted] failed", undefined);
   } finally {
     queryClient.clear();
     await screen.unmount();

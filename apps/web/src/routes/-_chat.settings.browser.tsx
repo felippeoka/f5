@@ -378,6 +378,7 @@ async function renderSettingsRoute(
     initialEntries: [initialEntry],
   });
   const router = getRouter(history);
+  await router.load();
   const screen = await render(<RouterProvider router={router} />);
 
   await vi.waitFor(() => {
@@ -1099,7 +1100,9 @@ describe("settings route", () => {
         expect(getCategoryPanelText("tools")).toContain("Hide");
       });
 
-      await selectScopeProject("Project Two");
+      await page.getByRole("combobox", { name: "Settings scope" }).click();
+      await page.getByRole("option", { name: "Project Two", exact: false }).click();
+      await page.getByRole("button", { name: "Discard changes", exact: true }).click();
 
       await vi.waitFor(() => {
         expect(getCategoryPanelText("tools")).toContain("Project Two");
@@ -1107,6 +1110,75 @@ describe("settings route", () => {
           document.querySelector<HTMLInputElement>('input[placeholder="filesystem"]')?.value,
         ).toBe("");
       });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it.each([null, PROJECT_ONE])(
+    "preserves an MCP draft across category and search navigation in scope %s",
+    async (project) => {
+      const { screen, router } = await renderSettingsRoute(
+        `/settings?category=tools${project ? `&project=${project}` : ""}`,
+      );
+      try {
+        await page.getByRole("textbox", { name: "Name", exact: true }).fill("retained-tab-draft");
+        await page.getByRole("button", { name: "Threads", exact: true }).click();
+        await vi.waitFor(() => expect(router.state.location.search.category).toBe("threads"));
+        expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+        await page.getByRole("button", { name: "Tools", exact: true }).click();
+        await expect
+          .element(page.getByRole("textbox", { name: "Name", exact: true }))
+          .toHaveValue("retained-tab-draft");
+        await page.getByRole("combobox", { name: "Search settings" }).fill("MCP servers");
+        await page.getByRole("option", { name: /MCP servers/ }).click();
+        await vi.waitFor(() => expect(router.state.location.search.item).toBe("tools.mcp"));
+        expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+        await expect
+          .element(page.getByRole("textbox", { name: "Name", exact: true }))
+          .toHaveValue("retained-tab-draft");
+        // A real scope change still asks once and clears the draft on confirmation.
+        await page.getByRole("combobox", { name: "Settings scope" }).click();
+        await page.getByRole("option", { name: "Project Two", exact: false }).click();
+        await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+        await vi.waitFor(() => expect(router.state.location.search.project).toBe(PROJECT_TWO));
+        await expect
+          .element(page.getByRole("textbox", { name: "Name", exact: true }))
+          .toHaveValue("");
+        await page.getByRole("button", { name: "Threads", exact: true }).click();
+        await vi.waitFor(() => expect(router.state.location.search.category).toBe("threads"));
+        const unload = new Event("beforeunload", { cancelable: true });
+        window.dispatchEvent(unload);
+        expect(unload.defaultPrevented).toBe(false);
+      } finally {
+        await screen.unmount();
+      }
+    },
+  );
+
+  it("guards a dirty MCP draft when switching projects through the settings router", async () => {
+    const { screen, router } = await renderSettingsRoute(
+      `/settings?category=tools&project=${PROJECT_ONE}`,
+    );
+    try {
+      await page.getByRole("textbox", { name: "Name", exact: true }).fill("unsaved-project-draft");
+      await page.getByRole("combobox", { name: "Settings scope" }).click();
+      await page.getByRole("option", { name: "Project Two", exact: false }).click();
+      await expect
+        .element(page.getByRole("alertdialog"))
+        .toHaveTextContent("Discard unsaved MCP changes?");
+      await page.getByRole("button", { name: "Keep editing", exact: true }).click();
+      expect(router.state.location.search.project).toBe(PROJECT_ONE);
+      await expect
+        .element(page.getByRole("textbox", { name: "Name", exact: true }))
+        .toHaveValue("unsaved-project-draft");
+      await page.getByRole("combobox", { name: "Settings scope" }).click();
+      await page.getByRole("option", { name: "Project Two", exact: false }).click();
+      await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+      await vi.waitFor(() => expect(router.state.location.search.project).toBe(PROJECT_TWO));
+      await expect
+        .element(page.getByRole("textbox", { name: "Name", exact: true }))
+        .toHaveValue("");
     } finally {
       await screen.unmount();
     }

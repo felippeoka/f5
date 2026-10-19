@@ -1,3 +1,4 @@
+import { McpConfirmDialog, McpDraftNavigationGuard, useMcpDraftGuard } from "./McpDraftGuard";
 import { setMcpToolEnabled } from "@t3tools/shared/mcpTools";
 import { Switch } from "../../ui/switch";
 import { onServerWelcome } from "../../../wsNativeApi";
@@ -25,7 +26,7 @@ import {
   validateMcpLayerWrite,
 } from "@t3tools/shared/mcpValidation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ensureNativeApi } from "../../../nativeApi";
 import {
   mcpCommonConfigQueryOptions,
@@ -86,6 +87,7 @@ export function McpServersSettings(props: {
       matchingAccounts[0]?.instanceId ??
       selectedProvider,
   );
+  const [editorEpoch, setEditorEpoch] = useState(0);
   const [editingServerName, setEditingServerName] = useState<string | null>(null);
   const [draft, setDraft] = useState<ServerDraft>(createEmptyDraft());
   const [formError, setFormError] = useState<string | null>(null);
@@ -96,6 +98,41 @@ export function McpServersSettings(props: {
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   const selectedProject = props.selectedProject;
+  const [draftBase, setDraftBase] = useState<ServerDraft>(draft);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(draftBase);
+  const [removingServer, setRemovingServer] = useState<string | null>(null);
+  const resetEditor = () => {
+    setEditorEpoch((epoch) => epoch + 1);
+    setRemovingServer(null);
+    setEditingServerName(null);
+    const empty = createEmptyDraft();
+    setDraft(empty);
+    setDraftBase(empty);
+    setFormError(null);
+    setProjectActionError(null);
+    setIsAdvancedOpen(false);
+  };
+  const {
+    requestChange,
+    confirmDiscard,
+    dialog: draftGuardDialog,
+  } = useMcpDraftGuard(dirty, isSavingConfig, resetEditor);
+  const latestEditor = useRef({
+    draft,
+    selectedProject,
+    selectedScope,
+    editingServerName,
+    editorEpoch,
+  });
+  useEffect(() => {
+    latestEditor.current = {
+      draft,
+      selectedProject,
+      selectedScope,
+      editingServerName,
+      editorEpoch,
+    };
+  });
   const selectedProjectId = selectedProject?.id ?? null;
 
   const commonConfigQuery = useQuery(mcpCommonConfigQueryOptions());
@@ -189,17 +226,13 @@ export function McpServersSettings(props: {
     }
   }, [selectedProjectId, selectedScope]);
 
-  useEffect(() => {
-    setEditingServerName(null);
-    setDraft(createEmptyDraft());
-    setFormError(null);
-    setProjectActionError(null);
-    setIsAdvancedOpen(false);
-  }, [selectedProjectId]);
-
   const activeConfig =
     selectedScope === "common" ? commonConfigQuery.data : projectConfigQuery.data;
   const activeServers = activeConfig?.servers ?? EMPTY_PROJECT_SERVERS;
+  const editedServerMissing =
+    editingServerName !== null &&
+    activeConfig !== undefined &&
+    !Object.hasOwn(activeServers, editingServerName);
   const orderedServers = useMemo(
     () =>
       (Object.entries(activeServers) as Array<[string, McpProjectServersConfig[string]]>).toSorted(
@@ -243,20 +276,6 @@ export function McpServersSettings(props: {
     }
     return new Map(Object.entries(projectConfigQuery.data?.servers ?? EMPTY_PROJECT_SERVERS));
   }, [projectConfigQuery.data, selectedProjectId, selectedScope]);
-
-  useEffect(() => {
-    if (selectedScope === "project" && !selectedProjectId) {
-      setEditingServerName(null);
-      setDraft(createEmptyDraft());
-      setIsAdvancedOpen(false);
-      return;
-    }
-    if (editingServerName && !activeServers[editingServerName]) {
-      setEditingServerName(null);
-      setDraft(createEmptyDraft());
-      setIsAdvancedOpen(false);
-    }
-  }, [activeServers, editingServerName, selectedProjectId, selectedScope]);
 
   useEffect(
     () =>
@@ -329,29 +348,30 @@ export function McpServersSettings(props: {
     setFormError(null);
   };
 
-  const beginCreate = () => {
-    setEditingServerName(null);
-    setDraft(createEmptyDraft());
-    setFormError(null);
-    setProjectActionError(null);
-    setIsAdvancedOpen(false);
-  };
+  const beginCreate = () => requestChange(resetEditor);
 
-  const beginEdit = (name: string, server: McpProjectServersConfig[string]) => {
-    setEditingServerName(name);
-    setDraft(draftFromServer(name, server));
-    setFormError(null);
-    setProjectActionError(null);
-    setIsAdvancedOpen(hasAdvancedFields(server));
-  };
+  const beginEdit = (name: string, server: McpProjectServersConfig[string]) =>
+    requestChange(() => {
+      setEditorEpoch((epoch) => epoch + 1);
+      setEditingServerName(name);
+      const next = draftFromServer(name, server);
+      setDraft(next);
+      setDraftBase(next);
+      setFormError(null);
+      setProjectActionError(null);
+      setIsAdvancedOpen(hasAdvancedFields(server));
+    });
 
   const removeServer = (name: string) => {
     const nextServers = toWritableProjectServers(activeServers);
     delete nextServers[name];
     void persistScopeServers(normalizeMcpServersRecord(nextServers))
       .then(() => {
-        if (editingServerName === name) {
-          beginCreate();
+        if (
+          latestEditor.current.editingServerName === name &&
+          latestEditor.current.draft === draft
+        ) {
+          resetEditor();
         }
       })
       .catch((error) => {
@@ -361,6 +381,13 @@ export function McpServersSettings(props: {
 
   const saveDraft = () => {
     try {
+      if (editedServerMissing)
+        throw new Error(
+          "This server was removed from saved configuration. Choose Create from this draft to add it again.",
+        );
+      const submittedDraft = draft;
+      const submittedProject = selectedProject;
+      const submittedScope = selectedScope;
       const { name, server } = decodeDraftServer(draft);
       const nextServers = toWritableProjectServers(activeServers);
       const collision = Object.keys(nextServers).find(
@@ -390,11 +417,21 @@ export function McpServersSettings(props: {
       setFormError(null);
       void persistScopeServers(normalized)
         .then((result) => {
+          if (
+            latestEditor.current.selectedProject !== submittedProject ||
+            latestEditor.current.selectedScope !== submittedScope
+          )
+            return;
+          const next = draftFromServer(name, result.servers[name] ?? server);
+          // Inputs remain editable during I/O; a completed save cannot erase newer typing.
+          setDraftBase(next);
           setEditingServerName(name);
-          const savedServer = result.servers[name];
-          setDraft(
-            savedServer ? draftFromServer(name, savedServer) : draftFromServer(name, server),
-          );
+          if (latestEditor.current.draft === submittedDraft) setDraft(next);
+          else
+            setDraft((current) => ({
+              ...current,
+              ...(next.original ? { original: next.original } : {}),
+            }));
         })
         .catch((error) => {
           setFormError(readErrorMessage(error, "Failed to save MCP server."));
@@ -406,6 +443,7 @@ export function McpServersSettings(props: {
 
   const toggleServerEnabled = (name: string, checked: boolean) => {
     const nextServers = toWritableProjectServers(activeServers);
+    const targetEpoch = editorEpoch;
     const currentServer = nextServers[name];
     if (!currentServer) {
       return;
@@ -413,8 +451,24 @@ export function McpServersSettings(props: {
     nextServers[name] = { ...currentServer, enabled: checked };
     void persistScopeServers(normalizeMcpServersRecord(nextServers))
       .then(() => {
-        if (editingServerName === name) {
-          setDraft((current) => ({ ...current, enabled: checked }));
+        if (
+          latestEditor.current.editingServerName === name &&
+          latestEditor.current.editorEpoch === targetEpoch
+        ) {
+          const mergeEnabled = (current: ServerDraft): ServerDraft => ({
+            ...current,
+            enabled: checked,
+            ...(current.original
+              ? {
+                  original: {
+                    ...current.original,
+                    server: { ...current.original.server, enabled: checked },
+                  },
+                }
+              : {}),
+          });
+          setDraft(mergeEnabled);
+          setDraftBase(mergeEnabled);
         }
       })
       .catch((error) => {
@@ -479,6 +533,23 @@ export function McpServersSettings(props: {
       className="rounded-xl border border-border bg-card p-5"
       data-settings-search-target="tools.mcp"
     >
+      {draftGuardDialog}
+      <McpDraftNavigationGuard confirmDiscard={confirmDiscard} />
+      <McpConfirmDialog
+        open={removingServer !== null}
+        title={`Remove “${removingServer ?? ""}”?`}
+        description={`Remove this server from ${selectedScope === "common" ? "common scope (all projects)" : `project scope (${selectedProject?.name ?? "this project"})`}? Running sessions keep their current configuration until it is applied.`}
+        confirmLabel="Remove server"
+        onCancel={() => setRemovingServer(null)}
+        onConfirm={() => {
+          const name = removingServer;
+          setRemovingServer(null);
+          if (name) {
+            if (editingServerName === name && dirty) requestChange(() => removeServer(name));
+            else removeServer(name);
+          }
+        }}
+      />
       {(
         (selectedScope === "common"
           ? commonConfigQuery.data?.issues
@@ -537,12 +608,11 @@ export function McpServersSettings(props: {
                 if (nextScope === "project" && !selectedProject) {
                   return;
                 }
-                setSelectedScope(nextScope);
-                setEditingServerName(null);
-                setDraft(createEmptyDraft());
-                setFormError(null);
-                setProjectActionError(null);
-                setIsAdvancedOpen(false);
+                if (nextScope === selectedScope) return;
+                requestChange(() => {
+                  setSelectedScope(nextScope);
+                  resetEditor();
+                });
               }}
             >
               <Toggle value="project" disabled={!selectedProject}>
@@ -563,8 +633,11 @@ export function McpServersSettings(props: {
                 if (nextProvider !== "codex" && nextProvider !== "claudeAgent") {
                   return;
                 }
-                setSelectedProvider(nextProvider);
-                setProjectActionError(null);
+                if (nextProvider === selectedProvider) return;
+                requestChange(() => {
+                  setSelectedProvider(nextProvider);
+                  resetEditor();
+                });
               }}
             >
               <Toggle value="codex">Codex</Toggle>
@@ -578,7 +651,13 @@ export function McpServersSettings(props: {
               <select
                 aria-label="MCP provider account"
                 value={selectedInstanceId}
-                onChange={(event) => setAccountSelection(event.target.value)}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  requestChange(() => {
+                    setAccountSelection(next);
+                    resetEditor();
+                  });
+                }}
                 className="block rounded border bg-background p-2 text-sm"
               >
                 {matchingAccounts.map((account) => (
@@ -790,8 +869,10 @@ export function McpServersSettings(props: {
                         size="xs"
                         variant="outline"
                         onClick={() => {
-                          setEditingServerName(null);
-                          setDraft(draftFromServer(name, server));
+                          requestChange(() => {
+                            resetEditor();
+                            setDraft(draftFromServer(name, server));
+                          });
                         }}
                       >
                         Override
@@ -828,7 +909,9 @@ export function McpServersSettings(props: {
               overriddenServersByName={overriddenServersByName}
               onToggleEnabled={toggleServerEnabled}
               beginEdit={beginEdit}
-              removeServer={removeServer}
+              removeServer={(name) => {
+                if (!isSavingConfig) setRemovingServer(name);
+              }}
               onToolToggle={async (name, tool, enabled) => {
                 const server = activeServers[name];
                 if (!server) throw new Error("Server no longer exists.");
@@ -840,6 +923,7 @@ export function McpServersSettings(props: {
             />
             <McpObservedGroup
               group="managed"
+              servers={effectiveConfigQuery.data?.servers ?? activeServers}
               removedNames={
                 serverStatusesQuery.data?.statuses
                   .filter(
@@ -858,6 +942,7 @@ export function McpServersSettings(props: {
             />
             <McpObservedGroup
               group="built-in"
+              servers={effectiveConfigQuery.data?.servers ?? activeServers}
               observation={serverStatusesQuery.data}
               projectId={selectedProjectId}
               provider={selectedProvider}
@@ -865,13 +950,28 @@ export function McpServersSettings(props: {
             />
             <McpObservedGroup
               group="external"
+              servers={effectiveConfigQuery.data?.servers ?? activeServers}
               observation={serverStatusesQuery.data}
               projectId={selectedProjectId}
               provider={selectedProvider}
               instanceId={selectedInstanceId}
             />
+            {editedServerMissing ? (
+              <div role="status" className="rounded border p-3 text-xs">
+                This server was removed from saved configuration. Your draft is preserved. Saving is
+                blocked until you explicitly create it again.
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => setEditingServerName(null)}
+                  disabled={isSavingConfig}
+                >
+                  Create from this draft
+                </Button>
+              </div>
+            ) : null}
             <McpServerEditor
-              key={`${selectedProjectId}:${selectedScope}:${selectedInstanceId}:${editingServerName}`}
+              key={`${selectedProjectId}:${selectedScope}:${selectedInstanceId}:${editingServerName}:${editorEpoch}`}
               projectId={selectedProjectId}
               instanceId={selectedInstanceId}
               editingServerName={editingServerName}
@@ -882,6 +982,7 @@ export function McpServersSettings(props: {
               isAdvancedOpen={isAdvancedOpen}
               onAdvancedOpenChange={setIsAdvancedOpen}
               isSavingConfig={isSavingConfig}
+              saveBlocked={editedServerMissing}
               beginCreate={beginCreate}
               saveDraft={saveDraft}
             />

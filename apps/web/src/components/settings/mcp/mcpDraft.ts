@@ -1,3 +1,4 @@
+import { readMcpKeyValueRows } from "./mcpEditorValues";
 import {
   McpServerWriteDefinition,
   type McpProjectServersConfig,
@@ -95,13 +96,7 @@ function parseStringArrayInput(value: string): string[] | undefined {
 
 function parseStringRecordInput(value: string, label: string): Record<string, string> | undefined {
   if (value.trim().startsWith("[") || value.trim().startsWith("{")) {
-    const json: unknown = JSON.parse(value);
-    const rows: { key: string; value: string; secret?: boolean }[] = Array.isArray(json)
-      ? json
-      : Object.entries(json as Record<string, string>).map(([key, entry]) => ({
-          key,
-          value: entry,
-        }));
+    const rows = readMcpKeyValueRows(value);
     const result: Record<string, string> = Object.create(null);
     for (const row of rows) {
       if (typeof row.key !== "string" || !row.key.trim() || typeof row.value !== "string")
