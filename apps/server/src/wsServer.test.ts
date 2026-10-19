@@ -5802,15 +5802,14 @@ describe("WebSocket Server", () => {
     await held;
     try {
       for (const method of [WS_METHODS.terminalOpen, WS_METHODS.terminalRestart]) {
-        const blocked = await sendRequest(ws, method, {
+        const liveTerminal = await sendRequest(ws, method, {
           threadId: "thread-1",
           cwd,
           cols: 100,
           rows: 24,
         });
-        expect(blocked.error).toEqual(
-          expect.objectContaining({ message: expect.stringContaining("conversation is busy") }),
-        );
+        expect(liveTerminal.error).toBeUndefined();
+        expect((liveTerminal.result as TerminalSessionSnapshot).threadId).toBe("thread-1");
       }
     } finally {
       release();

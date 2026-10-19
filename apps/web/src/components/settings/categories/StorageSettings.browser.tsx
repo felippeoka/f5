@@ -22,6 +22,11 @@ import { TestRouterContext } from "../../../test/routerContext";
 import { SettingsLayout } from "../SettingsLayout";
 import { StorageActionConfirmDialog } from "../StorageActionConfirmDialog";
 import { StorageSettings } from "./StorageSettings";
+import {
+  noteWsConnectionOpened,
+  noteWsSynchronized,
+  resetWsConnectionStateForTests,
+} from "../../../wsConnectionState";
 
 const { nativeApiRef } = vi.hoisted(() => ({
   nativeApiRef: {
@@ -228,6 +233,11 @@ function createNativeApiMock(
     status,
   }));
   const getStatus = vi.fn(async () => status);
+  const getTargets = vi.fn(async () => ({
+    targets: [] as StorageCleanupCategoryUsage["targets"],
+    targetCount: 0,
+    nextCursor: null,
+  }));
   const cleanup = vi.fn(async (request?: StorageCleanupRequest): Promise<StorageCleanupStatus> => {
     const operation: StorageCleanupStatus = {
       operationId: request?.operationId ?? result.operationId,
@@ -322,6 +332,7 @@ function createNativeApiMock(
     storage: {
       getUsage,
       getStatus,
+      getTargets,
       getOperation,
       getDiskSpace: async () => ({
         level: "ok",
@@ -351,6 +362,7 @@ function createNativeApiMock(
   return {
     getUsage,
     getStatus,
+    getTargets,
     getOperation,
     emitStatus,
     cleanup,
@@ -402,6 +414,82 @@ function getDisabledState(element: Element | null) {
 }
 
 describe("StorageSettings", () => {
+  it("keeps a selected target beyond the first 500 after reconnecting to the same scan", async () => {
+    const targets = Array.from({ length: 501 }, (_, id) => ({
+      id: `log-${id}`,
+      label: `log-${id}.log`,
+      bytes: 1000 - id,
+      safeToDelete: true,
+    }));
+    const report = usageReport({
+      categories: [
+        category({
+          id: "providerLogsForTerminalThreads",
+          section: "logs",
+          title: "Provider logs",
+          bytes: 500000,
+          reclaimableBytes: 500000,
+          targetCount: 501,
+          targets: targets.slice(0, 500),
+        }),
+      ],
+    });
+    const { screen, queryClient, nativeApi } = await renderStorageSettings(report);
+    nativeApi.getTargets.mockResolvedValue({
+      targets: targets.slice(500),
+      targetCount: 501,
+      nextCursor: null,
+    });
+    try {
+      await page.getByRole("button", { name: "Inspect 501 targets" }).click();
+      await page.getByRole("button", { name: "Load 100 more targets" }).click();
+      await page.getByRole("checkbox", { name: /log-500\.log/ }).click();
+      const refreshed = { ...(await nativeApi.getStatus()), revision: 2 };
+      nativeApi.emitStatus(refreshed);
+      noteWsConnectionOpened();
+      noteWsSynchronized();
+      await vi.waitFor(() => expect(nativeApi.getUsage.mock.calls.length).toBeGreaterThan(1));
+      await queryClient.invalidateQueries({ queryKey: ["storage", "usage"] });
+      await expect.element(page.getByRole("checkbox", { name: /log-500\.log/ })).toBeChecked();
+      await page.getByRole("button", { name: "Reclaim selected", exact: true }).click();
+      await page.getByRole("dialog").getByRole("button", { name: "Reclaim", exact: true }).click();
+      await vi.waitFor(() =>
+        expect(nativeApi.cleanup).toHaveBeenCalledWith(
+          expect.objectContaining({
+            targetSelections: [
+              { categoryId: "providerLogsForTerminalThreads", targetIds: ["log-500"] },
+            ],
+          }),
+        ),
+      );
+    } finally {
+      await screen.unmount();
+      resetWsConnectionStateForTests();
+      queryClient.clear();
+    }
+  });
+
+  it("recovers a lost cleanup acknowledgement using the same operation id", async () => {
+    const { screen, queryClient, nativeApi } = await renderStorageSettings();
+    nativeApi.cleanup.mockRejectedValueOnce(new Error("WebSocket connection closed."));
+    try {
+      noteWsConnectionOpened();
+      noteWsSynchronized();
+      await page.getByRole("button", { name: "Reclaim selected" }).click();
+      await page.getByPlaceholder("DELETE").fill("DELETE");
+      await page.getByRole("dialog").getByRole("button", { name: "Reclaim", exact: true }).click();
+      await vi.waitFor(() => expect(nativeApi.cleanup).toHaveBeenCalledTimes(2));
+      expect(nativeApi.cleanup.mock.calls[1]?.[0]).toEqual(nativeApi.cleanup.mock.calls[0]?.[0]);
+      expect(nativeApi.getOperation).toHaveBeenCalledWith({
+        operationId: nativeApi.cleanup.mock.calls[0]?.[0]?.operationId,
+      });
+      await expect.element(page.getByRole("button", { name: "Rescan", exact: true })).toBeEnabled();
+    } finally {
+      await screen.unmount();
+      resetWsConnectionStateForTests();
+      queryClient.clear();
+    }
+  });
   it("keeps another window's active cleanup while resolving our earlier completion", async () => {
     const { screen, queryClient, nativeApi } = await renderStorageSettings();
     let ownId = "";

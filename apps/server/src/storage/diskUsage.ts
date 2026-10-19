@@ -74,8 +74,13 @@ export function storageReadDir(
     ? fsCall(() => FS.readdir(path, options), signal)
     : fsCall(() => FS.readdir(path), signal);
 }
-export function allocatedBytes(stat: Stats): number {
-  return typeof stat.blocks === "number" ? stat.blocks * 512 : stat.size;
+export function allocatedBytes(
+  stat: Pick<Stats, "blocks" | "size">,
+  platform = process.platform,
+): number {
+  // Windows reports zero for the unsupported st_blocks field, even for
+  // non-empty files. POSIX zero blocks remains valid for sparse files.
+  return platform !== "win32" && typeof stat.blocks === "number" ? stat.blocks * 512 : stat.size;
 }
 export function fileIdentity(stat: Stats): FileIdentity {
   return { dev: stat.dev, ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, mode: stat.mode };

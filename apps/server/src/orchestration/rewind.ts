@@ -1,3 +1,4 @@
+import { pruneCheckpointRefs } from "../checkpointing/pruneCheckpointRefs.ts";
 import { requireAttachmentOwner } from "../attachmentOwnership.ts";
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
@@ -382,7 +383,7 @@ export const makeConversationRewind = Effect.gen(function* () {
             // The user cancelled while this run was preparing. Cancel already restored
             // the queue and released the thread, so this is not a failure.
             if (captureKeepFiles)
-              yield* checkpoints.deleteCheckpointRefs({
+              yield* pruneCheckpointRefs(checkpoints, {
                 cwd: workspace!,
                 checkpointRefs: [keepFilesRef],
               });
@@ -495,9 +496,9 @@ export const makeConversationRewind = Effect.gen(function* () {
           .filter((checkpoint) => checkpoint.checkpointTurnCount > op!.retained_count)
           .map((checkpoint) => checkpoint.checkpointRef);
         if (workspace && stale.length)
-          yield* checkpoints.deleteCheckpointRefs({ cwd: workspace, checkpointRefs: stale });
+          yield* pruneCheckpointRefs(checkpoints, { cwd: workspace, checkpointRefs: stale });
         if (workspace && caps.rollbackAffectsFiles && !request.restoreFiles)
-          yield* checkpoints.deleteCheckpointRefs({
+          yield* pruneCheckpointRefs(checkpoints, {
             cwd: workspace,
             checkpointRefs: [keepFilesRef],
           });

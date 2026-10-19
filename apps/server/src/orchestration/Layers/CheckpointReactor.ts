@@ -1,3 +1,4 @@
+import { pruneCheckpointRefs } from "../../checkpointing/pruneCheckpointRefs.ts";
 import { dispatchVerifiedWorkspace } from "../../project/workspaceTransitionContext.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -807,7 +808,7 @@ const make = Effect.gen(function* () {
       .map((checkpoint) => checkpoint.checkpointRef);
 
     if (staleCheckpointRefs.length > 0) {
-      yield* checkpointStore.deleteCheckpointRefs({
+      yield* pruneCheckpointRefs(checkpointStore, {
         cwd: sessionRuntime.value.cwd,
         checkpointRefs: staleCheckpointRefs,
       });

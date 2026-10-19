@@ -27,6 +27,22 @@ export function newerStorageUsage(
   if (newerStorageStatus(current.status, next.status) === current.status) return current;
   if (current.report && next.report && current.report.scannedAt > next.report.scannedAt)
     return { ...next, report: current.report, confirmation: null };
+  if (current.report && next.report && current.report.scanId === next.report.scanId) {
+    const loaded = new Map(current.report.categories.map((category) => [category.id, category]));
+    return {
+      ...next,
+      report: {
+        ...next.report,
+        categories: next.report.categories.map((category) => {
+          const targets = new Map(
+            loaded.get(category.id)?.targets.map((target) => [target.id, target]),
+          );
+          for (const target of category.targets) targets.set(target.id, target);
+          return { ...category, targets: [...targets.values()] };
+        }),
+      },
+    };
+  }
   return next;
 }
 export function useStorageStatus() {

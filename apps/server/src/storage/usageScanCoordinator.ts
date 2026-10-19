@@ -128,7 +128,18 @@ export const makeUsageScanCoordinator = <E>(input: {
               yield* Effect.tryPromise(async () => {
                 const temporary = `${persistedPath}.${Crypto.randomUUID()}.tmp`;
                 try {
-                  await FS.writeFile(temporary, JSON.stringify(result.value));
+                  await FS.writeFile(
+                    temporary,
+                    JSON.stringify({
+                      ...result.value,
+                      categories: result.value.categories.map((category) => ({
+                        ...category,
+                        targets: category.targets
+                          .toSorted((a, b) => b.bytes - a.bytes || a.id.localeCompare(b.id))
+                          .slice(0, 500),
+                      })),
+                    }),
+                  );
                   await FS.rename(temporary, persistedPath);
                 } finally {
                   await FS.unlink(temporary).catch(() => {});

@@ -11,6 +11,11 @@ import {
 } from "./diskUsage.ts";
 
 const roots: string[] = [];
+test("uses apparent bytes when Windows does not supply allocated block counts", () => {
+  expect(allocatedBytes({ blocks: 0, size: 1024 }, "win32")).toBe(1024);
+  expect(allocatedBytes({ blocks: 0, size: 1024 }, "linux")).toBe(0);
+  expect(allocatedBytes({ blocks: 8, size: 1024 }, "darwin")).toBe(4096);
+});
 async function fixture() {
   const root = await FS.mkdtemp(Path.join(OS.tmpdir(), "f5-disk-usage-"));
   roots.push(root);

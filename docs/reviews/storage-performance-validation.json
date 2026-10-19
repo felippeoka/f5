@@ -1,5 +1,5 @@
 {
-  "fixture": "100,000 empty files in 100 directories; generated temporary data only",
+  "fixture": "100,000 empty files in 100 directories; baseline node/bun results use 2 checkpoints, reviewCheckpointBenchmark uses 70 checkpoints; generated temporary data only",
   "node": {
     "runtime": "Node 26.11.1",
     "measurement": {

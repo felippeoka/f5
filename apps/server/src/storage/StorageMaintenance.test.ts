@@ -1,3 +1,9 @@
+import { vi } from "vitest";
+import { removeFileIfSafe } from "./storagePathSafety.ts";
+vi.mock("./storagePathSafety.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./storagePathSafety.ts")>();
+  return { ...actual, removeFileIfSafe: vi.fn(actual.removeFileIfSafe) };
+});
 import { withAttachmentRetentionLease } from "./attachmentRetention.ts";
 import { withWorktreeLifecycleLock } from "../project/Layers/WorktreeLifecycleCoordinator.ts";
 import { withProviderThreadAccess } from "../provider/providerThreadAccess.ts";
@@ -38,6 +44,7 @@ import { ServerSettingsService } from "../serverSettings.ts";
 import { StorageMaintenance } from "./StorageMaintenance.ts";
 import { StorageMaintenanceLive } from "./StorageMaintenance.ts";
 import { sizeIfExists } from "./diskUsage.ts";
+import { openRuntimeSqliteDatabase } from "../persistence/runtimeSqlite.ts";
 
 function makeProviderServiceStub(input?: {
   readonly stopSession?: ProviderServiceShape["stopSession"];
@@ -2381,7 +2388,167 @@ it.layer(makeStorageTestLayer())("StorageMaintenance automatic maintenance", (it
   );
 });
 
+it.effect("successful compaction without file-size reduction stays succeeded", () =>
+  withHomeSandbox(
+    Effect.gen(function* () {
+      const storage = yield* StorageMaintenance,
+        config = yield* ServerConfig;
+      yield* Effect.promise(async () => {
+        await NodeFS.mkdir(NodePath.dirname(config.dbPath), { recursive: true });
+        const db = await openRuntimeSqliteDatabase(config.dbPath, { readOnly: false });
+        try {
+          db.exec(
+            "PRAGMA auto_vacuum=INCREMENTAL; CREATE TABLE kept(value TEXT); INSERT INTO kept VALUES ('kept'); VACUUM",
+          );
+        } finally {
+          db.close();
+        }
+      });
+      const report = yield* storage.inspect({ force: true });
+      const operation = yield* storage.acceptCleanup({
+        operationId: "already-compact",
+        backendEpoch: (yield* storage.getStatus).backendEpoch,
+        scanId: report.scanId,
+        nonce: report.confirmationNonce,
+        categoryIds: ["databaseVacuum"],
+        confirmationText: "DELETE",
+      });
+      const result = yield* awaitOperation(storage, operation.operationId);
+      assert.equal(result.status.state, "succeeded");
+      assert.equal(result.status.result?.reclaimedBytes, 0);
+      assert.deepStrictEqual(result.status.result?.warnings, []);
+    }),
+  ).pipe(Effect.provide(makeStorageTestLayer())),
+);
+
 it.layer(makeStorageTestLayer())("StorageMaintenance scan and operation safety", (it) => {
+  for (const afterMark of [false, true]) {
+    it.effect(
+      `cancelling orphan cleanup ${afterMark ? "after" : "before"} marking preserves lifecycle safety`,
+      () =>
+        withHomeSandbox(
+          Effect.gen(function* () {
+            const storage = yield* StorageMaintenance,
+              sql = yield* SqlClient.SqlClient,
+              config = yield* ServerConfig;
+            const threadId = ThreadId.makeUnsafe(`attachment-cancel-${afterMark}`);
+            yield* seedThread({ sql, threadId, deletedAt: null });
+            const id = `cancel-image-${afterMark}`,
+              path = NodePath.join(config.attachmentsDir, id);
+            yield* Effect.promise(() => writeFile(path, "image bytes"));
+            yield* sql`INSERT INTO attachments(attachment_id, thread_id, type, name, mime_type, size_bytes, content_hash, final_path, lifecycle, created_at, updated_at)
+          VALUES (${id}, ${threadId}, 'image', 'cancel.png', 'image/png', 11, 'hash', ${path}, 'ready', '2026-01-01', '2026-01-01')`;
+            const report = yield* storage.inspect({ force: true });
+            const operationId = `cancel-attachment-${afterMark}`;
+            if (afterMark) {
+              const original = yield* Effect.promise(() =>
+                vi.importActual<typeof import("./storagePathSafety.ts")>("./storagePathSafety.ts"),
+              );
+              vi.mocked(removeFileIfSafe).mockImplementationOnce(async (input) => {
+                const rows = await Effect.runPromise(
+                  sql<{
+                    lifecycle: string;
+                  }>`SELECT lifecycle FROM attachments WHERE attachment_id = ${id}`,
+                );
+                assert.equal(rows[0]?.lifecycle, "deleting");
+                await Effect.runPromise(storage.cancel(operationId));
+                return original.removeFileIfSafe(input);
+              });
+            }
+            const result = yield* storage.cleanup(
+              {
+                operationId,
+                scanId: report.scanId,
+                nonce: report.confirmationNonce,
+                categoryIds: ["orphanAttachments"],
+                targetSelections: [{ categoryId: "orphanAttachments", targetIds: [id] }],
+                options: { vacuumAfterDeletes: false },
+              },
+              {
+                publishProgress: (progress) =>
+                  !afterMark &&
+                  progress.categoryId === "orphanAttachments" &&
+                  progress.phase === "deleting"
+                    ? storage.cancel(operationId)
+                    : Effect.void,
+              },
+            );
+            assert.isTrue(result.cancelled);
+            const rows = yield* sql<{
+              lifecycle: string;
+            }>`SELECT lifecycle FROM attachments WHERE attachment_id = ${id}`;
+            assert.equal(rows.length, afterMark ? 0 : 1);
+            if (!afterMark) {
+              assert.equal(rows[0]?.lifecycle, "ready");
+              yield* sql`INSERT INTO attachment_owners VALUES (${id}, 'ingress', 'cancelled-cleanup-reused', '2026-01-01')`;
+            }
+            assert.equal(yield* Effect.promise(() => pathExists(path)), !afterMark);
+            assert.equal(
+              (yield* sql`SELECT 1 FROM attachment_cleanup_jobs WHERE attachment_id = ${id}`)
+                .length,
+              0,
+            );
+          }),
+        ),
+    );
+  }
+  it.effect(
+    "retains a long-running operation from completion, including idempotent acceptance",
+    () =>
+      withHomeSandbox(
+        Effect.gen(function* () {
+          const storage = yield* StorageMaintenance,
+            sql = yield* SqlClient.SqlClient,
+            config = yield* ServerConfig;
+          const threadId = ThreadId.makeUnsafe("long-attachment-cleanup");
+          yield* seedThread({ sql, threadId, deletedAt: null });
+          const path = NodePath.join(config.attachmentsDir, "long-cleanup.png");
+          yield* Effect.promise(() => writeFile(path, "image bytes"));
+          yield* sql`INSERT INTO attachments(attachment_id, thread_id, type, name, mime_type, size_bytes, content_hash, final_path, lifecycle, created_at, updated_at)
+        VALUES ('long-cleanup', ${threadId}, 'image', 'long.png', 'image/png', 11, 'hash', ${path}, 'ready', '2026-01-01', '2026-01-01')`;
+          const report = yield* storage.inspect({ force: true });
+          const request = {
+            operationId: "long-cleanup",
+            backendEpoch: (yield* storage.getStatus).backendEpoch,
+            scanId: report.scanId,
+            nonce: report.confirmationNonce,
+            categoryIds: ["orphanAttachments"] as const,
+            targetSelections: [
+              { categoryId: "orphanAttachments" as const, targetIds: ["long-cleanup"] },
+            ],
+            options: { vacuumAfterDeletes: false },
+          };
+          const started = Date.now();
+          vi.useFakeTimers({ toFake: ["Date"] });
+          yield* Effect.gen(function* () {
+            const original = yield* Effect.promise(() =>
+              vi.importActual<typeof import("./storagePathSafety.ts")>("./storagePathSafety.ts"),
+            );
+            vi.mocked(removeFileIfSafe).mockImplementationOnce(async (input) => {
+              vi.setSystemTime(started + 20 * 60_000);
+              return original.removeFileIfSafe(input);
+            });
+            yield* storage.acceptCleanup(request);
+            const finished = yield* awaitOperation(storage, request.operationId);
+            assert.equal(finished.status.state, "succeeded");
+            assert.equal(finished.results[0]?.perTargetReclaimed[0]?.id, "long-cleanup");
+            assert.equal((yield* storage.acceptCleanup(request)).state, "succeeded");
+            vi.setSystemTime(started + 34 * 60_000);
+            assert.equal(
+              (yield* storage.getOperation({ operationId: request.operationId })).status.state,
+              "succeeded",
+            );
+            vi.setSystemTime(started + 36 * 60_000);
+            assert.isTrue(
+              Exit.isFailure(
+                yield* Effect.exit(storage.getOperation({ operationId: request.operationId })),
+              ),
+            );
+          }).pipe(Effect.ensuring(Effect.sync(() => vi.useRealTimers())));
+        }),
+      ),
+  );
+
   it.effect(
     "accepts an operation once and rejects conflicting reuse or a previous backend epoch",
     () =>

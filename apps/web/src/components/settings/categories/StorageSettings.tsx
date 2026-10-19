@@ -1,3 +1,4 @@
+import { acceptStorageCleanup } from "../../../storageCleanupAcceptance";
 import { StorageOperationDetails } from "../StorageOperationDetails";
 import { CopyPathButton } from "../../CopyPathButton";
 import {
@@ -692,7 +693,7 @@ export function StorageSettings() {
         void refreshUsage();
         throw new Error("Storage confirmation expired. Review the refreshed report.");
       }
-      return ensureNativeApi().storage.cleanup({
+      return acceptStorageCleanup(ensureNativeApi().storage, {
         operationId: id,
         backendEpoch: action.backendEpoch,
         scanId: action.confirmation.scanId,

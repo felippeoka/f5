@@ -94,6 +94,59 @@ const report = (): StorageUsageReport => ({
   categories: [],
   warnings: [],
 });
+test("persists bounded target previews while retaining the full current scan", async () => {
+  const stateDir = await fixture();
+  const full: StorageUsageReport = {
+    ...report(),
+    categories: [
+      {
+        id: "orphanAttachments",
+        section: "attachments",
+        title: "Attachments",
+        description: "Orphan attachments",
+        bytes: 1000,
+        reclaimableBytes: 1000,
+        measurement: "complete",
+        eligibleThreadCount: 0,
+        defaultSelected: false,
+        impact: "low",
+        availability: "ready",
+        targetCount: 1000,
+        warnings: [],
+        targets: Array.from({ length: 1000 }, (_, id) => ({
+          id: String(id),
+          label: String(id),
+          bytes: id,
+          safeToDelete: true,
+        })),
+      },
+    ],
+  };
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const coordinator = yield* makeUsageScanCoordinator({
+          stateDir,
+          scan: () => Effect.succeed(full),
+        });
+        yield* coordinator.request();
+        const running = (yield* coordinator.snapshot).running!;
+        yield* Deferred.await(running);
+        expect((yield* coordinator.snapshot).latest?.report.categories[0]?.targets).toHaveLength(
+          1000,
+        );
+        const persisted = JSON.parse(
+          yield* Effect.promise(() =>
+            FS.readFile(Path.join(stateDir, "storage-usage.json"), "utf8"),
+          ),
+        ) as StorageUsageReport;
+        expect(persisted.categories[0]?.targets).toHaveLength(500);
+        expect(persisted.categories[0]?.targetCount).toBe(1000);
+        expect(persisted.categories[0]?.targets[0]?.bytes).toBe(999);
+      }),
+    ),
+  );
+});
 test("concurrent requests join one scan and do not wait for completion", async () => {
   const stateDir = await fixture();
   await Effect.runPromise(

@@ -1865,6 +1865,14 @@ const makeStorageMaintenance = Effect.gen(function* () {
         Effect.mapError(toStorageMaintenanceError("StorageMaintenance.scan")),
       ),
   });
+  const pruneConfirmations = () => {
+    const now = Date.now();
+    for (const [id, issued] of issuedConfirmations)
+      if (issued.expiresAtMs <= now) issuedConfirmations.delete(id);
+  };
+  yield* Effect.forever(
+    Effect.sleep("30 seconds").pipe(Effect.andThen(Effect.sync(pruneConfirmations))),
+  ).pipe(Effect.forkIn(scope));
   const noteStorageMutated = coordinator.noteMutated;
   const getStatus: StorageMaintenanceShape["getStatus"] = Effect.gen(function* () {
     const state = yield* coordinator.snapshot;
@@ -1878,6 +1886,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
   });
   const getUsage: StorageMaintenanceShape["getUsage"] = (request = {}) =>
     Effect.gen(function* () {
+      pruneConfirmations();
       let state = yield* coordinator.snapshot;
       if (
         request.force ||
@@ -2969,6 +2978,9 @@ const makeStorageMaintenance = Effect.gen(function* () {
 
         const marked = yield* sql.withTransaction(
           Effect.gen(function* () {
+            // Cancellation before the lifecycle boundary must not reserve an
+            // otherwise usable content-addressed attachment id.
+            if (checkCancelled(request.operationId)) return false;
             const updated = yield* sql<OrphanAttachmentRow>`
               UPDATE attachments
               SET lifecycle = 'deleting', updated_at = ${nowIso()}
@@ -2995,6 +3007,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
           }),
         );
         if (!marked) {
+          if (checkCancelled(request.operationId)) break;
           warnings.push(
             warningFor(
               attachment.finalPath,
@@ -3013,7 +3026,9 @@ const makeStorageMaintenance = Effect.gen(function* () {
                 path: attachment.finalPath,
                 allowedRoot: config.attachmentsDir,
                 expectedIdentity: reviewIdentity(request.operationId, attachment.finalPath),
-                isCancelled: () => checkCancelled(request.operationId),
+                // Once marked, finish this attachment even if cancelled. A
+                // refusal/failure keeps deleting + the retry job; it cannot be
+                // resurrected without proving the bytes are safe to reference.
               }),
             catch: (cause) =>
               new StorageMaintenanceError({
@@ -3139,11 +3154,6 @@ const makeStorageMaintenance = Effect.gen(function* () {
           }),
       });
       const reclaimedBytes = Math.max(0, beforeBytes - afterBytes);
-      if (reclaimedBytes === 0) {
-        warnings.push(
-          warningFor(config.dbPath, "Database compaction completed with no file-size reduction."),
-        );
-      }
       return resultFor({
         categoryId: "databaseVacuum",
         status: "Cleaned",
@@ -3838,7 +3848,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
       if (activeStates.has(operation.status.state)) continue;
       retainedBytes += JSON.stringify(operation).length * 2;
       completed++;
-      if (Date.now() - operation.acceptedAt > NONCE_TTL_MS) {
+      if (Date.now() - Date.parse(operation.status.completedAt!) > NONCE_TTL_MS) {
         operations.delete(id);
         continue;
       }

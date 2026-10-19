@@ -1,7 +1,4 @@
-import {
-  withProviderThreadAccess,
-  tryWithProviderThreadAccess,
-} from "./provider/providerThreadAccess.ts";
+import { withProviderThreadAccess } from "./provider/providerThreadAccess.ts";
 import { makeMcpSecretWriter } from "./mcp/McpSecretWriter.ts";
 import { McpServerWriteDefinition } from "@t3tools/contracts";
 import { makeMcpAccountExecutionResolver } from "./mcp/accountExecution.ts";
@@ -3034,36 +3031,32 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     }),
   );
   const withTerminalThreadAccess = <A>(threadId: string, action: Effect.Effect<A, TerminalError>) =>
-    tryWithProviderThreadAccess(
-      threadId,
-      Effect.gen(function* () {
-        const { orchestrationEngine } = yield* awaitOrchestrationRuntimeForRoute;
-        const thread = (yield* orchestrationEngine.getReadModel()).threads.find(
-          (entry) => entry.id === threadId,
-        );
-        if (thread && thread.deletedAt !== null)
+    Effect.gen(function* () {
+      const { orchestrationEngine } = yield* awaitOrchestrationRuntimeForRoute;
+      const readThread = Effect.map(orchestrationEngine.getReadModel(), (model) =>
+        model.threads.find((entry) => entry.id === threadId),
+      );
+      const thread = yield* readThread;
+      const open = Effect.gen(function* () {
+        // Re-read after waiting for provider access: a purge may have deleted
+        // this archived thread while the request was queued.
+        const current = yield* readThread;
+        if ((thread && !current) || current?.deletedAt != null)
           return yield* new RouteRequestError({ message: "This conversation has been deleted." });
-        // Draft terminals may precede a persisted thread. Persisted deleted threads
-        // cannot restart while storage holds provider access through file/row removal.
-        return yield* thread?.worktreePath
-          ? withWorktreeLifecycleLock(thread.worktreePath, action).pipe(
+        return yield* current?.worktreePath
+          ? withWorktreeLifecycleLock(current.worktreePath, action).pipe(
               Effect.catchTag("RepositoryLifecycleError", (error) =>
                 Effect.fail(new RouteRequestError({ message: error.message })),
               ),
             )
           : action;
-      }),
-    ).pipe(
-      Effect.flatMap((result) =>
-        Option.isSome(result)
-          ? Effect.succeed(result.value)
-          : Effect.fail(
-              new RouteRequestError({
-                message: "This conversation is busy. Try opening the terminal again shortly.",
-              }),
-            ),
-      ),
-    );
+      });
+      // Live and draft terminals must not wait for provider startup or routing.
+      // Archived/deleted threads share the purge gate and revalidate after it.
+      return yield* thread && (thread.archivedAt !== null || thread.deletedAt !== null)
+        ? withProviderThreadAccess(threadId, open)
+        : open;
+    });
   const awaitOrchestrationRuntimeForOptionalBackground = Deferred.await(orchestrationRuntime).pipe(
     Effect.option,
   );
