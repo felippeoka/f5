@@ -2601,6 +2601,39 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
     },
   ];
 
+  const applyProjectorEvent = (
+    projector: ProjectorDefinition,
+    event: OrchestrationEvent,
+    sideEffects: AttachmentSideEffects,
+  ) =>
+    projector.apply(event, sideEffects).pipe(
+      Effect.tapCause((cause) =>
+        Effect.logWarning("projector failed to apply event", {
+          projector: projector.name,
+          sequence: event.sequence,
+          eventType: event.type,
+          causePretty: Cause.pretty(cause),
+        }),
+      ),
+    );
+
+  const finishAttachmentSideEffects = (
+    sideEffects: AttachmentSideEffects,
+    context: {
+      readonly projector: string;
+      readonly sequence: number;
+      readonly eventTypes: ReadonlyArray<OrchestrationEvent["type"]>;
+    },
+  ) =>
+    runAttachmentSideEffects(sideEffects).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("failed to apply projected attachment side-effects", {
+          ...context,
+          cause,
+        }),
+      ),
+    );
+
   /**
    * Applies `events` (ascending sequence) and advances the projector cursor to
    * `cursor` in one transaction, then runs the collected attachment cleanup.
@@ -2616,18 +2649,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
       yield* sql.withTransaction(
         Effect.forEach(
           events,
-          (event) =>
-            projector.apply(event, attachmentSideEffects).pipe(
-              // A failure rolls back the whole batch, so name the event that caused it.
-              Effect.tapCause((cause) =>
-                Effect.logWarning("projector failed to apply event", {
-                  projector: projector.name,
-                  sequence: event.sequence,
-                  eventType: event.type,
-                  causePretty: Cause.pretty(cause),
-                }),
-              ),
-            ),
+          (event) => applyProjectorEvent(projector, event, attachmentSideEffects),
           { discard: true },
         ).pipe(
           Effect.flatMap(() =>
@@ -2640,22 +2662,11 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
         ),
       );
 
-      yield* runAttachmentSideEffects(attachmentSideEffects).pipe(
-        Effect.catch((cause) =>
-          Effect.logWarning("failed to apply projected attachment side-effects", {
-            projector: projector.name,
-            sequence: cursor.sequence,
-            eventTypes: [...new Set(events.map((event) => event.type))],
-            cause,
-          }),
-        ),
-      );
-    });
-
-  const runProjectorForEvent = (projector: ProjectorDefinition, event: OrchestrationEvent) =>
-    applyEventsInTransaction(projector, [event], {
-      sequence: event.sequence,
-      occurredAt: event.occurredAt,
+      yield* finishAttachmentSideEffects(attachmentSideEffects, {
+        projector: projector.name,
+        sequence: cursor.sequence,
+        eventTypes: [...new Set(events.map((event) => event.type))],
+      });
     });
 
   const readEventHead = sql<{
@@ -2763,8 +2774,35 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
     });
 
   const projectEvent: OrchestrationProjectionPipelineShape["projectEvent"] = (event) =>
-    Effect.forEach(projectors, (projector) => runProjectorForEvent(projector, event), {
-      concurrency: 1,
+    Effect.gen(function* () {
+      const sideEffects = makeAttachmentSideEffects();
+      // Live delivery is one atomic event. A late projector/cursor failure must
+      // roll back every earlier projection, including direct calls outside the engine.
+      yield* sql.withTransaction(
+        Effect.forEach(
+          projectors,
+          (projector) => applyProjectorEvent(projector, event, sideEffects),
+          {
+            concurrency: 1,
+            discard: true,
+          },
+        ).pipe(
+          Effect.andThen(
+            projectionStateRepository.upsertMany(
+              projectors.map((projector) => ({
+                projector: projector.name,
+                lastAppliedSequence: event.sequence,
+                updatedAt: event.occurredAt,
+              })),
+            ),
+          ),
+        ),
+      );
+      yield* finishAttachmentSideEffects(sideEffects, {
+        projector: "live-event",
+        sequence: event.sequence,
+        eventTypes: [event.type],
+      });
     }).pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
