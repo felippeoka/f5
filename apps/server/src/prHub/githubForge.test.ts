@@ -230,3 +230,13 @@ describe("typed GitHub forge", () => {
     expect(changed.calls.some((call) => call.method === "POST")).toBe(false);
   });
 });
+
+it("reads diff text through the captured HTTP request without gh", async () => {
+  const f = fixture(["diff --git a/a b/a\n+hello\n"]);
+  expect(await Effect.runPromise(f.provider.getDiff(ref))).toBe("diff --git a/a b/a\n+hello\n");
+  expect(f.calls[0]).toMatchObject({
+    endpoint: "repos/team/repo/pulls/7",
+    method: "GET",
+    accept: "application/vnd.github.diff",
+  });
+});

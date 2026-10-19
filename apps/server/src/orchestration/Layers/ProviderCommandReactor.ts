@@ -1650,7 +1650,7 @@ const make = Effect.gen(function* () {
     >,
   ) {
     const thread = yield* resolveThread(event.payload.threadId);
-    if (!thread) {
+    if (!thread || thread.deletedAt !== null || thread.archivedAt !== null) {
       yield* Effect.logWarning("provider turn start ignored because the thread is missing", {
         threadId: event.payload.threadId,
         messageId: event.payload.messageId,
@@ -1658,7 +1658,7 @@ const make = Effect.gen(function* () {
       return yield* new ProviderTurnDeliveryError({
         certainty: "not_sent",
         retryable: false,
-        detail: "The queued turn's thread no longer exists.",
+        detail: "The queued turn's thread is missing, deleted, or archived.",
       });
     }
 

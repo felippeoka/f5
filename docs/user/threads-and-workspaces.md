@@ -86,3 +86,21 @@ override the resume setting.
 - [Agent tools](agent-tools.md)
 - [Workflows](workflows.md)
 - [Keybindings](../../KEYBINDINGS.md)
+
+## Panel tabs
+
+Drag a tab to change its order. **Mod+T** opens a searchable list of the thread's
+open panel tabs; Enter selects a result and Escape closes the list.
+**Mod+Shift+T** reopens the last closed tab, including its file location. F5
+remembers up to 20 closed tabs per thread for the current app session. Closing
+others, closing to the right and closing all also add to that history. Hiding
+the entire panel keeps its tabs open.
+
+In **Settings → Appearance → Conversation width**, select **Full** to use the
+available conversation width. Messages, the composer and conversation banners
+use the same width preference.
+
+Reasoning effort can also be stepped with the **Increase reasoning effort** and
+**Decrease reasoning effort** commands in keyboard settings. Both start unbound.
+They move through the selected model's supported levels, wrapping at either end,
+and keep the draft text, mode and other model options intact.

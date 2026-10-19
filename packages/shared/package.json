@@ -353,7 +353,8 @@
       "import": "./src/storageCleanup.ts"
     },
     "./mcpTools": "./src/mcpTools.ts",
-    "./mcpSecrets": "./src/mcpSecrets.ts"
+    "./mcpSecrets": "./src/mcpSecrets.ts",
+    "./observability": "./src/observability.ts"
   },
   "scripts": {
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",

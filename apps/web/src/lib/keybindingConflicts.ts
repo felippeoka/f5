@@ -178,8 +178,16 @@ export function formatKeybindingCommandLabel(
       return "Page chat down";
     case "chat.newBackground":
       return "Send new thread in background";
+    case "rightPanel.tabMenu":
+      return "Switch right panel tab";
+    case "rightPanel.reopenClosed":
+      return "Reopen closed right panel tab";
     case "rightPanel.closeTab":
       return "Close active right panel tab";
+    case "composer.effortUp":
+      return "Increase reasoning effort";
+    case "composer.effortDown":
+      return "Decrease reasoning effort";
     case "composer.effort":
       return "Choose effort";
     case "composer.runtimeMode":

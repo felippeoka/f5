@@ -246,20 +246,23 @@ const makeWithDatabase = (
     const semaphore = yield* Semaphore.make(1);
     const connection = yield* makeConnection;
 
-    const acquirer = Effect.suspend(() => {
-      const startedAt = performance.now();
-      return semaphore
-        .withPermits(1)(Effect.succeed(connection))
-        .pipe(Effect.tap(() => recordDuration(sqlConnectionWaitDuration, startedAt)));
-    });
-    const transactionAcquirer = Effect.uninterruptibleMask((restore) => {
+    // A standalone statement can yield while preparing or transforming a result.
+    // Reserve through its scope just like transactions, so neither can enter the other.
+    const acquirer = Effect.uninterruptibleMask((restore) => {
       const fiber = Fiber.getCurrent()!;
       const scope = ServiceMap.getUnsafe(fiber.services, Scope.Scope);
       const startedAt = performance.now();
       return Effect.as(
         Effect.tap(restore(semaphore.take(1)), () =>
           Scope.addFinalizer(scope, semaphore.release(1)).pipe(
-            Effect.andThen(recordDuration(sqlConnectionWaitDuration, startedAt)),
+            Effect.andThen(
+              Effect.suspend(() => {
+                const elapsed = performance.now() - startedAt;
+                return Metric.update(sqlConnectionWaitDuration, Duration.millis(elapsed)).pipe(
+                  Effect.andThen(Effect.annotateCurrentSpan("db.connection.wait_ms", elapsed)),
+                );
+              }),
+            ),
           ),
         ),
         connection,
@@ -269,11 +272,12 @@ const makeWithDatabase = (
     return yield* Client.make({
       acquirer,
       compiler,
-      transactionAcquirer,
+      transactionAcquirer: acquirer,
       beginTransaction: options.readonly ? "BEGIN" : "BEGIN IMMEDIATE",
       spanAttributes: [
         ...(options.spanAttributes ? Object.entries(options.spanAttributes) : []),
         [ATTR_DB_SYSTEM_NAME, "sqlite"],
+        ["db.connection.role", options.readonly ? "reader" : "writer"],
       ],
       transformRows,
     });

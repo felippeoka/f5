@@ -1,8 +1,8 @@
 # Preview snapshot secret protection
 
 This records the cross-frame portion of upstream #20446. Its delivery record
-remains deferred until native Electron verification and the settings/logs proof
-are complete.
+remains deferred until native Electron verification is complete. Settings and
+provider-initialization privacy checks are recorded below.
 
 The previous implementation collected protected fields only in the main frame.
 The new regression suite reproduced child credentials escaping in reflected text
@@ -58,3 +58,20 @@ bun run --cwd apps/desktop test:preview-snapshot:electron
 # Or reuse an installed binary matching apps/desktop/package.json exactly:
 bun run --cwd apps/desktop test:preview-snapshot:electron --executable=/path/to/Electron
 ```
+
+## Settings and initialization diagnostics
+
+Legacy global and per-instance OpenCode passwords now migrate into
+`ServerSecretStore`. The settings document stores only references; client reads
+redact the values. Updates preserve old redacted forms and roll back secret
+mutations when publication fails. A deleted instance removes its password.
+Missing references fail closed, while explicit replacement or removal can repair
+them without silently discarding other credentials.
+
+A separate failing-before regression reproduced private configuration values in
+provider schema-error diagnostics and unavailable snapshots. Another reproduced
+raw driver errors containing a credential in both outputs. Initialization now
+reports only fixed configuration/initialization categories and public instance
+identifiers. The focused settings and registry suites pass 38 tests, including
+both leak cases, publication failure, reference recovery and client redaction.
+These checks do not substitute for the failed native Electron fixture above.

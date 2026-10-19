@@ -11,6 +11,8 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import { Effect } from "effect";
+import { withEventBase } from "./eventBase.ts";
+import { decideWorkflowArchive, workflowEntries } from "./workflowArchiveLifecycle.ts";
 import {
   documentWorkflowForThread,
   defaultDocumentReaderSlot,
@@ -53,37 +55,6 @@ function unsupportedWorkflowBehaviorMessage(input: {
   } catch (cause) {
     return cause instanceof Error ? cause.message : "Unsupported planning workflow template.";
   }
-}
-
-const defaultMetadata: Omit<OrchestrationEvent, "sequence" | "type" | "payload"> = {
-  eventId: crypto.randomUUID() as OrchestrationEvent["eventId"],
-  aggregateKind: "thread",
-  aggregateId: "" as OrchestrationEvent["aggregateId"],
-  occurredAt: nowIso(),
-  commandId: null,
-  causationEventId: null,
-  correlationId: null,
-  metadata: {},
-};
-
-function withEventBase(
-  input: Pick<OrchestrationCommand, "commandId"> & {
-    readonly aggregateKind: OrchestrationEvent["aggregateKind"];
-    readonly aggregateId: OrchestrationEvent["aggregateId"];
-    readonly occurredAt: string;
-    readonly metadata?: OrchestrationEvent["metadata"];
-  },
-): Omit<OrchestrationEvent, "sequence" | "type" | "payload"> {
-  return {
-    ...defaultMetadata,
-    eventId: crypto.randomUUID() as OrchestrationEvent["eventId"],
-    aggregateKind: input.aggregateKind,
-    aggregateId: input.aggregateId,
-    occurredAt: input.occurredAt,
-    commandId: input.commandId,
-    correlationId: input.commandId,
-    metadata: input.metadata ?? {},
-  };
 }
 
 function makeThreadUnsnoozedEvent(input: {
@@ -627,6 +598,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.create": {
+      if (
+        workflowEntries(readModel).some(
+          (entry) =>
+            entry.workflow.deletedAt === null &&
+            entry.workflow.archivedAt !== null &&
+            entry.threadIds.includes(command.threadId),
+        )
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Restore the owning workflow before creating its thread.",
+        });
+      }
       yield* requireProject({
         readModel,
         command,
@@ -666,6 +650,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.delete": {
+      if (
+        command.expectedArchivedAt !== undefined &&
+        workflowEntries(readModel).some(
+          (entry) =>
+            entry.workflow.deletedAt === null && entry.threadIds.includes(command.threadId),
+        )
+      )
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Delete the owning workflow before permanently purging its threads.",
+        });
       const thread = yield* requireThread({
         readModel,
         command,
@@ -731,6 +726,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.unarchive": {
+      if (
+        workflowEntries(readModel).some(
+          (entry) =>
+            entry.workflow.deletedAt === null &&
+            entry.workflow.archivedAt !== null &&
+            entry.threadIds.includes(command.threadId),
+        )
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Restore the owning workflow before unarchiving this thread.",
+        });
+      }
       yield* requireThreadArchived({
         readModel,
         command,
@@ -1255,6 +1263,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "thread.turn.steer":
     case "thread.turn.start": {
+      if (
+        workflowEntries(readModel).some(
+          (entry) =>
+            entry.workflow.deletedAt === null &&
+            entry.workflow.archivedAt !== null &&
+            entry.threadIds.includes(command.threadId),
+        )
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Restore the owning workflow before starting a turn.",
+        });
+      }
       const targetThread = yield* requireThread({
         readModel,
         command,
@@ -2241,6 +2262,30 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "project.workflow.archive":
+    case "project.workflow.unarchive": {
+      yield* requireProject({ readModel, command, projectId: command.projectId });
+      const entry = workflowEntries(readModel).find(
+        (entry) =>
+          entry.kind === command.workflowKind &&
+          entry.workflow.id === command.workflowId &&
+          entry.workflow.projectId === command.projectId &&
+          entry.workflow.deletedAt === null,
+      );
+      if (!entry)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Workflow does not exist.",
+        });
+      return yield* decideWorkflowArchive({
+        entry,
+        readModel,
+        command,
+        occurredAt: command.createdAt,
+        operation: command.type === "project.workflow.archive" ? "archive" : "unarchive",
+      });
+    }
+
     case "project.workflow.upsert": {
       yield* requireProject({
         readModel,
@@ -2259,19 +2304,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Workflow branches must preserve branch ids 'a' and 'b'.",
         });
       }
-      return {
-        ...withEventBase({
-          aggregateKind: "project",
-          aggregateId: command.projectId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        }),
-        type: "project.workflow-upserted",
-        payload: {
-          projectId: command.projectId,
-          workflow: command.workflow,
-        },
-      };
+      return yield* decideWorkflowArchive({
+        entry: { kind: "planning", workflow: command.workflow },
+        readModel,
+        command,
+        occurredAt: command.createdAt,
+        operation: "preserve",
+      });
     }
 
     case "project.code-review-workflow.upsert": {
@@ -2286,19 +2325,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Workflow project id must match the enclosing project aggregate.",
         });
       }
-      return {
-        ...withEventBase({
-          aggregateKind: "project",
-          aggregateId: command.projectId,
-          occurredAt: command.updatedAt,
-          commandId: command.commandId,
-        }),
-        type: "project.code-review-workflow-upserted",
-        payload: {
-          projectId: command.projectId,
-          workflow: command.workflow,
-        },
-      };
+      return yield* decideWorkflowArchive({
+        entry: { kind: "codeReview", workflow: command.workflow },
+        readModel,
+        command,
+        occurredAt: command.updatedAt,
+        operation: "preserve",
+      });
     }
 
     case "project.code-review-workflow.delete": {
@@ -2345,19 +2378,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Workflow project id must match the enclosing project aggregate.",
         });
       }
-      return {
-        ...withEventBase({
-          aggregateKind: "project",
-          aggregateId: command.projectId,
-          occurredAt: command.updatedAt,
-          commandId: command.commandId,
-        }),
-        type: "project.investigation-workflow-upserted",
-        payload: {
-          projectId: command.projectId,
-          workflow: command.workflow,
-        },
-      };
+      return yield* decideWorkflowArchive({
+        entry: { kind: "investigation", workflow: command.workflow },
+        readModel,
+        command,
+        occurredAt: command.updatedAt,
+        operation: "preserve",
+      });
     }
 
     case "project.investigation-workflow.delete":

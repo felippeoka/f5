@@ -357,7 +357,7 @@ export function makeServerRuntimeServicesLayer() {
     prHubAdvisoryLayer,
     terminalLayer,
     KeybindingsLive,
-    ObservabilityLive,
+    ObservabilityLive.pipe(Layer.provide(ServerSettingsLive)),
     NextTurnQueueStoreLive,
   ).pipe(Layer.provideMerge(NodeServices.layer));
 }

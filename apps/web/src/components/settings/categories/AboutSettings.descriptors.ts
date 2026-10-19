@@ -2,6 +2,14 @@ import type { SettingsItemDescriptor } from "../settingsSearch";
 
 export const ABOUT_SETTINGS_DESCRIPTORS = [
   {
+    id: "about.cli",
+    category: "about",
+    label: "Install command-line tools",
+    description: "Install the bundled f5 and t3 commands for terminal use.",
+    keywords: ["terminal", "cli", "path", "symlink"],
+    targetSelector: '[data-settings-search-target="about.cli"]',
+  },
+  {
     id: "about.updates",
     category: "about",
     label: "Updates",

@@ -12,6 +12,7 @@ import {
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { isArchivedWorkflow, isDeletedWorkflow } from "@t3tools/shared/workflowArchive";
+import { setWorkflowArchived } from "../workflowArchiveLifecycle.ts";
 import { Cause, Effect, Layer, Stream } from "effect";
 
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
@@ -1195,6 +1196,7 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
 
   const startPendingInvestigations = (workflow: InvestigationWorkflow, updatedAt: string) =>
     Effect.gen(function* () {
+      if (isArchivedWorkflow(workflow)) return workflow;
       let nextWorkflow = workflow;
       for (const investigatorKey of ["investigatorA", "investigatorB"] as const) {
         const investigator = nextWorkflow[investigatorKey];
@@ -1383,6 +1385,7 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
     Effect.gen(function* () {
       if (
         isDeletedWorkflow(workflow) ||
+        isArchivedWorkflow(workflow) ||
         workflow.investigatorA.investigationStatus !== "completed" ||
         workflow.investigatorB.investigationStatus !== "completed"
       ) {
@@ -1508,6 +1511,7 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
     Effect.gen(function* () {
       if (
         isDeletedWorkflow(workflow) ||
+        isArchivedWorkflow(workflow) ||
         !workflow.selfReviewEnabled ||
         workflow.investigatorA.investigationStatus !== "completed" ||
         workflow.investigatorB.investigationStatus !== "completed"
@@ -1633,6 +1637,7 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
     Effect.gen(function* () {
       if (
         isDeletedWorkflow(workflow) ||
+        isArchivedWorkflow(workflow) ||
         workflow.investigatorA.crossReviewStatus !== "completed" ||
         workflow.investigatorB.crossReviewStatus !== "completed" ||
         (workflow.selfReviewEnabled &&
@@ -2644,48 +2649,10 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
     });
 
   const archiveWorkflow: InvestigationWorkflowServiceShape["archiveWorkflow"] = (workflowId) =>
-    Effect.gen(function* () {
-      const workflow = yield* readInvestigationWorkflow(orchestrationEngine, workflowId).pipe(
-        Effect.mapError(
-          (error) => new Error(`Failed to load workflow '${workflowId}': ${String(error)}`),
-        ),
-      );
-      if (!workflow) {
-        return yield* Effect.fail(new Error(`Workflow '${workflowId}' does not exist.`));
-      }
-      if (isArchivedWorkflow(workflow)) {
-        return yield* Effect.fail(new Error(`Workflow '${workflowId}' is already archived.`));
-      }
-
-      const updatedAt = new Date().toISOString();
-      yield* upsertWorkflow(
-        orchestrationEngine,
-        { ...workflow, archivedAt: updatedAt, updatedAt },
-        updatedAt,
-      );
-    });
+    setWorkflowArchived(orchestrationEngine, "investigation", workflowId, true);
 
   const unarchiveWorkflow: InvestigationWorkflowServiceShape["unarchiveWorkflow"] = (workflowId) =>
-    Effect.gen(function* () {
-      const workflow = yield* readInvestigationWorkflow(orchestrationEngine, workflowId).pipe(
-        Effect.mapError(
-          (error) => new Error(`Failed to load workflow '${workflowId}': ${String(error)}`),
-        ),
-      );
-      if (!workflow) {
-        return yield* Effect.fail(new Error(`Workflow '${workflowId}' does not exist.`));
-      }
-      if (!isArchivedWorkflow(workflow)) {
-        return yield* Effect.fail(new Error(`Workflow '${workflowId}' is not archived.`));
-      }
-
-      const updatedAt = new Date().toISOString();
-      yield* upsertWorkflow(
-        orchestrationEngine,
-        { ...workflow, archivedAt: null, updatedAt },
-        updatedAt,
-      );
-    });
+    setWorkflowArchived(orchestrationEngine, "investigation", workflowId, false);
 
   const retryWorkflow: InvestigationWorkflowServiceShape["retryWorkflow"] = (input) =>
     Effect.gen(function* () {
@@ -2697,6 +2664,8 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
       if (!workflow) {
         return yield* Effect.fail(new Error(`Workflow '${input.workflowId}' does not exist.`));
       }
+      if (isArchivedWorkflow(workflow))
+        return yield* Effect.fail(new Error("Restore the workflow before retrying it."));
 
       const updatedAt = new Date().toISOString();
       let nextWorkflow = workflow;

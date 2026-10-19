@@ -703,7 +703,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     private: true,
     description: "F5 desktop app",
     author: "Felipe Lopes",
-    main: "apps/desktop/dist-electron/main.js",
+    main: "apps/desktop/dist-electron/boot.js",
     build: yield* createBuildConfig(
       options.platform,
       options.target,

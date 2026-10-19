@@ -355,6 +355,7 @@ import { ComposerCommandItem } from "./chat/ComposerCommandMenu";
 
 import {
   getComposerProviderState,
+  getComposerReasoningStep,
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./chat/composerProviderState";
@@ -4094,6 +4095,28 @@ export default function ChatView({
           );
         return;
       }
+      if (command === "rightPanel.tabMenu") {
+        event.preventDefault();
+        const state = useRightPanelStore.getState();
+        const panel = state.byThreadId[activeThreadId];
+        if (panel?.surfaces.length) {
+          state.activateSurface(activeThreadId, panel.activeSurfaceId ?? panel.surfaces[0]!.id);
+          state.setTabMenuThread(activeThreadId);
+        }
+        return;
+      }
+      if (command === "rightPanel.reopenClosed") {
+        event.preventDefault();
+        const surface = useRightPanelStore.getState().reopenClosed(activeThreadId);
+        if (surface)
+          void navigate({
+            to: "/$threadId",
+            params: { threadId: activeThreadId },
+            replace: true,
+            search: (previous) => setSearchParamsForSurface(previous, surface),
+          });
+        return;
+      }
       if (command === "rightPanel.closeTab") {
         const state = useRightPanelStore.getState();
         const panel = state.byThreadId[activeThreadId];
@@ -4101,6 +4124,33 @@ export default function ChatView({
           event.preventDefault();
           state.closeSurface(activeThreadId, panel.activeSurfaceId);
         }
+        return;
+      }
+      if (command === "composer.effortUp" || command === "composer.effortDown") {
+        event.preventDefault();
+        if (
+          event.repeat ||
+          wsInteractionBlocked ||
+          dialogFocus ||
+          isTerminalFocused() ||
+          isComposerApprovalState ||
+          blockingUserInputs.length > 0
+        )
+          return;
+        const options = getComposerReasoningStep({
+          provider: selectedProviderDriver,
+          model: selectedModel,
+          models: selectedProviderModels,
+          modelOptions: selectedProviderModelOptionsForDispatch,
+          direction: command === "composer.effortUp" ? 1 : -1,
+        });
+        if (options)
+          useComposerDraftStore
+            .getState()
+            .setProviderModelOptions(activeThreadId, selectedProviderDriver, options, {
+              model: selectedModel,
+              persistSticky: true,
+            });
         return;
       }
       if (command === "composer.interactionMode") {
@@ -4191,6 +4241,12 @@ export default function ChatView({
     return () => window.removeEventListener("keydown", handler, true);
   }, [
     activeThreadId,
+    selectedProviderModels,
+    selectedModel,
+    selectedProviderDriver,
+    selectedProviderModelOptionsForDispatch,
+    isComposerApprovalState,
+    blockingUserInputs.length,
     keybindings,
     onStashPrompt,
     threadActionController,

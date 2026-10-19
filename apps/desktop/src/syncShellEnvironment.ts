@@ -4,6 +4,8 @@ import {
   type WindowsRegistryPathReader,
 } from "@t3tools/shared/windowsPath";
 
+const CA_TRUST_NAMES = ["SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS"] as const;
+
 const LOCALE_NAMES = ["LANG", "LC_ALL", "LC_CTYPE"] as const;
 
 export function syncShellEnvironment(
@@ -35,7 +37,11 @@ export function syncShellEnvironment(
       "PATH",
       "SSH_AUTH_SOCK",
       ...LOCALE_NAMES,
+      ...CA_TRUST_NAMES,
     ]);
+
+    for (const name of CA_TRUST_NAMES)
+      if (!env[name]?.trim() && shellEnvironment[name]?.trim()) env[name] = shellEnvironment[name];
 
     // Locale categories form a precedence group; never override an inherited choice.
     if (LOCALE_NAMES.every((name) => !env[name]?.trim())) {

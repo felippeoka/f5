@@ -2,6 +2,14 @@ import type { SettingsItemDescriptor } from "../settingsSearch";
 
 export const GENERAL_SETTINGS_DESCRIPTORS = [
   {
+    id: "general.diagnostics",
+    category: "general",
+    label: "Diagnostics",
+    description: "Configure OpenTelemetry traces, metrics and collector headers.",
+    keywords: ["otlp", "traces", "metrics", "observability", "telemetry"],
+    targetSelector: '[aria-label="traces collector URL"]',
+  },
+  {
     id: "general.sidebar-preview",
     category: "general",
     label: "Sidebar thread preview count",

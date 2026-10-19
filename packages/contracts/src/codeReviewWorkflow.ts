@@ -9,6 +9,7 @@ import {
   makeEntityId,
 } from "./baseSchemas";
 import { WorkflowModelSlot, WorkflowStepStatus } from "./planningWorkflow";
+import { WorkflowArchiveRestorations } from "./workflowArchive";
 
 /**
  * The `thread.turn.start` command that began a stage's current attempt. Only
@@ -77,6 +78,7 @@ export const CodeReviewWorkflow = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  archiveRestorations: WorkflowArchiveRestorations,
   deletedAt: Schema.NullOr(IsoDateTime),
 });
 export type CodeReviewWorkflow = typeof CodeReviewWorkflow.Type;

@@ -145,82 +145,6 @@ function parseRepositoryOwnerLogin(nameWithOwner: string | null): string | null 
   return normalizedOwnerLogin.length > 0 ? normalizedOwnerLogin : null;
 }
 
-function readNameWithOwner(value: unknown): string | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const nameWithOwner = (value as { readonly nameWithOwner?: unknown }).nameWithOwner;
-  return typeof nameWithOwner === "string" && nameWithOwner.trim().length > 0
-    ? nameWithOwner.trim()
-    : null;
-}
-
-function readLogin(value: unknown): string | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const login = (value as { readonly login?: unknown }).login;
-  return typeof login === "string" && login.trim().length > 0 ? login.trim() : null;
-}
-
-function parsePullRequestList(raw: unknown): PullRequestInfo[] {
-  if (!Array.isArray(raw)) return [];
-
-  const parsed: PullRequestInfo[] = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== "object") continue;
-    const record = entry as Record<string, unknown>;
-    const number = record.number;
-    const title = record.title;
-    const url = record.url;
-    const baseRefName = record.baseRefName;
-    const headRefName = record.headRefName;
-    const state = record.state;
-    const mergedAt = record.mergedAt;
-    const updatedAt = record.updatedAt;
-    const headRepositoryNameWithOwner = readNameWithOwner(record.headRepository);
-    const headRepositoryOwnerLogin = readLogin(record.headRepositoryOwner);
-    const isCrossRepository =
-      typeof record.isCrossRepository === "boolean" ? record.isCrossRepository : undefined;
-    if (typeof number !== "number" || !Number.isInteger(number) || number <= 0) {
-      continue;
-    }
-    if (
-      typeof title !== "string" ||
-      typeof url !== "string" ||
-      typeof baseRefName !== "string" ||
-      typeof headRefName !== "string"
-    ) {
-      continue;
-    }
-
-    let normalizedState: "open" | "closed" | "merged";
-    if ((typeof mergedAt === "string" && mergedAt.trim().length > 0) || state === "MERGED") {
-      normalizedState = "merged";
-    } else if (state === "OPEN" || state === undefined || state === null) {
-      normalizedState = "open";
-    } else if (state === "CLOSED") {
-      normalizedState = "closed";
-    } else {
-      continue;
-    }
-
-    parsed.push({
-      number,
-      title,
-      url,
-      baseRefName,
-      headRefName,
-      state: normalizedState,
-      updatedAt: typeof updatedAt === "string" && updatedAt.trim().length > 0 ? updatedAt : null,
-      ...(isCrossRepository !== undefined ? { isCrossRepository } : {}),
-      ...(headRepositoryNameWithOwner ? { headRepositoryNameWithOwner } : {}),
-      ...(headRepositoryOwnerLogin ? { headRepositoryOwnerLogin } : {}),
-    });
-  }
-  return parsed;
-}
-
 function gitManagerError(operation: string, detail: string, cause?: unknown): GitManagerError {
   return new GitManagerError({
     operation,
@@ -933,36 +857,14 @@ export const makeGitManager = Effect.gen(function* () {
       const parsedByNumber = new Map<number, PullRequestInfo>();
 
       for (const headSelector of headContext.headSelectors) {
-        const stdout = yield* provider
-          .execute({
-            cwd,
-            args: [
-              "pr",
-              "list",
-              "--head",
-              headSelector,
-              "--state",
-              "all",
-              "--limit",
-              "100",
-              "--json",
-              "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
-            ],
-          })
-          .pipe(Effect.map((result) => result.stdout));
-
-        const raw = stdout.trim();
-        if (raw.length === 0) {
-          continue;
-        }
-
-        const parsedJson = yield* Effect.try({
-          try: () => JSON.parse(raw) as unknown,
-          catch: (cause) =>
-            gitManagerError("findLatestPr", "GitHub CLI returned invalid PR list JSON.", cause),
+        const pullRequests = yield* provider.listOpenPullRequests({
+          cwd,
+          headSelector,
+          state: "all",
+          limit: 100,
         });
-
-        for (const pr of parsePullRequestList(parsedJson)) {
+        for (const item of pullRequests) {
+          const pr = { ...item, state: item.state ?? "open", updatedAt: item.updatedAt ?? null };
           if (!matchesBranchHeadContext(pr, headContext)) continue;
           parsedByNumber.set(pr.number, {
             ...pr,

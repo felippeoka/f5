@@ -12,7 +12,7 @@ const THREAD_B = ThreadId.makeUnsafe("thread-b");
 
 describe("rightPanelStore", () => {
   beforeEach(() => {
-    useRightPanelStore.setState({ byThreadId: {} });
+    useRightPanelStore.setState({ byThreadId: {}, closedByThreadId: {}, tabMenuThreadId: null });
   });
 
   it("adds agent surfaces without opening the panel or stealing the active tab", () => {
@@ -213,5 +213,75 @@ describe("rightPanelStore", () => {
     useRightPanelStore.getState().close(THREAD_A);
     expect(selectSurfaceHeaderState(state(), "preview")).toBe("closed");
     expect(selectSurfaceHeaderState(state(), "agents")).toBe("closed");
+  });
+});
+
+describe("right panel order and closed history", () => {
+  beforeEach(() =>
+    useRightPanelStore.setState({ byThreadId: {}, closedByThreadId: {}, tabMenuThreadId: null }),
+  );
+  it("moves tabs without changing the active surface and ignores invalid positions", () => {
+    const store = useRightPanelStore.getState();
+    store.open(THREAD_A, "diff");
+    store.open(THREAD_A, "plan");
+    store.open(THREAD_A, "agents");
+    store.moveSurface(THREAD_A, 0, 2);
+    const panel = useRightPanelStore.getState().byThreadId[THREAD_A]!;
+    expect(panel.surfaces.map((surface) => surface.id)).toEqual(["plan", "agents", "diff"]);
+    expect(panel.activeSurfaceId).toBe("agents");
+    for (const [from, to] of [
+      [-1, 0],
+      [0, 9],
+      [1.5, 0],
+      [0, NaN],
+      [1, 1],
+    ])
+      store.moveSurface(THREAD_A, from!, to!);
+    expect(useRightPanelStore.getState().byThreadId[THREAD_A]).toBe(panel);
+  });
+  it("reopens full file locations in LIFO order after bulk and individual closes", () => {
+    const store = useRightPanelStore.getState();
+    store.open(THREAD_A, "diff");
+    store.openFile(THREAD_A, { relativePath: "src/a.ts", line: 12, endLine: 15, column: 3 });
+    store.open(THREAD_A, "plan");
+    store.closeSurfacesToRight(THREAD_A, "diff");
+    expect(store.reopenClosed(THREAD_A)?.kind).toBe("plan");
+    expect(store.reopenClosed(THREAD_A)).toEqual({
+      id: "file:src/a.ts",
+      kind: "file",
+      relativePath: "src/a.ts",
+      line: 12,
+      endLine: 15,
+      column: 3,
+    });
+    expect(useRightPanelStore.getState().byThreadId[THREAD_A]?.isOpen).toBe(true);
+    store.closeAllSurfaces(THREAD_A);
+    expect(store.reopenClosed(THREAD_A)?.id).toBe("file:src/a.ts");
+  });
+  it("retains at most twenty tabs per thread and removes history when its thread is removed", () => {
+    const store = useRightPanelStore.getState();
+    for (let index = 0; index < 25; index++) {
+      const file = store.openFile(THREAD_A, { relativePath: `file-${index}` });
+      store.closeSurface(THREAD_A, file.id);
+    }
+    expect(useRightPanelStore.getState().closedByThreadId[THREAD_A]).toHaveLength(20);
+    expect(store.reopenClosed(THREAD_B)).toBeNull();
+    expect(store.reopenClosed(THREAD_A)?.id).toBe("file:file-24");
+    store.closeAllSurfaces(THREAD_A);
+    store.setTabMenuThread(THREAD_A);
+    store.removeThread(THREAD_A);
+    expect(useRightPanelStore.getState().closedByThreadId[THREAD_A]).toBeUndefined();
+    expect(useRightPanelStore.getState().tabMenuThreadId).toBeNull();
+    expect(store.reopenClosed(THREAD_A)).toBeNull();
+  });
+  it("does not remember hidden panels or reopen a duplicate tab", () => {
+    const store = useRightPanelStore.getState();
+    store.open(THREAD_A, "diff");
+    store.close(THREAD_A);
+    expect(store.reopenClosed(THREAD_A)).toBeNull();
+    store.closeSurface(THREAD_A, "diff");
+    store.open(THREAD_A, "diff");
+    expect(store.reopenClosed(THREAD_A)).toBeNull();
+    expect(useRightPanelStore.getState().byThreadId[THREAD_A]?.surfaces).toHaveLength(1);
   });
 });

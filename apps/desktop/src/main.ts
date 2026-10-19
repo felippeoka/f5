@@ -1,3 +1,4 @@
+import { createDesktopCliInstaller } from "./cliCommand";
 import { offerApplicationsMove, createBootstrapGate } from "./startupInstallation";
 import { createUpdatePoller } from "./updatePoller";
 import { getUpdateErrorMessage } from "./updateErrors";
@@ -2115,6 +2116,7 @@ protocol.registerSchemesAsPrivileged([
       secure: true,
       supportFetchAPI: true,
       corsEnabled: true,
+      codeCache: true,
     },
   },
 ]);
@@ -2876,7 +2878,12 @@ function startBackend(runtime: BackendRuntime = defaultBackend): void {
 
   const backendIncarnation = Crypto.randomUUID();
   const captureBackendLogs = backendLogSink !== null;
-  const isolated = isolatedBackendCommand(process.platform, process.execPath, backendEntry);
+  const isolated = isolatedBackendCommand(
+    process.platform,
+    process.execPath,
+    backendEntry,
+    app.isPackaged ? ["--require", Path.join(__dirname, "compileCache.js")] : [],
+  );
   const child = ChildProcess.spawn(isolated.executable, isolated.args, {
     cwd: resolveBackendCwd(),
     // In Electron main, process.execPath points to the Electron binary.
@@ -3173,6 +3180,26 @@ function registerIpcHandlers(): void {
       event.returnValue = null;
     }
   });
+  const cliInstaller = createDesktopCliInstaller({
+    executable: process.execPath,
+    entry: resolveBackendEntry(),
+    launcherDirectory: Path.join(app.getPath("userData"), "cli"),
+    home: OS.homedir(),
+  });
+  for (const [channel, action] of [
+    ["desktop:cli-command-state", cliInstaller.state],
+    ["desktop:cli-command-install", cliInstaller.install],
+  ] as const) {
+    ipcMain.handle(channel, async (event) => {
+      assertUpdateCaller(event, runtimeForRenderer);
+      if (!app.isPackaged) {
+        if (channel === "desktop:cli-command-state")
+          return { supported: false, installedPaths: { f5: null, t3: null }, onPath: false };
+        throw new Error("The CLI installer requires a packaged desktop application.");
+      }
+      return action();
+    });
+  }
   ipcMain.handle("desktop:switch-profile", async (event, id: unknown) => {
     runtimeForRenderer(event.sender.id);
     if (typeof id !== "string") return false;

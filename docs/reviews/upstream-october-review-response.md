@@ -27,6 +27,74 @@ The findings are accepted. The only procedural departure is preserving history
 instead of rebasing. This patch does not claim the full catch-up or its mandatory
 cut line is complete; the unresolved obligations below still apply.
 
+## Continued implementation after the full-plan request
+
+The integrated baseline is committed as `aaff303849`. Subsequent implementation
+adds the following behavior, with delivery decisions still requiring per-SHA proof:
+
+- Legacy global and per-instance OpenCode passwords move to `ServerSecretStore`.
+  Removed instances also remove their stored passwords. An explicit replacement
+  repairs a missing secret; unrelated changes still fail closed.
+  Migration and ordinary writes share rollback, preserve symlinks, and fail closed
+  when a stored reference cannot be read. Collector headers use the same path and
+  are removed from client reads. Failed migration preserves the original document.
+- OTLP traces and metrics use the installed Effect JSON/protobuf serializers.
+  Endpoint/header precedence, signal kill switches and resource attributes are
+  resolved centrally. The trace exporter bounds retained bytes and records,
+  owns one HTTP request, rejects redirects and aborts on shutdown. Metrics export
+  serially with bounded bodies and request deadlines. Unavailable log directories
+  do not prevent server work. The General settings Diagnostics card exposes
+  collector URLs, secret header editing and credential-free source information.
+- Event-loop stalls become independent duration-bearing spans with a 128-entry
+  recent history. SQLite spans identify connection role and semaphore wait time.
+  Standalone queries now reserve the connection until their operation scope closes;
+  a failing-before test shows a transaction entering a suspended statement before
+  this change, and verifies both serialization and the visible query result. Explicit SIGUSR2
+  requests write heap snapshots, and `f5 trace summarize --file ...` streams a
+  bounded trace reader and reports slow spans, failures and stalls.
+- Captured GitHub API requests use bounded HTTP reads instead of `gh api`.
+  Conditional caching, scheduling, credential scope and generation checks remain.
+  A rejected token refreshes once, and retries cannot change the account. A
+  failing-before race test also proves that a retry uses the exact token whose
+  identity was verified, even if token resolution changes during refresh. The
+  legacy CLI token fallback has tested five-minute/ten-second positive/negative TTLs.
+  PR listing/viewing/creation, reviews, comments, ready state, reviewer changes,
+  guarded merge/branch update, repository metadata, teams and search now use the
+  captured HTTP path. PR Hub diff reads request bounded text through the same
+  boundary. Concurrent head lookups batch up to 50 per repository/account/priority,
+  and the five-second shared remote-routing cache avoids Git work for repeated
+  reads. The remaining 15g verify-first scenarios, merge-read policy and sync
+  reset-wait behavior are still obligations.
+- Desktop login-shell hydration imports missing CA trust variables without
+  replacing inherited values. A packaged boot entry enables the V8 compile cache
+  before main and preloads it inside the isolated backend. Development and
+  AppImage paths retain their existing policy; Node's opt-out is respected.
+  Settings → About installs explicit `f5`/`t3` symlinks to a launcher using the
+  bundled runtime. It preserves foreign and dangling destinations, serializes
+  installs, falls back without privilege escalation and refuses PATH shadowing.
+- Provider initialization diagnostics and unavailable snapshots now contain fixed
+  failure categories instead of schema payloads or raw driver errors. Two
+  failing-before tests reproduce credential leaks through both paths.
+- Panel tabs can be dragged, searched with Mod+T and reopened with Mod+Shift+T.
+  All explicit close actions share a bounded 20-tab history per thread, retaining
+  file positions. Removing a thread clears it; hiding a panel adds no history.
+  Conversation width also offers Full while preserving existing preferences.
+  Unbound effort-up/down commands use reported model levels and the existing
+  Codex fallback policy, retain other traits and ignore repeated keydown events.
+  A full-app Chromium case verifies the custom bindings without sending a turn.
+
+Focused fake-collector, secret persistence/recovery, HTTP credential, browser
+settings, real child-process cache, CLI and desktop isolation checks cover these
+changes. The Node-built CLI successfully summarized a fixture without starting
+the server. Both server and desktop builds succeed. Later validation results
+supersede the earlier handoff below.
+
+The full plan is not delivered yet. Settlement, thread HTML tools/MCP apps,
+PR watches/guides and remaining PR UX, project provider/custom ACP/Pi,
+scratch projects/prompt links, timeline/panel/usage/native history changes,
+desktop passkeys, full verify-first triage and remaining performance
+comparisons are still required. No unfinished workstream has been promoted.
+
 ## Current validation (2026-10-19)
 
 - `bun fmt`, `bun lint`, `bun typecheck` (all eight packages),
@@ -35,9 +103,9 @@ cut line is complete; the unresolved obligations below still apply.
   regressions. The final audit-summary change passes all 24 cleanup tests again.
 - The exhaustive real-Git matrix passes 162 tests; Git smoke passes eight;
   server integration passes 25, with 18 existing opt-in skips.
-- The server unit run passes 4,765 tests and fails three launcher process-identity
+- The earlier continuation server unit run passes 4,787 tests and fails three launcher process-identity
   cases because this host rejects `/bin/ps` with `EPERM` (12 existing skips).
-- Desktop unit tests pass all 558 cases. The Chromium cross-frame snapshot smoke
+- Desktop unit tests pass all 567 cases after the installer/cache changes. The Chromium cross-frame snapshot smoke
   passes. Native Electron 40.6.0 aborts with `SIGABRT` before a result, so native
   integration remains unverified.
 - A fresh 40 MiB WAL measurement passes five warmups and thirty measured
@@ -55,6 +123,29 @@ cut line is complete; the unresolved obligations below still apply.
 The full gate is failed. Verify-first triage and the remaining security/native
 verification obligations are unfinished. These results do not establish the
 mandatory catch-up cut line.
+
+The subsequent HTTP/SQL/panel continuation passes 589 Git/PR Hub/source-control
+checks, 18 focused SQLite checks, 72 panel/shortcut checks, 138 appearance/settings
+checks, nine installer/About browser checks and four panel browser checks. The
+updated exhaustive Git matrix passes all 162 cases. Its fake adapter now honors
+`state: "all"` and normalizes API states, preserving the existing closed/merged/
+fork/open-preference assertions. The real desktop launcher starts Electron in
+Node mode and successfully prints the bundled server's `--help`. Full native GUI
+snapshot verification remains separate and unverified.
+
+The complete server run after the SQL reservation correction passes 4,808 tests
+and fails six (12 existing skips). Three are the launcher identity checks; three
+are workflow-storage assertions affected by concurrent workflow-archive edits
+in this checkout. Those edits are preserved and outside this continuation.
+Subsequent focused privacy/settings/registry checks pass 38 cases, and the latest
+HTTP/token race suite passes 66. Chromium tab dragging passes with no unhandled
+errors, as do the searchable tab menu and panel boundary checks.
+
+A fresh checkpoint measurement after the SQL reservation correction again runs
+five warmups and thirty measured repetitions. Maximum event-loop p99 is
+**3.219455 ms**, below 50 ms. The [new raw report](./upstream-october-checkpoint-postscope-measurement.json)
+retains source-dirty, runtime, hardware and digest metadata. Earlier reports are
+preserved; none is a comparative CPU or whole-application performance claim.
 
 ## Earlier implementation and review evidence
 

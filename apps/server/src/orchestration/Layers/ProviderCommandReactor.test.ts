@@ -87,6 +87,7 @@ import {
 } from "../Services/OrchestrationEngine.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { makeTraceSink } from "../../observability/TraceSink.ts";
 import { makeLocalFileTracer } from "../../observability/LocalFileTracer.ts";
 import { dispatchBootstrapTurnStart } from "../../wsServer/bootstrapTurnStart.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -599,14 +600,21 @@ describe("ProviderCommandReactor", () => {
         ),
     } satisfies ProviderSessionDirectoryShape;
 
-    const tracerLayer = input?.tracePath
+    let flushTrace: Effect.Effect<void> = Effect.void;
+    const tracePath = input?.tracePath;
+    const tracerLayer = tracePath
       ? Layer.effect(
           Tracer.Tracer,
-          makeLocalFileTracer({
-            filePath: input.tracePath,
-            maxBytes: 1024 * 1024,
-            maxFiles: 2,
-            batchWindowMs: 1,
+          Effect.gen(function* () {
+            const options = {
+              filePath: tracePath,
+              maxBytes: 1024 * 1024,
+              maxFiles: 2,
+              batchWindowMs: 1,
+            };
+            const sink = yield* makeTraceSink(options);
+            flushTrace = sink.flush;
+            return yield* makeLocalFileTracer({ ...options, sink });
           }),
         )
       : Layer.empty;
@@ -861,6 +869,7 @@ describe("ProviderCommandReactor", () => {
     }
 
     return {
+      flushTrace: () => Effect.runPromise(flushTrace),
       waitForDeliveries: () => Promise.all(pendingDeliveries),
       actualProvider: await runtime.runPromise(Effect.service(ProviderService)),
       engine,
@@ -1257,7 +1266,7 @@ describe("ProviderCommandReactor", () => {
 
     await waitFor(() => harness.startSession.mock.calls.length === 1);
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
-    await Effect.runPromise(Effect.sleep("25 millis"));
+    await harness.flushTrace();
 
     const after = await Effect.runPromise(Metric.snapshot);
     expect(
@@ -4723,5 +4732,39 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.archivedAt).toBe(now);
     expect(thread?.session?.status).toBe("stopped");
     expect(thread?.session?.activeTurnId).toBeNull();
+  });
+
+  it("does not deliver a pending turn after its thread was archived", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const createdAt = "2026-10-19T10:00:00.000Z";
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.makeUnsafe("archive-before-delivery"),
+        threadId,
+        createdAt,
+      }),
+    );
+    const error = await Effect.runPromise(
+      harness.reactor
+        .deliverTurnStart({
+          type: "thread.turn-start-requested",
+          sequence: 1,
+          eventId: EventId.makeUnsafe("pending-before-archive"),
+          commandId: CommandId.makeUnsafe("pending"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: createdAt,
+          correlationId: null,
+          causationEventId: null,
+          metadata: {},
+          payload: { threadId, messageId: MessageId.makeUnsafe("pending-message"), createdAt },
+        } as never)
+        .pipe(Effect.flip, Effect.scoped),
+    );
+    expect(error).toMatchObject({ certainty: "not_sent", retryable: false });
+    expect(harness.startSession).not.toHaveBeenCalled();
+    expect(harness.sendTurn).not.toHaveBeenCalled();
   });
 });

@@ -1,3 +1,4 @@
+import { RightPanelTabMenu } from "./RightPanelTabMenu";
 import type { ContextMenuItem } from "@t3tools/contracts";
 import {
   BotIcon,
@@ -260,6 +261,9 @@ function RightPanelEmptyState(props: {
 export function RightPanelTabs(props: {
   mode: "sidebar" | "sheet";
   surfaces: readonly RightPanelSurface[];
+  onMoveSurface?: (from: number, to: number) => void;
+  tabMenuOpen?: boolean;
+  onTabMenuOpenChange?: (open: boolean) => void;
   activeSurfaceId: string | null;
   onActivate: (surface: RightPanelSurface) => void;
   onCloseSurface: (surface: RightPanelSurface) => void;
@@ -282,6 +286,7 @@ export function RightPanelTabs(props: {
   children: ReactNode;
 }) {
   const keybindings = useServerKeybindings();
+  const draggedSurfaceId = useRef<string | null>(null);
   const tabListRef = useRef<HTMLDivElement>(null);
   const ownsDesktopTitleBar = isElectron && props.mode === "sidebar";
 
@@ -361,6 +366,13 @@ export function RightPanelTabs(props: {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-background">
+      <RightPanelTabMenu
+        open={props.tabMenuOpen ?? false}
+        onOpenChange={props.onTabMenuOpenChange ?? (() => {})}
+        surfaces={props.surfaces}
+        title={(surface) => surfaceTitle(surface, props.previewPresentation)}
+        onActivate={props.onActivate}
+      />
       <div
         className={cn(
           "flex shrink-0 items-center border-b border-border px-2",
@@ -379,6 +391,36 @@ export function RightPanelTabs(props: {
                   <div
                     key={surface.id}
                     data-active-tab={active}
+                    draggable={Boolean(props.onMoveSurface)}
+                    onDragStart={(event) => {
+                      draggedSurfaceId.current = surface.id;
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("application/x-f5-panel-tab", surface.id);
+                    }}
+                    onDragEnd={() => {
+                      draggedSurfaceId.current = null;
+                    }}
+                    onDragOver={(event) => {
+                      if (draggedSurfaceId.current && draggedSurfaceId.current !== surface.id) {
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = "move";
+                      }
+                    }}
+                    onDrop={(event) => {
+                      if (
+                        !draggedSurfaceId.current ||
+                        event.dataTransfer.getData("application/x-f5-panel-tab") !==
+                          draggedSurfaceId.current
+                      )
+                        return;
+                      event.preventDefault();
+                      const from = props.surfaces.findIndex(
+                          (entry) => entry.id === draggedSurfaceId.current,
+                        ),
+                        to = props.surfaces.findIndex((entry) => entry.id === surface.id);
+                      if (from >= 0 && to >= 0) props.onMoveSurface?.(from, to);
+                      draggedSurfaceId.current = null;
+                    }}
                     onMouseDown={handleTabMouseDown}
                     onAuxClick={(event) => handleTabAuxClick(event, surface)}
                     onContextMenu={(event) => void handleTabContextMenu(event, surface)}

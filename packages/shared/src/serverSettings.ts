@@ -117,7 +117,10 @@ function preserveRedactedProviderSecrets(
       continue;
     }
     const currentServerPassword = currentInstance.config.serverPassword;
-    if (typeof currentServerPassword !== "string" || currentServerPassword.length === 0) {
+    if (
+      typeof currentServerPassword !== "string" ||
+      (currentServerPassword.length === 0 && currentInstance.config.serverPasswordRedacted !== true)
+    ) {
       continue;
     }
     const nextInstance = providerInstances[providerInstanceId];
@@ -131,6 +134,9 @@ function preserveRedactedProviderSecrets(
         config: {
           ...nextInstance.config,
           serverPassword: currentServerPassword,
+          ...(currentInstance.config.serverPasswordRedacted === true
+            ? { serverPasswordRedacted: true }
+            : {}),
         },
       },
     };

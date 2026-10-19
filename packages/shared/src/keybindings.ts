@@ -18,6 +18,12 @@ type WhenToken =
   | { type: "rparen" };
 
 export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
+  { key: "mod+t", command: "rightPanel.tabMenu", when: "!terminalFocus && !dialogFocus" },
+  {
+    key: "mod+shift+t",
+    command: "rightPanel.reopenClosed",
+    when: "!terminalFocus && !dialogFocus",
+  },
   { key: "mod+[", command: "navigation.back", when: "!terminalFocus && !dialogFocus" },
   { key: "mod+]", command: "navigation.forward", when: "!terminalFocus && !dialogFocus" },
   {

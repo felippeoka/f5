@@ -25,6 +25,7 @@ import { GitManager } from "../git/Services/GitManager.ts";
 import { canonicalWorktreePath } from "../git/worktreePaths.ts";
 import { NextTurnQueueStore } from "../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { workflowEntries } from "../orchestration/workflowArchiveLifecycle.ts";
 import {
   pathContains,
   RepositoryBusyError,
@@ -549,7 +550,13 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
   const purgeThreadDryRunTargets = (settings: ServerSettings) =>
     Effect.gen(function* () {
       const cutoffs = purgeCutoffs(settings);
-      const threads = (yield* engine.getReadModel()).threads;
+      const model = yield* engine.getReadModel();
+      const retained = new Set(
+        workflowEntries(model)
+          .filter((entry) => entry.workflow.deletedAt === null)
+          .flatMap((entry) => entry.threadIds),
+      );
+      const threads = model.threads.filter((thread) => !retained.has(thread.id));
       const deleted = threads.filter(
         (thread) =>
           cutoffs.deletedBefore !== null &&

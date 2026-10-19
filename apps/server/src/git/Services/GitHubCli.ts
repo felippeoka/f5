@@ -19,6 +19,7 @@ export interface GitHubPullRequestSummary {
   readonly baseRefName: string;
   readonly headRefName: string;
   readonly headRefOid?: string | null;
+  readonly updatedAt?: string | null;
   readonly state?: "open" | "closed" | "merged";
   readonly isCrossRepository?: boolean;
   readonly headRepositoryNameWithOwner?: string | null;
@@ -67,6 +68,7 @@ export interface GitHubCliShape {
   readonly listOpenPullRequests: (input: {
     readonly cwd: string;
     readonly headSelector: string;
+    readonly state?: "open" | "all";
     readonly limit?: number;
   }) => Effect.Effect<ReadonlyArray<GitHubPullRequestSummary>, GitHubCliError>;
 

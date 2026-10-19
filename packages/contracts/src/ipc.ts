@@ -572,7 +572,18 @@ export type QuitShortcutHintEvent =
   | { state: "up" }
   | { state: "down"; mode: Exclude<QuitShortcutMode, "direct"> };
 
+export interface DesktopCliCommandState {
+  readonly supported: boolean;
+  readonly installedPaths: Readonly<Record<"f5" | "t3", string | null>>;
+  readonly onPath: boolean;
+  readonly shadowedBy?: string;
+}
+
 export interface DesktopBridge {
+  cliCommand?: {
+    state: () => Promise<DesktopCliCommandState>;
+    install: () => Promise<DesktopCliCommandState>;
+  };
   /** F5-native computer control; reports why it is unavailable until certified. */
   computerAutomation?: DesktopComputerAutomationBridge;
   setQuitShortcutMode?: (mode: QuitShortcutMode) => Promise<void>;

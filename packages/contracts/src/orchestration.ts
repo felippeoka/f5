@@ -1844,6 +1844,14 @@ const ProjectWorkflowUpsertCommand = Schema.Struct({
 });
 
 const InternalOrchestrationCommand = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literals(["project.workflow.archive", "project.workflow.unarchive"]),
+    commandId: CommandId,
+    projectId: ProjectId,
+    workflowKind: Schema.Literals(["planning", "codeReview", "investigation"]),
+    workflowId: Schema.Union([PlanningWorkflowId, CodeReviewWorkflowId, InvestigationWorkflowId]),
+    createdAt: IsoDateTime,
+  }),
   ProjectSkillsReplaceCommand,
   ProjectWorkflowUpsertCommand,
   ProjectCodeReviewWorkflowCreateCommand,

@@ -238,20 +238,28 @@ export function makeGitHubForge(github: GitHubCliShape, cwd: string): ForgeProvi
         return files;
       }),
     getDiff: (ref) =>
-      scope(ref, () =>
+      scope(ref, (context) =>
         github
-          .execute({
+          .request({
             cwd,
-            args: [
-              "api",
-              `repos/${ref.repository}/pulls/${ref.number}`,
-              "--hostname",
-              ref.host,
-              "-H",
-              "Accept: application/vnd.github.diff",
-            ],
+            context,
+            method: "GET",
+            endpoint: `repos/${ref.repository}/pulls/${ref.number}`,
+            accept: "application/vnd.github.diff",
           })
-          .pipe(Effect.map((r) => r.stdout)),
+          .pipe(
+            Effect.flatMap((response) =>
+              response.status === 200 && typeof response.body === "string"
+                ? Effect.succeed(response.body)
+                : Effect.fail(
+                    new GitHubCliError({
+                      operation: "diff",
+                      kind: response.status === 404 ? "not_found" : "invalid_json",
+                      detail: "GitHub did not return the pull request diff.",
+                    }),
+                  ),
+            ),
+          ),
       ),
     getComments: (ref) =>
       Effect.gen(function* () {

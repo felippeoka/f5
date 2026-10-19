@@ -1,3 +1,4 @@
+import { applyArchiveTestCommand } from "../workflowArchive.testUtils.ts";
 import {
   CheckpointRef,
   CommandId,
@@ -292,6 +293,9 @@ function applyWorkflowCommandToSnapshot(
   command: OrchestrationCommand,
 ): OrchestrationReadModel {
   switch (command.type) {
+    case "project.workflow.archive":
+    case "project.workflow.unarchive":
+      return applyArchiveTestCommand(snapshot, command).model;
     case "thread.create":
       return {
         ...snapshot,
@@ -2695,13 +2699,13 @@ describe("WorkflowService", () => {
     expect(unarchivedWorkflow?.deletedAt).toBeNull();
   });
 
-  it("rejects archiving an archived workflow and unarchiving an active workflow", async () => {
+  it("accepts repeated archive and restore requests", async () => {
     const archivedWorkflow = makeWorkflow({ archivedAt: NOW });
     harness = await createHarness(makeReadModel({ workflow: archivedWorkflow }));
 
     await expect(
       Effect.runPromise(harness.service.archiveWorkflow(archivedWorkflow.id)),
-    ).rejects.toThrow("already archived");
+    ).resolves.toBeUndefined();
 
     const activeWorkflow = makeWorkflow({
       id: PlanningWorkflowId.makeUnsafe("workflow-2"),
@@ -2710,7 +2714,7 @@ describe("WorkflowService", () => {
 
     await expect(
       Effect.runPromise(harness.service.unarchiveWorkflow(activeWorkflow.id)),
-    ).rejects.toThrow("is not archived");
+    ).resolves.toBeUndefined();
   });
 
   it("rejects startImplementation when implementation already exists", async () => {
@@ -2747,7 +2751,7 @@ describe("WorkflowService", () => {
     ).rejects.toThrow("already been started");
   });
 
-  it("allows startImplementation for archived workflows", async () => {
+  it("rejects startImplementation for archived workflows", async () => {
     const workflow = makeWorkflow({ archivedAt: NOW });
     harness = await createHarness(
       makeReadModel({
@@ -2771,17 +2775,17 @@ describe("WorkflowService", () => {
       }),
     );
 
-    await Effect.runPromise(
-      harness.service.startImplementation({
-        workflowId: workflow.id,
-        provider: "codex",
-        model: "gpt-5-codex",
-      }),
-    );
+    await expect(
+      Effect.runPromise(
+        harness.service.startImplementation({
+          workflowId: workflow.id,
+          provider: "codex",
+          model: "gpt-5-codex",
+        }),
+      ),
+    ).rejects.toThrow("Restore the workflow");
 
-    expect(lastWorkflowUpsert(harness.dispatched)?.workflow.implementation?.status).toBe(
-      "implementing",
-    );
+    expect(harness.dispatched.some((command) => command.type === "thread.turn.start")).toBe(false);
   });
 
   it("resumes implementation setup from persisted intent after thread creation fails", async () => {
@@ -2927,7 +2931,7 @@ describe("WorkflowService", () => {
     expect(harness.getSnapshot().planningWorkflows[0]?.implementation?.status).toBe("implementing");
   });
 
-  it("allows retryWorkflow for archived workflows", async () => {
+  it("rejects retryWorkflow for archived workflows", async () => {
     const workflow = makeWorkflow({
       archivedAt: NOW,
       branchA: {
@@ -2938,10 +2942,11 @@ describe("WorkflowService", () => {
     });
     harness = await createHarness(makeReadModel({ workflow }));
 
-    await Effect.runPromise(harness.service.retryWorkflow({ workflowId: workflow.id }));
+    await expect(
+      Effect.runPromise(harness.service.retryWorkflow({ workflowId: workflow.id })),
+    ).rejects.toThrow("Restore the workflow");
 
-    expect(lastWorkflowUpsert(harness.dispatched)?.workflow.branchA.status).toBe("authoring");
-    expect(lastWorkflowUpsert(harness.dispatched)?.workflow.archivedAt).toBe(NOW);
+    expect(harness.dispatched.some((command) => command.type === "thread.turn.start")).toBe(false);
   });
 
   it("starts implementation from the pinned approved merged plan and links sourceProposedPlan", async () => {

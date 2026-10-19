@@ -1,3 +1,4 @@
+import { publicOtlpConfiguration, resolveOtlpConfiguration } from "@t3tools/shared/observability";
 import { withProviderThreadAccess } from "./provider/providerThreadAccess.ts";
 import { makeMcpSecretWriter } from "./mcp/McpSecretWriter.ts";
 import { McpServerWriteDefinition } from "@t3tools/contracts";
@@ -5819,6 +5820,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           providers,
           availableEditors,
           settings,
+          diagnostics: publicOtlpConfiguration(
+            resolveOtlpConfiguration(settings.observability, process.env),
+          ),
         };
 
       case WS_METHODS.serverGetProjectSettings: {

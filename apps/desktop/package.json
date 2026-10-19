@@ -2,7 +2,7 @@
   "name": "@t3tools/desktop",
   "version": "0.1.0",
   "private": true,
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/boot.js",
   "scripts": {
     "dev": "bun run --parallel dev:bundle dev:electron",
     "dev:bundle": "node node_modules/tsdown/dist/run.mjs --config tsdown.config.mts --watch",

@@ -4728,6 +4728,71 @@ describe("ChatView timeline (full app)", () => {
     }
   });
 
+  it("steps reasoning effort with custom bindings without sending or changing other traits", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "Keep this draft");
+    useComposerDraftStore
+      .getState()
+      .setModelOptions(THREAD_ID, { codex: { reasoningEffort: "low", fastMode: true } });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-effort-step" as MessageId,
+        targetText: "Effort target",
+      }),
+      configureFixture: (next) => {
+        next.serverConfig = {
+          ...next.serverConfig,
+          keybindings: [
+            createModKeybinding("composer.effortUp", "arrowup"),
+            createModKeybinding("composer.effortDown", "arrowdown"),
+          ],
+        };
+      },
+    });
+    try {
+      const editor = await waitForComposerEditor();
+      await userEvent.click(editor);
+      const useMetaForMod = isMacPlatform(navigator.platform);
+      await userEvent.keyboard(
+        useMetaForMod ? "{Meta>}{ArrowUp}{/Meta}" : "{Control>}{ArrowUp}{/Control}",
+      );
+      await vi.waitFor(() =>
+        expect(
+          useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.modelOptions?.codex,
+        ).toMatchObject({ reasoningEffort: "medium", fastMode: true }),
+      );
+      editor.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowUp",
+          metaKey: useMetaForMod,
+          ctrlKey: !useMetaForMod,
+          repeat: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      expect(
+        useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.modelOptions?.codex
+          ?.reasoningEffort,
+      ).toBe("medium");
+      await userEvent.keyboard(
+        useMetaForMod ? "{Meta>}{ArrowDown}{/Meta}" : "{Control>}{ArrowDown}{/Control}",
+      );
+      await vi.waitFor(() =>
+        expect(
+          useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.modelOptions?.codex
+            ?.reasoningEffort,
+        ).toBe("low"),
+      );
+      expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt).toBe(
+        "Keep this draft",
+      );
+      expect(getDispatchCommandRequests("thread.turn.start")).toHaveLength(0);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("sends an explicit Codex effort for an untouched draft", async () => {
     // The draft stores no effort; the turn must still name the shown one so a
     // session reporting another default cannot substitute it.

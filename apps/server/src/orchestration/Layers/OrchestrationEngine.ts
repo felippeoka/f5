@@ -78,6 +78,8 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "project.workflow.create":
     case "project.workflow.delete":
     case "project.workflow.upsert":
+    case "project.workflow.archive":
+    case "project.workflow.unarchive":
     case "project.code-review-workflow.create":
     case "project.code-review-workflow.delete":
     case "project.code-review-workflow.upsert":
@@ -475,6 +477,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 const savedEvent = yield* eventStore.append(nextEvent);
                 nextReadModel = yield* projectEvent(nextReadModel, savedEvent);
                 yield* projectionPipeline.projectEvent(savedEvent);
+                if (savedEvent.type === "thread.archived" || savedEvent.type === "thread.deleted") {
+                  if (Option.isSome(transitions))
+                    yield* transitions.value.cancel(savedEvent.payload.threadId).pipe(Effect.orDie);
+                }
                 if (savedEvent.type === "thread.session-stop-requested") {
                   // Commit cancellation with the stop intent: a crash before live
                   // subscribers run must never revive an unsent continuation.
@@ -732,13 +738,6 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                   .update(record, { phase: "completed", error: null })
                   .pipe(Effect.orDie);
               }
-              if (
-                Option.isSome(transitions) &&
-                (envelope.command.type === "thread.archive" ||
-                  envelope.command.type === "thread.delete")
-              )
-                yield* transitions.value.cancel(envelope.command.threadId).pipe(Effect.orDie);
-
               return {
                 committedEvents,
                 lastSequence: lastSavedEvent.sequence,

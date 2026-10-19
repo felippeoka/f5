@@ -628,7 +628,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           },
           opencode: {
             serverUrl: "http://127.0.0.1:4096",
-            serverPassword: "secret-password",
+            serverPasswordRedacted: true,
           },
         },
       });

@@ -1,3 +1,4 @@
+import { summarizeTraceFile } from "./observability/traceSummary.ts";
 import { ProfileGithubAccount } from "./git/ProfileGithubAccount";
 import { makeServerSecretStore } from "./auth/Layers/ServerSecretStore";
 import * as ProfileFS from "node:fs/promises";
@@ -730,8 +731,59 @@ const agentBridgeStdioCommand = Command.make("agent-bridge-stdio", {}).pipe(
   ),
 );
 
+const traceSummarizeCommand = Command.make("summarize", {
+  file: Flag.string("file").pipe(Flag.optional),
+}).pipe(
+  Command.withDescription("Summarize a trace file without loading it into memory."),
+  Command.withHandler(({ file }) =>
+    Effect.gen(function* () {
+      const parent = yield* t3Base;
+      const path = yield* Path.Path;
+      let filename = Option.getOrUndefined(file);
+      if (!filename) {
+        const explicit =
+          optionStringToTrimmedUndefined(parent.stateDir) ??
+          trimToUndefined(process.env.F5_STATE_DIR) ??
+          trimToUndefined(process.env.T3CODE_STATE_DIR);
+        const base = explicit
+          ? path.dirname(yield* resolveStateDir(explicit))
+          : yield* resolveBaseDir(
+              optionStringToTrimmedUndefined(parent.t3Home) ??
+                trimToUndefined(process.env.F5_HOME) ??
+                trimToUndefined(process.env.T3CODE_HOME),
+            );
+        const state = explicit ? yield* resolveStateDir(explicit) : path.join(base, "userdata");
+        const registry = yield* Effect.promise(() => new ProfileRegistryStore(state).read());
+        const profiles = registry.ok ? registry.registry.profiles : [fallbackDefaultProfile(state)];
+        const reference =
+          optionStringToTrimmedUndefined(parent.profile) ??
+          trimToUndefined(process.env.F5_PROFILE) ??
+          "default";
+        const profile = profiles.find(
+          (entry) => entry.slug === reference || entry.id === reference,
+        );
+        if (!profile) return yield* new StartupError({ message: "Unknown F5 profile." });
+        const paths = yield* deriveServerPaths({ baseDir: base, defaultStateDir: state, profile });
+        filename = path.join(paths.logsDir, "observability", "traces.ndjson");
+      }
+      const summary = yield* Effect.tryPromise({
+        try: () => summarizeTraceFile(filename!),
+        catch: () => new StartupError({ message: "The trace file could not be read." }),
+      });
+      process.stdout.write(
+        `${summary.records} spans; ${summary.errors} failures; ${summary.stalls} event-loop stalls; ${summary.malformed} malformed lines\n`,
+      );
+      for (const span of summary.slowest)
+        process.stdout.write(`${span.durationMs.toFixed(2)} ms  ${span.name}\n`);
+    }),
+  ),
+);
+const traceCommand = Command.make("trace", {}).pipe(
+  Command.withSubcommands([traceSummarizeCommand]),
+);
+
 export const t3Cli = t3Base.pipe(
   Command.withDescription("Run the F5 server."),
   Command.withHandler((input) => Effect.scoped(makeServerProgram(input))),
-  Command.withSubcommands([agentBridgeStdioCommand]),
+  Command.withSubcommands([agentBridgeStdioCommand, traceCommand]),
 );

@@ -46,6 +46,7 @@ import { inferEntryKindFromPath } from "../vscode-icons";
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { SurfaceErrorBoundary } from "./ui/SurfaceErrorBoundary";
+import { MermaidDiagram } from "./chat/MermaidDiagram";
 
 /**
  * `default` renders trusted assistant output. `external-bot` renders content an
@@ -600,6 +601,15 @@ const RenderedMarkdownFragment = memo(function RenderedMarkdownFragment(props: {
           return (
             <MarkdownCodeBlock code={codeBlock.code}>
               <pre {...props}>{children}</pre>
+            </MarkdownCodeBlock>
+          );
+        }
+
+        if (extractFenceLanguage(codeBlock.className) === "mermaid") {
+          return (
+            <MarkdownCodeBlock code={codeBlock.code}>
+              <MermaidDiagram source={codeBlock.code} theme={resolvedTheme}
+                code={<pre {...props}>{children}</pre>} />
             </MarkdownCodeBlock>
           );
         }

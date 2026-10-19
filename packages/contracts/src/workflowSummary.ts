@@ -10,6 +10,7 @@ export const PlanningWorkflowSummary = Schema.Struct({
     "requirementPrompt",
     "plansDirectory",
     "implementation",
+    "archiveRestorations",
   ]),
   implementation: Schema.NullOr(
     Schema.Struct(Struct.omit(WorkflowImplementation.fields, ["reviewArtifact"])),
@@ -17,11 +18,11 @@ export const PlanningWorkflowSummary = Schema.Struct({
 });
 export type PlanningWorkflowSummary = typeof PlanningWorkflowSummary.Type;
 export const CodeReviewWorkflowSummary = Schema.Struct(
-  Struct.omit(CodeReviewWorkflow.fields, ["reviewPrompt"]),
+  Struct.omit(CodeReviewWorkflow.fields, ["reviewPrompt", "archiveRestorations"]),
 );
 export type CodeReviewWorkflowSummary = typeof CodeReviewWorkflowSummary.Type;
 export const InvestigationWorkflowSummary = Schema.Struct(
-  Struct.omit(InvestigationWorkflow.fields, ["problemPrompt"]),
+  Struct.omit(InvestigationWorkflow.fields, ["problemPrompt", "archiveRestorations"]),
 );
 export type InvestigationWorkflowSummary = typeof InvestigationWorkflowSummary.Type;
 

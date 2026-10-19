@@ -113,6 +113,8 @@ const SHORTCUT_SECTION_DEFINITIONS: ReadonlyArray<{
       "composer.stash",
       "composer.pasteAsText",
       "composer.effort",
+      "composer.effortUp",
+      "composer.effortDown",
       "composer.runtimeMode",
       "composer.envMode",
       "composer.branch",
@@ -139,6 +141,8 @@ const SHORTCUT_SECTION_DEFINITIONS: ReadonlyArray<{
       "terminal.close",
       "diff.toggle",
       "rightPanel.closeTab",
+      "rightPanel.tabMenu",
+      "rightPanel.reopenClosed",
     ],
   },
 ];

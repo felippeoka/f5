@@ -431,23 +431,33 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
             "--head",
             input.headSelector,
             "--state",
-            "open",
+            input.state ?? "open",
             "--limit",
             String(input.limit ?? 1),
             "--json",
-            "number,title,url,baseRefName,headRefName",
+            input.state === "all"
+              ? "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner"
+              : "number,title,url,baseRefName,headRefName",
           ],
         }).pipe(
           Effect.map((result) =>
             (
               JSON.parse(result.stdout) as Array<
-                GitHubPullRequestSummary & {
+                Omit<GitHubPullRequestSummary, "state"> & {
+                  state?: string;
+                  mergedAt?: string | null;
                   headRepository?: { nameWithOwner: string };
                   headRepositoryOwner?: { login: string };
                 }
               >
             ).map((pr) => ({
               ...pr,
+              state:
+                pr.mergedAt || pr.state === "MERGED"
+                  ? ("merged" as const)
+                  : pr.state === "CLOSED" || pr.state === "closed"
+                    ? ("closed" as const)
+                    : ("open" as const),
               ...(pr.headRepository
                 ? { headRepositoryNameWithOwner: pr.headRepository.nameWithOwner }
                 : {}),

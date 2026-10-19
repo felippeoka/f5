@@ -156,6 +156,7 @@ export const OpenCodeSettings = Schema.Struct({
   binaryPath: makeBinaryPathSetting("opencode"),
   serverUrl: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
   serverPassword: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
+  serverPasswordRedacted: Schema.optionalKey(Schema.Boolean),
   customModels: Schema.Array(CustomModelSetting).pipe(Schema.withDecodingDefault(() => [])),
 });
 export type OpenCodeSettings = typeof OpenCodeSettings.Type;
@@ -182,9 +183,25 @@ export const AntigravitySettings = Schema.Struct({
 });
 export type AntigravitySettings = typeof AntigravitySettings.Type;
 
+export const OtlpHeader = Schema.Struct({
+  name: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(128),
+    Schema.isPattern(/^[!#$%&'*+.^_`|~0-9a-z-]+$/i),
+  ),
+  value: Schema.String.check(Schema.isMaxLength(4096), Schema.isPattern(/^[^\r\n]*$/)),
+  valueRedacted: Schema.optionalKey(Schema.Boolean),
+});
+export const OtlpHeaders = Schema.Array(OtlpHeader).check(
+  Schema.isMaxLength(100),
+  Schema.makeFilter(
+    (headers) =>
+      new Set(headers.map((header) => header.name.toLowerCase())).size === headers.length,
+  ),
+);
 export const ObservabilitySettings = Schema.Struct({
   otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
   otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
+  otlpHeaders: Schema.optionalKey(OtlpHeaders),
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
@@ -553,6 +570,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(Schema.String),
       otlpMetricsUrl: Schema.optionalKey(Schema.String),
+      otlpHeaders: Schema.optionalKey(OtlpHeaders),
     }),
   ),
   prHub: Schema.optionalKey(PrHubSettingsPatch),

@@ -1,4 +1,5 @@
 import { userFacingCauseMessage } from "../../causeMessage.ts";
+import { setWorkflowArchived } from "../workflowArchiveLifecycle.ts";
 import {
   CodeReviewWorkflowId,
   CommandId,
@@ -737,6 +738,7 @@ export const makeCodeReviewWorkflowService = Effect.gen(function* () {
     Effect.gen(function* () {
       if (
         isDeletedWorkflow(workflow) ||
+        isArchivedWorkflow(workflow) ||
         workflow.reviewerA.status !== "completed" ||
         workflow.reviewerB.status !== "completed" ||
         (workflow.consolidation.status === "pending_start" && !resumePendingStart) ||
@@ -872,6 +874,7 @@ export const makeCodeReviewWorkflowService = Effect.gen(function* () {
 
   const startPendingReviewers = (workflow: CodeReviewWorkflow, updatedAt: string) =>
     Effect.gen(function* () {
+      if (isArchivedWorkflow(workflow)) return;
       const pendingReviewers = [workflow.reviewerA, workflow.reviewerB].filter(
         (reviewer) => reviewer.status === "pending",
       );
@@ -1594,48 +1597,10 @@ export const makeCodeReviewWorkflowService = Effect.gen(function* () {
     });
 
   const archiveWorkflow: CodeReviewWorkflowServiceShape["archiveWorkflow"] = (workflowId) =>
-    Effect.gen(function* () {
-      const workflow = yield* readCodeReviewWorkflow(orchestrationEngine, workflowId).pipe(
-        Effect.mapError(
-          (error) => new Error(`Failed to load workflow '${workflowId}': ${String(error)}`),
-        ),
-      );
-      if (!workflow) {
-        return yield* Effect.fail(new Error(`Workflow '${workflowId}' does not exist.`));
-      }
-      if (isArchivedWorkflow(workflow)) {
-        return yield* Effect.fail(new Error(`Workflow '${workflowId}' is already archived.`));
-      }
-
-      const updatedAt = new Date().toISOString();
-      yield* upsertWorkflow(
-        orchestrationEngine,
-        { ...workflow, archivedAt: updatedAt, updatedAt },
-        updatedAt,
-      );
-    });
+    setWorkflowArchived(orchestrationEngine, "codeReview", workflowId, true);
 
   const unarchiveWorkflow: CodeReviewWorkflowServiceShape["unarchiveWorkflow"] = (workflowId) =>
-    Effect.gen(function* () {
-      const workflow = yield* readCodeReviewWorkflow(orchestrationEngine, workflowId).pipe(
-        Effect.mapError(
-          (error) => new Error(`Failed to load workflow '${workflowId}': ${String(error)}`),
-        ),
-      );
-      if (!workflow) {
-        return yield* Effect.fail(new Error(`Workflow '${workflowId}' does not exist.`));
-      }
-      if (!isArchivedWorkflow(workflow)) {
-        return yield* Effect.fail(new Error(`Workflow '${workflowId}' is not archived.`));
-      }
-
-      const updatedAt = new Date().toISOString();
-      yield* upsertWorkflow(
-        orchestrationEngine,
-        { ...workflow, archivedAt: null, updatedAt },
-        updatedAt,
-      );
-    });
+    setWorkflowArchived(orchestrationEngine, "codeReview", workflowId, false);
 
   const retryWorkflow: CodeReviewWorkflowServiceShape["retryWorkflow"] = (input) =>
     Effect.gen(function* () {
@@ -1647,6 +1612,8 @@ export const makeCodeReviewWorkflowService = Effect.gen(function* () {
       if (!workflow) {
         return yield* Effect.fail(new Error(`Workflow '${input.workflowId}' does not exist.`));
       }
+      if (isArchivedWorkflow(workflow))
+        return yield* Effect.fail(new Error("Restore the workflow before retrying it."));
 
       const updatedAt = new Date().toISOString();
       const snapshot = yield* orchestrationEngine.getReadModel();

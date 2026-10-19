@@ -40,6 +40,8 @@ import {
   type ProviderServiceShape,
 } from "../provider/Services/ProviderService.ts";
 import { withHomeSandbox } from "../testing/homeSandbox.ts";
+import { workflowArchiveFixture } from "../orchestration/workflowArchive.testUtils.ts";
+import type { OrchestrationReadModel } from "@t3tools/contracts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { StorageMaintenance } from "./StorageMaintenance.ts";
 import { StorageMaintenanceLive } from "./StorageMaintenance.ts";
@@ -153,6 +155,10 @@ function makeGitCoreStub(input?: {
 
 function makeOrchestrationEngineStub(input?: {
   readonly dispatch?: OrchestrationEngineShape["dispatch"];
+  readonly getWorkflows?: () => Pick<
+    OrchestrationReadModel,
+    "planningWorkflows" | "codeReviewWorkflows" | "investigationWorkflows"
+  >;
 }): OrchestrationEngineShape {
   return {
     getReadModel: () =>
@@ -163,6 +169,7 @@ function makeOrchestrationEngineStub(input?: {
         const threads =
           yield* sql`SELECT thread_id AS id, project_id AS "projectId", worktree_path AS "worktreePath", archived_at AS "archivedAt", deleted_at AS "deletedAt" FROM projection_threads`;
         return {
+          ...input?.getWorkflows?.(),
           projects,
           threads: threads.map((thread) => ({ ...thread, session: null, activities: [] })),
         } as never;
@@ -1685,6 +1692,87 @@ layer("StorageMaintenance", (it) => {
     ),
   );
 });
+
+for (const kind of ["planning", "codeReview", "investigation"] as const) {
+  it.effect("retains " + kind + " workflow threads until their workflow is deleted", () => {
+    const fixture = workflowArchiveFixture(kind);
+    let retained = false;
+    const engine = makeOrchestrationEngineStub({
+      getWorkflows: () =>
+        retained
+          ? fixture.model
+          : {
+              planningWorkflows: [],
+              codeReviewWorkflows: [],
+              investigationWorkflows: [],
+            },
+    });
+    return withHomeSandbox(
+      Effect.gen(function* () {
+        const storage = yield* StorageMaintenance;
+        const config = yield* ServerConfig;
+        const sql = yield* SqlClient.SqlClient;
+        yield* seedThread({
+          sql,
+          threadId: fixture.a,
+          archivedAt: daysAgo(90),
+          deletedAt: null,
+        });
+        const log = NodePath.join(
+          config.providerLogsDir,
+          toSafeThreadAttachmentSegment(fixture.a)! + ".log",
+        );
+        yield* Effect.promise(() => writeFile(log, "workflow history"));
+        const report = yield* storage.inspect({ force: true });
+        assert.isTrue(
+          report.categories
+            .find((category) => category.id === "purgeArchivedThreads")
+            ?.targets.some((target) => target.id === fixture.a),
+        );
+        retained = true;
+        const guarded = yield* storage.cleanup({
+          operationId: "retained-stale-report-" + kind,
+          scanId: report.scanId,
+          nonce: report.confirmationNonce,
+          categoryIds: ["purgeArchivedThreads"],
+          targetSelections: [{ categoryId: "purgeArchivedThreads", targetIds: [fixture.a] }],
+          confirmationText: "DELETE",
+          options: { vacuumAfterDeletes: false },
+        });
+        assert.isTrue(
+          guarded.results
+            .flatMap((result) => result.warnings)
+            .some((warning) => warning.reason.includes("workflow")),
+          JSON.stringify(guarded),
+        );
+        assert.isTrue(yield* Effect.promise(() => pathExists(log)));
+        assert.equal(yield* countRows(sql, "projection_threads", fixture.a), 1);
+        const next = yield* storage.inspect({ force: true });
+        assert.isFalse(
+          next.categories
+            .find((category) => category.id === "purgeArchivedThreads")
+            ?.targets.some((target) => target.id === fixture.a),
+        );
+        const scheduled = yield* storage.purgeThreads({
+          operationId: "retained-scheduled-" + kind,
+          archivedBefore: daysAgo(30),
+          deletedBefore: daysAgo(0),
+          maxThreads: 10,
+        });
+        assert.deepEqual(scheduled.purgedThreadIds, []);
+        retained = false;
+        const released = yield* storage.purgeThreads({
+          operationId: "released-workflow-" + kind,
+          archivedBefore: daysAgo(30),
+          deletedBefore: daysAgo(0),
+          maxThreads: 10,
+        });
+        assert.deepEqual(released.purgedThreadIds, [fixture.a]);
+        assert.isFalse(yield* Effect.promise(() => pathExists(log)));
+      }).pipe(Effect.provide(makeStorageTestLayer({ orchestrationEngine: engine }))),
+    );
+  });
+}
 
 function seedThread(input: {
   readonly sql: SqlClient.SqlClient;

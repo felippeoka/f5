@@ -2577,6 +2577,10 @@ describe("WebSocket Server", () => {
       issues: [],
       providers: defaultProviderSnapshots,
       settings: DEFAULT_SERVER_SETTINGS,
+      diagnostics: {
+        traces: { endpoint: null, source: "unset", protocol: "http/protobuf" },
+        metrics: { endpoint: null, source: "unset", protocol: "http/protobuf" },
+      },
       availableEditors: expect.any(Array),
     });
     expect(
@@ -2602,6 +2606,9 @@ describe("WebSocket Server", () => {
       path.join(stateDir, "settings.json"),
       JSON.stringify(
         {
+          observability: {
+            otlpHeaders: [{ name: "Authorization", value: "collector-private-header" }],
+          },
           providers: {
             opencode: {
               serverPassword: "server-password",
@@ -2638,6 +2645,7 @@ describe("WebSocket Server", () => {
 
     const response = await sendRequest(ws, WS_METHODS.serverGetConfig);
     expect(response.error).toBeUndefined();
+    expect(JSON.stringify(response.result)).not.toContain("collector-private-header");
     const settings = (response.result as { settings: ServerSettings }).settings;
     expect(settings.providers.opencode.serverPassword).toBe("");
     expect(settings.providerInstances[instanceId]?.config).toMatchObject({
@@ -2867,6 +2875,10 @@ describe("WebSocket Server", () => {
       issues: [],
       providers: defaultProviderSnapshots,
       settings: DEFAULT_SERVER_SETTINGS,
+      diagnostics: {
+        traces: { endpoint: null, source: "unset", protocol: "http/protobuf" },
+        metrics: { endpoint: null, source: "unset", protocol: "http/protobuf" },
+      },
       availableEditors: expect.any(Array),
     });
     expectAvailableEditors((response.result as { availableEditors: unknown }).availableEditors);
@@ -2904,6 +2916,10 @@ describe("WebSocket Server", () => {
       ],
       providers: defaultProviderSnapshots,
       settings: DEFAULT_SERVER_SETTINGS,
+      diagnostics: {
+        traces: { endpoint: null, source: "unset", protocol: "http/protobuf" },
+        metrics: { endpoint: null, source: "unset", protocol: "http/protobuf" },
+      },
       availableEditors: expect.any(Array),
     });
     expectAvailableEditors((response.result as { availableEditors: unknown }).availableEditors);
@@ -3173,6 +3189,10 @@ describe("WebSocket Server", () => {
       issues: [],
       providers: defaultProviderSnapshots,
       settings: DEFAULT_SERVER_SETTINGS,
+      diagnostics: {
+        traces: { endpoint: null, source: "unset", protocol: "http/protobuf" },
+        metrics: { endpoint: null, source: "unset", protocol: "http/protobuf" },
+      },
       availableEditors: expect.any(Array),
     });
     expectAvailableEditors((response.result as { availableEditors: unknown }).availableEditors);
@@ -3221,6 +3241,10 @@ describe("WebSocket Server", () => {
       issues: [],
       providers: defaultProviderSnapshots,
       settings: DEFAULT_SERVER_SETTINGS,
+      diagnostics: {
+        traces: { endpoint: null, source: "unset", protocol: "http/protobuf" },
+        metrics: { endpoint: null, source: "unset", protocol: "http/protobuf" },
+      },
       availableEditors: expect.any(Array),
     });
     expectAvailableEditors(
