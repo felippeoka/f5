@@ -47,6 +47,8 @@ import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { SurfaceErrorBoundary } from "./ui/SurfaceErrorBoundary";
 import { MermaidDiagram } from "./chat/MermaidDiagram";
+import { useTerminalCommand } from "../terminalCommandContext";
+import { hasClosedCodeFence, runnableShellCode } from "../lib/shellCodeBlock";
 
 /**
  * `default` renders trusted assistant output. `external-bot` renders content an
@@ -156,7 +158,19 @@ function getHighlighterPromise(language: string): Promise<MarkdownHighlighter> {
   return promise;
 }
 
-function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNode }) {
+function MarkdownCodeBlock({
+  code,
+  command,
+  children,
+}: {
+  code: string;
+  command?: string | null;
+  children: ReactNode;
+}) {
+  const runCommand = useTerminalCommand();
+  const [running, setRunning] = useState(false);
+  const runningRef = useRef(false);
+  const [runError, setRunError] = useState(false);
   const wordWrap = useDiffWordWrap();
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -190,6 +204,30 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
       className={`chat-markdown-codeblock${wordWrap ? " chat-markdown-codeblock-wrap" : ""}`}
       data-word-wrap={wordWrap ? "true" : "false"}
     >
+      {runCommand && command ? (
+        <div className="flex items-center gap-2 px-3 pt-2 pr-12 text-xs text-muted-foreground">
+          <button
+            type="button"
+            disabled={running}
+            className="underline underline-offset-2 disabled:opacity-50"
+            onClick={() => {
+              if (runningRef.current) return;
+              runningRef.current = true;
+              setRunning(true);
+              setRunError(false);
+              void runCommand(command)
+                .catch(() => setRunError(true))
+                .finally(() => {
+                  runningRef.current = false;
+                  setRunning(false);
+                });
+            }}
+          >
+            Run in terminal
+          </button>
+          {runError ? <span role="status">Could not run command. Try again.</span> : null}
+        </div>
+      ) : null}
       <button
         type="button"
         className="chat-markdown-copy-button"
@@ -591,7 +629,7 @@ const RenderedMarkdownFragment = memo(function RenderedMarkdownFragment(props: {
           </TooltipProvider>
         );
       },
-      pre({ node: _node, children, ...props }) {
+      pre({ node, children, ...props }) {
         const codeBlock = extractCodeBlock(children);
         if (!codeBlock) {
           return <pre {...props}>{children}</pre>;
@@ -608,14 +646,24 @@ const RenderedMarkdownFragment = memo(function RenderedMarkdownFragment(props: {
         if (extractFenceLanguage(codeBlock.className) === "mermaid") {
           return (
             <MarkdownCodeBlock code={codeBlock.code}>
-              <MermaidDiagram source={codeBlock.code} theme={resolvedTheme}
-                code={<pre {...props}>{children}</pre>} />
+              <MermaidDiagram
+                source={codeBlock.code}
+                theme={resolvedTheme}
+                code={<pre {...props}>{children}</pre>}
+              />
             </MarkdownCodeBlock>
           );
         }
 
         return (
-          <MarkdownCodeBlock code={codeBlock.code}>
+          <MarkdownCodeBlock
+            code={codeBlock.code}
+            command={
+              hasClosedCodeFence(text, node?.position?.start.offset, node?.position?.end.offset)
+                ? runnableShellCode(extractFenceLanguage(codeBlock.className), codeBlock.code)
+                : null
+            }
+          >
             {/* Not keyed on the code: a failed highlighter load would retry on every streaming delta. */}
             <SurfaceErrorBoundary
               name="code-highlight"
@@ -659,7 +707,7 @@ const RenderedMarkdownFragment = memo(function RenderedMarkdownFragment(props: {
         );
       },
     }),
-    [cwd, diffThemeName, disambiguatorMap, mode, resolvedTheme, wordWrap, openLink],
+    [cwd, diffThemeName, disambiguatorMap, mode, resolvedTheme, wordWrap, openLink, text],
   );
 
   return (

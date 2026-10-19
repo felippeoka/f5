@@ -1,12 +1,12 @@
 # October catch-up review response
 
 The complete available October implementation and its subsequent review fixes are
-now included in the working-tree patch on `fix/upstream-october-review`, based on
+now included on `fix/upstream-october-review`, based on
 main `9355a57a59`. They were integrated from `f5/upstream-october-2026` at
 `01c0497143`. Review the actual submitted changes with:
 
 ```sh
-git diff HEAD
+git diff 9355a57a5958b88bfcf639c071222c16b43d57e6
 ```
 
 All 17 main commits since the October branch's last merge are retained. The
@@ -29,7 +29,9 @@ cut line is complete; the unresolved obligations below still apply.
 
 ## Continued implementation after the full-plan request
 
-The integrated baseline is committed as `aaff303849`. Subsequent implementation
+The integrated baseline is committed as `aaff303849`. The shared checkout was
+subsequently saved by the user as `f46c26cd2c` and switched to main; continuation
+now uses the isolated `f5-upstream-october-review` worktree. Subsequent implementation
 adds the following behavior, with delivery decisions still requiring per-SHA proof:
 
 - Legacy global and per-instance OpenCode passwords move to `ServerSecretStore`.
@@ -82,6 +84,13 @@ adds the following behavior, with delivery decisions still requiring per-SHA pro
   Unbound effort-up/down commands use reported model levels and the existing
   Codex fallback policy, retain other traits and ignore repeated keydown events.
   A full-app Chromium case verifies the custom bindings without sending a turn.
+- Settled Mermaid fences load 11.17.x only when visible, serialize global renderer
+  configuration, bound the pending queue/source/output/cache, and follow light/dark
+  themes. SVGs display as images rather than application DOM. Source toggling and
+  failure fallback stay in place. Shell fences use the existing terminal command
+  runner on an explicit click, with a fresh terminal in the thread workspace.
+  Streaming/unfinished fences, non-shell languages and invisible controls have no
+  run action; external-bot rendering retains its restricted policy.
 
 Focused fake-collector, secret persistence/recovery, HTTP credential, browser
 settings, real child-process cache, CLI and desktop isolation checks cover these
@@ -246,9 +255,9 @@ implemented and passes the Chromium smoke and 34 focused tests; native Electron
 launches abort with SIGABRT before producing a test result. See
 [the snapshot verification record](./upstream-october-preview-snapshot.md).
 #20446 remains deferred. Native Electron verification is still failed, and
-upstream's migration of legacy OpenCode passwords into the secret store has not
-yet been ported. Client reads redact those passwords, but the existing legacy
-settings file still stores them inline. Settings/logging proof above is separate
+the legacy OpenCode password migration described in the continuation above now
+passes its persistence/recovery tests. These do not establish native Electron
+snapshot verification. Settings/logging proof above is separate
 from the preview tests.
 
 ## Validation
@@ -294,3 +303,10 @@ two scripts recovery cases above and does not reach its exhaustive Git stage.
 Formatting, lint, all eight typecheck packages, the required-upstream ledger
 gate and diff whitespace checks pass on the merged branch. The original
 checkout remains untouched.
+
+The isolated continuation passes 12 Markdown/terminal/Mermaid Chromium cases and
+both shell source unit cases. Its production web build passes the initial-JS
+budget at 1,495,371 bytes (40.5% below the fixed baseline); this is a bundle-size
+check, not an interactive performance comparison. A new `env -i` full-gate run
+again passes 330 scripts tests and fails the two process-identity recovery cases
+before the exhaustive matrix. The host still denies `/bin/ps` with EPERM.

@@ -5948,6 +5948,51 @@ describe("ChatView timeline (full app)", () => {
     },
   );
 
+  it("runs a settled shell block in a fresh terminal rooted at the thread worktree", async () => {
+    const initial = createSnapshotForTargetUser({
+      targetMessageId: "shell-user" as MessageId,
+      targetText: "Show a command",
+      fillerPairCount: 1,
+      targetPairIndex: 0,
+    });
+    const snapshot = {
+      ...initial,
+      threads: initial.threads.map((thread) => ({
+        ...thread,
+        worktreePath: "/repo/worktree",
+        messages: thread.messages.map((message) =>
+          message.role === "assistant"
+            ? { ...message, text: "```bash\necho first\necho second\n```" }
+            : message,
+        ),
+      })),
+    };
+    const mounted = await mountChatView({ viewport: DEFAULT_VIEWPORT, snapshot });
+    try {
+      const run = page.getByRole("button", { name: "Run in terminal", exact: true });
+      await expect.element(run).toBeVisible();
+      expect(wsRequests.filter((body) => body._tag === WS_METHODS.terminalWrite)).toHaveLength(0);
+      await run.click();
+      await vi.waitFor(() =>
+        expect(wsRequests.filter((body) => body._tag === WS_METHODS.terminalWrite)).toHaveLength(1),
+      );
+      const write = wsRequests.find((body) => body._tag === WS_METHODS.terminalWrite)!;
+      expect(write).toMatchObject({ threadId: THREAD_ID, data: "echo first\necho second\r" });
+      expect(write.terminalId).toMatch(/^terminal-/);
+      expect(
+        wsRequests.find(
+          (body) => body._tag === WS_METHODS.terminalOpen && body.terminalId === write.terminalId,
+        ),
+      ).toMatchObject({ cwd: "/repo/worktree" });
+      expect(
+        useTerminalStateStore.getState().terminalStateByThreadId[THREAD_ID]?.terminalOpen,
+      ).toBe(true);
+      expect(getDispatchCommandRequests("thread.turn.start")).toHaveLength(0);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("starts a new draft in the background only after admission", async () => {
     useComposerDraftStore.setState({
       draftThreadsByThreadId: {

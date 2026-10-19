@@ -104,3 +104,15 @@ Reasoning effort can also be stepped with the **Increase reasoning effort** and
 **Decrease reasoning effort** commands in keyboard settings. Both start unbound.
 They move through the selected model's supported levels, wrapping at either end,
 and keep the draft text, mode and other model options intact.
+
+## Diagrams and shell commands
+
+Settled `mermaid` code blocks render a diagram when they come into view. **Show
+code** keeps the original source available in place, including when rendering
+fails. Diagrams follow the app's light or dark theme; diagram scripts and links
+are inactive. Large diagrams can remain as source.
+
+Complete shell fences offer **Run in terminal** in a connected thread. Execution
+starts only when you click. F5 opens a fresh terminal in the thread workspace so
+it preserves commands already typed in other terminals. Streaming, unfinished,
+empty or concealed-control-character blocks cannot run through this action.
