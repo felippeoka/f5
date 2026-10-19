@@ -1,3 +1,4 @@
+import type { MoveSnapshotOperations } from "../moveSnapshot.ts";
 /**
  * GitCore - Effect service contract for low-level Git operations.
  *
@@ -163,7 +164,7 @@ export interface GitWorktreeProgress {
 /**
  * GitCoreShape - Service API for low-level Git repository interactions.
  */
-export interface GitCoreShape {
+export interface GitCoreShape extends MoveSnapshotOperations {
   /** Local, bounded inventory status. Unknown/unreadable returns null. */
   readonly isDirty: (cwd: string) => Effect.Effect<boolean | null>;
   readonly listWorktrees: (

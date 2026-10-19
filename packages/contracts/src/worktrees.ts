@@ -63,3 +63,23 @@ export type WorktreesResolveTransitionInput = typeof WorktreesResolveTransitionI
 
 export const WorktreesListInput = Schema.Struct({ projectId: Schema.optional(ProjectId) });
 export type WorktreesListInput = typeof WorktreesListInput.Type;
+
+export const WorktreesMoveThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  branch: Schema.optional(Schema.NonEmptyString),
+});
+export type WorktreesMoveThreadInput = typeof WorktreesMoveThreadInput.Type;
+export const WorktreesMoveThreadResult = Schema.Struct({
+  operationId: Schema.String,
+  branch: Schema.String,
+  worktreePath: FilesystemPath,
+  copiedFileCount: NonNegativeInt,
+});
+export type WorktreesMoveThreadResult = typeof WorktreesMoveThreadResult.Type;
+export const WorktreesDiscardMovedChangesInput = Schema.Struct({
+  threadId: ThreadId,
+  operationId: Schema.String,
+});
+export type WorktreesDiscardMovedChangesInput = typeof WorktreesDiscardMovedChangesInput.Type;
+export const WorktreesDiscardMovedChangesResult = Schema.Struct({ discarded: Schema.Boolean });
+export type WorktreesDiscardMovedChangesResult = typeof WorktreesDiscardMovedChangesResult.Type;

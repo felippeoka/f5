@@ -1,3 +1,4 @@
+import { makeMoveSnapshotOperations } from "../moveSnapshot.ts";
 import { checkoutFingerprint } from "../checkoutFingerprint.ts";
 import { createHash } from "node:crypto";
 import { basename, dirname } from "node:path";
@@ -2917,6 +2918,7 @@ const makeGitCore = Effect.gen(function* () {
     );
 
   return {
+    ...makeMoveSnapshotOperations((cwd, args) => runGitStdout("GitCore.move", cwd, args)),
     status,
     ensureWorktree,
     readWorktreePreparation: (path) =>

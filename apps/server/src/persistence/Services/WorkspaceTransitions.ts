@@ -1,3 +1,5 @@
+import { Schema } from "effect";
+import { MoveSnapshot } from "../../git/moveSnapshot.ts";
 import type {
   ThreadId,
   WorkspaceTransitionSnapshot,
@@ -5,7 +7,18 @@ import type {
 } from "@t3tools/contracts";
 import { Effect, ServiceMap } from "effect";
 
+export const WorkspaceMoveData = Schema.Struct({
+  snapshot: MoveSnapshot,
+  snapshotRef: Schema.NullOr(Schema.String),
+  createdBranch: Schema.Boolean,
+  createdWorktree: Schema.Boolean,
+  copyStarted: Schema.Boolean,
+  discarded: Schema.Boolean,
+  discardStarted: Schema.Boolean,
+});
+export type WorkspaceMoveData = typeof WorkspaceMoveData.Type;
 export interface WorkspaceTransitionRecord extends WorkspaceTransitionSnapshot {
+  readonly moveData?: WorkspaceMoveData | undefined;
   readonly request: WorktreesSwitchWorkspaceInput;
   readonly requestHash: string;
   readonly baseRef?: string | undefined;
@@ -47,6 +60,8 @@ export interface WorkspaceTransitionsShape {
     patch: Partial<
       Pick<
         WorkspaceTransitionRecord,
+        | "moveData"
+        | "move"
         | "phase"
         | "target"
         | "observed"
@@ -60,6 +75,10 @@ export interface WorkspaceTransitionsShape {
       >
     >,
   ) => Effect.Effect<WorkspaceTransitionRecord, WorkspaceTransitionError>;
+  readonly unfinishedMoves: Effect.Effect<
+    ReadonlyArray<WorkspaceTransitionRecord>,
+    WorkspaceTransitionError
+  >;
   readonly reconcile: Effect.Effect<void, WorkspaceTransitionError>;
   readonly cancel: (threadId: ThreadId) => Effect.Effect<void, WorkspaceTransitionError>;
 }
@@ -72,6 +91,7 @@ export class WorkspaceTransitions extends ServiceMap.Service<
 export const workspaceTransitionSnapshot = (
   record: WorkspaceTransitionSnapshot,
 ): WorkspaceTransitionSnapshot => ({
+  ...(record.move ? { move: record.move } : {}),
   operationId: record.operationId,
   threadId: record.threadId,
   version: record.version,

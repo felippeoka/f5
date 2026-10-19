@@ -492,6 +492,7 @@ export function makeServerOrchestrationRuntimeLayer() {
     Layer.provideMerge(orchestrationLayer),
   );
   const workspaceTransitionLayer = WorkspaceTransitionLive.pipe(
+    Layer.provideMerge(textGenerationLayer),
     Layer.provideMerge(WorkspaceTransitionsLive),
     Layer.provideMerge(worktreePreparationLayer),
     Layer.provideMerge(nextTurnQueueDispatcherLayer),

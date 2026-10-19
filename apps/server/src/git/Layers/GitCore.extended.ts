@@ -103,6 +103,14 @@ const makeIsolatedGitCore = (gitService: GitServiceShape) =>
     const core = await Effect.runPromise(Effect.service(GitCore).pipe(Effect.provide(coreLayer)));
 
     return {
+      readMoveSnapshot: (cwd) => core.readMoveSnapshot(cwd),
+      copyMoveUntracked: (source, target, files) => core.copyMoveUntracked(source, target, files),
+      stashCreate: (cwd) => core.stashCreate(cwd),
+      stashApplySha: (cwd, sha) => core.stashApplySha(cwd, sha),
+      stashPushAll: (cwd, message) => core.stashPushAll(cwd, message),
+      setMoveRef: (cwd, ref, sha) => core.setMoveRef(cwd, ref, sha),
+      deleteMoveRef: (cwd, ref, sha) => core.deleteMoveRef(cwd, ref, sha),
+      cleanMoveCopies: (cwd, snapshot) => core.cleanMoveCopies(cwd, snapshot),
       listWorktrees: (cwd) => core.listWorktrees(cwd),
       isDirty: (cwd) => core.isDirty(cwd),
       inspectCheckoutIdentity: (path) => core.inspectCheckoutIdentity(path),

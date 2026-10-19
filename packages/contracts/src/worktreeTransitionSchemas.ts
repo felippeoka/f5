@@ -3,6 +3,7 @@ import { FilesystemPath, NonNegativeInt, ThreadId } from "./baseSchemas";
 import { GitCheckoutConflict } from "./git";
 
 export const WorkspaceTransitionIntent = Schema.Literals([
+  "move_to_new_worktree",
   "attach_existing",
   "checkout_branch",
   "create_branch_and_checkout",
@@ -37,6 +38,9 @@ export const WorkspaceCheckoutIdentity = Schema.Struct({
 export type WorkspaceCheckoutIdentity = typeof WorkspaceCheckoutIdentity.Type;
 
 export const WorkspaceTransitionSnapshot = Schema.Struct({
+  move: Schema.optional(
+    Schema.Struct({ copiedFileCount: NonNegativeInt, discarded: Schema.Boolean }),
+  ),
   errorCode: Schema.optional(Schema.Literal("WorkspaceRequiresNewWorktree")),
   checkoutConflict: Schema.optional(GitCheckoutConflict),
   operationId: Schema.String,

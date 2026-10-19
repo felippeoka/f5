@@ -147,6 +147,8 @@ export const WS_METHODS = {
   nextTurnQueueDiscardDelivery: "nextTurnQueue.discardDelivery",
 
   // Background worktree setup for a new thread's first send
+  worktreesMoveThread: "worktrees.moveThread",
+  worktreesDiscardMovedChanges: "worktrees.discardMovedChanges",
   worktreesList: "worktrees.list",
   worktreesInspect: "worktrees.inspect",
   worktreesRemove: "worktrees.remove",
