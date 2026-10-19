@@ -59,6 +59,7 @@ export function StorageOperationDetails({
                       {category?.targets.find((candidate) => candidate.id === target.id)?.label ??
                         target.path ??
                         target.id}
+                      {target.branch ? ` (branch ${target.branch})` : ""}
                     </p>
                   ))}
                   {entry.warnings.map((warning, warningIndex) => (
