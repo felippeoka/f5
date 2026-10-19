@@ -1382,6 +1382,26 @@ describe("Claude MCP sign-in", () => {
     }).pipe(Effect.provide(runtimeFor(providerService)));
   });
 
+  it.effect("releases the claimed sign-in when the server is disabled", () => {
+    const { state, providerService } = makeClaudeLoginProvider({
+      authUrl: "https://auth.example.test/authorize",
+    });
+    return Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      const error = yield* service.startLogin(claudeLogin).pipe(Effect.flip);
+      assert.include(error.message, "disabled");
+      assert.equal((yield* service.getLoginStatus(claudeLogin)).status, "idle");
+      assert.equal(state.authCalls.length, 0);
+    }).pipe(
+      Effect.provide(
+        makeRuntimeLayer({
+          servers: { docs: { type: "http", url: "https://docs.example.test/mcp", enabled: false } },
+          providerService,
+        }),
+      ),
+    );
+  });
+
   it.effect("keeps provider-scoped Claude login rejected and reports idle server status", () =>
     Effect.gen(function* () {
       const service = yield* McpRuntimeService;

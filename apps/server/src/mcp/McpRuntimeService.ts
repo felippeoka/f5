@@ -896,13 +896,6 @@ const makeMcpRuntimeService = Effect.gen(function* () {
         return yield* new McpRuntimeServiceError({
           message: "This provider runtime does not support MCP sign-in.",
         });
-      const effective = yield* projectMcpConfigService
-        .readEffectiveRuntimeConfig(input.projectId)
-        .pipe(Effect.mapError(runtimeError));
-      if (effective.servers[input.serverName]?.enabled === false)
-        return yield* new McpRuntimeServiceError({
-          message: `MCP server '${input.serverName}' is disabled in the shared effective config.`,
-        });
       const placeholder: McpLoginStatusResult = {
         target: "server",
         mode: "oauth",
@@ -914,6 +907,27 @@ const makeMcpRuntimeService = Effect.gen(function* () {
       };
       // Claim the key before any I/O so concurrent clicks share one sign-in.
       setLoginStatus(input, placeholder);
+      // A start rejected before reaching the provider restores the previous outcome.
+      const release = Effect.sync(() => {
+        if (loginStatuses.get(key) !== placeholder) return;
+        if (existing) setLoginStatus(input, existing);
+        else {
+          clearLoginStatusTimer(key);
+          loginStatuses.delete(key);
+        }
+      });
+      const effective = yield* projectMcpConfigService
+        .readEffectiveRuntimeConfig(input.projectId)
+        .pipe(
+          Effect.mapError(runtimeError),
+          Effect.tapError(() => release),
+        );
+      if (effective.servers[input.serverName]?.enabled === false) {
+        yield* release;
+        return yield* new McpRuntimeServiceError({
+          message: `MCP server '${input.serverName}' is disabled in the shared effective config.`,
+        });
+      }
       const started = yield* providerService
         .authenticateMcpServerForProject({
           provider: input.provider,
