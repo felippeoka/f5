@@ -26,6 +26,37 @@ describe("effective workspace claims and removal gate", () => {
   afterEach(async () => {
     for (const cleanup of cleanups.splice(0)) await cleanup();
   });
+  it("checks the reviewed root identity under both locks before removal", async () => {
+    const repo = await makeClonedRepo("f5-root-identity-");
+    cleanups.push(repo.cleanup);
+    const world = makeWorld();
+    world.projects.push(project("p", repo.root));
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const config = yield* ServerConfig;
+        const target = path.join(config.worktreesDir, "identity");
+        yield* Effect.promise(() => fs.mkdir(path.dirname(target), { recursive: true }));
+        git(repo.root, "worktree", "add", "-q", "-b", "identity", target, "main");
+        const stat = yield* Effect.promise(() => fs.lstat(target));
+        const input = {
+          projectCwd: repo.root,
+          path: target,
+          policy: { kind: "manual" as const, ownThreadId: null },
+        };
+        const refused = yield* removeWorktreeSafely({
+          ...input,
+          expectedRootIdentity: { dev: stat.dev, ino: stat.ino + 1 },
+        });
+        expect(refused.blockedReasons.join(" ")).toContain("replaced since inspection");
+        expect((yield* Effect.promise(() => fs.lstat(target))).isDirectory()).toBe(true);
+        const removed = yield* removeWorktreeSafely({
+          ...input,
+          expectedRootIdentity: { dev: stat.dev, ino: stat.ino },
+        });
+        expect(removed.blockedReasons).toEqual([]);
+      }).pipe(Effect.provide(automationLayer(world, {}, "f5-root-identity-state-")), Effect.scoped),
+    );
+  });
   it("includes local and archived conversations, and treats canonicalization failure as unknown", async () => {
     const repo = await makeClonedRepo("f5-claims-");
     cleanups.push(repo.cleanup);

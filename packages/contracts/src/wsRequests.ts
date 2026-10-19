@@ -252,6 +252,9 @@ import {
   StorageCleanupRequest,
   StorageGetDiskSpaceRequest,
   StorageGetUsageRequest,
+  StorageGetStatusRequest,
+  StorageGetTargetsRequest,
+  StorageGetOperationRequest,
 } from "./storage";
 import {
   TerminalClearInput,
@@ -550,6 +553,9 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.serverRemoveKeybinding, ServerRemoveKeybindingInput),
   tagRequestBody(WS_METHODS.serverResetKeybindings, ServerResetKeybindingsInput),
   tagRequestBody(WS_METHODS.storageGetUsage, StorageGetUsageRequest),
+  tagRequestBody(WS_METHODS.storageGetStatus, StorageGetStatusRequest),
+  tagRequestBody(WS_METHODS.storageGetTargets, StorageGetTargetsRequest),
+  tagRequestBody(WS_METHODS.storageGetOperation, StorageGetOperationRequest),
   tagRequestBody(WS_METHODS.storageCleanup, StorageCleanupRequest),
   tagRequestBody(WS_METHODS.storageCancelCleanup, StorageCancelCleanupRequest),
   tagRequestBody(WS_METHODS.storageAutomationDryRun, StorageAutomationDryRunInput),

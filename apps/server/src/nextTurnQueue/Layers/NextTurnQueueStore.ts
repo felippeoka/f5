@@ -1,3 +1,4 @@
+import { requireAttachmentOwner } from "../../attachmentOwnership.ts";
 import { withAttachmentRetentionLease } from "../../storage/attachmentRetention.ts";
 import {
   stampSubmissionSource,
@@ -821,11 +822,7 @@ export const makeNextTurnQueueStore = Effect.gen(function* () {
                       AND owner_kind = 'ingress'
                       AND owner_id = ${input.command.commandId}
                   `;
-                  yield* sql`
-                    INSERT OR IGNORE INTO attachment_owners (
-                      attachment_id, owner_kind, owner_id, created_at
-                    ) VALUES (${attachment.id}, 'queue_item', ${input.itemId}, ${at})
-                  `;
+                  yield* requireAttachmentOwner(sql, attachment.id, "queue_item", input.itemId, at);
                 }),
               { concurrency: 1, discard: true },
             );
@@ -1569,11 +1566,7 @@ export const makeNextTurnQueueStore = Effect.gen(function* () {
                   ${`copy:${attachment.id}`}, NULL, ${destination}, 'ready', ${at}, ${at}
                 )
               `;
-              yield* sql`
-                INSERT OR IGNORE INTO attachment_owners (
-                  attachment_id, owner_kind, owner_id, created_at
-                ) VALUES (${attachmentId}, 'ingress', ${commandId}, ${at})
-              `;
+              yield* requireAttachmentOwner(sql, attachmentId, "ingress", commandId, at);
               return nextAttachment;
             }),
           { concurrency: 1 },

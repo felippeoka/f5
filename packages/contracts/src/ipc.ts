@@ -257,13 +257,17 @@ import type {
   StorageAutomationAuditResult,
   StorageAutomationDryRunResult,
   StorageCancelCleanupRequest,
-  StorageCleanupProgressPayload,
+  StorageStatus,
+  StorageCleanupStatus,
+  StorageGetUsageResult,
+  StorageGetTargetsRequest,
+  StorageGetTargetsResult,
+  StorageGetOperationRequest,
+  StorageGetOperationResult,
   StorageCleanupRequest,
-  StorageCleanupResult,
   StorageGetDiskSpaceRequest,
   StorageGetUsageRequest,
   StorageInvalidatedPayload,
-  StorageUsageReport,
   DiskSpaceStatus,
 } from "./storage";
 import type {
@@ -916,14 +920,17 @@ export interface NativeApi {
     onStatusUpdated: (callback: (payload: McpStatusUpdatedPayload) => void) => () => void;
   };
   storage: {
-    getUsage: (input?: StorageGetUsageRequest) => Promise<StorageUsageReport>;
-    cleanup: (input: StorageCleanupRequest) => Promise<StorageCleanupResult>;
+    getUsage: (input?: StorageGetUsageRequest) => Promise<StorageGetUsageResult>;
+    cleanup: (input: StorageCleanupRequest) => Promise<StorageCleanupStatus>;
     cancelCleanup: (input: StorageCancelCleanupRequest) => Promise<void>;
     /** What automatic cleanup and auto-pull would do now, with exact skip reasons. */
     automationDryRun: () => Promise<StorageAutomationDryRunResult>;
     automationAudit: (input?: StorageAutomationAuditInput) => Promise<StorageAutomationAuditResult>;
     onInvalidated: (callback: (payload: StorageInvalidatedPayload) => void) => () => void;
-    onCleanupProgress: (callback: (payload: StorageCleanupProgressPayload) => void) => () => void;
+    getStatus: () => Promise<StorageStatus>;
+    getTargets: (input: StorageGetTargetsRequest) => Promise<StorageGetTargetsResult>;
+    getOperation: (input: StorageGetOperationRequest) => Promise<StorageGetOperationResult>;
+    onStatusUpdated: (callback: (payload: StorageStatus) => void) => () => void;
     /** Free space on the volumes F5 and its providers write to. */
     getDiskSpace: (input?: StorageGetDiskSpaceRequest) => Promise<DiskSpaceStatus>;
     onDiskSpaceUpdated: (callback: (payload: DiskSpaceStatus) => void) => () => void;

@@ -1,3 +1,12 @@
+import { vi } from "vitest";
+import { removeFileIfSafe } from "./storagePathSafety.ts";
+vi.mock("./storagePathSafety.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./storagePathSafety.ts")>();
+  return { ...actual, removeFileIfSafe: vi.fn(actual.removeFileIfSafe) };
+});
+import { withAttachmentRetentionLease } from "./attachmentRetention.ts";
+import { withWorktreeLifecycleLock } from "../project/Layers/WorktreeLifecycleCoordinator.ts";
+import { withProviderThreadAccess } from "../provider/providerThreadAccess.ts";
 import { makeFakeGitCore } from "../git/testDoubles.ts";
 import { canonicalWorktreePath } from "../git/worktreePaths.ts";
 import { NextTurnQueueStoreLive } from "../nextTurnQueue/Layers/NextTurnQueueStore.ts";
@@ -8,8 +17,8 @@ import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { CommandId, EventId, ProjectId, ThreadId } from "@t3tools/contracts";
-import { Effect, Exit, Layer, Scope, Stream } from "effect";
+import { CheckpointRef, CommandId, EventId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Scope, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { toSafeThreadAttachmentSegment } from "../attachmentStore.ts";
@@ -35,6 +44,7 @@ import { ServerSettingsService } from "../serverSettings.ts";
 import { StorageMaintenance } from "./StorageMaintenance.ts";
 import { StorageMaintenanceLive } from "./StorageMaintenance.ts";
 import { sizeIfExists } from "./diskUsage.ts";
+import { openRuntimeSqliteDatabase } from "../persistence/runtimeSqlite.ts";
 
 function makeProviderServiceStub(input?: {
   readonly stopSession?: ProviderServiceShape["stopSession"];
@@ -64,6 +74,7 @@ function makeCheckpointStoreStub(): CheckpointStoreShape {
     isGitRepository: notImplemented,
     captureCheckpoint: notImplemented,
     hasCheckpointRef: notImplemented,
+    readCheckpointRefs: () => Effect.succeed({}),
     restoreCheckpoint: notImplemented,
     diffCheckpoints: notImplemented,
     deleteCheckpointRefs: () => Effect.void,
@@ -315,7 +326,7 @@ for (const categoryId of ["inactiveF5Worktrees", "legacyT3Worktrees"] as const) 
         const result = yield* storage.cleanup({
           operationId: `cleanup-${categoryId}`,
           scanId: report.scanId,
-          confirmationNonce: report.confirmationNonce,
+          nonce: report.confirmationNonce,
           categoryIds: [categoryId],
           targetSelections: [{ categoryId, targetIds: targets.map((target) => target.id) }],
           confirmationText: "DELETE",
@@ -333,7 +344,431 @@ for (const categoryId of ["inactiveF5Worktrees", "legacyT3Worktrees"] as const) 
   });
 }
 
+const awaitOperation = (
+  storage: import("./StorageMaintenance.ts").StorageMaintenanceShape,
+  operationId: string,
+) =>
+  Effect.gen(function* () {
+    for (let attempt = 0; attempt < 1000; attempt++) {
+      const result = yield* storage.getOperation({ operationId });
+      if (result.status.completedAt) return result;
+      yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 1)));
+    }
+    return yield* Effect.die("Cleanup did not complete.");
+  });
+
 const layer = it.layer(makeStorageTestLayer());
+
+it.effect(
+  "skipped purge and no-op log pruning keep the measured generation and concise audit reasons",
+  () =>
+    withHomeSandbox(
+      Effect.gen(function* () {
+        const storage = yield* StorageMaintenance,
+          sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.makeUnsafe("skipped-stop-no-mutation");
+        yield* seedThread({ sql, threadId, deletedAt: daysAgo(90) });
+        const report = yield* storage.inspect({ force: true });
+        const before = yield* storage.getUsage();
+        yield* storage.purgeThreads({
+          operationId: "automatic-stop-skip",
+          deletedBefore: daysAgo(30),
+          archivedBefore: null,
+          maxThreads: 1,
+        });
+        yield* storage.pruneTerminalThreadLogs({
+          operationId: "logs-no-mutation",
+          modifiedBefore: daysAgo(1),
+          includeArchived: true,
+        });
+        assert.deepStrictEqual((yield* storage.getUsage()).confirmation, before.confirmation);
+        const operation = yield* storage.acceptCleanup({
+          operationId: "manual-stop-skip",
+          backendEpoch: before.status.backendEpoch,
+          scanId: report.scanId,
+          nonce: report.confirmationNonce,
+          categoryIds: ["purgeDeletedThreads"],
+          options: { vacuumAfterDeletes: false },
+        });
+        const result = yield* awaitOperation(storage, operation.operationId);
+        assert.equal(result.status.result?.results[0]?.perTargetReclaimed[0]?.status, "Skipped");
+        assert.equal(yield* countRows(sql, "projection_threads", threadId), 1);
+        const usage = yield* storage.getUsage();
+        assert.equal(usage.report?.scanId, report.scanId);
+        assert.equal(usage.status.scan.state, "idle");
+        const audit = yield* sql<{
+          reason: string | null;
+        }>`SELECT reason FROM storage_automation_audit`;
+        assert.isAbove(audit.length, 0);
+        for (const row of audit) {
+          assert.isAtMost(row.reason?.length ?? 0, 300);
+          assert.notInclude(row.reason ?? "", "\n    at ");
+        }
+      }).pipe(
+        Effect.provide(
+          makeStorageTestLayer({
+            providerService: makeProviderServiceStub({
+              stopSession: () => Effect.die(new Error(`Provider stop failed: ${"x".repeat(500)}`)),
+            }),
+          }),
+        ),
+      ),
+    ),
+);
+
+for (const mode of ["fallback", "another-copy", "remaining"] as const) {
+  it.effect(`checkpoint preflight uses bulk identity reads (${mode})`, () =>
+    withHomeSandbox(
+      Effect.gen(function* () {
+        let removed = false;
+        let deletedCwd: string | undefined;
+        let reads = 0;
+        const ref = CheckpointRef.makeUnsafe("refs/t3/checkpoints/purge-ref/1");
+        const oid = "a".repeat(40);
+        let worktree = "";
+        const checkpoints: CheckpointStoreShape = {
+          ...makeCheckpointStoreStub(),
+          isGitRepository: () => Effect.succeed(true),
+          readCheckpointRefs: ({ cwd }) =>
+            Effect.sync(() => {
+              reads++;
+              return removed && cwd === deletedCwd ? {} : { [ref]: oid };
+            }),
+          deleteCheckpointRefs: (input) =>
+            Effect.sync(() => {
+              deletedCwd = input.cwd;
+              assert.deepStrictEqual(input.expectedOids, { [ref]: oid });
+              removed = mode !== "remaining";
+            }),
+        };
+        return yield* Effect.gen(function* () {
+          const storage = yield* StorageMaintenance,
+            sql = yield* SqlClient.SqlClient,
+            config = yield* ServerConfig;
+          const threadId = ThreadId.makeUnsafe(`purge-ref-${mode}`);
+          const workspace = NodePath.join(config.baseDir, "recorded-root");
+          worktree = NodePath.join(config.baseDir, "recorded-worktree");
+          yield* Effect.promise(async () => {
+            await NodeFS.mkdir(NodePath.join(workspace, ".git"), { recursive: true });
+            if (mode !== "fallback")
+              await NodeFS.mkdir(NodePath.join(worktree, ".git"), { recursive: true });
+          });
+          yield* seedThread({ sql, threadId, worktreePath: worktree, deletedAt: daysAgo(90) });
+          yield* sql`UPDATE projection_projects SET workspace_root = ${workspace}`;
+          yield* sql`INSERT INTO projection_turns (thread_id, turn_id, state, requested_at, checkpoint_turn_count, checkpoint_ref, checkpoint_files_json)
+          VALUES (${threadId}, 'ref-turn', 'completed', ${daysAgo(90)}, 1, ${ref}, '[]')`;
+          const report = yield* storage.inspect({ force: true });
+          const operation = yield* storage.acceptCleanup({
+            operationId: `ref-${mode}`,
+            backendEpoch: (yield* storage.getStatus).backendEpoch,
+            scanId: report.scanId,
+            nonce: report.confirmationNonce,
+            categoryIds: ["purgeDeletedThreads"],
+            options: { vacuumAfterDeletes: false },
+          });
+          const result = yield* awaitOperation(storage, operation.operationId);
+          assert.equal(deletedCwd, mode === "fallback" ? workspace : worktree);
+          assert.isAtMost(reads, 3);
+          assert.equal(
+            yield* countRows(sql, "projection_threads", threadId),
+            mode === "remaining" ? 1 : 0,
+          );
+          if (mode === "another-copy")
+            assert.isTrue(
+              result.status.result?.warnings.some((warning) =>
+                warning.reason.includes("another recorded repository"),
+              ),
+            );
+          if (mode === "remaining")
+            assert.equal(
+              result.status.result?.results[0]?.perTargetReclaimed[0]?.status,
+              "Deleted, cleanup incomplete",
+            );
+        }).pipe(Effect.provide(makeStorageTestLayer({ checkpointStore: checkpoints })));
+      }),
+    ),
+  );
+}
+
+it.effect(
+  "manual acceptance and automatic purge share lock order without holding attachment access during stop",
+  () =>
+    Effect.gen(function* () {
+      const stopping = yield* Deferred.make<void>();
+      const resume = yield* Deferred.make<void>();
+      let stopped = false;
+      const providers = makeProviderServiceStub({
+        stopSession: () =>
+          Effect.gen(function* () {
+            if (!stopped) {
+              stopped = true;
+              yield* Deferred.succeed(stopping, undefined);
+              yield* Deferred.await(resume);
+            }
+          }),
+      });
+      return yield* withHomeSandbox(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const storage = yield* StorageMaintenance;
+            const sql = yield* SqlClient.SqlClient;
+            const config = yield* ServerConfig;
+            const threadId = ThreadId.makeUnsafe("concurrent-manual-automatic");
+            yield* seedThread({ sql, threadId, deletedAt: daysAgo(90) });
+            const report = yield* storage.inspect({ force: true });
+            const operation = yield* storage.acceptCleanup({
+              operationId: "manual-overlap",
+              backendEpoch: (yield* storage.getStatus).backendEpoch,
+              scanId: report.scanId,
+              nonce: report.confirmationNonce,
+              categoryIds: ["purgeDeletedThreads"],
+              options: { vacuumAfterDeletes: false },
+            });
+            yield* Deferred.await(stopping);
+            // Quiescence must leave attachment ingress/backup access available.
+            yield* withAttachmentRetentionLease(config.attachmentsDir, Effect.void).pipe(
+              Effect.timeout("1 second"),
+            );
+            const automatic = yield* storage
+              .purgeThreads({
+                operationId: "automatic-overlap",
+                deletedBefore: daysAgo(30),
+                archivedBefore: null,
+                maxThreads: 1,
+              })
+              .pipe(Effect.forkIn(yield* Scope.Scope));
+            // Let the automatic pass enumerate its small fixture and wait for the same provider lock.
+            yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 50)));
+            yield* withAttachmentRetentionLease(config.attachmentsDir, Effect.void).pipe(
+              Effect.timeout("1 second"),
+            );
+            yield* Deferred.succeed(resume, undefined);
+            const manual = yield* awaitOperation(storage, operation.operationId);
+            yield* Fiber.join(automatic).pipe(Effect.timeout("1 second"));
+            assert.equal(manual.status.state, "succeeded");
+            assert.equal(yield* countRows(sql, "projection_threads", threadId), 0);
+            yield* withAttachmentRetentionLease(config.attachmentsDir, Effect.void).pipe(
+              Effect.timeout("1 second"),
+            );
+          }),
+        ).pipe(Effect.provide(makeStorageTestLayer({ providerService: providers }))),
+      );
+    }),
+);
+
+for (const categoryId of ["inactiveF5Worktrees", "legacyT3Worktrees"] as const) {
+  it.effect(
+    `cancelling ${categoryId} while its lifecycle lock is held leaves the checkout intact`,
+    () =>
+      withHomeSandbox(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const storage = yield* StorageMaintenance;
+            const config = yield* ServerConfig;
+            const path = NodePath.join(
+              categoryId === "inactiveF5Worktrees"
+                ? config.worktreesDir
+                : NodePath.join(NodeOS.homedir(), ".t3", "worktrees"),
+              "cancel-locked",
+            );
+            yield* Effect.promise(async () => {
+              await writeFile(
+                NodePath.join(NodeOS.homedir(), ".f5", "userdata", "state.sqlite"),
+                "ready",
+              );
+              await writeGitWorktreeMetadata({
+                worktreePath: path,
+                mainWorktreePath: NodePath.join(config.baseDir, "cancel-main"),
+              });
+              await writeFile(NodePath.join(path, "keep.txt"), "keep these bytes");
+            });
+            const report = yield* storage.inspect({ force: true });
+            assert.isTrue(
+              report.categories
+                .find((category) => category.id === categoryId)
+                ?.targets.some((target) => target.path === path && target.safeToDelete),
+              JSON.stringify(report.categories.find((category) => category.id === categoryId)),
+            );
+            const locked = yield* Deferred.make<void>();
+            const release = yield* Deferred.make<void>();
+            yield* withWorktreeLifecycleLock(
+              path,
+              Deferred.succeed(locked, undefined).pipe(Effect.andThen(Deferred.await(release))),
+            ).pipe(Effect.forkIn(yield* Scope.Scope));
+            yield* Deferred.await(locked);
+            const operation = yield* storage.acceptCleanup({
+              operationId: `cancel-${categoryId}`,
+              backendEpoch: (yield* storage.getStatus).backendEpoch,
+              scanId: report.scanId,
+              nonce: report.confirmationNonce,
+              categoryIds: [categoryId],
+              targetSelections: [
+                {
+                  categoryId,
+                  targetIds: [
+                    report.categories
+                      .find((category) => category.id === categoryId)!
+                      .targets.find((target) => target.path === path)!.id,
+                  ],
+                },
+              ],
+              confirmationText: "DELETE",
+              options: { vacuumAfterDeletes: false },
+            });
+            while ((yield* storage.getStatus).cleanup?.progress?.phase !== "deleting")
+              yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 1)));
+            yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+            yield* storage.cancel(operation.operationId);
+            yield* Deferred.succeed(release, undefined);
+            const result = yield* awaitOperation(storage, operation.operationId);
+            assert.equal(result.status.state, "cancelled");
+            assert.deepStrictEqual(result.status.result?.results, []);
+            assert.isTrue(yield* Effect.promise(() => pathExists(NodePath.join(path, "keep.txt"))));
+          }),
+        ).pipe(Effect.provide(makeStorageTestLayer())),
+      ),
+  );
+}
+
+for (const cancelled of [false, true]) {
+  it.effect(
+    `keeps completed purge outcomes when optional compaction ${cancelled ? "is cancelled" : "fails"}`,
+    () =>
+      Effect.gen(function* () {
+        const compacting = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        let gates = 0;
+        const engine = {
+          ...makeOrchestrationEngineStub(),
+          acquireMaintenanceLock: () =>
+            Effect.gen(function* () {
+              if (++gates === 2 && cancelled) {
+                yield* Deferred.succeed(compacting, undefined);
+                yield* Deferred.await(release);
+              }
+              return yield* Scope.make("sequential");
+            }),
+        };
+        return yield* withHomeSandbox(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const storage = yield* StorageMaintenance;
+              const sql = yield* SqlClient.SqlClient;
+              const config = yield* ServerConfig;
+              const threadId = ThreadId.makeUnsafe(`post-purge-compaction-${cancelled}`);
+              const path = NodePath.join(
+                config.attachmentsDir,
+                `${threadId}-11111111-1111-4111-8111-111111111111.txt`,
+              );
+              yield* seedThread({ sql, threadId, deletedAt: daysAgo(90) });
+              yield* Effect.promise(() => writeFile(path, "removed and accounted for"));
+              // The helper will fail opening these bytes as a database; the SQL fixture is :memory:.
+              yield* Effect.promise(() => writeFile(config.dbPath, "not a SQLite database"));
+              const report = yield* storage.inspect({ force: true });
+              const operation = yield* storage.acceptCleanup({
+                operationId: `post-purge-${cancelled}`,
+                backendEpoch: (yield* storage.getStatus).backendEpoch,
+                scanId: report.scanId,
+                nonce: report.confirmationNonce,
+                categoryIds: ["purgeDeletedThreads"],
+              });
+              if (cancelled) {
+                yield* Deferred.await(compacting);
+                yield* storage.cancel(operation.operationId);
+                yield* Deferred.succeed(release, undefined);
+              }
+              const result = yield* awaitOperation(storage, operation.operationId);
+              assert.equal(result.status.state, cancelled ? "cancelled" : "partial");
+              assert.isAbove(result.status.result?.reclaimedBytes ?? 0, 0);
+              assert.equal(
+                result.status.result?.results[0]?.perTargetReclaimed[0]?.status,
+                "Removed",
+              );
+              assert.equal(result.status.result?.results[1]?.categoryId, "databaseVacuum");
+              assert.equal(yield* countRows(sql, "projection_threads", threadId), 0);
+              assert.isFalse(yield* Effect.promise(() => pathExists(path)));
+            }),
+          ).pipe(Effect.provide(makeStorageTestLayer({ orchestrationEngine: engine }))),
+        );
+      }),
+  );
+}
+
+it.effect("an unreadable provider-home root keeps accessible cleanup categories actionable", () =>
+  withHomeSandbox(
+    Effect.gen(function* () {
+      if (process.platform === "win32" || process.getuid?.() === 0) return;
+      const storage = yield* StorageMaintenance;
+      const config = yield* ServerConfig;
+      const root = config.providerHomesDir ?? NodePath.join(config.stateDir, "provider-homes");
+      const log = NodePath.join(config.providerLogsDir, "accessible-orphan.log");
+      yield* Effect.promise(async () => {
+        await NodeFS.mkdir(root, { recursive: true });
+        await writeFile(log, "accessible sibling");
+        await NodeFS.chmod(root, 0);
+      });
+      yield* Effect.gen(function* () {
+        const report = yield* storage.inspect({ force: true });
+        assert.isTrue(
+          report.warnings.some(
+            (warning) => warning.path === root && /EACCES|permission/i.test(warning.reason),
+          ),
+        );
+        assert.equal(report.providerHomesMeasurement, "unavailable");
+        assert.equal(
+          report.categories.find((category) => category.id === "databaseVacuum")?.measurement,
+          "complete",
+        );
+        const logs = report.categories.find(
+          (category) => category.id === "providerLogsForTerminalThreads",
+        );
+        assert.equal(logs?.measurement, "complete");
+        assert.equal(logs?.availability, "ready");
+        assert.isTrue(logs?.targets.some((target) => target.path === log));
+        assert.isNotNull((yield* storage.getUsage()).confirmation);
+      }).pipe(Effect.ensuring(Effect.promise(() => NodeFS.chmod(root, 0o700))));
+    }).pipe(Effect.provide(makeStorageTestLayer())),
+  ),
+);
+
+it.effect("an empty eligible attachment manifest never adds newly eligible files", () =>
+  withHomeSandbox(
+    Effect.gen(function* () {
+      const storage = yield* StorageMaintenance;
+      const sql = yield* SqlClient.SqlClient;
+      const config = yield* ServerConfig;
+      const threadId = ThreadId.makeUnsafe("new-unconfirmed-attachment-thread");
+      yield* seedThread({ sql, threadId, deletedAt: null });
+      const outsidePath = NodePath.join(config.baseDir, "outside-attachments.png");
+      yield* sql`INSERT INTO attachments(attachment_id, thread_id, type, name, mime_type, size_bytes, content_hash, final_path, lifecycle, created_at, updated_at)
+        VALUES ('outside-unconfirmed', ${threadId}, 'image', 'outside.png', 'image/png', 0, 'hash', ${outsidePath}, 'ready', '2026-01-01', '2026-01-01')`;
+      const report = yield* storage.inspect({ force: true });
+      assert.equal(
+        report.categories
+          .find((category) => category.id === "orphanAttachments")
+          ?.targets.filter((target) => target.safeToDelete).length,
+        0,
+      );
+      const path = NodePath.join(config.attachmentsDir, "new-unconfirmed.png");
+      yield* Effect.promise(() => writeFile(path, "new attachment"));
+      yield* sql`INSERT INTO attachments(attachment_id, thread_id, type, name, mime_type, size_bytes, content_hash, final_path, lifecycle, created_at, updated_at)
+        VALUES ('new-unconfirmed', ${threadId}, 'image', 'new.png', 'image/png', 14, 'hash', ${path}, 'ready', '2026-01-01', '2026-01-01')`;
+      const result = yield* storage.cleanup({
+        operationId: "empty-confirmed-manifest",
+        scanId: report.scanId,
+        nonce: report.confirmationNonce,
+        categoryIds: ["orphanAttachments"],
+        options: { vacuumAfterDeletes: false },
+      });
+      assert.equal(result.reclaimedBytes, 0);
+      assert.isTrue(yield* Effect.promise(() => pathExists(path)));
+      const rows = yield* sql<{
+        lifecycle: string;
+      }>`SELECT lifecycle FROM attachments WHERE attachment_id = 'new-unconfirmed'`;
+      assert.equal(rows[0]?.lifecycle, "ready");
+    }).pipe(Effect.provide(makeStorageTestLayer())),
+  ),
+);
 
 layer("StorageMaintenance", (it) => {
   it.effect("inspect enumerates provider log files without following symlinks", () =>
@@ -417,7 +852,7 @@ layer("StorageMaintenance", (it) => {
         const result = yield* storage.cleanup({
           operationId: "operation-provider-logs",
           scanId: report.scanId,
-          confirmationNonce: report.confirmationNonce,
+          nonce: report.confirmationNonce,
           categoryIds: ["providerLogsForTerminalThreads"],
           options: { vacuumAfterDeletes: false },
         });
@@ -447,7 +882,7 @@ layer("StorageMaintenance", (it) => {
         const request = {
           operationId: "operation-nonce",
           scanId: report.scanId,
-          confirmationNonce: report.confirmationNonce,
+          nonce: report.confirmationNonce,
           categoryIds: ["providerLogRotations" as const],
           options: { vacuumAfterDeletes: false },
         };
@@ -478,7 +913,7 @@ layer("StorageMaintenance", (it) => {
           storage.cleanup({
             operationId: "operation-legacy-no-delete",
             scanId: report.scanId,
-            confirmationNonce: report.confirmationNonce,
+            nonce: report.confirmationNonce,
             categoryIds: ["legacyT3Caches"],
             options: { vacuumAfterDeletes: false },
           }),
@@ -489,7 +924,7 @@ layer("StorageMaintenance", (it) => {
         const result = yield* storage.cleanup({
           operationId: "operation-legacy-delete",
           scanId: nextReport.scanId,
-          confirmationNonce: nextReport.confirmationNonce,
+          nonce: nextReport.confirmationNonce,
           categoryIds: ["legacyT3Caches"],
           confirmationText: "DELETE",
           options: { vacuumAfterDeletes: false },
@@ -565,7 +1000,7 @@ layer("StorageMaintenance", (it) => {
           storage.cleanup({
             operationId: "operation-worktree-without-targets",
             scanId: report.scanId,
-            confirmationNonce: report.confirmationNonce,
+            nonce: report.confirmationNonce,
             categoryIds: ["legacyT3Worktrees"],
             confirmationText: "DELETE",
             options: { vacuumAfterDeletes: false },
@@ -658,7 +1093,7 @@ layer("StorageMaintenance", (it) => {
         const result = yield* storage.cleanup({
           operationId: "operation-legacy-child-worktree",
           scanId: report.scanId,
-          confirmationNonce: report.confirmationNonce,
+          nonce: report.confirmationNonce,
           categoryIds: ["legacyT3Worktrees"],
           targetSelections: [{ categoryId: "legacyT3Worktrees", targetIds: [staleTarget!.id] }],
           confirmationText: "DELETE",
@@ -708,7 +1143,7 @@ layer("StorageMaintenance", (it) => {
         const result = yield* storage.cleanup({
           operationId: "operation-legacy-dirty-worktree",
           scanId: report.scanId,
-          confirmationNonce: report.confirmationNonce,
+          nonce: report.confirmationNonce,
           categoryIds: ["legacyT3Worktrees"],
           targetSelections: [{ categoryId: "legacyT3Worktrees", targetIds: [dirtyTarget!.id] }],
           confirmationText: "DELETE",
@@ -755,7 +1190,7 @@ layer("StorageMaintenance", (it) => {
           .cleanup({
             operationId: "operation-legacy-missing-metadata-worktree",
             scanId: report.scanId,
-            confirmationNonce: report.confirmationNonce,
+            nonce: report.confirmationNonce,
             categoryIds: ["legacyT3Worktrees"],
             targetSelections: [{ categoryId: "legacyT3Worktrees", targetIds: [target!.id] }],
             confirmationText: "DELETE",
@@ -826,7 +1261,7 @@ layer("StorageMaintenance", (it) => {
         const result = yield* storage.cleanup({
           operationId: "operation-archived-provider-logs",
           scanId: report.scanId,
-          confirmationNonce: report.confirmationNonce,
+          nonce: report.confirmationNonce,
           categoryIds: ["providerLogsForTerminalThreads"],
           options: { vacuumAfterDeletes: false },
         });
@@ -868,7 +1303,7 @@ layer("StorageMaintenance", (it) => {
         const result = yield* storage.cleanup({
           operationId: "operation-f5-worktree-clean",
           scanId: report.scanId,
-          confirmationNonce: report.confirmationNonce,
+          nonce: report.confirmationNonce,
           categoryIds: ["inactiveF5Worktrees"],
           targetSelections: [{ categoryId: "inactiveF5Worktrees", targetIds: [target!.id] }],
           confirmationText: "DELETE",
@@ -958,7 +1393,7 @@ layer("StorageMaintenance", (it) => {
         const result = yield* storage.cleanup({
           operationId: "operation-f5-worktree-root",
           scanId: report.scanId,
-          confirmationNonce: report.confirmationNonce,
+          nonce: report.confirmationNonce,
           categoryIds: ["inactiveF5Worktrees"],
           targetSelections: [{ categoryId: "inactiveF5Worktrees", targetIds: [target!.id] }],
           confirmationText: "DELETE",
@@ -1067,7 +1502,7 @@ layer("StorageMaintenance", (it) => {
           const result = yield* storage.cleanup({
             operationId: "operation-purge-deleted",
             scanId: report.scanId,
-            confirmationNonce: report.confirmationNonce,
+            nonce: report.confirmationNonce,
             categoryIds: ["purgeDeletedThreads"],
             options: { vacuumAfterDeletes: false },
           });
@@ -1144,7 +1579,7 @@ layer("StorageMaintenance", (it) => {
         const providerLogPath = NodePath.join(config.providerLogsDir, `${archivedSegment}.log`);
         const attachmentPath = NodePath.join(
           config.attachmentsDir,
-          `${archivedSegment}-attachment.txt`,
+          `${archivedSegment}-11111111-1111-4111-8111-111111111111.txt`,
         );
         yield* Effect.promise(async () => {
           await writeFile(providerLogPath, "archived provider log");
@@ -1160,7 +1595,7 @@ layer("StorageMaintenance", (it) => {
         const result = yield* storage.cleanup({
           operationId: "operation-purge-archived",
           scanId: report.scanId,
-          confirmationNonce: report.confirmationNonce,
+          nonce: report.confirmationNonce,
           categoryIds: ["purgeArchivedThreads"],
           confirmationText: "DELETE",
           options: { vacuumAfterDeletes: false },
@@ -1238,7 +1673,7 @@ layer("StorageMaintenance", (it) => {
         const result = yield* storage.cleanup({
           operationId: "operation-purge-archived-race",
           scanId: report.scanId,
-          confirmationNonce: report.confirmationNonce,
+          nonce: report.confirmationNonce,
           categoryIds: ["purgeArchivedThreads"],
           confirmationText: "DELETE",
           options: { vacuumAfterDeletes: false },
@@ -1700,7 +2135,7 @@ it.layer(
         const result = yield* storage.cleanup({
           operationId: "operation-codex-staging",
           scanId: report.scanId,
-          confirmationNonce: report.confirmationNonce,
+          nonce: report.confirmationNonce,
           categoryIds: ["codexMarketplaceStaging"],
         });
 
@@ -1868,7 +2303,7 @@ it.layer(makeStorageTestLayer())("StorageMaintenance automatic maintenance", (it
     ),
   );
 
-  it.effect("does not let threads that keep failing hold every purge slot", () =>
+  it.effect("purges missing workspaces with a warning while preserving busy threads", () =>
     withHomeSandbox(
       Effect.gen(function* () {
         const storage = yield* StorageMaintenance;
@@ -1908,10 +2343,14 @@ it.layer(makeStorageTestLayer())("StorageMaintenance automatic maintenance", (it
             maxThreads: 1,
           });
 
-        // The busy thread is never selected; the stuck one fails once...
+        // Missing recorded workspaces no longer prevent a purge. Ref copies in
+        // a moved repository are explicitly reported and left alone.
         const first = yield* pass("purge-first");
-        assert.deepStrictEqual(first.purgedThreadIds, []);
-        assert.equal(yield* countRows(sql, "projection_threads", stuck), 1);
+        assert.deepStrictEqual(first.purgedThreadIds, [stuck]);
+        assert.equal(yield* countRows(sql, "projection_threads", stuck), 0);
+        assert.isTrue(
+          first.warnings.some((warning) => warning.reason.includes("moved repository")),
+        );
         // ...and then waits behind the thread that can be purged.
         const second = yield* pass("purge-second");
         assert.deepStrictEqual(second.purgedThreadIds, [purgeable]);
@@ -1937,7 +2376,8 @@ it.layer(makeStorageTestLayer())("StorageMaintenance automatic maintenance", (it
 
       const result = yield* storage.reclaimDatabaseSpace({ maxDurationMs: 10_000 });
       assert.equal(result.action, "incremental");
-      assert.isAbove(result.reclaimedBytes, 0);
+      // This fixture uses :memory:; releasing pages frees no on-disk bytes.
+      assert.equal(result.reclaimedBytes, 0);
       const after = yield* sql<{ readonly freelist_count: number }>`PRAGMA freelist_count`;
       assert.equal(after[0]!.freelist_count, 0);
       assert.deepStrictEqual(yield* storage.reclaimDatabaseSpace({ maxDurationMs: 10_000 }), {
@@ -1947,3 +2387,502 @@ it.layer(makeStorageTestLayer())("StorageMaintenance automatic maintenance", (it
     }),
   );
 });
+
+it.effect("successful compaction without file-size reduction stays succeeded", () =>
+  withHomeSandbox(
+    Effect.gen(function* () {
+      const storage = yield* StorageMaintenance,
+        config = yield* ServerConfig;
+      yield* Effect.promise(async () => {
+        await NodeFS.mkdir(NodePath.dirname(config.dbPath), { recursive: true });
+        const db = await openRuntimeSqliteDatabase(config.dbPath, { readOnly: false });
+        try {
+          db.exec(
+            "PRAGMA auto_vacuum=INCREMENTAL; CREATE TABLE kept(value TEXT); INSERT INTO kept VALUES ('kept'); VACUUM",
+          );
+        } finally {
+          db.close();
+        }
+      });
+      const report = yield* storage.inspect({ force: true });
+      const operation = yield* storage.acceptCleanup({
+        operationId: "already-compact",
+        backendEpoch: (yield* storage.getStatus).backendEpoch,
+        scanId: report.scanId,
+        nonce: report.confirmationNonce,
+        categoryIds: ["databaseVacuum"],
+        confirmationText: "DELETE",
+      });
+      const result = yield* awaitOperation(storage, operation.operationId);
+      assert.equal(result.status.state, "succeeded");
+      assert.equal(result.status.result?.reclaimedBytes, 0);
+      assert.deepStrictEqual(result.status.result?.warnings, []);
+    }),
+  ).pipe(Effect.provide(makeStorageTestLayer())),
+);
+
+it.layer(makeStorageTestLayer())("StorageMaintenance scan and operation safety", (it) => {
+  for (const afterMark of [false, true]) {
+    it.effect(
+      `cancelling orphan cleanup ${afterMark ? "after" : "before"} marking preserves lifecycle safety`,
+      () =>
+        withHomeSandbox(
+          Effect.gen(function* () {
+            const storage = yield* StorageMaintenance,
+              sql = yield* SqlClient.SqlClient,
+              config = yield* ServerConfig;
+            const threadId = ThreadId.makeUnsafe(`attachment-cancel-${afterMark}`);
+            yield* seedThread({ sql, threadId, deletedAt: null });
+            const id = `cancel-image-${afterMark}`,
+              path = NodePath.join(config.attachmentsDir, id);
+            yield* Effect.promise(() => writeFile(path, "image bytes"));
+            yield* sql`INSERT INTO attachments(attachment_id, thread_id, type, name, mime_type, size_bytes, content_hash, final_path, lifecycle, created_at, updated_at)
+          VALUES (${id}, ${threadId}, 'image', 'cancel.png', 'image/png', 11, 'hash', ${path}, 'ready', '2026-01-01', '2026-01-01')`;
+            const report = yield* storage.inspect({ force: true });
+            const operationId = `cancel-attachment-${afterMark}`;
+            if (afterMark) {
+              const original = yield* Effect.promise(() =>
+                vi.importActual<typeof import("./storagePathSafety.ts")>("./storagePathSafety.ts"),
+              );
+              vi.mocked(removeFileIfSafe).mockImplementationOnce(async (input) => {
+                const rows = await Effect.runPromise(
+                  sql<{
+                    lifecycle: string;
+                  }>`SELECT lifecycle FROM attachments WHERE attachment_id = ${id}`,
+                );
+                assert.equal(rows[0]?.lifecycle, "deleting");
+                await Effect.runPromise(storage.cancel(operationId));
+                return original.removeFileIfSafe(input);
+              });
+            }
+            const result = yield* storage.cleanup(
+              {
+                operationId,
+                scanId: report.scanId,
+                nonce: report.confirmationNonce,
+                categoryIds: ["orphanAttachments"],
+                targetSelections: [{ categoryId: "orphanAttachments", targetIds: [id] }],
+                options: { vacuumAfterDeletes: false },
+              },
+              {
+                publishProgress: (progress) =>
+                  !afterMark &&
+                  progress.categoryId === "orphanAttachments" &&
+                  progress.phase === "deleting"
+                    ? storage.cancel(operationId)
+                    : Effect.void,
+              },
+            );
+            assert.isTrue(result.cancelled);
+            const rows = yield* sql<{
+              lifecycle: string;
+            }>`SELECT lifecycle FROM attachments WHERE attachment_id = ${id}`;
+            assert.equal(rows.length, afterMark ? 0 : 1);
+            if (!afterMark) {
+              assert.equal(rows[0]?.lifecycle, "ready");
+              yield* sql`INSERT INTO attachment_owners VALUES (${id}, 'ingress', 'cancelled-cleanup-reused', '2026-01-01')`;
+            }
+            assert.equal(yield* Effect.promise(() => pathExists(path)), !afterMark);
+            assert.equal(
+              (yield* sql`SELECT 1 FROM attachment_cleanup_jobs WHERE attachment_id = ${id}`)
+                .length,
+              0,
+            );
+          }),
+        ),
+    );
+  }
+  it.effect(
+    "retains a long-running operation from completion, including idempotent acceptance",
+    () =>
+      withHomeSandbox(
+        Effect.gen(function* () {
+          const storage = yield* StorageMaintenance,
+            sql = yield* SqlClient.SqlClient,
+            config = yield* ServerConfig;
+          const threadId = ThreadId.makeUnsafe("long-attachment-cleanup");
+          yield* seedThread({ sql, threadId, deletedAt: null });
+          const path = NodePath.join(config.attachmentsDir, "long-cleanup.png");
+          yield* Effect.promise(() => writeFile(path, "image bytes"));
+          yield* sql`INSERT INTO attachments(attachment_id, thread_id, type, name, mime_type, size_bytes, content_hash, final_path, lifecycle, created_at, updated_at)
+        VALUES ('long-cleanup', ${threadId}, 'image', 'long.png', 'image/png', 11, 'hash', ${path}, 'ready', '2026-01-01', '2026-01-01')`;
+          const report = yield* storage.inspect({ force: true });
+          const request = {
+            operationId: "long-cleanup",
+            backendEpoch: (yield* storage.getStatus).backendEpoch,
+            scanId: report.scanId,
+            nonce: report.confirmationNonce,
+            categoryIds: ["orphanAttachments"] as const,
+            targetSelections: [
+              { categoryId: "orphanAttachments" as const, targetIds: ["long-cleanup"] },
+            ],
+            options: { vacuumAfterDeletes: false },
+          };
+          const started = Date.now();
+          vi.useFakeTimers({ toFake: ["Date"] });
+          yield* Effect.gen(function* () {
+            const original = yield* Effect.promise(() =>
+              vi.importActual<typeof import("./storagePathSafety.ts")>("./storagePathSafety.ts"),
+            );
+            vi.mocked(removeFileIfSafe).mockImplementationOnce(async (input) => {
+              vi.setSystemTime(started + 20 * 60_000);
+              return original.removeFileIfSafe(input);
+            });
+            yield* storage.acceptCleanup(request);
+            const finished = yield* awaitOperation(storage, request.operationId);
+            assert.equal(finished.status.state, "succeeded");
+            assert.equal(finished.results[0]?.perTargetReclaimed[0]?.id, "long-cleanup");
+            assert.equal((yield* storage.acceptCleanup(request)).state, "succeeded");
+            vi.setSystemTime(started + 34 * 60_000);
+            assert.equal(
+              (yield* storage.getOperation({ operationId: request.operationId })).status.state,
+              "succeeded",
+            );
+            vi.setSystemTime(started + 36 * 60_000);
+            assert.isTrue(
+              Exit.isFailure(
+                yield* Effect.exit(storage.getOperation({ operationId: request.operationId })),
+              ),
+            );
+          }).pipe(Effect.ensuring(Effect.sync(() => vi.useRealTimers())));
+        }),
+      ),
+  );
+
+  it.effect(
+    "accepts an operation once and rejects conflicting reuse or a previous backend epoch",
+    () =>
+      withHomeSandbox(
+        Effect.gen(function* () {
+          const storage = yield* StorageMaintenance,
+            config = yield* ServerConfig;
+          const log = NodePath.join(config.providerLogsDir, "operation-orphan.log");
+          yield* Effect.promise(() => writeFile(log, "data"));
+          const report = yield* storage.inspect({ force: true });
+          const request = {
+            operationId: "test-idempotent",
+            backendEpoch: (yield* storage.getStatus).backendEpoch,
+            scanId: report.scanId,
+            nonce: report.confirmationNonce,
+            categoryIds: ["providerLogsForTerminalThreads"] as const,
+            options: { vacuumAfterDeletes: false },
+          };
+          const first = yield* storage.acceptCleanup(request),
+            second = yield* storage.acceptCleanup(request);
+          assert.equal(first.operationId, second.operationId);
+          assert.isTrue(
+            Exit.isFailure(
+              yield* Effect.exit(
+                storage.acceptCleanup({ ...request, confirmationText: "changed" }),
+              ),
+            ),
+          );
+          assert.isTrue(
+            Exit.isFailure(
+              yield* Effect.exit(
+                storage.acceptCleanup({ ...request, backendEpoch: "previous-backend" }),
+              ),
+            ),
+          );
+          const result = yield* awaitOperation(storage, request.operationId);
+          assert.equal(result.status.state, "succeeded");
+          assert.isFalse(yield* Effect.promise(() => pathExists(log)));
+          assert.equal((yield* storage.acceptCleanup(request)).state, "succeeded");
+        }),
+      ),
+  );
+  it.effect("shares a scan nonce across windows and rejects it after a real mutation", () =>
+    withHomeSandbox(
+      Effect.gen(function* () {
+        const storage = yield* StorageMaintenance;
+        const report = yield* storage.inspect({ force: true });
+        const first = yield* storage.getUsage(),
+          second = yield* storage.getUsage();
+        assert.deepStrictEqual(first.confirmation, second.confirmation);
+        yield* storage.noteStorageMutated;
+        const result = yield* Effect.exit(
+          storage.cleanup({
+            operationId: "stale-generation",
+            scanId: report.scanId,
+            nonce: report.confirmationNonce,
+            categoryIds: ["databaseVacuum"],
+            confirmationText: "DELETE",
+          }),
+        );
+        assert.isTrue(Exit.isFailure(result));
+        if (Exit.isFailure(result))
+          assert.include((Cause.squash(result.cause) as Error).message, "Storage changed");
+      }),
+    ),
+  );
+  it.effect("retains orphan attachment metadata and retry jobs when unlink is refused", () =>
+    withHomeSandbox(
+      Effect.gen(function* () {
+        const storage = yield* StorageMaintenance,
+          sql = yield* SqlClient.SqlClient,
+          config = yield* ServerConfig;
+        const threadId = ThreadId.makeUnsafe("orphan-refused-thread"),
+          path = NodePath.join(config.attachmentsDir, "directory-instead-of-file");
+        yield* seedThread({ sql, threadId, deletedAt: null });
+        yield* Effect.promise(() => NodeFS.mkdir(path, { recursive: true }));
+        yield* sql`INSERT INTO attachments(attachment_id, thread_id, type, name, mime_type, size_bytes, content_hash, final_path, lifecycle, created_at, updated_at)
+      VALUES ('orphan-refused', ${threadId}, 'image', 'refused.png', 'image/png', 0, 'hash', ${path}, 'ready', '2026-01-01', '2026-01-01')`;
+        const report = yield* storage.inspect({ force: true });
+        const result = yield* storage.cleanup({
+          operationId: "orphan-refusal",
+          scanId: report.scanId,
+          nonce: report.confirmationNonce,
+          categoryIds: ["orphanAttachments"],
+          options: { vacuumAfterDeletes: false },
+        });
+        assert.equal(result.reclaimedBytes, 0);
+        const rows = yield* sql<{
+          lifecycle: string;
+          lastError: string;
+        }>`SELECT lifecycle, last_error AS "lastError" FROM attachments JOIN attachment_cleanup_jobs USING (attachment_id) WHERE attachment_id = 'orphan-refused'`;
+        assert.equal(rows[0]?.lifecycle, "deleting");
+        assert.include(rows[0]?.lastError ?? "", "non-file");
+        for (const kind of [
+          "ingress",
+          "queue_item",
+          "message",
+          "user_input",
+          "rewind_draft",
+          "activity",
+        ]) {
+          assert.isTrue(
+            Exit.isFailure(
+              yield* Effect.exit(
+                sql`INSERT INTO attachment_owners VALUES ('orphan-refused', ${kind}, 'owner', '2026-01-01')`,
+              ),
+            ),
+          );
+        }
+        assert.isTrue(
+          Exit.isFailure(
+            yield* Effect.exit(
+              sql`UPDATE attachments SET lifecycle = 'ready' WHERE attachment_id = 'orphan-refused'`,
+            ),
+          ),
+        );
+        // Refusal does not permanently reserve this content-addressed id.
+        // After correcting the filesystem problem, confirmed cleanup finalizes
+        // the absent bytes and deletes the old registry/job, permitting reuse.
+        yield* Effect.promise(() => NodeFS.rmdir(path));
+        const retry = yield* storage.inspect({ force: true });
+        yield* storage.cleanup({
+          operationId: "orphan-refusal-retry",
+          scanId: retry.scanId,
+          nonce: retry.confirmationNonce,
+          categoryIds: ["orphanAttachments"],
+          options: { vacuumAfterDeletes: false },
+        });
+        const remaining =
+          yield* sql`SELECT 1 FROM attachments WHERE attachment_id = 'orphan-refused'`;
+        assert.equal(remaining.length, 0);
+        const jobs =
+          yield* sql`SELECT 1 FROM attachment_cleanup_jobs WHERE attachment_id = 'orphan-refused'`;
+        assert.equal(jobs.length, 0);
+      }),
+    ),
+  );
+  it.effect("blocks archived purge before deletion when a native operation needs recovery", () =>
+    withHomeSandbox(
+      Effect.gen(function* () {
+        const storage = yield* StorageMaintenance,
+          sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.makeUnsafe("archived-native-recovery"),
+          archivedAt = daysAgo(90);
+        yield* seedThread({ sql, threadId, archivedAt, deletedAt: null });
+        yield* sql`INSERT INTO native_operations VALUES ('native-recovery', ${threadId}, 0, 'indeterminate', '{}', '2026-01-01', '2026-01-01')`;
+        const report = yield* storage.inspect({ force: true });
+        const result = yield* storage.cleanup({
+          operationId: "blocked-archived",
+          scanId: report.scanId,
+          nonce: report.confirmationNonce,
+          categoryIds: ["purgeArchivedThreads"],
+          confirmationText: "DELETE",
+          options: { vacuumAfterDeletes: false },
+        });
+        const rows = yield* sql<{
+          archivedAt: string;
+          deletedAt: string | null;
+        }>`SELECT archived_at AS "archivedAt", deleted_at AS "deletedAt" FROM projection_threads WHERE thread_id = ${threadId}`;
+        assert.equal(rows[0]?.archivedAt, archivedAt);
+        assert.isNull(rows[0]?.deletedAt);
+        assert.isTrue(
+          result.warnings.some((warning) => warning.reason.includes("Native operation")),
+        );
+      }),
+    ),
+  );
+  it.effect("retries SQL rollback after files have already been removed", () =>
+    withHomeSandbox(
+      Effect.gen(function* () {
+        const storage = yield* StorageMaintenance,
+          sql = yield* SqlClient.SqlClient,
+          config = yield* ServerConfig;
+        const threadId = ThreadId.makeUnsafe("rollback-after-files"),
+          file = NodePath.join(
+            config.attachmentsDir,
+            `${threadId}-11111111-1111-4111-8111-111111111111.txt`,
+          );
+        yield* seedThread({ sql, threadId, deletedAt: daysAgo(40) });
+        yield* Effect.promise(() => writeFile(file, "retryable bytes"));
+        yield* sql`CREATE TRIGGER block_test_purge BEFORE DELETE ON projection_threads WHEN OLD.thread_id = 'rollback-after-files' BEGIN SELECT RAISE(ABORT, 'test SQL failure'); END`;
+        const first = yield* storage.inspect({ force: true });
+        const failed = yield* storage.cleanup({
+          operationId: "rollback-first",
+          scanId: first.scanId,
+          nonce: first.confirmationNonce,
+          categoryIds: ["purgeDeletedThreads"],
+          options: { vacuumAfterDeletes: false },
+        });
+        assert.equal(yield* countRows(sql, "projection_threads", threadId), 1);
+        assert.isFalse(yield* Effect.promise(() => pathExists(file)));
+        assert.isTrue(
+          failed.warnings.some((warning) =>
+            warning.reason.startsWith("Deleted, cleanup incomplete"),
+          ),
+        );
+        assert.isAbove(failed.reclaimedBytes, 0);
+        yield* sql`DROP TRIGGER block_test_purge`;
+        const second = yield* storage.inspect({ force: true });
+        const retried = yield* storage.cleanup({
+          operationId: "rollback-second",
+          scanId: second.scanId,
+          nonce: second.confirmationNonce,
+          categoryIds: ["purgeDeletedThreads"],
+          options: { vacuumAfterDeletes: false },
+        });
+        assert.equal(yield* countRows(sql, "projection_threads", threadId), 0);
+        assert.equal(retried.reclaimedBytes, 0);
+        assert.isTrue(
+          retried.results[0]?.perTargetReclaimed.some(
+            (target) => target.id === threadId && target.status === "Removed",
+          ),
+        );
+      }),
+    ),
+  );
+  it.effect(
+    "retains an archived thread before the boundary and reports incomplete deletion after it",
+    () =>
+      withHomeSandbox(
+        Effect.gen(function* () {
+          const storage = yield* StorageMaintenance,
+            sql = yield* SqlClient.SqlClient,
+            config = yield* ServerConfig;
+          const threadId = ThreadId.makeUnsafe("archived-unsafe-file"),
+            file = NodePath.join(config.attachmentsDir, "unsafe-file.png");
+          yield* seedThread({ sql, threadId, archivedAt: daysAgo(90), deletedAt: null });
+          yield* Effect.promise(() => NodeFS.symlink(config.stateDir, file));
+          yield* sql`INSERT INTO attachments(attachment_id, thread_id, type, name, mime_type, size_bytes, content_hash, final_path, lifecycle, created_at, updated_at) VALUES ('unsafe-file', ${threadId}, 'image', 'unsafe.png', 'image/png', 0, 'hash', ${file}, 'ready', '2026-01-01', '2026-01-01')`;
+          const report = yield* storage.inspect({ force: true });
+          const result = yield* storage.cleanup({
+            operationId: "archived-boundary",
+            scanId: report.scanId,
+            nonce: report.confirmationNonce,
+            categoryIds: ["purgeArchivedThreads"],
+            confirmationText: "DELETE",
+            options: { vacuumAfterDeletes: false },
+          });
+          const rows = yield* sql<{
+            deletedAt: string | null;
+          }>`SELECT deleted_at AS "deletedAt" FROM projection_threads WHERE thread_id = ${threadId}`;
+          assert.isNotNull(rows[0]?.deletedAt);
+          assert.isTrue(
+            result.results[0]?.perTargetReclaimed.some(
+              (target) => target.status === "Deleted, cleanup incomplete",
+            ),
+          );
+          assert.isTrue(yield* Effect.promise(() => pathExists(file)));
+        }),
+      ),
+  );
+  it.effect("cancels while waiting for provider access before the archived delete boundary", () =>
+    withHomeSandbox(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const storage = yield* StorageMaintenance,
+            sql = yield* SqlClient.SqlClient;
+          const threadId = ThreadId.makeUnsafe("cancel-before-boundary");
+          yield* seedThread({ sql, threadId, archivedAt: daysAgo(90), deletedAt: null });
+          const report = yield* storage.inspect({ force: true });
+          const entered = yield* Deferred.make<void>(),
+            release = yield* Deferred.make<void>();
+          yield* withProviderThreadAccess(
+            threadId,
+            Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
+          ).pipe(Effect.forkIn(yield* Scope.Scope));
+          yield* Deferred.await(entered);
+          const operation = yield* storage.acceptCleanup({
+            operationId: "cancel-queued",
+            backendEpoch: (yield* storage.getStatus).backendEpoch,
+            scanId: report.scanId,
+            nonce: report.confirmationNonce,
+            categoryIds: ["purgeArchivedThreads"],
+            confirmationText: "DELETE",
+            options: { vacuumAfterDeletes: false },
+          });
+          yield* storage.cancel(operation.operationId);
+          yield* Deferred.succeed(release, undefined);
+          const result = yield* awaitOperation(storage, operation.operationId);
+          assert.equal(result.status.state, "cancelled");
+          assert.deepStrictEqual(result.status.result?.results, []);
+          const rows = yield* sql<{
+            deletedAt: string | null;
+          }>`SELECT deleted_at AS "deletedAt" FROM projection_threads WHERE thread_id = ${threadId}`;
+          assert.isNull(rows[0]?.deletedAt);
+        }),
+      ),
+    ),
+  );
+});
+
+it.effect(
+  "getUsage returns before a blocked worktree readiness check and joins repeated rescans",
+  () =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>(),
+        release = yield* Deferred.make<void>();
+      const base = makeGitCoreStub();
+      const blocked = makeGitCoreStub({
+        status: (input) =>
+          Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.andThen(base.status(input)),
+          ),
+      });
+      return yield* withHomeSandbox(
+        Effect.gen(function* () {
+          const storage = yield* StorageMaintenance,
+            config = yield* ServerConfig;
+          const path = NodePath.join(config.worktreesDir, "blocked-readiness");
+          yield* Effect.promise(() =>
+            writeGitWorktreeMetadata({
+              worktreePath: path,
+              mainWorktreePath: NodePath.join(config.baseDir, "main-readiness"),
+            }),
+          );
+          const first = yield* storage.getUsage({ force: true });
+          assert.isNull(first.report);
+          assert.equal(first.status.scan.state, "scanning");
+          yield* Deferred.await(entered);
+          const second = yield* storage.getUsage({ force: true });
+          assert.isNull(second.report);
+          assert.equal(second.status.scan.startedAt, first.status.scan.startedAt);
+          yield* Deferred.succeed(release, undefined);
+          const report = yield* storage.inspect();
+          assert.equal(
+            report.categories.find((category) => category.id === "inactiveF5Worktrees")
+              ?.targetCount,
+            1,
+          );
+        }).pipe(
+          Effect.provide(makeStorageTestLayer({ gitCore: blocked })),
+          Effect.ensuring(Deferred.succeed(release, undefined)),
+        ),
+      );
+    }),
+);

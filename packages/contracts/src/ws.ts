@@ -39,11 +39,7 @@ import {
 import { PR_HUB_WS_CHANNELS, PrHubAdvisoriesChanged, PrHubChanged } from "./prHub";
 import { ProjectWatchedPathsChangedPayload } from "./project";
 import { ServerConfigUpdatedPayload, ServerProviderAdvisoriesUpdatedPayload } from "./server";
-import {
-  DiskSpaceStatus,
-  StorageCleanupProgressPayload,
-  StorageInvalidatedPayload,
-} from "./storage";
+import { DiskSpaceStatus, StorageStatus, StorageInvalidatedPayload } from "./storage";
 import { TerminalEvent } from "./terminal";
 import { WorktreeSetupUpdatedPayload } from "./worktreeSetup";
 
@@ -76,7 +72,7 @@ export const WS_CHANNELS = {
   providerAdvisoriesUpdated: "provider.advisoriesUpdated",
   mcpStatusUpdated: "mcp.statusUpdated",
   storageInvalidated: "storage.invalidated",
-  storageCleanupProgress: "storage.cleanupProgress",
+  storageStatusUpdated: "storage.statusUpdated",
   storageDiskSpaceUpdated: "storage.diskSpaceUpdated",
   nextTurnQueueUpdated: "nextTurnQueue.updated",
   nextTurnQueueSummaryUpdated: "nextTurnQueue.summaryUpdated",
@@ -139,7 +135,7 @@ export interface WsPushPayloadByChannel {
   readonly [WS_CHANNELS.computerActivity]: typeof ComputerActivity.Type;
   readonly [WS_CHANNELS.mcpStatusUpdated]: McpStatusUpdatedPayload;
   readonly [WS_CHANNELS.storageInvalidated]: StorageInvalidatedPayload;
-  readonly [WS_CHANNELS.storageCleanupProgress]: StorageCleanupProgressPayload;
+  readonly [WS_CHANNELS.storageStatusUpdated]: StorageStatus;
   readonly [WS_CHANNELS.storageDiskSpaceUpdated]: typeof DiskSpaceStatus.Type;
   readonly [WS_CHANNELS.nextTurnQueueUpdated]: typeof NextTurnQueueSnapshot.Type;
   readonly [WS_CHANNELS.nextTurnQueueSummaryUpdated]: typeof NextTurnQueueSummary.Type;
@@ -298,9 +294,9 @@ export const WsPushStorageInvalidated = makeWsPushSchema(
   WS_CHANNELS.storageInvalidated,
   StorageInvalidatedPayload,
 );
-export const WsPushStorageCleanupProgress = makeWsPushSchema(
-  WS_CHANNELS.storageCleanupProgress,
-  StorageCleanupProgressPayload,
+export const WsPushStorageStatusUpdated = makeWsPushSchema(
+  WS_CHANNELS.storageStatusUpdated,
+  StorageStatus,
 );
 export const WsPushStorageDiskSpaceUpdated = makeWsPushSchema(
   WS_CHANNELS.storageDiskSpaceUpdated,
@@ -354,7 +350,7 @@ export const WsPushChannelSchema = Schema.Literals([
   WS_CHANNELS.computerObservationsInvalidated,
   WS_CHANNELS.mcpStatusUpdated,
   WS_CHANNELS.storageInvalidated,
-  WS_CHANNELS.storageCleanupProgress,
+  WS_CHANNELS.storageStatusUpdated,
   WS_CHANNELS.storageDiskSpaceUpdated,
   WS_CHANNELS.nextTurnQueueUpdated,
   WS_CHANNELS.nextTurnQueueSummaryUpdated,
@@ -391,7 +387,7 @@ export const WsPush = Schema.Union([
   WsPushComputerObservationsInvalidated,
   WsPushMcpStatusUpdated,
   WsPushStorageInvalidated,
-  WsPushStorageCleanupProgress,
+  WsPushStorageStatusUpdated,
   WsPushStorageDiskSpaceUpdated,
   WsPushNextTurnQueueUpdated,
   WsPushNextTurnQueueSummaryUpdated,

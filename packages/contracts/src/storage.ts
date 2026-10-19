@@ -45,6 +45,12 @@ export type StorageAutomationDryRunResult = typeof StorageAutomationDryRunResult
 
 export const StorageAutomationAuditEntry = Schema.Struct({
   auditId: Schema.String,
+  source: Schema.Literals(["automatic", "manual"]),
+  category: Schema.NullOr(Schema.String),
+  reasonCode: Schema.NullOr(Schema.String),
+  summary: Schema.NullOr(
+    Schema.Struct({ targetCount: NonNegativeInt, reclaimedBytes: NonNegativeInt }),
+  ),
   operationId: Schema.String,
   job: StorageAutomationJob,
   policyVersion: NonNegativeInt,
@@ -60,6 +66,7 @@ export const StorageAutomationAuditEntry = Schema.Struct({
 export type StorageAutomationAuditEntry = typeof StorageAutomationAuditEntry.Type;
 
 export const StorageAutomationAuditInput = Schema.Struct({
+  source: Schema.optional(Schema.Literals(["automatic", "manual"])),
   limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 }))),
 });
 export type StorageAutomationAuditInput = typeof StorageAutomationAuditInput.Type;
@@ -126,6 +133,9 @@ export const StorageCleanupTarget = Schema.Struct({
   safeToDelete: Schema.Boolean,
   disabledReason: Schema.optional(Schema.String),
   detail: Schema.optional(Schema.String),
+  threadTitle: Schema.optional(Schema.String),
+  projectName: Schema.optional(Schema.String),
+  latestMtime: Schema.optional(IsoDateTime),
 });
 export type StorageCleanupTarget = typeof StorageCleanupTarget.Type;
 
@@ -136,6 +146,8 @@ export const StorageCleanupCategoryUsage = Schema.Struct({
   description: TrimmedNonEmptyString,
   bytes: NonNegativeInt,
   reclaimableBytes: NonNegativeInt,
+  measurement: Schema.Literals(["complete", "partial", "unavailable"]),
+  eligibleThreadCount: NonNegativeInt,
   defaultSelected: Schema.Boolean,
   impact: StorageCleanupImpact,
   availability: StorageCleanupAvailability,
@@ -148,8 +160,6 @@ export type StorageCleanupCategoryUsage = typeof StorageCleanupCategoryUsage.Typ
 
 export const StorageUsageReport = Schema.Struct({
   scanId: TrimmedNonEmptyString,
-  confirmationNonce: TrimmedNonEmptyString,
-  nonceExpiresAt: IsoDateTime,
   scannedAt: IsoDateTime,
   stateDir: TrimmedNonEmptyString,
   totalUsedBytes: NonNegativeInt,
@@ -159,6 +169,16 @@ export const StorageUsageReport = Schema.Struct({
   logsBytes: NonNegativeInt,
   attachmentsBytes: NonNegativeInt,
   legacyBytes: NonNegativeInt,
+  providerHomesBytes: NonNegativeInt,
+  /** Optional so previously persisted reports can still be displayed. */
+  providerHomesMeasurement: Schema.optional(
+    Schema.Literals(["complete", "partial", "unavailable"]),
+  ),
+  otherBytes: NonNegativeInt,
+  providerHomes: Schema.Array(
+    Schema.Struct({ name: Schema.String, path: Schema.String, bytes: NonNegativeInt }),
+  ),
+  warningsTruncated: Schema.Boolean,
   threadCount: NonNegativeInt,
   archivedThreadCount: NonNegativeInt,
   deletedThreadCount: NonNegativeInt,
@@ -188,8 +208,9 @@ export type StorageCleanupTargetSelection = typeof StorageCleanupTargetSelection
 
 export const StorageCleanupRequest = Schema.Struct({
   operationId: TrimmedNonEmptyString,
+  backendEpoch: TrimmedNonEmptyString,
   scanId: TrimmedNonEmptyString,
-  confirmationNonce: TrimmedNonEmptyString,
+  nonce: TrimmedNonEmptyString,
   categoryIds: Schema.Array(StorageCleanupCategoryId).check(Schema.isMinLength(1)),
   targetSelections: Schema.optional(Schema.Array(StorageCleanupTargetSelection)),
   confirmationText: Schema.optional(Schema.String),
@@ -278,6 +299,9 @@ export const StorageCleanupCategoryResult = Schema.Struct({
       id: TrimmedNonEmptyString,
       path: Schema.optional(Schema.String),
       reclaimedBytes: NonNegativeInt,
+      status: Schema.optional(
+        Schema.Literals(["Removed", "Skipped", "Deleted, cleanup incomplete", "Failed"]),
+      ),
     }),
   ),
   warnings: Schema.Array(StoragePathWarning),
@@ -295,3 +319,79 @@ export const StorageCleanupResult = Schema.Struct({
   cancelled: Schema.Boolean,
 });
 export type StorageCleanupResult = typeof StorageCleanupResult.Type;
+
+export const StorageScanStatus = Schema.Struct({
+  state: Schema.Literals(["idle", "scanning", "failed"]),
+  phase: Schema.NullOr(
+    Schema.Literals(["database", "files", "worktrees", "legacy", "providers", "finalizing"]),
+  ),
+  entriesVisited: NonNegativeInt,
+  startedAt: Schema.NullOr(IsoDateTime),
+  error: Schema.NullOr(Schema.String),
+});
+export type StorageScanStatus = typeof StorageScanStatus.Type;
+export const StorageCleanupStatus = Schema.Struct({
+  operationId: TrimmedNonEmptyString,
+  state: Schema.Literals([
+    "queued",
+    "running",
+    "cancelling",
+    "succeeded",
+    "partial",
+    "failed",
+    "cancelled",
+  ]),
+  startedAt: IsoDateTime,
+  completedAt: Schema.NullOr(IsoDateTime),
+  progress: Schema.NullOr(StorageCleanupProgressPayload),
+  result: Schema.NullOr(StorageCleanupResult),
+  error: Schema.NullOr(Schema.String),
+  omittedCount: NonNegativeInt,
+});
+export type StorageCleanupStatus = typeof StorageCleanupStatus.Type;
+export const StorageStatus = Schema.Struct({
+  backendEpoch: TrimmedNonEmptyString,
+  revision: NonNegativeInt,
+  updatedAt: IsoDateTime,
+  scan: StorageScanStatus,
+  cleanup: Schema.NullOr(StorageCleanupStatus),
+});
+export type StorageStatus = typeof StorageStatus.Type;
+export const StorageConfirmation = Schema.Struct({
+  scanId: TrimmedNonEmptyString,
+  nonce: TrimmedNonEmptyString,
+  expiresAt: IsoDateTime,
+});
+export type StorageConfirmation = typeof StorageConfirmation.Type;
+export const StorageGetUsageResult = Schema.Struct({
+  report: Schema.NullOr(StorageUsageReport),
+  confirmation: Schema.NullOr(StorageConfirmation),
+  status: StorageStatus,
+});
+export type StorageGetUsageResult = typeof StorageGetUsageResult.Type;
+export const StorageGetStatusRequest = Schema.Struct({});
+export const StorageGetTargetsRequest = Schema.Struct({
+  scanId: TrimmedNonEmptyString,
+  categoryId: StorageCleanupCategoryId,
+  cursor: Schema.optional(NonNegativeInt),
+  limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
+});
+export type StorageGetTargetsRequest = typeof StorageGetTargetsRequest.Type;
+export const StorageGetTargetsResult = Schema.Struct({
+  targets: Schema.Array(StorageCleanupTarget),
+  targetCount: NonNegativeInt,
+  nextCursor: Schema.NullOr(NonNegativeInt),
+});
+export type StorageGetTargetsResult = typeof StorageGetTargetsResult.Type;
+export const StorageGetOperationRequest = Schema.Struct({
+  operationId: TrimmedNonEmptyString,
+  cursor: Schema.optional(NonNegativeInt),
+  limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))),
+});
+export type StorageGetOperationRequest = typeof StorageGetOperationRequest.Type;
+export const StorageGetOperationResult = Schema.Struct({
+  status: StorageCleanupStatus,
+  results: Schema.Array(StorageCleanupCategoryResult),
+  nextCursor: Schema.NullOr(NonNegativeInt),
+});
+export type StorageGetOperationResult = typeof StorageGetOperationResult.Type;

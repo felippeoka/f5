@@ -1,3 +1,4 @@
+import { requireAttachmentOwner } from "../../attachmentOwnership.ts";
 import {
   WorkspaceWriteContext,
   type WorkspaceWrite,
@@ -507,14 +508,13 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                           WHERE attachment_id = ${attachment.id}
                             AND owner_kind IN ('ingress', 'queue_item')
                         `;
-                        yield* sql`
-                          INSERT OR IGNORE INTO attachment_owners (
-                            attachment_id, owner_kind, owner_id, created_at
-                          ) VALUES (
-                            ${attachment.id}, 'message', ${savedEvent.payload.messageId},
-                            ${savedEvent.occurredAt}
-                          )
-                        `;
+                        yield* requireAttachmentOwner(
+                          sql,
+                          attachment.id,
+                          "message",
+                          savedEvent.payload.messageId,
+                          savedEvent.occurredAt,
+                        );
                       }),
                     { concurrency: 1, discard: true },
                   );
@@ -569,7 +569,13 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                   } else
                     for (const attachment of savedEvent.payload.attachments ?? []) {
                       yield* sql`DELETE FROM attachment_owners WHERE attachment_id = ${attachment.id} AND owner_kind = 'ingress' AND owner_id = ${savedEvent.commandId}`;
-                      yield* sql`INSERT OR IGNORE INTO attachment_owners VALUES (${attachment.id}, 'user_input', ${savedEvent.payload.requestId}, ${savedEvent.occurredAt})`;
+                      yield* requireAttachmentOwner(
+                        sql,
+                        attachment.id,
+                        "user_input",
+                        savedEvent.payload.requestId,
+                        savedEvent.occurredAt,
+                      );
                     }
                 }
                 if (savedEvent.type === "thread.rewind-draft-resolved") {
@@ -590,7 +596,17 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                         detail:
                           "This rewind is already in progress or finished and can no longer be cancelled.",
                       });
-                    yield* sql`INSERT OR IGNORE INTO attachment_owners(attachment_id, owner_kind, owner_id, created_at) SELECT attachment_id, 'message', ${pending.target_message_id}, ${savedEvent.occurredAt} FROM attachment_owners WHERE owner_kind = 'rewind_draft' AND owner_id = ${operationId}`;
+                    const draftOwners = yield* sql<{
+                      attachmentId: string;
+                    }>`SELECT attachment_id AS "attachmentId" FROM attachment_owners WHERE owner_kind = 'rewind_draft' AND owner_id = ${operationId}`;
+                    for (const owner of draftOwners)
+                      yield* requireAttachmentOwner(
+                        sql,
+                        owner.attachmentId,
+                        "message",
+                        pending.target_message_id,
+                        savedEvent.occurredAt,
+                      );
                     yield* sql`DELETE FROM attachment_owners WHERE owner_kind = 'rewind_draft' AND owner_id = ${operationId}`;
                     const saved = (yield* sql<{
                       state: string | null;

@@ -6914,7 +6914,10 @@ export default function ChatView({
         <LowDiskSpaceBanner
           status={diskSpaceStatus}
           onOpenStorage={() => {
-            void navigate({ to: "/settings", search: { category: "storage" } });
+            void navigate({
+              to: "/settings",
+              search: { category: "storage", item: "storage.overview" },
+            });
           }}
         />
       ),

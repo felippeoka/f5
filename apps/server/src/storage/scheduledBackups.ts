@@ -1,3 +1,4 @@
+import { userFacingCauseMessage } from "../causeMessage.ts";
 import { ScheduledBackupStatus } from "@t3tools/contracts";
 import { createWriteStream } from "node:fs";
 import { finished } from "node:stream/promises";
@@ -111,9 +112,16 @@ export function runScheduledBackup(backup: BackupService, directory: string, now
           writeStatus(directory, {
             lastAttemptAt: new Date(now).toISOString(),
             lastSuccessAt: published ? new Date(now).toISOString() : previousStatus.lastSuccessAt,
-            lastError: Exit.isFailure(exit) ? Cause.pretty(exit.cause) : null,
+            lastError: Exit.isFailure(exit)
+              ? userFacingCauseMessage(exit.cause, "Backup failed.", { maxLength: 300 })
+              : null,
           }),
         ).pipe(
+          Effect.tap(() =>
+            Exit.isFailure(exit)
+              ? Effect.logWarning("Scheduled backup failed", { cause: Cause.pretty(exit.cause) })
+              : Effect.void,
+          ),
           Effect.catchCause((cause) =>
             Effect.logWarning("could not persist scheduled backup result", {
               cause: Cause.pretty(cause),

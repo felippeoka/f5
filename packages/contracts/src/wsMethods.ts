@@ -113,6 +113,9 @@ export const WS_METHODS = {
 
   // Storage maintenance
   storageGetUsage: "storage.getUsage",
+  storageGetStatus: "storage.getStatus",
+  storageGetTargets: "storage.getTargets",
+  storageGetOperation: "storage.getOperation",
   storageCleanup: "storage.cleanup",
   storageCancelCleanup: "storage.cancelCleanup",
   // Automatic cleanup and auto-pull: read-only preview and the audit trail

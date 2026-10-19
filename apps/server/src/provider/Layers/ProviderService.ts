@@ -2360,6 +2360,26 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         });
         let metricProvider = "unknown";
         return yield* Effect.gen(function* () {
+          const computerGeneration = Option.isSome(computerAutomationBroker)
+            ? computerAutomationBroker.value.generation(input.threadId)
+            : undefined;
+          const releaseControls = Effect.gen(function* () {
+            if (Option.isSome(previewAutomationBroker))
+              yield* previewAutomationBroker.value.releaseThread(input.threadId);
+            if (Option.isSome(computerAutomationBroker) && computerGeneration)
+              computerAutomationBroker.value.releaseSession(input.threadId, computerGeneration);
+          });
+          const binding = yield* directory.getBinding(input.threadId);
+          if (Option.isNone(binding) && !startingSessions.has(input.threadId)) {
+            yield* releaseControls;
+            submissionTokens.delete(input.threadId);
+            for (const [id, completion] of submissionCompletions)
+              if (completion.threadId === input.threadId) {
+                yield* Deferred.succeed(completion.done, undefined);
+                submissionCompletions.delete(id);
+              }
+            return;
+          }
           const routed = yield* resolveRoutableSessionUnlocked({
             threadId: input.threadId,
             operation: "ProviderService.stopSession",
@@ -2370,15 +2390,6 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             "provider.operation": "stop-session",
             "provider.kind": routed.adapter.provider,
             "provider.thread_id": input.threadId,
-          });
-          const computerGeneration = Option.isSome(computerAutomationBroker)
-            ? computerAutomationBroker.value.generation(input.threadId)
-            : undefined;
-          const releaseControls = Effect.gen(function* () {
-            if (Option.isSome(previewAutomationBroker))
-              yield* previewAutomationBroker.value.releaseThread(input.threadId);
-            if (Option.isSome(computerAutomationBroker) && computerGeneration)
-              computerAutomationBroker.value.releaseSession(input.threadId, computerGeneration);
           });
           if (routed.isActive)
             yield* routed.adapter

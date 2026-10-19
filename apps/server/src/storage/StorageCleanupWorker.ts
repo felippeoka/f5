@@ -1,4 +1,7 @@
-import * as FS from "node:fs/promises";
+import { userFacingCauseMessage } from "../causeMessage.ts";
+import { enumerateFiles } from "./diskUsage.ts";
+import { removeFileIfSafe } from "./storagePathSafety.ts";
+import { storageLstat } from "./diskUsage.ts";
 import * as OS from "node:os";
 import * as Path from "node:path";
 
@@ -172,12 +175,12 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
       Effect.orElseSucceed(() => null as string | null),
     );
   const exists = (value: string) =>
-    Effect.tryPromise(() => FS.lstat(value)).pipe(
+    Effect.tryPromise(() => storageLstat(value)).pipe(
       Effect.map(() => true),
       Effect.orElseSucceed(() => false),
     );
   const isFile = (value: string) =>
-    Effect.tryPromise(() => FS.lstat(value)).pipe(
+    Effect.tryPromise(() => storageLstat(value)).pipe(
       Effect.map((stat) => stat.isFile()),
       Effect.orElseSucceed(() => false),
     );
@@ -336,23 +339,21 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
 
   const providerLogTargets = (days: number | null) =>
     Effect.gen(function* () {
-      if (days === null) return [] as string[];
+      if (days === null) return [];
       const cutoff = Date.now() - days * DAY_MS;
-      const root = config.providerLogsDir;
-      // Top-level provider logs only (per-thread `<id>.log` files and
-      // `events.log` rotations). The live `events.log` is never removed; a log
-      // still being written has a recent mtime and is out of range anyway.
-      return yield* Effect.promise(async () => {
-        const files: string[] = [];
-        const entries = await FS.readdir(root, { withFileTypes: true }).catch(() => []);
-        for (const entry of entries) {
-          if (!entry.isFile() || entry.name === "events.log") continue;
-          const target = Path.join(root, entry.name);
-          const stat = await FS.lstat(target).catch(() => null);
-          if (stat !== null && stat.isFile() && stat.mtimeMs < cutoff) files.push(target);
-        }
-        return files;
+      const threads = yield* storageMaintenance.listTerminalThreadLogs({
+        modifiedBefore: new Date(cutoff).toISOString(),
+        includeArchived: true,
       });
+      const rotations = yield* Effect.tryPromise(() =>
+        enumerateFiles(config.providerLogsDir, { maxDepth: 1 }),
+      );
+      return [
+        ...threads,
+        ...rotations.files.filter(
+          (file) => /^events\.log\.\d+$/.test(file.name) && file.mtimeMs < cutoff,
+        ),
+      ];
     });
 
   const removeWorktree = (
@@ -415,6 +416,7 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
               result: "removed",
               reason: evaluation.target.reason,
             });
+            yield* storageMaintenance.noteStorageMutated;
             return evaluation.target;
           }),
           { mode: "background" },
@@ -475,6 +477,7 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
       const leftovers = yield* codexMarketplaceLeftovers;
       for (const leftover of leftovers) {
         const outcome = yield* Effect.promise(() => removeCodexMarketplaceLeftover(leftover));
+        if (outcome.kind === "removed") yield* storageMaintenance.noteStorageMutated;
         yield* recordStorageAutomationAudit(
           {
             operationId,
@@ -640,7 +643,13 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
         nowMs: Date.now(),
         maxDurationMs: EVENT_COMPACTION_BUDGET_MS,
       });
-      if (compaction.eventsRemoved > 0 || compaction.receiptsRemoved > 0) {
+      if (
+        compaction.eventsRemoved > 0 ||
+        compaction.receiptsRemoved > 0 ||
+        compaction.commandOutputsCompacted > 0 ||
+        compaction.messagesCompacted > 0
+      ) {
+        yield* storageMaintenance.noteStorageMutated;
         yield* recordStorageAutomationAudit({
           operationId,
           job: "event-compaction",
@@ -733,7 +742,28 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
       generatedAt: new Date().toISOString(),
       targets,
     };
-  });
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Storage automation preview failed", { cause: Cause.pretty(cause) }).pipe(
+        Effect.as({
+          storageCleanupEnabled: false,
+          generatedAt: new Date().toISOString(),
+          targets: [
+            {
+              job: "provider-logs" as const,
+              target: "Storage inspection",
+              projectId: null,
+              threadId: null,
+              action: "skip" as const,
+              reason: userFacingCauseMessage(cause, "Could not inspect storage.", {
+                maxLength: 300,
+              }),
+            },
+          ],
+        }),
+      ),
+    ),
+  );
 
   const runOnce: StorageCleanupWorkerShape["runOnce"] = Effect.gen(function* () {
     const operationId = crypto.randomUUID();
@@ -751,13 +781,27 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
     if (global?.storageCleanup.enabled) {
       const days = global.storageCleanup.providerLogsAfterDays;
       const logs = yield* providerLogTargets(days);
-      let removed = 0;
-      for (const file of logs) {
-        const ok = yield* Effect.tryPromise(() => FS.rm(file, { force: true })).pipe(
-          Effect.as(true),
-          Effect.orElseSucceed(() => false),
+      const threadLogs =
+        days === null
+          ? null
+          : yield* storageMaintenance.pruneTerminalThreadLogs({
+              operationId,
+              modifiedBefore: daysAgoIso(days),
+              includeArchived: true,
+            });
+      let removed = threadLogs?.perTargetReclaimed.length ?? 0;
+      for (const file of logs.filter((file) => /^events\.log\.\d+$/.test(file.name))) {
+        const outcome = yield* Effect.promise(() =>
+          removeFileIfSafe({
+            path: file.path,
+            allowedRoot: config.providerLogsDir,
+            expectedIdentity: file.identity,
+          }),
         );
-        if (ok) removed++;
+        if (outcome.kind === "removed") {
+          removed++;
+          yield* storageMaintenance.noteStorageMutated;
+        }
       }
       if (logs.length > 0) {
         yield* recordStorageAutomationAudit({

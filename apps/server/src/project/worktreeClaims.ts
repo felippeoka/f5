@@ -497,11 +497,22 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
   readonly path: string;
   readonly policy: WorktreeRemovalPolicy;
   readonly expectedHead?: string | null;
+  readonly expectedRootIdentity?: { readonly dev: number; readonly ino: number } | null | undefined;
+  /** Checked again under both locks, immediately before Git mutates the checkout. */
+  readonly isCancelled?: () => boolean;
   /** Runs under the same repository lock after the verified checkout is removed. */
   readonly afterRemoval?: (registration: RegisteredWorktree | null) => Effect.Effect<void>;
 }) {
   const git = yield* GitCore;
   const config = yield* ServerConfig;
+  if (input.isCancelled?.())
+    return {
+      exists: false,
+      registration: null,
+      linkedThreads: [] as ThreadId[],
+      deletedThreadClaims: [] as ThreadId[],
+      blockedReasons: ["Cleanup was cancelled."],
+    };
   const preview = yield* evaluateWorktreeRemoval(input);
   if (preview.blockedReasons.length) return preview;
   const common = yield* git.resolveCommonDir(input.projectCwd);
@@ -511,6 +522,8 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
       config.baseDir,
       common,
       Effect.gen(function* () {
+        if (input.isCancelled?.())
+          return { ...preview, blockedReasons: ["Cleanup was cancelled."] };
         const checked = yield* evaluateWorktreeRemoval(input);
         if (
           input.expectedHead !== undefined &&
@@ -534,6 +547,27 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
             "owned or deleted conversation processes still use the checkout",
           );
         if (checked.blockedReasons.length === 0) {
+          if (input.expectedRootIdentity !== undefined) {
+            const stat = yield* Effect.tryPromise(() => FS.lstat(input.path)).pipe(
+              Effect.orElseSucceed(() => null),
+            );
+            if (
+              !input.expectedRootIdentity ||
+              !stat?.isDirectory() ||
+              stat.isSymbolicLink() ||
+              stat.dev !== input.expectedRootIdentity.dev ||
+              stat.ino !== input.expectedRootIdentity.ino
+            ) {
+              checked.blockedReasons.push(
+                "Worktree directory was replaced since inspection. Rescan before removal.",
+              );
+              return checked;
+            }
+          }
+          if (input.isCancelled?.()) {
+            checked.blockedReasons.push("Cleanup was cancelled.");
+            return checked;
+          }
           yield* git.removeWorktree({ cwd: input.projectCwd, path: input.path });
           if (input.afterRemoval) yield* input.afterRemoval(checked.registration);
         }

@@ -1,3 +1,4 @@
+import { requireAttachmentOwner } from "./attachmentOwnership.ts";
 import { withAttachmentRetentionLease } from "./storage/attachmentRetention.ts";
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -343,13 +344,13 @@ export const persistPreparedAttachmentIngress = Effect.fnUntraced(function* (
                   ${entry.finalPath}, 'staged', ${createdAt}, ${createdAt}
                 )
               `;
-              yield* sql`
-                INSERT INTO attachment_owners (
-                  attachment_id, owner_kind, owner_id, created_at
-                ) VALUES (
-                  ${entry.attachment.id}, 'ingress', ${prepared.commandId}, ${createdAt}
-                )
-              `;
+              yield* requireAttachmentOwner(
+                sql,
+                entry.attachment.id,
+                "ingress",
+                prepared.commandId,
+                createdAt,
+              );
             });
           },
           { concurrency: 1, discard: true },

@@ -1,4 +1,4 @@
-import { Socket } from "node:net";
+import { watchMaintenanceOwner } from "./maintenanceOwner.ts";
 import { Data, Effect } from "effect";
 import { MAX_MANIFEST_BYTES } from "./backupArchive.ts";
 import { spawn } from "node:child_process";
@@ -126,10 +126,7 @@ export function runBackupMaintenance(
 export async function runBackupMaintenanceMode(): Promise<void> {
   // A separate lifetime pipe stays open after the request has been read.
   // Parent death closes it, terminating work before a new backend can clean files.
-  const owner = new Socket({ fd: 3, readable: true, writable: false });
-  owner.unref();
-  owner.on("end", () => process.exit(1));
-  owner.resume();
+  const stopWatchingOwner = await watchMaintenanceOwner();
   const input: Buffer[] = [];
   let bytes = 0;
   try {
@@ -138,9 +135,17 @@ export async function runBackupMaintenanceMode(): Promise<void> {
       if (bytes > 1024 * 1024) throw new Error("Backup request exceeded its size limit.");
       input.push(Buffer.from(chunk));
     }
-    const request = JSON.parse(Buffer.concat(input).toString("utf8")) as BackupMaintenanceInput;
+    const request = JSON.parse(Buffer.concat(input).toString("utf8")) as
+      | BackupMaintenanceInput
+      | { kind: "compact-database"; dbPath: string };
+    if ("kind" in request && request.kind === "compact-database") {
+      const { compactDatabaseFile } = await import("./storage/databaseMaintenance.ts");
+      await compactDatabaseFile(request.dbPath);
+      process.stdout.write(JSON.stringify({ compacted: true }));
+      return;
+    }
     const { buildBackupArchive } = await import("./backupExport.ts");
-    const manifest = await buildBackupArchive(request);
+    const manifest = await buildBackupArchive(request as BackupMaintenanceInput);
     process.stdout.write(JSON.stringify({ manifest }));
   } catch (error) {
     process.stdout.write(
@@ -148,7 +153,7 @@ export async function runBackupMaintenanceMode(): Promise<void> {
     );
     process.exitCode = 1;
   } finally {
-    owner.destroy();
+    await stopWatchingOwner();
   }
 }
 

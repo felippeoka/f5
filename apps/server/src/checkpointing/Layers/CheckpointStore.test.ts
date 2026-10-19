@@ -13,13 +13,14 @@ import { GitService, type ExecuteGitInput } from "../../git/Services/GitService.
 import { CheckpointStore } from "../Services/CheckpointStore.ts";
 import { CheckpointStoreLiveWithGitService } from "./CheckpointStore.ts";
 
-function makeLayer(calls: ExecuteGitInput[]) {
+function makeLayer(calls: ExecuteGitInput[], refOutput = "") {
   return CheckpointStoreLiveWithGitService.pipe(
     Layer.provideMerge(
       Layer.succeed(GitService, {
         execute: (input) =>
           Effect.sync(() => {
             calls.push(input);
+            if (input.args[0] === "for-each-ref") return { code: 0, stdout: refOutput, stderr: "" };
             if (input.args[0] === "rev-parse") {
               return { code: 0, stdout: `${input.args.at(-1)}-oid\n`, stderr: "" };
             }
@@ -32,6 +33,33 @@ function makeLayer(calls: ExecuteGitInput[]) {
 }
 
 describe("CheckpointStoreLive", () => {
+  it("resolves thousands of exact checkpoint refs with one bounded Git listing", async () => {
+    const refs = Array.from({ length: 2000 }, (_, turn) =>
+      CheckpointRef.makeUnsafe(`refs/t3/checkpoints/thread/${turn}`),
+    );
+    const oid = "a".repeat(40);
+    const calls: ExecuteGitInput[] = [];
+    const layer = makeLayer(
+      calls,
+      [...refs.map((ref) => `${ref}\t${oid}`), `refs/t3/checkpoints/other/0\t${oid}`].join("\n"),
+    );
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        return yield* (yield* CheckpointStore).readCheckpointRefs({
+          cwd: "/fixture",
+          checkpointRefs: refs,
+        });
+      }).pipe(Effect.provide(layer)),
+    );
+    expect(Object.keys(result)).toHaveLength(2000);
+    expect(result[refs[0]!]).toBe(oid);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.args).toEqual([
+      "for-each-ref",
+      "--format=%(refname)%09%(objectname)",
+      "refs/t3/checkpoints/thread/",
+    ]);
+  });
   it.each([
     ["fatal: Unable to create '/tmp/index.lock': File exists", 2, 3],
     ["error: open('vanished.txt'): No such file or directory", 1, 2],

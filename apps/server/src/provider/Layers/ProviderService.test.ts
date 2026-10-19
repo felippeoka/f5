@@ -1,3 +1,5 @@
+import { PreviewAutomationBroker } from "../../mcp/PreviewAutomationBroker.ts";
+import { ComputerAutomationBroker } from "../../computer/ComputerAutomationBroker.ts";
 import { readPersistedSessionGeneration } from "../sessionCapabilities.ts";
 import { reloadCodexMcpConfigAfterLogin } from "../../mcp/reloadCodexMcpConfigAfterLogin.ts";
 import { withWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
@@ -635,6 +637,39 @@ it.effect("persists Codex fork adoption before a failed final read", () => {
     });
   }).pipe(Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", adapter]]))));
 });
+it.effect(
+  "quiesces a thread without a provider binding and still releases automation controls",
+  () => {
+    const codex = makeFakeCodexAdapter();
+    const releasedPreview = vi.fn((_threadId: ThreadId) => Effect.void);
+    const releasedComputer = vi.fn();
+    const layer = makeProviderServiceLayerForAdapters(new Map([["codex", codex.adapter]])).pipe(
+      Layer.provide(
+        Layer.succeed(PreviewAutomationBroker, { releaseThread: releasedPreview } as never),
+      ),
+      Layer.provide(
+        Layer.succeed(ComputerAutomationBroker, {
+          generation: () => "unbound-control-generation",
+          releaseSession: releasedComputer,
+        } as never),
+      ),
+    );
+    return Effect.gen(function* () {
+      const provider = yield* ProviderService,
+        directory = yield* ProviderSessionDirectory;
+      const threadId = asThreadId("unbound-storage-purge");
+      assert.isTrue(Option.isNone(yield* directory.getBinding(threadId)));
+      yield* provider.stopSession({ threadId });
+      assert.equal(codex.stopSession.mock.calls.length, 0);
+      assert.equal(releasedPreview.mock.calls.length, 1);
+      assert.deepStrictEqual(releasedComputer.mock.calls, [
+        [threadId, "unbound-control-generation"],
+      ]);
+      assert.isTrue(Option.isNone(yield* directory.getBinding(threadId)));
+    }).pipe(Effect.provide(layer));
+  },
+);
+
 const routing = makeProviderServiceLayer();
 it.effect("advances the session generation and refuses steering from a stale browser", () => {
   const codex = makeFakeCodexAdapter();

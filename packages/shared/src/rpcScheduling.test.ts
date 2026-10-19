@@ -78,3 +78,20 @@ it("allows only explicitly audited reads during recovery", () => {
   ])
     expect(isReadOnlyRpc(method)).toBe(true);
 });
+
+it("keeps storage cancellation and status responsive while database users fill the ordinary lane", () => {
+  const admission = new RpcAdmission();
+  for (let index = 0; index < 8; index++) admission.claim("ordinary", 1);
+  expect(rpcLane({ _tag: "storage.cancelCleanup" })).toBe("stop");
+  expect(admission.claim(rpcLane({ _tag: "storage.cancelCleanup" }), 1)).not.toBeNull();
+  expect(admission.claim(rpcLane({ _tag: "storage.getStatus" }), 1)).not.toBeNull();
+  for (const method of [
+    "storage.getUsage",
+    "storage.getStatus",
+    "storage.getTargets",
+    "storage.getOperation",
+  ])
+    expect(isReadOnlyRpc(method)).toBe(true);
+  expect(isReadOnlyRpc("storage.cleanup")).toBe(false);
+  expect(isReadOnlyRpc("storage.cancelCleanup")).toBe(false);
+});

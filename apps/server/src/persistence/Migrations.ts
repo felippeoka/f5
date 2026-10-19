@@ -1,3 +1,5 @@
+import Migration0122 from "./Migrations/122_StorageActivity.ts";
+import Migration0121 from "./Migrations/121_AttachmentDeletionGuards.ts";
 import Migration0120 from "./Migrations/120_ProjectMcpDisabledCommonServers.ts";
 import Migration0119 from "./Migrations/119_WorkspaceTransitions.ts";
 import Migration0118 from "./Migrations/118_WorktreePreparations.ts";
@@ -153,6 +155,8 @@ import Migration0102 from "./Migrations/102_ForgeAccounts.ts";
 import Migration0101 from "./Migrations/101_UsageResetCreditRequests.ts";
 
 export const MIGRATIONS = {
+  "122_StorageActivity": Migration0122,
+  "121_AttachmentDeletionGuards": Migration0121,
   "119_WorkspaceTransitions": Migration0119,
   "120_ProjectMcpDisabledCommonServers": Migration0120,
   "118_WorktreePreparations": Migration0118,
