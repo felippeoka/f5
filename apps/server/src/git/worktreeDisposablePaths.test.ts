@@ -49,6 +49,8 @@ it("discards a collapsed untracked directory only with a subtree pattern", () =>
   expect(nonDisposablePaths(["src/new/", "src/a.js"], ["src/*"])).toEqual(["src/new/"]);
   expect(nonDisposablePaths(["x.log/"], ["*.log"])).toEqual(["x.log/"]);
   expect(nonDisposablePaths(["src/new/"], ["src/**"])).toEqual([]);
+  expect(nonDisposablePaths(["src/"], ["src/**"])).toEqual([]);
+  expect(nonDisposablePaths(["srcx/"], ["src/**"])).toEqual(["srcx/"]);
   expect(nonDisposablePaths(["src/new/"], ["src/new/"])).toEqual([]);
 });
 

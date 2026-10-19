@@ -807,36 +807,47 @@ const makeStorageMaintenance = Effect.gen(function* () {
       Effect.orElseSucceed(() => null),
     );
 
-  /**
-   * Disposable worktree paths of the projects in the worktree's repository,
-   * matched by Git common dir so subdirectory and linked-worktree projects
-   * count. With several projects, only patterns they all list apply. No
-   * matching project, or unreadable settings, means nothing is discardable.
-   */
-  const disposablePathsFor = (commandCwd: string): Effect.Effect<ReadonlyArray<string>> =>
-    Effect.gen(function* () {
-      if (settingsService._tag === "None") return [];
-      const global = yield* settingsService.value.getSettings.pipe(
-        Effect.orElseSucceed(() => null),
-      );
-      if (global === null) return [];
-      const commonDir = yield* commonDirOf(commandCwd);
-      if (commonDir === null) return [];
-      const owners: Array<ReadonlyArray<string>> = [];
-      for (const { project, root } of yield* listProjectRoots()) {
-        if (root === null || (yield* commonDirOf(project.workspaceRoot)) !== commonDir) continue;
-        const paths = yield* readProjectSettings(global, project).pipe(
-          Effect.map(
-            (resolved): ReadonlyArray<string> | null => resolved.settings.worktreeDisposablePaths,
+  /** Each project's repository common dir and disposable paths (null when unreadable). */
+  const readProjectDisposablePaths = Effect.gen(function* () {
+    if (settingsService._tag === "None") return [];
+    const global = yield* settingsService.value.getSettings.pipe(Effect.orElseSucceed(() => null));
+    if (global === null) return [];
+    return yield* Effect.forEach(
+      (yield* listProjectRoots()).filter((entry) => entry.root !== null),
+      ({ project }) =>
+        Effect.all({
+          commonDir: commonDirOf(project.workspaceRoot),
+          paths: readProjectSettings(global, project).pipe(
+            Effect.map(
+              (resolved): ReadonlyArray<string> | null => resolved.settings.worktreeDisposablePaths,
+            ),
+            Effect.catchCause(() => Effect.succeed(null)),
           ),
-          Effect.catchCause(() => Effect.succeed(null)),
-        );
-        if (paths === null) return [];
-        owners.push(paths);
-      }
-      const [first, ...rest] = owners;
-      return (first ?? []).filter((pattern) => rest.every((paths) => paths.includes(pattern)));
-    });
+        }),
+      { concurrency: 4 },
+    );
+  });
+
+  /**
+   * A lookup of the disposable worktree paths of the projects in a worktree's
+   * repository, matched by Git common dir so subdirectory and linked-worktree
+   * projects count. With several projects, only patterns they all list apply.
+   * No matching project, or unreadable settings, means nothing is discardable.
+   * Project ownership and settings are read once per lookup, so create one per
+   * scan or cleanup pass: a later pass sees settings changes.
+   */
+  const makeDisposablePathsLookup = Effect.gen(function* () {
+    const projects = yield* Effect.cached(readProjectDisposablePaths);
+    return (commandCwd: string): Effect.Effect<ReadonlyArray<string>> =>
+      Effect.gen(function* () {
+        const commonDir = yield* commonDirOf(commandCwd);
+        if (commonDir === null) return [];
+        const owners = (yield* projects).filter((entry) => entry.commonDir === commonDir);
+        if (owners.some((entry) => entry.paths === null)) return [];
+        const [first, ...rest] = owners.map((entry) => entry.paths ?? []);
+        return (first ?? []).filter((pattern) => rest.every((paths) => paths.includes(pattern)));
+      });
+  });
 
   /** Set by a forced scan (Rescan): refresh `origin/<default>` before measuring. */
   let refreshRemotesBeforeNextScan = false;
@@ -1227,6 +1238,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
     Effect.gen(function* () {
       const warnings: StoragePathWarning[] = [];
       const allThreads = scan?.threads ?? (yield* queryThreadRows());
+      const disposablePathsFor = yield* makeDisposablePathsLookup;
       const listed = scan
         ? { paths: scan.paths, warnings: [] }
         : yield* Effect.tryPromise({
@@ -1399,6 +1411,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
       const allThreads = scan?.threads ?? (yield* queryThreadRows());
       const managedRoot = yield* canonicalOrNull(config.worktreesDir);
       const legacyRoot = yield* canonicalOrNull(Path.join(legacyT3BaseDir(), "worktrees"));
+      const disposablePathsFor = yield* makeDisposablePathsLookup;
       const listed = yield* listProjectRegistrations();
       warnings.push(...listed.warnings);
       const candidates: Array<(typeof listed.registrations)[number]> = [];
@@ -3278,7 +3291,8 @@ const makeStorageMaintenance = Effect.gen(function* () {
             metadataDisabledReason: GIT_WORKTREE_METADATA_UNRESOLVED,
             policy: { kind: input.kind, ownThreadId: null },
             ...(input.commandCwd ? { commandCwd: input.commandCwd } : {}),
-            disposablePaths: disposablePathsFor,
+            // Fresh under the lock, so a settings change since the scan applies.
+            disposablePaths: yield* makeDisposablePathsLookup,
           });
           if (readiness.disabledReason || !readiness.commandCwd)
             return {

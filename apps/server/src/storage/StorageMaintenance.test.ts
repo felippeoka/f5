@@ -3126,117 +3126,119 @@ it.layer(
     },
   }),
 )("StorageMaintenance worktree cleanup against real repositories", (it) => {
-  it.effect("removes inactive F5 worktrees and deletes only merged, unreferenced branches", () =>
-    withHomeSandbox(
-      Effect.gen(function* () {
-        const storage = yield* StorageMaintenance;
-        const config = yield* ServerConfig;
-        const sql = yield* SqlClient.SqlClient;
-        const repo = yield* Effect.promise(() => makeClonedRepo("f5-storage-managed-"));
-        yield* Effect.addFinalizer(() => Effect.promise(repo.cleanup));
-        const managed = (name: string) => NodePath.join(config.worktreesDir, "managed", name);
-        yield* Effect.promise(async () => {
-          runGit(repo.root, "worktree", "add", "-q", "-b", "merged-a", managed("a"), "main");
-          runGit(repo.root, "worktree", "add", "-q", "-b", "pushed-b", managed("b"), "main");
-          await writeFile(NodePath.join(managed("b"), "b.txt"), "b\n");
-          runGit(managed("b"), "add", ".");
-          runGit(managed("b"), "commit", "-q", "-m", "b");
-          runGit(managed("b"), "push", "-q", "-u", "origin", "pushed-b");
-          runGit(repo.root, "worktree", "add", "-q", "-b", "archived-c", managed("c"), "main");
-          runGit(repo.root, "worktree", "add", "-q", "-b", "ahead-d", managed("d"), "main");
-          await writeFile(NodePath.join(managed("d"), "d.txt"), "d\n");
-          runGit(managed("d"), "add", ".");
-          runGit(managed("d"), "commit", "-q", "-m", "d");
-          // Ignored build output no longer blocks storage cleanup.
-          await writeFile(
-            NodePath.join(repo.root, ".git", "info", "exclude"),
-            "dist/\n*.tsbuildinfo\n",
+  it.effect(
+    "removes inactive F5 worktrees and deletes only merged, unreferenced branches",
+    () =>
+      withHomeSandbox(
+        Effect.gen(function* () {
+          const storage = yield* StorageMaintenance;
+          const config = yield* ServerConfig;
+          const sql = yield* SqlClient.SqlClient;
+          const repo = yield* Effect.promise(() => makeClonedRepo("f5-storage-managed-"));
+          yield* Effect.addFinalizer(() => Effect.promise(repo.cleanup));
+          const managed = (name: string) => NodePath.join(config.worktreesDir, "managed", name);
+          yield* Effect.promise(async () => {
+            runGit(repo.root, "worktree", "add", "-q", "-b", "merged-a", managed("a"), "main");
+            runGit(repo.root, "worktree", "add", "-q", "-b", "pushed-b", managed("b"), "main");
+            await writeFile(NodePath.join(managed("b"), "b.txt"), "b\n");
+            runGit(managed("b"), "add", ".");
+            runGit(managed("b"), "commit", "-q", "-m", "b");
+            runGit(managed("b"), "push", "-q", "-u", "origin", "pushed-b");
+            runGit(repo.root, "worktree", "add", "-q", "-b", "archived-c", managed("c"), "main");
+            runGit(repo.root, "worktree", "add", "-q", "-b", "ahead-d", managed("d"), "main");
+            await writeFile(NodePath.join(managed("d"), "d.txt"), "d\n");
+            runGit(managed("d"), "add", ".");
+            runGit(managed("d"), "commit", "-q", "-m", "d");
+            // Ignored build output no longer blocks storage cleanup.
+            await writeFile(
+              NodePath.join(repo.root, ".git", "info", "exclude"),
+              "dist/\n*.tsbuildinfo\n",
+            );
+            await writeFile(NodePath.join(managed("a"), "node_modules", "x", "index.js"), "x");
+            await writeFile(NodePath.join(managed("a"), "dist", "index.js"), "x");
+            await writeFile(NodePath.join(managed("a"), "app.tsbuildinfo"), "{}");
+            // The default branch, and a long-lived branch with a live upstream, are kept even
+            // when merged; a branch that only tracks origin/main is not long-lived.
+            runGit(repo.root, "checkout", "-q", "-b", "feature-x");
+            runGit(repo.root, "worktree", "add", "-q", managed("m"), "main");
+            runGit(repo.root, "branch", "release-1", "main");
+            runGit(repo.root, "push", "-q", "-u", "origin", "release-1");
+            runGit(repo.root, "worktree", "add", "-q", managed("r"), "release-1");
+            runGit(
+              repo.root,
+              "worktree",
+              "add",
+              "-q",
+              "--track",
+              "-b",
+              "tracks-main",
+              managed("t"),
+              "origin/main",
+            );
+          });
+          yield* seedProject({ sql, projectId: "project-managed", workspaceRoot: repo.root });
+          yield* seedThread({
+            sql,
+            threadId: ThreadId.makeUnsafe("thread-archived-managed-c"),
+            archivedAt: "2026-04-01T00:00:00.000Z",
+            deletedAt: null,
+            worktreePath: managed("c"),
+          });
+
+          const report = yield* storage.inspect({ force: true });
+          const category = report.categories.find((entry) => entry.id === "inactiveF5Worktrees");
+          const target = (name: string) =>
+            category?.targets.find((entry) => entry.path === managed(name));
+          assert.equal(target("a")?.safeToDelete, true, target("a")?.disabledReason);
+          assert.equal(target("b")?.safeToDelete, true, target("b")?.disabledReason);
+          assert.equal(target("c")?.safeToDelete, true, target("c")?.disabledReason);
+          assert.equal(target("d")?.safeToDelete, false);
+          assert.equal(
+            target("d")?.disabledReason,
+            "it has commits that are not in origin/main and not pushed",
           );
-          await writeFile(NodePath.join(managed("a"), "node_modules", "x", "index.js"), "x");
-          await writeFile(NodePath.join(managed("a"), "dist", "index.js"), "x");
-          await writeFile(NodePath.join(managed("a"), "app.tsbuildinfo"), "{}");
-          // The default branch, and a long-lived branch with a live upstream, are kept even
-          // when merged; a branch that only tracks origin/main is not long-lived.
-          runGit(repo.root, "checkout", "-q", "-b", "feature-x");
-          runGit(repo.root, "worktree", "add", "-q", managed("m"), "main");
-          runGit(repo.root, "branch", "release-1", "main");
-          runGit(repo.root, "push", "-q", "-u", "origin", "release-1");
-          runGit(repo.root, "worktree", "add", "-q", managed("r"), "release-1");
-          runGit(
-            repo.root,
-            "worktree",
-            "add",
-            "-q",
-            "--track",
-            "-b",
-            "tracks-main",
-            managed("t"),
-            "origin/main",
+          // The managed worktrees are not offered again as external ones.
+          assert.deepEqual(
+            report.categories.find((entry) => entry.id === "externalWorktrees")?.targets ?? [],
+            [],
           );
-        });
-        yield* seedProject({ sql, projectId: "project-managed", workspaceRoot: repo.root });
-        yield* seedThread({
-          sql,
-          threadId: ThreadId.makeUnsafe("thread-archived-managed-c"),
-          archivedAt: "2026-04-01T00:00:00.000Z",
-          deletedAt: null,
-          worktreePath: managed("c"),
-        });
 
-        const report = yield* storage.inspect({ force: true });
-        const category = report.categories.find((entry) => entry.id === "inactiveF5Worktrees");
-        const target = (name: string) =>
-          category?.targets.find((entry) => entry.path === managed(name));
-        assert.equal(target("a")?.safeToDelete, true, target("a")?.disabledReason);
-        assert.equal(target("b")?.safeToDelete, true, target("b")?.disabledReason);
-        assert.equal(target("c")?.safeToDelete, true, target("c")?.disabledReason);
-        assert.equal(target("d")?.safeToDelete, false);
-        assert.equal(
-          target("d")?.disabledReason,
-          "it has commits that are not in origin/main and not pushed",
-        );
-        // The managed worktrees are not offered again as external ones.
-        assert.deepEqual(
-          report.categories.find((entry) => entry.id === "externalWorktrees")?.targets ?? [],
-          [],
-        );
+          const result = yield* storage.cleanup({
+            operationId: "operation-real-managed-worktrees",
+            scanId: report.scanId,
+            nonce: report.confirmationNonce,
+            categoryIds: ["inactiveF5Worktrees"],
+            targetSelections: [
+              {
+                categoryId: "inactiveF5Worktrees",
+                targetIds: ["a", "b", "c", "m", "r", "t"].map((name) => target(name)!.id),
+              },
+            ],
+            confirmationText: "DELETE",
+            options: { vacuumAfterDeletes: false },
+          });
 
-        const result = yield* storage.cleanup({
-          operationId: "operation-real-managed-worktrees",
-          scanId: report.scanId,
-          nonce: report.confirmationNonce,
-          categoryIds: ["inactiveF5Worktrees"],
-          targetSelections: [
-            {
-              categoryId: "inactiveF5Worktrees",
-              targetIds: ["a", "b", "c", "m", "r", "t"].map((name) => target(name)!.id),
-            },
-          ],
-          confirmationText: "DELETE",
-          options: { vacuumAfterDeletes: false },
-        });
-
-        const reclaimed = result.results[0]?.perTargetReclaimed ?? [];
-        assert.equal(result.results[0]?.status, "Cleaned");
-        assert.deepEqual(reclaimed.map((entry) => [entry.path, entry.branch]).toSorted(), [
-          [managed("a"), "deleted"],
-          [managed("b"), "kept"],
-          [managed("c"), "kept"],
-          [managed("m"), "kept"],
-          [managed("r"), "kept"],
-          [managed("t"), "deleted"],
-        ]);
-        const branches = localBranches(repo.root);
-        assert.notInclude(branches, "merged-a");
-        assert.notInclude(branches, "tracks-main");
-        assert.include(branches, "main");
-        assert.include(branches, "release-1");
-        assert.include(branches, "pushed-b");
-        assert.include(branches, "archived-c");
-        assert.include(branches, "ahead-d");
-        assert.equal(yield* Effect.promise(() => pathExists(managed("d"))), true);
-      }),
-    ),
+          const reclaimed = result.results[0]?.perTargetReclaimed ?? [];
+          assert.equal(result.results[0]?.status, "Cleaned");
+          assert.deepEqual(reclaimed.map((entry) => [entry.path, entry.branch]).toSorted(), [
+            [managed("a"), "deleted"],
+            [managed("b"), "kept"],
+            [managed("c"), "kept"],
+            [managed("m"), "kept"],
+            [managed("r"), "kept"],
+            [managed("t"), "deleted"],
+          ]);
+          const branches = localBranches(repo.root);
+          assert.notInclude(branches, "merged-a");
+          assert.notInclude(branches, "tracks-main");
+          assert.include(branches, "main");
+          assert.include(branches, "release-1");
+          assert.include(branches, "pushed-b");
+          assert.include(branches, "archived-c");
+          assert.include(branches, "ahead-d");
+          assert.equal(yield* Effect.promise(() => pathExists(managed("d"))), true);
+        }),
+      ),
     // Seven real worktrees, each inspected and removed with several Git calls.
     60_000,
   );

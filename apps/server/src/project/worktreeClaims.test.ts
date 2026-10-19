@@ -519,8 +519,12 @@ describe("effective workspace claims and removal gate", () => {
           await fs.writeFile(path.join(target, "README.md"), "regenerated\n");
           await fs.mkdir(path.join(target, "__screenshots__"), { recursive: true });
           await fs.writeFile(path.join(target, "__screenshots__", "a.png"), "png");
+          // A staged new file is discarded by restoring the index too.
+          await fs.mkdir(path.join(target, "generated"), { recursive: true });
+          await fs.writeFile(path.join(target, "generated", "x.js"), "x\n");
+          git(target, "add", "generated/x.js");
         });
-        const disposablePaths = ["README.md", "**/__screenshots__/"];
+        const disposablePaths = ["README.md", "**/__screenshots__/", "generated/"];
         const policy = (paths: ReadonlyArray<string>): WorktreeRemovalPolicy => ({
           kind: "storageMaintenance",
           ownThreadId: null,
@@ -538,7 +542,12 @@ describe("effective workspace claims and removal gate", () => {
           policy: policy(disposablePaths),
         });
         expect(reviewed.blockedReasons).toEqual([]);
-        expect(reviewed.discardChanges?.paths).toEqual(["README.md", "__screenshots__/"]);
+        // Untracked folders are listed file by file, so only reviewed files are cleaned.
+        expect(reviewed.discardChanges?.paths).toEqual([
+          "README.md",
+          "__screenshots__/a.png",
+          "generated/x.js",
+        ]);
         // A change after review must not be discarded.
         yield* Effect.promise(() =>
           fs.writeFile(path.join(target, "README.md"), "edited again after review\n"),

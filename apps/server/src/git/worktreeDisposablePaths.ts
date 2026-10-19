@@ -51,8 +51,11 @@ export function nonDisposablePaths(
     // (a trailing `/` or `**`) may discard it.
     const isDirectory = path.endsWith("/");
     const normalized = path.replace(/\/+$/, "");
-    return !matchers.some(
-      (matcher) => matcher.regex.test(normalized) && (!isDirectory || matcher.coversSubtree),
+    return !matchers.some((matcher) =>
+      isDirectory
+        ? matcher.coversSubtree &&
+          (matcher.regex.test(normalized) || matcher.regex.test(`${normalized}/`))
+        : matcher.regex.test(normalized),
     );
   });
 }

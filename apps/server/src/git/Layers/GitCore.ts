@@ -2309,10 +2309,18 @@ const makeGitCore = Effect.gen(function* () {
         const status = (yield* executeGit(
           "GitCore.inspectCheckout",
           cwd,
-          ["--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+          [
+            "--no-optional-locks",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            // Exact discard needs every untracked file, not a collapsed `dir/`.
+            options?.changesFingerprint ? "--untracked-files=all" : "--untracked-files=normal",
+          ],
           { timeoutMs: options?.statusTimeoutMs ?? 30_000 },
         )).stdout;
         const changedPaths: string[] = [];
+        const untrackedPaths: string[] = [];
         let hasTrackedChanges = false;
         let hasUntrackedChanges = false;
         const records = status.split("\0");
@@ -2320,8 +2328,10 @@ const makeGitCore = Effect.gen(function* () {
           const record = records[i]!;
           if (!record) continue;
           changedPaths.push(record.slice(3));
-          if (record.startsWith("??")) hasUntrackedChanges = true;
-          else {
+          if (record.startsWith("??")) {
+            hasUntrackedChanges = true;
+            untrackedPaths.push(record.slice(3));
+          } else {
             hasTrackedChanges = true;
             if (/^[RC]|^.[RC]/.test(record)) {
               if (records[i + 1]) changedPaths.push(records[i + 1]!);
@@ -2394,6 +2404,7 @@ const makeGitCore = Effect.gen(function* () {
           hasTrackedChanges,
           hasUntrackedChanges,
           changedPaths,
+          untrackedPaths,
           ...(changesFingerprint ? { changesFingerprint } : {}),
           ignoredEntries: ignored.entries,
           ignoredTruncated: ignored.truncated,
@@ -2745,13 +2756,48 @@ const makeGitCore = Effect.gen(function* () {
           "Checkout identity, local changes, or protected ignored files prevent removal.",
         );
       }
+      if (discardsReviewedChanges) {
+        // Discard exactly the reviewed paths instead of forcing removal: a file
+        // an editor or watcher writes after the review stays a local change, and
+        // the plain `worktree remove` below then refuses.
+        const untracked = new Set(inspection.untrackedPaths ?? []);
+        const tracked = (inspection.changedPaths ?? []).filter((path) => !untracked.has(path));
+        if (tracked.length > 0)
+          yield* executeGit(
+            "GitCore.removeWorktree.restore",
+            target,
+            [
+              "--literal-pathspecs",
+              "restore",
+              "--source=HEAD",
+              "--staged",
+              "--worktree",
+              "--",
+              ...tracked,
+            ],
+            { timeoutMs: 60_000 },
+          );
+        if (untracked.size > 0)
+          yield* executeGit(
+            "GitCore.removeWorktree.clean",
+            target,
+            ["--literal-pathspecs", "clean", "-f", "-q", "--", ...untracked],
+            { timeoutMs: 60_000 },
+          );
+      }
       yield* executeGit(
         "GitCore.removeWorktree",
         input.cwd,
-        discardsReviewedChanges
-          ? ["worktree", "remove", "--force", "--", entry.path]
-          : ["worktree", "remove", "--", entry.path],
-        { timeoutMs: 300_000 },
+        ["worktree", "remove", "--", entry.path],
+        {
+          timeoutMs: 300_000,
+          ...(discardsReviewedChanges
+            ? {
+                fallbackErrorMessage:
+                  "The reviewed changes were discarded, but new local changes appeared, so the worktree was kept.",
+              }
+            : {}),
+        },
       );
       yield* finishRemoval;
     });
