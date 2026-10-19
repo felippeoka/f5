@@ -16,6 +16,7 @@ export const ProjectMcpConfigRecord = Schema.Struct({
   projectId: Schema.NullOr(ProjectId).pipe(Schema.withDecodingDefault(() => null)),
   version: TrimmedNonEmptyString,
   servers: McpProjectServersConfig,
+  disabledCommonServers: Schema.optional(Schema.Array(Schema.String)),
   updatedAt: IsoDateTime,
 });
 export type ProjectMcpConfigRecord = typeof ProjectMcpConfigRecord.Type;
@@ -34,6 +35,7 @@ export const ReplaceProjectMcpConfigInput = Schema.Struct({
   ),
   nextVersion: TrimmedNonEmptyString,
   servers: McpProjectServersConfig,
+  disabledCommonServers: Schema.optional(Schema.Array(Schema.String)),
   updatedAt: IsoDateTime,
 });
 export type ReplaceProjectMcpConfigInput = typeof ReplaceProjectMcpConfigInput.Type;
@@ -41,6 +43,7 @@ export type ReplaceProjectMcpConfigInput = typeof ReplaceProjectMcpConfigInput.T
 export interface ProjectMcpConfigRepositoryShape {
   readonly listByScope: (
     scope: "common" | "project",
+    options?: { readonly includeDeleted?: boolean },
   ) => Effect.Effect<ReadonlyArray<ProjectMcpConfigRecord>, ProjectionRepositoryError>;
   readonly withTransaction: <A, E, R>(
     effect: Effect.Effect<A, E, R>,

@@ -1,3 +1,4 @@
+import { McpTestConnection } from "./McpTestConnection";
 import { reconnectMcpServer } from "./mcpActions";
 import { LazyMcpServerInspector as McpServerInspector } from "./LazyMcpServerInspector";
 import type {
@@ -22,6 +23,7 @@ import { McpServerStatusBadge } from "./McpStatus";
 import { readErrorMessage } from "./mcpSettingsHelpers";
 
 export function McpServerRow(props: {
+  readonly onToolToggle?: ((toolName: string, enabled: boolean) => Promise<void>) | undefined;
   readonly selectedProvider: ProviderKind;
   readonly observation?: McpServerStatusesResult | undefined;
   readonly outcomes?: ReadonlyArray<McpSessionReloadOutcome> | undefined;
@@ -39,6 +41,17 @@ export function McpServerRow(props: {
   readonly onRemove: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [probeTools, setProbeTools] = useState<{
+    config: string;
+    tools: import("@t3tools/contracts").McpToolSummary[];
+  }>();
+  const probeConfig = JSON.stringify({
+    ...props.server,
+    enabledTools: undefined,
+    disabledTools: undefined,
+    enabled: undefined,
+  });
+  const [toolsOpenCount, setToolsOpenCount] = useState(0);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [reconnectOutcomes, setReconnectOutcomes] =
@@ -246,13 +259,29 @@ export function McpServerRow(props: {
           {readErrorMessage(loginStatusQuery.error, "Failed to read MCP login status.")}
         </p>
       ) : null}
-      {inspectorOpen && props.projectId ? (
+      <McpTestConnection
+        projectId={props.projectId}
+        instanceId={props.instanceId}
+        getServer={() => ({ name: props.name, server: props.server })}
+        onResult={(result) => setProbeTools({ config: probeConfig, tools: [...result.tools] })}
+        onOpenTools={() => {
+          setToolsOpenCount((count) => count + 1);
+          setInspectorOpen(true);
+        }}
+      />
+      {inspectorOpen ? (
         <McpServerInspector
-          key={`${props.observation?.threadId}:${props.observation?.generation}`}
+          key={`${props.observation?.threadId}:${props.observation?.generation}:${toolsOpenCount}`}
+          initialTab={toolsOpenCount ? "Tools" : "Overview"}
           provider={props.selectedProvider}
           instanceId={props.instanceId}
           projectId={props.projectId}
           serverName={props.name}
+          configuredServer={props.server}
+          onToolToggle={props.onToolToggle}
+          fallbackTools={
+            probeTools?.config === probeConfig ? probeTools.tools : props.serverStatus?.tools
+          }
           observation={props.observation}
           outcomes={reconnectOutcomes ?? props.outcomes}
           outcomeAction={reconnectOutcomes ? "reconnect" : "apply"}

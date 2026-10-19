@@ -27,6 +27,8 @@ const browserConfig = mergeConfig(
     test: {
       include: ["src/**/*.browser.{ts,tsx}"],
       browser: {
+        // Separate worktrees and concurrent test runs must not contend for a fixed port.
+        api: { strictPort: false },
         enabled: true,
         screenshotDirectory: resolve(
           process.env.F5_CI_ARTIFACT_DIR || "./.playwright",

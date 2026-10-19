@@ -1,3 +1,9 @@
+import { makeMcpSecretWriter } from "./mcp/McpSecretWriter.ts";
+import { McpServerWriteDefinition } from "@t3tools/contracts";
+import { makeMcpAccountExecutionResolver } from "./mcp/accountExecution.ts";
+import { detectMcpImports } from "./mcp/McpImportDetection.ts";
+import { probeMcpServer } from "./mcp/McpProbe.ts";
+import { resolveMcpSecrets } from "./mcp/McpSecretResolver.ts";
 import { OrchestrationCommandInvariantError } from "./orchestration/Errors.ts";
 import {
   WorkspaceRequiresNewWorktreeError,
@@ -1066,6 +1072,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   );
   const profileSecrets = yield* makeServerSecretStore.pipe(
     Effect.mapError((cause) => new ServerLifecycleError({ operation: "profiles.secrets", cause })),
+  );
+  const storeMcpSecret = yield* makeMcpSecretWriter(profileSecrets);
+  const resolveMcpFeatureExecution = yield* makeMcpAccountExecutionResolver.pipe(
+    Effect.provideService(ProjectionProjectRepository, projectionProjects),
   );
   const githubAccount = new ProfileGithubAccount(profileSecrets, fetch, serverConfig);
   const githubLogin = new GithubDeviceLogin(githubAccount, resolveGithubOAuthClientId(process.env));
@@ -6699,6 +6709,56 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
                 message: error.message,
               }),
           ),
+        );
+      }
+
+      case WS_METHODS.mcpListImportCandidates: {
+        const requestBody = stripRequestTag(request.body);
+        const body = yield* profileCall(() => resolveMcpAccount(requestBody));
+        const execution = yield* resolveMcpFeatureExecution(body).pipe(
+          Effect.mapError((error) => new RouteRequestError({ message: error.message })),
+        );
+        return yield* profileCall(() =>
+          detectMcpImports({
+            environment: execution.environment,
+            ...(body.projectId ? { cwd: execution.cwd } : {}),
+          }),
+        );
+      }
+
+      case WS_METHODS.mcpProbeServer: {
+        const requestBody = stripRequestTag(request.body);
+        if (!Schema.is(McpServerWriteDefinition)(requestBody.server))
+          return yield* new RouteRequestError({
+            message: "Invalid MCP draft. Check the command, HTTP URL, and options.",
+          });
+        const body = yield* profileCall(() => resolveMcpAccount(requestBody));
+        const execution = yield* resolveMcpFeatureExecution(body).pipe(
+          Effect.mapError((error) => new RouteRequestError({ message: error.message })),
+        );
+        const resolved = yield* resolveMcpSecrets(
+          { [body.serverName]: body.server },
+          profileSecrets,
+        );
+        const server = resolved.servers[body.serverName];
+        if (!server)
+          return {
+            ok: false,
+            durationMs: 0,
+            tools: [],
+            toolsTruncated: false,
+            resourceCount: 0,
+            promptCount: 0,
+            authRequired: false,
+            error: resolved.issues[0]?.message ?? "Stored secret is unavailable.",
+          };
+        return yield* probeMcpServer({ ...body, server }, execution);
+      }
+
+      case WS_METHODS.mcpStoreSecret: {
+        const { value } = stripRequestTag(request.body);
+        return yield* storeMcpSecret(value).pipe(
+          Effect.mapError((error) => new RouteRequestError({ message: error.message })),
         );
       }
 

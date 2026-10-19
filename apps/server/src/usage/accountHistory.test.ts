@@ -159,6 +159,7 @@ const fixedKeyStore = (key: number) =>
     get: () => Effect.succeed(null),
     set: () => Effect.void,
     remove: () => Effect.void,
+    list: () => Effect.succeed([]),
     getOrCreateRandom: (_name, bytes) => Effect.succeed(new Uint8Array(bytes).fill(key)),
   });
 

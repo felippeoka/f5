@@ -17,6 +17,7 @@ export function McpExport({
 }) {
   return (
     <div className="space-y-3 rounded-lg border border-border bg-background p-4">
+      <p className="text-xs text-muted-foreground">Secret values are not included.</p>
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-foreground">Effective JSON export</p>

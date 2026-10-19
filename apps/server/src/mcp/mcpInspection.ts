@@ -1,3 +1,4 @@
+import { summarizeMcpTools } from "@t3tools/shared/mcpTools";
 import type { McpServerStatusEntry, McpProjectServersConfig } from "@t3tools/contracts";
 import { createMcpDiagnosticsSanitizer, isMcpCredentialKey } from "@t3tools/shared/mcpDiagnostics";
 import { mcpServerNameKey } from "@t3tools/shared/mcpValidation";
@@ -31,6 +32,16 @@ export function projectMcpStatuses(
                 : "unknown",
     authStatus:
       server.status === "needs-auth" ? "unauthenticated" : (server.authStatus ?? "unknown"),
+    ...(server.tools
+      ? {
+          tools: summarizeMcpTools(server.tools).map((tool) => ({
+            ...tool,
+            ...(tool.description
+              ? { description: sanitizer.text(tool.description).slice(0, 300) }
+              : {}),
+          })),
+        }
+      : {}),
     toolCount: server.toolCount ?? server.tools?.length ?? 0,
     resourceCount: server.resources?.length ?? 0,
     resourceTemplateCount: server.resourceTemplates?.length ?? 0,

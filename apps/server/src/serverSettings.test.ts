@@ -791,6 +791,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           Effect.sync(() => {
             values.delete(name);
           }),
+        list: () => Effect.succeed([]),
         getOrCreateRandom: () => Effect.die("unused"),
       });
       yield* Effect.gen(function* () {

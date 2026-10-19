@@ -106,6 +106,14 @@ function makeProjectMcpConfigServiceTestLayer(
         effectiveVersion: "mcp-version-test",
         servers,
       }),
+    readEffectiveRuntimeConfig: (projectId) =>
+      Effect.succeed({
+        projectId,
+        commonVersion: "mcp-version-test",
+        projectVersion: "mcp-version-test",
+        effectiveVersion: "mcp-version-test",
+        servers,
+      }),
     readCommonConfig: () =>
       Effect.succeed({
         version: "mcp-version-test",
@@ -3303,7 +3311,7 @@ it.effect(
         const service = yield* ProjectMcpConfigService;
         return {
           ...service,
-          readEffectiveStoredConfig: (projectId: ProjectId) =>
+          readEffectiveRuntimeConfig: (projectId: ProjectId) =>
             Effect.sync(() => {
               reads++;
               return { projectId, effectiveVersion: version, servers };

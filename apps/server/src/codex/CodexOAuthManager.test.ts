@@ -104,6 +104,8 @@ const makeProjectMcpConfigServiceStub = (input?: {
       Effect.die(new Error("unused in CodexOAuthManager tests")),
     readEffectiveStoredConfig: (_projectId: ProjectId) =>
       Effect.die(new Error("unused in CodexOAuthManager tests")),
+    readEffectiveRuntimeConfig: (_projectId: ProjectId) =>
+      Effect.die(new Error("unused in CodexOAuthManager tests")),
     readCommonConfig: () => Effect.die(new Error("unused in CodexOAuthManager tests")),
     replaceCommonConfig: (_input) => Effect.die(new Error("unused in CodexOAuthManager tests")),
     readProjectConfig: (_projectId) => Effect.die(new Error("unused in CodexOAuthManager tests")),

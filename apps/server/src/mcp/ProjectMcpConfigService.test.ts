@@ -36,6 +36,7 @@ function makeRepositoryLayer() {
       expectedVersion,
       nextVersion,
       servers,
+      disabledCommonServers,
       updatedAt,
     }) =>
       Effect.sync(() => {
@@ -51,6 +52,7 @@ function makeRepositoryLayer() {
           projectId,
           version: nextVersion,
           servers,
+          disabledCommonServers,
           updatedAt,
         };
         rows.set(key, row);
@@ -685,5 +687,138 @@ it("excludes soft-deleted projects from common save validation and compatibility
         ]),
       );
     }).pipe(Effect.provide(layer)),
+  );
+});
+
+it("persists project opt-outs atomically and preserves them when an older client omits the field", async () => {
+  const { layer } = makeRepositoryLayer();
+  const projectId = ProjectId.makeUnsafe("opt-out");
+  await runServiceEffect(
+    Effect.gen(function* () {
+      const service = yield* ProjectMcpConfigService;
+      yield* service.replaceCommonConfig({
+        servers: { shared: { type: "stdio", command: "node" } },
+      });
+      const before = yield* service.readEffectiveConfig(projectId);
+      const saved = yield* service.replaceProjectConfig({
+        projectId,
+        servers: {},
+        disabledCommonServers: ["shared"],
+      });
+      expect(saved.disabledCommonServers).toEqual(["shared"]);
+      const after = yield* service.readEffectiveConfig(projectId);
+      expect(after.servers.shared?.enabled).toBe(false);
+      expect(after.effectiveVersion).not.toBe(before.effectiveVersion);
+      const edited = yield* service.replaceProjectConfig({
+        projectId,
+        expectedVersion: saved.version,
+        servers: { own: { type: "stdio", command: "own" } },
+      });
+      expect(edited.disabledCommonServers).toEqual(["shared"]);
+      const override = yield* service.replaceProjectConfig({
+        projectId,
+        expectedVersion: edited.version,
+        servers: { shared: { type: "stdio", command: "override" } },
+      });
+      expect((yield* service.readEffectiveConfig(projectId)).servers.shared).toEqual(
+        override.servers.shared,
+      );
+    }),
+    layer,
+  );
+});
+
+it("keeps placeholders and their versions in storage while every runtime read resolves them", async () => {
+  const { layer } = makeRepositoryLayer();
+  const { ServerSecretStore } = await import("../auth/Services/ServerSecretStore.ts");
+  const id = "00000000-0000-4000-8000-000000000000";
+  const secretStore = Layer.succeed(ServerSecretStore, {
+    get: (name: string) =>
+      Effect.succeed(
+        name === `mcp-secret-${id}` ? new TextEncoder().encode("private-resolved-value") : null,
+      ),
+    set: () => Effect.void,
+    list: () => Effect.succeed([]),
+    getOrCreateRandom: () => Effect.succeed(new Uint8Array()),
+    remove: () => Effect.void,
+  });
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const service = yield* ProjectMcpConfigService;
+      const projectId = ProjectId.makeUnsafe("secret-runtime");
+      const server = {
+        type: "http" as const,
+        url: "https://example.test/mcp",
+        headers: { Authorization: "${f5-secret:" + id + "}" },
+      };
+      yield* service.replaceProjectConfig({ projectId, servers: { docs: server } });
+      const stored = yield* service.readEffectiveConfig(projectId);
+      const runtime = yield* service.readEffectiveRuntimeConfig(projectId);
+      expect(stored.servers.docs).toEqual(server);
+      expect(JSON.stringify(stored)).not.toContain("private-resolved-value");
+      expect(runtime.servers.docs?.headers?.Authorization).toBe("private-resolved-value");
+      expect(runtime.effectiveVersion).toBe(stored.effectiveVersion);
+    }).pipe(
+      Effect.provide(
+        ProjectMcpConfigServiceLive.pipe(Layer.provide(layer), Layer.provide(secretStore)),
+      ),
+    ),
+  );
+});
+
+it("allows unrelated edits, opt-outs and disabling with unchanged missing secrets, but rejects new references", async () => {
+  const { layer, rows } = makeRepositoryLayer();
+  const projectId = ProjectId.makeUnsafe("missing-secret");
+  const broken = {
+    type: "stdio" as const,
+    command: "node",
+    env: { TOKEN: "${f5-secret:00000000-0000-4000-8000-000000000000}" },
+  };
+  rows.set(scopeKey("project", projectId), {
+    scope: "project",
+    projectId,
+    version: "initial",
+    servers: { broken },
+    updatedAt: new Date().toISOString(),
+  });
+  await runServiceEffect(
+    Effect.gen(function* () {
+      const service = yield* ProjectMcpConfigService;
+      const first = yield* service.replaceProjectConfig({
+        projectId,
+        expectedVersion: "initial",
+        servers: {
+          broken,
+          unrelated: { type: "stdio", command: "other" },
+        },
+      });
+      const second = yield* service.replaceProjectConfig({
+        projectId,
+        expectedVersion: first.version,
+        servers: {
+          ...first.servers,
+          broken: { ...broken, enabled: false },
+        },
+        disabledCommonServers: ["common"],
+      });
+      expect(second.disabledCommonServers).toEqual(["common"]);
+      const failed = yield* service
+        .replaceProjectConfig({
+          projectId,
+          expectedVersion: second.version,
+          servers: {
+            ...second.servers,
+            newlyReferenced: broken,
+          },
+        })
+        .pipe(Effect.flip);
+      expect(failed.message).toContain("newlyReferenced.env.TOKEN");
+      yield* service.replaceProjectConfig({
+        projectId,
+        expectedVersion: second.version,
+        servers: {},
+      });
+    }),
+    layer,
   );
 });

@@ -372,14 +372,16 @@ const makeMcpRuntimeService = Effect.gen(function* () {
 
   const readStoredServer = (input: McpGetLoginStatusRequest) =>
     Effect.gen(function* () {
-      const stored = yield* projectMcpConfigService.readEffectiveStoredConfig(input.projectId).pipe(
-        Effect.mapError(
-          (error) =>
-            new McpRuntimeServiceError({
-              message: error.message,
-            }),
-        ),
-      );
+      const stored = yield* projectMcpConfigService
+        .readEffectiveRuntimeConfig(input.projectId)
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new McpRuntimeServiceError({
+                message: error.message,
+              }),
+          ),
+        );
       const serverName = input.serverName;
       if (!serverName) {
         return { stored, server: undefined };
@@ -409,7 +411,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
   const getProviderStatus: McpRuntimeServiceShape["getProviderStatus"] = (input) =>
     Effect.gen(function* () {
       const effectiveConfig = yield* projectMcpConfigService
-        .readEffectiveStoredConfig(input.projectId)
+        .readEffectiveRuntimeConfig(input.projectId)
         .pipe(
           Effect.mapError(
             (error) =>
@@ -459,7 +461,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
   const readRedactionContext = (input: McpGetServerStatusesRequest) =>
     Effect.gen(function* () {
       const effective = yield* projectMcpConfigService
-        .readEffectiveStoredConfig(input.projectId)
+        .readEffectiveRuntimeConfig(input.projectId)
         .pipe(Effect.mapError(runtimeError));
       const identity = yield* resolveExecution(input).pipe(Effect.option);
       const environment = Option.isSome(identity) ? identity.value.environment : {};
@@ -484,7 +486,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
     Effect.gen(function* () {
       const identity = yield* resolveExecution(input).pipe(Effect.mapError(runtimeError));
       const effective = yield* projectMcpConfigService
-        .readEffectiveStoredConfig(input.projectId)
+        .readEffectiveRuntimeConfig(input.projectId)
         .pipe(Effect.mapError(runtimeError));
       const additionalValues = Object.values(effective.servers).flatMap((server) =>
         server.bearerTokenEnvVar && identity.environment[server.bearerTokenEnvVar]
@@ -560,7 +562,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
           new Error("MCP account or project changed while reading status. Refresh."),
         );
       const latest = yield* projectMcpConfigService
-        .readEffectiveStoredConfig(input.projectId)
+        .readEffectiveRuntimeConfig(input.projectId)
         .pipe(Effect.mapError(runtimeError));
       if (latest.effectiveVersion !== effective.effectiveVersion)
         return yield* runtimeError(
@@ -591,7 +593,21 @@ const makeMcpRuntimeService = Effect.gen(function* () {
         ...(observation?.omissions ? { omissions: observation.omissions } : {}),
         support,
         ...(supportMessage ? { supportMessage } : {}),
-        statuses: projectMcpStatuses(effective.servers, observation, input.provider),
+        statuses: [
+          ...projectMcpStatuses(effective.servers, observation, input.provider),
+          ...(effective.issues ?? [])
+            .filter((issue) => issue.serverName && !effective.servers[issue.serverName])
+            .map((issue) => ({
+              name: issue.serverName!,
+              state: "failed" as const,
+              ownership: "managed" as const,
+              authStatus: "unknown" as const,
+              toolCount: 0,
+              resourceCount: 0,
+              resourceTemplateCount: 0,
+              message: issue.message,
+            })),
+        ],
       };
       return { result, observation, effective, additionalValues };
     });
@@ -654,7 +670,7 @@ const makeMcpRuntimeService = Effect.gen(function* () {
         .readIdentity(input)
         .pipe(Effect.mapError(runtimeError));
       const effective = yield* projectMcpConfigService
-        .readEffectiveStoredConfig(input.projectId)
+        .readEffectiveRuntimeConfig(input.projectId)
         .pipe(Effect.mapError(runtimeError));
       if (input.provider === "claudeAgent") {
         if (!providerService.reconnectMcpServerForProject)

@@ -9,7 +9,7 @@ import {
   TrimmedNonEmptyString,
 } from "./baseSchemas";
 import { ServerProviderAuthStatus } from "./server";
-import { McpProjectServersConfig } from "./mcpServer";
+import { McpServerDefinition, McpProjectServersConfig } from "./mcpServer";
 import { McpConfigScope } from "./mcpConfigScope";
 
 // Responses are separate from startup request schemas so browser bundles can omit unused definitions.
@@ -86,6 +86,7 @@ export const McpCommonConfigResult = Schema.Struct({
 export type McpCommonConfigResult = typeof McpCommonConfigResult.Type;
 
 export const McpProjectConfigResult = Schema.Struct({
+  disabledCommonServers: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   projectId: ProjectId,
   version: Schema.optional(TrimmedNonEmptyString),
   servers: McpProjectServersConfig,
@@ -188,6 +189,14 @@ export const McpServerStatusState = Schema.Literals([
 ]);
 export type McpServerStatusState = typeof McpServerStatusState.Type;
 
+export const McpToolSummary = Schema.Struct({
+  name: Schema.String.check(Schema.isMaxLength(128)),
+  description: Schema.optional(Schema.String.check(Schema.isMaxLength(300))),
+  readOnly: Schema.optional(Schema.Boolean),
+  destructive: Schema.optional(Schema.Boolean),
+});
+export type McpToolSummary = typeof McpToolSummary.Type;
+
 export const McpServerStatusEntry = Schema.Struct({
   name: TrimmedNonEmptyString,
   state: McpServerStatusState,
@@ -199,6 +208,7 @@ export const McpServerStatusEntry = Schema.Struct({
   ownership: Schema.optional(Schema.Literals(["managed", "external", "built-in"])),
   origin: Schema.optional(Schema.String),
   desiredEnabled: Schema.optional(Schema.Boolean),
+  tools: Schema.optional(Schema.Array(McpToolSummary).check(Schema.isMaxLength(200))),
 });
 export type McpServerStatusEntry = typeof McpServerStatusEntry.Type;
 
@@ -278,3 +288,42 @@ export const McpReconnectServerResult = Schema.Struct({
   sessions: Schema.optional(Schema.Array(McpSessionReloadOutcome)),
 });
 export type McpReconnectServerResult = typeof McpReconnectServerResult.Type;
+
+export const McpImportIssue = Schema.Struct({
+  serverName: Schema.optional(Schema.String),
+  field: Schema.String,
+  severity: Schema.Literals(["warning", "error"]),
+  message: Schema.String,
+});
+export const McpImportCandidate = Schema.Struct({
+  selectedByDefault: Schema.optional(Schema.Boolean),
+  id: Schema.String,
+  name: Schema.String,
+  source: Schema.String,
+  server: Schema.optional(McpServerDefinition),
+  issues: Schema.Array(McpImportIssue),
+});
+export const McpListImportCandidatesResult = Schema.Struct({
+  candidates: Schema.Array(McpImportCandidate),
+  issues: Schema.Array(McpImportIssue),
+});
+export const McpProbeServerResult = Schema.Struct({
+  ok: Schema.Boolean,
+  durationMs: NonNegativeInt,
+  serverInfo: Schema.optional(Schema.Struct({ name: Schema.String, version: Schema.String })),
+  protocolVersion: Schema.optional(Schema.String),
+  tools: Schema.Array(McpToolSummary),
+  toolsTruncated: Schema.Boolean,
+  resourceCount: NonNegativeInt,
+  promptCount: NonNegativeInt,
+  authRequired: Schema.Boolean,
+  error: Schema.optional(Schema.String),
+  stderrTail: Schema.optional(Schema.String),
+});
+export const McpStoreSecretResult = Schema.Struct({ placeholder: Schema.String });
+
+export type McpImportIssue = typeof McpImportIssue.Type;
+export type McpImportCandidate = typeof McpImportCandidate.Type;
+export type McpListImportCandidatesResult = typeof McpListImportCandidatesResult.Type;
+export type McpProbeServerResult = typeof McpProbeServerResult.Type;
+export type McpStoreSecretResult = typeof McpStoreSecretResult.Type;

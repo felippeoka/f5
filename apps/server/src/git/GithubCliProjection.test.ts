@@ -36,6 +36,7 @@ async function profile() {
       ),
     remove: (name) =>
       Effect.promise(() => FS.rm(Path.join(secretsDir, `${name}.bin`), { force: true })),
+    list: () => Effect.succeed([]),
     getOrCreateRandom: () => Effect.die("unused"),
   };
   const account = new ProfileGithubAccount(
