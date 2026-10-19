@@ -18,12 +18,13 @@ const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
   inspect: vi.fn(),
 }));
-vi.mock("../../nativeApi", () => ({
-  readNativeApi: () => ({
+vi.mock("../../nativeApi", () => {
+  const api = {
     nativeOperations: { list: mocks.list, execute: mocks.execute, inspect: mocks.inspect },
     agents: { getSnapshot: mocks.snapshot },
-  }),
-}));
+  };
+  return { readNativeApi: () => api, ensureNativeApi: () => api };
+});
 const at = "2026-10-10T00:00:00.000Z";
 function fixture(overrides: Partial<Parameters<typeof NativeRuntimePanel>[0]> = {}) {
   return {

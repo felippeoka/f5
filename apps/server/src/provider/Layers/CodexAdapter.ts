@@ -69,6 +69,7 @@ import {
   decodeCodexMcpServerStatus,
 } from "../../codex/codexMcpServerStatus.ts";
 import {
+  isCodexMcpLoginRequiredError,
   restartRequiredMcpReload,
   stableMcpConfigKey,
   summarizeMcpReload,
@@ -2159,10 +2160,15 @@ function mapToRuntimeEvents(
 
   if (event.method === "mcpServer/startupStatus/updated") {
     const name = asString(payload?.name);
-    const status = asMcpStartupStatus(payload?.status);
-    if (!name || !status) {
+    const startupStatus = asMcpStartupStatus(payload?.status);
+    if (!name || !startupStatus) {
       return [];
     }
+    // Codex reports a missing or expired OAuth token as a failed startup.
+    const status =
+      startupStatus === "failed" && isCodexMcpLoginRequiredError(asString(payload?.error))
+        ? "needs-auth"
+        : startupStatus;
 
     return [
       {

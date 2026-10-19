@@ -8,7 +8,12 @@ import {
   DialogDescription,
   DialogPanel,
 } from "../ui/dialog";
-import type { CompactRuntimeConfiguredActivityPayload } from "@t3tools/contracts";
+import type {
+  CompactRuntimeConfiguredActivityPayload,
+  ProjectId,
+  ProviderKind,
+} from "@t3tools/contracts";
+import { readMcpStatusActivityPayload } from "@t3tools/shared/orchestrationActivityPayload";
 import { SlidersHorizontalIcon } from "lucide-react";
 import { readNativeTaskIdentity } from "@t3tools/shared/nativeTaskIdentity";
 import { useEffect, useState } from "react";
@@ -19,9 +24,11 @@ import type {
   OrchestrationThreadActivity,
   ThreadBackgroundWorkEntry,
 } from "@t3tools/contracts";
+import type { ThreadSession } from "../../types";
 import { readNativeApi } from "../../nativeApi";
 import { describeBackgroundTask } from "./NativeRuntimeTray.logic";
 import { recentRuntimeNotices, resolveRuntimeModelReport } from "./runtimePresentation";
+import { McpSignInList, needsAuthMcpServers, supportsMcpSignIn } from "./McpSignInTray";
 
 /**
  * Same names as the composer tray, plus the agent's own type so finished
@@ -42,6 +49,9 @@ function backgroundTaskLabel(task: ThreadBackgroundWorkEntry): string {
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 interface NativeRuntimePanelProps {
+  provider?: ProviderKind | null | undefined;
+  sessionStatus?: ThreadSession["status"] | null | undefined;
+  projectId?: ProjectId | undefined;
   threadId: ThreadId;
   capabilities: ProviderSessionCapabilities | null | undefined;
   activities: readonly OrchestrationThreadActivity[];
@@ -143,7 +153,23 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
   const normalized = info?.runtimeInfo;
   const effective = normalized?.effective;
   const requested = normalized?.requested;
-  const warnings = recentRuntimeNotices(activities);
+  const signInProvider = supportsMcpSignIn(props.provider, props.sessionStatus)
+    ? props.provider
+    : null;
+  const signInServers =
+    signInProvider && props.projectId
+      ? needsAuthMcpServers(activities, props.capabilities?.generation)
+      : [];
+  // needs-auth servers get their own section with Sign in instead of read-only notices.
+  const warnings = recentRuntimeNotices(
+    signInServers.length > 0
+      ? activities.filter(
+          (entry) =>
+            entry.kind !== "mcp.status.updated" ||
+            readMcpStatusActivityPayload(entry.payload)?.status !== "needs-auth",
+        )
+      : activities,
+  );
   const modelReport = resolveRuntimeModelReport({ configuredRuntime: info, activities });
   const attachments = activities.filter(
     (entry) => entry.kind === "native.metadata" && "nativeAttachment" in object(entry.payload),
@@ -203,6 +229,21 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
               )}
             </dl>
             {normalized?.fallback && <p>{normalized.fallback}</p>}
+            {signInServers.length > 0 && signInProvider && props.projectId && (
+              <section aria-label="MCP sign-in" className="space-y-2">
+                <h3 className="font-medium">MCP servers that need sign-in</h3>
+                <p className="text-muted-foreground">
+                  Sign in opens your browser. Tokens are saved for this account, so later
+                  conversations connect without asking.
+                </p>
+                <McpSignInList
+                  servers={signInServers}
+                  provider={signInProvider}
+                  projectId={props.projectId}
+                  threadId={threadId}
+                />
+              </section>
+            )}
             {warnings.length > 0 && (
               <section aria-label="Provider notices" className="space-y-2">
                 <h3 className="font-medium">Provider notices</h3>

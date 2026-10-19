@@ -6,6 +6,7 @@ import { AgentComputerLiveCard } from "./AgentComputerLiveCard";
 import { parseNativeReviewTarget } from "@t3tools/shared/nativeReviewTarget";
 import { NativeRuntimePanel } from "./chat/NativeRuntimePanel";
 import { NativeRuntimeTray } from "./chat/NativeRuntimeTray";
+import { McpSignInTray } from "./chat/McpSignInTray";
 import { latestNativeGoal, resolveNativeGoalMenuState } from "./chat/nativeGoal";
 import { TranscriptRepairAction } from "./TranscriptRepairAction";
 import { isSessionActionSupported } from "@t3tools/shared/providerRuntimeCapabilities";
@@ -7278,6 +7279,9 @@ export default function ChatView({
               ) : null}
             </div>
             <NativeRuntimePanel
+              provider={sessionProvider}
+              sessionStatus={activeThread.session?.status}
+              projectId={activeThread.projectId}
               threadId={activeThread.id}
               capabilities={activeThread.session?.capabilities}
               activities={activeThread.activities}
@@ -7543,6 +7547,14 @@ export default function ChatView({
                           />
                         ))
                       : null}
+                    <McpSignInTray
+                      provider={sessionProvider}
+                      sessionStatus={activeThread.session?.status}
+                      sessionGeneration={activeThread.session?.capabilities?.generation}
+                      projectId={activeThread.projectId}
+                      threadId={activeThread.id}
+                      activities={activeThread.activities}
+                    />
                     <NativeRuntimeTray
                       threadId={activeThread.id}
                       capabilities={activeThread.session?.capabilities}
