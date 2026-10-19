@@ -729,12 +729,17 @@
     {
       "upstreamSha": "37ea8a88dee3fe3256e6333e10dd43c214ec660c",
       "classification": "planned:15e",
-      "reason": "Planned: reconcile the approved 15e feature and its follow-ups. Upstream change: refactor(web): the MCP app frame keeps its caching without \"use memo\" hooks (#20759).",
+      "reason": "Planned: implementation and focused scenario evidence exist for stable frame bridge lifetime through native approval updates; delivery remains deferred until the required full-workspace release gate passes. Upstream change: refactor(web): the MCP app frame keeps its caching without \"use memo\" hooks (#20759).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15e-pr-20759"],
         "targetModules": ["apps/server/src/codexAppServerManager.ts", "apps/web/src/components"]
-      }
+      },
+      "evidence": [
+        "apps/web/src/components/chat/McpAppFrame.tsx:1",
+        "apps/web/src/components/chat/McpAppFrame.browser.tsx:1"
+      ],
+      "f5Shas": ["054a4605d1d406406263a52deabc719384365f1d"]
     },
     {
       "upstreamSha": "0ad3fd64360ef6942ad4b76ece2d8fdd28432a11",
@@ -3157,12 +3162,17 @@
     {
       "upstreamSha": "38b43572be93a8c35c955303cdc237da134ba7a8",
       "classification": "planned:15e",
-      "reason": "Planned: reconcile the approved 15e feature and its follow-ups. Upstream change: perf(web): the MCP app frame compiles without manual memoization (#20691).",
+      "reason": "Planned: implementation and focused scenario evidence exist for MCP app bridge lifetime without manual memoization hooks; delivery remains deferred until the required full-workspace release gate passes. Upstream change: perf(web): the MCP app frame compiles without manual memoization (#20691).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15e-pr-20691"],
         "targetModules": ["apps/server/src/codexAppServerManager.ts", "apps/web/src/components"]
-      }
+      },
+      "evidence": [
+        "apps/web/src/components/chat/McpAppFrame.tsx:1",
+        "apps/web/src/components/chat/McpAppFrame.browser.tsx:1"
+      ],
+      "f5Shas": ["054a4605d1d406406263a52deabc719384365f1d"]
     },
     {
       "upstreamSha": "06299ff56ad6ead52e94c9a8cc44e63c76a3b5b7",
@@ -8194,12 +8204,18 @@
     {
       "upstreamSha": "ac2cc78d4a4aa9508acb65ad5e9dab319dd1962a",
       "classification": "planned:15e",
-      "reason": "Planned: reconcile the approved 15e feature and its follow-ups. Upstream change: fix(client): tolerate blocked cookies in MCP app sandboxes (#17027).",
+      "reason": "Planned: implementation and focused scenario evidence exist for blocked-cookie compatibility bootstrap in saved app snapshots; delivery remains deferred until the required full-workspace release gate passes. Upstream change: fix(client): tolerate blocked cookies in MCP app sandboxes (#17027).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15e-pr-17027"],
         "targetModules": ["apps/server/src/codexAppServerManager.ts", "apps/web/src/components"]
-      }
+      },
+      "evidence": [
+        "packages/shared/src/mcpApp.ts:1",
+        "packages/shared/src/mcpApp.test.ts:1",
+        "apps/server/src/mcpApps/McpAppSnapshot.ts:1"
+      ],
+      "f5Shas": ["054a4605d1d406406263a52deabc719384365f1d"]
     },
     {
       "upstreamSha": "8de61d4a97635382ee08d098b2a588e88532cc0a",
@@ -8220,12 +8236,18 @@
     {
       "upstreamSha": "2e19207b179dca57d57ecd24a4b0b0776a41e0bf",
       "classification": "planned:15e",
-      "reason": "Planned: reconcile the approved 15e feature and its follow-ups. Upstream change: fix(client): apply host color scheme to saved MCP apps (#17026).",
+      "reason": "Planned: implementation and focused scenario evidence exist for host theme bootstrap in owned app snapshots; delivery remains deferred until the required full-workspace release gate passes. Upstream change: fix(client): apply host color scheme to saved MCP apps (#17026).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15e-pr-17026"],
         "targetModules": ["apps/server/src/codexAppServerManager.ts", "apps/web/src/components"]
-      }
+      },
+      "evidence": [
+        "packages/shared/src/mcpApp.ts:1",
+        "packages/shared/src/mcpApp.test.ts:1",
+        "apps/server/src/mcpApps/McpAppSnapshot.ts:1"
+      ],
+      "f5Shas": ["054a4605d1d406406263a52deabc719384365f1d"]
     },
     {
       "upstreamSha": "b147dc99e31da173f0bbe2f25ced0f5cb5b2092b",
@@ -8294,7 +8316,7 @@
     {
       "upstreamSha": "8ac6846a0b855c3aad70adbf745ff113d4eb3f1f",
       "classification": "planned:15k",
-      "reason": "Planned: implement and verify the explicitly approved 15k scenario. Upstream change: feat(settings): providers can be turned on or off per project (#17879).",
+      "reason": "Planned: implementation and focused scenario evidence exist for bidirectional project provider policy, scoped admission/bridge/draft selection and project text generation; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(settings): providers can be turned on or off per project (#17879).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15k-pr-17879"],
@@ -8302,7 +8324,14 @@
           "apps/server/src/provider/Layers/ProviderInstanceRegistryLive.ts",
           "packages/contracts/src/settings.ts"
         ]
-      }
+      },
+      "evidence": [
+        "packages/shared/src/serverSettings.test.ts:1",
+        "apps/server/src/provider/Layers/ProviderService.test.ts:1",
+        "apps/server/src/git/Layers/TextGenerationLive.test.ts:1",
+        "apps/web/src/components/settings/SettingsRouteState.browser.tsx:1"
+      ],
+      "f5Shas": ["7d3a3b9430a0dfec596656192e8659dfb0e1ff47"]
     },
     {
       "upstreamSha": "243c9994d047f3102a9622d1a5cff42ef78515ee",
@@ -8747,12 +8776,17 @@
     {
       "upstreamSha": "29e09df979955a22e2ad35bd58a13518861b9551",
       "classification": "planned:15e",
-      "reason": "Planned: reconcile the approved 15e feature and its follow-ups. Upstream change: fix(web): MCP app permission prompts no longer overflow the screen (#17962).",
+      "reason": "Planned: implementation and focused scenario evidence exist for bounded long-argument approval with both decisions visible in Chromium; delivery remains deferred until the required full-workspace release gate passes. Upstream change: fix(web): MCP app permission prompts no longer overflow the screen (#17962).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15e-pr-17962"],
         "targetModules": ["apps/server/src/codexAppServerManager.ts", "apps/web/src/components"]
-      }
+      },
+      "evidence": [
+        "apps/web/src/components/chat/McpAppFrame.tsx:1",
+        "apps/web/src/components/chat/McpAppFrame.browser.tsx:1"
+      ],
+      "f5Shas": ["054a4605d1d406406263a52deabc719384365f1d"]
     },
     {
       "upstreamSha": "9ec472c7d9345a0c9528183d918f5fbc7f73be75",
@@ -11661,12 +11695,19 @@
     {
       "upstreamSha": "4d976d1fc233d3aa971fa7dcbf2e7316bfa3ac72",
       "classification": "planned:15e",
-      "reason": "Planned: reconcile the approved 15e feature and its follow-ups. Upstream change: feat: MCP apps render and run inline in threads (#16236).",
+      "reason": "Planned: implementation and focused scenario evidence exist for Codex app capture, owned attachments, scoped RPCs, durable context, document revocation and confirmed interactions; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat: MCP apps render and run inline in threads (#16236).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15e-pr-16236"],
         "targetModules": ["apps/server/src/codexAppServerManager.ts", "apps/web/src/components"]
-      }
+      },
+      "evidence": [
+        "apps/server/src/mcpApps/McpAppCapture.test.ts:1",
+        "apps/server/src/mcpApps/McpAppService.test.ts:1",
+        "apps/server/src/codexMcpApps.test.ts:1",
+        "apps/web/src/components/chat/McpAppFrame.browser.tsx:1"
+      ],
+      "f5Shas": ["054a4605d1d406406263a52deabc719384365f1d"]
     },
     {
       "upstreamSha": "6ecb82dc42c4c721fd2c03c92316ee5361306cdb",

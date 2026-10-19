@@ -8,6 +8,13 @@ export const threadPurgePolicy: Readonly<
     { readonly kind: "root" | "cascade" | "explicit" | "retain"; readonly reason?: string }
   >
 > = {
+  thread_pull_request_watches: { kind: "cascade" },
+  thread_pull_request_watch_stops: { kind: "cascade" },
+  thread_message_authorship: { kind: "cascade" },
+  thread_settlement_requests: { kind: "cascade" },
+  thread_settlement_hooks: { kind: "cascade" },
+  mcp_app_instances: { kind: "cascade" },
+  mcp_app_model_context: { kind: "cascade" },
   search_documents: { kind: "explicit" },
   usage_limit_resumes: { kind: "cascade" },
   usage_limit_resume_streaks: { kind: "cascade" },

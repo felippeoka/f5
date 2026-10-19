@@ -2177,6 +2177,15 @@ describe("WebSocket Server", () => {
     vi.resetModules();
     vi.doMock("./serverLayers.ts", async () => {
       const actual = await vi.importActual<typeof import("./serverLayers.ts")>("./serverLayers.ts");
+      const { McpAppService } = await vi.importActual<typeof import("./mcpApps/McpAppService.ts")>(
+        "./mcpApps/McpAppService.ts",
+      );
+      const { ThreadSettlementService } = await vi.importActual<
+        typeof import("./orchestration/Layers/ThreadSettlementService.ts")
+      >("./orchestration/Layers/ThreadSettlementService.ts");
+      const { PullRequestWatchService } = await vi.importActual<
+        typeof import("./orchestration/Layers/PullRequestWatchService.ts")
+      >("./orchestration/Layers/PullRequestWatchService.ts");
       const orchestrationEngineModule = await vi.importActual<
         typeof import("./orchestration/Services/OrchestrationEngine.ts")
       >("./orchestration/Services/OrchestrationEngine.ts");
@@ -2283,6 +2292,9 @@ describe("WebSocket Server", () => {
       };
 
       const runtimeLayer = Layer.mergeAll(
+        Layer.mock(McpAppService)({}),
+        Layer.mock(ThreadSettlementService)({ start: Effect.void }),
+        Layer.mock(PullRequestWatchService)({ start: Effect.void, changes: Stream.empty }),
         Layer.succeed(orchestrationEngineModule.OrchestrationEngineService, {
           getReadModel: () => Effect.succeed(readModel),
           readEvents: () => Stream.empty,

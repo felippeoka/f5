@@ -574,3 +574,26 @@ pass before the final admission regression. The required full command ran again:
 process-identity probes. Formatting, lint and the upstream ledger check pass.
 No deferred ledger obligation is promoted solely by these implementation tests;
 the full gate is still failed.
+
+## Cross-feature integration follow-up (2026-10-19)
+
+The broad server suite exposed integration failures hidden by the root test
+command's earlier script failure. The settlement migration now reuses the
+idempotent core-schema repair before adding foreign-key dependents, skips missing
+historical provenance and safely ignores malformed historical JSON. A direct
+regression verifies repeated migration, row preservation and positive-evidence-only
+automation backfill. Migration fixtures now use shared child-first teardown with
+foreign-key checks kept on. Exact projection expectations include the new optional
+settlement fields. All seven watch/settlement/MCP thread-reference tables have an
+explicit cascade purge policy; the existing schema-coverage test verifies their
+foreign keys. The passive reconciliation runtime fixture includes the new service
+tags so it exercises its intended asynchronous path.
+
+The focused schema/projection/purge run passes all 81 cases; the new provenance
+suite passes both cases, and the passive-reconciliation regression passes. All
+eight workspace typechecks and formatting/lint pass. The broad suite is rerun
+after these fixes: 4,998 cases pass and twelve are skipped. Only three launcher
+process-identity checks fail under the host's `ps` restriction. This is not a waiver.
+The ledger and classification artifact attach implementation SHAs and scenario
+files to the six MCP app entries and #17879. Their dispositions stay deferred
+while the required full-workspace gate is failed.
