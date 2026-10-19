@@ -1411,3 +1411,29 @@ full run fails the same two scripts recovery identity cases (332 pass), before t
 Git matrix. The strict ledger and 12 plan tests pass after the compiler/device/SSH
 triage: 4,084 records, 1,233 planned, 482 ported, 152 equivalent and two already
 present. None of these outstanding full-gate failures is waived.
+
+The fourth compiler pass reads 39 complete patches, closes 26 mechanical cases
+and four excluded-subsystem cases, and retains nine mixed runtime obligations.
+Across the four passes, 140 full candidates have been inspected: 106 mechanical
+exclusions, seven subsystem exclusions and 27 retained runtime cases. Thirty-three
+larger compiler candidates still need source review. The strict ledger reports
+1,203 planned entries, and the combined plan/performance-fixture tests pass 29 cases.
+
+The current server-component measurement completes five warmups and 30 measured
+repetitions for all eight workloads, with no failed resource observations. The
+source is clean commit `62a7ebf2f4279ef48ecffc8253efe3d1fa3d3a69`; raw report:
+`/tmp/f5-october-runtime-server-20261020.json`. Stream latency is 55.97 ms p50 and
+75.71 ms p95; event-loop delay is 14.64 ms p99. Read-model retained heap is 51,890,608
+bytes and RSS is 229,031,936 bytes. These are current-checkpoint absolute results,
+not a baseline comparison or complete interactive/soak evidence.
+
+The first interactive attempt fails before the soak because the wire fixture
+predates three renderer queries. Its generic unknown response is interpreted as
+a workspace transition, causing the missing-phase render error. A failing-before
+schema test reproduces this fixture drift. The fixture now supplies valid idle
+worktree state, a null transition and an empty PR-watch list; unknown queries still
+fail the completeness assertion. Duplicate pre-existing switch cases are removed.
+All 17 performance-support tests, all eight typechecks, formatter and lint pass.
+The real browser smoke now completes with no unknown methods or page errors and
+passes its transport/input/switch bounds. Smoke has no retained-memory credit.
+Both full reports will be rerun against the same updated fixture and source.

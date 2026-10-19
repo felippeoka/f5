@@ -53,12 +53,12 @@ The artifact deliberately retains runtime changes whose source/scenario review i
 | `equivalent:packages/shared/src/codexProtocolManifest.ts:6`     |       2 |
 | `equivalent:packages/shared/src/model.ts:591`                   |       1 |
 | `equivalent:packages/shared/src/model.ts:71`                    |       2 |
-| `not-applicable:devices`                                        |      14 |
-| `not-applicable:maintenance`                                    |     138 |
+| `not-applicable:devices`                                        |      15 |
+| `not-applicable:maintenance`                                    |     164 |
 | `not-applicable:marketing`                                      |       3 |
 | `not-applicable:mobile`                                         |     136 |
-| `not-applicable:multi-environment`                              |       2 |
-| `not-applicable:relay-cloud`                                    |      46 |
+| `not-applicable:multi-environment`                              |       3 |
+| `not-applicable:relay-cloud`                                    |      48 |
 | `not-applicable:release-ci`                                     |       4 |
 | `not-applicable:upstream-only-subsystem:context-handoff`        |       3 |
 | `not-applicable:upstream-only-subsystem:lineage-delegation`     |      11 |
@@ -68,7 +68,7 @@ The artifact deliberately retains runtime changes whose source/scenario review i
 | `planned:11a`                                                   |      46 |
 | `planned:12a`                                                   |     102 |
 | `planned:13b`                                                   |      57 |
-| `planned:15a`                                                   |     236 |
+| `planned:15a`                                                   |     206 |
 | `planned:15b`                                                   |      16 |
 | `planned:15c`                                                   |      21 |
 | `planned:15d`                                                   |      11 |
@@ -327,3 +327,40 @@ device workspace. `079a349708dd6a257fd25576378fa1de105e327c` (#20490) touches on
 the native desktop SSH password dialog and its compiler-list entry; SSH connection
 management is excluded with multi-environment support. These are scope decisions,
 not claims that the error-cleanup rewrites are behavior-neutral.
+
+## Fourth source-inspected compiler pass (2026-10-20)
+
+This pass reads 39 complete patches: 26 qualify as compiler/test maintenance, and four concern only excluded load balancing, T3 Connect relay/cloud or device-host management. Nine mixed changes remain open: media video lifetime (#20486), fullscreen IPC caching (#20569), color-picker state (#20525), thread status callback ownership (#20630), file-save session lifetime (#20697), pending-input timing (#20592), update failure cleanup (#20478), theme index state (#20655), and settings result selection (#20623). Across all four passes, 140 complete candidates have been inspected: 106 mechanical exclusions, seven excluded-subsystem decisions and 27 retained runtime obligations. The remaining 33 larger candidates have not been source-reviewed in this pass. Classification alone grants no runtime port or measured performance credit.
+
+| Upstream SHA                               | Source result                                                                                                                                                                                                                                                      |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `6515be7f4bd34a6d69e4f40b7f615e438aa235d0` | not-applicable:maintenance: project clone toasts hoist the unchanged action helper and unwrap the same draft-check/open callbacks; the hoisted helper leaves effect dependencies.                                                                                  |
+| `aca2b2ab4e82afcf99482fdd09cf502112829842` | not-applicable:maintenance: scoped model availability unwraps the same per-environment capability and model-option checks without useCallback.                                                                                                                     |
+| `f0474d37d7d4986bbef7835745e04d5a4c9e717f` | not-applicable:maintenance: resize handles unwrap unchanged flush/finish callbacks and read them through useEffectEvent; moved flags retain their boolean logic and effect listeners no longer depend on a render callback.                                        |
+| `696e0e4314a44e4614438f9c3142ddb8b5e10cbc` | not-applicable:maintenance: asset URL hooks extract the identical file-resource predicate and preserve result indexing while unwrapping refresh and URL projections.                                                                                               |
+| `c36880ea67221d81a1dcfedd462c483cd4400b1f` | not-applicable:maintenance: project action settings unwrap the same importable-script filter and payload/submission callback without memoization.                                                                                                                  |
+| `9ef927496573c059f9f3b06d0faa4cee37e0e993` | not-applicable:maintenance: ChatView extracts the same unseen-wake predicate into a pure tested helper; filtering invalid visits and requiring every valid visit before the wake is equivalent to the previous maximum-time check.                                 |
+| `530d119655d64f6999dd76b2261636c548ff5634` | not-applicable:maintenance: remove-cloned-project unwraps the unchanged deletion, failure, post-await route check and upload/draft cleanup callback without useCallback.                                                                                           |
+| `4e8c01c1bc251bf948adb0c0484b8b4b9aba8c74` | not-applicable:maintenance: chat canvas unwraps the same equality-guarded preview/details callbacks and unchanged layout/context construction without memoization.                                                                                                 |
+| `ef643a3f0e7b10aa7f66dca9b4f017d7ce7865e1` | not-applicable:maintenance: scheduled-task settings unwrap the same editor callback, environment/task Atom, project filter and provider model projections without memoization.                                                                                     |
+| `222ebe071e4c825574d37b180c8ab60dfecf3c15` | not-applicable:maintenance: pairing surfaces retain the same initial URL token and one-shot submit guards through lazy state/useEffectEvent instead of mount-only refs and memoized callbacks.                                                                     |
+| `9b62eae950e380752a94e797105832e19dfed20d` | not-applicable:maintenance: settings layout unwraps the same context, search-target callbacks and settings map; project override calculation moves unchanged into a pure helper.                                                                                   |
+| `73d9a77e43ee7cdc099726129d56576d5835c109` | not-applicable:maintenance: open-in picker preserves the same editor resolution and local/remote policy branches in a compiler-memoized helper and unwrapped callbacks.                                                                                            |
+| `2520821d575fb769875f67fca1b9c62784817452` | not-applicable:maintenance: device stream views extract unchanged aspect/rotation calculations and replace callbacks that capture only stable setters/refs with stable forwarders; frame, reset and input behavior is unchanged.                                   |
+| `0fdbb37478dedd328bfb908e9b20bb3b2061d5dc` | not-applicable:maintenance: ThemeEditorHost unwraps the same merged/existing/new-theme save branches and storage-failure checks without useCallback.                                                                                                               |
+| `d89076c6d8df27a9e18eda642096f99a910d18e3` | not-applicable:maintenance: storage settings unwrap the same report Atom and retain the same Promise.all cleanup operations with pending reset in Promise.finally.                                                                                                 |
+| `934398bc41b7e01278ed75f742894848b2b12578` | not-applicable:maintenance: settings search moves the same primitive availability flags and unchanged filtering into a compiler-memoized helper.                                                                                                                   |
+| `c62480abff883376fc5b0d3df16097c468cd526b` | not-applicable:maintenance: query hooks extract unchanged ref-page Atom construction, preserve cursor guards and refresh behavior, and unwrap search normalization/callbacks without manual memoization.                                                           |
+| `e6a126095f01ae28f67e71a7b9518b529730dfa6` | not-applicable:maintenance: settings scope context unwraps the same member-file Atom, environment/scope resolution, selected target and provider context without useMemo.                                                                                          |
+| `37db94e5204569b54aa773a50806ad57e09e22dd` | not-applicable:maintenance: editor preferences unwrap the same available-editor fallback, permission/error checks and open callback without memoization.                                                                                                           |
+| `436ff018d8ac491dee5bff0db209591c251a1e9f` | not-applicable:maintenance: draft hero headline unwraps the same project sorting, labels, scratch exclusion and picker filtering, moving its existing hooks before derived values.                                                                                 |
+| `383d8cc6aedc7ffb27984c8dc0a64be6a3b67f7d` | not-applicable:maintenance: scoped settings extract the same server/client merge into a compiler-memoized helper and unwrap unchanged persistence plans, authorization checks and error reporting callbacks.                                                       |
+| `8e49f230d8a6267e2ccea9c72f358096d605fa53` | not-applicable:maintenance: Lineage panels extract unchanged subagent maps and relationship graph traversal into compiler-memoized helpers and unwrap the same row derivation.                                                                                     |
+| `b82d2e3bd5ba4bbf5bfb009c1713855dbae82e4b` | not-applicable:maintenance: guide excerpts extract identical patch slicing and expansion-loader bodies into compiler-memoized helpers and unwrap unchanged annotations, commenting and view options.                                                               |
+| `41edad837f18a742816c4a5bbd1172448e156164` | not-applicable:maintenance: file context menus unwrap identical capability/absolute-path checks, activation, menu construction and handler bodies without memoization.                                                                                             |
+| `b618d53941b8bdde151e5b104c47ad29e2447687` | not-applicable:maintenance: project script settings extract the unchanged target-write/keybinding loop into an async helper and retain its saving guard cleanup through Promise.finally.                                                                           |
+| `472a62a6a8f6157b9283dcee201f2780ade9a301` | not-applicable:maintenance: sidebar primitives unwrap identical open/cookie/toggle/context bodies, extract unchanged resize options into a compiler-memoized helper and read refresh through useEffectEvent.                                                       |
+| `33672c47e3c45a6afabdc1a0dd89033e77237bec` | not-applicable:multi-environment: the entire runtime patch is useLoadBalancedEnvironment, whose host-resource expiry timer and automatic machine selection belong to excluded multi-environment load balancing; it changes no F5 local provider or task scheduler. |
+| `ecb973a7df86421adce88120d6de41854705d620` | not-applicable:relay-cloud: the sole runtime file is the Clerk-backed ConnectOnboardingDialog and its cloud publishing/device onboarding state; F5 excludes T3 Connect relay/cloud onboarding and keeps its own remote-access model.                               |
+| `c1caac81ab32ec5912ee318aa23c8a2f5119dd8e` | not-applicable:relay-cloud: the runtime patch changes only CloudEnvironmentConnectList relay machine registration, auto-selection and discovery polling, plus its compiler-list entry; F5 has no T3 Connect relay environment catalog.                             |
+| `7091bc2495df63174afc4a14d6890c1aab7daf64` | not-applicable:devices: the sole runtime file manages SSH device-host configuration and device-state queries in DeviceHostsSettings, plus its compiler-list entry; this is the excluded device workspace, not a local provider or general forge host setting.      |
