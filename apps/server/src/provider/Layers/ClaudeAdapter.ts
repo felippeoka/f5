@@ -3039,8 +3039,9 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             ? {
                 backgroundTasks: [...context.taskStates.values()]
                   .slice(-512)
-                  .map(({ taskId, toolUseId, model, effort, description, taskType }) => ({
+                  .map(({ taskId, toolUseId, turnId, model, effort, description, taskType }) => ({
                     taskId,
+                    ...(turnId ? { turnId } : {}),
                     toolUseId,
                     model,
                     effort,
@@ -3556,6 +3557,16 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       return state;
     };
 
+    const nativeTaskRunReference = (
+      context: ClaudeSessionContext,
+      taskId: string,
+      message?: unknown,
+    ): { readonly runId?: string } => {
+      const reported = asUnknownRecord(message)?.run_id;
+      const runId = typeof reported === "string" ? reported : context.nativeTaskRuns.get(taskId);
+      return runId ? { runId } : {};
+    };
+
     const emitBackgroundToolLifecycle = (
       context: ClaudeSessionContext,
       input: {
@@ -3643,6 +3654,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             type: "task.progress",
             payload: {
               taskId: RuntimeTaskId.makeUnsafe(input.state.taskId),
+              ...nativeTaskRunReference(context, input.state.taskId),
               description: input.state.description ?? "Background task running",
               ...(input.state.tool ? { lastToolName: input.state.tool.toolName } : {}),
             },
@@ -3655,6 +3667,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           type: "task.completed",
           payload: {
             taskId: RuntimeTaskId.makeUnsafe(input.state.taskId),
+            ...nativeTaskRunReference(context, input.state.taskId),
             status: input.status ?? "completed",
             ...(input.state.description ? { summary: input.state.description } : {}),
           },
@@ -4734,6 +4747,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                 ...(task.turnId ? { turnId: task.turnId } : {}),
                 payload: {
                   taskId: RuntimeTaskId.make(taskId),
+                  ...nativeTaskRunReference(context, taskId),
                   description: task.description ?? "Subagent",
                   model,
                   effort: resolveClaudeSubagentEffort(
@@ -5288,9 +5302,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               type: "task.started",
               payload: {
                 taskId: RuntimeTaskId.makeUnsafe(message.task_id),
-                ...(typeof asUnknownRecord(message)?.run_id === "string"
-                  ? { runId: String(asUnknownRecord(message)!.run_id) }
-                  : {}),
+                ...nativeTaskRunReference(context, message.task_id, message),
                 ...(context.taskStates.get(message.task_id)?.model
                   ? { model: context.taskStates.get(message.task_id)!.model! }
                   : {}),
@@ -5315,11 +5327,12 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             yield* offerRuntimeEvent({
               ...base,
               type: "task.progress",
+              ...(context.taskStates.get(message.task_id)?.turnId
+                ? { turnId: context.taskStates.get(message.task_id)!.turnId! }
+                : {}),
               payload: {
                 taskId: RuntimeTaskId.makeUnsafe(message.task_id),
-                ...(typeof asUnknownRecord(message)?.run_id === "string"
-                  ? { runId: String(asUnknownRecord(message)!.run_id) }
-                  : {}),
+                ...nativeTaskRunReference(context, message.task_id, message),
                 ...(context.taskStates.get(message.task_id)?.model
                   ? { model: context.taskStates.get(message.task_id)!.model! }
                   : {}),
@@ -5343,6 +5356,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                 context.nativeTaskRuns.get(message.task_id)!
             )
               return;
+            const completedTaskTurnId = context.taskStates.get(message.task_id)?.turnId;
             yield* resolvePendingInteractions(context, message.task_id);
             // Either terminal notification can arrive first. Close the tool
             // while its launch metadata still exists, then publish the task edge.
@@ -5372,11 +5386,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               ...base,
               resumeCursor: context.session.resumeCursor,
               type: "task.completed",
+              ...(completedTaskTurnId ? { turnId: completedTaskTurnId } : {}),
               payload: {
                 taskId: RuntimeTaskId.makeUnsafe(message.task_id),
-                ...(typeof asUnknownRecord(message)?.run_id === "string"
-                  ? { runId: String(asUnknownRecord(message)!.run_id) }
-                  : {}),
+                ...nativeTaskRunReference(context, message.task_id, message),
                 status: message.status,
                 ...(message.summary ? { summary: message.summary } : {}),
                 ...(message.usage ? { usage: message.usage } : {}),
@@ -6150,7 +6163,11 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             provider: PROVIDER,
             threadId: context.session.threadId,
             ...(task.turnId ? { turnId: task.turnId } : {}),
-            payload: { taskId: RuntimeTaskId.make(task.taskId), status: "stopped" },
+            payload: {
+              taskId: RuntimeTaskId.make(task.taskId),
+              ...nativeTaskRunReference(context, task.taskId),
+              status: "stopped",
+            },
           });
         }
         context.taskStates.clear();

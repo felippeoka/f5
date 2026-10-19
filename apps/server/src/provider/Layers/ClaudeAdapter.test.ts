@@ -13645,3 +13645,179 @@ for (const streamed of [false, true]) {
     },
   );
 }
+
+it.effect("keeps older background task ownership through parent model changes and steering", () => {
+  const h = makeHarness();
+  return Effect.gen(function* () {
+    const adapter = yield* ClaudeAdapter;
+    const events: ProviderRuntimeEvent[] = [];
+    const listener = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+      Effect.sync(() => {
+        events.push(event);
+      }),
+    ).pipe(Effect.forkChild);
+    yield* adapter.startSession({
+      threadId: THREAD_ID,
+      runtimeMode: "full-access",
+      model: "claude-opus-5-5",
+    });
+    const first = yield* adapter.sendTurn({
+      threadId: THREAD_ID,
+      input: "Explore",
+      attachments: [],
+    });
+    h.query.emit({
+      type: "assistant",
+      parent_tool_use_id: null,
+      uuid: crypto.randomUUID(),
+      session_id: BACKGROUND_SESSION_ID,
+      message: {
+        role: "assistant",
+        model: "claude-opus-5-5",
+        content: [
+          {
+            type: "tool_use",
+            id: "older-agent-call",
+            name: "Agent",
+            input: { model: "claude-sonnet-4-6", effort: "low" },
+          },
+        ],
+      },
+    } as SDKMessage);
+    h.query.emit({
+      type: "system",
+      subtype: "task_started",
+      task_id: "older-agent",
+      run_id: "run-original",
+      tool_use_id: "older-agent-call",
+      task_type: "local_agent",
+      description: "Explore in background",
+      uuid: crypto.randomUUID(),
+      session_id: BACKGROUND_SESSION_ID,
+    } as SDKMessage);
+    h.query.emit({
+      type: "system",
+      subtype: "background_tasks_changed",
+      tasks: [{ task_id: "older-agent", task_type: "local_agent", ambient: true }],
+      uuid: crypto.randomUUID(),
+      session_id: BACKGROUND_SESSION_ID,
+    } as unknown as SDKMessage);
+    emitClaudeSuccessResult(h.query);
+    yield* Effect.promise(() =>
+      vi.waitFor(() =>
+        assert.ok(
+          events.some((event) => event.type === "turn.completed" && event.turnId === first.turnId),
+        ),
+      ),
+    );
+    const second = yield* adapter.sendTurn({
+      threadId: THREAD_ID,
+      input: "Next",
+      attachments: [],
+      modelSelection: createModelSelection(
+        ProviderInstanceId.make("claudeAgent"),
+        "claude-opus-4-6",
+        [{ id: "effort", value: "high" }],
+      ),
+    });
+    yield* adapter.steerTurn!({
+      threadId: THREAD_ID,
+      input: "Keep exploring",
+      attachments: [],
+      expectedTurnId: second.turnId,
+    });
+    h.query.emit({
+      type: "system",
+      subtype: "task_progress",
+      task_id: "older-agent",
+      description: "Still exploring",
+      uuid: crypto.randomUUID(),
+      session_id: BACKGROUND_SESSION_ID,
+    } as SDKMessage);
+    yield* Effect.promise(() =>
+      vi.waitFor(() =>
+        assert.ok(
+          events.some(
+            (event) =>
+              event.type === "task.progress" && event.payload.description === "Still exploring",
+          ),
+        ),
+      ),
+    );
+    const progress = events.find(
+      (event) => event.type === "task.progress" && event.payload.description === "Still exploring",
+    )!;
+    assert.equal(progress.turnId, first.turnId);
+    assert.equal(progress.type, "task.progress");
+    if (progress.type === "task.progress") {
+      assert.equal(progress.payload.model, "claude-sonnet-4-6");
+      assert.equal(progress.payload.effort, "low");
+      assert.equal(progress.payload.runId, "run-original");
+    }
+    const cursor = (yield* adapter.listSessions())[0]!.resumeCursor as {
+      backgroundTasks: { taskId: string; turnId?: string }[];
+    };
+    assert.equal(
+      cursor.backgroundTasks.find((task) => task.taskId === "older-agent")?.turnId,
+      first.turnId,
+    );
+    assert.equal(h.getCreateQueryInputs().length, 1);
+    assert.deepEqual(h.query.setModelCalls, ["claude-opus-4-6"]);
+    assert.deepEqual(h.query.interruptCalls, []);
+    assert.deepEqual(h.query.stopTaskCalls, []);
+    assert.equal(
+      events.some((event) => event.type === "task.completed"),
+      false,
+    );
+    h.query.emit({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "older-agent",
+      status: "completed",
+      output_file: "native-output",
+      summary: "Explored",
+      uuid: crypto.randomUUID(),
+      session_id: BACKGROUND_SESSION_ID,
+    } as SDKMessage);
+    yield* Effect.promise(() =>
+      vi.waitFor(() => assert.ok(events.some((event) => event.type === "task.completed"))),
+    );
+    assert.equal(events.find((event) => event.type === "task.completed")?.turnId, first.turnId);
+    const completed = events.find((event) => event.type === "task.completed");
+    if (completed?.type === "task.completed") assert.equal(completed.payload.runId, "run-original");
+    yield* adapter.stopSession(THREAD_ID);
+    yield* Fiber.interrupt(listener);
+  }).pipe(Effect.provide(h.layer));
+});
+
+it.effect("settles the exact persisted native task run when its session stops", () => {
+  const h = makeHarness();
+  return Effect.gen(function* () {
+    const adapter = yield* ClaudeAdapter;
+    const events: ProviderRuntimeEvent[] = [];
+    const listener = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+      Effect.sync(() => {
+        events.push(event);
+      }),
+    ).pipe(Effect.forkChild);
+    yield* adapter.startSession({
+      threadId: THREAD_ID,
+      runtimeMode: "full-access",
+      resumeCursor: {
+        nativeTaskIds: ["native-agent"],
+        nativeTaskRuns: [["native-agent", "run-2"]],
+        backgroundTasks: [
+          { taskId: "native-agent", turnId: "original-turn", taskType: "local_agent" },
+        ],
+      },
+    });
+    yield* adapter.stopSession(THREAD_ID);
+    yield* Effect.promise(() =>
+      vi.waitFor(() => assert.ok(events.some((event) => event.type === "task.completed"))),
+    );
+    const completed = events.find((event) => event.type === "task.completed")!;
+    assert.equal(completed.turnId, "original-turn");
+    if (completed.type === "task.completed") assert.equal(completed.payload.runId, "run-2");
+    yield* Fiber.interrupt(listener);
+  }).pipe(Effect.provide(h.layer));
+});
