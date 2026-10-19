@@ -211,17 +211,27 @@ function Thread({
       ) : null}
       {!pr.repositoryArchived &&
       pr.provider === "github" &&
+      thread.canResolve !== false &&
       (thread.isResolved ? thread.viewerCanUnresolve : thread.viewerCanResolve) ? (
         <Button size="xs" variant="outline" disabled={busy} onClick={() => void setResolved()}>
           {thread.isResolved ? "Reopen conversation" : "Resolve conversation"}
         </Button>
       ) : null}
-      {!pr.repositoryArchived && (pr.forgeCapabilities?.review.reply ?? thread.viewerCanReply) ? (
+      {!pr.repositoryArchived &&
+      (pr.forgeCapabilities
+        ? pr.forgeCapabilities.review.reply && thread.viewerCanReply !== false
+        : thread.viewerCanReply) ? (
         <Button size="xs" variant="outline" onClick={() => setReplyOpen(!replyOpen)}>
           Reply
         </Button>
       ) : null}
-      {pr.provider !== "github" && pr.forgeCapabilities?.review.resolve ? (
+      {!pr.repositoryArchived &&
+      pr.provider !== "github" &&
+      pr.forgeCapabilities?.review.resolve &&
+      thread.canResolve !== false &&
+      (thread.isResolved
+        ? thread.viewerCanUnresolve !== false
+        : thread.viewerCanResolve !== false) ? (
         <ForgeOperationPanel
           pr={pr}
           payload={{ kind: "thread-state", threadId: thread.id, resolved: !thread.isResolved }}

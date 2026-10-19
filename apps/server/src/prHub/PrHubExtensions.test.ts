@@ -53,6 +53,9 @@ interface State {
   writes: string[];
   reviews: { body: string; verdict: string }[];
   delay: boolean;
+  canEdit?: boolean;
+  canResolve?: boolean;
+  itemWrites: string[];
 }
 const transportFailure = (mode: Exclude<Mode, "success">) =>
   new SourceControlProviderError({
@@ -78,6 +81,7 @@ const fixture = Effect.gen(function* () {
     writes: [],
     reviews: [],
     delay: false,
+    itemWrites: [],
   };
   const native = makeForgeSourceControlProvider({
     kind: "gitlab",
@@ -105,6 +109,24 @@ const fixture = Effect.gen(function* () {
   const provider = {
     ...native,
     getComments: () => Effect.succeed(state.comments),
+    getReviewThreads: () =>
+      Effect.succeed([
+        {
+          id: "thread-1",
+          canResolve: state.canResolve,
+          comments: [{ id: "comment-1", path: "a.ts", body: "Inline" }],
+        },
+      ]),
+    editComment: () =>
+      Effect.sync(() => {
+        state.itemWrites.push("edit");
+        return {};
+      }),
+    resolveThread: () =>
+      Effect.sync(() => {
+        state.itemWrites.push("resolve");
+        return {};
+      }),
     getFiles: () =>
       Effect.sync(() => {
         if (state.moveBase) state.base = "base-2";
@@ -489,6 +511,56 @@ it.effect("fences inline comments when the base changes during file loading", ()
       state.moveBase = true;
       assert.equal((yield* engine.submitOperation(identify(input))).status, "failed");
       assert.equal(state.writes.length, 0);
+    }),
+  ),
+);
+
+it.effect("host item permissions override authorship and are rechecked before a saved edit", () =>
+  run(({ engine, state }) =>
+    Effect.gen(function* () {
+      state.comments = [{ id: "comment-1", author: { id: "42" }, canEdit: false }];
+      const input = prepared("edit-denied", {
+        kind: "edit-comment",
+        commentId: "comment-1",
+        body: "Changed",
+      });
+      assert.equal((yield* engine.prepareOperation(input).pipe(Effect.result))._tag, "Failure");
+      // An explicit grant can permit editing another author's remark.
+      state.comments = [{ id: "comment-1", author: { id: "other" }, canEdit: true }];
+      yield* engine.prepareOperation(input);
+      state.comments = [{ id: "comment-1", author: { id: "other" }, canEdit: false }];
+      assert.equal(
+        (yield* engine.submitOperation(identify(input)).pipe(Effect.result))._tag,
+        "Failure",
+      );
+      assert.deepEqual(state.itemWrites, []);
+      state.comments = [{ id: "comment-1", author: { id: "other" }, canEdit: true }];
+      assert.equal((yield* engine.submitOperation(identify(input))).status, "succeeded");
+      assert.deepEqual(state.itemWrites, ["edit"]);
+    }),
+  ),
+);
+it.effect("per-thread resolution restrictions are rechecked before dispatch", () =>
+  run(({ engine, state }) =>
+    Effect.gen(function* () {
+      const input = prepared("resolve-denied", {
+        kind: "thread-state",
+        threadId: "thread-1",
+        resolved: true,
+      });
+      state.canResolve = false;
+      assert.equal((yield* engine.prepareOperation(input).pipe(Effect.result))._tag, "Failure");
+      state.canResolve = true;
+      yield* engine.prepareOperation(input);
+      state.canResolve = false;
+      assert.equal(
+        (yield* engine.submitOperation(identify(input)).pipe(Effect.result))._tag,
+        "Failure",
+      );
+      assert.deepEqual(state.itemWrites, []);
+      state.canResolve = true;
+      assert.equal((yield* engine.submitOperation(identify(input))).status, "succeeded");
+      assert.deepEqual(state.itemWrites, ["resolve"]);
     }),
   ),
 );

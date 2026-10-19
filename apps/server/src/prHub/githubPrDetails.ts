@@ -38,13 +38,13 @@ query F5PrTimeline($owner:String!,$repo:String!,$number:Int!,$issueLimit:Int!,$i
   repository(owner:$owner,name:$repo){
     pullRequest(number:$number){
       comments(last:$issueLimit,before:$issueCursor,orderBy:{field:UPDATED_AT,direction:ASC}){
-        nodes { id databaseId body createdAt updatedAt url viewerDidAuthor author { login avatarUrl ... on User { name } } reactionGroups { content viewerHasReacted users(first:20){ totalCount nodes { login } } } }
+        nodes { id databaseId body createdAt updatedAt url viewerDidAuthor viewerCanUpdate author { login avatarUrl ... on User { name } } reactionGroups { content viewerHasReacted users(first:20){ totalCount nodes { login } } } }
         pageInfo { hasPreviousPage startCursor }
       }
       reviews(last:$reviewLimit,before:$reviewCursor){
         nodes {
           id body state submittedAt lastEditedAt url author { login avatarUrl ... on User { name } }
-          comments(first:25){ totalCount nodes { id databaseId body createdAt updatedAt url path line originalLine viewerDidAuthor author { login avatarUrl ... on User { name } } reactionGroups { content viewerHasReacted users(first:20){ totalCount nodes { login } } } } }
+          comments(first:25){ totalCount nodes { id databaseId body createdAt updatedAt url path line originalLine viewerDidAuthor viewerCanUpdate author { login avatarUrl ... on User { name } } reactionGroups { content viewerHasReacted users(first:20){ totalCount nodes { login } } } } }
         }
         pageInfo { hasPreviousPage startCursor }
       }
@@ -450,7 +450,10 @@ export function decodeGitHubPrTimeline(
         path: null,
         line: null,
         reviewState: null,
-        viewerCanUpdate: comment.viewerDidAuthor === true,
+        viewerCanUpdate:
+          typeof comment.viewerCanUpdate === "boolean"
+            ? comment.viewerCanUpdate
+            : comment.viewerDidAuthor === true,
         reactions: reactionsOf(comment.reactionGroups),
       });
     }
@@ -498,7 +501,10 @@ export function decodeGitHubPrTimeline(
                 ? nonNegativeInt(comment.originalLine)
                 : null,
           reviewState: nullableString(review.state),
-          viewerCanUpdate: comment.viewerDidAuthor === true,
+          viewerCanUpdate:
+            typeof comment.viewerCanUpdate === "boolean"
+              ? comment.viewerCanUpdate
+              : comment.viewerDidAuthor === true,
           reactions: reactionsOf(comment.reactionGroups),
         });
       }

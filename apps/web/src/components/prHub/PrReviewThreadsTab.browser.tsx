@@ -9,7 +9,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
 import { PrReviewThreadsTab } from "./PrReviewThreadsTab";
-const api = vi.hoisted(() => ({ getReviewThreads: vi.fn(), setReviewThreadState: vi.fn() }));
+const api = vi.hoisted(() => ({
+  getReviewThreads: vi.fn(),
+  setReviewThreadState: vi.fn(),
+  getOperation: vi.fn(),
+}));
 vi.mock("../../nativeApi", () => ({ ensureNativeApi: () => ({ prHub: api }) }));
 vi.mock("./PrSendToAgent", () => ({ PrSendToAgent: () => null }));
 const pr = {
@@ -57,11 +61,11 @@ const result = (rows: PrHubReviewThread[], next = false) => ({
 });
 let screen: Awaited<ReturnType<typeof render>> | undefined;
 let client: QueryClient;
-async function mount() {
+async function mount(subject: TrackedPullRequest = pr) {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   screen = await render(
     <QueryClientProvider client={client}>
-      <PrReviewThreadsTab pr={pr} />
+      <PrReviewThreadsTab pr={subject} />
     </QueryClientProvider>,
   );
   await expect.element(page.getByText("human content", { exact: true })).toBeVisible();
@@ -122,4 +126,23 @@ it("keeps more pages reachable and displays human replies under a hidden bot roo
   await page.getByRole("button", { name: "Load more threads", exact: true }).click();
   await expect.element(page.getByText("later content", { exact: true })).toBeVisible();
   expect(api.setReviewThreadState).not.toHaveBeenCalled();
+});
+
+it("does not offer a native resolve operation denied for this thread", async () => {
+  api.getOperation.mockResolvedValue(null);
+  api.getReviewThreads.mockResolvedValue(
+    result([thread("human", "alice", { canResolve: false, viewerCanResolve: true })]),
+  );
+  await mount({
+    ...pr,
+    provider: "gitlab",
+    repositoryArchived: false,
+    forgeCapabilities: {
+      review: { resolve: true, reply: false },
+    } as TrackedPullRequest["forgeCapabilities"],
+  });
+  expect(
+    page.getByRole("button", { name: "Prepare resolve conversation", exact: true }).query(),
+  ).toBeNull();
+  expect(api.getOperation).not.toHaveBeenCalled();
 });

@@ -613,3 +613,20 @@ and loading a human reply beneath a hidden bot root. Formatting, lint, all eight
 workspace typechecks and the pinned upstream ledger check pass. This implements
 the plan's Review threads surface for #17645; the remaining PR UX work and full
 release gate are still outstanding. Ledger dispositions remain deferred.
+
+## Per-item forge permissions continuation (2026-10-19)
+
+Native discussion normalization now retains optional `canEdit` and `canResolve`
+answers. Explicit edit permission overrides authorship; explicit resolution denial
+narrows repository capabilities. Timeline edits, thread resolve/reopen controls and
+fresh server-side preparation/submission checks use these answers. Saved previews
+cannot authorize an edit or resolution after the host revokes it. GitHub timeline
+queries also read `viewerCanUpdate` on issue and inline comments, retaining the
+older authorship fallback only when the host omits the field.
+
+The six focused server suites pass 39 cases, including permission revocation
+between preview and submission. Six Chromium cases cover native editing and the
+absence of a denied resolve action. Formatting, lint and all eight TypeScript
+checks pass. The required full command ran for this continuation: 330 script
+checks pass and the same two process-identity recovery checks fail. No full-gate
+waiver or ledger promotion is claimed.

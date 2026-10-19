@@ -781,6 +781,8 @@ export const PrHubChangedFile = Schema.Struct({
 export type PrHubChangedFile = typeof PrHubChangedFile.Type;
 
 export const PrHubReviewComment = Schema.Struct({
+  /** Explicit host permission; absent retains the host-specific fallback. */
+  canEdit: Schema.optionalKey(Schema.Boolean),
   authorIsBot: Schema.optionalKey(Schema.Boolean),
   id: Schema.String,
   url: Schema.String,
@@ -795,6 +797,8 @@ export const PrHubReviewComment = Schema.Struct({
 });
 export type PrHubReviewComment = typeof PrHubReviewComment.Type;
 export const PrHubReviewThread = Schema.Struct({
+  /** Per-thread permission can narrow, never widen, repository capabilities. */
+  canResolve: Schema.optionalKey(Schema.Boolean),
   id: Schema.String,
   isResolved: Schema.Boolean,
   path: Schema.NullOr(Schema.String),

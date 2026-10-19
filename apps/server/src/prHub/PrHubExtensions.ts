@@ -21,7 +21,12 @@ import { resolvePrReviewPosition, type PrReviewPosition } from "@t3tools/shared/
 import { ServerConfig } from "../config.ts";
 import { SourceControlProviderError } from "../sourceControl/SourceControlProvider.ts";
 import { PrHubFederation, type PrHubAccountRuntime } from "./Layers/PrHubFederation.ts";
-import { forgeComparison } from "./forgeModel.ts";
+import {
+  forgeComparison,
+  forgeComments,
+  forgeReviewThreads,
+  forgeUserMatches,
+} from "./forgeModel.ts";
 import { readGitHubStack } from "./githubStacks.ts";
 import { mapGitHubCliError } from "../sourceControl/GitHubSourceControlProvider.ts";
 
@@ -291,6 +296,46 @@ export const makePrHubExtensions = Effect.gen(function* () {
       ? Effect.void
       : Effect.fail(failure("This forge does not advertise this operation.", "unsupported"));
   };
+  // Read permissions again before preparation and dispatch: a saved preview grants no authority.
+  const validateItem = (
+    runtime: PrHubAccountRuntime,
+    ref: import("@t3tools/contracts").SourceControlPullRequestRef,
+    payload: ForgePrepareOperationInput["payload"],
+  ) =>
+    Effect.gen(function* () {
+      if (payload.kind === "edit-comment") {
+        const comments = forgeComments(yield* runtime.provider.getComments(ref));
+        const comment = comments.find((comment) => String(comment.id) === payload.commentId);
+        if (
+          !comment ||
+          comment.system === true ||
+          comment.isDeleted === true ||
+          comment.kind === "review" ||
+          (typeof comment.canEdit === "boolean"
+            ? !comment.canEdit
+            : !forgeUserMatches(comment.author ?? comment.user, runtime.account))
+        )
+          return yield* failure(
+            "You cannot edit this comment. Refresh its permissions.",
+            "forbidden",
+          );
+      } else if (payload.kind === "thread-state") {
+        const threads = forgeReviewThreads(
+          yield* runtime.provider.getReviewThreads(ref),
+          runtime.provider,
+        );
+        const thread = threads.find((thread) => thread.id === payload.threadId);
+        if (
+          !thread ||
+          thread.canResolve === false ||
+          !(payload.resolved ? thread.viewerCanResolve : thread.viewerCanUnresolve)
+        )
+          return yield* failure(
+            "You cannot change this thread's resolution. Refresh its permissions.",
+            "forbidden",
+          );
+      }
+    });
   const load = (accountId: string, id: string) =>
     Effect.gen(function* () {
       const rows = yield* db(
@@ -323,6 +368,7 @@ export const makePrHubExtensions = Effect.gen(function* () {
     Effect.gen(function* () {
       const { runtime, ref } = yield* resolve(input);
       yield* validate(runtime, input);
+      yield* validateItem(runtime, ref, input.payload);
       const detail = yield* runtime.provider.getDetail(ref);
       if (!input.expectedHeadOid || detail.headRefOid !== input.expectedHeadOid)
         return yield* failure(
@@ -402,6 +448,7 @@ export const makePrHubExtensions = Effect.gen(function* () {
               return yield* failure("Saved operation identity mismatch.", "forbidden");
             if (saved.operation.status !== "prepared") return saved.operation;
             yield* validate(runtime, saved.operation);
+            yield* validateItem(runtime, ref, saved.operation.payload);
             const detail = yield* runtime.provider.getDetail(ref);
             if (detail.headRefOid !== saved.operation.expectedHeadOid)
               return yield* failure(

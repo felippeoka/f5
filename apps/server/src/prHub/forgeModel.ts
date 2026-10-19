@@ -171,6 +171,16 @@ export function forgeDetail(pr: TrackedPullRequest, detail: ForgeDetail): PrHubD
   };
 }
 
+/** Keep native discussion and flat comment shapes consistent across reads and writes. */
+export const forgeComments = (values: readonly Readonly<Record<string, unknown>>[]) =>
+  values.flatMap((value) =>
+    Array.isArray(value.notes)
+      ? value.notes.map(record)
+      : Array.isArray(value.comments)
+        ? value.comments.map(record)
+        : [value],
+  );
+
 /** Native discussion shapes retain only actual inline locations and resolution facts. */
 export function forgeReviewThreads(
   values: readonly Readonly<Record<string, unknown>>[],
@@ -220,10 +230,12 @@ export function forgeReviewThreads(
         line,
         originalLine: line,
         viewerCanReply: provider.forgeCapabilities.review.reply,
-        viewerCanResolve: provider.forgeCapabilities.review.resolve,
-        viewerCanUnresolve: provider.forgeCapabilities.review.resolve,
+        ...(typeof value.canResolve === "boolean" ? { canResolve: value.canResolve } : {}),
+        viewerCanResolve: provider.forgeCapabilities.review.resolve && value.canResolve !== false,
+        viewerCanUnresolve: provider.forgeCapabilities.review.resolve && value.canResolve !== false,
         comments: inline.map((comment) => ({
           id: String(comment.id),
+          ...(typeof comment.canEdit === "boolean" ? { canEdit: comment.canEdit } : {}),
           url: text(comment.html_url ?? comment.web_url) ?? "",
           author: login(comment.author ?? comment.user),
           ...(record(comment.author ?? comment.user).bot === true ||

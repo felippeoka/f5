@@ -360,3 +360,44 @@ it("reads edited review activity without paging the PR commit history for a watc
       .commitLimit,
   ).toBe(1);
 });
+
+it("prefers the host's per-comment edit answer over authorship on both timeline copies", () => {
+  const comment = (id: string, viewerDidAuthor: boolean, viewerCanUpdate: boolean) => ({
+    id,
+    databaseId: 1,
+    body: "Remark",
+    createdAt: "2026-10-19T00:00:00Z",
+    viewerDidAuthor,
+    viewerCanUpdate,
+    author: { login: "alice" },
+  });
+  const page = decodeGitHubPrTimeline(
+    responseWithPullRequest({
+      comments: {
+        nodes: [comment("own-locked", true, false), comment("other-editable", false, true)],
+        pageInfo: { hasPreviousPage: false },
+      },
+      reviews: {
+        nodes: [
+          {
+            id: "review",
+            submittedAt: "2026-10-19T00:00:00Z",
+            comments: {
+              totalCount: 2,
+              nodes: [
+                comment("inline-own-locked", true, false),
+                comment("inline-other-editable", false, true),
+              ],
+            },
+          },
+        ],
+        pageInfo: { hasPreviousPage: false },
+      },
+      commits: { nodes: [], pageInfo: { hasPreviousPage: false } },
+    }),
+  );
+  for (const entry of page.entries) {
+    if (entry.type !== "comment" || entry.kind === "review") continue;
+    expect(entry.viewerCanUpdate).toBe(entry.id.endsWith("editable"));
+  }
+});
