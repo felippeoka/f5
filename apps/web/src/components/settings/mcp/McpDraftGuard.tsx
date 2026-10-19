@@ -44,17 +44,25 @@ export function McpConfirmDialog(props: {
 }
 
 /** Shares one decision between local editor actions and route/project navigation. */
-export function useMcpDraftGuard(dirty: boolean, saving: boolean) {
+export function useMcpDraftGuard(dirty: boolean, saving: boolean, onDiscard: () => void) {
   const pending = useRef<((discard: boolean) => void) | null>(null);
   const [open, setOpen] = useState(false);
+  const [savingNotice, setSavingNotice] = useState(false);
+  useEffect(() => {
+    if (!saving) setSavingNotice(false);
+  }, [saving]);
   const decide = (discard: boolean) => {
     const resolve = pending.current;
     pending.current = null;
     setOpen(false);
+    if (discard) onDiscard();
     resolve?.(discard);
   };
   const confirmDiscard = (): Promise<boolean> => {
-    if (saving) return Promise.resolve(false);
+    if (saving) {
+      setSavingNotice(true);
+      return Promise.resolve(false);
+    }
     if (!dirty) return Promise.resolve(true);
     // A second navigation must never replace the first unresolved decision.
     if (pending.current) return Promise.resolve(false);
@@ -86,20 +94,51 @@ export function useMcpDraftGuard(dirty: boolean, saving: boolean) {
       });
     },
     dialog: (
-      <McpConfirmDialog
-        open={open}
-        title="Discard unsaved MCP changes?"
-        description="Your server draft has unsaved changes. Discard them to continue."
-        confirmLabel="Discard changes"
-        onConfirm={() => decide(true)}
-        onCancel={() => decide(false)}
-      />
+      <>
+        <AlertDialog open={savingNotice} onOpenChange={setSavingNotice}>
+          <AlertDialogPopup>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Saving MCP changes…</AlertDialogTitle>
+              <AlertDialogDescription>
+                Wait for the save to finish before replacing this editor or leaving settings. You
+                can still switch settings tabs.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <Button variant="outline" onClick={() => setSavingNotice(false)}>
+                Close
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogPopup>
+        </AlertDialog>
+        <McpConfirmDialog
+          open={open}
+          title="Discard unsaved MCP changes?"
+          description="Your server draft has unsaved changes. Discard them to continue."
+          confirmLabel="Discard changes"
+          onConfirm={() => decide(true)}
+          onCancel={() => decide(false)}
+        />
+      </>
     ),
   };
 }
 
 function RouterDraftGuard({ confirmDiscard }: { readonly confirmDiscard: () => Promise<boolean> }) {
-  useBlocker({ shouldBlockFn: async () => !(await confirmDiscard()), enableBeforeUnload: false });
+  useBlocker({
+    shouldBlockFn: async ({ current, next }) => {
+      // Settings keeps category panels mounted, including during item/search navigation.
+      if (
+        current.pathname === "/settings" &&
+        next.pathname === "/settings" &&
+        ("project" in current.search ? current.search.project : undefined) ===
+          ("project" in next.search ? next.search.project : undefined)
+      )
+        return false;
+      return !(await confirmDiscard());
+    },
+    enableBeforeUnload: false,
+  });
   return null;
 }
 

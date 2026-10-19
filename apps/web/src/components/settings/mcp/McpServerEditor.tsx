@@ -24,6 +24,7 @@ export function McpServerEditor({
   isAdvancedOpen,
   onAdvancedOpenChange,
   isSavingConfig,
+  saveBlocked,
   beginCreate,
   saveDraft,
 }: {
@@ -37,6 +38,7 @@ export function McpServerEditor({
   readonly isAdvancedOpen: boolean;
   readonly onAdvancedOpenChange: (open: boolean) => void;
   readonly isSavingConfig: boolean;
+  readonly saveBlocked: boolean;
   readonly beginCreate: () => void;
   readonly saveDraft: () => void;
 }) {
@@ -375,7 +377,11 @@ export function McpServerEditor({
               Cancel
             </Button>
           ) : null}
-          <Button size="sm" onClick={saveDraft} disabled={isSavingConfig || duplicateKeys.size > 0}>
+          <Button
+            size="sm"
+            onClick={saveDraft}
+            disabled={isSavingConfig || saveBlocked || duplicateKeys.size > 0}
+          >
             {editingServerName ? "Save changes" : "Add server"}
           </Button>
         </div>

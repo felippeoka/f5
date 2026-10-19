@@ -1,15 +1,18 @@
 import { McpErrorDetails } from "./McpErrorDetails";
 import type {
   McpServerStatusesResult,
+  McpProjectServersConfig,
   ProjectId,
   ProviderInstanceId,
   ProviderKind,
 } from "@t3tools/contracts";
+import { createMcpDiagnosticsSanitizer } from "@t3tools/shared/mcpDiagnostics";
 import { useState } from "react";
 import { Button } from "../../ui/button";
 import { LazyMcpServerInspector as McpServerInspector } from "./LazyMcpServerInspector";
 
 export function McpObservedGroup(props: {
+  servers: McpProjectServersConfig;
   group: "external" | "built-in" | "managed";
   observation?: McpServerStatusesResult | undefined;
   removedNames?: ReadonlyArray<string>;
@@ -50,7 +53,15 @@ export function McpObservedGroup(props: {
               {props.provider !== "claudeAgent" ? ` · ${entry.resourceCount} resources` : ""}
             </p>
           ) : null}
-          {entry.message ? <McpErrorDetails message={entry.message} /> : null}
+          {entry.message ? (
+            ["failed", "needs-auth", "login-required", "unknown"].includes(entry.state) ? (
+              <McpErrorDetails message={entry.message} servers={props.servers} />
+            ) : (
+              <p className="whitespace-pre-wrap break-words text-muted-foreground">
+                {createMcpDiagnosticsSanitizer(props.servers).text(entry.message)}
+              </p>
+            )
+          ) : null}
           {props.projectId ? (
             <Button
               size="xs"

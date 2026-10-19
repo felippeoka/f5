@@ -10,9 +10,14 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { afterEach, expect, it } from "vitest";
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { vi } from "vitest";
 import { ProviderRuntimeInfoBanner } from "./ProviderRuntimeInfoBanner";
+
+const { getEffectiveConfig } = vi.hoisted(() => ({ getEffectiveConfig: vi.fn() }));
+vi.mock("../../nativeApi", () => ({ ensureNativeApi: () => ({ mcp: { getEffectiveConfig } }) }));
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -36,11 +41,24 @@ it.each(["codex", "claudeAgent"] as ProviderKind[])(
         payload: {
           name: "search",
           status: "needs-auth",
-          error: "Sign in at https://user:pass@example.test/mcp?token=secret#fragment",
+          error:
+            "configured-secret-value Sign in at https://user:pass@example.test/mcp?token=secret#fragment",
           sessionGeneration: 2,
         },
       },
     ]);
+    getEffectiveConfig.mockResolvedValue({
+      projectId: "project-1",
+      effectiveVersion: "v1",
+      servers: {
+        docs: {
+          type: "http",
+          url: "https://example.test",
+          headers: { "X-Key": "configured-secret-value" },
+        },
+      },
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const root = createRootRoute({ component: () => <Outlet /> });
     const index = createRoute({
       getParentRoute: () => root,
@@ -59,23 +77,46 @@ it.each(["codex", "claudeAgent"] as ProviderKind[])(
       history: createMemoryHistory({ initialEntries: ["/"] }),
     });
     await router.load();
-    const screen = await render(<RouterProvider router={router} />);
+    const screen = await render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
     try {
-      await page.getByRole("button", { name: "MCP: 1/2 connected" }).hover();
+      const trigger = page.getByRole("button", { name: "MCP: 1/2 connected" });
+      trigger.element().focus();
+      await userEvent.keyboard("{Enter}");
       await expect.element(page.getByText("docs · ready", { exact: true })).toBeVisible();
       await expect.element(page.getByText("search · needs-auth", { exact: true })).toBeVisible();
       expect(document.body.textContent).not.toContain("old-generation");
       expect(document.body.textContent).not.toContain("legacy");
       await expect
-        .element(page.getByText("Sign in at https://example.test/mcp", { exact: true }))
+        .element(page.getByText("[redacted] Sign in at https://example.test/mcp", { exact: true }))
         .toBeVisible();
       const link = page.getByRole("link", { name: "Open MCP settings" });
       await expect
         .element(link)
         .toHaveAttribute("href", expect.stringContaining("project=project-1"));
       await expect.element(link).toHaveAttribute("href", expect.stringContaining("item=tools.mcp"));
+      await expect.element(link).toHaveFocus();
+      await expect.element(link).toHaveAttribute("href", expect.stringContaining("category=tools"));
       await page.screenshot({ fullPage: true });
+      await userEvent.keyboard("{Escape}");
+      await expect.element(trigger).toHaveFocus();
+      queryClient.removeQueries({ queryKey: ["mcp", "effectiveConfig"] });
+      getEffectiveConfig.mockRejectedValueOnce(new Error("Configuration unavailable"));
+      await trigger.click();
+      await expect
+        .element(
+          page.getByText(
+            "Error details unavailable until configuration loads. Open MCP settings for details.",
+            { exact: true },
+          ),
+        )
+        .toBeVisible();
+      expect(document.body.textContent).not.toContain("configured-secret-value");
     } finally {
+      queryClient.clear();
       await screen.unmount();
     }
   },
