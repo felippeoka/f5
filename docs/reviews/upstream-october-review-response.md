@@ -906,3 +906,35 @@ cannot be required by the CommonJS artifact. Node ESM and CommonJS and Bun ESM
 and CommonJS: an older message and a long folded plan are found and highlighted,
 with two search RPCs, no mutations and no page errors. This does not replace the
 remaining native desktop and comparative-performance obligations.
+
+## Pi integration groundwork (15l; delivery still deferred)
+
+The new Pi transport speaks LF-delimited RPC without readline, preserves Unicode
+line separators, bounds frame size, buffered bytes, queued frames and pending
+requests, and correlates reordered replies. Timed-out host replies cannot become
+turn acknowledgements. Real child-process tests cover crashes, early stdout
+closure, cancellation and SIGTERM-resistant processes. Transport errors omit
+private provider payloads.
+
+Model discovery preserves provider/model identity and applies the active thinking
+default only to that model. Commands retain workspace skill metadata and the
+native compact command. The MCP extension supports mixed text/image results,
+structured script results, optional tool discovery and completion-gateway schemas.
+Only owned bridge tools and native builtins inherit read-only approval bypasses;
+replacements require approval. Missing runtime policy defaults to approval-required.
+HTTP bodies, pagination and selected skill reads are bounded. Native tree helpers
+walk active ancestry and reject ambiguous rollback boundaries.
+
+Metadata runs in disposable directories with extensions, tools, persistent history
+and inherited MCP credentials disabled. Shared source-control prompt generation is
+now used by Muse and Pi. Real CLI fixtures verify model selection, successful retry,
+native abort/error outcomes, output bounds and admission before spawning. The
+focused Pi, Muse and text-routing run passes 107 cases. The required root full run
+still fails the same two migration-recovery process-identity cases (330 scripts
+pass); its other completed workspaces pass 723 shared, 570 desktop, 2,333 web and
+21 ACP cases. The strict upstream ledger check passes without disposition changes.
+
+This groundwork does not register a Pi driver or expose Pi in provider selection.
+The adapter, session/approval lifecycle, native rewinds, background-continuation
+ownership, driver/UI wiring and native integration evidence remain required before
+15l can be considered delivered. No Pi ledger records have been promoted.

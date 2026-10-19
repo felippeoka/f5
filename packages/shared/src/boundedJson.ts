@@ -1,3 +1,34 @@
+/** Check structure before JSON.parse can allocate an excessively deep or broad object. */
+export function assertJsonSourceWithinLimits(
+  text: string,
+  maxDepth = 64,
+  maxTokens = 100_000,
+): void {
+  let depth = 0,
+    tokens = 0,
+    quoted = false,
+    escaped = false;
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') quoted = false;
+      continue;
+    }
+    if (character === '"') {
+      quoted = true;
+      tokens++;
+    } else if (character === "{" || character === "[") {
+      depth++;
+      tokens++;
+    } else if (character === "}" || character === "]") depth = Math.max(0, depth - 1);
+    else if (character === "," || character === ":") tokens++;
+    if (depth > maxDepth || tokens > maxTokens)
+      throw new RangeError("JSON exceeds the structure limit.");
+  }
+}
+
 /** Reject oversized/deep JSON before allocating its full serialized form. */
 export function stringifyWithinBytes(value: unknown, limit: number): string | undefined {
   if (!Number.isSafeInteger(limit) || limit < 0) return undefined;

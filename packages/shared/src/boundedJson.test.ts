@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { stringifyWithinBytes } from "./boundedJson";
+import { assertJsonSourceWithinLimits, stringifyWithinBytes } from "./boundedJson";
 describe("bounded JSON serialization", () => {
+  it("checks JSON structure before parsing while ignoring escaped punctuation in strings", () => {
+    expect(() =>
+      assertJsonSourceWithinLimits(JSON.stringify({ text: '\\"{[,:,:'.repeat(1000) }), 2, 20),
+    ).not.toThrow();
+    expect(() => assertJsonSourceWithinLimits("[".repeat(65) + "0" + "]".repeat(65))).toThrow(
+      /structure limit/,
+    );
+    expect(() => assertJsonSourceWithinLimits("[" + "0,".repeat(100001) + "0]")).toThrow(
+      /structure limit/,
+    );
+    expect(() => assertJsonSourceWithinLimits('{"a":[1,2]}', 2, 20)).not.toThrow();
+  });
   it("matches JSON serialization and exact UTF-8 byte boundaries", () => {
     for (const value of [
       { text: '界\n"', missing: undefined },
