@@ -88,6 +88,7 @@ export const GITHUB_FORGE_CAPABILITIES: ForgeCapabilities = {
   comment: true,
   labels: true,
   actions: [
+    "delete-branch",
     "merge",
     "ready",
     "draft",

@@ -730,3 +730,38 @@ PR panel pass. The focused web run passes 35 cases and the broad web run passes
 2,320 cases in 238 files. All 85 focused server capability/model/operation cases
 pass. Formatting, lint and all eight TypeScript checks pass. The last required
 full run still fails its two process-identity checks; no release waiver is claimed.
+
+## Opt-in branch cleanup continuation (2026-10-19)
+
+The #19257 merge/close toggle starts off and records the choice in the saved
+operation before dispatch. GitHub deletion uses GraphQL updateRefs with the exact
+reviewed beforeOid and a zero afterOid. Fresh reads reject open PRs, stacks,
+base/default branches, unwritable or archived source repositories, changed heads,
+and incomplete responses. The captured account and exclusion guards still apply
+after the primary action closes the PR. Remote results and local cleanup warnings
+are reported separately, so a confirmed merge is never presented as retryable
+because branch cleanup failed.
+
+Local cleanup searches only registered projects with matching source-repository
+remotes. It keeps default/current/worktree-owned branches and compares the local
+ref to the reviewed head under the repository lifecycle lock. Recovery performs
+read-only remote absence checks; it never repeats a merge, close, remote deletion
+or local cleanup after an uncertain response. Protocol 35 adds the explicit forge
+action; other forge adapters do not advertise it.
+
+The focused server run passes 95 cases, including 14 real-HTTP branch-admission
+cases, eight local cleanup cases, 24 durable-operation cases and 49 existing PR Hub
+cases. All 163 exhaustive real-Git cases pass, including an occupied-worktree and
+moved-head deletion scenario. The seven Chromium native-action scenarios pass,
+including an unchecked default, explicit opt-in, locked prepared payload and
+separate confirmation. The legacy merge regression also verifies that cleanup
+failure returns a warning with exactly one primary merge. Required full-workspace
+validation is still a separate obligation; this evidence does not promote any
+ledger disposition.
+
+The required `bun run test:full` was repeated for this continuation. It fails the
+same two scripts migration-recovery cases because process creation identity cannot
+be verified on this host (330 script cases pass). The launcher suite also reports
+its three process-inspection failures before the scripts failure stops Turbo. The
+exhaustive Git matrix was run independently and passes all 163 cases. These are
+reported failures, not a waiver or a reason to weaken recovery ownership checks.

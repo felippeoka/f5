@@ -7,12 +7,12 @@ This artifact tracks triage separately from delivery. `scripts/upstream-ports.js
 Implementation is on `fix/upstream-october-review` in the isolated checkout
 `../f5-upstream-october-review`. Main `f711d43051` was merged additively in
 `401725257a`; user work in the original checkout remains intact. The implementation
-through `4c564ea546` includes guided reviews, scoped thread tools, HTML renders,
+through `2dab633b11` includes guided reviews, scoped thread tools, HTML renders,
 manual GitHub reset waits, durable PR watches, persisted settlement, Codex MCP apps
 and per-project provider policy. The current continuation adds PR review filters,
 per-item forge permissions, thread-owned PR panels, reference chips and opt-in
-merge-message attribution cleanup. It also repairs cross-feature migration and
-runtime integration and attaches per-SHA implementation evidence. Migration 127 and protocol 34 extend the merged baseline. Coverage remains 4,084 ledger records;
+merge-message attribution cleanup, forge-aware quick actions and opt-in branch cleanup. It also repairs cross-feature migration and
+runtime integration and attaches per-SHA implementation evidence. Migration 127 and protocol 35 extend the merged baseline. Coverage remains 4,084 ledger records;
 implementation work does not automatically promote deferred obligations.
 
 The full gate and verify-first/security obligations remain incomplete. See

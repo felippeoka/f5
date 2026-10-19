@@ -1,4 +1,5 @@
 import "../../index.css";
+import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PullRequestKey, type TrackedPullRequest, type NativeApi } from "@t3tools/contracts";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
@@ -312,4 +313,39 @@ it("rejects a quick action outside the freshly loaded PR capabilities without pr
   ).toBeNull();
   expect(api.prepareOperation).not.toHaveBeenCalled();
   expect(api.submitOperation).not.toHaveBeenCalled();
+});
+
+it("branch cleanup is opt-in and its choice is frozen in the saved close preview", async () => {
+  function Subject() {
+    const [deleteBranch, setDeleteBranch] = useState(false);
+    const pr = {
+      ...makePr(),
+      forgeCapabilities: {
+        ...nativePr().forgeCapabilities!,
+        actions: ["delete-branch", "close"] as const,
+      },
+    };
+    return (
+      <PrActionDialogs
+        {...dialogProps("close")}
+        pr={pr}
+        deleteBranch={deleteBranch}
+        setDeleteBranch={setDeleteBranch}
+      />
+    );
+  }
+  await mount(<Subject />);
+  const toggle = page.getByRole("switch", { name: "Delete source branch after this action" });
+  await expect.element(toggle).not.toBeChecked();
+  expect(api.prepareOperation).not.toHaveBeenCalled();
+  await toggle.click();
+  await expect.element(toggle).toBeChecked();
+  await page.getByRole("button", { name: "Prepare close pull request", exact: true }).click();
+  expect(api.prepareOperation).toHaveBeenCalledWith(
+    expect.objectContaining({ payload: { kind: "action", action: "close", deleteBranch: true } }),
+  );
+  await expect.element(toggle).toBeDisabled();
+  expect(api.submitOperation).not.toHaveBeenCalled();
+  await page.getByRole("button", { name: "Confirm close pull request", exact: true }).click();
+  expect(api.submitOperation).toHaveBeenCalledTimes(1);
 });

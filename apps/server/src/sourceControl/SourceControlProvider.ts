@@ -1,3 +1,7 @@
+import type {
+  GitHubBranchDeletionInput,
+  PullRequestBranchDeletionResult,
+} from "../git/githubBranchDeletion.ts";
 import {
   SourceControlProviderKind,
   SourceControlRateLimit,
@@ -78,6 +82,9 @@ export interface SourceControlMergePullRequestInput {
  * SourceControlProviderError before they cross this boundary.
  */
 export interface SourceControlProvider {
+  readonly deletePullRequestBranch?: (
+    input: GitHubBranchDeletionInput,
+  ) => Effect.Effect<PullRequestBranchDeletionResult, SourceControlProviderError>;
   readonly kind: SourceControlProviderKind;
   readonly capabilities: ReadonlyArray<SourceControlCapability>;
   readonly capability: (action: SourceControlPullRequestAction) => SourceControlCapability;

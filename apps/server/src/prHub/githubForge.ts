@@ -322,6 +322,14 @@ export function makeGitHubForge(github: GitHubCliShape, cwd: string): ForgeProvi
                   : { removeAgentCreditsOnMerge: input.removeAgentCreditsOnMerge }),
               }),
             );
+          case "delete-branch":
+            if (!original.deletePullRequestBranch || !input.expectedHeadOid)
+              return yield* failure("delete-branch", "A prepared branch revision is required.");
+            return yield* original.deletePullRequestBranch({
+              cwd,
+              url: `https://${ref.host}/${ref.repository}/pull/${ref.number}`,
+              expectedHeadOid: input.expectedHeadOid,
+            });
           case "close":
           case "reopen":
             return yield* request(ref, `/pulls/${ref.number}`, "PATCH", {

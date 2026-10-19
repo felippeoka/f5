@@ -243,6 +243,7 @@ export const PrHubSchedulerState = Schema.Struct({
 });
 export type PrHubSchedulerState = typeof PrHubSchedulerState.Type;
 export const PrHubSnapshot = Schema.Struct({
+  actionWarning: Schema.optional(Schema.String),
   nextRefreshAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   scheduler: Schema.optional(PrHubSchedulerState),
   coverage: Schema.optional(Schema.Array(PrHubCoverage)),
@@ -391,6 +392,7 @@ export const PrHubRequestChangesInput = Schema.Struct({
 export type PrHubRequestChangesInput = typeof PrHubRequestChangesInput.Type;
 
 export const PrHubMergeInput = Schema.Struct({
+  deleteBranch: Schema.optional(Schema.Boolean),
   accountGeneration: Schema.optional(Schema.String),
   url: Schema.String,
   expectedComparison: Schema.optional(Schema.suspend(() => PrHubComparisonIdentity)),

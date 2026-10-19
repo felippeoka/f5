@@ -502,6 +502,54 @@ it.layer(TestLayer)("git integration", (it) => {
   });
 
   describe("upstream Git safety", () => {
+    it.effect(
+      "keeps branches used by any registered checkout and compares unused refs atomically",
+      () =>
+        Effect.gen(function* () {
+          const cwd = yield* makeTmpDir();
+          const { initialBranch } = yield* initRepoWithCommit(cwd);
+          const core = yield* GitCore;
+          const head = yield* git(cwd, ["rev-parse", "HEAD"]);
+          expect(
+            yield* core.deleteBranchIfAt({
+              cwd,
+              branch: initialBranch,
+              expectedSha: head,
+              onlyIfUnused: true,
+            }),
+          ).toBe(false);
+          yield* core.createBranch({ cwd, branch: "used-topic" });
+          const worktree = path.join(yield* makeTmpDir(), "linked");
+          yield* git(cwd, ["worktree", "add", "--", worktree, "used-topic"]);
+          expect(
+            yield* core.deleteBranchIfAt({
+              cwd,
+              branch: "used-topic",
+              expectedSha: head,
+              onlyIfUnused: true,
+            }),
+          ).toBe(false);
+          yield* core.createBranch({ cwd, branch: "unused-topic" });
+          expect(
+            yield* core.deleteBranchIfAt({
+              cwd,
+              branch: "unused-topic",
+              expectedSha: "b".repeat(40),
+              onlyIfUnused: true,
+            }),
+          ).toBe(false);
+          expect(yield* core.resolveCommit(cwd, "refs/heads/unused-topic")).toBe(head);
+          expect(
+            yield* core.deleteBranchIfAt({
+              cwd,
+              branch: "unused-topic",
+              expectedSha: head,
+              onlyIfUnused: true,
+            }),
+          ).toBe(true);
+          expect(yield* core.resolveCommit(cwd, "refs/heads/used-topic")).toBe(head);
+        }),
+    );
     it.effect("deletes only the named branch when it has become a symbolic ref", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

@@ -1,3 +1,4 @@
+import { Switch } from "../ui/switch";
 import * as Schema from "effect/Schema";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { getPrHubDraftIdentity } from "../../lib/prHubAccount";
@@ -38,6 +39,8 @@ export function PrActionDialogs({
   reviewers,
   setReviewers,
   mergeMethod,
+  deleteBranch = false,
+  setDeleteBranch,
   allowedMergeMethods,
   mergeComparison,
   mergeComparisonError,
@@ -54,6 +57,7 @@ export function PrActionDialogs({
   selectFolder,
 }: PrActionDialogProps & { confirmationMode?: "dialog" | "inline" }) {
   const [folderPath, setFolderPath] = useState("");
+  const [branchChoiceLocked, setBranchChoiceLocked] = useState(false);
   const [reviewBody, setReviewBody] = useLocalStorage(
     JSON.stringify(["nativeQuickReview", getPrHubDraftIdentity(), pr.key, pendingAction]),
     "",
@@ -80,6 +84,25 @@ export function PrActionDialogs({
         description={`${pr.repository.nameWithOwner}#${pr.number} · ${pr.title}`}
       >
         <DialogPanel className="space-y-3">
+          {(pendingAction === "merge" || pendingAction === "close") &&
+          pr.provider === "github" &&
+          nativeCaps?.actions.includes("delete-branch") ? (
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">Delete source branch after {pendingAction}</p>
+                <p className="text-xs text-muted-foreground">
+                  Remote deletion checks the reviewed head. Local branches used by a worktree or
+                  changed since review are kept.
+                </p>
+              </div>
+              <Switch
+                aria-label="Delete source branch after this action"
+                checked={deleteBranch}
+                disabled={isRunning || branchChoiceLocked || !setDeleteBranch}
+                onCheckedChange={setDeleteBranch}
+              />
+            </div>
+          ) : null}
           {pendingAction === "comment" ? (
             pr.provider === "github" ? (
               <PrCommentSubmit key={pr.key} prKey={pr.key} />
@@ -176,7 +199,13 @@ export function PrActionDialogs({
           availableMergeMethods.includes(mergeMethod) ? (
             <ForgeOperationPanel
               pr={pr}
-              payload={{ kind: "action", action: "merge", method: mergeMethod }}
+              payload={{
+                kind: "action",
+                action: "merge",
+                method: mergeMethod,
+                ...(deleteBranch ? { deleteBranch: true } : {}),
+              }}
+              onPendingChange={setBranchChoiceLocked}
               label="Merge"
               onSucceeded={() => setPendingAction(null)}
             />
@@ -203,7 +232,12 @@ export function PrActionDialogs({
           {pendingAction === "close" || pendingAction === "reopen" ? (
             <ForgeOperationPanel
               pr={pr}
-              payload={{ kind: "action", action: pendingAction }}
+              payload={{
+                kind: "action",
+                action: pendingAction,
+                ...(deleteBranch ? { deleteBranch: true } : {}),
+              }}
+              onPendingChange={setBranchChoiceLocked}
               label={pendingAction === "close" ? "Close pull request" : "Reopen pull request"}
               onSucceeded={() => setPendingAction(null)}
             />

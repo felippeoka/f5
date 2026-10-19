@@ -1154,7 +1154,7 @@ const makeGitCore = Effect.gen(function* () {
       Effect.catch(() => Effect.succeed(null)),
     );
 
-  const listWorktrees: GitCoreShape["listWorktrees"] = (cwd) =>
+  const readWorktreeEntries = (cwd: string) =>
     Effect.gen(function* () {
       const args = ["worktree", "list", "--porcelain"];
       const result = yield* executeGit("GitCore.listWorktrees", cwd, [...args, "-z"], {
@@ -1181,15 +1181,21 @@ const makeGitCore = Effect.gen(function* () {
         })).stdout;
         format = "line";
       }
-      return yield* Effect.forEach(
-        parseWorktreeListPorcelain(stdout, format),
-        (entry) =>
-          inspectionSemaphore
-            .withPermits(1)(canonicalPath(entry.path))
-            .pipe(Effect.map((canonicalPath) => ({ ...entry, canonicalPath }))),
-        { concurrency: 4 },
-      );
+      return parseWorktreeListPorcelain(stdout, format);
     });
+  const listWorktrees: GitCoreShape["listWorktrees"] = (cwd) =>
+    readWorktreeEntries(cwd).pipe(
+      Effect.flatMap((entries) =>
+        Effect.forEach(
+          entries,
+          (entry) =>
+            inspectionSemaphore
+              .withPermits(1)(canonicalPath(entry.path))
+              .pipe(Effect.map((canonicalPath) => ({ ...entry, canonicalPath }))),
+          { concurrency: 4 },
+        ),
+      ),
+    );
 
   const releaseFailedWorktreeAllocation = (
     receipt: WorktreePreparationReceipt,
@@ -2528,14 +2534,7 @@ const makeGitCore = Effect.gen(function* () {
         const canonicalRoot = yield* canonicalPath(stripPathTerminator(root));
         const commonDir = yield* canonicalPath(yield* resolveCommonDir(cwd));
         // Avoid recursively acquiring the inspection semaphore while listing registrations.
-        const listed = parseWorktreeListPorcelain(
-          yield* runGitStdout("GitCore.inspectCheckout", cwd, [
-            "worktree",
-            "list",
-            "--porcelain",
-            "-z",
-          ]),
-        );
+        const listed = yield* readWorktreeEntries(cwd);
         const entries = yield* Effect.forEach(listed, (entry) =>
           canonicalPath(entry.path).pipe(
             Effect.map((canonicalPath) => ({ ...entry, canonicalPath })),
@@ -2731,19 +2730,26 @@ const makeGitCore = Effect.gen(function* () {
       : withRepositoryLock(
           "GitCore.deleteBranchIfAt",
           input.cwd,
-          executeGit(
-            "GitCore.deleteBranchIfAt",
-            input.cwd,
-            [
-              "update-ref",
-              "--no-deref",
-              "-d",
-              "--",
-              `refs/heads/${input.branch}`,
-              input.expectedSha,
-            ],
-            { allowNonZeroExit: true },
-          ).pipe(Effect.map((result) => result.code === 0)),
+          Effect.gen(function* () {
+            if (
+              input.onlyIfUnused &&
+              (yield* readWorktreeEntries(input.cwd)).some((entry) => entry.branch === input.branch)
+            )
+              return false;
+            return yield* executeGit(
+              "GitCore.deleteBranchIfAt",
+              input.cwd,
+              [
+                "update-ref",
+                "--no-deref",
+                "-d",
+                "--",
+                `refs/heads/${input.branch}`,
+                input.expectedSha,
+              ],
+              { allowNonZeroExit: true },
+            ).pipe(Effect.map((result) => result.code === 0));
+          }),
         );
 
   const readFileAtRevision: GitCoreShape["readFileAtRevision"] = (input) =>

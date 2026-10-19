@@ -1,3 +1,4 @@
+import { cleanupLocalPrBranch } from "./localBranchCleanup.ts";
 import { createHash } from "node:crypto";
 import { Effect, Layer, Schema, Semaphore, ServiceMap } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -258,6 +259,11 @@ export const makePrHubExtensions = Effect.gen(function* () {
         break;
       case "action":
         supported =
+          (!p.deleteBranch ||
+            ((p.action === "merge" || p.action === "close") &&
+              caps.actions.includes("delete-branch") &&
+              !!runtime.provider.deletePullRequestBranch)) &&
+          (p.action !== "delete-branch" || !!runtime.provider.deletePullRequestBranch) &&
           caps.actions.includes(p.action) &&
           (!p.method ||
             (p.action === "update-branch" ? caps.updateMethods : caps.mergeMethods).includes(
@@ -360,6 +366,8 @@ export const makePrHubExtensions = Effect.gen(function* () {
               verdictStarted?: boolean;
               uuid?: string;
               completed?: number;
+              actionDone?: boolean;
+              branchDeletionStarted?: boolean;
             })
           : {},
       };
@@ -370,6 +378,16 @@ export const makePrHubExtensions = Effect.gen(function* () {
       yield* validate(runtime, input);
       yield* validateItem(runtime, ref, input.payload);
       const detail = yield* runtime.provider.getDetail(ref);
+      if (
+        input.payload.kind === "action" &&
+        input.payload.action === "delete-branch" &&
+        detail.state !== "closed" &&
+        detail.state !== "merged"
+      )
+        return yield* failure(
+          "Close or merge the PR before preparing branch deletion.",
+          "forbidden",
+        );
       if (!input.expectedHeadOid || detail.headRefOid !== input.expectedHeadOid)
         return yield* failure(
           "The pull request changed. Refresh before preparing the operation.",
@@ -415,9 +433,15 @@ export const makePrHubExtensions = Effect.gen(function* () {
       );
       return (yield* load(runtime.account.id, input.operationId))!.operation;
     });
-  const update = (account: string, id: string, status: ForgeOperation["status"], error?: string) =>
+  const update = (
+    account: string,
+    id: string,
+    status: ForgeOperation["status"],
+    error?: string,
+    warning?: string,
+  ) =>
     db(
-      sql`UPDATE forge_operations SET status=${status},result_json=${error ? JSON.stringify({ error }) : null} WHERE account_id=${account} AND operation_id=${id}`,
+      sql`UPDATE forge_operations SET status=${status},result_json=${error || warning ? JSON.stringify({ ...(error ? { error } : {}), ...(warning ? { warning } : {}) }) : null} WHERE account_id=${account} AND operation_id=${id}`,
     );
   const progress = (account: string, id: string, value: unknown) =>
     db(
@@ -465,6 +489,7 @@ export const makePrHubExtensions = Effect.gen(function* () {
             const tag = marker(id, input.key, account);
             const commentBody = (body: string) => `${body}\n\n${tag}`;
             let dispatched = 0;
+            let branchWarning: string | undefined;
             const dispatch = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
               Effect.suspend(() => {
                 dispatched++;
@@ -565,8 +590,21 @@ export const makePrHubExtensions = Effect.gen(function* () {
                     }),
                   );
                 }
-                case "action":
-                  return yield* dispatch(
+                case "action": {
+                  if (p.action === "delete-branch") {
+                    if (!runtime.provider.deletePullRequestBranch)
+                      return yield* failure("This forge cannot delete branches.", "unsupported");
+                    const deleted = yield* dispatch(
+                      runtime.provider.deletePullRequestBranch({
+                        cwd: config.cwd,
+                        url: `https://${ref.host}/${ref.repository}/pull/${ref.number}`,
+                        expectedHeadOid: saved.operation.expectedHeadOid,
+                      }),
+                    );
+                    branchWarning = yield* cleanupLocalPrBranch(deleted);
+                    return null;
+                  }
+                  yield* dispatch(
                     runtime.provider.performAction({
                       ref,
                       action: p.action,
@@ -574,6 +612,22 @@ export const makePrHubExtensions = Effect.gen(function* () {
                       expectedHeadOid: saved.operation.expectedHeadOid,
                     }),
                   );
+                  if (p.deleteBranch) {
+                    saved.progress.actionDone = true;
+                    yield* progress(account, id, saved.progress);
+                    saved.progress.branchDeletionStarted = true;
+                    yield* progress(account, id, saved.progress);
+                    const deleted = yield* dispatch(
+                      runtime.provider.deletePullRequestBranch!({
+                        cwd: config.cwd,
+                        url: `https://${ref.host}/${ref.repository}/pull/${ref.number}`,
+                        expectedHeadOid: saved.operation.expectedHeadOid,
+                      }),
+                    );
+                    branchWarning = yield* cleanupLocalPrBranch(deleted);
+                  }
+                  return null;
+                }
                 case "edit":
                   return yield* dispatch(
                     runtime.provider.editChangeRequest({
@@ -739,12 +793,13 @@ export const makePrHubExtensions = Effect.gen(function* () {
             const outcome = yield* Effect.result(
               run.pipe(Effect.interruptible, Effect.timeout("30 seconds")),
             );
-            if (outcome._tag === "Success") yield* update(account, id, "succeeded");
+            if (outcome._tag === "Success")
+              yield* update(account, id, "succeeded", undefined, branchWarning);
             else {
               const error = outcome.failure;
               const definitelyUnsent =
                 dispatched === 0 ||
-                (dispatched === 1 &&
+                ((dispatched === 1 || saved.progress.actionDone) &&
                   Schema.is(SourceControlProviderError)(error) &&
                   error.requestDispatched === false);
               yield* update(
@@ -753,7 +808,7 @@ export const makePrHubExtensions = Effect.gen(function* () {
                 definitelyUnsent ? "failed" : "outcome_unknown",
                 definitelyUnsent
                   ? Schema.is(SourceControlProviderError)(error)
-                    ? error.detail
+                    ? `${saved.progress.actionDone ? "The PR action completed, but its branch was kept. " : ""}${error.detail}`
                     : "The operation was not dispatched."
                   : "The outcome could not be confirmed. Check this saved operation before preparing another.",
               );
@@ -841,6 +896,34 @@ export const makePrHubExtensions = Effect.gen(function* () {
                 }
                 // A dispatched verdict requires direct host evidence; never infer it from its comment.
               } else if (found) yield* update(runtime.account.id, input.operationId, "succeeded");
+            } else if (p.kind === "action" && (p.action === "delete-branch" || p.deleteBranch)) {
+              const detail = yield* runtime.provider.getDetail(ref);
+              const primaryDone =
+                p.action === "delete-branch" ||
+                (p.action === "merge" ? detail.state === "merged" : detail.state === "closed");
+              if (primaryDone && p.deleteBranch && !saved.progress.branchDeletionStarted) {
+                yield* update(
+                  runtime.account.id,
+                  input.operationId,
+                  "failed",
+                  "The PR action completed, but branch deletion was not sent. Request branch cleanup separately.",
+                );
+              } else if (primaryDone && runtime.provider.deletePullRequestBranch) {
+                const inspected = yield* runtime.provider.deletePullRequestBranch({
+                  cwd: config.cwd,
+                  url: `https://${ref.host}/${ref.repository}/pull/${ref.number}`,
+                  expectedHeadOid: saved.operation.expectedHeadOid,
+                  inspectOnly: true,
+                });
+                if (inspected.absent)
+                  yield* update(
+                    runtime.account.id,
+                    input.operationId,
+                    "succeeded",
+                    undefined,
+                    "Remote branch absence was verified. Local cleanup is not replayed during recovery; inspect any remaining local branch.",
+                  );
+              }
             } else if (p.kind === "stack" && saved.progress.uuid && runtime.github) {
               const context = yield* runtime.github
                 .getCredentialContext({ cwd: config.cwd, host: ref.host })

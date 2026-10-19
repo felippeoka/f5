@@ -352,6 +352,8 @@ export interface GitCoreShape extends MoveSnapshotOperations {
     readonly cwd: string;
     readonly branch: string;
     readonly expectedSha: string;
+    /** Check all registered worktrees while holding the repository lifecycle lock. */
+    readonly onlyIfUnused?: boolean;
   }) => Effect.Effect<boolean, GitCommandError>;
 
   /** Reads a small file from a revision without checking it out. Null when absent. */
