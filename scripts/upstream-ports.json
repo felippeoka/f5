@@ -955,10 +955,10 @@
     {
       "upstreamSha": "07956d1ac54200f14c0f2b5221d1fe3f81a7cc7f",
       "subject": "perf(web): the new thread hooks compile without manual memoization (#20699)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the new thread hooks compile without manual memoization (#20699).",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; new-thread hooks unwrap identical project/model/workspace resolution, call-time state reads, concurrent draft reuse and stale navigation guards; ordered projects move to an equivalent compiler-memoized helper. Upstream change: perf(web): the new thread hooks compile without manual memoization (#20699).",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable",
+      "evidence": ["docs/reviews/upstream-october-classification.md:368"]
     },
     {
       "upstreamSha": "0796638512d4c610469905adc597cc33c307fc32",
@@ -2771,10 +2771,10 @@
     {
       "upstreamSha": "145b15416a71b1370bf8f6ec1fe4005bcb524877",
       "subject": "perf(web): resource telemetry diagnostics compile without manual memoization (#20625)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): resource telemetry diagnostics compile without manual memoization (#20625).",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; resource telemetry diagnostics unwrap the same visible-process derivation, process-identity/permission/confirmation checks, signaling cleanup and collector retry callbacks without memoization. Upstream change: perf(web): resource telemetry diagnostics compile without manual memoization (#20625).",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable",
+      "evidence": ["docs/reviews/upstream-october-classification.md:368"]
     },
     {
       "upstreamSha": "148e6deea046658639aae9fef5b349781cec39d1",
@@ -6306,10 +6306,10 @@
     {
       "upstreamSha": "2dd87a4047a18ad7918e7dc1265469d19d101e0c",
       "subject": "perf(web): run the React Compiler natively instead of through Babel (#20114)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): run the React Compiler natively instead of through Babel (#20114).",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; build-only React Compiler migration replaces the Babel preset with the native compiler option and corresponding compiler dependencies and lockfile; no application runtime or product behavior is added. Upstream change: perf(web): run the React Compiler natively instead of through Babel (#20114).",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable",
+      "evidence": ["docs/reviews/upstream-october-classification.md:368"]
     },
     {
       "upstreamSha": "2de98f035c3aa84768c2d3a547ed91f0d3daa83e",
@@ -7297,10 +7297,10 @@
     {
       "upstreamSha": "35dcdfb945374b3baf417b99b157d4d202020d62",
       "subject": "perf(web): source control action hooks compile with the React Compiler (#20456)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): source control action hooks compile with the React Compiler (#20456).",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; source-control action hooks unwrap identical callbacks without useCallback; authorization rechecks, action-manager ownership, error results and command payloads are unchanged. Upstream change: perf(web): source control action hooks compile with the React Compiler (#20456).",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable",
+      "evidence": ["docs/reviews/upstream-october-classification.md:368"]
     },
     {
       "upstreamSha": "3603057fe437658c6d427e587f25688b6114a317",
@@ -7397,10 +7397,10 @@
     {
       "upstreamSha": "36c1fe50ac97748f39e1439bffb2b436d338740e",
       "subject": "perf(web): the new project hook compiles without manual memoization (#20675)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the new project hook compiles without manual memoization (#20675).",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; new-project hooks unwrap the unchanged private-publication, creation/commit-warning, project-arrival and first-draft callback bodies without useCallback. Upstream change: perf(web): the new project hook compiles without manual memoization (#20675).",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable",
+      "evidence": ["docs/reviews/upstream-october-classification.md:368"]
     },
     {
       "upstreamSha": "36c48a6b7c03c9a9adbc3e55d4d9ae77eae6f816",
@@ -10132,10 +10132,10 @@
     {
       "upstreamSha": "4a9516d3d5e73869fc9d33b744b31ef2f26ba404",
       "subject": "perf(web): the chat header compiles with the React Compiler (#20656)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the chat header compiles with the React Compiler (#20656).",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; chat header unwraps unchanged rename/menu/keyboard callbacks, retains identical breadcrumb dependencies and inlines the same thread-owned menu-timer cleanup. Upstream change: perf(web): the chat header compiles with the React Compiler (#20656).",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable",
+      "evidence": ["docs/reviews/upstream-october-classification.md:368"]
     },
     {
       "upstreamSha": "4a9d2d0ced2a2b899dbee9e4a5162fd83f81edb8",
@@ -13768,10 +13768,10 @@
     {
       "upstreamSha": "65d352eb6d9b59494c7dd28383cc3f9e609ee7c4",
       "subject": "perf(web): the annotatable diff view compiles without manual memoization (#20657)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the annotatable diff view compiles without manual memoization (#20657).",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; annotatable diffs unwrap the same file map, persisted/draft annotation construction, version hash and comment callbacks without manual memoization. Upstream change: perf(web): the annotatable diff view compiles without manual memoization (#20657).",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable",
+      "evidence": ["docs/reviews/upstream-october-classification.md:368"]
     },
     {
       "upstreamSha": "65d390fc52fe7cc4c481dede0e45cca6b7f5d365",
@@ -15271,10 +15271,10 @@
     {
       "upstreamSha": "70c73d96e0f395c3cea59266699a6d92045959ed",
       "subject": "perf(web): useLocalStorage compiles with the React Compiler (#20472)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): useLocalStorage compiles with the React Compiler (#20472).",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; local storage hooks extract identical read/decode/write error and fallback bodies into helpers and unwrap the same event subscription and value setter without memoization. Upstream change: perf(web): useLocalStorage compiles with the React Compiler (#20472).",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable",
+      "evidence": ["docs/reviews/upstream-october-classification.md:368"]
     },
     {
       "upstreamSha": "70cd258d8aac43ea57494527b00bf36de3efa6c0",
@@ -19365,10 +19365,10 @@
     {
       "upstreamSha": "8f309bce656b315aacc93ba54ed6f3933124da0e",
       "subject": "perf(web): welcome wizard keeps its auto-selected computers in lazy state (#20469)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): welcome wizard keeps its auto-selected computers in lazy state (#20469).",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; welcome wizard retains the same lifetime auto-selection Set in lazy state instead of a ref; callback bodies, provider grouping, project import partitioning and terminal setup guards are unchanged. Upstream change: perf(web): welcome wizard keeps its auto-selected computers in lazy state (#20469).",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable",
+      "evidence": ["docs/reviews/upstream-october-classification.md:368"]
     },
     {
       "upstreamSha": "8f341f20c91e708de1dab949dbd723e86f2ff328",
@@ -23479,10 +23479,10 @@
     {
       "upstreamSha": "afb8da0094cbadc5dd3f23cc4aaf921d2c885492",
       "subject": "perf(web): the right panel tabs compile with the React Compiler (#20662)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the right panel tabs compile with the React Compiler (#20662).",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; right-panel tabs replace the latest-action ref with useEffectEvent, hoist the identical stable mount-focus callback, and unwrap unchanged PR references, drag, tab scroll and context-menu callbacks. Upstream change: perf(web): the right panel tabs compile with the React Compiler (#20662).",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable",
+      "evidence": ["docs/reviews/upstream-october-classification.md:368"]
     },
     {
       "upstreamSha": "afc8342801d487d96732fdad25454f0c1fe96a3b",
@@ -25734,10 +25734,10 @@
     {
       "upstreamSha": "c0cdb02a4b8f96df7e077a8e7dadc6da833f3568",
       "subject": "perf(web): the thread action menu hook compiles without manual memoization (#20701)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the thread action menu hook compiles without manual memoization (#20701).",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; thread action menu unwraps identical grouping, capability/permission rechecks, snooze/pin/settlement/archive/delete/copy actions and close callback without manual memoization. Upstream change: perf(web): the thread action menu hook compiles without manual memoization (#20701).",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable",
+      "evidence": ["docs/reviews/upstream-october-classification.md:368"]
     },
     {
       "upstreamSha": "c0d4e95c0d921b5960ad04c7f8abec459ee3c59e",
@@ -29008,10 +29008,10 @@
     {
       "upstreamSha": "d9157773977d2f91992b5fba5a9d2c59ab3e5887",
       "subject": "perf(web): keybindings settings compile without manual memoization (#20598)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): keybindings settings compile without manual memoization (#20598).",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; keybindings settings extract unchanged merged options, row groups and anchor IDs into compiler-memoized helpers and unwrap identical permission/payload/save/remove/reset callbacks. Upstream change: perf(web): keybindings settings compile without manual memoization (#20598).",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable",
+      "evidence": ["docs/reviews/upstream-october-classification.md:368"]
     },
     {
       "upstreamSha": "d924fe266483e1d400775e3c3ce784f8e90f355f",
@@ -31786,10 +31786,10 @@
     {
       "upstreamSha": "ed16d9f2416951366ecc20607df125912420d558",
       "subject": "perf(web): thread find navigation compiles without manual memoization (#20603)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): thread find navigation compiles without manual memoization (#20603).",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; thread-find navigation unwraps the same reveal callback without useCallback; paging pinning, virtual-row materialization, horizontal code scrolling, retargeting, match ownership and animation-frame checks are unchanged. Upstream change: perf(web): thread find navigation compiles without manual memoization (#20603).",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable",
+      "evidence": ["docs/reviews/upstream-october-classification.md:368"]
     },
     {
       "upstreamSha": "ed27eb724b4d7963b59de8fd2e51d6b877004163",

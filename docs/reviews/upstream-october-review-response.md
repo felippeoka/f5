@@ -1437,3 +1437,26 @@ All 17 performance-support tests, all eight typechecks, formatter and lint pass.
 The real browser smoke now completes with no unknown methods or page errors and
 passes its transport/input/switch bounds. Smoke has no retained-memory credit.
 Both full reports will be rerun against the same updated fixture and source.
+
+The fifth compiler pass reads 26 more complete patches, closes 13 mechanical cases
+and retains 13 mixed runtime obligations. Across five passes, 166 complete patches
+have been read: 119 mechanical exclusions, seven subsystem exclusions and 40
+retained runtime cases. Seven larger patches remain partially inspected. The
+classification changes reduce planned entries to 1,190 without promoting any
+runtime delivery disposition.
+
+The refreshed server baseline runs all eight workloads with five warmups and 30
+repetitions on clean commit `bd5bc8bc1b21649259fdb1ba02880dc4ec62d2c4`.
+[Its raw report](./upstream-october-server-baseline-20261020.json) passes every
+resource observation: stream p95 is 77.04 ms and event-loop p99 is 14.89 ms.
+The matching browser attempt completes all latency samples and 11 memory samples
+across ten minutes. [The browser diagnostic](./upstream-october-browser-soak-diagnostic-20261020.json)
+preserves those samples and fixture counters. All six retained-memory bounds pass;
+server heap grows 146,336 bytes over the final five minutes. The fixture consumes
+120,750 delivered stream updates at 20.003 updates/s/thread, with no unknown RPCs.
+However, the full interactive command **fails** its native process-activity check:
+59,592 terminal data events but zero activity events, against a required minimum
+of 20. The host also rejects `/bin/ps` with operation-not-permitted. The activity
+failure is consistent with that restriction but is not independently diagnosed.
+No complete interactive report or successful coverage certification is claimed;
+no guard is relaxed, and no measurements are reconstructed as a successful report.

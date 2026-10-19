@@ -54,7 +54,7 @@ The artifact deliberately retains runtime changes whose source/scenario review i
 | `equivalent:packages/shared/src/model.ts:591`                   |       1 |
 | `equivalent:packages/shared/src/model.ts:71`                    |       2 |
 | `not-applicable:devices`                                        |      15 |
-| `not-applicable:maintenance`                                    |     164 |
+| `not-applicable:maintenance`                                    |     177 |
 | `not-applicable:marketing`                                      |       3 |
 | `not-applicable:mobile`                                         |     136 |
 | `not-applicable:multi-environment`                              |       3 |
@@ -68,7 +68,7 @@ The artifact deliberately retains runtime changes whose source/scenario review i
 | `planned:11a`                                                   |      46 |
 | `planned:12a`                                                   |     102 |
 | `planned:13b`                                                   |      57 |
-| `planned:15a`                                                   |     206 |
+| `planned:15a`                                                   |     193 |
 | `planned:15b`                                                   |      16 |
 | `planned:15c`                                                   |      21 |
 | `planned:15d`                                                   |      11 |
@@ -364,3 +364,23 @@ This pass reads 39 complete patches: 26 qualify as compiler/test maintenance, an
 | `ecb973a7df86421adce88120d6de41854705d620` | not-applicable:relay-cloud: the sole runtime file is the Clerk-backed ConnectOnboardingDialog and its cloud publishing/device onboarding state; F5 excludes T3 Connect relay/cloud onboarding and keeps its own remote-access model.                               |
 | `c1caac81ab32ec5912ee318aa23c8a2f5119dd8e` | not-applicable:relay-cloud: the runtime patch changes only CloudEnvironmentConnectList relay machine registration, auto-selection and discovery polling, plus its compiler-list entry; F5 has no T3 Connect relay environment catalog.                             |
 | `7091bc2495df63174afc4a14d6890c1aab7daf64` | not-applicable:devices: the sole runtime file manages SSH device-host configuration and device-state queries in DeviceHostsSettings, plus its compiler-list entry; this is the excluded device workspace, not a local provider or general forge host setting.      |
+
+## Fifth source-inspected compiler pass (2026-10-20)
+
+This pass reads 26 complete patches: 13 qualify as compiler/test maintenance. Thirteen mixed runtime changes remain open: directory-entry refresh (#20482), integration busy cleanup (#20512), diagnostics signaling cleanup (#20507), theme-editor seeding/inspector timing (#20458), SnapShot stale checks/hydration (#20514), theme-half application (#20473), theme import lifetime (#20513), diff retry/query identity (#20670), project icon failure cleanup (#20509), favorite rollback (#20474), terminal session/layout ownership (#20527), font edit generations (#20528), and model-picker fade measurement (#20706). Across five passes, 166 complete candidates have been inspected: 119 mechanical exclusions, seven excluded-subsystem decisions and 40 retained runtime obligations. Seven larger patches remain only partially inspected and retain their planned classification. Classification alone grants no runtime port or measured performance credit.
+
+| Upstream SHA                               | Source result                                                                                                                                                                                                                                           |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `8f309bce656b315aacc93ba54ed6f3933124da0e` | not-applicable:maintenance: welcome wizard retains the same lifetime auto-selection Set in lazy state instead of a ref; callback bodies, provider grouping, project import partitioning and terminal setup guards are unchanged.                        |
+| `145b15416a71b1370bf8f6ec1fe4005bcb524877` | not-applicable:maintenance: resource telemetry diagnostics unwrap the same visible-process derivation, process-identity/permission/confirmation checks, signaling cleanup and collector retry callbacks without memoization.                            |
+| `70c73d96e0f395c3cea59266699a6d92045959ed` | not-applicable:maintenance: local storage hooks extract identical read/decode/write error and fallback bodies into helpers and unwrap the same event subscription and value setter without memoization.                                                 |
+| `36c1fe50ac97748f39e1439bffb2b436d338740e` | not-applicable:maintenance: new-project hooks unwrap the unchanged private-publication, creation/commit-warning, project-arrival and first-draft callback bodies without useCallback.                                                                   |
+| `4a9516d3d5e73869fc9d33b744b31ef2f26ba404` | not-applicable:maintenance: chat header unwraps unchanged rename/menu/keyboard callbacks, retains identical breadcrumb dependencies and inlines the same thread-owned menu-timer cleanup.                                                               |
+| `65d352eb6d9b59494c7dd28383cc3f9e609ee7c4` | not-applicable:maintenance: annotatable diffs unwrap the same file map, persisted/draft annotation construction, version hash and comment callbacks without manual memoization.                                                                         |
+| `d9157773977d2f91992b5fba5a9d2c59ab3e5887` | not-applicable:maintenance: keybindings settings extract unchanged merged options, row groups and anchor IDs into compiler-memoized helpers and unwrap identical permission/payload/save/remove/reset callbacks.                                        |
+| `ed16d9f2416951366ecc20607df125912420d558` | not-applicable:maintenance: thread-find navigation unwraps the same reveal callback without useCallback; paging pinning, virtual-row materialization, horizontal code scrolling, retargeting, match ownership and animation-frame checks are unchanged. |
+| `afb8da0094cbadc5dd3f23cc4aaf921d2c885492` | not-applicable:maintenance: right-panel tabs replace the latest-action ref with useEffectEvent, hoist the identical stable mount-focus callback, and unwrap unchanged PR references, drag, tab scroll and context-menu callbacks.                       |
+| `35dcdfb945374b3baf417b99b157d4d202020d62` | not-applicable:maintenance: source-control action hooks unwrap identical callbacks without useCallback; authorization rechecks, action-manager ownership, error results and command payloads are unchanged.                                             |
+| `2dd87a4047a18ad7918e7dc1265469d19d101e0c` | not-applicable:maintenance: build-only React Compiler migration replaces the Babel preset with the native compiler option and corresponding compiler dependencies and lockfile; no application runtime or product behavior is added.                    |
+| `c0cdb02a4b8f96df7e077a8e7dadc6da833f3568` | not-applicable:maintenance: thread action menu unwraps identical grouping, capability/permission rechecks, snooze/pin/settlement/archive/delete/copy actions and close callback without manual memoization.                                             |
+| `07956d1ac54200f14c0f2b5221d1fe3f81a7cc7f` | not-applicable:maintenance: new-thread hooks unwrap identical project/model/workspace resolution, call-time state reads, concurrent draft reuse and stale navigation guards; ordered projects move to an equivalent compiler-memoized helper.           |
