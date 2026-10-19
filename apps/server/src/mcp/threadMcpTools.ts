@@ -17,6 +17,7 @@ const GuideTarget = Schema.Struct({
 });
 export type ThreadToolRequest =
   | { readonly name: "thread_status" }
+  | { readonly name: "thread_settle" }
   | { readonly name: "html_render"; readonly input: HtmlRenderInput }
   | { readonly name: "html_preview"; readonly input: HtmlPreviewInput }
   | {
@@ -100,6 +101,15 @@ const annotations = (readOnlyHint: boolean) => ({
   openWorldHint: !readOnlyHint,
 });
 export const THREAD_TOOL_DEFINITIONS = [
+  {
+    name: "thread_settle",
+    title: "Settle thread",
+    description:
+      "Mark this thread done but keep its history. If this turn is still running, settlement waits for it to finish. New user activity or Stop cancels a pending settlement.",
+    shape: {},
+    annotations: annotations(false),
+    alwaysLoad: false,
+  },
   {
     name: "thread_status",
     title: "Get thread status",
@@ -190,7 +200,7 @@ export async function callThreadTool(
         return { name, input: Schema.decodeUnknownSync(HtmlRenderInput)(arguments_ ?? {}) };
       if (name === "html_preview")
         return { name, input: Schema.decodeUnknownSync(HtmlPreviewInput)(arguments_ ?? {}) };
-      if (name === "thread_status") {
+      if (name === "thread_status" || name === "thread_settle") {
         Schema.decodeUnknownSync(Schema.Struct({}))(arguments_ ?? {});
         return { name };
       }

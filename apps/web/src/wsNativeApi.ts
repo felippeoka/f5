@@ -1,3 +1,4 @@
+import { THREAD_SETTLEMENT_WS_METHODS } from "@t3tools/contracts";
 import {
   PR_WATCH_WS_METHODS,
   PR_WATCH_CHANGED_CHANNEL,
@@ -551,6 +552,9 @@ export function createWsNativeApi(): NativeApi {
         transport.subscribe(WS_CHANNELS.agentComputerUseChanged, (message) =>
           listener(message.data),
         ),
+    },
+    threadSettlement: {
+      settleProjectIdle: requestMethod(THREAD_SETTLEMENT_WS_METHODS.settleProjectIdle),
     },
     pullRequestWatches: {
       list: async (input) =>

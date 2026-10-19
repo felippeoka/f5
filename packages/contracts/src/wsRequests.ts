@@ -1,3 +1,4 @@
+import { THREAD_SETTLEMENT_WS_METHODS, SettleProjectIdleInput } from "./threadSettlement";
 import {
   PR_WATCH_WS_METHODS,
   PullRequestWatchInput,
@@ -659,6 +660,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(PR_HUB_WS_METHODS.listAccountRouting, Schema.Struct({})),
   tagRequestBody(PR_HUB_WS_METHODS.setAccountRouting, ForgeAccountRouting),
   tagRequestBody(PR_HUB_WS_METHODS.removeAccountRouting, ForgeAccountRouting),
+  tagRequestBody(THREAD_SETTLEMENT_WS_METHODS.settleProjectIdle, SettleProjectIdleInput),
   tagRequestBody(PR_WATCH_WS_METHODS.list, PullRequestWatchListInput),
   tagRequestBody(PR_WATCH_WS_METHODS.start, PullRequestWatchInput),
   tagRequestBody(PR_WATCH_WS_METHODS.stop, PullRequestWatchInput),

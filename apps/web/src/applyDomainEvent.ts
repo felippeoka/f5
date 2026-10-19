@@ -860,6 +860,30 @@ export function applyDomainEvent(state: AppState, event: OrchestrationEvent): Ap
       return threads === state.threads ? state : { ...state, threads };
     }
 
+    case "thread.settled": {
+      const threads = updateThread(state.threads, event.payload.threadId, (thread) => ({
+        ...thread,
+        settledAt: event.payload.settledAt,
+        settledBy: event.payload.settledBy,
+      }));
+      return threads === state.threads ? state : { ...state, threads };
+    }
+    case "thread.unsettled": {
+      const threads = updateThread(state.threads, event.payload.threadId, (thread) => ({
+        ...thread,
+        settledAt: null,
+        settledBy: null,
+        lastInteractionAt: event.occurredAt,
+      }));
+      return threads === state.threads ? state : { ...state, threads };
+    }
+    case "thread.auto-settle-changed": {
+      const threads = updateThread(state.threads, event.payload.threadId, (thread) => ({
+        ...thread,
+        autoSettleDisabled: !event.payload.enabled,
+      }));
+      return threads === state.threads ? state : { ...state, threads };
+    }
     case "thread.archived": {
       const threads = updateThread(state.threads, event.payload.threadId, (thread) =>
         thread.archivedAt === event.payload.archivedAt &&
@@ -870,6 +894,8 @@ export function applyDomainEvent(state: AppState, event: OrchestrationEvent): Ap
           : {
               ...thread,
               archivedAt: event.payload.archivedAt,
+              settledAt: null,
+              settledBy: null,
               pinnedAt: null,
               pinOrderKey: null,
               snoozedUntil: null,

@@ -39,7 +39,7 @@ wins.
 
 ## Good to know
 
-- Automatic worktree cleanup, auto-pull, external preview hosts, Claude in Chrome and computer use
+- Automatic thread settlement, worktree cleanup, auto-pull, external preview hosts, Claude in Chrome and computer use
   are never read from `f5.json`. Only you can turn them on.
 - Deleting a project removes its overrides.
 - Skill scan problems appear above project settings with the affected path. **Refresh
@@ -97,3 +97,7 @@ once per profile, and the first client wins.
 - [PR Hub and forges](pr-hub-forges.md)
 
 See [MCP servers](mcp-servers.md) for common and project inheritance, provider support, live status, Apply, Reconnect, connection tests, tool filters, and the limits of stored-secret protection.
+
+Thread settlement overrides live in the project's Git settings. Resolved-PR and
+inactivity settlement both start disabled. Removing a project override restores
+the global rule; a checked-in configuration cannot enable these automatic actions.

@@ -458,3 +458,49 @@ remove saved watches and pending watch submissions inside the orchestration comm
 transaction. This prevents a restart between command acceptance and live subscribers
 from reviving a watch. Already admitted/dispatching deliveries remain recoverable.
 The direct transactional regression and full engine suite pass 32 tests.
+
+## Settlement continuation (2026-10-19)
+
+Migration 126 and protocol 33 add persisted settlement state, per-thread opt-out,
+wake anchors and server/project rules. Both automatic rules default off. The
+server checks queue, request, background-work and watch state within the settlement
+transaction. New work prepends its wake to the same event transaction. Persisted
+human/automation provenance makes the PR timestamp rule conservative for unknown
+historical messages. PR reads share one result per key per sweep, admit four
+threads concurrently, cap remote reads at 32 with a 15-second deadline and rotate
+the starting thread for fairness. Newly linked PRs are tracked before reading;
+stale reads and account-generation changes retain active threads.
+
+The sidebar has a collapsed Settled group, explicit wake control, row/menu actions,
+a project bulk-idle action and an unbound toggle command. The header exposes the
+per-thread preference. Global and project settings use the existing persistence
+and source routing; checked-in files cannot opt into automatic rules.
+
+Settlement scripts use durable pending/running/completed/failed/canceled/orphaned
+jobs and the shared owned-project-process runner. Cleanup protects pending,
+running and orphaned claims. Ordinary failure adds a fixed notice and releases
+its claim only after owned process finalizers finish. Success and failure trigger
+a fresh cleanup safety evaluation. Restart never replays an unverified running
+script; its orphaned claim cannot be overwritten by another settlement. Wake
+cancels the live job before releasing its claim. Idle terminal closure uses a
+fresh child-process probe, checks intervening input and preserves history.
+
+The plan's migration numbers 117/118 are already occupied by integrated main
+work; this implementation uses 126 rather than rewriting migration history.
+Closed-PR settlement requires the same explicit opt-in as merge settlement,
+and future snoozes and pending user inputs remain protected as required by the
+approved f5 plan. Upstream default-on and automatic snoozed-settlement behavior
+are intentionally not adopted. The individual September and October settlement
+follow-up proof remains to be reconciled; no ledger entry is promoted by this
+implementation alone.
+
+Settlement validation passes the focused server suites (180 distinct cases after
+correcting the on-settle-only resolver regression), all 54 storage maintenance
+cases, all 48 sidebar/control Chromium cases, 104 earlier store/sidebar unit
+checks and 52 subsequent visibility/attention/preload checks. The settings
+contracts pass, including partial cleanup-patch preservation and the 365-day
+bound; shared project settings pass all ten checks. The exhaustive real-Git
+matrix passes 162 cases again. The required full command ran and stopped at the
+two existing migration-recovery process-identity failures (330 scripts checks
+passed). Final typecheck and format results are tracked with the implementation
+commit; this record does not waive the failed full gate.

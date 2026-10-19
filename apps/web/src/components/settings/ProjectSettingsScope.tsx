@@ -1,3 +1,4 @@
+import { ThreadSettlementFields } from "./ThreadSettlementSettings";
 import { pickPreferredModel } from "@t3tools/shared/model";
 import { useComputerStatus, computerSettingsCanEnable } from "../../hooks/useComputerStatus";
 import { RememberedComputerApps } from "./RememberedComputerApps";
@@ -626,6 +627,16 @@ export function ProjectGitOverrides() {
             />
           ) : null}
         </ProjectSettingRow>
+      </SettingsCard>
+      <SettingsCard title="Thread settlement">
+        <ThreadSettlementFields
+          settings={settings}
+          disabled={saving}
+          badge={badge}
+          onChange={(patch) => {
+            for (const [key, value] of Object.entries(patch)) set(key as keyof typeof patch, value);
+          }}
+        />
       </SettingsCard>
       <SettingsCard title="Sync">
         <ProjectSettingRow

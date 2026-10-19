@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import { DEFAULT_SERVER_SETTINGS, ProjectId, ServerSettings } from "@t3tools/contracts";
 import { parseCheckedInProjectFile } from "./checkedInProjectFile";
-import { agentBrowserPolicyFromSettings, resolveProjectSettings } from "./projectSettings";
+import {
+  agentBrowserPolicyFromSettings,
+  resolveProjectSettings,
+  resolveWorktreeCleanupRules,
+} from "./projectSettings";
 import { applyServerSettingsPatch } from "./serverSettings";
 const id = ProjectId.makeUnsafe("project-test");
 describe("agent browser policy", () => {
@@ -37,6 +41,43 @@ describe("project settings", () => {
     expect(result.settings.worktreeCleanup).toBeNull();
     expect(result.sources.autoPullDefaultBranch).toBe("default");
   });
+  it("keeps settlement opt-in under user-owned global and project settings", () => {
+    const checkedIn = {
+      autoSettleOnPullRequestMerge: true,
+      autoSettleAfterDays: 1,
+      autoSettleKeepPullRequests: false,
+    };
+    const result = resolveProjectSettings({ projectId: id, checkedIn, sourceFile: "f5.json" });
+    expect(result.settings.autoSettleOnPullRequestMerge).toBe(false);
+    expect(result.settings.autoSettleAfterDays).toBeNull();
+    expect(result.settings.autoSettleKeepPullRequests).toBe(true);
+    const global = { ...DEFAULT_SERVER_SETTINGS, projectSettingsOverrides: { [id]: checkedIn } };
+    const override = resolveProjectSettings({ projectId: id, checkedIn: {}, global });
+    expect(override.settings.autoSettleAfterDays).toBe(1);
+    expect(override.sources.autoSettleAfterDays).toBe("project");
+  });
+  it("recognizes an on-settle-only cleanup rule and honors the master opt-in", () => {
+    const worktree = {
+      afterDays: null,
+      onMerge: false,
+      onDelete: false,
+      unchanged: false,
+      onSettle: true,
+    };
+    expect(
+      resolveWorktreeCleanupRules({
+        ...DEFAULT_SERVER_SETTINGS,
+        storageCleanup: { ...DEFAULT_SERVER_SETTINGS.storageCleanup, enabled: true, worktree },
+      }),
+    ).toEqual(worktree);
+    expect(
+      resolveWorktreeCleanupRules({
+        ...DEFAULT_SERVER_SETTINGS,
+        storageCleanup: { ...DEFAULT_SERVER_SETTINGS.storageCleanup, enabled: false, worktree },
+      }),
+    ).toBeNull();
+  });
+
   it("never lets a checked-in file widen agent browser or computer reach", () => {
     const result = resolveProjectSettings({
       projectId: id,

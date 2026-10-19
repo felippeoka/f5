@@ -124,6 +124,10 @@ export function forgeTracked(
     attentionFingerprint: JSON.stringify([state, detail.headRefOid]),
   };
 }
+const validTerminalDate = (value: unknown): string | null =>
+  typeof value === "string" && Number.isFinite(Date.parse(value))
+    ? new Date(value).toISOString()
+    : null;
 export function forgeDetail(pr: TrackedPullRequest, detail: ForgeDetail): PrHubDetailResult {
   return {
     detail: {
@@ -148,8 +152,14 @@ export function forgeDetail(pr: TrackedPullRequest, detail: ForgeDetail): PrHubD
       baseRefName: pr.baseRefName,
       createdAt: pr.createdAt,
       updatedAt: pr.updatedAt,
-      mergedAt: null,
-      closedAt: null,
+      mergedAt:
+        pr.state === "merged"
+          ? validTerminalDate(detail.raw.merged_at ?? detail.raw.closedDate ?? detail.raw.closed_on)
+          : null,
+      closedAt:
+        pr.state === "closed"
+          ? validTerminalDate(detail.raw.closed_at ?? detail.raw.closedDate ?? detail.raw.closed_on)
+          : null,
       author: pr.author ? { login: pr.author, name: null, avatarUrl: null } : null,
       labels: pr.labels.map((name) => ({ name, color: null, description: null })),
       reviewers: [],

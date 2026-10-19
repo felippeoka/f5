@@ -108,7 +108,7 @@ export const makePullRequestWatchStore = Effect.gen(function* () {
             });
           const watchId = randomUUID();
           const inserted =
-            yield* sql`INSERT INTO thread_pull_request_watches(thread_id,pr_key,account_id,watch_id,watch_json,updated_at) SELECT ${input.threadId},${input.key},${input.accountId},${watchId},${JSON.stringify(input.watch)},${input.watch.startedAt} FROM projection_threads WHERE thread_id=${input.threadId} AND archived_at IS NULL AND deleted_at IS NULL RETURNING watch_id`;
+            yield* sql`INSERT INTO thread_pull_request_watches(thread_id,pr_key,account_id,watch_id,watch_json,updated_at) SELECT ${input.threadId},${input.key},${input.accountId},${watchId},${JSON.stringify(input.watch)},${input.watch.startedAt} FROM projection_threads WHERE thread_id=${input.threadId} AND archived_at IS NULL AND deleted_at IS NULL AND settled_at IS NULL RETURNING watch_id`;
           if (!inserted.length)
             return yield* new PullRequestWatchError({
               message: "This thread is no longer active.",

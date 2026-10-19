@@ -10,7 +10,7 @@ import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ChevronRightIcon, EllipsisIcon, SquarePenIcon, WorkflowIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import type { DraftThreadState } from "../../composerDraftStore";
 import { getVisibleThreadsWithPinnedDraft, isDraftThreadId } from "../../lib/draftThreads";
@@ -246,6 +246,8 @@ export function SidebarProjectItem(props: SidebarProjectItemProps) {
     prependUnseenKeys: sidebarLists.projectDraftThreadId ? [sidebarLists.projectDraftThreadId] : [],
   });
   const snoozedThreads = sidebarLists.snoozedThreads;
+  const [settledExpanded, setSettledExpanded] = useState(false);
+  const settledThreads = sidebarLists.settledThreads;
   const projectPinnedSortableIds = activeThreads
     .filter((thread) => thread.pinnedAt != null)
     .map((thread) => pinnedThreadSortableId(thread.id));
@@ -539,6 +541,29 @@ export function SidebarProjectItem(props: SidebarProjectItemProps) {
                       ))
                     : null}
 
+                  {settledThreads.length > 0 ? (
+                    <SectionToggleRow
+                      label={`Settled (${settledThreads.length})`}
+                      expanded={settledExpanded}
+                      onToggle={() => setSettledExpanded((value) => !value)}
+                    />
+                  ) : null}
+                  {settledExpanded
+                    ? settledThreads.map((thread) => (
+                        <SidebarThreadRow
+                          key={`settled:${thread.id}`}
+                          thread={thread}
+                          section="settled"
+                          isActive={routeThreadId === thread.id}
+                          orderedIds={orderedProjectThreadIds}
+                          isRenaming={threadActions.renamingThreadId === thread.id}
+                          actions={threadActions}
+                          {...indicatorsForThread(thread)}
+                          threadStatus={null}
+                          terminalStatus={null}
+                        />
+                      ))
+                    : null}
                   {archivedSidebarItems.length > 0 ? (
                     <SectionToggleRow
                       label="Archived"

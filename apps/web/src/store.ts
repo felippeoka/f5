@@ -1133,6 +1133,9 @@ function buildThreadFromReadModel(
     existing.error === error &&
     existing.createdAt === thread.createdAt &&
     existing.archivedAt === thread.archivedAt &&
+    (existing.settledAt ?? null) === (thread.settledAt ?? null) &&
+    (existing.settledBy ?? null) === (thread.settledBy ?? null) &&
+    (existing.autoSettleDisabled ?? false) === (thread.autoSettleDisabled ?? false) &&
     (existing.pinnedAt ?? null) === pinnedAt &&
     (existing.pinOrderKey ?? null) === pinOrderKey &&
     (existing.snoozedUntil ?? null) === snoozedUntil &&
@@ -1186,6 +1189,9 @@ function buildThreadFromReadModel(
     error,
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt,
+    settledAt: thread.settledAt ?? null,
+    settledBy: thread.settledBy ?? null,
+    autoSettleDisabled: thread.autoSettleDisabled ?? false,
     pinnedAt,
     pinOrderKey,
     snoozedUntil,

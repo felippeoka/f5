@@ -19,6 +19,7 @@ describe("buildThreadActionMenuItems", () => {
       "snooze-three-hours",
       "snooze-tomorrow",
       "snooze-next-week",
+      "settle",
       "archive",
       "mark-unread",
       "copy-path",
@@ -33,6 +34,27 @@ describe("buildThreadActionMenuItems", () => {
     });
     expect(snoozed.some((item) => item.id === "wake")).toBe(true);
     expect(snoozed.some((item) => item.id.startsWith("snooze-"))).toBe(false);
+  });
+
+  it("offers an explicit wake and keeps pinned or snoozed work out of manual settlement", () => {
+    for (const state of [
+      { pinned: true, snoozed: false },
+      { pinned: false, snoozed: true },
+    ]) {
+      expect(
+        buildThreadActionMenuItems({
+          thread: { archivedAt: null, titleRegeneration: null },
+          ...state,
+        }).find((item) => item.id === "settle")?.disabled,
+      ).toBe(true);
+    }
+    const settled = buildThreadActionMenuItems({
+      thread: { archivedAt: null, titleRegeneration: null, settledAt: "2026-10-19T12:00:00.000Z" },
+      pinned: false,
+      snoozed: false,
+    });
+    expect(settled.find((item) => item.id === "unsettle")?.disabled).not.toBe(true);
+    expect(settled.some((item) => item.id === "settle")).toBe(false);
   });
 
   it("disables pending regeneration and strips web-only fields for native menus", () => {

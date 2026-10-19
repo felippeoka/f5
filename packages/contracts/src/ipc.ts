@@ -716,6 +716,9 @@ export interface DesktopPreviewBridge {
 }
 
 export interface NativeApi {
+  threadSettlement: {
+    settleProjectIdle: (input: { projectId: ProjectId }) => Promise<{ settled: number }>;
+  };
   pullRequestWatches: {
     list: (input: { threadId: ThreadId }) => Promise<ReadonlyArray<PullRequestWatchEntry>>;
     start: (input: PullRequestWatchInput) => Promise<PullRequestWatchEntry>;

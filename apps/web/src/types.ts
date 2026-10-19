@@ -172,6 +172,9 @@ export interface Thread {
   error: string | null;
   createdAt: string;
   archivedAt: string | null;
+  settledAt?: string | null;
+  settledBy?: import("@t3tools/contracts").ThreadSettledBy | null;
+  autoSettleDisabled?: boolean;
   pinnedAt?: string | null;
   pinOrderKey?: number | null;
   snoozedUntil?: string | null;
@@ -231,6 +234,9 @@ export type ThreadListItem = Pick<
   | "codexThreadId"
   | "createdAt"
   | "archivedAt"
+  | "settledAt"
+  | "settledBy"
+  | "autoSettleDisabled"
   | "pinnedAt"
   | "pinOrderKey"
   | "snoozedUntil"

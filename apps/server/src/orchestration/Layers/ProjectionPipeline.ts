@@ -1,3 +1,4 @@
+import { readSubmissionSource } from "../../provider/submissionProvenance.ts";
 import {
   ELICITATION_SUBMITTED_ACTIVITY_KIND,
   projectPendingUserInputs,
@@ -729,6 +730,28 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           });
           return;
 
+        case "thread.settled":
+        case "thread.unsettled":
+        case "thread.auto-settle-changed": {
+          if (event.type === "thread.unsettled")
+            yield* sql`UPDATE projection_threads SET last_unsettled_at=${event.occurredAt} WHERE thread_id=${event.payload.threadId}`.pipe(
+              Effect.mapError(toPersistenceSqlError("ProjectionPipeline.lastUnsettledAt")),
+            );
+          const existing = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existing)) return;
+          yield* projectionThreadRepository.upsert({
+            ...existing.value,
+            updatedAt: event.occurredAt,
+            ...(event.type === "thread.settled"
+              ? { settledAt: event.payload.settledAt, settledBy: event.payload.settledBy }
+              : event.type === "thread.unsettled"
+                ? { settledAt: null, settledBy: null, lastInteractionAt: event.occurredAt }
+                : { autoSettleDisabled: !event.payload.enabled }),
+          });
+          return;
+        }
         case "thread.archived": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
@@ -739,6 +762,8 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
             archivedAt: event.payload.archivedAt,
+            settledAt: null,
+            settledBy: null,
             pinnedAt: null,
             pinOrderKey: null,
             snoozedUntil: null,
@@ -1342,6 +1367,17 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             createdAt: existingMessage?.createdAt ?? event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
           });
+          if (event.payload.role === "user") {
+            const source = event.commandId
+              ? yield* readSubmissionSource(event.commandId, event.payload.threadId).pipe(
+                  Effect.provideService(SqlClient.SqlClient, sql),
+                  Effect.mapError(toPersistenceSqlError("ProjectionPipeline.authorship:read")),
+                )
+              : undefined;
+            yield* sql`INSERT OR IGNORE INTO thread_message_authorship(message_id,thread_id,source) SELECT m.message_id,m.thread_id,${source ?? "human"} FROM projection_thread_messages m JOIN projection_threads t ON t.thread_id=m.thread_id WHERE m.message_id=${event.payload.messageId} AND m.thread_id=${event.payload.threadId}`.pipe(
+              Effect.mapError(toPersistenceSqlError("ProjectionPipeline.authorship:write")),
+            );
+          }
           return;
         }
 

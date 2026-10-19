@@ -1,3 +1,4 @@
+import { ThreadSettlementServiceLive } from "./orchestration/Layers/ThreadSettlementService.ts";
 import { PullRequestWatchServiceLive } from "./orchestration/Layers/PullRequestWatchService.ts";
 import { ThreadMcpBroker, ThreadMcpBrokerLive } from "./mcp/threadMcpTools.ts";
 import { PrHubReviewGuideServiceLive } from "./prHub/Layers/PrHubReviewGuideService.ts";
@@ -553,5 +554,6 @@ export function makeServerOrchestrationRuntimeLayer() {
     workspaceTransitionLayer,
     defaultBranchAutoPullLayer,
     PullRequestWatchServiceLive.pipe(Layer.provideMerge(nextTurnQueueDispatcherLayer)),
+    ThreadSettlementServiceLive.pipe(Layer.provideMerge(nextTurnQueueDispatcherLayer)),
   ).pipe(Layer.provideMerge(NodeServices.layer));
 }

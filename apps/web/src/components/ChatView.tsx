@@ -3226,6 +3226,7 @@ export default function ChatView({
         command: input.command,
         icon: input.icon,
         runOnWorktreeCreate: input.runOnWorktreeCreate,
+        ...(input.runOnWorktreeSettle ? { runOnWorktreeSettle: true } : {}),
         ...(input.runOnWorktreeCreate && !input.async ? { async: false } : {}),
       };
       const nextScripts = input.runOnWorktreeCreate
@@ -3256,13 +3257,18 @@ export default function ChatView({
         throw new Error("Script not found.");
       }
 
-      const { async: _previousAsync, ...existingWithoutAsync } = existingScript;
+      const {
+        async: _previousAsync,
+        runOnWorktreeSettle: _previousSettle,
+        ...existingWithoutAsync
+      } = existingScript;
       const updatedScript: ProjectScript = {
         ...existingWithoutAsync,
         name: input.name,
         command: input.command,
         icon: input.icon,
         runOnWorktreeCreate: input.runOnWorktreeCreate,
+        ...(input.runOnWorktreeSettle ? { runOnWorktreeSettle: true } : {}),
         ...(input.runOnWorktreeCreate && !input.async ? { async: false } : {}),
       };
       const nextScripts = activeProject.scripts.map((script) =>
@@ -4073,6 +4079,19 @@ export default function ChatView({
             top: (command === "chat.pageUp" ? -1 : 1) * scroller.clientHeight * 0.9,
           });
         }
+        return;
+      }
+      if (command === "thread.toggleSettled") {
+        if (event.repeat || dialogFocus || isTerminalFocused()) return;
+        event.preventDefault();
+        void threadActionController
+          .executeAction(activeThreadId, activeThread?.settledAt ? "unsettle" : "settle")
+          .catch(() =>
+            toastManager.add({
+              type: "error",
+              title: "Could not change settlement; check pending work first.",
+            }),
+          );
         return;
       }
       if (command === "thread.togglePin" || command === "thread.copyReference") {

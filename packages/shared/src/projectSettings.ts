@@ -17,6 +17,9 @@ import {
  * that removes worktrees or pulls branches.
  */
 const USER_ONLY_PROJECT_SETTING_KEYS: ReadonlySet<string> = new Set([
+  "autoSettleOnPullRequestMerge",
+  "autoSettleAfterDays",
+  "autoSettleKeepPullRequests",
   "worktreeCleanup",
   "autoPullDefaultBranch",
   // Capabilities that widen what an agent can reach must never come from a checked-in file.
@@ -130,7 +133,11 @@ export function resolveWorktreeCleanupRules(settings: ServerSettings): WorktreeC
         ? policy.rules
         : settings.storageCleanup.worktree;
   if (!rules) return null;
-  return rules.afterDays !== null || rules.onMerge || rules.onDelete || rules.unchanged
+  return rules.afterDays !== null ||
+    rules.onMerge ||
+    rules.onDelete ||
+    rules.unchanged ||
+    rules.onSettle
     ? rules
     : null;
 }

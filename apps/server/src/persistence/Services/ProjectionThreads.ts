@@ -8,6 +8,7 @@
  */
 import {
   CommandId,
+  OrchestrationThread,
   IsoDateTime,
   ModelSelection,
   NonNegativeInt,
@@ -53,6 +54,9 @@ export const ProjectionThread = Schema.Struct({
   sessionNotes: Schema.NullOr(ThreadSessionNotes),
   threadReferences: Schema.Array(ThreadReference),
   archivedAt: Schema.NullOr(IsoDateTime),
+  settledAt: OrchestrationThread.fields.settledAt,
+  settledBy: OrchestrationThread.fields.settledBy,
+  autoSettleDisabled: OrchestrationThread.fields.autoSettleDisabled,
   pinnedAt: Schema.NullOr(IsoDateTime),
   pinOrderKey: Schema.NullOr(NonNegativeInt),
   snoozedUntil: Schema.NullOr(IsoDateTime),

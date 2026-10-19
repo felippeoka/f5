@@ -21,6 +21,7 @@ import {
 
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
+    autoSettleDisabled: Schema.BooleanFromBit,
     tasks: Schema.fromJsonString(ProjectionThread.fields.tasks),
     tasksTracking: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadTaskTracking))).pipe(
       Schema.withDecodingDefault(() => null),
@@ -59,6 +60,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           model_context_window_tokens,
           session_notes_json,
           thread_references_json,
+          settled_at, settled_by, auto_settle_disabled,
           archived_at,
           pinned_at,
           pin_order_key,
@@ -95,6 +97,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.modelContextWindowTokens},
           ${row.sessionNotes === null ? null : JSON.stringify(row.sessionNotes)},
           ${JSON.stringify(row.threadReferences)},
+          ${row.settledAt ?? null}, ${row.settledBy ?? null}, ${row.autoSettleDisabled ? 1 : 0},
           ${row.archivedAt},
           ${row.pinnedAt},
           ${row.pinOrderKey},
@@ -131,6 +134,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           model_context_window_tokens = excluded.model_context_window_tokens,
           session_notes_json = excluded.session_notes_json,
           thread_references_json = excluded.thread_references_json,
+          settled_at=excluded.settled_at, settled_by=excluded.settled_by, auto_settle_disabled=excluded.auto_settle_disabled,
           archived_at = excluded.archived_at,
           pinned_at = excluded.pinned_at,
           pin_order_key = excluded.pin_order_key,
@@ -174,6 +178,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           model_context_window_tokens AS "modelContextWindowTokens",
           session_notes_json AS "sessionNotes",
           thread_references_json AS "threadReferences",
+          settled_at AS "settledAt",settled_by AS "settledBy",auto_settle_disabled AS "autoSettleDisabled",
           archived_at AS "archivedAt",
           pinned_at AS "pinnedAt",
           pin_order_key AS "pinOrderKey",
@@ -219,6 +224,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           model_context_window_tokens AS "modelContextWindowTokens",
           session_notes_json AS "sessionNotes",
           thread_references_json AS "threadReferences",
+          settled_at AS "settledAt",settled_by AS "settledBy",auto_settle_disabled AS "autoSettleDisabled",
           archived_at AS "archivedAt",
           pinned_at AS "pinnedAt",
           pin_order_key AS "pinOrderKey",

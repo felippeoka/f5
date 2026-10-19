@@ -1,3 +1,4 @@
+import type { ThreadSettlementService } from "../orchestration/Layers/ThreadSettlementService.ts";
 import type { PullRequestWatchService } from "../orchestration/Layers/PullRequestWatchService.ts";
 import type { makeHtmlRenderRuntime } from "../htmlRender/HtmlRenderRuntime.ts";
 import { PullRequestKey } from "@t3tools/contracts";
@@ -15,6 +16,7 @@ import { ThreadToolError, type ThreadToolHandler } from "./threadMcpTools.ts";
 export function makeThreadToolHandler(input: {
   readonly engine: Pick<OrchestrationEngineShape, "getReadModel">;
   readonly federation: Pick<PrHubFederationShape, "resolve" | "parseUrl">;
+  readonly settlement: Pick<ThreadSettlementService["Service"], "settleFromAgent">;
   readonly watches: Pick<PullRequestWatchService["Service"], "startWatch" | "stopWatch">;
   readonly guides: PrHubReviewGuideService["Service"];
   readonly html: Effect.Success<ReturnType<typeof makeHtmlRenderRuntime>>;
@@ -26,11 +28,16 @@ export function makeThreadToolHandler(input: {
       const thread = model.threads.find((value) => value.id === threadId && !value.deletedAt);
       if (!thread)
         return yield* new ThreadToolError({ message: "This thread is no longer available." });
+      if (request.name === "thread_settle")
+        return yield* input.settlement.settleFromAgent(threadId);
       if (request.name === "thread_status")
         return {
           threadId,
           title: thread.title,
           archivedAt: thread.archivedAt,
+          settledAt: thread.settledAt ?? null,
+          settledBy: thread.settledBy ?? null,
+          autoSettleDisabled: thread.autoSettleDisabled ?? false,
           pinnedAt: thread.pinnedAt,
           snoozedUntil: thread.snoozedUntil,
           latestTurn: thread.latestTurn,

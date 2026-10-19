@@ -1049,6 +1049,62 @@ describe("Thread sidebar", () => {
     document.body.innerHTML = "";
   });
 
+  it("keeps settled threads in a collapsed bucket and reachable by their existing route", async () => {
+    const mounted = await mountApp({
+      width: 1400,
+      initialEntries: [`/${THREAD_ID}`],
+      configureFixture: (next) => {
+        next.snapshot = createSnapshot([
+          createSnapshotThread({
+            id: THREAD_ID,
+            title: "Settled conversation",
+            settledAt: NOW_ISO,
+            settledBy: "user",
+          }),
+        ]);
+      },
+    });
+    try {
+      await expect
+        .element(page.getByRole("button", { name: "Settled (1)", exact: true }))
+        .toBeVisible();
+      expect(querySidebarThreadRowsByTitle("Settled conversation")).toHaveLength(0);
+      expect(mounted.router.state.location.pathname).toBe(`/${THREAD_ID}`);
+      await page.getByRole("button", { name: "Settled (1)", exact: true }).click();
+      await expect.poll(() => querySidebarThreadRowsByTitle("Settled conversation").length).toBe(1);
+      const row = page.getByTestId(`thread-row-${THREAD_ID}`);
+      await row.hover();
+      await page
+        .getByRole("button", { name: "Unsettle Settled conversation", exact: true })
+        .click();
+      await expect
+        .poll(() =>
+          wsRequests.some(
+            (body) =>
+              body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              (body.command as { type?: string } | undefined)?.type === "thread.unsettle",
+          ),
+        )
+        .toBe(true);
+      useStore.getState().syncServerReadModel(
+        createSnapshot([
+          createSnapshotThread({
+            id: THREAD_ID,
+            title: "Settled conversation",
+            settledAt: null,
+            settledBy: null,
+          }),
+        ]),
+      );
+      await expect
+        .element(page.getByRole("button", { name: "Settled (1)", exact: true }))
+        .not.toBeInTheDocument();
+      expect(querySidebarThreadRowsByTitle("Settled conversation")).toHaveLength(1);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("shows startup skeletons until the initial snapshot and recovery complete", async () => {
     seedAppSettings({ onboardingLiteStatus: "dismissed" });
     const emptySnapshot = createEmptySnapshot();

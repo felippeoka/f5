@@ -258,6 +258,7 @@ export type StorageRetentionDays = typeof StorageRetentionDays.Type;
  * the thread's worktree path, so resuming the thread recreates the checkout.
  */
 export const WorktreeCleanupRules = Schema.Struct({
+  onSettle: Schema.optionalKey(Schema.Boolean).pipe(Schema.withDecodingDefault(() => false)),
   /** Remove after the thread has been idle this many days. */
   afterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(() => null)),
   /** Remove once HEAD is in the default branch and the branch's PR is merged. */
@@ -309,6 +310,7 @@ const StorageCleanupSettingsPatch = Schema.Struct({
   worktree: Schema.optionalKey(
     Schema.Struct({
       afterDays: Schema.optionalKey(StorageRetentionDays),
+      onSettle: Schema.optionalKey(Schema.Boolean),
       onMerge: Schema.optionalKey(Schema.Boolean),
       onDelete: Schema.optionalKey(Schema.Boolean),
       unchanged: Schema.optionalKey(Schema.Boolean),
@@ -330,7 +332,14 @@ export type PreviewExternalHosts = typeof PreviewExternalHosts.Type;
 export const ComputerUseExecutionMode = Schema.Literals(["foreground", "background"]);
 export type ComputerUseExecutionMode = typeof ComputerUseExecutionMode.Type;
 
+export const AutoSettleAfterDays = Schema.NullOr(
+  Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 365 })),
+);
+
 export const ProjectSettingsOverrides = Schema.Struct({
+  autoSettleOnPullRequestMerge: Schema.optionalKey(Schema.Boolean),
+  autoSettleAfterDays: Schema.optionalKey(AutoSettleAfterDays),
+  autoSettleKeepPullRequests: Schema.optionalKey(Schema.Boolean),
   autoResumeUsageLimitedThreads: Schema.optionalKey(Schema.Boolean),
   resumeActiveTurnsAfterRestart: Schema.optionalKey(Schema.Boolean),
   defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
@@ -353,6 +362,9 @@ export const ProjectSettingsOverrides = Schema.Struct({
 export type ProjectSettingsOverrides = typeof ProjectSettingsOverrides.Type;
 
 export const ServerSettings = Schema.Struct({
+  autoSettleOnPullRequestMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  autoSettleAfterDays: AutoSettleAfterDays.pipe(Schema.withDecodingDefault(() => null)),
+  autoSettleKeepPullRequests: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   usagePriceOverrides: Schema.Array(UsagePriceOverride).pipe(Schema.withDecodingDefault(() => [])),
   /** Background account-limit sampling for quota history and forecasts. */
   usageBackgroundSampling: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
@@ -536,6 +548,9 @@ const PrHubSettingsPatch = Schema.Struct({
 });
 
 export const ServerSettingsPatch = Schema.Struct({
+  autoSettleOnPullRequestMerge: Schema.optionalKey(Schema.Boolean),
+  autoSettleAfterDays: Schema.optionalKey(AutoSettleAfterDays),
+  autoSettleKeepPullRequests: Schema.optionalKey(Schema.Boolean),
   usagePriceOverrides: Schema.optionalKey(Schema.Array(UsagePriceOverride)),
   usageBackgroundSampling: Schema.optionalKey(Schema.Boolean),
   autoResumeUsageLimitedThreads: Schema.optionalKey(Schema.Boolean),
@@ -605,6 +620,9 @@ export const ServerSettingsPatch = Schema.Struct({
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
 export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
+  "autoSettleOnPullRequestMerge",
+  "autoSettleAfterDays",
+  "autoSettleKeepPullRequests",
   "resumeActiveTurnsAfterRestart",
   "autoResumeUsageLimitedThreads",
   "defaultRuntimeMode",

@@ -9,10 +9,13 @@ import {
   MoonIcon,
   PinIcon,
   SquarePenIcon,
+  SunriseIcon,
   TerminalIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { useStore } from "../../store";
+import { ProjectIcon } from "../ProjectIcon";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { cn } from "../../lib/utils";
@@ -40,9 +43,16 @@ import type { SidebarThreadActions } from "./useSidebarThreadActions";
  * - `active`: project thread list; drafts, pins, queue badge, rename, archive.
  * - `snoozed`: no status/PR, single-thread context menu, no keyboard open.
  * - `archived`: rename and unarchive.
+ * - `settled`: quiet completed work, with an explicit Unsettle action.
  * - `attention`: "Needs you"; plain navigation, no multi-select, shows the project.
  */
-export type SidebarThreadRowSection = "workflow" | "active" | "snoozed" | "archived" | "attention";
+export type SidebarThreadRowSection =
+  | "workflow"
+  | "active"
+  | "snoozed"
+  | "archived"
+  | "settled"
+  | "attention";
 
 export interface SidebarThreadRowProps {
   thread: ThreadListItem;
@@ -83,18 +93,23 @@ export function SidebarThreadRow(props: SidebarThreadRowProps) {
     isRenaming,
     actions,
   } = props;
+  const project = useStore((state) =>
+    section === "settled"
+      ? state.projects.find((project) => project.id === thread.projectId)
+      : undefined,
+  );
   const selectable = section !== "snoozed" && section !== "attention" && !isDraft;
   const isSelected = useThreadSelectionStore(
     (state) => selectable && state.selectedThreadIds.has(thread.id),
   );
   const isHighlighted = isActive || isSelected;
   const testId =
-    section === "active" || section === "archived"
+    section === "active" || section === "archived" || section === "settled"
       ? `thread-row-${thread.id}`
       : section === "attention"
         ? `attention-thread-row-${thread.id}`
         : undefined;
-  const canRename = section === "active" || section === "archived";
+  const canRename = section === "active" || section === "archived" || section === "settled";
   const action =
     section === "active" && !isDraft
       ? {
@@ -114,7 +129,16 @@ export function SidebarThreadRow(props: SidebarThreadRowProps) {
               void actions.archiveThread(thread.id, false);
             },
           }
-        : null;
+        : section === "settled"
+          ? {
+              label: "Unsettle",
+              ariaLabel: `Unsettle ${thread.title}`,
+              icon: SunriseIcon,
+              onClick: () => {
+                void actions.unsettleThread(thread.id);
+              },
+            }
+          : null;
 
   return (
     <SidebarMenuSubItem
@@ -140,6 +164,8 @@ export function SidebarThreadRow(props: SidebarThreadRowProps) {
             isSelected,
             isUnread: section !== "archived" && isUnread,
           }),
+          section === "settled" &&
+            "text-muted-foreground [&:not(:hover):not(:focus-within)_*]:text-muted-foreground",
         )}
         onClick={(event) => {
           if (section === "attention") {
@@ -187,7 +213,14 @@ export function SidebarThreadRow(props: SidebarThreadRowProps) {
         }}
       >
         <span className="flex size-4 shrink-0 items-center justify-center">
-          {section === "snoozed" ? (
+          {section === "settled" ? (
+            <ProjectIcon
+              projectId={thread.projectId}
+              name={project?.name ?? "Project"}
+              icon={project?.icon}
+              className="size-4"
+            />
+          ) : section === "snoozed" ? (
             <MoonIcon aria-label="Snoozed" className="size-3.5 text-faint-foreground" />
           ) : threadStatus ? (
             <ThreadStatusPillBadge pill={threadStatus} variant="icon" live={false} />
@@ -202,7 +235,16 @@ export function SidebarThreadRow(props: SidebarThreadRowProps) {
                   aria-label={prStatus.tooltip}
                   className={cn(
                     "-mx-0.5 inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-ring",
-                    prStatus.colorClass,
+                    section === "settled"
+                      ? cn(
+                          "text-muted-foreground",
+                          prStatus.label === "PR open"
+                            ? "group-hover/thread-row:text-success-foreground group-focus-within/thread-row:text-success-foreground"
+                            : prStatus.label === "PR merged"
+                              ? "group-hover/thread-row:text-attention-foreground group-focus-within/thread-row:text-attention-foreground"
+                              : "group-hover/thread-row:text-muted-foreground",
+                        )
+                      : prStatus.colorClass,
                   )}
                   onClick={(event) => {
                     actions.openPrLink(event, prStatus.url);

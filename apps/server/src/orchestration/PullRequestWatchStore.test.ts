@@ -22,7 +22,7 @@ const watch: ThreadPullRequestWatch = {
 };
 const fixture = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  yield* sql`CREATE TABLE projection_threads(thread_id TEXT PRIMARY KEY,archived_at TEXT,deleted_at TEXT)`;
+  yield* sql`CREATE TABLE projection_threads(thread_id TEXT PRIMARY KEY,archived_at TEXT,deleted_at TEXT,settled_at TEXT)`;
   yield* sql`INSERT INTO projection_threads(thread_id) VALUES(${threadId})`;
   yield* Migration125;
   return yield* makePullRequestWatchStore;

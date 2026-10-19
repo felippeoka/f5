@@ -1,3 +1,4 @@
+import { ThreadSettlementSettings } from "../ThreadSettlementSettings";
 import { DEFAULT_GIT_TEXT_GENERATION_MODEL, type ServerSettings } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -67,6 +68,7 @@ export function GitSettings() {
       <WritingSettings />
       <PullRequestSettings />
       <ReviewGuideSettings />
+      <ThreadSettlementSettings />
     </>
   );
 }

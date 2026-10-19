@@ -10,7 +10,7 @@ import { ServerConfig } from "../config.ts";
 import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurns.ts";
 import { WorktreeSetupGate } from "./Services/WorktreeSetupGate.ts";
 import {
-  type ThreadId,
+  ThreadId,
   WorktreeSetupSnapshot,
   worktreeSetupGatesTurn,
   WorkspaceTransitionSnapshot,
@@ -151,6 +151,19 @@ export const readWorktreeClaims = Effect.fn("readWorktreeClaims")(function* (pat
   }
   const transitionSql = yield* Effect.serviceOption(SqlClient.SqlClient);
   if (Option.isSome(transitionSql)) {
+    const hooks = yield* transitionSql.value<{
+      threadId: string;
+      path: string;
+    }>`SELECT thread_id AS "threadId",worktree_path AS path FROM thread_settlement_hooks WHERE state IN ('pending','running','orphaned') LIMIT 1001`.pipe(
+      Effect.orElseSucceed(() => {
+        unknown = true;
+        return [];
+      }),
+    );
+    if (hooks.length > 1000) unknown = true;
+    for (const hook of hooks)
+      if (inside(yield* resolve(hook.path)))
+        setupThreadIds.push(ThreadId.makeUnsafe(hook.threadId));
     const transitions = yield* transitionSql.value<{
       record: string;
     }>`SELECT record_json AS record FROM workspace_transitions

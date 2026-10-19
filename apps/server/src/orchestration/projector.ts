@@ -1,3 +1,8 @@
+import {
+  ThreadSettledPayload,
+  ThreadUnsettledPayload,
+  ThreadAutoSettleChangedPayload,
+} from "@t3tools/contracts";
 import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
 import type { ProviderKind } from "@t3tools/contracts";
 import { projectPendingUserInputs } from "@t3tools/shared/pendingUserInputs";
@@ -839,6 +844,44 @@ export function projectEvent(
         "payload",
       ).pipe(Effect.as(nextBase));
 
+    case "thread.settled":
+      return decodeForEvent(ThreadSettledPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            settledAt: payload.settledAt,
+            settledBy: payload.settledBy,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+    case "thread.unsettled":
+      return decodeForEvent(ThreadUnsettledPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            settledAt: null,
+            settledBy: null,
+            lastInteractionAt: event.occurredAt,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+    case "thread.auto-settle-changed":
+      return decodeForEvent(
+        ThreadAutoSettleChangedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            autoSettleDisabled: !payload.enabled,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
     case "thread.archived":
       return decodeForEvent(ThreadArchivedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
@@ -846,6 +889,8 @@ export function projectEvent(
           ...(payload.pinRevision !== undefined ? { pinRevision: payload.pinRevision } : {}),
           threads: updateThread(nextBase.threads, payload.threadId, {
             archivedAt: payload.archivedAt,
+            settledAt: null,
+            settledBy: null,
             pinnedAt: null,
             pinOrderKey: null,
             snoozedUntil: null,

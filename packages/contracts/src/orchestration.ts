@@ -292,6 +292,7 @@ export const ProjectScript = Schema.Struct({
   command: TrimmedNonEmptyString,
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
+  runOnWorktreeSettle: Schema.optional(Schema.Boolean),
   /**
    * Whether the agent may start while this setup script still runs. Absent
    * means true, so scripts saved before the option existed keep running in
@@ -953,7 +954,17 @@ export const RewindDraft = Schema.Struct({
 });
 export type RewindDraft = typeof RewindDraft.Type;
 
+export const ThreadSettledBy = Schema.Literals(["user", "auto", "agent"]);
+export type ThreadSettledBy = typeof ThreadSettledBy.Type;
+
 export const OrchestrationThread = Schema.Struct({
+  settledAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  settledBy: Schema.optional(Schema.NullOr(ThreadSettledBy)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  autoSettleDisabled: Schema.optional(Schema.Boolean).pipe(Schema.withDecodingDefault(() => false)),
   rewindDrafts: Schema.optional(Schema.Array(RewindDraft)),
   pendingUserInputs: Schema.optional(Schema.Array(PendingUserInput)),
   id: ThreadId,
@@ -1262,6 +1273,30 @@ const ThreadDeleteCommand = Schema.Struct({
   threadId: ThreadId,
   expectedArchivedAt: Schema.optional(IsoDateTime),
   expectedWorktreePath: Schema.optional(Schema.NullOr(FilesystemPath)),
+});
+
+const ThreadSettleCommand = Schema.Struct({
+  type: Schema.Literal("thread.settle"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+  settledBy: Schema.optional(ThreadSettledBy),
+  settledAt: Schema.optional(IsoDateTime),
+  expectedUpdatedAt: Schema.optional(IsoDateTime),
+});
+const ThreadUnsettleCommand = Schema.Struct({
+  type: Schema.Literal("thread.unsettle"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+  reason: Schema.optional(Schema.Literals(["user", "activity", "wake"])),
+});
+const ThreadAutoSettleCommand = Schema.Struct({
+  type: Schema.Literal("thread.auto-settle.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+  enabled: Schema.Boolean,
 });
 
 const ThreadArchiveCommand = Schema.Struct({
@@ -1582,6 +1617,9 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectWorkflowDeleteCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
+  ThreadSettleCommand,
+  ThreadUnsettleCommand,
+  ThreadAutoSettleCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
   ThreadPinsReplaceCommand,
@@ -1617,6 +1655,9 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectWorkflowDeleteCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
+  ThreadSettleCommand,
+  ThreadUnsettleCommand,
+  ThreadAutoSettleCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
   ThreadPinsReplaceCommand,
@@ -1909,6 +1950,9 @@ export const OrchestrationEventType = Schema.Literals([
   "project.debug-workflow-deleted",
   "thread.created",
   "thread.deleted",
+  "thread.settled",
+  "thread.unsettled",
+  "thread.auto-settle-changed",
   "thread.archived",
   "thread.unarchived",
   "thread.pins-replaced",
@@ -2090,6 +2134,20 @@ export const ThreadDeletedPayload = Schema.Struct({
   threadId: ThreadId,
   deletedAt: IsoDateTime,
   pinRevision: Schema.optional(NonNegativeInt),
+});
+
+export const ThreadSettledPayload = Schema.Struct({
+  threadId: ThreadId,
+  settledAt: IsoDateTime,
+  settledBy: ThreadSettledBy,
+});
+export const ThreadUnsettledPayload = Schema.Struct({
+  threadId: ThreadId,
+  reason: Schema.Literals(["user", "activity", "wake"]),
+});
+export const ThreadAutoSettleChangedPayload = Schema.Struct({
+  threadId: ThreadId,
+  enabled: Schema.Boolean,
 });
 
 export const ThreadArchivedPayload = Schema.Struct({
@@ -2498,6 +2556,21 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.deleted"),
     payload: ThreadDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.settled"),
+    payload: ThreadSettledPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.unsettled"),
+    payload: ThreadUnsettledPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.auto-settle-changed"),
+    payload: ThreadAutoSettleChangedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

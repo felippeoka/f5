@@ -30,6 +30,7 @@ export type ModelPickerKeybindingCommand = (typeof MODEL_PICKER_KEYBINDING_COMMA
 export const STATIC_KEYBINDING_COMMANDS = [
   "thread.stop",
   "thread.togglePin",
+  "thread.toggleSettled",
   "thread.copyReference",
   "thread.undo",
   "navigation.back",

@@ -77,7 +77,7 @@ function makeThreadUnsnoozedEvent(input: {
   };
 }
 
-export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
+const decideCommand = Effect.fn("decideOrchestrationCommand")(function* ({
   command,
   readModel,
   providerInstances = [],
@@ -699,6 +699,78 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           deletedAt: occurredAt,
           ...(pinRevision !== undefined ? { pinRevision } : {}),
         },
+      };
+    }
+
+    case "thread.settle": {
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (
+        thread.deletedAt ||
+        thread.pinnedAt ||
+        thread.session?.activeTurnId ||
+        thread.latestTurn?.state === "running" ||
+        (thread.latestTurn?.completedAt && thread.latestTurn.processingQuiescedAt === null) ||
+        ["running", "starting"].includes(thread.session?.status ?? "") ||
+        (thread.pendingUserInputs?.length ?? 0) > 0 ||
+        (thread.snoozedUntil && Date.parse(thread.snoozedUntil) > Date.parse(command.createdAt))
+      )
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Finish pending work and clear the pin or snooze before settling this thread.",
+        });
+      if (command.expectedUpdatedAt !== undefined && command.expectedUpdatedAt !== thread.updatedAt)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The thread changed before settlement. Retry with the current thread.",
+        });
+      if (command.settledBy === "auto" && thread.autoSettleDisabled)
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Automatic settlement is disabled for this thread.",
+        });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.settled",
+        payload: {
+          threadId: command.threadId,
+          settledAt: command.settledAt ?? command.createdAt,
+          settledBy: command.settledBy ?? "user",
+        },
+      };
+    }
+    case "thread.unsettle": {
+      yield* requireThread({ readModel, command, threadId: command.threadId });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.unsettled",
+        payload: { threadId: command.threadId, reason: command.reason ?? "user" },
+      };
+    }
+    case "thread.auto-settle.set": {
+      yield* requireThread({ readModel, command, threadId: command.threadId });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.auto-settle-changed",
+        payload: { threadId: command.threadId, enabled: command.enabled },
       };
     }
 
@@ -2428,4 +2500,43 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
     }
   }
+});
+
+/** Wake is part of the same accepted command and replay stream as the new work. */
+export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* (
+  input: Parameters<typeof decideCommand>[0],
+) {
+  const result = yield* decideCommand(input);
+  const events = Array.isArray(result) ? result : [result];
+  const command = input.command;
+  if (!("threadId" in command)) return result;
+  const thread = input.readModel.threads.find((thread) => thread.id === command.threadId);
+  if (
+    !thread?.settledAt ||
+    !events.some(
+      (event) =>
+        event.type === "thread.message-sent" ||
+        event.type === "thread.turn-start-requested" ||
+        event.type === "thread.unsnoozed" ||
+        (event.type === "thread.session-set" &&
+          (event.payload.session.activeTurnId ||
+            ["starting", "running"].includes(event.payload.session.status))),
+    )
+  )
+    return result;
+  const event = events[0]!;
+  const wake: Omit<OrchestrationEvent, "sequence"> = {
+    ...withEventBase({
+      aggregateKind: "thread",
+      aggregateId: command.threadId,
+      commandId: command.commandId,
+      occurredAt: event.occurredAt,
+    }),
+    type: "thread.unsettled",
+    payload: {
+      threadId: command.threadId,
+      reason: events.some((event) => event.type === "thread.unsnoozed") ? "wake" : "activity",
+    },
+  };
+  return [wake, ...events];
 });

@@ -33,6 +33,8 @@ export type ThreadActionId =
   | "snooze-three-hours"
   | "snooze-tomorrow"
   | "snooze-next-week"
+  | "settle"
+  | "unsettle"
   | "archive"
   | "unarchive"
   | "mark-unread"
@@ -48,7 +50,7 @@ export interface ThreadActionMenuItem {
 }
 
 export function buildThreadActionMenuItems(input: {
-  readonly thread: Pick<Thread, "archivedAt" | "titleRegeneration">;
+  readonly thread: Pick<Thread, "archivedAt" | "titleRegeneration" | "settledAt">;
   readonly pinned: boolean;
   readonly snoozed: boolean;
 }): ThreadActionMenuItem[] {
@@ -68,6 +70,15 @@ export function buildThreadActionMenuItems(input: {
                 { id: "snooze-tomorrow", label: "Snooze until tomorrow morning" },
                 { id: "snooze-next-week", label: "Snooze until next week" },
               ] as const)),
+        ]
+      : []),
+    ...(thread.archivedAt === null
+      ? [
+          {
+            id: thread.settledAt ? ("unsettle" as const) : ("settle" as const),
+            label: thread.settledAt ? "Unsettle" : "Settle",
+            disabled: !thread.settledAt && (pinned || snoozed),
+          },
         ]
       : []),
     {
@@ -304,6 +315,15 @@ export function useThreadActionController(input: {
             description: error instanceof Error ? error.message : "An error occurred.",
           });
         }
+        return;
+      }
+      if (actionId === "settle" || actionId === "unsettle") {
+        await api.orchestration.dispatchCommand({
+          type: actionId === "settle" ? "thread.settle" : "thread.unsettle",
+          commandId: newCommandId(),
+          threadId,
+          createdAt: new Date().toISOString(),
+        });
         return;
       }
       if (actionId === "archive" || actionId === "unarchive") {

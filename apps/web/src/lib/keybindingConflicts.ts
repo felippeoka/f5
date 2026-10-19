@@ -162,6 +162,8 @@ export function formatKeybindingCommandLabel(
   switch (staticCommand) {
     case "thread.stop":
       return "Stop active turn";
+    case "thread.toggleSettled":
+      return "Toggle thread settlement";
     case "thread.togglePin":
       return "Pin or unpin thread";
     case "thread.copyReference":

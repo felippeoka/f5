@@ -629,6 +629,7 @@ export default function Sidebar() {
       const clicked = await api.contextMenu.show(
         [
           { id: "worktrees", label: "Worktrees…" },
+          { id: "settle-idle", label: "Settle idle threads" },
           { id: "icon", label: "Change project icon..." },
           { id: "change-path", label: "Change project path..." },
           { id: "rename", label: "Rename project" },
@@ -638,6 +639,18 @@ export default function Sidebar() {
       );
       const project = projects.find((entry) => entry.id === projectId);
       if (!project) return;
+      if (clicked === "settle-idle") {
+        try {
+          const result = await api.threadSettlement.settleProjectIdle({ projectId });
+          toastManager.add({
+            type: "success",
+            title: `Settled ${result.settled} idle thread${result.settled === 1 ? "" : "s"}`,
+          });
+        } catch {
+          toastManager.add({ type: "error", title: "Could not settle idle threads" });
+        }
+        return;
+      }
       if (clicked === "worktrees") {
         await navigate({ to: "/worktrees", search: { projectId } });
         return;

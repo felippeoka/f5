@@ -124,6 +124,7 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
+    autoSettleDisabled: Schema.BooleanFromBit,
     tasks: Schema.fromJsonString(Schema.Array(TaskItem)),
     tasksTracking: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadTaskTracking))).pipe(
       Schema.withDecodingDefault(() => null),
@@ -145,6 +146,9 @@ const ProjectionThreadSummaryDbRowSchema = Schema.Struct({
   branch: ProjectionThread.fields.branch,
   worktreePath: ProjectionThread.fields.worktreePath,
   archivedAt: ProjectionThread.fields.archivedAt,
+  settledAt: ProjectionThread.fields.settledAt,
+  settledBy: ProjectionThread.fields.settledBy,
+  autoSettleDisabled: Schema.BooleanFromBit,
   pinnedAt: ProjectionThread.fields.pinnedAt,
   pinOrderKey: ProjectionThread.fields.pinOrderKey,
   snoozedUntil: ProjectionThread.fields.snoozedUntil,
@@ -440,6 +444,9 @@ function buildThreadSnapshot(params: {
     worktreePath: row.worktreePath,
     latestTurn: params.latestTurnByThread.get(row.threadId) ?? null,
     archivedAt: row.archivedAt,
+    settledAt: row.settledAt ?? null,
+    settledBy: row.settledBy ?? null,
+    autoSettleDisabled: row.autoSettleDisabled ?? false,
     pinnedAt: row.pinnedAt,
     pinOrderKey: row.pinOrderKey,
     snoozedUntil: row.snoozedUntil,
@@ -884,6 +891,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           compaction_json AS "compaction",
           session_notes_json AS "sessionNotes",
           thread_references_json AS "threadReferences",
+          settled_at AS "settledAt",settled_by AS "settledBy",auto_settle_disabled AS "autoSettleDisabled",
           archived_at AS "archivedAt",
           pinned_at AS "pinnedAt",
           pin_order_key AS "pinOrderKey",
@@ -920,6 +928,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           interaction_mode AS "interactionMode",
           branch,
           worktree_path AS "worktreePath",
+          settled_at AS "settledAt",settled_by AS "settledBy",auto_settle_disabled AS "autoSettleDisabled",
           archived_at AS "archivedAt",
           pinned_at AS "pinnedAt",
           pin_order_key AS "pinOrderKey",

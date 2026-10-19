@@ -56,7 +56,7 @@ interface LastRead {
   readonly remarksComplete: boolean;
 }
 const active = (thread: OrchestrationThread) =>
-  !thread.deletedAt && !thread.archivedAt && !("settledAt" in thread && thread.settledAt);
+  !thread.deletedAt && !thread.archivedAt && !thread.settledAt;
 const storageError = () =>
   new PullRequestWatchError({
     message:

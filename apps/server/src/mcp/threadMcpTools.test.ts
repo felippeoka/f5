@@ -105,6 +105,7 @@ it.effect(
         assert.deepStrictEqual(
           tools.body.result?.tools?.map((tool) => tool.name),
           [
+            "thread_settle",
             "thread_status",
             "pull_request_review_guide_read",
             "pull_request_review_guide_write",

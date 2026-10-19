@@ -99,6 +99,7 @@ const SHORTCUT_SECTION_DEFINITIONS: ReadonlyArray<{
       "workflow.new",
       "thread.stop",
       "thread.togglePin",
+      "thread.toggleSettled",
       "thread.copyReference",
       "thread.undo",
       "prHub.copyNumber",

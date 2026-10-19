@@ -453,6 +453,23 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           .withTransaction(
             Effect.gen(function* () {
               yield* checkWorkspaceBarrier;
+              if (envelope.command.type === "thread.settle") {
+                const command = envelope.command;
+                const blocked = yield* sql`SELECT 1 WHERE
+                  EXISTS(SELECT 1 FROM thread_settlement_hooks WHERE thread_id=${command.threadId} AND state IN ('pending','running','orphaned'))
+                  OR EXISTS(SELECT 1 FROM next_turn_queue WHERE thread_id=${command.threadId} AND deleted_at IS NULL)
+                  OR EXISTS(SELECT 1 FROM next_turn_queue_quarantine WHERE thread_id=${command.threadId})
+                  OR EXISTS(SELECT 1 FROM next_turn_queue_state WHERE thread_id=${command.threadId} AND worktree_block_token IS NOT NULL)
+                  OR EXISTS(SELECT 1 FROM projection_pending_approvals WHERE thread_id=${command.threadId} AND status='pending')
+                  OR EXISTS(SELECT 1 FROM projection_pending_user_inputs WHERE thread_id=${command.threadId} AND resolution IS NULL)
+                  OR EXISTS(SELECT 1 FROM projection_thread_background_work WHERE thread_id=${command.threadId} AND active=1)
+                  OR (${command.settledBy === "auto" ? 1 : 0}=1 AND EXISTS(SELECT 1 FROM thread_pull_request_watches WHERE thread_id=${command.threadId}))`;
+                if (blocked.length)
+                  return yield* new OrchestrationCommandInvariantError({
+                    commandType: command.type,
+                    detail: "This thread still has pending work, requests or PR watches.",
+                  });
+              }
               if (
                 envelope.command.type === "thread.turn.start" &&
                 envelope.command.dispatchSource === "next-turn-queue"
@@ -483,16 +500,38 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                     yield* transitions.value.cancel(savedEvent.payload.threadId).pipe(Effect.orDie);
                 }
                 if (
+                  savedEvent.type === "thread.settled" ||
                   savedEvent.type === "thread.archived" ||
                   savedEvent.type === "thread.deleted" ||
                   savedEvent.type === "thread.turn-interrupt-requested" ||
                   savedEvent.type === "thread.session-stop-requested"
                 ) {
+                  yield* sql`DELETE FROM thread_settlement_requests WHERE thread_id=${savedEvent.payload.threadId}`;
                   yield* stopThreadPullRequestWatches(
                     sql,
                     savedEvent.payload.threadId,
                     savedEvent.occurredAt,
                   );
+                }
+                if (savedEvent.type === "thread.settled") {
+                  const settledThread = nextReadModel.threads.find(
+                    (thread) => thread.id === savedEvent.payload.threadId,
+                  );
+                  const project = nextReadModel.projects.find(
+                    (project) => project.id === settledThread?.projectId,
+                  );
+                  const scripts =
+                    project?.scripts.filter((script) => script.runOnWorktreeSettle) ?? [];
+                  if (settledThread?.worktreePath && project && scripts.length) {
+                    yield* sql`INSERT INTO thread_settlement_hooks(thread_id,job_id,settled_at,worktree_path,project_id,scripts_json,state,updated_at) VALUES(${settledThread.id},${savedEvent.eventId},${savedEvent.payload.settledAt},${settledThread.worktreePath},${project.id},${JSON.stringify(scripts)},'pending',${savedEvent.occurredAt}) ON CONFLICT(thread_id) DO UPDATE SET job_id=excluded.job_id,settled_at=excluded.settled_at,worktree_path=excluded.worktree_path,project_id=excluded.project_id,scripts_json=excluded.scripts_json,state='pending',updated_at=excluded.updated_at`;
+                  }
+                }
+                if (
+                  savedEvent.type === "thread.unsettled" ||
+                  savedEvent.type === "thread.archived" ||
+                  savedEvent.type === "thread.deleted"
+                ) {
+                  yield* sql`UPDATE thread_settlement_hooks SET state='canceled',updated_at=${savedEvent.occurredAt} WHERE thread_id=${savedEvent.payload.threadId} AND state='pending'`;
                 }
                 if (savedEvent.type === "thread.session-stop-requested") {
                   // Commit cancellation with the stop intent: a crash before live
@@ -516,6 +555,12 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                   if (cancelled.length > 0)
                     yield* sql`UPDATE next_turn_queue_state SET revision = revision + 1,
                       updated_at = ${savedEvent.occurredAt} WHERE thread_id = ${savedEvent.payload.threadId}`;
+                }
+                if (
+                  savedEvent.type === "thread.message-sent" &&
+                  savedEvent.payload.role === "user"
+                ) {
+                  yield* sql`DELETE FROM thread_settlement_requests WHERE thread_id=${savedEvent.payload.threadId}`;
                 }
                 if (savedEvent.type === "thread.message-sent") {
                   yield* Effect.forEach(

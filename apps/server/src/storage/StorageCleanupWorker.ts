@@ -136,6 +136,7 @@ const CODEX_LEFTOVER_MIN_AGE_HOURS = CODEX_MARKETPLACE_LEFTOVER_MIN_AGE_MS / (60
 export function matchWorktreeCleanupRule(input: {
   readonly rules: WorktreeCleanupRules;
   readonly deleted: boolean;
+  readonly settled?: boolean;
   readonly lastInteractionAt: string;
   readonly nowMs: number;
   readonly headInDefaultBranch: boolean | null;
@@ -143,6 +144,7 @@ export function matchWorktreeCleanupRule(input: {
 }): string | null {
   if (input.deleted && input.rules.onDelete) return "the thread was deleted";
   if (input.deleted) return null;
+  if (input.settled && input.rules.onSettle) return "the thread was settled";
   if (input.rules.afterDays !== null) {
     const idleMs = input.nowMs - Date.parse(input.lastInteractionAt);
     if (Number.isFinite(idleMs) && idleMs >= input.rules.afterDays * DAY_MS) {
@@ -308,6 +310,7 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
       const matched = matchWorktreeCleanupRule({
         rules,
         deleted: thread.deletedAt !== null,
+        settled: !!thread.settledAt,
         lastInteractionAt: thread.lastInteractionAt,
         nowMs: input.nowMs,
         headInDefaultBranch,
@@ -912,7 +915,10 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
       return trigger.pipe(Effect.forkScoped, Effect.asVoid);
     }).pipe(Effect.forkScoped);
     yield* Stream.runForEach(engine.streamDomainEvents, (event) =>
-      event.type === "thread.deleted"
+      event.type === "thread.deleted" ||
+      event.type === "thread.settled" ||
+      (event.type === "thread.activity-appended" &&
+        event.payload.activity.kind === "settlement.script")
         ? trigger.pipe(Effect.forkScoped, Effect.asVoid)
         : Effect.void,
     ).pipe(Effect.forkScoped);

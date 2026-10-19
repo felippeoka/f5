@@ -264,3 +264,20 @@ a conversation cancels the worker, waits for filesystem writes to settle, releas
 private ref, and records any retained checkout and branch for manual review. Recovery can
 accept a verified complete copy, or keep the original workspace and clean up only proven
 copies. Untracked nested repositories must be committed, ignored, or removed before moving.
+
+## Settlement scripts and cleanup
+
+**When the thread is settled** is a separate cleanup rule and starts off. It uses
+the same checkout, queue, session, process and environment-file safety checks as
+other automatic cleanup rules and retains the branch. Automatic cleanup may
+remove other ignored build output; manual removal also protects ignored local
+files such as databases, `.envrc` and private keys.
+
+A project script's **Run when worktree settles** option also starts off. Enabled
+scripts run sequentially in that linked worktree before cleanup can remove it.
+The runner owns each process, limits a script to two minutes and the job to five,
+and captures at most 20 scripts in a 64 KiB snapshot. A failure adds a notice and
+allows cleanup to continue through its safety checks. Waking or archiving the
+thread cancels its owned job and waits for process exit before releasing the
+worktree claim. A server restart never replays an already-running script. Its
+unverified process claim keeps the checkout protected and a notice explains why.

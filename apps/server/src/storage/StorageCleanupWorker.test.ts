@@ -164,6 +164,41 @@ describe("StorageCleanupWorker", { timeout: 60_000 }, () => {
     );
   });
 
+  it("protects pending and orphaned settlement scripts, then cleans after verified completion", async () => {
+    await Effect.runPromise(
+      withWorktree(
+        {
+          storageCleanup: {
+            enabled: true,
+            worktree: {
+              afterDays: null,
+              onMerge: false,
+              onDelete: false,
+              unchanged: false,
+              onSettle: true,
+            },
+          },
+        },
+        ({ worker, world, worktreePath }) =>
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            const now = new Date().toISOString();
+            world.threads[0] = { ...world.threads[0]!, settledAt: now, settledBy: "user" };
+            yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,default_model,scripts_json,created_at,updated_at,deleted_at) VALUES('project-1','P','/tmp',NULL,'[]',${now},${now},NULL)`;
+            yield* sql`INSERT INTO projection_threads(thread_id,project_id,title,model,branch,worktree_path,latest_turn_id,archived_at,created_at,last_interaction_at,updated_at,deleted_at) VALUES('thread-1','project-1','T','gpt-5',NULL,${worktreePath},NULL,NULL,${now},${now},${now},NULL)`;
+            yield* sql`INSERT INTO thread_settlement_hooks(thread_id,job_id,settled_at,worktree_path,project_id,scripts_json,state,updated_at) VALUES('thread-1','hook',${now},${worktreePath},'project-1','[]','pending',${now})`;
+            for (const state of ["pending", "running", "orphaned"]) {
+              yield* sql`UPDATE thread_settlement_hooks SET state=${state}`;
+              expect((yield* worker.runOnce)[0]?.action).toBe("skip");
+              expect((yield* Effect.promise(() => fs.stat(worktreePath))).isDirectory()).toBe(true);
+            }
+            yield* sql`UPDATE thread_settlement_hooks SET state='completed'`;
+            expect((yield* worker.runOnce)[0]?.action).toBe("remove");
+          }),
+      ),
+    );
+  });
+
   it("does nothing while storage cleanup is off", async () => {
     const result = await Effect.runPromise(withWorktree({}, ({ worker }) => worker.dryRun));
     expect(result).toMatchObject({ storageCleanupEnabled: false, targets: [] });

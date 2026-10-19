@@ -122,3 +122,29 @@ Complete shell fences offer **Run in terminal** in a connected thread. Execution
 starts only when you click. F5 opens a fresh terminal in the thread workspace so
 it preserves commands already typed in other terminals. Streaming, unfinished,
 empty or concealed-control-character blocks cannot run through this action.
+
+## Settle completed work
+
+Choose **Settle** in a thread's menu to keep completed work in the project's
+collapsed **Settled** group. The conversation stays searchable and opens at its
+existing address. **Unsettle** returns it to the active list. A new message, turn
+or queued wake also brings it back before the work starts. The unbound
+**Toggle thread settlement** keyboard command can be assigned in keyboard settings.
+The project menu's **Settle idle threads** leaves running, pinned, snoozed and
+pending work alone.
+
+Automatic settlement is off by default. In **Settings → Git & GitHub → Thread
+settlement**, enable resolved-PR settlement or choose an inactivity period from
+1 to 365 days. Project settings can override these choices. Resolved-PR settlement
+requires every linked PR to be merged or closed after your latest human message
+or wake. Old merges do not immediately settle a conversation you just unsettled.
+The inactivity rule keeps linked PR threads unless you disable that preference.
+The header's **Auto-settle** switch lets one thread opt out of enabled rules.
+
+Running turns, unfinished terminal processing, pending approvals or questions,
+queued work, background work and active PR watches prevent automatic settlement.
+An explicit manual settlement stops its PR watches. F5 closes idle terminals only
+when a fresh process check proves they have no live children; terminal history is
+retained. Agents can explicitly request settlement with **thread_settle**. During
+a turn, that request waits until processing finishes; Stop or a new message
+cancels it.

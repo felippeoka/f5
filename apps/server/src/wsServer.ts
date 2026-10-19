@@ -1,3 +1,5 @@
+import { ThreadSettlementService } from "./orchestration/Layers/ThreadSettlementService.ts";
+import { THREAD_SETTLEMENT_WS_METHODS } from "@t3tools/contracts";
 import { PullRequestWatchService } from "./orchestration/Layers/PullRequestWatchService.ts";
 import { PR_WATCH_WS_METHODS, PR_WATCH_CHANGED_CHANNEL } from "@t3tools/contracts";
 import { HTML_RENDER_WS_METHODS } from "@t3tools/contracts";
@@ -911,6 +913,7 @@ function formatServerLifecycleRouteFailure(error: ServerLifecycleError): string 
 const ORCHESTRATION_RUNTIME_ROUTE_WAIT_MS = 55_000;
 
 interface OrchestrationRuntimeServices {
+  readonly threadSettlement: ThreadSettlementService["Service"];
   readonly pullRequestWatches: PullRequestWatchService["Service"];
   readonly projectSkillSyncService: ProjectSkillSyncServiceShape;
   readonly threadBackgroundWork: ThreadBackgroundWorkShape;
@@ -2749,6 +2752,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         orchestrationRuntimeServices,
         NextTurnQueueDispatcher,
       );
+      const threadSettlement = ServiceMap.get(
+        orchestrationRuntimeServices,
+        ThreadSettlementService,
+      );
       const pullRequestWatches = ServiceMap.get(
         orchestrationRuntimeServices,
         PullRequestWatchService,
@@ -2787,6 +2794,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
               federation: threadMcpFederation.value,
               guides: prHubReviewGuide,
               watches: pullRequestWatches,
+              settlement: threadSettlement,
               links: prHubExtensions.value,
               html,
             }),
@@ -2922,6 +2930,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         pushBus.publishAll(PR_WATCH_CHANGED_CHANNEL, { threadId }),
       ).pipe(Effect.forkIn(subscriptionsScope));
       yield* Scope.provide(pullRequestWatches.start, subscriptionsScope);
+      yield* Scope.provide(threadSettlement.start, subscriptionsScope);
       yield* Scope.provide(defaultBranchAutoPull.start, subscriptionsScope);
       if (diskSpaceMonitor._tag === "Some")
         yield* Scope.provide(
@@ -2933,6 +2942,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       yield* Ref.set(nextTurnQueueDispatcherRef, nextTurnQueueDispatcher);
       yield* readiness.markOrchestrationSubscriptionsReady;
       yield* Deferred.succeed(orchestrationRuntime, {
+        threadSettlement,
         pullRequestWatches,
         threadBackgroundWork,
         usageService,
@@ -5487,6 +5497,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return yield* prHubAdvisory.analyzeAdvisories(body);
       }
 
+      case THREAD_SETTLEMENT_WS_METHODS.settleProjectIdle:
+        return yield* (yield* awaitOrchestrationRuntimeForRoute).threadSettlement.settleProjectIdle(
+          request.body.projectId,
+        );
       case PR_WATCH_WS_METHODS.list:
         return yield* (yield* awaitOrchestrationRuntimeForRoute).pullRequestWatches.list(
           request.body.threadId,
