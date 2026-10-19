@@ -90,6 +90,7 @@ import {
   mapMuseApprovalChoices,
   museAnswers,
   museApprovalDetail,
+  museApprovalTurnId,
   museApprovalOptions,
   museApprovalRequestId,
   museDeltaStreamKind,
@@ -401,7 +402,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         for (const pending of ctx.approvals.values()) {
           yield* offer({
             type: "request.resolved",
-            ...(yield* stamp(ctx.threadId, pending.params.turnId)),
+            ...(yield* stamp(ctx.threadId, museApprovalTurnId(pending.params))),
             requestId: RuntimeRequestId.make(pending.requestId),
             payload: { requestType: museRequestType(pending.params), decision: "cancel" },
           });
@@ -549,7 +550,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         ctx.approvalRequestByApprovalId.set(params.approvalId, requestId);
         yield* offer({
           type: "request.opened",
-          ...(yield* stamp(ctx.threadId, params.turnId)),
+          ...(yield* stamp(ctx.threadId, museApprovalTurnId(params))),
           requestId: RuntimeRequestId.make(requestId),
           payload: {
             requestType: museRequestType(params),
@@ -577,7 +578,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
         }
         yield* offer({
           type: "request.resolved",
-          ...(yield* stamp(ctx.threadId, pending.params.turnId)),
+          ...(yield* stamp(ctx.threadId, museApprovalTurnId(pending.params))),
           requestId: RuntimeRequestId.make(requestId),
           payload: {
             requestType: museRequestType(pending.params),
@@ -627,8 +628,9 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
           return yield* closeApproval(ctx, previousId, "resolved");
         }
         yield* closeApproval(ctx, previousId, "superseded", { superseded: true });
-        yield* openApproval(ctx, {
+        yield* handleApprovalRequested(ctx, {
           ...previous.params,
+          ...(params.subagentOrigin ? { subagentOrigin: params.subagentOrigin } : {}),
           availableChoices: params.availableChoices,
           currentRequirementId: params.currentRequirementId,
           subject: params.subject,
