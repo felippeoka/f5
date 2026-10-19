@@ -19136,10 +19136,18 @@
     {
       "upstreamSha": "8ddf200e8f637eaf9a4f0d3036ece8f1d3869d10",
       "subject": "fix(server): one failing RPC handler no longer ends the client's other requests (#15515)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): one failing RPC handler no longer ends the client's other requests (#15515).",
+      "reason": "Planned: implementation and focused evidence exist for 16 of 22 initial ACP reproductions fail before the fix. Handler construction throws, Effect defects and cleanup defects now fail only the originating request or notification, preserve typed failures, continue ordered wire delivery and retain owner interruption. Both ACP core servers disable fatal socket-wide defects; unexpected reader failure rejects pending and later calls. All 53 library cases, 68 server ACP cases and two concurrent real-WebSocket cases pass. F5's existing request-local WebSocket exit handling is equivalent; its baseline provenance is d4d6991e764631bc825a3e4061651d6ff1ab484f. The remaining 15a per-SHA audit and required release gates are not complete. Upstream change: fix(server): one failing RPC handler no longer ends the client's other requests (#15515).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "plannedWorkstream": "15a",
+      "f5Shas": ["6236ddcd59f5ac32b52133e877e5826e9dc6b72b"],
+      "evidence": [
+        "packages/effect-acp/src/handlerIsolation.test.ts:1",
+        "packages/effect-acp/src/_internal/shared.ts:29",
+        "packages/effect-acp/src/protocol.ts:219",
+        "apps/server/src/wsServer.test.ts:6033",
+        "apps/server/src/wsServer.ts:7208"
+      ]
     },
     {
       "upstreamSha": "8de0aa24d9b09b3dff9e3378222877cbfff41ae0",

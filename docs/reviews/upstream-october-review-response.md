@@ -1340,3 +1340,24 @@ behavior remain open. These are classification decisions, not runtime ports or
 performance claims. The strict ledger check and all 12 October/September plan tests
 pass: 4,084 records, 1,283 planned, 482 ported, 152 equivalent and two already
 present. The interval and frozen September memberships are unchanged.
+
+Verify-first #15515 reproduces in F5's shared ACP transport. Sixteen of 22 initial
+cases fail before the change: a handler defect or construction throw can stop the
+wire reader, skip later notification handlers or emit a connection-wide defect.
+The shared handler boundary now catches construction and Effect defects, logs the
+failure and isolates the originating call. Typed request errors retain their
+classification; cleanup defects take precedence over a typed failure. Notification
+failures cannot skip subsequent subscribers. Owner interruption still cancels
+notification, extension and core handlers, and explicit completion signals verify
+that their finalizers finish. An unexpected reader defect fails pending requests
+and rejects later calls with the same connection failure instead of hanging.
+
+The complete ACP library suite passes all 53 cases, including 32 new isolation and
+cancellation cases. Six server ACP suites pass 68 cases over the real stdio
+fixtures. Two new real-WebSocket cases confirm that F5's existing request-local
+exit handling already preserves concurrent and subsequent requests after a route
+defect or construction throw; the held request completes after explicit release.
+The WebSocket baseline comes from `d4d6991e764631bc825a3e4061651d6ff1ab484f`.
+All eight typechecks, formatter, lint and whitespace checks pass. The ledger records
+this individual implementation proof while keeping the broader 15a audit and
+required release gates open. This correctness fix makes no CPU performance claim.
