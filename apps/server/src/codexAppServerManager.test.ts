@@ -3942,7 +3942,7 @@ describe.skipIf(!process.env.CODEX_BINARY_PATH)("startSession live Codex resume"
 
 it("drains replaced provider sources without closing their replacement", () => {
   const manager = new CodexAppServerManager();
-  const output = Object.assign(new EventEmitter(), { close: vi.fn() });
+  const output = Object.assign(new EventEmitter(), { close: vi.fn(), finish: vi.fn() });
   const child = Object.assign(new EventEmitter(), { stderr: new EventEmitter() });
   const context = {
     session: { threadId: "replaced" },
@@ -4398,7 +4398,7 @@ it("stamps MCP startup notifications from their emitting Codex context", () => {
 describe("Codex process settlement and source draining", () => {
   function fixture() {
     const manager = new CodexAppServerManager();
-    const output = Object.assign(new EventEmitter(), { close: vi.fn() });
+    const output = Object.assign(new EventEmitter(), { close: vi.fn(), finish: vi.fn() });
     const child = Object.assign(new EventEmitter(), {
       stdout: { destroy: vi.fn() },
       stdin: { destroy: vi.fn() },
@@ -4476,10 +4476,18 @@ describe("Codex process settlement and source draining", () => {
     vi.useFakeTimers();
     try {
       const f = fixture();
+      f.output.finish.mockImplementation(() => {
+        f.output.emit("line", '{"method":"final"}');
+        f.output.emit("close");
+      });
       f.child.emit("error", new Error("failed without exit"));
       expect(f.context.pending.size).toBe(0);
       await vi.advanceTimersByTimeAsync(1_800);
       expect(f.lifecycle).toHaveBeenCalledTimes(1);
+      expect(f.lines).toHaveBeenCalledWith(f.context, '{"method":"final"}');
+      expect(f.lines.mock.invocationCallOrder[0]).toBeLessThan(
+        f.lifecycle.mock.invocationCallOrder[0]!,
+      );
       expect(f.child.eventNames()).toEqual([]);
       expect(f.child.stderr.eventNames()).toEqual([]);
       expect(f.output.eventNames()).toEqual([]);

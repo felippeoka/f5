@@ -278,6 +278,27 @@ const makeProviderSessionRuntimeRepository = Effect.gen(function* () {
         ),
       );
 
+  const updateHistoryReconciliationIfCurrent: ProviderSessionRuntimeRepositoryShape["updateHistoryReconciliationIfCurrent"] =
+    (input) =>
+      sql`
+    UPDATE provider_session_runtime
+    SET runtime_payload_json = json_set(COALESCE(runtime_payload_json, '{}'),
+      '$.historyReconciliationRequired', json(${JSON.stringify(input.marker)}))
+    WHERE thread_id = ${input.threadId}
+      AND COALESCE(provider_instance_id, provider_name) = ${input.instanceId}
+      AND COALESCE(json_extract(runtime_payload_json, '$.sessionGeneration'), 0) = ${input.generation}
+      AND (${input.marker !== null ? 1 : 0} = 1 OR
+        json_extract(runtime_payload_json, '$.historyReconciliationRequired.eventId') = ${input.expectedMarkerId ?? null})
+    RETURNING thread_id
+  `.pipe(
+        Effect.map((rows) => rows.length === 1),
+        Effect.mapError(
+          toPersistenceSqlError(
+            "ProviderSessionRuntimeRepository.updateHistoryReconciliationIfCurrent",
+          ),
+        ),
+      );
+
   const updateTerminalLifecycleIfCurrent: ProviderSessionRuntimeRepositoryShape["updateTerminalLifecycleIfCurrent"] =
     (input) =>
       sql`
@@ -302,6 +323,7 @@ const makeProviderSessionRuntimeRepository = Effect.gen(function* () {
       );
 
   return {
+    updateHistoryReconciliationIfCurrent,
     updateTerminalLifecycleIfCurrent,
     updateMcpStateIfCurrent,
     upsert,

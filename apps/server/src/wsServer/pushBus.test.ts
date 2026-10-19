@@ -1,12 +1,13 @@
+import { EventEmitter } from "node:events";
 import type { WebSocket } from "ws";
 import { it } from "@effect/vitest";
-import { describe, expect } from "vitest";
+import { describe, expect, vi } from "vitest";
 import { Deferred, Effect, Fiber, Ref } from "effect";
 import { ProviderInstanceId, ProjectId, ThreadId, WS_CHANNELS } from "@t3tools/contracts";
 
 import { makeServerPushBus, makeWebSocketSendController, pushCoalescingKey } from "./pushBus";
 
-class MockWebSocket {
+class MockWebSocket extends EventEmitter {
   static readonly OPEN = 1;
 
   readonly OPEN = MockWebSocket.OPEN;
@@ -48,6 +49,7 @@ class MockWebSocket {
       ...(code !== undefined ? { code } : {}),
       ...(reason !== undefined ? { reason } : {}),
     });
+    this.emit("close");
     for (const waiter of this.waiters) waiter();
   }
 
@@ -510,4 +512,29 @@ describe("makeServerPushBus", () => {
       }),
     ),
   );
+});
+
+it("releases oversized-send timers, queued frames and listeners on normal close", () => {
+  vi.useFakeTimers();
+  try {
+    const client = new MockWebSocket();
+    client.autoCompleteSends = false;
+    const clients = Effect.runSync(Ref.make(new Set([client as unknown as WebSocket])));
+    const controller = makeWebSocketSendController({ clients, maxClientBufferedBytes: 100 });
+    Effect.runSync(controller.send(client as unknown as WebSocket, "x".repeat(101)));
+    Effect.runSync(controller.send(client as unknown as WebSocket, "queued"));
+    expect(vi.getTimerCount()).toBe(1);
+    expect(client.listenerCount("close")).toBe(1);
+    client.close();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(client.listenerCount("close")).toBe(0);
+    expect(controller.logicalOutstandingBytes(client as unknown as WebSocket)).toBe(0);
+    expect(Effect.runSync(Ref.get(clients)).size).toBe(0);
+    client.completeNextSend();
+    vi.advanceTimersByTime(10_000);
+    expect(client.sent).toEqual(["x".repeat(101)]);
+    expect(client.closes).toHaveLength(1);
+  } finally {
+    vi.useRealTimers();
+  }
 });

@@ -6,6 +6,7 @@ import { useStore } from "../store";
 
 const report = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`);
 let socket: WebSocket;
+let url = process.argv[2]!;
 let generation = 0;
 let nextRpc = 0;
 let incarnation: string | undefined;
@@ -61,7 +62,7 @@ const router = createOrchestrationEventRouter({
 });
 function connect() {
   const ownGeneration = ++generation;
-  socket = new WebSocket(process.argv[2]!);
+  socket = new WebSocket(url);
   socket.addEventListener("message", (event) => {
     if (ownGeneration !== generation) return;
     const message = JSON.parse(String(event.data));
@@ -108,8 +109,10 @@ lines.on("line", (line) => {
       })),
     });
   } else if (command.method === "disconnect") socket.close();
-  else if (command.method === "reconnect") connect();
-  else if (command.method === "quit") {
+  else if (command.method === "reconnect") {
+    if (typeof command.url === "string") url = command.url;
+    connect();
+  } else if (command.method === "quit") {
     router.dispose();
     socket.close();
     for (const request of pending.values()) {

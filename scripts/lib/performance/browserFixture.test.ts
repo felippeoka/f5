@@ -73,3 +73,24 @@ it("answers current workspace recovery reads without creating a transition", () 
   expect(Schema.is(WorktreesThreadStateResult)(state)).toBe(true);
   expect([...fixture.unknownMethods]).toEqual([]);
 });
+
+it("answers reconciliation probes at the same head and incarnation as its snapshot", () => {
+  const fixture = createBrowserFixture(30);
+  for (let index = 0; index < 3; index++) {
+    const snapshot = fixture.rpc({ _tag: "orchestration.getSnapshot" }) as {
+      snapshotSequence: number;
+    };
+    expect(fixture.rpc({ _tag: "orchestration.getLatestSequence" })).toEqual({
+      latestSequence: snapshot.snapshotSequence,
+      backendIncarnation: fixture.welcome.backendIncarnation,
+    });
+    fixture.nextEvents();
+  }
+  expect(fixture.welcome.backendIncarnation).toBe("performance-fixture");
+  expect([...fixture.unknownMethods]).toEqual([]);
+});
+it("acknowledges page diagnostics without injecting benchmark work", () => {
+  const fixture = createBrowserFixture();
+  expect(fixture.rpc({ _tag: "server.reportClientDiagnostics" })).toBeNull();
+  expect([...fixture.unknownMethods]).toEqual([]);
+});

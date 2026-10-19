@@ -107,8 +107,9 @@ Cursor, Grok and Antigravity publish one runtime error and one session exit,
 retire the matching context and close its scope from a sibling fiber. A stale
 context cannot close its replacement. Their spawned-agent tests cover both malformed
 JSON and child exit, request settlement within one second, repeated disposal and
-confirmed child termination. The owned OpenCode process-group audit remains required
-before claiming the complete per-transport guarantees.
+confirmed child termination. The POSIX OpenCode process-group fixture also verifies
+that shutdown reaps an owned server and its descendant when both ignore TERM;
+Windows keeps its separate descendant teardown path.
 
 Claude completion records carry exact emitted block text in `payload.data.text`,
 including leading newlines and trailing whitespace; display detail is not the recovery

@@ -1,3 +1,4 @@
+import { registerBrowserResourceReader } from "./lib/performanceCounters";
 import {
   withHistoryCoverage,
   canHydrateThreadTail,
@@ -2336,6 +2337,19 @@ if (typeof window !== "undefined") {
     debouncedPersistState.flush();
   });
 }
+
+registerBrowserResourceReader("store", () => {
+  const state = useStore.getState();
+  const buffers = [...state.detailEventBufferByThreadId.values()];
+  return {
+    retainedThreads: state.threads.filter((thread) => thread.messages.length > 0).length,
+    retainedMessages: state.threads.reduce((sum, thread) => sum + thread.messages.length, 0),
+    hydrationBuffers: buffers.length,
+    hydrationEvents: buffers.reduce((sum, buffer) => sum + buffer.events.length, 0),
+    hydrationBytes: buffers.reduce((sum, buffer) => sum + (buffer.bytes ?? 0), 0),
+    coverageThreads: state.detailCoverageByThreadId?.size ?? 0,
+  };
+});
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {

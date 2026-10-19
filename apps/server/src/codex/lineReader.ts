@@ -20,6 +20,10 @@ export class ProviderLineReader extends EventEmitter<{ line: [string]; close: []
     for (const line of this.lines.finish()) this.emit("line", line);
     this.close();
   };
+  /** Flush an already received final fragment before releasing a draining source. */
+  finish(): void {
+    this.end();
+  }
   close(): void {
     if (this.closed) return;
     this.closed = true;

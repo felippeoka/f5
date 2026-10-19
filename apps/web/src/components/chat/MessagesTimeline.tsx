@@ -1,3 +1,4 @@
+import { recordTimelineRowRender } from "../../lib/performanceCounters";
 import { messageTextRevision, messageReasoningContent } from "../../lib/streamingTextRevision";
 import { computerToolHeading } from "@t3tools/shared/computerAction";
 import { NativeFilePreview } from "./NativeFilePreview";
@@ -1371,6 +1372,7 @@ const TimelineRowWrapper = memo(function TimelineRowWrapper({
   testRenderCountProps?: { "data-render-count": number } | undefined;
   children: ReactNode;
 }) {
+  recordTimelineRowRender(row.id);
   return (
     <div
       className="pb-4"

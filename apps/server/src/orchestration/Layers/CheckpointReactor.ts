@@ -957,7 +957,7 @@ const make = Effect.gen(function* () {
       processInputSafely(input).pipe(Effect.provideService(AcceptedShutdownWork, true)),
     { name: "CheckpointReactor" },
   );
-  yield* registerShutdown("checkpoints", "drain", () => worker.drain);
+  yield* registerShutdown("checkpoints", "drain", () => worker.drain, ["provider-ingestion"]);
 
   const reconcileStartupQuiescence = Effect.gen(function* () {
     const unquiesced = yield* turns.listTerminalUnquiesced.pipe(

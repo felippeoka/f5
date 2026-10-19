@@ -68,9 +68,19 @@ export function makeWebSocketSendController(input: {
     pendingBytes: number;
     readonly pending: PendingFrame[];
     oversizedDrainTimer: ReturnType<typeof setTimeout> | null;
+    onClose: () => void;
   }
   const sendStateByClient = new WeakMap<WebSocket, ClientSendState>();
   const closedClients = new WeakSet<WebSocket>();
+
+  const discardSendState = (client: WebSocket, state: ClientSendState) => {
+    if (state.oversizedDrainTimer) clearTimeout(state.oversizedDrainTimer);
+    state.oversizedDrainTimer = null;
+    state.pending.length = 0;
+    state.inFlightBytes = state.pendingBytes = 0;
+    client.off("close", state.onClose);
+    sendStateByClient.delete(client);
+  };
 
   const getSendState = (client: WebSocket): ClientSendState => {
     const existing = sendStateByClient.get(client);
@@ -80,7 +90,13 @@ export function makeWebSocketSendController(input: {
       pendingBytes: 0,
       pending: [],
       oversizedDrainTimer: null,
+      onClose: () => {
+        closedClients.add(client);
+        discardSendState(client, created);
+        Effect.runSync(removeClient(client));
+      },
     };
+    client.once("close", created.onClose);
     sendStateByClient.set(client, created);
     return created;
   };
@@ -99,8 +115,7 @@ export function makeWebSocketSendController(input: {
       closedClients.add(client);
       return Effect.sync(() => {
         const state = sendStateByClient.get(client);
-        if (state?.oversizedDrainTimer) clearTimeout(state.oversizedDrainTimer);
-        sendStateByClient.delete(client);
+        if (state) discardSendState(client, state);
         try {
           client.close(SLOW_CLIENT_CLOSE_CODE, SLOW_CLIENT_CLOSE_REASON);
         } catch {
@@ -124,6 +139,7 @@ export function makeWebSocketSendController(input: {
     }
     try {
       client.send(frame.message, (error) => {
+        if (closedClients.has(client) || sendStateByClient.get(client) !== state) return;
         if (state.oversizedDrainTimer) {
           clearTimeout(state.oversizedDrainTimer);
           state.oversizedDrainTimer = null;
@@ -153,7 +169,7 @@ export function makeWebSocketSendController(input: {
 
   const send: WebSocketSendController["send"] = (client, message) =>
     Effect.gen(function* () {
-      if (client.readyState !== client.OPEN) {
+      if (closedClients.has(client) || client.readyState !== client.OPEN) {
         yield* removeClient(client);
         return false;
       }

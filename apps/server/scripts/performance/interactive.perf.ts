@@ -352,6 +352,7 @@ it("measures the production renderer, real WS backpressure and native terminal s
     writer: writerStats,
     notMeasured: [] as string[],
     fixtureStats: {},
+    diagnostics: {} as Record<string, number>,
   };
   try {
     await once(writer, "message", { signal: AbortSignal.timeout(10000) });
@@ -414,6 +415,14 @@ it("measures the production renderer, real WS backpressure and native terminal s
     report.metadata.browser = browser.browser;
     report.metadata.browserConfig = browser.config;
     report.fixtureStats = browser.loaded;
+    const final = browser.diagnostics?.final;
+    for (const group of ["work", "gauges"])
+      for (const [name, value] of Object.entries(final?.[group] ?? {}))
+        if (typeof value === "number") report.diagnostics[`browser.${group}.${name}`] = value;
+    for (const [family, values] of Object.entries(final?.resources ?? {}))
+      for (const [name, value] of Object.entries(values as Record<string, unknown>))
+        if (typeof value === "number")
+          report.diagnostics[`browser.resources.${family}.${name}`] = value;
     report.observations.push(
       maximumObservation(
         "browser.composerInputP95Ms",

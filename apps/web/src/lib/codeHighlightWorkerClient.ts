@@ -1,3 +1,4 @@
+import { recordBrowserWork, recordBrowserGauge } from "./performanceCounters";
 import { raceWithAbort } from "@t3tools/shared/abortSignal";
 import type { resolveLanguage, resolveTheme } from "@pierre/diffs";
 
@@ -179,9 +180,15 @@ export async function highlightCodeInWorker(input: {
   const reservation = { bytes };
   reservations.add(reservation);
   reservedBytes += bytes;
+  recordBrowserWork("highlightJobs");
+  recordBrowserWork("highlightBytes", bytes);
+  recordBrowserGauge("highlightJobs", reservations.size);
+  recordBrowserGauge("highlightBytes", reservedBytes);
   const generation = factoryGeneration;
   const release = () => {
     if (reservations.delete(reservation)) reservedBytes -= bytes;
+    recordBrowserGauge("highlightJobs", reservations.size);
+    recordBrowserGauge("highlightBytes", reservedBytes);
   };
   let posted = false;
   try {

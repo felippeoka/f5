@@ -1,3 +1,4 @@
+import { makeShutdownSourceScope, registerShutdown } from "../../shutdown.ts";
 import { setupProjectScript } from "@t3tools/shared/projectScripts";
 import { makeWorkflowArchiveLifecycle } from "../workflowArchiveLifecycle.ts";
 import {
@@ -17,7 +18,7 @@ import {
   type WorkflowReviewSlot,
 } from "@t3tools/contracts";
 import { createHash } from "node:crypto";
-import { Cause, Clock, Duration, Effect, Layer, Stream } from "effect";
+import { Cause, Clock, Duration, Effect, Layer, Scope, Stream } from "effect";
 import {
   defaultDocumentReaderSlot,
   documentWorkflowForThread,
@@ -1294,6 +1295,7 @@ function resolveMergedPlanForImplementation(
 }
 
 export const makeWorkflowService = Effect.gen(function* () {
+  const sources = yield* makeShutdownSourceScope("planning-workflows-sources");
   const baseOrchestrationEngine = yield* OrchestrationEngineService;
   const textGeneration = yield* TextGeneration;
   const gitCore = yield* GitCore;
@@ -1461,7 +1463,8 @@ export const makeWorkflowService = Effect.gen(function* () {
           ),
         ),
       ),
-      Effect.forkScoped,
+      Scope.provide(sources.scope),
+      Effect.forkIn(sources.scope),
     );
 
   const forkPlanningReviewAutoRetry = (input: {
@@ -1570,7 +1573,8 @@ export const makeWorkflowService = Effect.gen(function* () {
           );
         }),
       ),
-      Effect.forkScoped,
+      Scope.provide(sources.scope),
+      Effect.forkIn(sources.scope),
     );
 
   const titleGenerationWorker = yield* makeBackgroundWorker(
@@ -5112,6 +5116,8 @@ export const makeWorkflowService = Effect.gen(function* () {
     );
 
   const start: WorkflowServiceShape["start"] = Effect.gen(function* () {
+    if (sources.stopped) return;
+    yield* Effect.addFinalizer(() => sources.stop);
     yield* reconcileStuckWorkflows.pipe(
       Effect.catchCause((cause) =>
         Effect.logError("WorkflowService.reconcileStuckWorkflows failed", {
@@ -5127,7 +5133,8 @@ export const makeWorkflowService = Effect.gen(function* () {
       ),
     );
     yield* Stream.runForEach(orchestrationEngine.streamDomainEvents, handleDomainEvent).pipe(
-      Effect.forkScoped({ startImmediately: true }),
+      Scope.provide(sources.scope),
+      Effect.forkIn(sources.scope, { startImmediately: true }),
       Effect.asVoid,
     );
   }).pipe(
@@ -6729,6 +6736,12 @@ export const makeWorkflowService = Effect.gen(function* () {
       ),
       Effect.orElseSucceed(() => null),
     );
+
+  yield* registerShutdown("planning-workflows-titles", "drain", () => titleGenerationWorker.drain, [
+    "provider-ingestion",
+  ]);
+
+  yield* Effect.addFinalizer(() => sources.stop);
 
   return {
     start,

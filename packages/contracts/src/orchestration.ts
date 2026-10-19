@@ -1679,6 +1679,20 @@ const ThreadMessageAssistantDeltaCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+// Internal verified-history repair. Live deltas never reopen a completed message.
+const ThreadMessageAssistantReconcileCommand = Schema.Struct({
+  type: Schema.Literal("thread.message.assistant.reconcile"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messageId: MessageId,
+  turnId: TurnId,
+  expectedText: Schema.NullOr(Schema.String),
+  expectedReasoningText: Schema.String,
+  text: Schema.String,
+  reasoningText: Schema.String,
+  createdAt: IsoDateTime,
+});
+
 const ThreadMessageAssistantCompleteCommand = Schema.Struct({
   type: Schema.Literal("thread.message.assistant.complete"),
   commandId: CommandId,
@@ -1865,6 +1879,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadUsageRecordCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
+  ThreadMessageAssistantReconcileCommand,
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadTurnProcessingQuiesceCommand,

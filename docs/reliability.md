@@ -145,16 +145,49 @@ state untouched. Text-only appends preserve timeline/row structure and attachmen
 indexes. Transient text revisions retain at most 32 suffixes/64 KiB, including
 skipped renders; hydration, replacement and expired provenance rebuild safely.
 Reasoning display keeps its whitespace trimming while processing only new suffixes.
-The parser advances long plain paragraphs and fenced code incrementally; other
-active grammars retain the validated parsing path and still need controlled
-operation-count qualification.
+The parser advances long plain paragraphs, fenced code, compatible lists, blockquotes
+and established tables incrementally. Ambiguous syntax and block boundaries retain
+the validated parsing path. Deterministic tests compare the incremental fragments
+with full parsing and bound processed characters over 1,000 appends.
 
-Notification preparation admission, remaining browser streaming work, production lifecycle
-scenarios and the remaining chaos matrix remain open. The real client store now has
-a WebSocket-drop convergence test. Hosted Windows validation, three green main pushes
-and browser/desktop performance qualification remain separate acceptance requirements.
-The server foundation baseline is pinned and recorded in `docs/performance.md`. These changes
-do not establish completion of M0 or the full roadmap.
+Codex notification preparation has entry and byte admission limits, with separate
+capacity for lifecycle/control notifications. A valid large frame can run alone;
+stdout and RPC response handling never wait for preparation. Exhaustion interrupts
+the originating live context, blocks new turns, and publishes an explicit incomplete
+history error after admitted output. The marker is persisted in runtime metadata,
+fenced by instance/generation, and retained through replacement. Verified complete
+plain-text native history can repair completed messages through a separate internal
+command; live deltas still cannot reopen completed messages. Partial, divergent,
+replaced, deleted, reasoning or tool history never clears the marker. Full non-text
+history repair remains required for those cases. Queue entries/bytes/age and provider
+fan-out backlog are observable with static labels.
+
+Shutdown orders provider-event delivery before ingestion, then checkpoints and
+provider command work. It waits for handoffs that are still entering the bounded
+workers. Workflow subscriptions/retry timers, compaction subscriptions and native
+cleanup subscriptions have separate source scopes, closed during admission shutdown;
+their admitted workers participate in the same absolute deadline. Cyclic drain
+ordering is reported as failed rather than hanging teardown.
+
+The chaos suite now uses real sockets and the production router/store for a dropped
+connection and an overflowing slow connection followed by an oversized startup snapshot.
+A separate server process is killed and reopened on the same database before send,
+after native acceptance without acknowledgement, and after acknowledgement plus
+output projection. Unsent intent is replayed once; ambiguous/accepted work is not
+resent. The precise acknowledgement-to-output window still requires an external
+provider history fixture. Restart also exercises a malformed receipt ahead of 65
+stale-generation receipts across pages. A killed log-writer process verifies both
+repair tools against a partial final batch and a subsequent writer reopen.
+
+Remaining qualification includes provider death during a turn, the Claude crash/resume
+coalescing gate, non-text incomplete-history repair, production stop/approval under
+saturation, and qualification of desktop quit/reopen with active streams and terminals. The desktop
+smoke runner now checks active terminal history through backend restart and a full
+app quit/relaunch, but Electron launch remains unavailable on this host. Hosted Windows
+validation and three green main pushes remain separate acceptance requirements.
+The server optimization passes its pinned full comparison in `docs/performance.md`;
+full browser/desktop performance qualification still requires a supported host.
+These results do not establish completion of M0 or the entire roadmap.
 
 ## Durable reactor catch-up design (not enabled)
 

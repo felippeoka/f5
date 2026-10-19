@@ -5830,22 +5830,34 @@ const make = Effect.gen(function* () {
       ),
     { name: "ProviderRuntimeIngestion" },
   );
+  let pendingRuntimeAdmissions = 0;
   const enqueueRuntimeEvent = (event: ProviderRuntimeEvent) =>
-    Effect.suspend(() => {
-      if (!isProviderTerminalRuntimeEvent(event))
-        return worker.enqueue({ source: "runtime", event });
-      if (pendingTerminalEventIds.has(event.eventId)) return Effect.void;
-      pendingTerminalEventIds.add(event.eventId);
-      return worker
-        .enqueue({ source: "runtime", event })
-        .pipe(
-          Effect.onExit((exit) =>
-            Exit.isFailure(exit)
-              ? Effect.sync(() => pendingTerminalEventIds.delete(event.eventId))
-              : Effect.void,
-          ),
-        );
-    });
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        pendingRuntimeAdmissions++;
+      }),
+      () =>
+        Effect.suspend(() => {
+          if (!isProviderTerminalRuntimeEvent(event))
+            return worker.enqueue({ source: "runtime", event });
+          if (pendingTerminalEventIds.has(event.eventId)) return Effect.void;
+          pendingTerminalEventIds.add(event.eventId);
+          return worker
+            .enqueue({ source: "runtime", event })
+            .pipe(
+              Effect.onExit((exit) =>
+                Exit.isFailure(exit)
+                  ? Effect.sync(() => pendingTerminalEventIds.delete(event.eventId))
+                  : Effect.void,
+              ),
+            );
+        }),
+      () =>
+        Effect.sync(() => {
+          pendingRuntimeAdmissions--;
+        }),
+    );
+
   enqueueResolvedUsageLimit = worker.enqueue;
   enqueueAssistantDeltaFlush = (threadId, messageId, commandId) => {
     void Effect.runPromise(
@@ -6084,14 +6096,20 @@ const make = Effect.gen(function* () {
     );
   });
 
-  const drain = worker
-    .enqueue({ source: "command-output-flush-all" })
-    .pipe(
-      Effect.andThen(worker.enqueue({ source: "assistant-delta-flush-all" })),
-      Effect.andThen(worker.drain),
-    );
-  yield* registerShutdown("provider-ingestion", "drain", () =>
-    Effect.sync(() => streamingDeltas.cancelTimers()).pipe(Effect.andThen(drain)),
+  const drain = Effect.gen(function* () {
+    while (pendingRuntimeAdmissions > 0) {
+      yield* worker.drain;
+      yield* Effect.yieldNow;
+    }
+    yield* worker.enqueue({ source: "command-output-flush-all" });
+    yield* worker.enqueue({ source: "assistant-delta-flush-all" });
+    yield* worker.drain;
+  });
+  yield* registerShutdown(
+    "provider-ingestion",
+    "drain",
+    () => Effect.sync(() => streamingDeltas.cancelTimers()).pipe(Effect.andThen(drain)),
+    ["provider-event-delivery"],
   );
 
   return { start, drain } satisfies ProviderRuntimeIngestionShape;

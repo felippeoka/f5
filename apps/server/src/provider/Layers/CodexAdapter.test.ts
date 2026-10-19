@@ -244,6 +244,7 @@ const providerSessionDirectoryTestLayer = Layer.succeed(ProviderSessionDirectory
   listThreadIds: () => Effect.succeed([]),
   listBindings: () => Effect.succeed([]),
   updateMcpStateIfCurrent: () => Effect.succeed(true),
+  updateHistoryReconciliationIfCurrent: () => Effect.succeed(true),
   updateTerminalLifecycleIfCurrent: () => Effect.succeed(true),
   listBindingsByProject: () => Effect.succeed([]),
 });
@@ -3007,5 +3008,106 @@ it.effect(
         assert.deepEqual(logged, ["fifo-output", "fifo-completed"]);
       }).pipe(Effect.provide(layer));
     });
+  },
+);
+
+it.effect(
+  "bounds admitted notification preparation, interrupts on overflow, and refuses ghost turns",
+  () => {
+    const manager = new FakeCodexManager();
+    return Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>(),
+        release = yield* Deferred.make<void>();
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined));
+      const layer = makeCodexAdapterLive({
+        manager,
+        notificationLimits: { entries: 1, bytes: 4096, controls: 2 },
+        nativeEventLogger: {
+          filePath: "overflow.log",
+          close: () => Effect.void,
+          write: () =>
+            Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
+        },
+      }).pipe(
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Layer.provideMerge(providerSessionDirectoryTestLayer),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const adapter = yield* CodexAdapter;
+        const threadId = asThreadId("notification-overflow");
+        const events = yield* adapter.streamEvents.pipe(
+          Stream.take(3),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        const base = {
+          provider: "codex" as const,
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          sessionGeneration: 1,
+          threadId,
+          turnId: asTurnId("overflow-turn"),
+          createdAt: "2026-10-19T00:00:00.000Z",
+        };
+        const delta = (id: string) =>
+          manager.emit("event", {
+            ...base,
+            id: asEventId(id),
+            kind: "notification",
+            method: "item/agentMessage/delta",
+            itemId: asItemId("overflow-item"),
+            textDelta: id,
+            payload: { delta: id },
+          });
+        delta("kept-prefix");
+        yield* Deferred.await(entered);
+        for (let index = 0; index < 100; index++) delta(`unadmitted-${index}`);
+        assert.equal(manager.interruptTurnImpl.mock.calls.length, 1);
+        const error = yield* adapter
+          .sendTurn({ threadId, input: "must not be written" })
+          .pipe(Effect.flip);
+        assert.equal(error._tag, "ProviderAdapterRequestError");
+        if (error._tag === "ProviderAdapterRequestError") {
+          assert.equal(error.deliveryCertainty, "not_sent");
+          assert.equal(error.deliveryRetryable, false);
+        }
+        assert.equal(manager.sendTurnImpl.mock.calls.length, 0);
+        manager.emit("event", {
+          ...base,
+          id: asEventId("overflow-terminal"),
+          kind: "notification",
+          method: "turn/completed",
+          payload: { turn: { id: base.turnId, status: "interrupted" } },
+        });
+        yield* Deferred.succeed(release, undefined);
+        const result = yield* Fiber.join(events);
+        assert.deepEqual(
+          result.map((event) => event.type),
+          ["content.delta", "runtime.error", "turn.completed"],
+        );
+        assert.ok(
+          result.some(
+            (event) =>
+              event.type === "runtime.error" && event.payload.historyReconciliationRequired,
+          ),
+        );
+        assert.equal(result.filter((event) => event.type === "content.delta").length, 1);
+        yield* adapter.acknowledgeHistoryReconciliation!(threadId, "unrelated-marker");
+        const stillBlocked = yield* adapter
+          .sendTurn({ threadId, input: "still blocked" })
+          .pipe(Effect.flip);
+        assert.equal(stillBlocked._tag, "ProviderAdapterRequestError");
+        yield* adapter.acknowledgeHistoryReconciliation!(threadId, "incomplete:unadmitted-0");
+        yield* adapter.sendTurn({ threadId, input: "recovered" });
+        const resumed = yield* adapter.streamEvents.pipe(
+          Stream.take(1),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        delta("after-recovery");
+        assert.equal(Option.getOrThrow(yield* Fiber.join(resumed)).type, "content.delta");
+        assert.equal(manager.sendTurnImpl.mock.calls.length, 1);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped);
   },
 );

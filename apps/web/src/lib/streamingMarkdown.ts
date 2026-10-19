@@ -1,3 +1,4 @@
+import { recordBrowserWork } from "./performanceCounters";
 import { suffixSince, type TextRevision } from "./streamingTextRevision";
 export type StreamingMarkdownBlockKind =
   | "paragraph"
@@ -617,6 +618,7 @@ export function advanceStreamingMarkdown(
       return EMPTY_STREAMING_MARKDOWN_STATE;
     }
 
+    recordBrowserWork("markdownParsedCharacters", nextText.length);
     const parsed = parseStreamingMarkdown(nextText);
     return {
       text: nextText,
@@ -639,6 +641,7 @@ export function advanceStreamingMarkdown(
       textRevision !== undefined ||
       !nextText.startsWith(previous.text))
   ) {
+    recordBrowserWork("markdownParsedCharacters", nextText.length);
     const parsed = parseStreamingMarkdown(nextText);
     return {
       text: nextText,
@@ -664,6 +667,13 @@ export function advanceStreamingMarkdown(
       ? previous.sealedBlocks
       : [...previous.sealedBlocks, ...parsed.sealedBlocks];
 
+  recordBrowserWork(
+    "markdownParsedCharacters",
+    incremental
+      ? (incremental.scannedCharacters ?? suffix.length)
+      : previous.activeBlock.length + suffix.length,
+  );
+  recordBrowserWork("markdownValidatedCharacters", knownSuffix === null ? previous.text.length : 0);
   const result: StreamingMarkdownState = {
     text: nextText,
     textRevision,

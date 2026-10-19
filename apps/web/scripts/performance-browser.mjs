@@ -23,6 +23,7 @@ const context = await browser.newContext({
   reducedMotion: config.reducedMotion,
 });
 await context.addInitScript(() => {
+  window.__f5PerformanceCounters = { work: {}, gauges: {}, rowRenders: Object.create(null) };
   window.__perfStartup = new Promise((resolve) => {
     const ready = () => {
       const row = document.querySelector('[data-message-id="perf-small-message-19"]');
@@ -48,6 +49,7 @@ const report = {
   memory: [],
   errors,
   loaded: {},
+  diagnostics: {},
 };
 const editor = page.locator('[contenteditable="true"]').first();
 const title = (id) =>
@@ -207,7 +209,10 @@ try {
     .getByText(/Streaming frame/)
     .first()
     .waitFor();
+  const beforeStreaming = await page.evaluate(() => window.__f5PerformanceCounters.sample());
   await measure("browser.composer-input-streaming", typeMeasurement, clearEditor);
+  const afterStreaming = await page.evaluate(() => window.__f5PerformanceCounters.sample());
+  report.diagnostics.streaming = { before: beforeStreaming, after: afterStreaming };
   await clearEditor();
   await control("stop-streaming");
   if (minutes > 0) {
@@ -235,6 +240,7 @@ try {
   }
   report.loaded = await control("stats");
   if (errors.length) throw new Error(`Browser runtime errors: ${errors.join("\n")}`);
+  report.diagnostics.final = await page.evaluate(() => window.__f5PerformanceCounters.sample());
   writeFileSync(output, JSON.stringify(report), { flag: "wx" });
 } catch (error) {
   console.error("Fixture diagnostics", await control("stats").catch(() => null));

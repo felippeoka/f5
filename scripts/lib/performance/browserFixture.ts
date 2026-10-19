@@ -182,6 +182,7 @@ export function createBrowserFixture(protocolVersion = 1) {
     commands,
     unknownMethods,
     welcome: {
+      backendIncarnation: "performance-fixture",
       cwd: "/fixture",
       projectName: "Performance fixture",
       bootstrapProjectId: "perf-project",
@@ -203,6 +204,10 @@ export function createBrowserFixture(protocolVersion = 1) {
       switch (body._tag) {
         case "server.probe":
           return { ok: true };
+        case "server.reportClientDiagnostics":
+          return null;
+        case "orchestration.getLatestSequence":
+          return { latestSequence: sequence, backendIncarnation: "performance-fixture" };
         case "orchestration.getRewindDrafts":
           return { threadId: id, drafts: [] };
         case "worktreeSetup.subscribe":

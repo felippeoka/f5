@@ -1,3 +1,4 @@
+import { recordBrowserWork } from "./lib/performanceCounters";
 import { messageListStructure } from "./lib/streamingTextRevision";
 import { Schema } from "effect";
 import {
@@ -1891,6 +1892,7 @@ export function deriveTimelineEntries(
       const identity = timelineStructures.get(cache.result);
       if (identity) timelineStructures.set(result, identity);
       cache.contentUpdates++;
+      recordBrowserWork("timelineContentUpdates");
       cache.result = result;
     }
     return cache.result;
@@ -1899,6 +1901,7 @@ export function deriveTimelineEntries(
     cache.structure = structure;
     cache.otherSources = otherSources;
     cache.structuralDerivations++;
+    recordBrowserWork("timelineDerivations");
   }
   const nextCacheEntries: TimelineEntryCache["entries"] = new Map();
   const reuse = (

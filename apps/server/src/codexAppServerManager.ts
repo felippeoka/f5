@@ -2995,6 +2995,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     const stderr = new Utf8Lines(1024 * 1024, "truncate");
     let stdoutClosed = false;
     let stderrClosed = false;
+    let finishing = false;
     let terminal: { method: string; message: string } | undefined;
     let deadline: ReturnType<typeof setTimeout> | undefined;
     const isCurrent = () => this.sessions.get(context.session.threadId) === context;
@@ -3011,8 +3012,12 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       if (acceptsOutput()) this.handleStdoutLine(context, line);
     };
     const finish = () => {
-      if (!terminal || context.phase === "closed") return;
+      if (!terminal || context.phase === "closed" || finishing) return;
+      finishing = true;
       if (deadline) clearTimeout(deadline);
+      // A descendant can hold stdout open after the provider exits. Finish
+      // bytes already received while the context still accepts notifications.
+      context.output.finish();
       for (const line of stderr.finish()) emitStderr(line);
       context.phase = "closed";
       this.sourceDrains.delete(drained.promise);

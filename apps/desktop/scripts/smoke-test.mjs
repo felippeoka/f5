@@ -452,6 +452,86 @@ try {
       { origin: backendOrigin, expected },
       { timeout: 60_000 },
     );
+  const terminalRequest = (method, body) =>
+    page.evaluate(
+      ({ method, body }) =>
+        new Promise((resolve, reject) => {
+          const socket = new WebSocket(window.desktopBridge.getWsUrl());
+          const controller = new AbortController();
+          const timer = setTimeout(
+            () => finish(new Error(`Terminal smoke request timed out: ${method}`)),
+            15_000,
+          );
+          const finish = (error, value) => {
+            clearTimeout(timer);
+            controller.abort();
+            socket.close();
+            if (error) reject(error);
+            else resolve(value);
+          };
+          socket.addEventListener(
+            "open",
+            () =>
+              socket.send(
+                JSON.stringify({ id: "terminal-smoke", body: { ...body, _tag: method } }),
+              ),
+            { signal: controller.signal },
+          );
+          socket.addEventListener(
+            "message",
+            (event) => {
+              const response = JSON.parse(String(event.data));
+              if (response.id !== "terminal-smoke") return;
+              finish(response.error ? new Error(response.error.message) : null, response.result);
+            },
+            { signal: controller.signal },
+          );
+          socket.addEventListener(
+            "error",
+            () => finish(new Error("Terminal smoke connection failed")),
+            { signal: controller.signal },
+          );
+          socket.addEventListener(
+            "close",
+            () => finish(new Error("Terminal smoke connection closed")),
+            { signal: controller.signal },
+          );
+        }),
+      { method, body },
+    );
+  const terminalInput = {
+    threadId: "desktop-shutdown-smoke",
+    terminalId: "default",
+    cwd: workspace,
+    cols: 80,
+    rows: 24,
+  };
+  const waitForTerminalOutput = async (marker) => {
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      const snapshot = await terminalRequest("terminal.snapshot", {
+        threadId: terminalInput.threadId,
+        terminalId: terminalInput.terminalId,
+      });
+      // The echoed shell command contains the marker once. Require actual
+      // subprocess output as well, rather than passing on that echo alone.
+      if ((snapshot?.history.split(marker).length ?? 1) - 1 >= 3) return snapshot;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error("Terminal smoke subprocess did not emit output");
+  };
+  const startTerminalStream = async (marker) => {
+    await terminalRequest("terminal.open", terminalInput);
+    const script = `process.stdout.write('BEGIN'+String.fromCharCode(10));setInterval(()=>process.stdout.write('${marker}'+String.fromCharCode(10)),100)`;
+    await terminalRequest("terminal.write", {
+      threadId: terminalInput.threadId,
+      terminalId: terminalInput.terminalId,
+      data: `node -e "${script}"\r`,
+    });
+    return waitForTerminalOutput(marker);
+  };
+  const recoveryTerminalMarker = "F5_BACKEND_RECOVERY_OUTPUT";
+  await startTerminalStream(recoveryTerminalMarker);
   const retainedWsUrl = await page.evaluate(() => window.desktopBridge.getWsUrl());
   const retainedRendererUrl = page.url();
   const recoveryCount = () =>
@@ -471,6 +551,9 @@ try {
   const beforeSecondInstance = recoveryCount();
   await application.evaluate(({ app }) => app.emit("second-instance", {}, [], ""));
   await waitForRecovery(beforeSecondInstance);
+  const restoredTerminal = await terminalRequest("terminal.open", terminalInput);
+  if (!restoredTerminal.history.includes(recoveryTerminalMarker))
+    throw new Error("Backend recovery lost terminal history");
   if ((await page.evaluate(() => window.desktopBridge.getWsUrl())) !== retainedWsUrl)
     throw new Error("Reopening changed the retained window's connection");
   if (
@@ -534,6 +617,8 @@ try {
   page.off("dialog", observeUnloadDialog);
   await page.reload();
   await page.locator('[contenteditable="true"]').waitFor({ timeout: 60000 });
+  const quitTerminalMarker = "F5_DESKTOP_QUIT_OUTPUT";
+  await startTerminalStream(quitTerminalMarker);
   const popupEvent = application.waitForEvent("window");
   await application.evaluate(({ BrowserWindow }) => {
     const popup = new BrowserWindow({ width: 320, height: 240, webPreferences: { sandbox: true } });
@@ -564,6 +649,31 @@ try {
   await pressQuit();
   await pressQuit();
   await closed;
+  // Reopen the same isolated profile after a real app quit with a live PTY.
+  application = await _electron.launch({
+    executablePath: requireDesktop("electron"),
+    args: [wrapper],
+    cwd: directory,
+    env,
+    timeout: 60_000,
+  });
+  electronProcess = application.process();
+  for (const stream of [electronProcess.stdout, electronProcess.stderr])
+    stream?.on("data", (chunk) => {
+      output = (output + chunk.toString()).slice(-65_536);
+    });
+  page = await application.firstWindow({ timeout: 60_000 });
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(retainedRendererUrl);
+  await page.locator('[contenteditable="true"]').waitFor({ timeout: 60_000 });
+  const quitHistory = await terminalRequest("terminal.open", terminalInput);
+  if (quitHistory.history.split(quitTerminalMarker).length - 1 < 3)
+    throw new Error("Desktop quit/reopen lost active terminal output");
+  await terminalRequest("terminal.close", {
+    threadId: terminalInput.threadId,
+    terminalId: terminalInput.terminalId,
+  });
+  if (errors.length) throw new Error(errors.join("\n"));
   console.log(
     artifactDirectory
       ? "Desktop smoke test passed."

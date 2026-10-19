@@ -2958,7 +2958,7 @@ const make = Effect.gen(function* () {
       concurrency: 2,
     },
   );
-  yield* registerShutdown("provider-command-work", "drain", () => drain);
+  yield* registerShutdown("provider-command-work", "drain", () => drain, ["provider-ingestion"]);
   return {
     start,
     drain,

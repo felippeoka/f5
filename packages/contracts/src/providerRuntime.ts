@@ -713,6 +713,7 @@ const RuntimeWarningPayload = Schema.Struct({
 export type RuntimeWarningPayload = typeof RuntimeWarningPayload.Type;
 
 const RuntimeErrorPayload = Schema.Struct({
+  historyReconciliationRequired: Schema.optional(Schema.Boolean),
   usageLimit: Schema.optional(RuntimeUsageLimit),
   message: TrimmedNonEmptyStringSchema,
   class: Schema.optional(RuntimeErrorClass),

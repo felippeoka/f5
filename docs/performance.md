@@ -319,3 +319,21 @@ CPU improvement failed. This candidate is not performance-qualified. Reports are
 `.performance/stability-baseline-full-20261019-37.json` and
 `.performance/stability-candidate-full-20261019-45.json`; do not substitute median
 improvements for the documented p95 comparison gate.
+
+The follow-up candidate `f4d4fd0fb30306452d1501819c572b868a1fb036` passes the
+same full comparison against that baseline, including the 20% CPU p95 gate.
+Uncoalesced Claude wall p95 was 6,184.10 ms and CPU p95 was 5,264.97 ms, versus
+9,474.05 and 7,870.84 ms in the baseline. Median wall/CPU were 4,975.99/4,738.49 ms;
+SQL statements were 29,034. All other latency and resource bounds passed.
+The candidate report is `.performance/stability-candidate-full-20261019-53.json`.
+This qualifies the guarded append, token-estimate and cursor updates in that
+pinned source tree; subsequent lifecycle changes still need correctness checks.
+
+The production-browser runner opts into report-only work counters before app startup:
+row renders (a bounded 2,048-row sample), structural/content timeline derivations,
+markdown parsed/validated characters, highlight jobs/bytes, and resource samples for
+hydration buffers, retained messages, WebSocket listeners/timers and pending RPCs.
+Before/after streaming snapshots remain in the browser artifact; numeric final
+samples also enter the interactive report. Ordinary application sessions do not
+collect these counters. This changes the harness digest; older reports remain valid
+for their pinned comparison, but new comparisons require a matching harness baseline.

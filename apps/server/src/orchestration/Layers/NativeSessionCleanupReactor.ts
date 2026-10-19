@@ -1,3 +1,4 @@
+import { makeShutdownSourceScope, registerShutdown } from "../../shutdown.ts";
 /**
  * Deletes a Claude session's local transcript once its F5 thread is deleted.
  *
@@ -19,7 +20,7 @@ import {
 } from "@t3tools/contracts";
 import { makeBackgroundWorker } from "../../backgroundWorker.ts";
 import { providerRuntimeCapabilities } from "@t3tools/shared/providerRuntimeCapabilities";
-import { Cause, Effect, Layer, Option, Stream } from "effect";
+import { Cause, Effect, Layer, Option, Scope, Stream } from "effect";
 
 import { readClaudeResumeState } from "../../provider/claudeResumeState.ts";
 import { ProviderInstanceRegistry } from "../../provider/Services/ProviderInstanceRegistry.ts";
@@ -50,6 +51,7 @@ export function claudeSessionIdOfBinding(
 }
 
 export const makeNativeSessionCleanupReactor = Effect.gen(function* () {
+  const sources = yield* makeShutdownSourceScope("native-session-cleanup-sources");
   const orchestrationEngine = yield* OrchestrationEngineService;
   const directory = yield* ProviderSessionDirectory;
   const instances = yield* ProviderInstanceRegistry;
@@ -148,9 +150,10 @@ export const makeNativeSessionCleanupReactor = Effect.gen(function* () {
       ),
     );
 
-  const start: NativeSessionCleanupReactorShape["start"] = Stream.runForEach(
-    orchestrationEngine.streamDomainEvents,
-    (event) =>
+  const start: NativeSessionCleanupReactorShape["start"] = Effect.gen(function* () {
+    if (sources.stopped) return;
+    yield* Effect.addFinalizer(() => sources.stop);
+    yield* Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) =>
       event.type === "thread.deleted"
         ? captureJob(event.payload.threadId).pipe(
             Effect.flatMap(
@@ -158,7 +161,17 @@ export const makeNativeSessionCleanupReactor = Effect.gen(function* () {
             ),
           )
         : Effect.void,
-  ).pipe(Effect.forkScoped({ startImmediately: true }), Effect.asVoid);
+    ).pipe(
+      Scope.provide(sources.scope),
+      Effect.forkIn(sources.scope, { startImmediately: true }),
+      Effect.asVoid,
+    );
+  });
+
+  yield* registerShutdown("native-session-cleanup", "drain", () => worker.drain, [
+    "provider-ingestion",
+  ]);
+  yield* Effect.addFinalizer(() => sources.stop);
 
   return { start, drain: worker.drain } satisfies NativeSessionCleanupReactorShape;
 });

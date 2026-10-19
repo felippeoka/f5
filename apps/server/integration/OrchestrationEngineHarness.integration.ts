@@ -238,6 +238,10 @@ export interface OrchestrationIntegrationHarness {
 }
 
 interface MakeOrchestrationIntegrationHarnessOptions {
+  /** Caller-owned directory supports crash/restart scenarios without fixture deletion. */
+  readonly rootDir?: string;
+  readonly startReactors?: boolean;
+  readonly prepareAdapter?: (adapter: TestProviderAdapterHarness) => Effect.Effect<void>;
   readonly provider?: "codex";
   readonly realCodex?: boolean;
 }
@@ -259,13 +263,15 @@ export const makeOrchestrationIntegrationHarness = (
           ...makeAdapterRegistryMock({ [adapterHarness.provider]: adapterHarness.adapter }),
         })
       : null;
-    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-orchestration-integration-"));
+    if (adapterHarness && options?.prepareAdapter) yield* options.prepareAdapter(adapterHarness);
+    const rootDir =
+      options?.rootDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "t3-orchestration-integration-"));
     const workspaceDir = path.join(rootDir, "workspace");
     const stateDir = path.join(rootDir, "state");
     const dbPath = path.join(stateDir, "state.sqlite");
     fs.mkdirSync(workspaceDir, { recursive: true });
     fs.mkdirSync(stateDir, { recursive: true });
-    initializeGitWorkspace(workspaceDir);
+    if (!fs.existsSync(path.join(workspaceDir, ".git"))) initializeGitWorkspace(workspaceDir);
 
     const persistenceLayer = makeSqlitePersistenceLive(dbPath);
     const orchestrationLayer = OrchestrationEngineLive.pipe(
@@ -513,9 +519,10 @@ export const makeOrchestrationIntegrationHarness = (
     ).pipe(Effect.orDie);
 
     const scope = yield* Scope.make("sequential");
-    yield* tryRuntimePromise("start OrchestrationReactor", () =>
-      runtime.runPromise(reactor.start.pipe(Scope.provide(scope))),
-    ).pipe(Effect.orDie);
+    if (options?.startReactors !== false)
+      yield* tryRuntimePromise("start OrchestrationReactor", () =>
+        runtime.runPromise(reactor.start.pipe(Scope.provide(scope))),
+      ).pipe(Effect.orDie);
     const receiptHistory = yield* Ref.make<ReadonlyArray<OrchestrationRuntimeReceipt>>([]);
     yield* Stream.runForEach(runtimeReceiptBus.stream, (receipt) =>
       Ref.update(receiptHistory, (history) => [...history, receipt]).pipe(Effect.asVoid),
@@ -652,7 +659,7 @@ export const makeOrchestrationIntegrationHarness = (
       yield* shutdown.pipe(
         Effect.ensuring(
           Effect.sync(() => {
-            fs.rmSync(rootDir, { recursive: true, force: true });
+            if (!options?.rootDir) fs.rmSync(rootDir, { recursive: true, force: true });
           }),
         ),
       );

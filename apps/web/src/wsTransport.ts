@@ -1,3 +1,4 @@
+import { registerBrowserResourceReader } from "./lib/performanceCounters";
 import { raceWithAbort } from "@t3tools/shared/abortSignal";
 import { isReadOnlyRpc, rpcLane } from "@t3tools/shared/rpcScheduling";
 import {
@@ -215,7 +216,15 @@ export class WsTransport {
     }
   };
 
+  private unregisterResourceReader: (() => void) | undefined;
   constructor(url?: string) {
+    this.unregisterResourceReader = registerBrowserResourceReader("transport", () => ({
+      pendingRpcs: this.pending.size,
+      queuedRequests: this.outboundQueue.size,
+      listeners: [...this.listeners.values()].reduce((sum, listeners) => sum + listeners.size, 0),
+      timers: Number(this.reconnectTimer !== null) + Number(this.connectionTimer !== null),
+      connecting: Number(this.authConnectInFlight),
+    }));
     const bridgeUrl = window.desktopBridge?.getWsUrl();
     const envUrl = import.meta.env.VITE_WS_URL as string | undefined;
     this.url =
@@ -440,6 +449,8 @@ export class WsTransport {
   }
 
   dispose() {
+    this.unregisterResourceReader?.();
+    this.unregisterResourceReader = undefined;
     this.disposed = true;
     this.cancelAuthAttempt();
     this.clearConnectionTimer();

@@ -1,10 +1,11 @@
-import { Duration, Effect, Layer, Metric, Option, ServiceMap } from "effect";
+import { Duration, Effect, Exit, Layer, Metric, Option, Scope, ServiceMap } from "effect";
 import { createLogger } from "./logger.ts";
 
 type Phase = "admission" | "flush" | "producers" | "drain" | "logs";
 interface ShutdownStep {
   readonly name: string;
   readonly phase: Phase;
+  readonly after?: ReadonlyArray<string>;
   readonly run: (deadline: number, signal: AbortSignal) => Promise<unknown>;
 }
 export interface ShutdownResult {
@@ -41,10 +42,21 @@ export class ShutdownRegistry {
   private async finish(deadline: number): Promise<ReadonlyArray<ShutdownResult>> {
     const results: ShutdownResult[] = [];
     for (const phase of phases) {
-      await Promise.all(
-        [...this.steps]
-          .filter((step) => step.phase === phase)
-          .map(async (step) => {
+      const remaining = new Set([...this.steps].filter((step) => step.phase === phase));
+      while (remaining.size > 0) {
+        const ready = [...remaining].filter(
+          (step) =>
+            !step.after?.some((name) => [...remaining].some((pending) => pending.name === name)),
+        );
+        if (ready.length === 0) {
+          for (const step of remaining) {
+            logger.warn("shutdown dependency cycle", { phase, component: step.name });
+            results.push({ name: step.name, phase, outcome: "failed", durationMs: 0 });
+          }
+          break;
+        }
+        await Promise.all(
+          ready.map(async (step) => {
             const started = performance.now();
             const controller = new AbortController();
             let timer: ReturnType<typeof setTimeout> | undefined;
@@ -88,7 +100,9 @@ export class ShutdownRegistry {
             }
             results.push({ name: step.name, phase, outcome, durationMs });
           }),
-      );
+        );
+        for (const step of ready) remaining.delete(step);
+      }
     }
     this.steps.clear();
     return results;
@@ -109,6 +123,7 @@ export const registerShutdown = <E, R>(
   name: string,
   phase: Phase,
   work: (deadline: number) => Effect.Effect<unknown, E, R>,
+  after?: ReadonlyArray<string>,
 ) =>
   Effect.gen(function* () {
     const coordinator = yield* Effect.serviceOption(ServerShutdown);
@@ -117,7 +132,28 @@ export const registerShutdown = <E, R>(
     const unregister = coordinator.value.register({
       name,
       phase,
+      ...(after ? { after } : {}),
       run: (deadline, signal) => Effect.runPromiseWith(services)(work(deadline), { signal }),
     });
     yield* Effect.addFinalizer(() => Effect.sync(unregister));
+  });
+
+/** Owns background subscriptions and retry timers separately from admitted workers. */
+export const makeShutdownSourceScope = (name: string) =>
+  Effect.gen(function* () {
+    const scope = yield* Scope.make("sequential");
+    let stopped = false;
+    const stop = Effect.gen(function* () {
+      stopped = true;
+      yield* Scope.close(scope, Exit.void);
+    });
+    yield* Effect.addFinalizer(() => stop);
+    yield* registerShutdown(name, "admission", () => stop);
+    return {
+      scope,
+      stop,
+      get stopped() {
+        return stopped;
+      },
+    };
   });

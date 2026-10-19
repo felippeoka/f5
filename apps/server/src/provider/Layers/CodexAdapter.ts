@@ -1,3 +1,8 @@
+import {
+  registerNotificationQueueResources,
+  providerNotificationOverflows,
+} from "../../observability/Metrics.ts";
+import { NotificationAdmission } from "../notificationAdmission.ts";
 import { ServerShutdown } from "../../shutdown.ts";
 import { observeCodexMcpServers } from "../codexMcpObservation.ts";
 import { mcpProviderReads, mcpContextKey } from "../../mcp/McpReadCoordinator.ts";
@@ -79,7 +84,18 @@ import {
   codexNotificationDisposition,
   codexThreadItemDisposition,
 } from "@t3tools/shared/codexProtocolManifest";
-import { Cause, Effect, Layer, Option, Queue, Schema, ServiceMap, Stream } from "effect";
+import {
+  Semaphore,
+  Cause,
+  Effect,
+  Layer,
+  Metric,
+  Option,
+  Queue,
+  Schema,
+  ServiceMap,
+  Stream,
+} from "effect";
 
 import {
   ProviderAdapterProcessError,
@@ -151,6 +167,7 @@ export function resolveCodexSelectionOptions(input: {
 export interface CodexAdapterLiveOptions {
   readonly getEffectiveModelCapabilities?: () => ReadonlyMap<string, ModelCapabilities>;
   readonly manager?: CodexAppServerManager;
+  readonly notificationLimits?: { entries: number; bytes: number; controls: number };
   readonly makeManager?: (services?: ServiceMap.ServiceMap<never>) => CodexAppServerManager;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
@@ -2722,6 +2739,14 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
 
     const sendTurn: CodexAdapterShape["sendTurn"] = (input) =>
       Effect.gen(function* () {
+        if (incompleteThreads.has(input.threadId))
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "turn/start",
+            detail: "Provider output is incomplete. Reconcile native history before continuing.",
+            deliveryCertainty: "not_sent",
+            deliveryRetryable: false,
+          });
         const codexAttachments = yield* Effect.forEach(
           (input.attachments ?? []).filter((attachment) => attachment.type === "image"),
           (attachment) =>
@@ -3062,11 +3087,66 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
         } finally {
           if (timer) clearTimeout(timer);
         }
-        if (preparationControllers.size)
+        if (preparationControllers.size) {
+          const pending = preparationControllers.size;
           for (const controller of preparationControllers) controller.abort();
+          throw new Error(
+            `Codex shutdown left ${pending} admitted event preparation(s) incomplete.`,
+          );
+        }
       });
 
-    const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const runtimeEventQueue = yield* Queue.bounded<{
+      event: ProviderRuntimeEvent;
+      units: number;
+      lease: symbol;
+      bytes: number;
+    }>(1024);
+    const runtimeEventBudget = yield* Semaphore.make(512);
+    const canonicalQueueResources = new Map<symbol, { bytes: number; admittedAt: number }>();
+    const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
+      Effect.gen(function* () {
+        const bytes = Buffer.byteLength(JSON.stringify(event));
+        const units = Math.min(512, Math.max(1, Math.ceil(bytes / (64 * 1024))));
+        const lease = Symbol();
+        let transferred = false;
+        yield* Effect.acquireUseRelease(
+          runtimeEventBudget.take(units),
+          () =>
+            Effect.sync(() =>
+              canonicalQueueResources.set(lease, { bytes, admittedAt: Date.now() }),
+            ).pipe(
+              Effect.andThen(Queue.offer(runtimeEventQueue, { event, units, lease, bytes })),
+              Effect.tap((accepted) =>
+                Effect.sync(() => {
+                  transferred = accepted;
+                }),
+              ),
+            ),
+          () =>
+            transferred
+              ? Effect.void
+              : Effect.sync(() => canonicalQueueResources.delete(lease)).pipe(
+                  Effect.andThen(runtimeEventBudget.release(units)),
+                ),
+        );
+      });
+    const notificationAdmission = new NotificationAdmission(options?.notificationLimits);
+    const incompleteThreads = new Map<ThreadId, { eventId: string; contextKey: string }>();
+    const incompleteContexts = new Set<string>();
+    const unregisterQueueResources = registerNotificationQueueResources(() => {
+      const native = notificationAdmission.snapshot();
+      const canonical = [...canonicalQueueResources.values()];
+      return {
+        entries: native.entries + native.controls + canonical.length,
+        bytes: native.bytes + canonical.reduce((sum, entry) => sum + entry.bytes, 0),
+        oldestAgeMs: Math.max(
+          native.oldestAgeMs,
+          ...canonical.map((entry) => Date.now() - entry.admittedAt),
+        ),
+      };
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(unregisterQueueResources));
     const prepareRuntimeEvent = yield* makeAutomationRuntimeEventPreparer;
 
     const eventPreparation = new Map<string, Promise<void>>();
@@ -3092,7 +3172,80 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           });
 
         const services = yield* Effect.services<never>();
+        const markIncomplete = (event: ProviderEvent) => {
+          const key = `${event.threadId}:${event.providerInstanceId ?? "legacy"}:${event.sessionGeneration ?? 0}`;
+          if (incompleteContexts.has(key)) return;
+          incompleteContexts.add(key);
+          Effect.runSync(Metric.update(providerNotificationOverflows, 1));
+          const eventId = `incomplete:${event.id}`;
+          const liveGeneration = automationGenerations.get(event.threadId);
+          const ownsCurrent =
+            liveGeneration === undefined ||
+            event.sessionGeneration === undefined ||
+            liveGeneration === event.sessionGeneration;
+          if (ownsCurrent) {
+            incompleteThreads.set(event.threadId, { eventId, contextKey: key });
+            // A retired context must never interrupt its replacement.
+            void manager
+              .interruptTurn(
+                event.threadId,
+                event.turnId ? TurnId.makeUnsafe(String(event.turnId)) : undefined,
+              )
+              .catch(() => {});
+          }
+          const previous = eventPreparation.get(key) ?? Promise.resolve();
+          const reportController = new AbortController();
+          preparationControllers.add(reportController);
+          const report = () =>
+            Effect.runPromiseWith(services)(
+              offerRuntimeEvent({
+                type: "runtime.error",
+                eventId: EventId.makeUnsafe(eventId),
+                provider: PROVIDER,
+                threadId: event.threadId,
+                createdAt: event.createdAt,
+                ...(event.turnId ? { turnId: TurnId.makeUnsafe(String(event.turnId)) } : {}),
+                ...(event.providerInstanceId !== undefined
+                  ? { providerInstanceId: event.providerInstanceId }
+                  : {}),
+                ...(event.sessionGeneration !== undefined
+                  ? { sessionGeneration: event.sessionGeneration }
+                  : {}),
+                payload: {
+                  class: "transport_error",
+                  historyReconciliationRequired: true,
+                  message:
+                    "Provider output is incomplete because notification admission was exhausted. Native history must be reconciled before continuing.",
+                },
+              }),
+              { signal: reportController.signal },
+            );
+          const next = previous.then(report, report);
+          eventPreparation.set(key, next);
+          void next
+            .finally(() => {
+              preparationControllers.delete(reportController);
+              if (eventPreparation.get(key) === next) eventPreparation.delete(key);
+            })
+            .catch(() => {});
+        };
         const listener = (event: ProviderEvent) => {
+          const control =
+            event.kind === "session" ||
+            event.kind === "error" ||
+            /(?:completed|closed|exited|started|requestApproval|requestUserInput)$/.test(
+              event.method,
+            );
+          const contextKey = `${event.threadId}:${event.providerInstanceId ?? "legacy"}:${event.sessionGeneration ?? 0}`;
+          if (incompleteContexts.has(contextKey) && !control) return;
+          const releaseAdmission = notificationAdmission.reserve(
+            Buffer.byteLength(JSON.stringify(event)),
+            control,
+          );
+          if (!releaseAdmission) {
+            markIncomplete(event);
+            return;
+          }
           // Retain synchronously at admission: asynchronous logging/image storage
           // can still be running when a replacement retires this provider process.
           const releaseProvenance = automationEventSanitizer.retain(event.threadId);
@@ -3160,6 +3313,7 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
                   computerDecisions.delete(event.threadId);
                   automationGenerations.delete(event.threadId);
                 }
+                incompleteContexts.delete(key);
                 limitsByThread.delete(key);
                 turnStartedAtByThread.delete(key);
               }
@@ -3172,7 +3326,10 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
                 });
                 return;
               }
-              yield* Queue.offerAll(runtimeEventQueue, safeRuntimeEvents);
+              yield* Effect.forEach(safeRuntimeEvents, offerRuntimeEvent, {
+                concurrency: 1,
+                discard: true,
+              });
             }).pipe(
               Effect.catchCause((cause) =>
                 Cause.hasInterruptsOnly(cause)
@@ -3182,7 +3339,8 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
                         "Codex event preparation failed; history reconciliation required",
                         { threadId: event.threadId, eventId: event.id, cause },
                       );
-                      yield* Queue.offer(runtimeEventQueue, {
+                      markIncomplete(event);
+                      yield* offerRuntimeEvent({
                         type: "runtime.error",
                         eventId: EventId.makeUnsafe(`prepare:${event.id}`),
                         provider: PROVIDER,
@@ -3208,6 +3366,7 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           eventPreparation.set(key, next);
           void next
             .finally(() => {
+              releaseAdmission();
               releaseProvenance();
               preparationControllers.delete(controller);
               if (eventPreparation.get(key) === next) eventPreparation.delete(key);
@@ -3303,7 +3462,22 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           Object.keys(JSON.parse(launchedMcpConfigKeys.get(threadId) ?? "{}") as object),
         ),
       stopAll,
-      streamEvents: Stream.fromQueue(runtimeEventQueue),
+      acknowledgeHistoryReconciliation: (threadId, markerId) =>
+        Effect.sync(() => {
+          const marker = incompleteThreads.get(threadId);
+          if (marker?.eventId === markerId) {
+            incompleteContexts.delete(marker.contextKey);
+            incompleteThreads.delete(threadId);
+          }
+        }),
+      streamEvents: Stream.fromQueue(runtimeEventQueue).pipe(
+        Stream.mapEffect(({ event, units, lease }) =>
+          Effect.sync(() => canonicalQueueResources.delete(lease)).pipe(
+            Effect.andThen(runtimeEventBudget.release(units)),
+            Effect.as(event),
+          ),
+        ),
+      ),
     } satisfies CodexAdapterShape;
   });
 

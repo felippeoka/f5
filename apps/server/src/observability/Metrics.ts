@@ -185,6 +185,27 @@ export const workerQueueBytes = Metric.gauge("f5_worker_queue_bytes");
 export const workerQueueOldestAgeMs = Metric.gauge("f5_worker_queue_oldest_age_ms");
 export const workerFailures = Metric.gauge("f5_worker_failures");
 
+type QueueResources = { entries: number; bytes: number; oldestAgeMs: number };
+const notificationQueues = new Set<() => QueueResources>();
+const runtimeFanouts = new Set<() => Effect.Effect<number>>();
+export const providerRuntimeFanoutBacklog = Metric.gauge("f5_provider_runtime_fanout_backlog");
+export const providerNotificationOverflows = Metric.counter(
+  "f5_provider_notification_overflows_total",
+);
+export function registerProviderRuntimeFanout(read: () => Effect.Effect<number>) {
+  runtimeFanouts.add(read);
+  return () => {
+    runtimeFanouts.delete(read);
+  };
+}
+/** Static family only; instance/thread identities never become metric labels. */
+export function registerNotificationQueueResources(read: () => QueueResources) {
+  notificationQueues.add(read);
+  return () => {
+    notificationQueues.delete(read);
+  };
+}
+
 const EVENT_LOOP_DELAY_SAMPLE_INTERVAL_MS = 250;
 
 /**
@@ -196,6 +217,26 @@ export const sampleEventLoopDelay = Effect.gen(function* () {
   yield* Effect.sleep(Duration.millis(EVENT_LOOP_DELAY_SAMPLE_INTERVAL_MS));
   const lateness = performance.now() - startedAt - EVENT_LOOP_DELAY_SAMPLE_INTERVAL_MS;
   yield* Metric.update(eventLoopDelay, Duration.millis(Math.max(0, lateness)));
+  let fanoutBacklog = 0;
+  for (const read of runtimeFanouts) {
+    const result = yield* Effect.exit(read());
+    if (Exit.isSuccess(result)) fanoutBacklog += result.value;
+  }
+  yield* Metric.update(providerRuntimeFanoutBacklog, fanoutBacklog);
+  const resources = [...notificationQueues].map((read) => read());
+  const notificationAttributes = { worker: "codex-notifications" };
+  yield* Metric.update(
+    Metric.withAttributes(workerQueueEntries, notificationAttributes),
+    resources.reduce((sum, resource) => sum + resource.entries, 0),
+  );
+  yield* Metric.update(
+    Metric.withAttributes(workerQueueBytes, notificationAttributes),
+    resources.reduce((sum, resource) => sum + resource.bytes, 0),
+  );
+  yield* Metric.update(
+    Metric.withAttributes(workerQueueOldestAgeMs, notificationAttributes),
+    Math.max(0, ...resources.map((resource) => resource.oldestAgeMs)),
+  );
   for (const worker of getDrainableWorkerSnapshots()) {
     const attributes = { worker: worker.name };
     yield* Metric.update(Metric.withAttributes(workerQueueEntries, attributes), worker.entries);
