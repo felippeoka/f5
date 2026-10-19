@@ -71,6 +71,7 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
     const failPhase: { current: string | null } = { current: null };
     const preparationControl = { fail: false, block: false };
     const preparationEntered = Deferred.makeUnsafe<void>();
+    const stoppingEntered = Deferred.makeUnsafe<void>();
     const mutationEntered = Deferred.makeUnsafe<void>();
     const mutationControl = { fail: false, block: false, raceBranch: false };
     const discardControl: { failure: "unchanged" | "after_stash" | null } = { failure: null };
@@ -158,15 +159,18 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
             record: Parameters<typeof store.update>[0],
             patch: Parameters<typeof store.update>[1],
           ) =>
-            store
-              .update(record, patch)
-              .pipe(
-                Effect.tap((next) =>
-                  failPhase.current === next.phase
-                    ? Effect.fail(new WorkspaceTransitionError(`crash after ${next.phase}`))
-                    : Effect.void,
-                ),
+            store.update(record, patch).pipe(
+              Effect.tap((next) =>
+                next.phase === "stopping"
+                  ? Deferred.succeed(stoppingEntered, undefined)
+                  : Effect.void,
               ),
+              Effect.tap((next) =>
+                failPhase.current === next.phase
+                  ? Effect.fail(new WorkspaceTransitionError(`crash after ${next.phase}`))
+                  : Effect.void,
+              ),
+            ),
         })),
       ),
     );
@@ -303,6 +307,7 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
       failPhase,
       preparationControl,
       preparationEntered,
+      stoppingEntered,
       mutationControl,
       mutationEntered,
       discardControl,
@@ -321,7 +326,8 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
     await fs.writeFile(path.join(f.repo.root, "README.md"), "staged\n");
     git(f.repo.root, "add", "README.md");
     await fs.writeFile(path.join(f.repo.root, "README.md"), "staged and unstaged\n");
-    await fs.writeFile(path.join(f.repo.root, "binary \n"), Buffer.from([0, 255, 12]));
+    const binaryName = process.platform === "win32" ? "binary file.bin" : "binary \n";
+    await fs.writeFile(path.join(f.repo.root, binaryName), Buffer.from([0, 255, 12]));
     await fs.writeFile(path.join(f.repo.root, "run"), "#!/bin/sh\necho copied\n", { mode: 0o751 });
     await fs.symlink("/outside/never-follow", path.join(f.repo.root, "link"));
     await fs.writeFile(path.join(f.repo.root, ".env"), "secret");
@@ -339,11 +345,17 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
     expect(await fs.readFile(path.join(moved.worktreePath, "README.md"), "utf8")).toBe(
       "staged and unstaged\n",
     );
-    expect(await fs.readFile(path.join(moved.worktreePath, "binary \n"))).toEqual(
+    expect(await fs.readFile(path.join(moved.worktreePath, binaryName))).toEqual(
       Buffer.from([0, 255, 12]),
     );
-    expect((await fs.stat(path.join(moved.worktreePath, "run"))).mode & 0o777).toBe(0o751);
-    expect(await fs.readlink(path.join(moved.worktreePath, "link"))).toBe("/outside/never-follow");
+    expect((await fs.stat(path.join(moved.worktreePath, "run"))).mode & 0o777).toBe(
+      (await fs.stat(path.join(f.repo.root, "run"))).mode & 0o777,
+    );
+    expect(await fs.readlink(path.join(moved.worktreePath, "link"))).toBe(
+      process.platform === "win32"
+        ? path.resolve("/outside/never-follow")
+        : "/outside/never-follow",
+    );
     expect(await fs.stat(path.join(moved.worktreePath, ".env")).catch(() => null)).toBeNull();
     const receipt = await f.runtime.runPromise(
       Effect.flatMap(Effect.service(GitCore), (git) =>
@@ -813,7 +825,9 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
     const moved = await f.runtime.runPromise(
       f.transition.moveThread({ threadId: f.threadId, branch: "symlink-modes" }),
     );
-    expect(await fs.readlink(path.join(moved.worktreePath, "private-link"))).toBe("/never-follow");
+    expect(await fs.readlink(path.join(moved.worktreePath, "private-link"))).toBe(
+      process.platform === "win32" ? path.resolve("/never-follow") : "/never-follow",
+    );
     const { sameMoveFile } = await import("../../git/moveSnapshot.ts");
     const file = { path: "link", sha256: "hash", mode: 0o700, size: 4, symlink: true };
     expect(sameMoveFile(file, { ...file, mode: 0o755 })).toBe(true);
@@ -1331,11 +1345,8 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
     );
     const request = await f.request("checkout_branch", { branch: "topic" });
     const running = f.runtime.runPromise(f.transition.switchWorkspace(request));
-    await vi.waitFor(async () =>
-      expect((await f.runtime.runPromise(f.store.get(request.operationId)))?.phase).toBe(
-        "stopping",
-      ),
-    );
+    await f.runtime.runPromise(Deferred.await(f.stoppingEntered));
+    expect((await f.runtime.runPromise(f.store.get(request.operationId)))?.phase).toBe("stopping");
     await f.runtime.runPromise(
       withWorktreeLifecycleLock(f.repo.root, Effect.void).pipe(Effect.timeout("1 second")),
     );

@@ -1,5 +1,6 @@
+import { getDrainableWorkerSnapshots } from "@t3tools/shared/DrainableWorker";
 import { RotatingFileSink } from "@t3tools/shared/logging";
-import { Duration, Effect, Exit, Metric } from "effect";
+import { Duration, Effect, Exit, Metric, ServiceMap } from "effect";
 import { dual } from "effect/Function";
 
 import {
@@ -135,6 +136,23 @@ export const previewRecordingFramesDroppedTotal = Metric.counter(
   },
 );
 
+export const wsSlowClientClosesTotal = Metric.counter("f5_ws_slow_client_closes_total", {
+  description: "Outbound clients closed after send failure or backlog overflow.",
+});
+export const wsCoalescedPushesReplacedTotal = Metric.counter(
+  "f5_ws_coalesced_pushes_replaced_total",
+  {
+    description: "Pending latest-state pushes replaced or subsumed by another invalidation.",
+  },
+);
+export const wsPushFrameBytes = Metric.histogram("f5_ws_push_frame_bytes", {
+  description: "Encoded push frame bytes before compression.",
+  boundaries: Metric.exponentialBoundaries({ start: 128, factor: 2, count: 20 }),
+});
+export const wsPushQueueDepth = Metric.gauge("f5_ws_push_queue_depth", {
+  description: "Push bus queue entries, sampled every 250 milliseconds.",
+});
+
 export const eventLoopDelay = Metric.timer("t3_event_loop_delay", {
   // One sample per 250 ms sleep, so a short stall between samples can be missed. Its
   // percentiles are not comparable with the perf harness's monitorEventLoopDelay p99.
@@ -162,6 +180,11 @@ export const deliveryAmbiguousTotal = Metric.counter("t3_delivery_ambiguous_tota
   description: "Provider deliveries recorded as ambiguous (sent with unknown outcome).",
 });
 
+export const workerQueueEntries = Metric.gauge("f5_worker_queue_entries");
+export const workerQueueBytes = Metric.gauge("f5_worker_queue_bytes");
+export const workerQueueOldestAgeMs = Metric.gauge("f5_worker_queue_oldest_age_ms");
+export const workerFailures = Metric.gauge("f5_worker_failures");
+
 const EVENT_LOOP_DELAY_SAMPLE_INTERVAL_MS = 250;
 
 /**
@@ -173,6 +196,16 @@ export const sampleEventLoopDelay = Effect.gen(function* () {
   yield* Effect.sleep(Duration.millis(EVENT_LOOP_DELAY_SAMPLE_INTERVAL_MS));
   const lateness = performance.now() - startedAt - EVENT_LOOP_DELAY_SAMPLE_INTERVAL_MS;
   yield* Metric.update(eventLoopDelay, Duration.millis(Math.max(0, lateness)));
+  for (const worker of getDrainableWorkerSnapshots()) {
+    const attributes = { worker: worker.name };
+    yield* Metric.update(Metric.withAttributes(workerQueueEntries, attributes), worker.entries);
+    yield* Metric.update(Metric.withAttributes(workerQueueBytes, attributes), worker.bytes);
+    yield* Metric.update(
+      Metric.withAttributes(workerQueueOldestAgeMs, attributes),
+      worker.oldestAgeMs,
+    );
+    yield* Metric.update(Metric.withAttributes(workerFailures, attributes), worker.failures);
+  }
 }).pipe(Effect.forever, Effect.withTracerEnabled(false));
 
 export const metricAttributes = (attributes: Readonly<Record<string, unknown>>): MetricAttributes =>
@@ -372,7 +405,7 @@ export function serializeMetricSnapshot(
     type: "metric-snapshot",
     recordedAt,
     metrics: snapshots
-      .filter((snapshot) => snapshot.id.startsWith("t3_"))
+      .filter((snapshot) => snapshot.id.startsWith("t3_") || snapshot.id.startsWith("f5_"))
       .map(snapshotToRecord)
       .filter((record): record is LocalMetricRecord => record !== null)
       .toSorted((left, right) => {
@@ -441,3 +474,28 @@ export const terminalSnapshotsTotal = Metric.counter("f5_terminal_snapshots_tota
 export const terminalStateChangesTotal = Metric.counter("f5_terminal_state_changes_total", {
   description: "Published terminal state revisions.",
 });
+
+export const snapshotReadDuration = Metric.timer("f5_snapshot_read_duration", {
+  description: "Consistent snapshot transaction duration, including admission.",
+});
+export const snapshotReadOverruns = Metric.counter("f5_snapshot_read_overruns_total", {
+  description: "Snapshot reads exceeding their cooperative deadline.",
+});
+
+/** Optional deterministic-harness hook; production does no stage timing work when absent. */
+export const PerformanceStageProbe = ServiceMap.Reference<
+  ((stage: string, durationMs: number) => void) | null
+>("t3/observability/PerformanceStageProbe", { defaultValue: () => null });
+export const measurePerformanceStage = <A, E, R>(
+  probe: ((stage: string, durationMs: number) => void) | null,
+  stage: string,
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
+  probe === null
+    ? effect
+    : Effect.suspend(() => {
+        const started = performance.now();
+        return effect.pipe(
+          Effect.ensuring(Effect.sync(() => probe(stage, performance.now() - started))),
+        );
+      });

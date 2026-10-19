@@ -1,3 +1,5 @@
+import { WorktreesThreadStateResult } from "@t3tools/contracts";
+import { Schema } from "effect";
 import { expect, it } from "vitest";
 import { createBrowserFixture } from "./browserFixture";
 
@@ -62,4 +64,12 @@ it("keeps the offered streaming workload bounded under real client delta semanti
   expect(client.size).toBe(10);
   expect(deltas).toBe(1900);
   expect(replacements).toBe(100);
+});
+
+it("answers current workspace recovery reads without creating a transition", () => {
+  const fixture = createBrowserFixture();
+  expect(fixture.rpc({ _tag: "worktrees.getTransition", threadId: "perf-small" })).toBeNull();
+  const state = fixture.rpc({ _tag: "worktrees.threadState", threadId: "perf-small" });
+  expect(Schema.is(WorktreesThreadStateResult)(state)).toBe(true);
+  expect([...fixture.unknownMethods]).toEqual([]);
 });

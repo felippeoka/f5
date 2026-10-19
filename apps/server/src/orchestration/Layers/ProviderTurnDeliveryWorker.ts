@@ -184,36 +184,46 @@ const make = Effect.gen(function* () {
                       ),
                     ),
                   prepared: (snapshot) =>
-                    repository
-                      .recordDispatchIntent({
-                        deliveryId,
-                        attemptId: claimed.attemptId!,
-                        preSendTurnIds:
-                          snapshot?.turns.map((turn) => turn.id) ?? claimed.preSendTurnIds,
-                        historyEvidence: snapshot?.history ?? claimed.historyEvidence ?? null,
-                      })
-                      .pipe(
-                        Effect.mapError(
-                          (cause) =>
+                    Effect.suspend(() =>
+                      engine.isTurnStartSuperseded?.(claimed.event)
+                        ? Effect.fail(
                             new ProviderTurnDeliveryError({
                               certainty: "not_sent",
-                              retryable: true,
-                              detail: "Could not persist provider dispatch intent.",
-                              cause,
+                              retryable: false,
+                              detail: "The session stopped before this turn was sent.",
                             }),
-                        ),
-                        Effect.flatMap((recorded) =>
-                          recorded
-                            ? handoff
-                            : Effect.fail(
-                                new ProviderTurnDeliveryError({
-                                  certainty: "not_sent",
-                                  retryable: false,
-                                  detail: "This delivery attempt no longer owns dispatch.",
-                                }),
+                          )
+                        : repository
+                            .recordDispatchIntent({
+                              deliveryId,
+                              attemptId: claimed.attemptId!,
+                              preSendTurnIds:
+                                snapshot?.turns.map((turn) => turn.id) ?? claimed.preSendTurnIds,
+                              historyEvidence: snapshot?.history ?? claimed.historyEvidence ?? null,
+                            })
+                            .pipe(
+                              Effect.mapError(
+                                (cause) =>
+                                  new ProviderTurnDeliveryError({
+                                    certainty: "not_sent",
+                                    retryable: true,
+                                    detail: "Could not persist provider dispatch intent.",
+                                    cause,
+                                  }),
                               ),
-                        ),
-                      ),
+                              Effect.flatMap((recorded) =>
+                                recorded
+                                  ? handoff
+                                  : Effect.fail(
+                                      new ProviderTurnDeliveryError({
+                                        certainty: "not_sent",
+                                        retryable: false,
+                                        detail: "This delivery attempt no longer owns dispatch.",
+                                      }),
+                                    ),
+                              ),
+                            ),
+                    ),
                 }
               : null,
           ),
@@ -576,7 +586,7 @@ const make = Effect.gen(function* () {
               Effect.catchCause((cause) => Effect.logWarning("delivery wake failed", { cause })),
             )
           : Effect.void,
-    ).pipe(Effect.forkScoped);
+    ).pipe(Effect.forkScoped({ startImmediately: true }));
     yield* Stream.runForEach(Stream.fromPubSub(delayed), ([deliveryId, delayMs]) =>
       Effect.sleep(Duration.millis(delayMs)).pipe(
         Effect.andThen(enqueueById(deliveryId)),

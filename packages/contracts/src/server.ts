@@ -1,4 +1,4 @@
-import { FilesystemPath } from "./baseSchemas";
+import { FilesystemPath, NonNegativeInt } from "./baseSchemas";
 import { Schema } from "effect";
 import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas";
 import { KeybindingRule, KeybindingsConfig, ResolvedKeybindingsConfig } from "./keybindings";
@@ -367,3 +367,23 @@ export const ServerRunProviderUpdateResult = Schema.Struct({
   providers: ServerProviders,
 });
 export type ServerRunProviderUpdateResult = typeof ServerRunProviderUpdateResult.Type;
+
+export const ClientDiagnosticsCounters = Schema.Struct({
+  snapshotSyncs: NonNegativeInt,
+  gapRecoveries: NonNegativeInt,
+  bufferOverflows: NonNegativeInt,
+  poisonBatches: NonNegativeInt,
+  connectedMs: NonNegativeInt,
+});
+export type ClientDiagnosticsCounters = typeof ClientDiagnosticsCounters.Type;
+export const ReportClientDiagnosticsInput = Schema.Struct({
+  sessionId: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+  reportSeq: NonNegativeInt,
+  clientKind: Schema.Literals(["desktop", "web"]),
+  counters: ClientDiagnosticsCounters,
+  applyBatchBuckets: Schema.Array(NonNegativeInt).check(
+    Schema.isMinLength(9),
+    Schema.isMaxLength(9),
+  ),
+});
+export type ReportClientDiagnosticsInput = typeof ReportClientDiagnosticsInput.Type;

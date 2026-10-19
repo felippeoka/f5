@@ -1,5 +1,6 @@
+import { vi } from "vitest";
 import { assert, it } from "@effect/vitest";
-import { Effect, Exit, Metric } from "effect";
+import { Effect, Exit, Metric, Logger } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { sqlConnectionWaitDuration, sqlExecutionDuration } from "../observability/Metrics.ts";
@@ -75,6 +76,38 @@ layer("NodeSqliteClient", (it) => {
       assert.isTrue(Exit.isFailure(yield* Effect.exit(duplicate.values)));
 
       assert.equal((yield* Metric.value(failed)).count - failedBefore, 2);
+    }),
+  );
+  it.effect("logs slow SQL shapes without parameter values on both execution paths", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const messages: unknown[] = [];
+      // Deterministic duration injection keeps timing thresholds out of CI.
+      let elapsed = 0;
+      const clock = vi.spyOn(performance, "now").mockImplementation(() => (elapsed += 101));
+      const query = sql`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<1000) SELECT sum(i), ${"private-bound-value"} FROM n`;
+      yield* Effect.all([query, query.values], { concurrency: 1 }).pipe(
+        Effect.provide(
+          Logger.layer(
+            [
+              Logger.make((options) => {
+                messages.push(options.message);
+              }),
+            ],
+            { mergeWithExisting: false },
+          ),
+        ),
+        Effect.ensuring(Effect.sync(() => clock.mockRestore())),
+      );
+      assert.equal(messages.length, 2);
+      for (const message of messages) {
+        assert.equal((message as unknown[])[0], "slow sql statement");
+        const detail = (message as [string, { durationMs: number; sql: string }])[1];
+        assert.isAbove(detail.durationMs, 100);
+        assert.isAtMost(detail.sql.length, 160);
+        assert.include(detail.sql, "WITH RECURSIVE");
+        assert.notInclude(JSON.stringify(message), "private-bound-value");
+      }
     }),
   );
   for (const values of [false, true]) {

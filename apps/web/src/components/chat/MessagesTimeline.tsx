@@ -649,7 +649,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         return;
       }
       isAtEndRef.current = true;
-      list.scrollToEnd?.({ animated: true });
+      // A submitted turn can be thousands of virtual rows away. Jump to its
+      // measured tail instead of animating through estimated intermediate rows.
+      list.scrollToEnd?.({ animated: !followRequested });
       onIsAtEndChange(true);
     };
     frame = window.requestAnimationFrame(scrollToEndWhenReady);

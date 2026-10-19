@@ -1,3 +1,4 @@
+import { ServerShutdown } from "../../shutdown.ts";
 import { observeCodexMcpServers } from "../codexMcpObservation.ts";
 import { mcpProviderReads, mcpContextKey } from "../../mcp/McpReadCoordinator.ts";
 import {
@@ -78,7 +79,7 @@ import {
   codexNotificationDisposition,
   codexThreadItemDisposition,
 } from "@t3tools/shared/codexProtocolManifest";
-import { Effect, Layer, Queue, Schema, ServiceMap, Stream } from "effect";
+import { Cause, Effect, Layer, Option, Queue, Schema, ServiceMap, Stream } from "effect";
 
 import {
   ProviderAdapterProcessError,
@@ -103,7 +104,11 @@ import type {
   PreviewMcpHttpServerShape,
   PreviewMcpSessionConfig,
 } from "../../mcp/PreviewMcpHttpServer.ts";
-import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import {
+  writeProviderEventLog,
+  type EventNdjsonLogger,
+  makeEventNdjsonLogger,
+} from "./EventNdjsonLogger.ts";
 import { appendProviderAttachmentRuntimeContext } from "../attachmentRuntimeContext.ts";
 
 const PROVIDER = "codex" as const;
@@ -224,6 +229,13 @@ function toRequestError(threadId: ThreadId, method: string, cause: unknown): Pro
     provider: PROVIDER,
     method,
     detail: toMessage(cause, `${method} failed`),
+    ...(asObject(cause)?.deliveryCertainty === "not_sent" ||
+    asObject(cause)?.deliveryCertainty === "unknown"
+      ? {
+          deliveryCertainty: asObject(cause)!.deliveryCertainty as "not_sent" | "unknown",
+          deliveryRetryable: asObject(cause)?.deliveryRetryable === true,
+        }
+      : {}),
     ...(method === "turn/start"
       ? (() => {
           const usageLimit = detectCodexUsageLimit({
@@ -2434,6 +2446,7 @@ function mapToRuntimeEvents(
 export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
   Effect.gen(function* () {
     const serverConfig = yield* Effect.service(ServerConfig);
+    const shutdown = yield* Effect.serviceOption(ServerShutdown);
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make(PROVIDER);
     const nativeEventLogger =
       options?.nativeEventLogger ??
@@ -2476,6 +2489,7 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
     };
     const computerMcpSessions = new Map<ThreadId, PreviewMcpSessionConfig>();
     const previewMcpSessions = new Map<ThreadId, PreviewMcpSessionConfig>();
+    const automationGenerations = new Map<ThreadId, number | undefined>();
     // Sessions pin F5's MCP servers with `-c mcp_servers=...` at launch, so a
     // reload cannot change that set; a different desired set needs a restart.
     const launchedMcpConfigKeys = new Map<ThreadId, string>();
@@ -2681,7 +2695,10 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
         };
 
         return yield* Effect.tryPromise({
-          try: () => manager.startSession(managerInput),
+          try: (signal) => {
+            automationGenerations.set(input.threadId, input.mcpEventIdentity?.sessionGeneration);
+            return manager.startSession(managerInput, signal);
+          },
           catch: (cause) =>
             new ProviderAdapterProcessError({
               provider: PROVIDER,
@@ -3022,7 +3039,7 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
       });
 
     const stopAll: CodexAdapterShape["stopAll"] = () =>
-      Effect.sync(() => {
+      Effect.promise(async () => {
         for (const session of previewMcpSessions.values()) {
           session.dispose();
         }
@@ -3031,15 +3048,32 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
         computerMcpSessions.clear();
         computerDecisions.clear();
         launchedMcpConfigKeys.clear();
-        manager.stopAll();
+        const deadline = Option.getOrUndefined(shutdown)?.deadline ?? Date.now() + 1_800;
+        if (typeof manager.shutdown === "function") await manager.shutdown(deadline);
+        else manager.stopAll();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            Promise.all([...eventPreparation.values()]),
+            new Promise<void>((resolve) => {
+              timer = setTimeout(resolve, Math.max(0, deadline - Date.now()));
+            }),
+          ]);
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+        if (preparationControllers.size)
+          for (const controller of preparationControllers) controller.abort();
       });
 
     const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const prepareRuntimeEvent = yield* makeAutomationRuntimeEventPreparer;
 
-    const turnStartedAtByThread = new Map<ThreadId, string>();
+    const eventPreparation = new Map<string, Promise<void>>();
+    const preparationControllers = new Set<AbortController>();
+    const turnStartedAtByThread = new Map<string, string>();
     const limitsByThread = new Map<
-      ThreadId,
+      string,
       Map<string, { snapshot: CodexLimitSnapshot; observedAt: string }>
     >();
 
@@ -3050,7 +3084,8 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
             if (!nativeEventLogger) {
               return;
             }
-            yield* nativeEventLogger.write(
+            yield* writeProviderEventLog(
+              nativeEventLogger,
               automationEventSanitizer.sanitize(event.threadId, event),
               event.threadId,
             );
@@ -3061,61 +3096,124 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           // Retain synchronously at admission: asynchronous logging/image storage
           // can still be running when a replacement retires this provider process.
           const releaseProvenance = automationEventSanitizer.retain(event.threadId);
-          return Effect.gen(function* () {
-            if (isSyntheticOneOffThreadId(event.threadId)) {
-              return;
-            }
-            yield* writeNativeEvent(event);
-            if (event.method === "turn/started")
-              turnStartedAtByThread.set(event.threadId, event.createdAt);
-            if (event.method === "account/rateLimits/updated") {
-              const snapshot = asObject(asObject(event.payload)?.rateLimits);
-              if (snapshot) {
-                const buckets = limitsByThread.get(event.threadId) ?? new Map();
-                const key = typeof snapshot.limitId === "string" ? snapshot.limitId : "codex";
-                const merged = mergeCodexLimitSnapshot(
-                  buckets.get(key)?.snapshot,
-                  snapshot as CodexLimitSnapshot,
-                );
-                if (merged) buckets.set(key, { snapshot: merged, observedAt: event.createdAt });
-                limitsByThread.set(event.threadId, buckets);
+          const controller = new AbortController();
+          preparationControllers.add(controller);
+          const key = `${event.threadId}:${event.providerInstanceId ?? "legacy"}:${event.sessionGeneration ?? 0}`;
+          const previous = eventPreparation.get(key) ?? Promise.resolve();
+          const prepare = () =>
+            Effect.gen(function* () {
+              if (isSyntheticOneOffThreadId(event.threadId)) {
+                return;
               }
-            }
-            const previewServerName = previewMcpSessions.get(event.threadId)?.serverName;
-            if (event.method === "turn/completed" && event.turnId)
-              computerMcpSessions.get(event.threadId)?.endTurn?.(event.turnId);
-            const runtimeEvents = withAgentBrowserPreview(
-              mapToRuntimeEvents(
-                event,
-                event.threadId,
-                limitsByThread.get(event.threadId)?.get("codex")?.snapshot,
-                [...(limitsByThread.get(event.threadId)?.values() ?? [])],
-                turnStartedAtByThread.get(event.threadId),
+              yield* writeNativeEvent(event);
+              if (event.method === "turn/started") turnStartedAtByThread.set(key, event.createdAt);
+              if (event.method === "account/rateLimits/updated") {
+                const snapshot = asObject(asObject(event.payload)?.rateLimits);
+                if (snapshot) {
+                  const buckets = limitsByThread.get(key) ?? new Map();
+                  const limitKey =
+                    typeof snapshot.limitId === "string" ? snapshot.limitId : "codex";
+                  const merged = mergeCodexLimitSnapshot(
+                    buckets.get(limitKey)?.snapshot,
+                    snapshot as CodexLimitSnapshot,
+                  );
+                  if (merged)
+                    buckets.set(limitKey, { snapshot: merged, observedAt: event.createdAt });
+                  limitsByThread.set(key, buckets);
+                }
+              }
+              const ownsAutomation =
+                automationGenerations.get(event.threadId) === event.sessionGeneration;
+              const previewServerName = ownsAutomation
+                ? previewMcpSessions.get(event.threadId)?.serverName
+                : undefined;
+              if (ownsAutomation && event.method === "turn/completed" && event.turnId)
+                computerMcpSessions.get(event.threadId)?.endTurn?.(event.turnId);
+              const runtimeEvents = withAgentBrowserPreview(
+                mapToRuntimeEvents(
+                  event,
+                  event.threadId,
+                  limitsByThread.get(key)?.get("codex")?.snapshot,
+                  [...(limitsByThread.get(key)?.values() ?? [])],
+                  turnStartedAtByThread.get(key),
+                ),
+                previewServerName,
+                ownsAutomation ? computerMcpSessions.get(event.threadId)?.serverName : undefined,
+                ownsAutomation ? computerDecisions.get(event.threadId) : undefined,
+              );
+              // Redact at admission, before lifecycle cleanup removes provenance.
+              const safeRuntimeEvents = yield* Effect.forEach(runtimeEvents, (runtimeEvent) =>
+                prepareRuntimeEvent({
+                  ...runtimeEvent,
+                  ...(event.providerInstanceId !== undefined
+                    ? { providerInstanceId: event.providerInstanceId }
+                    : {}),
+                  ...(event.sessionGeneration !== undefined
+                    ? { sessionGeneration: event.sessionGeneration }
+                    : {}),
+                }),
+              );
+              if (event.method === "session/exited" || event.method === "session/closed") {
+                if (ownsAutomation) {
+                  computerMcpSessions.get(event.threadId)?.dispose();
+                  computerMcpSessions.delete(event.threadId);
+                  computerDecisions.delete(event.threadId);
+                  automationGenerations.delete(event.threadId);
+                }
+                limitsByThread.delete(key);
+                turnStartedAtByThread.delete(key);
+              }
+              if (runtimeEvents.length === 0) {
+                yield* Effect.logDebug("ignoring unhandled Codex provider event", {
+                  method: event.method,
+                  threadId: event.threadId,
+                  turnId: event.turnId,
+                  itemId: event.itemId,
+                });
+                return;
+              }
+              yield* Queue.offerAll(runtimeEventQueue, safeRuntimeEvents);
+            }).pipe(
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.interrupt
+                  : Effect.gen(function* () {
+                      yield* Effect.logError(
+                        "Codex event preparation failed; history reconciliation required",
+                        { threadId: event.threadId, eventId: event.id, cause },
+                      );
+                      yield* Queue.offer(runtimeEventQueue, {
+                        type: "runtime.error",
+                        eventId: EventId.makeUnsafe(`prepare:${event.id}`),
+                        provider: PROVIDER,
+                        threadId: event.threadId,
+                        createdAt: event.createdAt,
+                        ...(event.providerInstanceId !== undefined
+                          ? { providerInstanceId: event.providerInstanceId }
+                          : {}),
+                        ...(event.sessionGeneration !== undefined
+                          ? { sessionGeneration: event.sessionGeneration }
+                          : {}),
+                        payload: {
+                          class: "transport_error",
+                          message:
+                            "Provider output could not be prepared. Reconcile history before continuing.",
+                        },
+                      });
+                    }),
               ),
-              previewServerName,
-              computerMcpSessions.get(event.threadId)?.serverName,
-              computerDecisions.get(event.threadId),
+              (effect) => Effect.runPromiseWith(services)(effect, { signal: controller.signal }),
             );
-            // Redact at admission, before lifecycle cleanup removes provenance.
-            const safeRuntimeEvents = yield* Effect.forEach(runtimeEvents, prepareRuntimeEvent);
-            if (event.method === "session/exited" || event.method === "session/closed") {
-              computerMcpSessions.get(event.threadId)?.dispose();
-              computerMcpSessions.delete(event.threadId);
-              computerDecisions.delete(event.threadId);
-              limitsByThread.delete(event.threadId);
-              turnStartedAtByThread.delete(event.threadId);
-            }
-            if (runtimeEvents.length === 0) {
-              yield* Effect.logDebug("ignoring unhandled Codex provider event", {
-                method: event.method,
-                threadId: event.threadId,
-                turnId: event.turnId,
-                itemId: event.itemId,
-              });
-              return;
-            }
-            yield* Queue.offerAll(runtimeEventQueue, safeRuntimeEvents);
-          }).pipe(Effect.ensuring(Effect.sync(releaseProvenance)), Effect.runPromiseWith(services));
+          const next = previous.then(prepare, prepare);
+          eventPreparation.set(key, next);
+          void next
+            .finally(() => {
+              releaseProvenance();
+              preparationControllers.delete(controller);
+              if (eventPreparation.get(key) === next) eventPreparation.delete(key);
+            })
+            .catch(() => {});
+          return next;
         };
         manager.on("event", listener);
         return listener;
@@ -3125,6 +3223,21 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           yield* Effect.sync(() => {
             manager.off("event", listener);
           });
+          yield* Effect.promise(() => Promise.allSettled([...eventPreparation.values()])).pipe(
+            Effect.timeoutOption(
+              Math.max(
+                0,
+                (Option.getOrUndefined(shutdown)?.deadline ?? Date.now() + 1_800) - Date.now(),
+              ),
+            ),
+          );
+          if (preparationControllers.size > 0) {
+            yield* Effect.logWarning("Codex event preparation did not drain before shutdown", {
+              pending: preparationControllers.size,
+            });
+            for (const controller of preparationControllers) controller.abort();
+            yield* Effect.promise(() => Promise.allSettled([...eventPreparation.values()]));
+          }
           yield* Queue.shutdown(runtimeEventQueue);
         }),
     );

@@ -4,7 +4,7 @@ import {
   type OrchestrationEvent,
   type ThreadId,
 } from "@t3tools/contracts";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeBackgroundWorker } from "../../backgroundWorker.ts";
 import { Data, Effect, Layer, Schema, Stream } from "effect";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
@@ -525,18 +525,20 @@ const make = Effect.gen(function* () {
       });
     });
 
-  const worker = yield* makeDrainableWorker((threadId: ThreadId) =>
-    Effect.sync(() => {
-      queuedThreadIds.delete(threadId);
-    }).pipe(
-      Effect.flatMap(() => refreshThreadNotes(threadId)),
-      Effect.catchCause((cause) =>
-        Effect.logWarning("session notes refresh failed", {
-          threadId,
-          cause: String(cause),
-        }),
+  const worker = yield* makeBackgroundWorker(
+    (threadId: ThreadId) =>
+      Effect.sync(() => {
+        queuedThreadIds.delete(threadId);
+      }).pipe(
+        Effect.flatMap(() => refreshThreadNotes(threadId)),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("session notes refresh failed", {
+            threadId,
+            cause: String(cause),
+          }),
+        ),
       ),
-    ),
+    { name: "SessionNotesService", key: (item) => String(item) },
   );
 
   const start: SessionNotesServiceShape["start"] = Effect.forkScoped(

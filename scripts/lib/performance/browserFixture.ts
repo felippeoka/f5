@@ -209,6 +209,18 @@ export function createBrowserFixture(protocolVersion = 1) {
           return { snapshot: null, generation: 0, sequence: 0 };
         case "projects.cloneList":
           return [];
+        case "worktrees.getTransition":
+          return null;
+        case "worktrees.threadState":
+          return {
+            recovery: "none",
+            worktreePath: null,
+            branch: "main",
+            directoryExists: true,
+            registration: "none",
+            branchExists: true,
+            defaultBranch: "main",
+          };
         case "server.getProjectSettings":
           return resolveProjectSettings({
             projectId: ProjectId.makeUnsafe(String(body.projectId)),
@@ -244,10 +256,6 @@ export function createBrowserFixture(protocolVersion = 1) {
           return [];
         case "prHub.getThreadLinks":
           return [];
-        case "orchestration.getRewindDrafts":
-          return { threadId: id, drafts: [] };
-        case "worktreeSetup.subscribe":
-          return { snapshot: null, generation: 0, sequence: 0 };
         case "orchestration.getSnapshot":
           return snapshot();
         case "orchestration.getStartupSnapshot":

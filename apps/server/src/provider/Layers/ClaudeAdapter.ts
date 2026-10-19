@@ -221,7 +221,11 @@ import {
   reduceClaudeTurnLifecycle,
   type ClaudeTurnLifecycle,
 } from "./claudeTurnLifecycle.ts";
-import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import {
+  writeProviderEventLog,
+  type EventNdjsonLogger,
+  makeEventNdjsonLogger,
+} from "./EventNdjsonLogger.ts";
 import { resolveClaudeApiModelId } from "./ClaudeProvider.ts";
 import type { PreviewAutomationBrokerShape } from "../../mcp/PreviewAutomationBroker.ts";
 import { type AgentBrowserPolicy, DISABLED_AGENT_BROWSER_POLICY } from "../../mcp/browserAccess.ts";
@@ -310,6 +314,7 @@ interface AssistantTextBlockState {
   readonly itemId: string;
   readonly blockIndex: number;
   emittedTextDelta: boolean;
+  readonly emittedTextParts: string[];
   fallbackText: string;
   streamClosed: boolean;
   completionEmitted: boolean;
@@ -2393,8 +2398,13 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
     // the millisecond. Ordering only matters within a thread, so threads keep
     // separate clocks and a busy thread cannot push others' stamps ahead.
     const nextEventCreatedAt = makeMonotonicIsoClock();
-    const makeEventStamp = (threadId: ThreadId) =>
-      Effect.all({ eventId: nextEventId, createdAt: nextEventCreatedAt(threadId) });
+    const makeEventStamp = (context: ClaudeSessionContext) => {
+      const identity = context.startInput.mcpEventIdentity;
+      return Effect.all({
+        eventId: nextEventId,
+        createdAt: nextEventCreatedAt(context.session.threadId),
+      }).pipe(Effect.map((stamp) => ({ ...stamp, ...identity })));
+    };
     const acquireThreadLock = (threadId: string) =>
       SynchronizedRef.modifyEffect(threadLocksRef, (current) => {
         const existing = Option.fromNullishOr(current.get(threadId));
@@ -2451,10 +2461,11 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         context.configuredBase = config;
         const modelContextWindowTokens = emittedModelContextWindowTokens(context);
 
-        const stamp = yield* makeEventStamp(context.session.threadId);
+        const stamp = yield* makeEventStamp(context);
         yield* offerRuntimeEvent({
           type: "session.configured",
           resumeCursor: context.session.resumeCursor,
+          ...stamp,
           eventId: stamp.eventId,
           provider: PROVIDER,
           createdAt: stamp.createdAt,
@@ -2570,7 +2581,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           const key = JSON.stringify([status, server.error, toolCount]);
           if (context.mcpStatusEmitted.get(server.name) === key) continue;
           context.mcpStatusEmitted.set(server.name, key);
-          const stamp = yield* makeEventStamp(context.session.threadId);
+          const stamp = yield* makeEventStamp(context);
           yield* offerRuntimeEvent({
             ...stamp,
             type: "mcp.status.updated",
@@ -2578,9 +2589,9 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             threadId: context.session.threadId,
             payload: {
               status: {
+                ...context.startInput.mcpEventIdentity,
                 name: server.name,
                 status,
-                ...context.startInput.mcpEventIdentity,
                 ...(server.error ? { error: server.error } : {}),
                 ...(toolCount !== undefined ? { toolCount } : {}),
               },
@@ -2940,7 +2951,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         const observedAt = new Date().toISOString();
         const itemId = sdkNativeItemId(message);
 
-        yield* nativeEventLogger.write(
+        yield* writeProviderEventLog(
+          nativeEventLogger,
           {
             observedAt,
             event: {
@@ -3125,6 +3137,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           itemId: yield* Random.nextUUIDv4,
           blockIndex,
           emittedTextDelta: false,
+          emittedTextParts: [],
           fallbackText: options?.fallbackText ?? "",
           streamClosed: options?.streamClosed ?? false,
           completionEmitted: false,
@@ -3178,9 +3191,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         }
 
         if (!block.emittedTextDelta && block.fallbackText.length > 0) {
-          const deltaStamp = yield* makeEventStamp(context.session.threadId);
+          const deltaStamp = yield* makeEventStamp(context);
           yield* offerRuntimeEvent({
             type: "content.delta",
+            ...deltaStamp,
             eventId: deltaStamp.eventId,
             provider: PROVIDER,
             createdAt: deltaStamp.createdAt,
@@ -3209,9 +3223,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           turnState.assistantTextBlocks.delete(block.blockIndex);
         }
 
-        const stamp = yield* makeEventStamp(context.session.threadId);
+        const stamp = yield* makeEventStamp(context);
         yield* offerRuntimeEvent({
           type: "item.completed",
+          ...stamp,
           eventId: stamp.eventId,
           provider: PROVIDER,
           createdAt: stamp.createdAt,
@@ -3222,6 +3237,9 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             itemType: "assistant_message",
             status: "completed",
             title: "Assistant message",
+            data: {
+              text: block.emittedTextDelta ? block.emittedTextParts.join("") : block.fallbackText,
+            },
             ...(block.fallbackText.length > 0 ? { detail: block.fallbackText } : {}),
           },
           providerRefs: nativeProviderRefs(context),
@@ -3330,9 +3348,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
 
         if (context.lastThreadStartedId !== nextThreadId) {
           context.lastThreadStartedId = nextThreadId;
-          const stamp = yield* makeEventStamp(context.session.threadId);
+          const stamp = yield* makeEventStamp(context);
           yield* offerRuntimeEvent({
             type: "thread.started",
+            ...stamp,
             eventId: stamp.eventId,
             provider: PROVIDER,
             createdAt: stamp.createdAt,
@@ -3360,9 +3379,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
         const turnState = context.turnState;
-        const stamp = yield* makeEventStamp(context.session.threadId);
+        const stamp = yield* makeEventStamp(context);
         yield* offerRuntimeEvent({
           type: "runtime.error",
+          ...stamp,
           eventId: stamp.eventId,
           provider: PROVIDER,
           createdAt: stamp.createdAt,
@@ -3385,9 +3405,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       receipt: ElicitationTerminalReceipt,
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
-        const stamp = yield* makeEventStamp(context.session.threadId);
+        const stamp = yield* makeEventStamp(context);
         yield* offerRuntimeEvent({
           type: "user-input.resolved",
+          ...stamp,
           eventId: stamp.eventId,
           provider: PROVIDER,
           createdAt: stamp.createdAt,
@@ -3442,9 +3463,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
         const turnState = context.turnState;
-        const stamp = yield* makeEventStamp(context.session.threadId);
+        const stamp = yield* makeEventStamp(context);
         yield* offerRuntimeEvent({
           type: "runtime.warning",
+          ...stamp,
           eventId: stamp.eventId,
           provider: PROVIDER,
           createdAt: stamp.createdAt,
@@ -3540,8 +3562,9 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             result,
           }),
         };
-        const stamp = yield* makeEventStamp(context.session.threadId);
+        const stamp = yield* makeEventStamp(context);
         const base = {
+          ...stamp,
           eventId: stamp.eventId,
           provider: PROVIDER,
           createdAt: stamp.createdAt,
@@ -3573,8 +3596,9 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       },
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
-        const stamp = yield* makeEventStamp(context.session.threadId);
+        const stamp = yield* makeEventStamp(context);
         const base = {
+          ...stamp,
           eventId: stamp.eventId,
           provider: PROVIDER,
           createdAt: stamp.createdAt,
@@ -3746,9 +3770,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         context.compactionRecommendationEmitted = true;
         yield* updateResumeCursor(context);
 
-        const stamp = yield* makeEventStamp(context.session.threadId);
+        const stamp = yield* makeEventStamp(context);
         yield* offerRuntimeEvent({
           type: "compaction.recommended",
+          ...stamp,
           eventId: stamp.eventId,
           provider: PROVIDER,
           createdAt: stamp.createdAt,
@@ -3789,9 +3814,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         }
         turnState.capturedProposedPlanKeys.add(captureKey);
 
-        const stamp = yield* makeEventStamp(context.session.threadId);
+        const stamp = yield* makeEventStamp(context);
         yield* offerRuntimeEvent({
           type: "turn.proposed.completed",
+          ...stamp,
           eventId: stamp.eventId,
           provider: PROVIDER,
           createdAt: stamp.createdAt,
@@ -3821,9 +3847,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         const itemId = turnState.openThinkingBlocks.get(index);
         if (itemId === undefined) return;
         turnState.openThinkingBlocks.delete(index);
-        const stamp = yield* makeEventStamp(context.session.threadId);
+        const stamp = yield* makeEventStamp(context);
         yield* offerRuntimeEvent({
           type: "item.completed",
+          ...stamp,
           eventId: stamp.eventId,
           provider: PROVIDER,
           createdAt: stamp.createdAt,
@@ -3901,9 +3928,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             continue;
           }
 
-          const toolStamp = yield* makeEventStamp(context.session.threadId);
+          const toolStamp = yield* makeEventStamp(context);
           yield* offerRuntimeEvent({
             type: "item.completed",
+            ...toolStamp,
             eventId: toolStamp.eventId,
             provider: PROVIDER,
             createdAt: toolStamp.createdAt,
@@ -3991,9 +4019,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         for (const requestId of context.elicitations.forTurn(turnState.turnId))
           yield* settleElicitation(context, requestId, "completed");
 
-        const stamp = yield* makeEventStamp(context.session.threadId);
+        const stamp = yield* makeEventStamp(context);
         yield* offerRuntimeEvent({
           type: "turn.completed",
+          ...stamp,
           eventId: stamp.eventId,
           provider: PROVIDER,
           createdAt: stamp.createdAt,
@@ -4044,9 +4073,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             context.latestUsage =
               event.type === "message_start" ? usage : { ...context.latestUsage, ...usage };
           const modelContextWindowTokens = emittedModelContextWindowTokens(context);
-          const stamp = yield* makeEventStamp(context.session.threadId);
+          const stamp = yield* makeEventStamp(context);
           yield* offerRuntimeEvent({
             type: "thread.token-usage.updated",
+            ...stamp,
             eventId: stamp.eventId,
             provider: PROVIDER,
             createdAt: stamp.createdAt,
@@ -4093,6 +4123,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                   : undefined;
             if (assistantBlockEntry?.block && event.delta.type === "text_delta") {
               assistantBlockEntry.block.emittedTextDelta = true;
+              assistantBlockEntry.block.emittedTextParts.push(deltaText);
             }
             // Thinking deltas carry their block's item id so separate blocks
             // become separate reasoning sections.
@@ -4101,9 +4132,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               (event.delta.type === "thinking_delta"
                 ? context.turnState.openThinkingBlocks.get(event.index)
                 : undefined);
-            const stamp = yield* makeEventStamp(context.session.threadId);
+            const stamp = yield* makeEventStamp(context);
             yield* offerRuntimeEvent({
               type: "content.delta",
+              ...stamp,
               eventId: stamp.eventId,
               provider: PROVIDER,
               createdAt: stamp.createdAt,
@@ -4169,9 +4201,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             };
             context.inFlightTools.set(event.index, nextTool);
 
-            const stamp = yield* makeEventStamp(context.session.threadId);
+            const stamp = yield* makeEventStamp(context);
             yield* offerRuntimeEvent({
               type: "item.updated",
+              ...stamp,
               eventId: stamp.eventId,
               provider: PROVIDER,
               createdAt: stamp.createdAt,
@@ -4224,9 +4257,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             turnState.thinkingBlockCount += 1;
             const itemId = `${turnState.turnId}:thinking:${turnState.thinkingBlockCount}`;
             turnState.openThinkingBlocks.set(index, itemId);
-            const stamp = yield* makeEventStamp(context.session.threadId);
+            const stamp = yield* makeEventStamp(context);
             yield* offerRuntimeEvent({
               type: "item.started",
+              ...stamp,
               eventId: stamp.eventId,
               provider: PROVIDER,
               createdAt: stamp.createdAt,
@@ -4279,9 +4313,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           };
           context.inFlightTools.set(index, tool);
 
-          const stamp = yield* makeEventStamp(context.session.threadId);
+          const stamp = yield* makeEventStamp(context);
           yield* offerRuntimeEvent({
             type: "item.started",
+            ...stamp,
             eventId: stamp.eventId,
             provider: PROVIDER,
             createdAt: stamp.createdAt,
@@ -4396,9 +4431,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               result,
             });
 
-            const updatedStamp = yield* makeEventStamp(context.session.threadId);
+            const updatedStamp = yield* makeEventStamp(context);
             yield* offerRuntimeEvent({
               type: "item.updated",
+              ...updatedStamp,
               eventId: updatedStamp.eventId,
               provider: PROVIDER,
               createdAt: updatedStamp.createdAt,
@@ -4423,9 +4459,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
 
             const streamKind = toolResultStreamKind(tool.itemType);
             if (streamKind && toolResult.text.length > 0 && context.turnState) {
-              const deltaStamp = yield* makeEventStamp(context.session.threadId);
+              const deltaStamp = yield* makeEventStamp(context);
               yield* offerRuntimeEvent({
                 type: "content.delta",
+                ...deltaStamp,
                 eventId: deltaStamp.eventId,
                 provider: PROVIDER,
                 createdAt: deltaStamp.createdAt,
@@ -4483,9 +4520,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             result: toolResult.block,
           });
 
-          const updatedStamp = yield* makeEventStamp(context.session.threadId);
+          const updatedStamp = yield* makeEventStamp(context);
           yield* offerRuntimeEvent({
             type: "item.updated",
+            ...updatedStamp,
             eventId: updatedStamp.eventId,
             provider: PROVIDER,
             createdAt: updatedStamp.createdAt,
@@ -4510,9 +4548,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
 
           const streamKind = toolResultStreamKind(tool.itemType);
           if (streamKind && toolResult.text.length > 0 && context.turnState) {
-            const deltaStamp = yield* makeEventStamp(context.session.threadId);
+            const deltaStamp = yield* makeEventStamp(context);
             yield* offerRuntimeEvent({
               type: "content.delta",
+              ...deltaStamp,
               eventId: deltaStamp.eventId,
               provider: PROVIDER,
               createdAt: deltaStamp.createdAt,
@@ -4532,9 +4571,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             });
           }
 
-          const completedStamp = yield* makeEventStamp(context.session.threadId);
+          const completedStamp = yield* makeEventStamp(context);
           yield* offerRuntimeEvent({
             type: "item.completed",
+            ...completedStamp,
             eventId: completedStamp.eventId,
             provider: PROVIDER,
             createdAt: completedStamp.createdAt,
@@ -4559,9 +4599,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           });
 
           if (tool.itemType === "file_change" && context.turnState) {
-            const diffStamp = yield* makeEventStamp(context.session.threadId);
+            const diffStamp = yield* makeEventStamp(context);
             yield* offerRuntimeEvent({
               type: "turn.diff.updated",
+              ...diffStamp,
               eventId: diffStamp.eventId,
               provider: PROVIDER,
               createdAt: diffStamp.createdAt,
@@ -4623,7 +4664,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               context.taskStates.set(taskId, { ...task, model });
               yield* offerRuntimeEvent({
                 type: "task.progress",
-                ...(yield* makeEventStamp(context.session.threadId)),
+                ...(yield* makeEventStamp(context)),
                 provider: PROVIDER,
                 threadId: context.session.threadId,
                 ...(task.turnId ? { turnId: task.turnId } : {}),
@@ -4663,9 +4704,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             activeTurnId: turnId,
             updatedAt: startedAt,
           };
-          const turnStartedStamp = yield* makeEventStamp(context.session.threadId);
+          const turnStartedStamp = yield* makeEventStamp(context);
           yield* offerRuntimeEvent({
             type: "turn.started",
+            ...turnStartedStamp,
             eventId: turnStartedStamp.eventId,
             provider: PROVIDER,
             createdAt: turnStartedStamp.createdAt,
@@ -4911,8 +4953,9 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           return;
         }
 
-        const stamp = yield* makeEventStamp(context.session.threadId);
+        const stamp = yield* makeEventStamp(context);
         const base = {
+          ...stamp,
           eventId: stamp.eventId,
           provider: PROVIDER,
           createdAt: stamp.createdAt,
@@ -5338,8 +5381,9 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       message: SDKMessage,
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
-        const stamp = yield* makeEventStamp(context.session.threadId);
+        const stamp = yield* makeEventStamp(context);
         const base = {
+          ...stamp,
           eventId: stamp.eventId,
           provider: PROVIDER,
           createdAt: stamp.createdAt,
@@ -5546,9 +5590,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             context.compactionRecommendationEmitted = false;
             // ensureThreadId already adopted the harness-reported session_id.
             yield* updateResumeCursor(context);
-            const resetStamp = yield* makeEventStamp(context.session.threadId);
+            const resetStamp = yield* makeEventStamp(context);
             yield* offerRuntimeEvent({
               type: "thread.state.changed",
+              ...resetStamp,
               eventId: resetStamp.eventId,
               provider: PROVIDER,
               createdAt: resetStamp.createdAt,
@@ -5561,7 +5606,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           case "prompt_suggestion": {
             if (context.queryOptions.promptSuggestions !== true || !message.suggestion.trim())
               return;
-            const stamp = yield* makeEventStamp(context.session.threadId);
+            const stamp = yield* makeEventStamp(context);
             yield* offerRuntimeEvent({
               ...stamp,
               provider: PROVIDER,
@@ -5802,7 +5847,8 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         });
         if (!nativeEventLogger) return;
         const observedAt = new Date().toISOString();
-        yield* nativeEventLogger.write(
+        yield* writeProviderEventLog(
+          nativeEventLogger,
           {
             observedAt,
             event: {
@@ -5882,9 +5928,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           // two `request.resolved` events per cancelled approval.
           pending.resolvedExternally = true;
           yield* Deferred.succeed(pending.decision, "cancel");
-          const stamp = yield* makeEventStamp(context.session.threadId);
+          const stamp = yield* makeEventStamp(context);
           yield* offerRuntimeEvent({
             type: "request.resolved",
+            ...stamp,
             eventId: stamp.eventId,
             provider: PROVIDER,
             createdAt: stamp.createdAt,
@@ -5904,9 +5951,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           const emptyAnswers = {} as ProviderUserInputAnswers;
           pending.resolvedExternally = true;
           pending.cancel();
-          const stamp = yield* makeEventStamp(context.session.threadId);
+          const stamp = yield* makeEventStamp(context);
           yield* offerRuntimeEvent({
             type: "user-input.resolved",
+            ...stamp,
             eventId: stamp.eventId,
             provider: PROVIDER,
             createdAt: stamp.createdAt,
@@ -5995,7 +6043,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
 
         for (const task of context.taskStates.values()) {
           yield* offerRuntimeEvent({
-            ...(yield* makeEventStamp(context.session.threadId)),
+            ...(yield* makeEventStamp(context)),
             type: "task.completed",
             provider: PROVIDER,
             threadId: context.session.threadId,
@@ -6030,9 +6078,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         };
 
         if (options?.emitExitEvent !== false) {
-          const stamp = yield* makeEventStamp(context.session.threadId);
+          const stamp = yield* makeEventStamp(context);
           yield* offerRuntimeEvent({
             type: "session.exited",
+            ...stamp,
             eventId: stamp.eventId,
             provider: PROVIDER,
             createdAt: stamp.createdAt,
@@ -6502,9 +6551,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             };
 
             // Emit user-input.requested so the UI can present the questions.
-            const requestedStamp = yield* makeEventStamp(context.session.threadId);
+            const requestedStamp = yield* makeEventStamp(context);
             yield* offerRuntimeEvent({
               type: "user-input.requested",
+              ...requestedStamp,
               eventId: requestedStamp.eventId,
               provider: PROVIDER,
               createdAt: requestedStamp.createdAt,
@@ -6548,9 +6598,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             // already emitted it on our behalf; otherwise consumers see a
             // duplicate terminal event for the same request.
             if (!pendingInput.resolvedExternally) {
-              const resolvedStamp = yield* makeEventStamp(context.session.threadId);
+              const resolvedStamp = yield* makeEventStamp(context);
               yield* offerRuntimeEvent({
                 type: "user-input.resolved",
+                ...resolvedStamp,
                 eventId: resolvedStamp.eventId,
                 provider: PROVIDER,
                 createdAt: resolvedStamp.createdAt,
@@ -6666,9 +6717,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                 Effect.runFork(settleElicitation(context, requestId, "aborted"));
               };
               callbackOptions.signal.addEventListener("abort", onAbort, { once: true });
-              const stamp = yield* makeEventStamp(context.session.threadId);
+              const stamp = yield* makeEventStamp(context);
               yield* offerRuntimeEvent({
                 type: "user-input.requested",
+                ...stamp,
                 eventId: stamp.eventId,
                 provider: PROVIDER,
                 createdAt: stamp.createdAt,
@@ -6828,9 +6880,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                 // `resolved` event too: the timeline keeps a record of what was
                 // asked, and the UI does not leave an unanswerable question card
                 // open (pending requests are only closed by a `resolved` event).
-                const stamp = yield* makeEventStamp(context.session.threadId);
+                const stamp = yield* makeEventStamp(context);
                 yield* offerRuntimeEvent({
                   type: "user-input.requested",
+                  ...stamp,
                   eventId: stamp.eventId,
                   provider: PROVIDER,
                   createdAt: stamp.createdAt,
@@ -6849,9 +6902,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                     payload: { toolName, input: toolInput },
                   },
                 });
-                const declinedStamp = yield* makeEventStamp(context.session.threadId);
+                const declinedStamp = yield* makeEventStamp(context);
                 yield* offerRuntimeEvent({
                   type: "user-input.resolved",
+                  ...declinedStamp,
                   eventId: declinedStamp.eventId,
                   provider: PROVIDER,
                   createdAt: declinedStamp.createdAt,
@@ -6914,9 +6968,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                 const requestId = ApprovalRequestId.makeUnsafe(yield* Random.nextUUIDv4);
                 const requestType = classifyRequestType(toolName);
                 const detail = summarizeToolRequest(toolName, toolInput);
-                const stamp = yield* makeEventStamp(context.session.threadId);
+                const stamp = yield* makeEventStamp(context);
                 yield* offerRuntimeEvent({
                   type: "request.opened",
+                  ...stamp,
                   eventId: stamp.eventId,
                   provider: PROVIDER,
                   createdAt: stamp.createdAt,
@@ -6939,9 +6994,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                     payload: { toolName, input: toolInput },
                   },
                 });
-                const resolvedStamp = yield* makeEventStamp(context.session.threadId);
+                const resolvedStamp = yield* makeEventStamp(context);
                 yield* offerRuntimeEvent({
                   type: "request.resolved",
+                  ...resolvedStamp,
                   eventId: resolvedStamp.eventId,
                   provider: PROVIDER,
                   createdAt: resolvedStamp.createdAt,
@@ -7000,9 +7056,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                 ...(presentation ? { presentation } : {}),
               };
 
-              const requestedStamp = yield* makeEventStamp(context.session.threadId);
+              const requestedStamp = yield* makeEventStamp(context);
               yield* offerRuntimeEvent({
                 type: "request.opened",
+                ...requestedStamp,
                 eventId: requestedStamp.eventId,
                 provider: PROVIDER,
                 createdAt: requestedStamp.createdAt,
@@ -7057,9 +7114,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               // Skip duplicate `request.resolved` when the interrupt path
               // already emitted the terminal event for this approval.
               if (!pendingApproval.resolvedExternally) {
-                const resolvedStamp = yield* makeEventStamp(context.session.threadId);
+                const resolvedStamp = yield* makeEventStamp(context);
                 yield* offerRuntimeEvent({
                   type: "request.resolved",
+                  ...resolvedStamp,
                   eventId: resolvedStamp.eventId,
                   provider: PROVIDER,
                   createdAt: resolvedStamp.createdAt,
@@ -7761,9 +7819,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           });
         }
 
-        const sessionStartedStamp = yield* makeEventStamp(threadId);
+        const sessionStartedStamp = yield* makeEventStamp(context);
         yield* offerRuntimeEvent({
           type: "session.started",
+          ...sessionStartedStamp,
           eventId: sessionStartedStamp.eventId,
           provider: PROVIDER,
           createdAt: sessionStartedStamp.createdAt,
@@ -7785,9 +7844,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           );
         yield* emitSessionConfigured(context, configuredBase);
 
-        const readyStamp = yield* makeEventStamp(threadId);
+        const readyStamp = yield* makeEventStamp(context);
         yield* offerRuntimeEvent({
           type: "session.state.changed",
+          ...readyStamp,
           eventId: readyStamp.eventId,
           provider: PROVIDER,
           createdAt: readyStamp.createdAt,
@@ -8041,10 +8101,11 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           updatedAt,
         };
 
-        const turnStartedStamp = yield* makeEventStamp(context.session.threadId);
+        const turnStartedStamp = yield* makeEventStamp(context);
         yield* ensureLive;
         yield* offerRuntimeEvent({
           type: "turn.started",
+          ...turnStartedStamp,
           eventId: turnStartedStamp.eventId,
           provider: PROVIDER,
           createdAt: turnStartedStamp.createdAt,

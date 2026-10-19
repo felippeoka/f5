@@ -2,7 +2,7 @@ import type { WebSocket } from "ws";
 import { it } from "@effect/vitest";
 import { describe, expect } from "vitest";
 import { Deferred, Effect, Fiber, Ref } from "effect";
-import { ThreadId, WS_CHANNELS } from "@t3tools/contracts";
+import { ProviderInstanceId, ProjectId, ThreadId, WS_CHANNELS } from "@t3tools/contracts";
 
 import { makeServerPushBus, makeWebSocketSendController, pushCoalescingKey } from "./pushBus";
 
@@ -109,6 +109,92 @@ describe("makeServerPushBus", () => {
 
     expect(first).not.toBe(second);
   });
+
+  it("keys Git and MCP invalidations by their complete scope", () => {
+    expect(pushCoalescingKey(WS_CHANNELS.gitStatusInvalidated, { cwd: "/a" })).not.toBe(
+      pushCoalescingKey(WS_CHANNELS.gitStatusInvalidated, { cwd: "/b" }),
+    );
+    expect(pushCoalescingKey(WS_CHANNELS.gitStatusInvalidated, { cwd: null })).toBe(
+      WS_CHANNELS.gitStatusInvalidated,
+    );
+    const base = {
+      instanceId: ProviderInstanceId.makeUnsafe("codex"),
+      provider: "codex",
+      scope: "project",
+      reason: "runtime",
+    } as const;
+    expect(
+      pushCoalescingKey(WS_CHANNELS.mcpStatusUpdated, {
+        ...base,
+        projectId: ProjectId.makeUnsafe("a"),
+      }),
+    ).not.toBe(
+      pushCoalescingKey(WS_CHANNELS.mcpStatusUpdated, {
+        ...base,
+        projectId: ProjectId.makeUnsafe("b"),
+      }),
+    );
+    expect(pushCoalescingKey(WS_CHANNELS.mcpStatusUpdated, { ...base, scope: "common" })).not.toBe(
+      pushCoalescingKey(WS_CHANNELS.mcpStatusUpdated, base),
+    );
+    expect(
+      pushCoalescingKey(WS_CHANNELS.mcpStatusUpdated, {
+        ...base,
+        instanceId: ProviderInstanceId.makeUnsafe("another"),
+      }),
+    ).not.toBe(pushCoalescingKey(WS_CHANNELS.mcpStatusUpdated, base));
+  });
+
+  for (const scopes of [
+    ["/a", "/b"],
+    ["/a", null, "/b"],
+    [null, "/a"],
+    ["/a", "/b", null],
+  ]) {
+    it.live(`preserves scoped invalidations and global coverage (${JSON.stringify(scopes)})`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = new MockWebSocket();
+          const clients = yield* Ref.make(new Set([client as unknown as WebSocket]));
+          const started = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          const pushBus = yield* makeServerPushBus({
+            clients,
+            logOutgoingPush: () => {},
+            sendClient: (_client, message) =>
+              message.includes(WS_CHANNELS.serverWelcome)
+                ? Deferred.succeed(started, undefined).pipe(
+                    Effect.andThen(Deferred.await(release)),
+                    Effect.as(true),
+                  )
+                : Effect.sync(() => {
+                    client.send(message);
+                    return true;
+                  }),
+          });
+          const welcome = yield* Effect.forkScoped(
+            pushBus.publishClient(client as unknown as WebSocket, WS_CHANNELS.serverWelcome, {
+              cwd: "/project",
+              projectName: "project",
+            }),
+          );
+          yield* Deferred.await(started);
+          for (const cwd of scopes)
+            yield* pushBus.publishAll(WS_CHANNELS.gitStatusInvalidated, { cwd });
+          yield* Deferred.succeed(release, undefined);
+          yield* Fiber.join(welcome);
+          // A targeted sentinel proves every earlier queued entry was processed.
+          yield* pushBus.publishClient(client as unknown as WebSocket, WS_CHANNELS.serverWelcome, {
+            cwd: "/sentinel",
+            projectName: "sentinel",
+          });
+          expect(client.sent.map((message) => JSON.parse(message).data.cwd)).toEqual(
+            scopes.includes(null) ? [null] : scopes,
+          );
+        }),
+      ),
+    );
+  }
 
   it.live("waits for the welcome push before a new client joins broadcast delivery", () =>
     Effect.scoped(

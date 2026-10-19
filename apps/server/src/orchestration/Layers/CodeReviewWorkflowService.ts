@@ -13,7 +13,7 @@ import {
   type OrchestrationEvent,
 } from "@t3tools/contracts";
 import { Cause, Effect, Layer, Stream } from "effect";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeBackgroundWorker } from "../../backgroundWorker.ts";
 
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
 import { buildFallbackTitle, resolveBestEffortGeneratedTitle } from "../../threadTitle.ts";
@@ -667,7 +667,7 @@ export const makeCodeReviewWorkflowService = Effect.gen(function* () {
       );
     });
 
-  const titleGenerationWorker = yield* makeDrainableWorker(
+  const titleGenerationWorker = yield* makeBackgroundWorker(
     (item: CodeReviewWorkflowTitleGenerationWorkItem) =>
       Effect.gen(function* () {
         const snapshot = yield* orchestrationEngine.getReadModel();
@@ -726,6 +726,7 @@ export const makeCodeReviewWorkflowService = Effect.gen(function* () {
           }),
         ),
       ),
+    { name: "CodeReviewWorkflowService", key: (item) => String(item.workflowId) },
   );
 
   const maybeStartConsolidation = (
@@ -1417,7 +1418,7 @@ export const makeCodeReviewWorkflowService = Effect.gen(function* () {
         : domainEvents;
     yield* Stream.runForEach(work, (item) =>
       item.kind === "event" ? handleDomainEvent(item.event) : handleDeliveryOutcome(item.outcome),
-    ).pipe(Effect.forkScoped, Effect.asVoid);
+    ).pipe(Effect.forkScoped({ startImmediately: true }), Effect.asVoid);
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.logError("CodeReviewWorkflowService.start failed", { cause }).pipe(

@@ -117,6 +117,7 @@ export interface NextTurnQueueStoreShape {
   readonly listByThread: (
     threadId: ThreadId,
   ) => Effect.Effect<NextTurnQueueThreadData, NextTurnQueueError>;
+  /** At most 64 actionable threads; successive reads rotate fairly through the inventory. */
   readonly listActionableThreadIds: Effect.Effect<ReadonlyArray<ThreadId>, NextTurnQueueError>;
   readonly getItem: (
     itemId: CommandId,

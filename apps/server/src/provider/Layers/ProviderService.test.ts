@@ -1,3 +1,4 @@
+import { ProviderControlTarget } from "../controlTarget.ts";
 import { PreviewAutomationBroker } from "../../mcp/PreviewAutomationBroker.ts";
 import { ComputerAutomationBroker } from "../../computer/ComputerAutomationBroker.ts";
 import { readPersistedSessionGeneration } from "../sessionCapabilities.ts";
@@ -4007,6 +4008,53 @@ it.effect(
         assert.equal(event.payload.status.sessionGeneration, 2);
     }).pipe(
       Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]))),
+    );
+  },
+);
+
+it.effect.each(["interrupt", "approval", "input", "stop"] as const)(
+  "refuses a stale %s target after acquiring provider thread ownership",
+  (control) => {
+    const codex = makeFakeCodexAdapter();
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const threadId = asThreadId(`stale-${control}`);
+      const start = {
+        provider: "codex" as const,
+        threadId,
+        cwd: process.cwd(),
+        runtimeMode: "full-access" as const,
+      };
+      const first = yield* service.startSession(threadId, start);
+      yield* service.startSession(threadId, start);
+      codex.stopSession.mockClear();
+      const requestId = ApprovalRequestId.makeUnsafe("old-request");
+      const action =
+        control === "stop"
+          ? service.stopSession({ threadId })
+          : control === "interrupt"
+            ? service.interruptTurn({ threadId })
+            : control === "approval"
+              ? service.respondToRequest({ threadId, requestId, decision: "accept" })
+              : service.respondToUserInput({ threadId, requestId, answers: {} });
+      const error = yield* action.pipe(
+        Effect.provideService(ProviderControlTarget, {
+          threadId,
+          provider: "codex",
+          instanceId: "codex",
+          generation: first.capabilities!.generation,
+          activeTurnId: null,
+        }),
+        Effect.flip,
+      );
+      assert.equal(error._tag, "ProviderValidationError");
+      assert.equal(codex.stopSession.mock.calls.length, 0);
+      assert.equal(codex.interruptTurn.mock.calls.length, 0);
+      assert.equal(codex.respondToRequest.mock.calls.length, 0);
+      assert.equal(codex.respondToUserInput.mock.calls.length, 0);
+      assert.equal((yield* service.listSessions()).length, 1);
+    }).pipe(
+      Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", codex.adapter]]))),
     );
   },
 );

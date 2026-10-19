@@ -26,7 +26,7 @@ import {
   validateDocumentArtifact,
   type DocumentValidationResult,
 } from "@t3tools/shared/documentWorkflow";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeBackgroundWorker } from "../../backgroundWorker.ts";
 import { readToolActivityPayload } from "@t3tools/shared/orchestrationActivityPayload";
 import { planningWorkflowBranchFailureStage } from "@t3tools/shared/planningWorkflow";
 import {
@@ -1573,7 +1573,7 @@ export const makeWorkflowService = Effect.gen(function* () {
       Effect.forkScoped,
     );
 
-  const titleGenerationWorker = yield* makeDrainableWorker(
+  const titleGenerationWorker = yield* makeBackgroundWorker(
     (item: WorkflowTitleGenerationWorkItem) =>
       Effect.gen(function* () {
         const snapshot = yield* orchestrationEngine.getReadModel();
@@ -1628,6 +1628,7 @@ export const makeWorkflowService = Effect.gen(function* () {
           }),
         ),
       ),
+    { name: "WorkflowService", key: (item) => String(item.workflowId) },
   );
 
   const reviewFeedbackForBranch = (
@@ -5126,7 +5127,7 @@ export const makeWorkflowService = Effect.gen(function* () {
       ),
     );
     yield* Stream.runForEach(orchestrationEngine.streamDomainEvents, handleDomainEvent).pipe(
-      Effect.forkScoped,
+      Effect.forkScoped({ startImmediately: true }),
       Effect.asVoid,
     );
   }).pipe(

@@ -8,6 +8,7 @@
  * - `MSP_MOCK_IGNORE_SIGTERM=1`: ignore SIGTERM (forces SIGKILL escalation).
  * - `MSP_MOCK_FINGERPRINT`: schema fingerprint to advertise.
  */
+import { Utf8Lines } from "@t3tools/shared/utf8Lines";
 import { MockMspHost } from "../src/provider/msp/testing/mockMspHost.ts";
 
 const host = new MockMspHost(
@@ -17,9 +18,16 @@ const host = new MockMspHost(
 if (process.env.MSP_MOCK_STDERR) process.stderr.write(process.env.MSP_MOCK_STDERR);
 if (process.env.MSP_MOCK_IGNORE_SIGTERM === "1") process.on("SIGTERM", () => undefined);
 
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (chunk: string) => {
-  void host.transport.write(chunk);
+const inputLines = new Utf8Lines();
+process.stdin.on("data", (chunk: Buffer) => {
+  for (const line of inputLines.push(chunk)) {
+    if (
+      process.env.MSP_MOCK_EXIT_METHOD &&
+      JSON.parse(line).method === process.env.MSP_MOCK_EXIT_METHOD
+    )
+      process.exit(23);
+    void host.transport.write(`${line}\n`);
+  }
 });
 process.stdin.on("end", () => {
   if (process.env.MSP_MOCK_STAY_ALIVE !== "1") process.exit(0);

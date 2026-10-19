@@ -16,7 +16,7 @@ import {
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { afterAll, it, vi } from "@effect/vitest";
 
-import { Effect, Fiber, Layer, Option, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option, Stream } from "effect";
 import { holdsAutomaticResume, isBlockingUserInput } from "@t3tools/shared/pendingUserInputs";
 import { getDefaultReasoningEffort, normalizeCodexModelOptions } from "@t3tools/shared/model";
 
@@ -244,6 +244,7 @@ const providerSessionDirectoryTestLayer = Layer.succeed(ProviderSessionDirectory
   listThreadIds: () => Effect.succeed([]),
   listBindings: () => Effect.succeed([]),
   updateMcpStateIfCurrent: () => Effect.succeed(true),
+  updateTerminalLifecycleIfCurrent: () => Effect.succeed(true),
   listBindingsByProject: () => Effect.succeed([]),
 });
 const validationManager = new FakeCodexManager();
@@ -2926,3 +2927,85 @@ it("reports computer fallback and unavailability without installing both tool ca
     assert.equal(config?.computer, undefined);
   }
 });
+
+it.effect(
+  "keeps completion behind admitted Codex output preparation and retains its generation",
+  () => {
+    const manager = new FakeCodexManager();
+    return Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>(),
+        release = yield* Deferred.make<void>();
+      const logged: string[] = [];
+      const layer = makeCodexAdapterLive({
+        manager,
+        nativeEventLogger: {
+          filePath: "test-events.ndjson",
+          close: () => Effect.void,
+          write: (value) =>
+            Effect.gen(function* () {
+              const event = value as ProviderEvent;
+              logged.push(event.id);
+              if (event.id === "fifo-output") {
+                yield* Deferred.succeed(entered, undefined);
+                yield* Deferred.await(release);
+              }
+            }),
+        },
+      }).pipe(
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Layer.provideMerge(providerSessionDirectoryTestLayer),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const adapter = yield* CodexAdapter;
+        const result = yield* adapter.streamEvents.pipe(
+          Stream.filter(
+            (event) => event.type === "content.delta" || event.type === "turn.completed",
+          ),
+          Stream.take(2),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        const base = {
+          provider: "codex" as const,
+          providerInstanceId: ProviderInstanceId.makeUnsafe("codex-fifo"),
+          sessionGeneration: 7,
+          threadId: asThreadId("thread-fifo"),
+          turnId: asTurnId("turn-fifo"),
+          createdAt: "2026-10-19T12:00:00.000Z",
+        };
+        manager.emit("event", {
+          ...base,
+          id: asEventId("fifo-output"),
+          kind: "notification",
+          method: "item/agentMessage/delta",
+          itemId: asItemId("message-fifo"),
+          textDelta: "final output",
+          payload: { delta: "final output" },
+        });
+        yield* Deferred.await(entered);
+        manager.emit("event", {
+          ...base,
+          id: asEventId("fifo-completed"),
+          kind: "notification",
+          method: "turn/completed",
+          payload: { turn: { id: "turn-fifo", status: "completed" } },
+        });
+        yield* Effect.yieldNow;
+        assert.deepEqual(logged, ["fifo-output"]);
+        yield* Deferred.succeed(release, undefined);
+        const events = yield* Fiber.join(result);
+        assert.deepEqual(
+          events.map((event) => event.type),
+          ["content.delta", "turn.completed"],
+        );
+        assert.ok(
+          events.every(
+            (event) => event.sessionGeneration === 7 && event.providerInstanceId === "codex-fifo",
+          ),
+        );
+        assert.deepEqual(logged, ["fifo-output", "fifo-completed"]);
+      }).pipe(Effect.provide(layer));
+    });
+  },
+);

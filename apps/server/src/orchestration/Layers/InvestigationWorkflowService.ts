@@ -10,7 +10,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationReadModel,
 } from "@t3tools/contracts";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeBackgroundWorker } from "../../backgroundWorker.ts";
 import { isArchivedWorkflow, isDeletedWorkflow } from "@t3tools/shared/workflowArchive";
 import { makeWorkflowArchiveLifecycle } from "../workflowArchiveLifecycle.ts";
 import { Cause, Effect, Layer, Stream } from "effect";
@@ -1133,7 +1133,7 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
   const providerTurnDeliveryWorker = yield* Effect.serviceOption(ProviderTurnDeliveryWorker);
   const resolveStageDispatch = yield* makeWorkflowStageDispatchResolver;
 
-  const titleGenerationWorker = yield* makeDrainableWorker(
+  const titleGenerationWorker = yield* makeBackgroundWorker(
     (item: InvestigationWorkflowTitleGenerationWorkItem) =>
       Effect.gen(function* () {
         const snapshot = yield* orchestrationEngine.getReadModel();
@@ -1192,6 +1192,7 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
           }),
         ),
       ),
+    { name: "InvestigationWorkflowService", key: (item) => String(item.workflowId) },
   );
 
   const startPendingInvestigations = (workflow: InvestigationWorkflow, updatedAt: string) =>
@@ -2458,7 +2459,7 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
         : domainEvents;
     yield* Stream.runForEach(work, (item) =>
       item.kind === "event" ? handleDomainEvent(item.event) : handleDeliveryOutcome(item.outcome),
-    ).pipe(Effect.forkScoped, Effect.asVoid);
+    ).pipe(Effect.forkScoped({ startImmediately: true }), Effect.asVoid);
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.logError("InvestigationWorkflowService.start failed", { cause }).pipe(

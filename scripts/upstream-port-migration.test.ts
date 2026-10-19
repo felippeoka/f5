@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { migrateLegacyLedger } from "./upstream-port-migration.ts";
 import { type LegacyLedger } from "./upstream-port-legacy-ledger.ts";
-import { recoverPortFiles } from "./upstream-port-legacy-files.ts";
+import { recoverPortFiles, systemProcessIdentityProbe } from "./upstream-port-legacy-files.ts";
 import { sha256, makeAudit } from "./upstream-port-ledger.ts";
 import { parseLedger } from "./upstream-port-validation.ts";
 import { AUTHORITATIVE_REPOSITORY } from "./upstream-port-history.ts";
@@ -236,7 +236,7 @@ describe("schema-5 migration", { timeout: process.platform === "win32" ? 30_000 
     const p = pair();
     const journalPath = `${p.file}.refresh-journal`;
     const journal = {
-      pid: process.pid,
+      pid: 2_147_483_647,
       host: hostname(),
       processStart: "previous-boot",
       paths: { ledger: p.file, manifest: p.manifestFile },
@@ -247,19 +247,20 @@ describe("schema-5 migration", { timeout: process.platform === "win32" ? 30_000 
     expect(p.run().status).toBe(1);
     writeFileSync(journalPath, JSON.stringify(journal));
     mkdirSync(`${journalPath}.recovering`);
-    const result = p.run();
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(`${journalPath}.recovering`);
+    const recovery = p.run();
+    expect(recovery.status).toBe(1);
+    expect(recovery.stderr).toContain(`${journalPath}.recovering`);
     expect(readFileSync(p.file, "utf8")).toBe(journal.ledger);
   });
   it("recovers a dead schema-5 writer's split publication before migration", () => {
     const p = pair();
     const files = { ledger: p.file, manifest: p.manifestFile };
-    // PID reuse is ruled out by an intentionally different creation identity.
+    // An absent PID exercises recovery through the real CLI without requiring
+    // a process-creation probe. Reused PIDs are covered by injected unit tests.
     writeFileSync(
       `${p.file}.refresh-journal`,
       JSON.stringify({
-        pid: process.pid,
+        pid: 2_147_483_647,
         host: hostname(),
         processStart: "previous-boot",
         paths: files,
@@ -293,8 +294,61 @@ describe("schema-5 migration", { timeout: process.platform === "win32" ? 30_000 
         nextDigest: { ledger: sha256(next.ledger), manifest: sha256(next.manifest) },
       }),
     );
-    recoverPortFiles(files);
+    recoverPortFiles(files, { isAlive: () => true, startTime: () => "current-boot" });
     expect(readFileSync(files.ledger, "utf8")).toBe(next.ledger);
     expect(readFileSync(files.manifest, "utf8")).toBe(next.manifest);
   });
+  it.each(["live", "dead", "reused", "unavailable", "permission"] as const)(
+    "recovers only verified dead/reused process identities (%s)",
+    (state) => {
+      const directory = temp();
+      directories.push(directory);
+      const files = {
+        ledger: path.join(directory, "ledger"),
+        manifest: path.join(directory, "manifest"),
+      };
+      const old = { ledger: "old ledger", manifest: "old manifest" };
+      writeFileSync(files.ledger, "interrupted ledger");
+      writeFileSync(files.manifest, "interrupted manifest");
+      const journal = `${files.ledger}.refresh-journal`;
+      writeFileSync(
+        journal,
+        JSON.stringify({
+          ...old,
+          paths: files,
+          host: hostname(),
+          pid: 123,
+          processStart: "original",
+        }),
+      );
+      const recover = () =>
+        recoverPortFiles(files, {
+          isAlive: () => {
+            if (state === "permission") throw Object.assign(new Error("denied"), { code: "EPERM" });
+            return state !== "dead";
+          },
+          startTime: () =>
+            state === "unavailable" ? "" : state === "reused" ? "replacement" : "original",
+        });
+      if (state === "dead" || state === "reused") {
+        recover();
+        expect(readFileSync(files.ledger, "utf8")).toBe(old.ledger);
+        expect(readFileSync(files.manifest, "utf8")).toBe(old.manifest);
+        expect(existsSync(journal)).toBe(false);
+      } else {
+        expect(recover).toThrow(state === "live" ? "already running" : "cannot verify");
+        expect(readFileSync(files.ledger, "utf8")).toBe("interrupted ledger");
+        expect(existsSync(journal)).toBe(true);
+      }
+    },
+  );
+  it.runIf(process.env.CI === "true")(
+    "reads a stable real process creation identity on CI hosts",
+    () => {
+      expect(systemProcessIdentityProbe.isAlive(process.pid)).toBe(true);
+      const start = systemProcessIdentityProbe.startTime(process.pid);
+      expect(start.length).toBeGreaterThan(0);
+      expect(systemProcessIdentityProbe.startTime(process.pid)).toBe(start);
+    },
+  );
 });

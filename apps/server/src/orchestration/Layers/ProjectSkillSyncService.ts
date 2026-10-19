@@ -1,5 +1,8 @@
 import { CommandId, type ProjectId } from "@t3tools/contracts";
-import { makeDrainableWorker, type DrainableWorker } from "@t3tools/shared/DrainableWorker";
+import {
+  makeBackgroundWorker,
+  type BackgroundWorker as DrainableWorker,
+} from "../../backgroundWorker.ts";
 import {
   Cause,
   Deferred,
@@ -151,12 +154,14 @@ const make = Effect.gen(function* () {
     }
   }).pipe(Effect.ensuring(reconcileWatchers));
 
-  worker = yield* makeDrainableWorker(() =>
-    refresh.pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("project skill refresh failed", { cause: String(cause) }),
+  worker = yield* makeBackgroundWorker(
+    () =>
+      refresh.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("project skill refresh failed", { cause: String(cause) }),
+        ),
       ),
-    ),
+    { name: "ProjectSkillSyncService", key: () => "projects" },
   );
 
   const drain = Effect.gen(function* () {
@@ -181,9 +186,9 @@ const make = Effect.gen(function* () {
               event.type === "project.deleted"
                 ? queueRefresh([event.aggregateId as ProjectId])
                 : Effect.void,
-            ).pipe(Effect.forkIn(scope));
+            ).pipe(Effect.forkIn(scope, { startImmediately: true }));
             for (const project of (yield* engine.getReadModel()).projects) dirty.add(project.id);
-            yield* drain;
+            yield* drain.pipe(Effect.orDie);
             // Watch failures/deleted roots recover even if the OS emits no final event.
             yield* Effect.sync(
               () =>

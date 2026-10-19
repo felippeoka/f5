@@ -1,11 +1,11 @@
 import { holdsWorktreeLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import { ServerConfig } from "../../config.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Cause, Effect, Layer, Metric } from "effect";
+import { Cause, Effect, Layer, ManagedRuntime, Metric } from "effect";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { GitCoreTestLive as GitCoreLive } from "../testLayers.ts";
 import { GitCommandError } from "../Errors.ts";
@@ -47,13 +47,20 @@ function makeScriptedGitService(resolve: (input: ExecuteGitInput) => ScriptedRes
   };
 }
 
+const runtimeDisposals = new Set<() => Promise<void>>();
+afterEach(async () => {
+  await Promise.all([...runtimeDisposals].map((dispose) => dispose()));
+  runtimeDisposals.clear();
+});
 async function makeCore(gitService: GitServiceShape) {
   const layer = GitCoreLive.pipe(
     Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "f5-git-core-" })),
     Layer.provide(Layer.succeed(GitService, gitService)),
     Layer.provide(NodeServices.layer),
   );
-  return Effect.runPromise(Effect.service(GitCore).pipe(Effect.provide(layer)));
+  const runtime = ManagedRuntime.make(layer);
+  runtimeDisposals.add(() => runtime.dispose());
+  return runtime.runPromise(Effect.service(GitCore));
 }
 
 it("places generated worktrees under the configured server worktree root", async () => {
@@ -355,7 +362,10 @@ describe("GitCore unit", () => {
     });
     const core = await makeCore(scripted.service);
 
+    const refreshed = Promise.withResolvers<void>();
+    await Effect.runPromise(core.subscribeStatusRefresh!(() => refreshed.resolve()));
     await Effect.runPromise(core.statusDetails(process.cwd()));
+    await refreshed.promise;
     await Effect.runPromise(core.statusDetails(process.cwd()));
 
     const refreshes = scripted.calls.filter((call) => call.args[0] === "fetch");

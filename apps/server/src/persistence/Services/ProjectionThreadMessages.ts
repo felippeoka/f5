@@ -51,10 +51,26 @@ export const DeleteProjectionThreadMessagesInput = Schema.Struct({
 });
 export type DeleteProjectionThreadMessagesInput = typeof DeleteProjectionThreadMessagesInput.Type;
 
+export const AppendStreamingTextInput = Schema.Struct({
+  messageId: MessageId,
+  threadId: ThreadId,
+  turnId: Schema.NullOr(TurnId),
+  role: OrchestrationMessageRole,
+  delta: Schema.String,
+  reasoningDelta: Schema.optional(Schema.String),
+  updatedAt: IsoDateTime,
+});
+export type AppendStreamingTextInput = typeof AppendStreamingTextInput.Type;
+
 /**
  * ProjectionThreadMessageRepositoryShape - Service API for projected thread messages.
  */
 export interface ProjectionThreadMessageRepositoryShape {
+  /** Append only to the exact existing message identity; zero rows requires upsert fallback. */
+  readonly appendStreamingText: (
+    input: AppendStreamingTextInput,
+  ) => Effect.Effect<number, ProjectionRepositoryError>;
+
   /**
    * Insert or replace a projected thread message row.
    *

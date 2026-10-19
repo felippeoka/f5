@@ -1,6 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import readline from "node:readline";
+import { ProviderLineReader } from "./lineReader.ts";
 
 import { type CodexMcpServerEntry, type McpServerStartupStatus } from "@t3tools/contracts";
 import { CODEX_MCP_OAUTH_LOGIN_REQUEST_TIMEOUT_MS } from "@t3tools/shared/codexOAuthTiming";
@@ -10,7 +10,13 @@ import {
   killChildTree,
 } from "../codexAppServerManager.ts";
 import { readCodexModelPages } from "./readCodexModelPages.ts";
-import { createJsonRpcStdinWriter, type JsonRpcStdinWriter } from "./JsonRpcStdinWriter.ts";
+import {
+  createJsonRpcStdinWriter,
+  JsonRpcDeliveryError,
+  jsonRpcWriteLane,
+  type JsonRpcWriteOptions,
+  type JsonRpcStdinWriter,
+} from "./JsonRpcStdinWriter.ts";
 import { buildCodexAppServerCommand } from "../provider/codexLaunchArgs.ts";
 import { buildProviderChildProcessEnv } from "../providerProcessEnv.ts";
 import { resolveCodexHome } from "../os-jank.ts";
@@ -24,6 +30,8 @@ interface PendingRequest {
   readonly timeout: ReturnType<typeof setTimeout>;
   readonly resolve: (value: unknown) => void;
   readonly reject: (reason: unknown) => void;
+  wasWritten?: boolean;
+  cancelWrite?: () => void;
 }
 
 interface JsonRpcError {
@@ -187,11 +195,12 @@ export function isMethodNotFoundError(error: unknown): boolean {
 export class CodexControlClient extends EventEmitter<{
   notification: [CodexControlNotification];
   closed: [Error];
+  protocolError: [Error];
 }> {
   capabilities: CodexControlCapabilities;
 
   private readonly child: ChildProcessWithoutNullStreams;
-  private readonly output: readline.Interface;
+  private readonly output: ProviderLineReader;
   private readonly writer: JsonRpcStdinWriter;
   private readonly pending = new Map<string, PendingRequest>();
   private mcpObservationContext: object = {};
@@ -208,12 +217,14 @@ export class CodexControlClient extends EventEmitter<{
   >();
   private nextRequestId = 1;
   private closed = false;
+  private reportedProtocolError = false;
+  private cleanupProcessListeners: () => void = () => {};
   private removeAbortListener: (() => void) | undefined;
 
   private constructor(
     private readonly environment: CodexControlEnvironmentConfig,
     child: ChildProcessWithoutNullStreams,
-    output: readline.Interface,
+    output: ProviderLineReader,
     writer: JsonRpcStdinWriter,
     capabilities: CodexControlCapabilities,
   ) {
@@ -232,10 +243,11 @@ export class CodexControlClient extends EventEmitter<{
     signal?.throwIfAborted();
     const binaryPath = environment.binaryPath ?? "codex";
     const codexHomePath = resolveCodexHome({ homePath: environment.homePath });
-    assertSupportedCodexCliVersion({
+    await assertSupportedCodexCliVersion({
       processEnvironment: environment.processEnvironment ?? process.env,
       binaryPath,
       cwd: environment.cwd,
+      ...(signal ? { signal } : {}),
       ...(codexHomePath ? { homePath: codexHomePath } : {}),
     });
     const childEnvironment = buildProviderChildProcessEnv(
@@ -268,7 +280,7 @@ export class CodexControlClient extends EventEmitter<{
       stdio: ["pipe", "pipe", "pipe"],
     });
     child.stderr.resume();
-    const output = readline.createInterface({ input: child.stdout });
+    const output = new ProviderLineReader(child.stdout);
     const writer = createJsonRpcStdinWriter({
       stdin: child.stdin,
       closedMessage: "Codex control client is closed.",
@@ -318,11 +330,16 @@ export class CodexControlClient extends EventEmitter<{
   }
 
   private attachProcessListeners(): void {
-    this.output.on("line", (line) => {
+    const onLine = (line: string) => {
       let parsed: unknown;
       try {
         parsed = JSON.parse(line);
       } catch {
+        if (!this.reportedProtocolError) {
+          this.reportedProtocolError = true;
+          codexControlLogger.warn("Malformed Codex control JSON line; continuing session");
+        }
+        this.emit("protocolError", new Error("Malformed Codex control JSON line."));
         return;
       }
 
@@ -338,18 +355,26 @@ export class CodexControlClient extends EventEmitter<{
           params: parsed.params,
         });
       }
-    });
+    };
+    this.output.on("line", onLine);
 
     const handleExit = (cause: Error) => {
       if (this.closed) {
         return;
       }
       this.closed = true;
+      this.cleanupProcessListeners();
       this.removeAbortListener?.();
       this.removeAbortListener = undefined;
       for (const pending of this.pending.values()) {
         clearTimeout(pending.timeout);
-        pending.reject(cause);
+        pending.reject(
+          new JsonRpcDeliveryError(
+            cause.message,
+            pending.wasWritten === false ? "not_sent" : "unknown",
+          ),
+        );
+        pending.cancelWrite?.();
       }
       this.pending.clear();
       this.output.close();
@@ -357,19 +382,20 @@ export class CodexControlClient extends EventEmitter<{
       this.emit("closed", cause);
     };
 
-    this.child.once("error", (error) => {
-      handleExit(error instanceof Error ? error : new Error(String(error)));
-    });
-
-    this.child.once("exit", (code, signal) => {
+    const onError = (error: Error) => handleExit(error);
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) =>
       handleExit(
         new Error(
-          `codex control client exited (code=${String(code ?? "null")}, signal=${String(
-            signal ?? "null",
-          )}).`,
+          `codex control client exited (code=${code ?? "null"}, signal=${signal ?? "null"}).`,
         ),
       );
-    });
+    this.child.once("error", onError);
+    this.child.once("exit", onExit);
+    this.cleanupProcessListeners = () => {
+      this.output.off("line", onLine);
+      this.child.off("error", onError);
+      this.child.off("exit", onExit);
+    };
   }
 
   private recordMcpStartupStatus(notification: JsonRpcNotification): void {
@@ -415,11 +441,11 @@ export class CodexControlClient extends EventEmitter<{
     pending.resolve(response.result);
   }
 
-  private async writeMessage(message: unknown): Promise<void> {
+  private async writeMessage(message: unknown, options?: JsonRpcWriteOptions): Promise<void> {
     if (this.closed) {
       throw new Error("Codex control client is closed.");
     }
-    await this.writer.write(message);
+    await this.writer.write(message, { lane: jsonRpcWriteLane(message), ...options });
   }
 
   private async sendRequest<TResponse>(
@@ -435,24 +461,36 @@ export class CodexControlClient extends EventEmitter<{
     this.nextRequestId += 1;
 
     return await new Promise<TResponse>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pending.delete(String(id));
-        reject(new Error(`Timed out waiting for ${method}.`));
-      }, timeoutMs);
-
-      this.pending.set(String(id), {
+      const controller = new AbortController();
+      const pending: PendingRequest = {
         method,
-        timeout,
         resolve: (value) => resolve(value as TResponse),
         reject,
-      });
-
-      void this.writeMessage({
-        id,
-        method,
-        params,
-      }).catch((error) => {
-        clearTimeout(timeout);
+        wasWritten: false,
+        cancelWrite: () => controller.abort(),
+        timeout: setTimeout(() => {
+          this.pending.delete(String(id));
+          controller.abort();
+          reject(
+            new JsonRpcDeliveryError(
+              `Timed out waiting for ${method}.`,
+              pending.wasWritten ? "unknown" : "not_sent",
+            ),
+          );
+        }, timeoutMs),
+      };
+      this.pending.set(String(id), pending);
+      void this.writeMessage(
+        { id, method, params },
+        {
+          signal: controller.signal,
+          deadline: Date.now() + timeoutMs,
+          onWrite: () => {
+            pending.wasWritten = true;
+          },
+        },
+      ).catch((error) => {
+        clearTimeout(pending.timeout);
         this.pending.delete(String(id));
         reject(error);
       });
@@ -639,18 +677,36 @@ export class CodexControlClient extends EventEmitter<{
     };
   }
 
-  async closeAndWait(): Promise<void> {
+  async closeAndWait(deadline = Date.now() + 1_800): Promise<void> {
     if (this.child.exitCode !== null || this.child.signalCode !== null || !this.child.pid) {
       this.close();
       return;
     }
-    const exited = new Promise<void>((resolve) => this.child.once("exit", () => resolve()));
+    let onExit!: () => void;
+    const exited = new Promise<void>((resolve) => {
+      onExit = resolve;
+      this.child.once("exit", onExit);
+    });
     this.close();
-    const timer = setTimeout(() => this.child.kill("SIGKILL"), 3000);
+    const force = setTimeout(
+      () => this.child.kill("SIGKILL"),
+      Math.max(0, deadline - Date.now() - 100),
+    );
+    let limit: ReturnType<typeof setTimeout> | undefined;
     try {
-      await exited;
+      await Promise.race([
+        exited,
+        new Promise<never>((_, reject) => {
+          limit = setTimeout(
+            () => reject(new Error("Codex control process did not exit before shutdown deadline.")),
+            Math.max(0, deadline - Date.now()),
+          );
+        }),
+      ]);
     } finally {
-      clearTimeout(timer);
+      clearTimeout(force);
+      if (limit) clearTimeout(limit);
+      this.child.off("exit", onExit);
     }
   }
 
@@ -661,9 +717,16 @@ export class CodexControlClient extends EventEmitter<{
       return;
     }
     this.closed = true;
+    this.cleanupProcessListeners();
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
-      pending.reject(new Error("Codex control client closed."));
+      pending.reject(
+        new JsonRpcDeliveryError(
+          "Codex control client closed.",
+          pending.wasWritten === false ? "not_sent" : "unknown",
+        ),
+      );
+      pending.cancelWrite?.();
     }
     this.pending.clear();
     this.output.close();

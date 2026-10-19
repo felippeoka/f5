@@ -24,6 +24,8 @@ export interface PerformanceReport {
   measurements: Record<string, Samples>;
   observations: Observation[];
   notMeasured: string[];
+  /** Report-only counters/timings until a controlled baseline establishes numeric gates. */
+  diagnostics?: Record<string, number>;
   memory?: MemorySample[];
 }
 
@@ -168,6 +170,27 @@ export function comparisonGate(baseline: number, candidate: number, targetCpu = 
     : !(candidate > baseline * 1.1 && candidate - baseline > 20);
 }
 
+export function compareReportMetadata(base: PerformanceReport, next: PerformanceReport): string[] {
+  const failures: string[] = [];
+  for (const key of [
+    "fixtureDigest",
+    "harnessDigest",
+    "hardware",
+    "os",
+    "gitVersion",
+    "browser",
+    "browserConfig",
+  ] as const)
+    if (JSON.stringify(base.metadata[key]) !== JSON.stringify(next.metadata[key]))
+      failures.push(`Incompatible ${key}`);
+  if (
+    base.metadata.runtime.versions.node !== next.metadata.runtime.versions.node ||
+    base.metadata.runtime.versions.bun !== next.metadata.runtime.versions.bun
+  )
+    failures.push("Incompatible runtime versions");
+  return failures;
+}
+
 /** Never accept a smoke run, missing scenario, different fixture, or incompatible machine. */
 export function compareReports(
   base: PerformanceReport,
@@ -186,22 +209,7 @@ export function compareReports(
     )
       failures.push("Comparison requires full server measurements (5 warmups, 30 repetitions)");
   }
-  for (const key of [
-    "fixtureDigest",
-    "harnessDigest",
-    "hardware",
-    "os",
-    "gitVersion",
-    "browser",
-    "browserConfig",
-  ] as const)
-    if (JSON.stringify(base.metadata[key]) !== JSON.stringify(next.metadata[key]))
-      failures.push(`Incompatible ${key}`);
-  if (
-    base.metadata.runtime.versions.node !== next.metadata.runtime.versions.node ||
-    base.metadata.runtime.versions.bun !== next.metadata.runtime.versions.bun
-  )
-    failures.push("Incompatible runtime versions");
+  failures.push(...compareReportMetadata(base, next));
   const names = Object.keys(base.measurements);
   if (
     names.length === 0 ||

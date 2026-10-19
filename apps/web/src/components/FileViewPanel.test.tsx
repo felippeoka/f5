@@ -1,3 +1,4 @@
+import FileViewPanel from "./FileViewPanel";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -111,7 +112,6 @@ describe("FileViewPanel", () => {
   });
 
   async function renderPanel() {
-    const { default: FileViewPanel } = await import("./FileViewPanel");
     return renderToStaticMarkup(<FileViewPanel mode="sheet" />);
   }
 

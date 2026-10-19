@@ -589,6 +589,7 @@ describe("ProviderCommandReactor", () => {
           })),
         ),
       updateMcpStateIfCurrent: () => Effect.succeed(true),
+      updateTerminalLifecycleIfCurrent: () => Effect.succeed(true),
       listBindingsByProject: (projectId) =>
         Effect.sync(() =>
           [...persistedBindings.values()]
@@ -662,6 +663,7 @@ describe("ProviderCommandReactor", () => {
     }).service;
     const workspaceGitLayer = Layer.succeed(GitCore, workspaceGit);
     const orchestrationLayer = OrchestrationEngineLive.pipe(
+      Layer.provide(Layer.succeed(ProviderSessionDirectory, providerSessionDirectory)),
       Layer.provide(workspaceGitLayer),
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
       Layer.provide(OrchestrationProjectionPipelineLive),
@@ -826,7 +828,7 @@ describe("ProviderCommandReactor", () => {
               return delivery.finally(() => pendingDeliveries.delete(delivery));
             }).pipe(Effect.asVoid)
           : Effect.void,
-      ).pipe(Effect.forkScoped, Scope.provide(scope)),
+      ).pipe(Effect.forkScoped({ startImmediately: true }), Scope.provide(scope)),
     );
     const drain = () => Effect.runPromise(reactor.drain);
 
@@ -4328,6 +4330,93 @@ describe("ProviderCommandReactor", () => {
       thread?.activities.some((activity) => activity.summary === "Session context reset"),
     ).toBe(false);
   });
+
+  it.each(["generation", "turn"] as const)(
+    "fences queued controls when the provider %s changes",
+    async (change) => {
+      const harness = await createHarness();
+      const threadId = ThreadId.makeUnsafe("thread-1");
+      const createdAt = new Date().toISOString();
+      harness.upsertBinding({
+        threadId,
+        provider: "codex",
+        providerInstanceId: ProviderInstanceId.makeUnsafe("codex"),
+        runtimePayload: { sessionGeneration: 0 },
+      });
+      const session = {
+        threadId,
+        status: "running" as const,
+        providerName: "codex",
+        runtimeMode: "approval-required" as const,
+        activeTurnId: asTurnId("original-turn"),
+        lastError: null,
+        updatedAt: createdAt,
+      };
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.makeUnsafe("fence-session"),
+          threadId,
+          session,
+          createdAt,
+        }),
+      );
+      const barrier = Promise.withResolvers<void>();
+      let entered = false;
+      harness.interruptTurn.mockImplementationOnce(() =>
+        Effect.promise(async () => {
+          entered = true;
+          await barrier.promise;
+        }),
+      );
+      try {
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.turn.interrupt",
+            commandId: CommandId.makeUnsafe("fence-blocker"),
+            threadId,
+            createdAt,
+          }),
+        );
+        await waitFor(() => entered);
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.session.stop",
+            commandId: CommandId.makeUnsafe("fence-stop"),
+            threadId,
+            createdAt,
+          }),
+        );
+        if (change === "generation")
+          harness.upsertBinding({
+            threadId,
+            provider: "codex",
+            runtimePayload: { sessionGeneration: 1 },
+          });
+        else
+          await Effect.runPromise(
+            harness.engine.dispatch({
+              type: "thread.session.set",
+              commandId: CommandId.makeUnsafe("fence-new-turn"),
+              threadId,
+              session: { ...session, activeTurnId: asTurnId("replacement-turn") },
+              createdAt,
+            }),
+          );
+        barrier.resolve();
+        await waitFor(async () =>
+          (await Effect.runPromise(harness.engine.getReadModel())).threads[0]!.activities.some(
+            (activity) =>
+              activity.summary === "The provider session changed before this action ran",
+          ),
+        );
+        expect(harness.stopSession).not.toHaveBeenCalled();
+        expect(harness.engine.inspectQueue!().entries).toBe(0);
+      } finally {
+        barrier.resolve();
+      }
+    },
+  );
 
   it("reacts to thread.turn.interrupt-requested by calling provider interrupt", async () => {
     const harness = await createHarness();

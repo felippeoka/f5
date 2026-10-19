@@ -1,3 +1,5 @@
+import { ProviderControlTarget } from "../controlTarget.ts";
+import { registerShutdown, ServerShutdown } from "../../shutdown.ts";
 import { resolveOwnedMcpServerName } from "../mcpObservation.ts";
 import { carryPreparedComputerEvidence } from "../prepareAutomationRuntimeEvent";
 import { resolveBindingInstanceId } from "../bindingIdentity.ts";
@@ -109,6 +111,7 @@ import {
   ProviderSessionActionUnavailableError,
   ProviderValidationError,
   ProviderTurnDeliveryError,
+  ProviderAdapterRequestError,
 } from "../Errors.ts";
 import {
   buildProviderSessionCapabilities,
@@ -125,7 +128,11 @@ import {
   ProviderSessionDirectory,
   type ProviderRuntimeBinding,
 } from "../Services/ProviderSessionDirectory.ts";
-import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import {
+  writeProviderEventLog,
+  type EventNdjsonLogger,
+  makeEventNdjsonLogger,
+} from "./EventNdjsonLogger.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
 import {
   ProjectMcpConfigService,
@@ -529,7 +536,8 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             return;
         }
         if (canonicalEventLogger)
-          yield* canonicalEventLogger.write(
+          yield* writeProviderEventLog(
+            canonicalEventLogger,
             automationEventSanitizer.sanitize(event.threadId, event),
             null,
           );
@@ -641,6 +649,11 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             }
 
             const binding = bindingOption.value;
+            if (
+              event.sessionGeneration !== undefined &&
+              event.sessionGeneration !== readPersistedSessionGeneration(binding.runtimePayload)
+            )
+              return;
             if (binding.provider !== event.provider) {
               yield* Effect.logWarning("provider runtime resume cursor provider mismatch", {
                 expectedProvider: binding.provider,
@@ -893,6 +906,37 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
 
     // Lock order: reactor turn gate, then this service gate. Never enter the reactor here.
     const withSessionOperation = makeOperationGate<ThreadId>();
+
+    const assertControlTarget = (threadId: ThreadId) =>
+      Effect.gen(function* () {
+        const expected = yield* ProviderControlTarget;
+        if (!expected) return;
+        const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+        let matches =
+          expected.threadId === threadId &&
+          (binding?.provider ?? null) === expected.provider &&
+          (binding ? resolveBindingInstanceId(binding) : null) === expected.instanceId &&
+          (binding ? readPersistedSessionGeneration(binding.runtimePayload) : null) ===
+            expected.generation;
+        if (matches && binding && expected.activeTurnId !== null) {
+          const adapter = yield* registry.getByInstance(resolveBindingInstanceId(binding));
+          const sessions = yield* adapter.listSessions();
+          matches = sessions.some(
+            (session) =>
+              session.threadId === threadId && session.activeTurnId === expected.activeTurnId,
+          );
+        }
+        if (!matches)
+          return yield* toValidationError(
+            "ProviderService.control",
+            "The provider session or turn changed before this action ran. The action was not sent.",
+          );
+      });
+    const withControlTarget = <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
+      withProviderThreadAccess(
+        threadId,
+        assertControlTarget(threadId).pipe(Effect.andThen(effect)),
+      );
 
     const recoverSessionForThread = (input: {
       readonly binding: ProviderRuntimeBinding;
@@ -2024,18 +2068,32 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 }),
             ),
           );
-          const turn = yield* input.expectedTurnId !== undefined
-            ? routed.adapter.steerTurn!({
-                ...input,
-                expectedTurnId: input.expectedTurnId,
-                attachments: nativeAttachments,
-                resolvedAttachments,
-              })
-            : routed.adapter.sendTurn({
-                ...input,
-                attachments: nativeAttachments,
-                resolvedAttachments,
-              });
+          const turn = yield* (
+            input.expectedTurnId !== undefined
+              ? routed.adapter.steerTurn!({
+                  ...input,
+                  expectedTurnId: input.expectedTurnId,
+                  attachments: nativeAttachments,
+                  resolvedAttachments,
+                })
+              : routed.adapter.sendTurn({
+                  ...input,
+                  attachments: nativeAttachments,
+                  resolvedAttachments,
+                })
+          ).pipe(
+            Effect.mapError((error) =>
+              Schema.is(ProviderAdapterRequestError)(error) && error.deliveryCertainty
+                ? new ProviderTurnDeliveryError({
+                    certainty: error.deliveryCertainty,
+                    retryable:
+                      error.deliveryCertainty === "not_sent" && error.deliveryRetryable === true,
+                    detail: error.detail,
+                    ...(error.usageLimit ? { usageLimit: error.usageLimit } : {}),
+                  })
+                : error,
+            ),
+          );
           if (deliveryAttempt)
             yield* deliveryAttempt.accepted(turn, {
               runtimeGeneration: generation,
@@ -3358,9 +3416,16 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               cause: Cause.pretty(cause),
             }),
           ),
-        );
-        yield* Effect.forEach(currentAdapters, ([, adapter]) => adapter.stopAll()).pipe(
-          Effect.asVoid,
+          Effect.ensuring(
+            Effect.forEach(currentAdapters, ([, adapter]) => adapter.stopAll(), {
+              concurrency: "unbounded",
+              discard: true,
+            }).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("provider stop incomplete", { cause }),
+              ),
+            ),
+          ),
         );
         yield* Effect.forEach(threadIds, (threadId) =>
           directory.getBinding(threadId).pipe(
@@ -3418,9 +3483,12 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         Effect.forkIn(nativeScope),
       );
     }
+    const shutdown = yield* Effect.serviceOption(ServerShutdown);
+    yield* registerShutdown("providers", "producers", () => runStopAll());
     yield* Effect.addFinalizer(() =>
-      Effect.catch(runStopAll(), (cause) =>
-        Effect.logWarning("failed to stop provider service", { cause }),
+      Effect.catch(
+        Option.isSome(shutdown) && shutdown.value.started ? Effect.void : runStopAll(),
+        (cause) => Effect.logWarning("failed to stop provider service", { cause }),
       ).pipe(
         Effect.ensuring(
           Effect.gen(function* () {
@@ -3491,11 +3559,9 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         ),
       submitTurn,
       sendTurn: (input) => submitTurn(input).pipe(Effect.flatMap((handle) => handle.acceptance)),
-      interruptTurn: (input) => withProviderThreadAccess(input.threadId, interruptTurn(input)),
-      respondToRequest: (input) =>
-        withProviderThreadAccess(input.threadId, respondToRequest(input)),
-      respondToUserInput: (input) =>
-        withProviderThreadAccess(input.threadId, respondToUserInput(input)),
+      interruptTurn: (input) => withControlTarget(input.threadId, interruptTurn(input)),
+      respondToRequest: (input) => withControlTarget(input.threadId, respondToRequest(input)),
+      respondToUserInput: (input) => withControlTarget(input.threadId, respondToUserInput(input)),
       respondToElicitation: (input) =>
         Effect.suspend(() => {
           // The start holds the thread lock until the adapter returns, so a
@@ -3505,7 +3571,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             ? respondToStartingElicitation(input, starting.adapter)
             : withProviderThreadAccess(input.threadId, respondToElicitation(input));
         }),
-      stopSession: (input) => withProviderThreadAccess(input.threadId, stopSession(input)),
+      stopSession: (input) => withControlTarget(input.threadId, stopSession(input)),
       listStartingWorkspaces: () =>
         Effect.sync(() =>
           Array.from(startingSessions, ([threadId, { session }]) => ({

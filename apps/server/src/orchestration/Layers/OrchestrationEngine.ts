@@ -1,3 +1,7 @@
+import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
+import { makeCommandAdmission, isControlCommand, isControlEvent } from "../commandAdmission.ts";
+import { readPersistedSessionGeneration } from "../../provider/sessionCapabilities.ts";
+import { registerShutdown } from "../../shutdown.ts";
 import { requireAttachmentOwner } from "../../attachmentOwnership.ts";
 import {
   WorkspaceWriteContext,
@@ -20,13 +24,14 @@ import {
   Metric,
   Option,
   PubSub,
-  Queue,
   Schema,
   Stream,
 } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
+  PerformanceStageProbe,
+  measurePerformanceStage,
   metricAttributes,
   orchestrationCommandAckDuration,
   orchestrationCommandsTotal,
@@ -36,6 +41,7 @@ import { toPersistenceSqlError } from "../../persistence/Errors.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepository } from "../../persistence/Services/OrchestrationCommandReceipts.ts";
 import {
+  OrchestrationOverloadError,
   OrchestrationCommandIdConflictError,
   OrchestrationCommandInvariantError,
   ThreadTurnNotReadyError,
@@ -43,11 +49,13 @@ import {
   type OrchestrationDispatchError,
 } from "../Errors.ts";
 import { decideOrchestrationCommand, GLOBAL_PIN_AGGREGATE_ID } from "../decider.ts";
+import { observeReadModelRetention } from "../readModelRetention.ts";
 import { createEmptyReadModel, projectEvent } from "../projector.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
+  type ControlOrigin,
 } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
@@ -60,6 +68,8 @@ interface CommandEnvelope {
   workspaceWrite?: WorkspaceWrite | null;
   result: Deferred.Deferred<{ sequence: number }, OrchestrationDispatchError>;
   startedAtMs: number;
+  controlCommitted?: boolean;
+  controlOrigin?: ControlOrigin;
   workspace?: { path: string; branch: string | null; projectCwd: string };
 }
 
@@ -119,11 +129,39 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const workspaceGit = yield* Effect.serviceOption(GitCore);
   const maintenanceLock = yield* makeStorageMaintenanceLock;
   const providerRegistry = yield* Effect.serviceOption(ProviderRegistry);
+  const sessionDirectory = yield* Effect.serviceOption(ProviderSessionDirectory);
   const diskSpaceMonitor = yield* Effect.serviceOption(DiskSpaceMonitor);
 
   let readModel = createEmptyReadModel(new Date().toISOString());
 
-  const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
+  const admission = yield* makeCommandAdmission<CommandEnvelope>();
+  const controlReservations = new Map<string, CommandEnvelope>();
+  const stoppedSequences = new Map<string, number>();
+  const releaseControl = (commandId: string) =>
+    Effect.gen(function* () {
+      const envelope = controlReservations.get(commandId);
+      if (!envelope) return;
+      controlReservations.delete(commandId);
+      yield* admission.release(envelope);
+    });
+  yield* registerShutdown("orchestration-admission", "admission", () => admission.close);
+  yield* Effect.addFinalizer(() =>
+    Effect.gen(function* () {
+      yield* admission.close;
+      for (const envelope of admission.pending()) {
+        yield* Deferred.fail(
+          envelope.result,
+          new OrchestrationOverloadError({
+            lane: isControlCommand(envelope.command) ? "control" : "ordinary",
+            reason: "closed",
+          }),
+        );
+        yield* admission.release(envelope);
+      }
+      controlReservations.clear();
+    }),
+  );
+  const probe = yield* PerformanceStageProbe;
   const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
 
   const readSteerFallback = (command: OrchestrationCommand) =>
@@ -475,8 +513,14 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
               for (const nextEvent of eventBases) {
                 const savedEvent = yield* eventStore.append(nextEvent);
-                nextReadModel = yield* projectEvent(nextReadModel, savedEvent);
-                yield* projectionPipeline.projectEvent(savedEvent);
+                nextReadModel = yield* measurePerformanceStage(
+                  probe,
+                  "engine.readModelProjection",
+                  projectEvent(nextReadModel, savedEvent),
+                );
+                yield* projectionPipeline.projectEvent(savedEvent, {
+                  deferCursor: projectionPipeline.commitCursors !== undefined,
+                });
                 if (savedEvent.type === "thread.archived" || savedEvent.type === "thread.deleted") {
                   if (Option.isSome(transitions))
                     yield* transitions.value.cancel(savedEvent.payload.threadId).pipe(Effect.orDie);
@@ -498,6 +542,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                   savedEvent.type === "thread.session-stop-requested" ||
                   savedEvent.type === "thread.archived"
                 ) {
+                  yield* sql`UPDATE provider_turn_deliveries SET state = 'rejected', certainty = 'not_sent',
+                    error_code = 'cancelled_before_send', error_detail = 'The session stopped before this turn was sent.',
+                    updated_at = ${savedEvent.occurredAt}
+                    WHERE thread_id = ${savedEvent.payload.threadId} AND state = 'pending'`;
                   // Commit cancellation with the stop intent: a crash before live
                   // subscribers run must never revive an unsent continuation.
                   yield* sql`UPDATE usage_limit_resumes SET state = 'cancelled',
@@ -754,6 +802,8 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                   .update(record, { phase: "completed", error: null })
                   .pipe(Effect.orDie);
               }
+              if (projectionPipeline.commitCursors)
+                yield* projectionPipeline.commitCursors(lastSavedEvent);
               return {
                 committedEvents,
                 lastSequence: lastSavedEvent.sequence,
@@ -771,6 +821,21 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
         readModel = committedCommand.nextReadModel;
         for (const [index, event] of committedCommand.committedEvents.entries()) {
+          if (isControlEvent(event)) envelope.controlCommitted = true;
+          if (event.type === "thread.session-stop-requested" || event.type === "thread.archived") {
+            stoppedSequences.set(event.payload.threadId, event.sequence);
+            const cancelled = yield* admission.cancelQueued(
+              (queued) =>
+                queued.command.type === "thread.turn.start" &&
+                queued.command.threadId === event.payload.threadId,
+            );
+            for (const pending of cancelled)
+              yield* Deferred.fail(
+                pending.result,
+                new OrchestrationOverloadError({ lane: "ordinary", reason: "superseded" }),
+              );
+          }
+          if (event.type === "thread.deleted") stoppedSequences.delete(event.payload.threadId);
           yield* PubSub.publish(eventPubSub, event);
           if (index === 0) {
             yield* Metric.update(
@@ -904,11 +969,27 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       }),
   );
 
-  const worker = Effect.forever(
-    Queue.take(commandQueue).pipe(
-      Effect.flatMap((envelope) => maintenanceLock.withShared(processEnvelope(envelope))),
-    ),
-  );
+  yield* observeReadModelRetention(readModel);
+
+  const worker = Effect.gen(function* () {
+    for (;;) {
+      const envelope = yield* admission.take;
+      if (!envelope) return;
+      yield* maintenanceLock
+        .withShared(processEnvelope(envelope))
+        .pipe(
+          Effect.ensuring(
+            Effect.suspend(() =>
+              envelope.controlCommitted
+                ? Effect.void
+                : isControlCommand(envelope.command)
+                  ? releaseControl(envelope.command.commandId)
+                  : admission.release(envelope),
+            ),
+          ),
+        );
+    }
+  });
   yield* Effect.forkScoped(worker);
   yield* Effect.log("orchestration engine started").pipe(
     Effect.annotateLogs({
@@ -971,18 +1052,78 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           );
         }
       }
+      const control = isControlCommand(command);
+      const existingControl = controlReservations.get(command.commandId);
+      if (control && existingControl) return yield* Deferred.await(existingControl.result);
+      let controlOrigin: ControlOrigin | undefined;
+      if (control && "threadId" in command) {
+        let binding: { provider: string; instanceId: string | null; payload: unknown } | undefined;
+        if (Option.isSome(sessionDirectory)) {
+          const current = Option.getOrUndefined(
+            yield* sessionDirectory.value
+              .getBinding(command.threadId)
+              .pipe(Effect.mapError(toPersistenceSqlError("OrchestrationEngine.controlOrigin"))),
+          );
+          if (current)
+            binding = {
+              provider: current.provider,
+              instanceId: current.providerInstanceId ?? current.provider,
+              payload: current.runtimePayload,
+            };
+        } else {
+          const rows = yield* sql<{
+            provider: string;
+            instanceId: string | null;
+            payload: string | null;
+          }>`SELECT provider_name AS provider, provider_instance_id AS instanceId, runtime_payload_json AS payload FROM provider_session_runtime WHERE thread_id = ${command.threadId}`.pipe(
+            Effect.mapError(toPersistenceSqlError("OrchestrationEngine.controlOrigin")),
+          );
+          if (rows[0])
+            binding = {
+              ...rows[0],
+              instanceId: rows[0].instanceId ?? rows[0].provider,
+              payload: rows[0].payload ? JSON.parse(rows[0].payload) : null,
+            };
+        }
+        controlOrigin = {
+          threadId: command.threadId,
+          provider: binding?.provider ?? null,
+          instanceId: binding?.instanceId ?? null,
+          generation: binding ? readPersistedSessionGeneration(binding.payload) : null,
+          activeTurnId:
+            readModel.threads.find((thread) => thread.id === command.threadId)?.session
+              ?.activeTurnId ?? null,
+        };
+      }
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
-      yield* Queue.offer(commandQueue, {
+      const envelope: CommandEnvelope = {
         command,
         result,
         startedAtMs: Date.now(),
         workspaceWrite: yield* WorkspaceWriteContext,
+        ...(controlOrigin ? { controlOrigin } : {}),
         ...(workspace ? { workspace } : {}),
-      });
-      return yield* Deferred.await(result);
+      };
+      const bytes = Buffer.byteLength(JSON.stringify(command));
+      const admittedResult = yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          const existing = control ? controlReservations.get(command.commandId) : undefined;
+          if (existing) return existing.result;
+          yield* admission.offer(envelope, bytes, control);
+          if (control) controlReservations.set(command.commandId, envelope);
+          return result;
+        }),
+      );
+      return yield* Deferred.await(admittedResult);
     });
 
   return {
+    completeControl: releaseControl,
+    controlOrigin: (commandId) => controlReservations.get(commandId)?.controlOrigin,
+    isTurnStartSuperseded: (event) =>
+      event.aggregateKind === "thread" &&
+      event.sequence < (stoppedSequences.get(event.aggregateId) ?? 0),
+    inspectQueue: admission.snapshot,
     getReadModel,
     readEvents,
     dispatch,

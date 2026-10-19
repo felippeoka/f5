@@ -48,6 +48,7 @@ let pendingBarrier = true;
 let reconciliationCount = 0;
 let acceptSend = false;
 let unavailableDispatchSnapshot = false;
+let supersededByStop = false;
 let methodNotFound = false;
 let reconciliationFails = false;
 let extraReplayDelivery: ProviderTurnDelivery | null = null;
@@ -91,6 +92,7 @@ function resetDelivery() {
   reconciliationCount = 0;
   acceptSend = false;
   unavailableDispatchSnapshot = false;
+  supersededByStop = false;
   methodNotFound = false;
   reconciliationFails = false;
   extraReplayDelivery = null;
@@ -288,6 +290,7 @@ const testLayer = ProviderTurnDeliveryWorkerLive.pipe(
   Layer.provideMerge(
     Layer.succeed(OrchestrationEngineService, {
       streamDomainEvents: Stream.empty,
+      isTurnStartSuperseded: () => supersededByStop,
       getReadModel: () =>
         Effect.succeed({
           threads: [
@@ -687,5 +690,21 @@ it.effect("retains the claimed baseline if the final dispatch read is unavailabl
     yield* worker.drain;
     assert.equal(state.state, "ambiguous");
     assert.deepEqual(state.preSendTurnIds, [TurnId.makeUnsafe("existing-turn")]);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a stop fences a claimed start before dispatch intent and never retries it", () =>
+  Effect.gen(function* () {
+    resetDelivery();
+    acceptSend = true;
+    unavailableDispatchSnapshot = true;
+    supersededByStop = true;
+    const worker = yield* ProviderTurnDeliveryWorker;
+    yield* worker.start;
+    yield* worker.drain;
+    assert.equal(state.state, "rejected");
+    assert.equal(state.certainty, "not_sent");
+    assert.equal(requeueCount, 0);
+    assert.include(state.errorDetail!, "stopped before");
   }).pipe(Effect.provide(testLayer)),
 );

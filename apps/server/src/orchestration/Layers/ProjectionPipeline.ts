@@ -1,3 +1,4 @@
+import { PerformanceStageProbe, measurePerformanceStage } from "../../observability/Metrics.ts";
 import {
   ELICITATION_SUBMITTED_ACTIVITY_KIND,
   projectPendingUserInputs,
@@ -106,8 +107,7 @@ interface ProjectorDefinition {
   /**
    * Event types this projector reacts to. When set, bootstrap catch-up reads
    * only these types from the event store, so the payloads of every other event
-   * are never decoded. `apply` must still ignore other types, because the live
-   * path (`projectEvent`) passes it every event.
+   * are never decoded. Live dispatch uses the same filter.
    */
   readonly eventTypes?: ReadonlyArray<OrchestrationEvent["type"]>;
   readonly apply: (
@@ -435,6 +435,7 @@ const runAttachmentSideEffects = Effect.fn(function* (sideEffects: AttachmentSid
 });
 
 const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
+  const probe = yield* PerformanceStageProbe;
   const sql = yield* SqlClient.SqlClient;
   const eventStore = yield* OrchestrationEventStore;
   const projectionStateRepository = yield* ProjectionStateRepository;
@@ -445,12 +446,24 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
   const projectionThreadMessageRepository = yield* ProjectionThreadMessageRepository;
 
   // Streaming emits a message-sent event per delta, so only the null-estimate
-  // recompute may read the whole thread; the incremental path reads one row.
+  // recompute may read the whole thread; verified appends use just delta lengths.
+  const appendedStreamingEvents = new WeakSet<OrchestrationEvent>();
   const estimateContextTokensForMessageEvent = (
-    payload: Extract<OrchestrationEvent, { type: "thread.message-sent" }>["payload"],
+    event: Extract<OrchestrationEvent, { type: "thread.message-sent" }>,
     estimatedContextTokens: number | null,
-  ) =>
-    estimatedContextTokens === null
+  ) => {
+    const payload = event.payload;
+    // The message projector already verified the full identity and appended
+    // this exact metadata-free delta inside the same command transaction.
+    if (estimatedContextTokens !== null && appendedStreamingEvents.has(event))
+      return Effect.succeed(
+        estimateContextTokensAfterMessageUpdate({
+          previousEstimatedContextTokens: estimatedContextTokens,
+          previousMessageCharacters: 0,
+          nextMessageCharacters: payload.text.length + (payload.reasoningText?.length ?? 0),
+        }),
+      );
+    return estimatedContextTokens === null
       ? projectionThreadMessageRepository
           .listByThreadId({ threadId: payload.threadId })
           .pipe(Effect.map(estimateThreadContextTokensFromMessages))
@@ -465,6 +478,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
               }),
             ),
           );
+  };
   const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
   const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
   const projectionThreadCommandExecutionRepository =
@@ -1114,7 +1128,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           const estimatedContextTokens = hasProviderTokenUsage
             ? existingRow.value.estimatedContextTokens
             : yield* estimateContextTokensForMessageEvent(
-                event.payload,
+                event,
                 existingRow.value.estimatedContextTokens,
               );
 
@@ -1314,6 +1328,28 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
     Effect.gen(function* () {
       switch (event.type) {
         case "thread.message-sent": {
+          appendedStreamingEvents.delete(event);
+          if (
+            event.payload.streaming &&
+            event.payload.attachments === undefined &&
+            event.payload.skillCall === undefined
+          ) {
+            const changed = yield* projectionThreadMessageRepository.appendStreamingText({
+              messageId: event.payload.messageId,
+              threadId: event.payload.threadId,
+              turnId: event.payload.turnId,
+              role: event.payload.role,
+              delta: event.payload.text,
+              ...(event.payload.reasoningText !== undefined
+                ? { reasoningDelta: event.payload.reasoningText }
+                : {}),
+              updatedAt: event.payload.updatedAt,
+            });
+            if (changed === 1) {
+              appendedStreamingEvents.add(event);
+              return;
+            }
+          }
           const existingMessage = Option.getOrUndefined(
             yield* projectionThreadMessageRepository.getByMessageId({
               threadId: event.payload.threadId,
@@ -1774,7 +1810,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           const estimatedContextTokens = hasProviderTokenUsage
             ? existingRow.value.estimatedContextTokens
             : yield* estimateContextTokensForMessageEvent(
-                event.payload,
+                event,
                 existingRow.value.estimatedContextTokens ??
                   Option.match(
                     yield* projectionThreadRepository.getById({
@@ -2400,70 +2436,155 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
   const projectors: ReadonlyArray<ProjectorDefinition> = [
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.projects,
+      eventTypes: ["project.created", "project.deleted", "project.meta-updated"],
       apply: applyProjectsProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.projectMemories,
+      eventTypes: ["project.memory-deleted", "project.memory-saved", "project.memory-updated"],
       apply: applyProjectMemoriesProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.projectSkills,
+      eventTypes: ["project.deleted", "project.skills-replaced"],
       apply: applyProjectSkillsProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.planningWorkflows,
+      eventTypes: [
+        "project.workflow-created",
+        "project.workflow-deleted",
+        "project.workflow-upserted",
+      ],
       apply: applyPlanningWorkflowsProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.codeReviewWorkflows,
+      eventTypes: [
+        "project.code-review-workflow-created",
+        "project.code-review-workflow-deleted",
+        "project.code-review-workflow-upserted",
+      ],
       apply: applyCodeReviewWorkflowsProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.investigationWorkflows,
+      eventTypes: [
+        "project.debug-workflow-created",
+        "project.debug-workflow-deleted",
+        "project.debug-workflow-upserted",
+        "project.investigation-workflow-created",
+        "project.investigation-workflow-deleted",
+        "project.investigation-workflow-upserted",
+      ],
       apply: applyInvestigationWorkflowsProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
+      eventTypes: ["thread.message-sent", "thread.reverted"],
       apply: applyThreadMessagesProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
+      eventTypes: ["thread.proposed-plan-upserted", "thread.reverted"],
       apply: applyThreadProposedPlansProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
+      eventTypes: ["thread.activity-appended", "thread.reverted"],
       apply: applyThreadActivitiesProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.threadCommandExecutions,
+      eventTypes: [
+        "thread.command-execution-output-appended",
+        "thread.command-execution-recorded",
+        "thread.deleted",
+        "thread.reverted",
+      ],
       apply: applyThreadCommandExecutionsProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.threadFileChanges,
+      eventTypes: ["thread.file-change-recorded", "thread.reverted"],
       apply: applyThreadFileChangesProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
+      eventTypes: [
+        "thread.compacted",
+        "thread.message-sent",
+        "thread.reverted",
+        "thread.session-set",
+      ],
       apply: applyThreadSessionsProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.usageFacts,
+      eventTypes: ["thread.session-set", "thread.usage-recorded"],
       apply: applyUsageFactsProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.threadTurns,
+      eventTypes: [
+        "thread.message-sent",
+        "thread.reverted",
+        "thread.session-set",
+        "thread.turn-diff-completed",
+        "thread.turn-interrupt-requested",
+        "thread.turn-processing-quiesced",
+        "thread.turn-start-requested",
+      ],
       apply: applyThreadTurnsProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
+      eventTypes: [],
       apply: applyCheckpointsProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.pendingApprovals,
+      eventTypes: ["thread.activity-appended", "thread.approval-response-requested"],
       apply: applyPendingApprovalsProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.threads,
+      eventTypes: [
+        "thread.activity-appended",
+        "thread.approval-response-requested",
+        "thread.archived",
+        "thread.checkpoint-revert-requested",
+        "thread.command-execution-output-appended",
+        "thread.command-execution-recorded",
+        "thread.compact-requested",
+        "thread.compacted",
+        "thread.created",
+        "thread.deleted",
+        "thread.file-change-recorded",
+        "thread.interaction-mode-set",
+        "thread.legacy-pins-imported",
+        "thread.message-sent",
+        "thread.meta-updated",
+        "thread.pins-replaced",
+        "thread.proposed-plan-upserted",
+        "thread.reverted",
+        "thread.runtime-mode-set",
+        "thread.session-notes-recorded",
+        "thread.session-set",
+        "thread.session-stop-requested",
+        "thread.snoozed",
+        "thread.tasks.updated",
+        "thread.title-regenerated",
+        "thread.title-regeneration-discarded",
+        "thread.title-regeneration-failed",
+        "thread.title-regeneration-started",
+        "thread.turn-diff-completed",
+        "thread.turn-interrupt-requested",
+        "thread.turn-start-requested",
+        "thread.unarchived",
+        "thread.unsnoozed",
+        "thread.user-input-response-requested",
+      ],
       apply: applyThreadsProjection,
     },
     {
@@ -2475,6 +2596,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.threadPullRequests,
+      eventTypes: ["thread.created", "thread.meta-updated"],
       apply: applyThreadPullRequestsProjection,
     },
   ];
@@ -2487,6 +2609,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
     projector: ProjectorDefinition,
     events: ReadonlyArray<OrchestrationEvent>,
     cursor: { readonly sequence: number; readonly occurredAt: string },
+    deferCursor = false,
   ) =>
     Effect.gen(function* () {
       const attachmentSideEffects = makeAttachmentSideEffects();
@@ -2495,7 +2618,11 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
         Effect.forEach(
           events,
           (event) =>
-            projector.apply(event, attachmentSideEffects).pipe(
+            measurePerformanceStage(
+              probe,
+              `projector.${projector.name}.${event.type}`,
+              projector.apply(event, attachmentSideEffects),
+            ).pipe(
               // A failure rolls back the whole batch, so name the event that caused it.
               Effect.tapCause((cause) =>
                 Effect.logWarning("projector failed to apply event", {
@@ -2509,11 +2636,13 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           { discard: true },
         ).pipe(
           Effect.flatMap(() =>
-            projectionStateRepository.upsert({
-              projector: projector.name,
-              lastAppliedSequence: cursor.sequence,
-              updatedAt: cursor.occurredAt,
-            }),
+            deferCursor
+              ? Effect.void
+              : projectionStateRepository.upsert({
+                  projector: projector.name,
+                  lastAppliedSequence: cursor.sequence,
+                  updatedAt: cursor.occurredAt,
+                }),
           ),
         ),
       );
@@ -2530,11 +2659,40 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
       );
     });
 
-  const runProjectorForEvent = (projector: ProjectorDefinition, event: OrchestrationEvent) =>
-    applyEventsInTransaction(projector, [event], {
-      sequence: event.sequence,
-      occurredAt: event.occurredAt,
-    });
+  const handledTypes = new Map(
+    projectors.map((projector) => [projector.name, new Set(projector.eventTypes)]),
+  );
+  const runProjectorForEvent = (
+    projector: ProjectorDefinition,
+    event: OrchestrationEvent,
+    deferCursor: boolean,
+  ) => {
+    const relevant = handledTypes.get(projector.name)!.has(event.type);
+    if (!relevant && deferCursor) return Effect.void;
+    return applyEventsInTransaction(
+      projector,
+      relevant ? [event] : [],
+      {
+        sequence: event.sequence,
+        occurredAt: event.occurredAt,
+      },
+      deferCursor,
+    );
+  };
+
+  const commitCursors: NonNullable<OrchestrationProjectionPipelineShape["commitCursors"]> = (
+    event,
+  ) =>
+    Effect.forEach(
+      projectors,
+      (projector) =>
+        projectionStateRepository.upsert({
+          projector: projector.name,
+          lastAppliedSequence: event.sequence,
+          updatedAt: event.occurredAt,
+        }),
+      { discard: true },
+    );
 
   const readEventHead = sql<{
     readonly sequence: number;
@@ -2640,10 +2798,14 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
       }
     });
 
-  const projectEvent: OrchestrationProjectionPipelineShape["projectEvent"] = (event) =>
-    Effect.forEach(projectors, (projector) => runProjectorForEvent(projector, event), {
-      concurrency: 1,
-    }).pipe(
+  const projectEvent: OrchestrationProjectionPipelineShape["projectEvent"] = (event, options) =>
+    Effect.forEach(
+      projectors,
+      (projector) => runProjectorForEvent(projector, event, options?.deferCursor === true),
+      {
+        concurrency: 1,
+      },
+    ).pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
       Effect.provideService(ServerConfig, serverConfig),
@@ -2675,6 +2837,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
   return {
     bootstrap,
     projectEvent,
+    commitCursors,
   } satisfies OrchestrationProjectionPipelineShape;
 });
 

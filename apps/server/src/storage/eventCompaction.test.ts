@@ -10,7 +10,7 @@ import {
   TurnId,
 } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Deferred, Effect, Fiber, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { ServerConfig } from "../config.ts";
@@ -25,6 +25,7 @@ import {
   compactThreadEvents,
   foldMessagePayloads,
   MAX_EVENTS_PER_TRANSACTION,
+  MAX_EVENTS_PER_GROUP,
 } from "./eventCompaction.ts";
 
 const layer = OrchestrationProjectionPipelineLive.pipe(
@@ -344,7 +345,7 @@ it.layer(layer)("compactThreadEvents", (it) => {
     }),
   );
 
-  it.effect("splits a group larger than one transaction and finishes it", () =>
+  it.effect("commits a group larger than the transaction target as one unit", () =>
     Effect.gen(function* () {
       yield* reset;
       yield* seed;
@@ -370,6 +371,93 @@ it.layer(layer)("compactThreadEvents", (it) => {
         complete: true,
       });
       assert.equal(yield* eventCount("thread.command-execution-output-appended"), 1);
+    }),
+  );
+
+  it.effect("rolls back a whole large group and its counters when a later delete fails", () =>
+    Effect.gen(function* () {
+      yield* reset;
+      yield* seed;
+      const sql = yield* SqlClient.SqlClient;
+      yield* appendRawMessages(MAX_EVENTS_PER_TRANSACTION + 50, "atomic-message");
+      yield* markAllProjected;
+      // Keep only this group eligible, so its first transaction is the one
+      // interrupted after rewrite and multiple successful delete chunks.
+      yield* sql`DELETE FROM orchestration_events WHERE json_extract(payload_json, '$.messageId') IS NOT 'atomic-message'`;
+      const before =
+        yield* sql`SELECT sequence, payload_json FROM orchestration_events ORDER BY sequence`;
+      const target = before[1_800]!.sequence;
+      yield* sql.unsafe(
+        `CREATE TEMP TRIGGER compaction_fail BEFORE DELETE ON orchestration_events WHEN OLD.sequence = ${Number(target)} BEGIN SELECT RAISE(ABORT, 'injected interruption'); END`,
+      );
+      const failed = yield* compactThreadEvents({ nowMs: Date.now(), maxDurationMs: 60_000 });
+      yield* sql.unsafe("DROP TRIGGER compaction_fail");
+      assert.deepInclude(failed, {
+        threadsFailed: 1,
+        eventsRemoved: 0,
+        receiptsRemoved: 0,
+        bytesRemoved: 0,
+        messagesCompacted: 0,
+      });
+      assert.deepStrictEqual(
+        yield* sql`SELECT sequence, payload_json FROM orchestration_events ORDER BY sequence`,
+        before,
+      );
+      yield* sql`DELETE FROM orchestration_event_compaction`;
+      const complete = yield* compactThreadEvents({ nowMs: Date.now(), maxDurationMs: 60_000 });
+      assert.equal(complete.messagesCompacted, 1);
+      assert.equal(complete.eventsRemoved, before.length - 1);
+      const rows = yield* sql<{
+        payloadJson: string;
+      }>`SELECT payload_json AS "payloadJson" FROM orchestration_events`;
+      assert.equal(JSON.parse(rows[0]!.payloadJson).text, "x".repeat(before.length - 1));
+    }),
+  );
+  it.effect("interruption after rewrite rolls back before releasing the transaction", () =>
+    Effect.gen(function* () {
+      yield* reset;
+      yield* seed;
+      const sql = yield* SqlClient.SqlClient;
+      const before =
+        yield* sql`SELECT sequence, payload_json FROM orchestration_events ORDER BY sequence`;
+      const rewritten = yield* Deferred.make<void>();
+      const intercepted = new Proxy(sql, {
+        apply(target, self, args) {
+          const statement = Reflect.apply(target, self, args);
+          if (String(args[0]).includes("UPDATE orchestration_events SET payload_json"))
+            return statement.pipe(
+              Effect.tap(() => Deferred.succeed(rewritten, undefined)),
+              Effect.andThen(Effect.never),
+            );
+          return statement;
+        },
+      });
+      const fiber = yield* compactThreadEvents({ nowMs: Date.now(), maxDurationMs: 60_000 }).pipe(
+        Effect.provideService(SqlClient.SqlClient, intercepted),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(rewritten);
+      yield* Fiber.interrupt(fiber);
+      assert.deepStrictEqual(
+        yield* sql`SELECT sequence, payload_json FROM orchestration_events ORDER BY sequence`,
+        before,
+      );
+    }),
+  );
+
+  it.effect("skips groups over the safety ceiling without rewriting any payload", () =>
+    Effect.gen(function* () {
+      yield* reset;
+      yield* seed;
+      const sql = yield* SqlClient.SqlClient;
+      yield* appendRawMessages(MAX_EVENTS_PER_GROUP + 1, "oversized-message");
+      yield* markAllProjected;
+      const result = yield* compactThreadEvents({ nowMs: Date.now(), maxDurationMs: 60_000 });
+      assert.equal(result.groupsSkipped, 1);
+      const rows = yield* sql<{
+        count: number;
+      }>`SELECT COUNT(*) AS count FROM orchestration_events WHERE json_extract(payload_json, '$.messageId') = 'oversized-message'`;
+      assert.equal(rows[0]!.count, MAX_EVENTS_PER_GROUP + 1);
     }),
   );
 
@@ -457,3 +545,21 @@ const markAllProjected = Effect.gen(function* () {
     SET last_applied_sequence = (SELECT MAX(sequence) FROM orchestration_events)
   `;
 });
+
+const appendRawMessages = (count: number, id: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const payload = JSON.stringify(
+      message({ messageId: MessageId.makeUnsafe(id), text: "x", streaming: true }),
+    );
+    yield* sql`
+    WITH RECURSIVE numbers(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM numbers WHERE i < ${count})
+    INSERT INTO orchestration_events (event_id, aggregate_kind, stream_id, stream_version, event_type, occurred_at,
+      command_id, causation_event_id, correlation_id, actor_kind, payload_json, metadata_json)
+    SELECT ${id} || i, 'thread', ${threadId},
+      (SELECT MAX(stream_version) FROM orchestration_events WHERE stream_id = ${threadId}) + i,
+      'thread.message-sent', ${at}, NULL, NULL, NULL, 'server',
+      CASE WHEN i = ${count} THEN json_set(${payload}, '$.streaming', json('false'), '$.text', '') ELSE ${payload} END, '{}'
+    FROM numbers
+  `;
+  });

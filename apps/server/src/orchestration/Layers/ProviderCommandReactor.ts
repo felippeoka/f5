@@ -1,3 +1,5 @@
+import { ProviderControlTarget } from "../../provider/controlTarget.ts";
+import { isControlEvent } from "../commandAdmission.ts";
 import { ServerConfig } from "../../config.ts";
 import { withRepositoryLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import { dispatchVerifiedWorkspace } from "../../project/workspaceTransitionContext.ts";
@@ -49,7 +51,7 @@ import {
   type WorkflowTurnExecutionProfile,
 } from "@t3tools/contracts";
 import { Cause, Effect, Layer, Option, Schema, Stream } from "effect";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeBackgroundWorker } from "../../backgroundWorker.ts";
 import { estimateMessageContextCharacters, inferProviderForModel } from "@t3tools/shared/model";
 import { getProviderTurnInputLengthIssue } from "@t3tools/shared/providerInput";
 import {
@@ -1656,7 +1658,18 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const titleRegenerationWorker = yield* makeDrainableWorker(processTitleRegenerationStartedSafely);
+  const titleRegenerationWorker = yield* makeBackgroundWorker(
+    processTitleRegenerationStartedSafely,
+    {
+      name: "ProviderCommandReactor.titleRegeneration",
+      maxEntries: 64,
+      key: (event) =>
+        event.payload.origin === "explicit"
+          ? event.payload.titleRegeneration.requestId
+          : event.payload.threadId,
+      revision: (event) => event.payload.expectedTitleRevision,
+    },
+  );
 
   const processTurnStartRequested = Effect.fnUntraced(function* (
     event: Extract<
@@ -2626,16 +2639,30 @@ const make = Effect.gen(function* () {
       });
 
   // Title synchronization has its own bounded worker so a slow provider cannot stall turns.
-  const providerTitleWorker = yield* makeDrainableWorker(
-    (input: { threadId: ThreadId; title: string }) =>
-      providerService.renameThread
-        ? providerService.renameThread(input.threadId, input.title).pipe(
+  const providerTitleWorker = yield* makeBackgroundWorker(
+    (input: { threadId: ThreadId; title: string; revision: number }) =>
+      Effect.gen(function* () {
+        const current = yield* resolveThread(input.threadId);
+        if (
+          !current ||
+          current.deletedAt !== null ||
+          (current.titleRevision ?? 0) !== input.revision ||
+          current.title !== input.title
+        )
+          return;
+        if (providerService.renameThread)
+          yield* providerService.renameThread(input.threadId, input.title).pipe(
             Effect.timeout("5 seconds"),
             Effect.catchCause((cause) =>
               Effect.logWarning("Provider title sync failed", { threadId: input.threadId, cause }),
             ),
-          )
-        : Effect.void,
+          );
+      }),
+    {
+      name: "ProviderCommandReactor.providerTitle",
+      key: (item) => item.threadId,
+      revision: (item) => item.revision,
+    },
   );
 
   const processDomainEvent = (event: ProviderIntentEvent) =>
@@ -2648,7 +2675,11 @@ const make = Effect.gen(function* () {
         case "thread.turn-processing-quiesced": {
           const thread = yield* resolveThread(event.payload.threadId);
           if (event.type === "thread.title-regenerated" && thread)
-            yield* providerTitleWorker.enqueue({ threadId: thread.id, title: thread.title });
+            yield* providerTitleWorker.enqueue({
+              threadId: thread.id,
+              title: thread.title,
+              revision: thread.titleRevision ?? 0,
+            });
           const completedAt =
             event.type === "thread.turn-processing-quiesced"
               ? event.payload.processingQuiescedAt
@@ -2684,7 +2715,22 @@ const make = Effect.gen(function* () {
           break;
         }
         case "thread.title-regeneration-started":
-          yield* titleRegenerationWorker.enqueue(event);
+          if (event.payload.origin !== "explicit") {
+            yield* titleRegenerationWorker.enqueue(event);
+            break;
+          }
+          if (
+            !(yield* titleRegenerationWorker
+              .offer(event)
+              .pipe(Effect.catchTag("WorkerAdmissionError", () => Effect.succeed(false))))
+          ) {
+            yield* dispatchTitleRegenerationFailure({
+              threadId: event.payload.threadId,
+              requestId: event.payload.titleRegeneration.requestId,
+              expectedTitleRevision: event.payload.expectedTitleRevision,
+              reason: "Title generation is busy or unavailable. Try again.",
+            });
+          }
           break;
         case "thread.runtime-mode-set": {
           const thread = yield* resolveThread(event.payload.threadId);
@@ -2695,10 +2741,12 @@ const make = Effect.gen(function* () {
           break;
         }
         case "thread.meta-updated": {
-          if (event.payload.title && event.payload.titleOrigin !== "provider")
+          const thread = yield* resolveThread(event.payload.threadId);
+          if (thread && event.payload.title && event.payload.titleOrigin !== "provider")
             yield* providerTitleWorker.enqueue({
               threadId: event.payload.threadId,
               title: event.payload.title,
+              revision: thread.titleRevision ?? 0,
             });
           // Titles and observed checkout branches do not change the provider
           // launch context. Re-reading its stale session would erase turn errors.
@@ -2708,7 +2756,6 @@ const make = Effect.gen(function* () {
             event.payload.worktreePath === undefined
           )
             return;
-          const thread = yield* resolveThread(event.payload.threadId);
           if (!thread?.session || thread.session.status === "stopped") {
             return;
           }
@@ -2756,7 +2803,43 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.withSpan(`provider.reactor.${event.type}`));
 
   const processDomainEventSafely = (event: ProviderIntentEvent) =>
-    processDomainEvent(event).pipe(
+    Effect.gen(function* () {
+      const origin = event.commandId
+        ? orchestrationEngine.controlOrigin?.(event.commandId)
+        : undefined;
+      if (isControlEvent(event) && origin) {
+        const current = Option.getOrUndefined(
+          yield* providerSessionDirectory.getBinding(event.payload.threadId),
+        );
+        const thread = yield* resolveThread(event.payload.threadId);
+        if (
+          (current?.provider ?? null) !== origin.provider ||
+          (current?.providerInstanceId ?? current?.provider ?? null) !== origin.instanceId ||
+          (current ? readPersistedSessionGeneration(current.runtimePayload) : null) !==
+            origin.generation ||
+          (origin.activeTurnId !== null &&
+            (thread?.session?.activeTurnId ?? null) !== origin.activeTurnId)
+        ) {
+          yield* appendProviderFailureActivity({
+            threadId: event.payload.threadId,
+            kind:
+              event.type === "thread.session-stop-requested"
+                ? "provider.session.stop.failed"
+                : event.type === "thread.turn-interrupt-requested"
+                  ? "provider.turn.interrupt.failed"
+                  : event.type === "thread.approval-response-requested"
+                    ? "provider.approval.respond.failed"
+                    : "provider.user-input.respond.failed",
+            summary: "The provider session changed before this action ran",
+            detail: "The action was not sent to the replacement session or turn.",
+            turnId: null,
+            createdAt: event.occurredAt,
+          });
+          return;
+        }
+      }
+      yield* processDomainEvent(event).pipe(Effect.provideService(ProviderControlTarget, origin));
+    }).pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.failCause(cause);
@@ -2766,9 +2849,20 @@ const make = Effect.gen(function* () {
           cause: Cause.pretty(cause),
         });
       }),
+      Effect.ensuring(
+        Effect.suspend(() =>
+          event.commandId && isControlEvent(event) && orchestrationEngine.completeControl
+            ? orchestrationEngine.completeControl(event.commandId)
+            : Effect.void,
+        ),
+      ),
     );
 
-  const worker = yield* makeDrainableWorker(processDomainEventSafely);
+  const worker = yield* makeBackgroundWorker(processDomainEventSafely, {
+    name: "ProviderCommandReactor",
+    controlEntries: 64,
+    isControl: isControlEvent,
+  });
 
   const start: ProviderCommandReactorShape["start"] = Effect.gen(function* () {
     yield* Effect.forkScoped(
@@ -2789,8 +2883,20 @@ const make = Effect.gen(function* () {
           return Effect.void;
         }
 
+        if (isControlEvent(event)) return Effect.void;
         return worker.enqueue(event);
       }),
+      { startImmediately: true },
+    );
+
+    // Separate subscriptions keep a blocked lossless bulk admission from hiding
+    // controls later in the PubSub. Both feed the same serial priority worker.
+    yield* Effect.forkScoped(
+      Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+        if (!isControlEvent(event)) return Effect.void;
+        return worker.enqueue(event as ProviderIntentEvent);
+      }),
+      { startImmediately: true },
     );
 
     const readModel = yield* orchestrationEngine.getReadModel();

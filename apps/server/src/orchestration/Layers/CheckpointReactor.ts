@@ -17,7 +17,7 @@ import {
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
 import { Cause, Effect, Layer, Option, Stream } from "effect";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeBackgroundWorker } from "../../backgroundWorker.ts";
 
 import { parseTurnDiffFilesFromUnifiedDiff } from "../../checkpointing/Diffs.ts";
 import {
@@ -951,7 +951,7 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const worker = yield* makeDrainableWorker(processInputSafely);
+  const worker = yield* makeBackgroundWorker(processInputSafely, { name: "CheckpointReactor" });
 
   const reconcileStartupQuiescence = Effect.gen(function* () {
     const unquiesced = yield* turns.listTerminalUnquiesced.pipe(
@@ -997,6 +997,7 @@ const make = Effect.gen(function* () {
         }
         return worker.enqueue({ source: "domain", event });
       }),
+      { startImmediately: true },
     );
 
     yield* Effect.forkScoped(
@@ -1010,6 +1011,7 @@ const make = Effect.gen(function* () {
         }
         return worker.enqueue({ source: "runtime", event });
       }),
+      { startImmediately: true },
     );
 
     // Historical recovery can involve filesystem and Git work for many turns.

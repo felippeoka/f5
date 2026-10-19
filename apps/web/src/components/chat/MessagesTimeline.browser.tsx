@@ -1,9 +1,15 @@
+import {
+  TimelineHarness,
+  makeUserEntry,
+  makeAssistantEntry,
+  type TimelineHarnessApi,
+} from "../../test/timeline";
 // Production CSS is part of the behavior under test because LegendList's
 // internal measurement depends on Tailwind sizing utilities applied to each
 // row.
 import "../../index.css";
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import type { OrchestrationCommandExecution } from "@t3tools/contracts";
 import {
   MessageId,
@@ -11,10 +17,9 @@ import {
   type OrchestrationFileChangeSummary,
   ThreadId,
   TurnId,
-  type UserMessageSkillCall,
 } from "@t3tools/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
-import { StrictMode, useLayoutEffect, useRef, useState } from "react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {} from "@vitest/browser-playwright"; // Types cdp() as a Playwright CDPSession.
 import { cdp, page, userEvent } from "vitest/browser";
@@ -24,17 +29,12 @@ import type { deriveTimelineEntries, LiveWorkActivity } from "../../session-logi
 import { parsePersistedAppSettings } from "../../appSettings";
 import type { TurnDiffSummary } from "../../types";
 import { readTimelineScrollAnchor } from "./timelineScrollAnchors";
-import { setNowTickerClockForTests } from "../../lib/nowTicker";
 import {
   buildTimelineRowExternals,
   buildTimelineRows,
   createTimelineRowCache,
-  MessagesTimeline,
   type TimelineRowExternalsInputs,
 } from "./MessagesTimeline";
-import { ComposerDock } from "./composer/ComposerDock";
-import type { ImageAttachmentActionItem } from "./imageAttachmentActions";
-import { WORK_LOG_PAGE_SIZE } from "./workLogConstants";
 import { appendTerminalContextsToPrompt } from "../../lib/terminalContext";
 
 const reducedMotionStore = vi.hoisted(() => {
@@ -98,64 +98,6 @@ function makeQueryClient() {
   });
 }
 
-function makeUserEntry(
-  id: string,
-  text: string,
-  offsetSeconds: number,
-  options: {
-    skillCall?: UserMessageSkillCall;
-    attachments?: Array<{
-      type: "image";
-      id: string;
-      name: string;
-      mimeType: string;
-      sizeBytes: number;
-      previewUrl: string;
-    }>;
-  } = {},
-): TimelineEntry {
-  const createdAt = new Date(
-    Date.parse("2026-03-04T12:00:00.000Z") + offsetSeconds * 1000,
-  ).toISOString();
-  return {
-    id,
-    kind: "message",
-    createdAt,
-    message: {
-      id: id as MessageId,
-      role: "user",
-      text,
-      ...(options.skillCall !== undefined ? { skillCall: options.skillCall } : {}),
-      createdAt,
-      completedAt: createdAt,
-      streaming: false,
-      attachments: options.attachments ?? [],
-      reasoningText: null,
-    },
-  } as unknown as TimelineEntry;
-}
-
-function makeAssistantEntry(id: string, text: string, offsetSeconds: number): TimelineEntry {
-  const createdAt = new Date(
-    Date.parse("2026-03-04T12:00:00.000Z") + offsetSeconds * 1000,
-  ).toISOString();
-  return {
-    id,
-    kind: "message",
-    createdAt,
-    message: {
-      id: id as MessageId,
-      role: "assistant",
-      text,
-      createdAt,
-      completedAt: createdAt,
-      streaming: false,
-      attachments: [],
-      reasoningText: null,
-    },
-  } as unknown as TimelineEntry;
-}
-
 function makeReadWorkEntry(id: string, path: string, offsetSeconds: number): TimelineEntry {
   const createdAt = new Date(
     Date.parse("2026-03-04T12:00:00.000Z") + offsetSeconds * 1000,
@@ -207,229 +149,6 @@ function makeCommandEntry(
       ...overrides,
     },
   } as unknown as TimelineEntry;
-}
-
-interface HarnessProps {
-  threadId?: ThreadId;
-  initialEntries: TimelineEntry[];
-  onIsAtEndChangeSpy: (value: boolean) => void;
-  onListRefChange?: (ref: LegendListRef | null) => void;
-  headerContent?: React.ReactNode;
-  initialHeight?: number;
-  initialIsWorking?: boolean;
-  initialActiveTurnStartedAt?: string | null;
-  initialLiveActivity?: LiveWorkActivity;
-  initialExpandedCommandExecutions?: Record<string, boolean>;
-  queryClient?: QueryClient;
-  turnDiffSummaryByTurnId?: Map<TurnId, TurnDiffSummary>;
-  workspaceRoot?: string;
-  chatDiffContextOverrides?: Partial<{
-    threadId: ThreadId | null;
-    isGitRepo: boolean;
-    inferredCheckpointTurnCountByTurnId: Record<TurnId, number>;
-    expandedFileChangeDiffs: Record<string, boolean>;
-    fileChangeSummariesById: Record<string, OrchestrationFileChangeSummary>;
-  }>;
-  onOpenTurnDiff?: (turnId: TurnId, filePath?: string) => void;
-  onImageActionMenu?: (item: ImageAttachmentActionItem, position: { x: number; y: number }) => void;
-  usesCustomImageContextMenu?: boolean;
-  revertTurnCountByUserMessageId?: Map<MessageId, number>;
-  onRevertUserMessage?: (
-    messageId: MessageId,
-    restoreFiles?: boolean,
-    expectedLatestMessageId?: MessageId | null,
-  ) => void;
-  canRestoreFiles?: boolean;
-  revertDisabledReason?: string | null;
-  pendingRevert?: { targetMessageId: MessageId; label: string } | null;
-  revertReopenRequest?: { messageId: MessageId; restoreFiles: boolean; nonce: number } | null;
-  onRevertReopenHandled?: (nonce: number) => void;
-  latestMessageId?: MessageId | null;
-  initialNowIso?: string;
-  onWorkingRibbonFocusLost?: () => void;
-}
-
-interface TimelineHarnessApi {
-  setEntries: (entries: TimelineEntry[]) => void;
-  setHeaderContent: (content: React.ReactNode) => void;
-  setHeight: (height: number) => void;
-  /** Height of the content inside the harness's real composer dock. */
-  setDockHeight: (height: number) => void;
-  /** Remounts the timeline the way ChatView does on a thread switch. */
-  setThreadId: (threadId: ThreadId) => void;
-  setTimelineState: (nextState: {
-    entries?: TimelineEntry[];
-    isWorking?: boolean;
-    activeTurnStartedAt?: string | null;
-    nowIso?: string;
-    liveActivity?: LiveWorkActivity;
-  }) => void;
-  /** Mirrors ChatView's send-follow: appends entries and requests a tail follow in one commit. */
-  followNewTurn: (entries: TimelineEntry[]) => void;
-}
-
-function TimelineHarness(
-  props: HarnessProps & {
-    // Parent drives the entry list via this setter so the test can push
-    // additions and simulate 0 → >0 transitions.
-    setApi?: (api: TimelineHarnessApi) => void;
-  },
-) {
-  const [entries, setEntries] = useState<TimelineEntry[]>(props.initialEntries);
-  const [height, setHeight] = useState(props.initialHeight ?? 400);
-  const [isWorking, setIsWorking] = useState(props.initialIsWorking ?? false);
-  const [activeTurnStartedAt, setActiveTurnStartedAt] = useState<string | null>(
-    props.initialActiveTurnStartedAt === undefined
-      ? "2026-03-04T12:00:00.000Z"
-      : props.initialActiveTurnStartedAt,
-  );
-  const [nowIso, setNowIso] = useState(() => {
-    const initial = props.initialNowIso ?? "2026-03-04T12:05:00.000Z";
-    // Live clocks read the shared ticker; pin it so labels stay deterministic.
-    setNowTickerClockForTests(() => Date.parse(initial));
-    return initial;
-  });
-  useLayoutEffect(() => {
-    setNowTickerClockForTests(() => Date.parse(nowIso));
-  }, [nowIso]);
-  useLayoutEffect(() => () => setNowTickerClockForTests(null), []);
-  const [liveActivity, setLiveActivity] = useState<LiveWorkActivity>(
-    props.initialLiveActivity ?? null,
-  );
-  const [dockHeight, setDockHeight] = useState(0);
-  const [threadId, setThreadId] = useState<ThreadId | undefined>(props.threadId);
-  const [headerContent, setHeaderContent] = useState<React.ReactNode>(props.headerContent ?? null);
-  const [expandedCommandExecutions, setExpandedCommandExecutions] = useState<
-    Record<string, boolean>
-  >(props.initialExpandedCommandExecutions ?? {});
-  const [expandedWorkGroups, setExpandedWorkGroups] = useState<Record<string, number>>({});
-  const [workGroupCollapseOverrides, setWorkGroupCollapseOverrides] = useState<
-    Record<string, boolean>
-  >({});
-  const [expandedFileChangeDiffs, setExpandedFileChangeDiffs] = useState<Record<string, boolean>>(
-    {},
-  );
-  const [followNextTailNonce, setFollowNextTailNonce] = useState(0);
-  const listRef = useRef<LegendListRef | null>(null);
-  const queryClientRef = useRef<QueryClient>(props.queryClient ?? makeQueryClient());
-  // Expose the list ref out through the callback so tests can observe the
-  // real LegendList ref the component received.
-  if (props.onListRefChange) {
-    props.onListRefChange(listRef.current);
-  }
-  if (props.setApi) {
-    props.setApi({
-      setEntries,
-      setHeaderContent,
-      setHeight,
-      setDockHeight,
-      setThreadId,
-      setTimelineState: (nextState) => {
-        if (nextState.entries !== undefined) setEntries(nextState.entries);
-        if (nextState.isWorking !== undefined) setIsWorking(nextState.isWorking);
-        if (nextState.nowIso !== undefined) setNowIso(nextState.nowIso);
-        if (nextState.liveActivity !== undefined) setLiveActivity(nextState.liveActivity);
-        if (Object.hasOwn(nextState, "activeTurnStartedAt")) {
-          setActiveTurnStartedAt(nextState.activeTurnStartedAt ?? null);
-        }
-      },
-      followNewTurn: (nextEntries) => {
-        setEntries(nextEntries);
-        setFollowNextTailNonce((nonce) => nonce + 1);
-      },
-    });
-  }
-
-  return (
-    <div
-      data-composer-dock-host
-      style={{ height, display: "flex", flexDirection: "column", position: "relative" }}
-    >
-      <QueryClientProvider client={queryClientRef.current}>
-        <MessagesTimeline
-          key={threadId}
-          {...(threadId ? { threadId } : {})}
-          {...(props.onWorkingRibbonFocusLost
-            ? { onWorkingRibbonFocusLost: props.onWorkingRibbonFocusLost }
-            : {})}
-          hasMessages={entries.length > 0}
-          isWorking={isWorking}
-          activeTurnStartedAt={activeTurnStartedAt}
-          liveActivity={liveActivity}
-          listRef={listRef}
-          followNextTailNonce={followNextTailNonce}
-          onIsAtEndChange={props.onIsAtEndChangeSpy}
-          timelineEntries={entries}
-          completionDividerBeforeEntryId={null}
-          completionSummary={null}
-          turnDiffSummaryByAssistantMessageId={new Map()}
-          turnDiffSummaryByTurnId={props.turnDiffSummaryByTurnId ?? new Map()}
-          expandedWorkGroups={expandedWorkGroups}
-          onToggleWorkGroup={(groupId, paginatedEntryCount) => {
-            setExpandedWorkGroups((current) => {
-              const revealedEntries = current[groupId] ?? WORK_LOG_PAGE_SIZE;
-              return {
-                ...current,
-                [groupId]:
-                  revealedEntries >= paginatedEntryCount
-                    ? WORK_LOG_PAGE_SIZE
-                    : Math.min(paginatedEntryCount, revealedEntries + WORK_LOG_PAGE_SIZE),
-              };
-            });
-          }}
-          workGroupCollapseOverrides={workGroupCollapseOverrides}
-          onSetWorkGroupExpanded={(groupId, expanded) => {
-            setWorkGroupCollapseOverrides((current) => ({ ...current, [groupId]: expanded }));
-          }}
-          onOpenTurnDiff={props.onOpenTurnDiff ?? (() => {})}
-          revertTurnCountByUserMessageId={props.revertTurnCountByUserMessageId ?? new Map()}
-          onRevertUserMessage={props.onRevertUserMessage ?? (() => {})}
-          canRestoreFiles={props.canRestoreFiles}
-          isRevertingCheckpoint={false}
-          revertDisabledReason={props.revertDisabledReason ?? null}
-          pendingRevert={props.pendingRevert ?? null}
-          revertReopenRequest={props.revertReopenRequest ?? null}
-          onRevertReopenHandled={props.onRevertReopenHandled}
-          latestMessageId={props.latestMessageId ?? null}
-          onImageExpand={() => {}}
-          onImageActionMenu={props.onImageActionMenu}
-          usesCustomImageContextMenu={props.usesCustomImageContextMenu}
-          markdownCwd={undefined}
-          resolvedTheme="light"
-          timestampFormat="locale"
-          workspaceRoot={props.workspaceRoot}
-          expandedCommandExecutions={expandedCommandExecutions}
-          onToggleCommandExecution={(commandExecutionId) => {
-            setExpandedCommandExecutions((current) => ({
-              ...current,
-              [commandExecutionId]: !(current[commandExecutionId] ?? false),
-            }));
-          }}
-          allDirectoriesExpanded={false}
-          onToggleAllDirectories={() => {}}
-          listHeaderContent={headerContent}
-          chatDiffContext={{
-            threadId: INLINE_DIFF_THREAD_ID,
-            isGitRepo: true,
-            inferredCheckpointTurnCountByTurnId: {},
-            expandedFileChangeDiffs,
-            fileChangeSummariesById: {},
-            onToggleFileChangeDiff: (workEntryId) => {
-              setExpandedFileChangeDiffs((current) => ({
-                ...current,
-                [workEntryId]: !(current[workEntryId] ?? true),
-              }));
-            },
-            onOpenFileChangeDiff: () => {},
-            ...props.chatDiffContextOverrides,
-          }}
-        />
-      </QueryClientProvider>
-      <ComposerDock>
-        <div data-testid="harness-dock-content" style={{ height: dockHeight }} />
-      </ComposerDock>
-    </div>
-  );
 }
 
 function makeOverflowEntries(count: number): TimelineEntry[] {

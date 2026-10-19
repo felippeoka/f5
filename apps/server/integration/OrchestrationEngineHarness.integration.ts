@@ -7,6 +7,9 @@ import { execFileSync } from "node:child_process";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ApprovalRequestId,
+  CommandId,
+  ThreadId,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
   ProjectId,
   type OrchestrationEvent,
   type OrchestrationThread,
@@ -672,4 +675,36 @@ export const makeOrchestrationIntegrationHarness = (
       waitForReceipt,
       dispose,
     } satisfies OrchestrationIntegrationHarness;
+  });
+
+/** Common aggregate seed for integration and chaos scenarios. */
+export const seedOrchestrationProjectAndThread = (
+  harness: OrchestrationIntegrationHarness,
+  branch: string | null = null,
+) =>
+  Effect.gen(function* () {
+    const createdAt = new Date().toISOString();
+    const projectId = ProjectId.makeUnsafe("project-1");
+    yield* harness.engine.dispatch({
+      type: "project.create",
+      commandId: CommandId.makeUnsafe("cmd-project-create"),
+      projectId,
+      title: "Integration Project",
+      workspaceRoot: harness.workspaceDir,
+      defaultModel: "gpt-5-codex",
+      createdAt,
+    });
+    yield* harness.engine.dispatch({
+      type: "thread.create",
+      commandId: CommandId.makeUnsafe("cmd-thread-create"),
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      projectId,
+      title: "Integration Thread",
+      model: "gpt-5-codex",
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "approval-required",
+      branch,
+      worktreePath: null,
+      createdAt,
+    });
   });

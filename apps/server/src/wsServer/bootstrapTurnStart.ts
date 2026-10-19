@@ -1,3 +1,4 @@
+import { OrchestrationOverloadError } from "../orchestration/Errors.ts";
 import { dispatchVerifiedWorkspace } from "../project/workspaceTransitionContext.ts";
 import { setupProjectScript } from "@t3tools/shared/projectScripts";
 import { CommandId, type OrchestrationCommand } from "@t3tools/contracts";
@@ -112,6 +113,7 @@ export type BootstrapTurnStartDependencies = BootstrapTurnStartBaseDependencies 
 
 export function isDefinitelyUncommittedDispatchError(error: OrchestrationDispatchError): boolean {
   return (
+    Schema.is(OrchestrationOverloadError)(error) ||
     Schema.is(OrchestrationCommandIdConflictError)(error) ||
     Schema.is(OrchestrationCommandInvariantError)(error) ||
     Schema.is(OrchestrationCommandPreviouslyRejectedError)(error) ||
@@ -215,6 +217,8 @@ function withAppendedCleanupDetail(
       detail: `${error.detail}${suffix}`,
     });
   }
+  if (Schema.is(OrchestrationOverloadError)(error))
+    return new OrchestrationOverloadError({ ...error });
   const exhaustive: never = error;
   return exhaustive;
 }

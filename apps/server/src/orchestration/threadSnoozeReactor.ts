@@ -129,7 +129,7 @@ export function startThreadSnoozeReactor(
       }
       const threadId = affectsSnoozeSchedule(event);
       return threadId === null ? Effect.void : reconcileThread(threadId);
-    }).pipe(Effect.forkScoped);
+    }).pipe(Effect.forkScoped({ startImmediately: true }));
 
     yield* Effect.addFinalizer(() =>
       Effect.gen(function* () {

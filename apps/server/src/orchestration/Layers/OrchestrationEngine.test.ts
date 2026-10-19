@@ -26,7 +26,18 @@ import {
   TurnId,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
-import { Deferred, Effect, Layer, ManagedRuntime, Metric, Queue, Stream, Tracer } from "effect";
+import {
+  Deferred,
+  Effect,
+  Exit,
+  Scope,
+  Layer,
+  ManagedRuntime,
+  Metric,
+  Queue,
+  Stream,
+  Tracer,
+} from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { describe, expect, it } from "vitest";
 
@@ -2182,4 +2193,185 @@ describe("usage recovery stop durability", () => {
       }
     },
   );
+});
+
+describe("command admission", () => {
+  it("rejects an oversized ordinary command before committing any intent", async () => {
+    const system = await createOrchestrationSystem();
+    try {
+      const failure = await system.run(
+        system.engine
+          .dispatch({
+            type: "project.create",
+            commandId: CommandId.makeUnsafe("oversized"),
+            projectId: asProjectId("oversized-project"),
+            title: "x".repeat(32 * 1024 * 1024),
+            workspaceRoot: process.cwd(),
+            createdAt: now(),
+          })
+          .pipe(Effect.flip),
+      );
+      expect(failure).toMatchObject({
+        _tag: "OrchestrationOverloadError",
+        lane: "ordinary",
+        retryable: true,
+        deliveryCertainty: "not_sent",
+      });
+      expect((await system.run(system.engine.getReadModel())).snapshotSequence).toBe(0);
+      expect(system.engine.inspectQueue!().entries).toBe(0);
+    } finally {
+      await system.dispose();
+    }
+  });
+  it("a stop overtakes queued starts and atomically rejects unsent durable deliveries", async () => {
+    const system = await createOrchestrationSystem();
+    const projectId = asProjectId("cancel-project"),
+      threadId = ThreadId.makeUnsafe("cancel-thread");
+    let maintenance: Scope.Closeable | undefined;
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("cancel-project-create"),
+          projectId,
+          title: "Project",
+          workspaceRoot: process.cwd(),
+          createdAt: now(),
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("cancel-thread-create"),
+          threadId,
+          projectId,
+          title: "Thread",
+          model: "gpt-5-codex",
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+          createdAt: now(),
+        }),
+      );
+      maintenance = await system.run(system.engine.acquireMaintenanceLock());
+      const start = (id: string) =>
+        system.run(
+          system.engine
+            .dispatch({
+              type: "thread.turn.start",
+              commandId: CommandId.makeUnsafe(id),
+              threadId,
+              message: { messageId: asMessageId(id), role: "user", text: id, attachments: [] },
+              interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+              runtimeMode: "approval-required",
+              createdAt: now(),
+            })
+            .pipe(Effect.exit),
+        );
+      const first = start("active-start");
+      await expect.poll(() => system.engine.inspectQueue!().entries).toBe(1);
+      const second = start("queued-start");
+      await expect.poll(() => system.engine.inspectQueue!().entries).toBe(2);
+      const stop = system.run(
+        system.engine.dispatch({
+          type: "thread.session.stop",
+          commandId: CommandId.makeUnsafe("overtaking-stop"),
+          threadId,
+          createdAt: now(),
+        }),
+      );
+      await expect.poll(() => system.engine.inspectQueue!().entries).toBe(3);
+      await system.run(Scope.close(maintenance, Exit.void));
+      maintenance = undefined;
+      expect(Exit.isSuccess(await first)).toBe(true);
+      expect(await second).toMatchObject({ _tag: "Failure" });
+      await stop;
+      const model = await system.run(system.engine.getReadModel());
+      expect(model.threads[0]!.messages.map((message) => message.id)).toEqual(["active-start"]);
+      const deliveries = await system.run(
+        system.sql<{
+          state: string;
+          certainty: string;
+        }>`SELECT state, certainty FROM provider_turn_deliveries`,
+      );
+      expect(deliveries).toEqual([{ state: "rejected", certainty: "not_sent" }]);
+      await system.run(system.engine.completeControl!("overtaking-stop"));
+      expect(system.engine.inspectQueue!().entries).toBe(0);
+    } finally {
+      if (maintenance) await system.run(Scope.close(maintenance, Exit.void));
+      await system.dispose();
+    }
+  });
+  it("reserves controls before commit and releases slots only after reactor completion", async () => {
+    const system = await createOrchestrationSystem();
+    const projectId = asProjectId("control-project"),
+      threadId = ThreadId.makeUnsafe("control-thread");
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("control-project-create"),
+          projectId,
+          title: "Project",
+          workspaceRoot: process.cwd(),
+          createdAt: now(),
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("control-thread-create"),
+          threadId,
+          projectId,
+          title: "Thread",
+          model: "gpt-5-codex",
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+          createdAt: now(),
+        }),
+      );
+      for (let index = 0; index < 64; index++)
+        await system.run(
+          system.engine.dispatch({
+            type: "thread.session.stop",
+            commandId: CommandId.makeUnsafe(`control-${index}`),
+            threadId,
+            createdAt: now(),
+          }),
+        );
+      const sequence = (await system.run(system.engine.getReadModel())).snapshotSequence;
+      expect(
+        await system.run(
+          system.engine
+            .dispatch({
+              type: "thread.session.stop",
+              commandId: CommandId.makeUnsafe("control-full"),
+              threadId,
+              createdAt: now(),
+            })
+            .pipe(Effect.flip),
+        ),
+      ).toMatchObject({ _tag: "OrchestrationOverloadError", lane: "control" });
+      expect((await system.run(system.engine.getReadModel())).snapshotSequence).toBe(sequence);
+      await system.run(system.engine.completeControl!("control-0"));
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.session.stop",
+          commandId: CommandId.makeUnsafe("control-recovered"),
+          threadId,
+          createdAt: now(),
+        }),
+      );
+      expect(system.engine.inspectQueue!().entries).toBe(64);
+      for (let index = 1; index < 64; index++)
+        await system.run(system.engine.completeControl!(`control-${index}`));
+      await system.run(system.engine.completeControl!("control-recovered"));
+      expect(system.engine.inspectQueue!().entries).toBe(0);
+    } finally {
+      await system.dispose();
+    }
+  });
 });

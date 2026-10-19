@@ -217,6 +217,31 @@ describe("FileBrowserPanel", () => {
     }
   });
 
+  it("keeps stale root and expanded listings usable after refresh failure, with a local retry", async () => {
+    const mounted = await renderPanel();
+    try {
+      await expect.element(page.getByText("README.md", { exact: true })).toBeInTheDocument();
+      listDirectory.mockRejectedValue(
+        new Error("Permission denied: workspace temporarily unavailable"),
+      );
+      await page.getByRole("button", { name: "Refresh workspace files" }).click();
+      await expect.element(page.getByText("README.md", { exact: true })).toBeInTheDocument();
+      await expect
+        .element(page.getByRole("alert").first())
+        .toHaveTextContent("Permission denied reading workspace root");
+      await expect
+        .element(page.getByRole("alert").first())
+        .toHaveTextContent("last successful listing");
+      await page.getByText("README.md", { exact: true }).click();
+      expect(mounted.onOpenFile).toHaveBeenCalledWith("README.md");
+      listDirectory.mockResolvedValue(listResult());
+      await page.getByRole("button", { name: "Retry folder" }).first().click();
+      await expect.element(page.getByText("README.md", { exact: true })).toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("shows an unavailable state without listing files when cwd is missing", async () => {
     const mounted = await renderPanel({ cwd: null });
     try {

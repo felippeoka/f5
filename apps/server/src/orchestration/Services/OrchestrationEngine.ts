@@ -24,7 +24,18 @@ import type { OrchestrationEventStoreError } from "../../persistence/Errors.ts";
 /**
  * OrchestrationEngineShape - Service API for orchestration command and event flow.
  */
+export type { ProviderControlOrigin as ControlOrigin } from "../../provider/controlTarget.ts";
+import type { ProviderControlOrigin as ControlOrigin } from "../../provider/controlTarget.ts";
+
 export interface OrchestrationEngineShape {
+  /** Releases a reserved control slot after its provider-side outcome is recorded. */
+  readonly completeControl?: (commandId: string) => Effect.Effect<void>;
+  readonly controlOrigin?: (commandId: string) => ControlOrigin | undefined;
+  readonly isTurnStartSuperseded?: (event: OrchestrationEvent) => boolean;
+
+  /** Process-local admission inventory; never includes command contents. */
+  readonly inspectQueue?: () => { entries: number; bytes: number; oldestAgeMs: number };
+
   /**
    * Read the current in-memory orchestration read model.
    *

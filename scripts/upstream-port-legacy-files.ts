@@ -88,7 +88,10 @@ function processStart(pid: number): string {
   if (process.platform === "linux") {
     const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
     const ticks = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
-    return `${readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim()}:${ticks}`;
+    const boot = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    if (!ticks || !/^\d+$/.test(ticks) || !boot)
+      throw new Error(`cannot determine start time for process ${pid}`);
+    return `${boot}:${ticks}`;
   }
   const value =
     process.platform === "win32"
@@ -105,17 +108,40 @@ function processStart(pid: number): string {
       : execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
           encoding: "utf8",
           env: { ...process.env, LC_ALL: "C" },
+          timeout: 10_000,
+          stdio: ["ignore", "pipe", "pipe"],
         });
   if (!value.trim()) throw new Error(`cannot determine start time for process ${pid}`);
   return value.trim();
 }
+
+export interface ProcessIdentityProbe {
+  readonly isAlive: (pid: number) => boolean;
+  readonly startTime: (pid: number) => string;
+}
+
+export const systemProcessIdentityProbe: ProcessIdentityProbe = {
+  isAlive: (pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+      throw error;
+    }
+  },
+  startTime: processStart,
+};
 
 function manualRecovery(journalPath: string): string {
   return `Inspect ${journalPath} and the canonical files; after confirming no writer or recovery is active and repairing the pair if necessary, remove ${journalPath} and ${journalPath}.recovering if present, then retry.`;
 }
 
 /** Recover a killed writer before reading either file. Live writers fail closed. */
-export function recoverPortFiles(files: PortFiles): void {
+export function recoverPortFiles(
+  files: PortFiles,
+  probe: ProcessIdentityProbe = systemProcessIdentityProbe,
+): void {
   const journalPath = pathsFor(files).journal;
   if (!existsSync(journalPath)) return;
   const journalText = readFileSync(journalPath, "utf8");
@@ -157,18 +183,16 @@ export function recoverPortFiles(files: PortFiles): void {
       `cannot recover a refresh journal from another host or file pair. ${manualRecovery(journalPath)}`,
     );
   }
-  let alive = true;
+  let alive: boolean;
   try {
-    process.kill(value.pid, 0);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ESRCH") alive = false;
-  }
-  if (alive && value.processStart) {
-    try {
-      alive = processStart(value.pid) === value.processStart;
-    } catch {
-      throw new Error(`cannot verify refresh process identity. ${manualRecovery(journalPath)}`);
+    alive = probe.isAlive(value.pid);
+    if (alive && value.processStart) {
+      const start = probe.startTime(value.pid);
+      if (!start.trim()) throw new Error("process identity probe unavailable");
+      alive = start === value.processStart;
     }
+  } catch {
+    throw new Error(`cannot verify refresh process identity. ${manualRecovery(journalPath)}`);
   }
   if (alive)
     throw new Error(

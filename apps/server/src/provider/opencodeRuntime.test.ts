@@ -1,3 +1,4 @@
+import { once } from "node:events";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
@@ -191,4 +192,39 @@ describe("resolveOpenCodeInvocation", () => {
       expect(command.args).toEqual([script, "--version", "value & literal"]);
     },
   );
+});
+
+it("aborts an in-flight SDK request when the owning server lifetime ends", async () => {
+  const { createServer } = await import("node:http");
+  const received = Promise.withResolvers<void>();
+  const server = createServer(() => received.resolve());
+  const listening = once(server, "listening");
+  server.listen(0, "127.0.0.1");
+  await listening;
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Expected TCP address");
+  const lifetime = new AbortController();
+  try {
+    const runtime = await Effect.runPromise(
+      Effect.service(OpenCodeRuntime).pipe(
+        Effect.provide(OpenCodeRuntimeLive.pipe(Layer.provide(NodeServices.layer))),
+      ),
+    );
+    const client = runtime.createOpenCodeSdkClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      directory: process.cwd(),
+      signal: lifetime.signal,
+    });
+    const result = client.session.list().then(
+      () => "completed",
+      () => "aborted",
+    );
+    await received.promise;
+    lifetime.abort(new Error("server exited"));
+    expect(await result).toBe("aborted");
+  } finally {
+    lifetime.abort();
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });

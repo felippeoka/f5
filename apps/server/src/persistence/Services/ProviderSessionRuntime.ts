@@ -65,7 +65,19 @@ export interface ProviderMcpStateUpdate {
   readonly unconvergedVersion: string | null;
 }
 
+export interface ProviderTerminalLifecycleUpdate {
+  readonly threadId: ThreadId;
+  readonly instanceId: ProviderInstanceId;
+  readonly generation: number;
+  readonly turnId: string | null;
+  readonly eventType: "turn.completed" | "session.exited";
+  readonly createdAt: string;
+}
+
 export interface ProviderSessionRuntimeRepositoryShape {
+  readonly updateTerminalLifecycleIfCurrent: (
+    input: ProviderTerminalLifecycleUpdate,
+  ) => Effect.Effect<boolean, ProviderSessionRuntimeRepositoryError>;
   readonly updateMcpStateIfCurrent: (
     input: ProviderMcpStateUpdate,
   ) => Effect.Effect<boolean, ProviderSessionRuntimeRepositoryError>;

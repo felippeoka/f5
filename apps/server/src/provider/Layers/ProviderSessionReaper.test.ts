@@ -99,6 +99,7 @@ function makeLayer(input: {
     listThreadIds: () => Effect.succeed([ThreadId.makeUnsafe("thread-idle")]),
     listBindings: () => Effect.succeed(listedBindings),
     updateMcpStateIfCurrent: () => Effect.succeed(true),
+    updateTerminalLifecycleIfCurrent: () => Effect.succeed(true),
     listBindingsByProject: () => Effect.succeed([]),
   };
   const engine: OrchestrationEngineShape = {
