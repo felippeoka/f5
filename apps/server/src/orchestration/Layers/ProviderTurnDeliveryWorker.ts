@@ -1,3 +1,4 @@
+import { registerShutdown } from "../../shutdown.ts";
 import { DeliveryAttemptContext } from "../../provider/deliveryAttemptContext";
 import { CommandId, TurnId, type OrchestrationUsageLimit, type ThreadId } from "@t3tools/contracts";
 import {
@@ -5,6 +6,7 @@ import {
   Deferred,
   Duration,
   Effect,
+  Exit,
   Fiber,
   Layer,
   Metric,
@@ -45,6 +47,20 @@ const make = Effect.gen(function* () {
   const reactor = yield* ProviderCommandReactor;
   const turns = yield* ProjectionTurnRepository;
   const engine = yield* OrchestrationEngineService;
+  const sourceScope = yield* Scope.make("sequential");
+  let stopping = false;
+  const stopSources = Effect.gen(function* () {
+    stopping = true;
+    yield* Scope.close(sourceScope, Exit.void);
+  });
+  yield* Effect.addFinalizer(() => stopSources);
+  yield* registerShutdown("provider-delivery-sources", "admission", () => stopSources);
+  const shutdownBeforeSend = () =>
+    new ProviderTurnDeliveryError({
+      certainty: "not_sent",
+      retryable: true,
+      detail: "Server shutdown stopped this turn before dispatch.",
+    });
   const preparationSlots = yield* Semaphore.make(8);
   const controlPreparationSlots = yield* Semaphore.make(2);
   const delayed = yield* PubSub.unbounded<readonly [CommandId, number]>();
@@ -138,8 +154,11 @@ const make = Effect.gen(function* () {
         return;
       }
 
+      const turnEvent = claimed.event;
       const exit = yield* Effect.exit(
-        reactor.deliverTurnStart(claimed.event).pipe(
+        Effect.suspend(() =>
+          stopping ? Effect.fail(shutdownBeforeSend()) : reactor.deliverTurnStart(turnEvent),
+        ).pipe(
           Effect.provideService(
             DeliveryAttemptContext,
             claimed.attemptId
@@ -196,47 +215,51 @@ const make = Effect.gen(function* () {
                       ),
                       Effect.andThen(
                         Effect.suspend(() =>
-                          engine.isTurnStartSuperseded?.(claimed.event)
-                            ? Effect.fail(
-                                new ProviderTurnDeliveryError({
-                                  certainty: "not_sent",
-                                  retryable: false,
-                                  detail: "The session stopped before this turn was sent.",
-                                }),
-                              )
-                            : repository
-                                .recordDispatchIntent({
-                                  deliveryId,
-                                  attemptId: claimed.attemptId!,
-                                  preSendTurnIds:
-                                    snapshot?.turns.map((turn) => turn.id) ??
-                                    claimed.preSendTurnIds,
-                                  historyEvidence:
-                                    snapshot?.history ?? claimed.historyEvidence ?? null,
-                                })
-                                .pipe(
-                                  Effect.mapError(
-                                    (cause) =>
-                                      new ProviderTurnDeliveryError({
-                                        certainty: "not_sent",
-                                        retryable: true,
-                                        detail: "Could not persist provider dispatch intent.",
-                                        cause,
-                                      }),
+                          stopping
+                            ? Effect.fail(shutdownBeforeSend())
+                            : engine.isTurnStartSuperseded?.(claimed.event)
+                              ? Effect.fail(
+                                  new ProviderTurnDeliveryError({
+                                    certainty: "not_sent",
+                                    retryable: false,
+                                    detail: "The session stopped before this turn was sent.",
+                                  }),
+                                )
+                              : repository
+                                  .recordDispatchIntent({
+                                    deliveryId,
+                                    attemptId: claimed.attemptId!,
+                                    preSendTurnIds:
+                                      snapshot?.turns.map((turn) => turn.id) ??
+                                      claimed.preSendTurnIds,
+                                    historyEvidence:
+                                      snapshot?.history ?? claimed.historyEvidence ?? null,
+                                  })
+                                  .pipe(
+                                    Effect.mapError(
+                                      (cause) =>
+                                        new ProviderTurnDeliveryError({
+                                          certainty: "not_sent",
+                                          retryable: true,
+                                          detail: "Could not persist provider dispatch intent.",
+                                          cause,
+                                        }),
+                                    ),
+                                    Effect.flatMap((recorded) =>
+                                      recorded
+                                        ? Effect.suspend(() =>
+                                            stopping ? Effect.fail(shutdownBeforeSend()) : handoff,
+                                          )
+                                        : Effect.fail(
+                                            new ProviderTurnDeliveryError({
+                                              certainty: "not_sent",
+                                              retryable: false,
+                                              detail:
+                                                "This delivery attempt no longer owns dispatch.",
+                                            }),
+                                          ),
+                                    ),
                                   ),
-                                  Effect.flatMap((recorded) =>
-                                    recorded
-                                      ? handoff
-                                      : Effect.fail(
-                                          new ProviderTurnDeliveryError({
-                                            certainty: "not_sent",
-                                            retryable: false,
-                                            detail:
-                                              "This delivery attempt no longer owns dispatch.",
-                                          }),
-                                        ),
-                                  ),
-                                ),
                         ),
                       ),
                     ),
@@ -332,7 +355,7 @@ const make = Effect.gen(function* () {
         notSent &&
         typedDeliveryError?.retryable === true &&
         !typedDeliveryError.usageLimit &&
-        claimed.attempt < 3
+        (stopping || claimed.attempt < 3)
       ) {
         const delayMs = Math.min(30_000, 1_000 * 2 ** Math.max(0, claimed.attempt - 1));
         yield* repository.requeue({
@@ -379,6 +402,7 @@ const make = Effect.gen(function* () {
 
   const processDelivery = (deliveryId: CommandId) =>
     Effect.gen(function* () {
+      if (stopping) return;
       const candidate = yield* repository.getByCommandId(deliveryId);
       if (
         !candidate ||
@@ -396,6 +420,7 @@ const make = Effect.gen(function* () {
       const baseline = yield* provider
         .readThread(candidate.threadId)
         .pipe(Effect.catchCause(() => Effect.succeed(null)));
+      if (stopping) return;
       const claimed = yield* repository.claim(
         deliveryId,
         baseline?.turns.map((turn) => turn.id) ?? [],
@@ -443,6 +468,7 @@ const make = Effect.gen(function* () {
     event: { type: string };
   }) =>
     Effect.gen(function* () {
+      if (stopping) return;
       const key = `${delivery.event.type === "thread.turn-steer-requested" ? "steer" : "start"}:${delivery.threadId}`;
       const reserved = yield* Effect.sync(() => {
         if (active.has(key)) return false;
@@ -560,7 +586,11 @@ const make = Effect.gen(function* () {
     ),
   );
 
+  yield* registerShutdown("provider-delivery-work", "drain", () => drain);
+
   const start: ProviderTurnDeliveryWorkerShape["start"] = Effect.gen(function* () {
+    if (stopping) return;
+    yield* Effect.addFinalizer(() => stopSources);
     yield* turns.reconcileAllAcceptedPendingTurnStarts.pipe(
       Effect.catchCause((cause) =>
         Effect.logError("accepted pending turn startup reconciliation failed", {
@@ -605,14 +635,14 @@ const make = Effect.gen(function* () {
               Effect.catchCause((cause) => Effect.logWarning("delivery wake failed", { cause })),
             )
           : Effect.void,
-    ).pipe(Effect.forkScoped({ startImmediately: true }));
+    ).pipe(Effect.forkIn(sourceScope, { startImmediately: true }));
     yield* Stream.runForEach(Stream.fromPubSub(delayed), ([deliveryId, delayMs]) =>
       Effect.sleep(Duration.millis(delayMs)).pipe(
         Effect.andThen(enqueueById(deliveryId)),
-        Effect.forkScoped,
+        Effect.forkIn(sourceScope),
         Effect.asVoid,
       ),
-    ).pipe(Effect.forkScoped);
+    ).pipe(Effect.forkIn(sourceScope));
     yield* Effect.forever(
       enqueueActionable.pipe(
         Effect.andThen(replayTerminalOutcomes),
@@ -621,7 +651,7 @@ const make = Effect.gen(function* () {
         ),
         Effect.andThen(Effect.sleep("1 second")),
       ),
-    ).pipe(Effect.forkScoped);
+    ).pipe(Effect.forkIn(sourceScope));
   });
 
   const getTargetDelivery = (threadId: ThreadId, deliveryId: CommandId) =>

@@ -1,3 +1,4 @@
+import { ServerShutdown, ShutdownRegistry } from "../../shutdown.ts";
 import { ProviderAdapterRequestError, ProviderTurnDeliveryError } from "../../provider/Errors.ts";
 import {
   CommandId,
@@ -50,6 +51,7 @@ let acceptSend = false;
 let unavailableDispatchSnapshot = false;
 let supersededByStop = false;
 let pendingControl: Effect.Effect<void> | undefined;
+let beforePrepared: Effect.Effect<void> | undefined;
 let methodNotFound = false;
 let reconciliationFails = false;
 let extraReplayDelivery: ProviderTurnDelivery | null = null;
@@ -95,6 +97,7 @@ function resetDelivery() {
   unavailableDispatchSnapshot = false;
   supersededByStop = false;
   pendingControl = undefined;
+  beforePrepared = undefined;
   methodNotFound = false;
   reconciliationFails = false;
   extraReplayDelivery = null;
@@ -253,6 +256,7 @@ const testLayer = ProviderTurnDeliveryWorkerLive.pipe(
           Effect.andThen(
             Effect.gen(function* () {
               const context = yield* DeliveryAttemptContext;
+              if (beforePrepared) yield* beforePrepared;
               if (unavailableDispatchSnapshot && context) yield* context.prepared(null);
               return yield* Effect.suspend(deliverTurnStartOutcome);
             }),
@@ -735,4 +739,47 @@ it.effect.each(["finish", "stop"] as const)(
       assert.equal(state.state, outcome === "stop" ? "rejected" : "accepted");
       assert.equal(state.attempt, outcome === "stop" ? 0 : 1);
     }).pipe(Effect.provide(testLayer)),
+);
+
+it.live(
+  "shutdown preserves unsent deliveries and fences an admitted preparation before native dispatch",
+  () =>
+    Effect.gen(function* () {
+      resetDelivery();
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const admissionStopped = yield* Deferred.make<void>();
+      beforePrepared = Deferred.succeed(entered, undefined).pipe(
+        Effect.andThen(Deferred.await(release)),
+      );
+      unavailableDispatchSnapshot = true;
+      acceptSend = true;
+      const shutdown = new ShutdownRegistry();
+      shutdown.register({
+        name: "test-admission-barrier",
+        phase: "flush",
+        run: () => Effect.runPromise(Deferred.succeed(admissionStopped, undefined)),
+      });
+      yield* Effect.gen(function* () {
+        const worker = yield* ProviderTurnDeliveryWorker;
+        yield* worker.start;
+        yield* Deferred.await(entered);
+        const closing = shutdown.run();
+        yield* Deferred.await(admissionStopped);
+        yield* Deferred.succeed(release, undefined);
+        const results = yield* Effect.promise(() => closing);
+        assert.equal(
+          results.every((result) => result.outcome === "complete"),
+          true,
+        );
+        assert.equal(state.state, "pending");
+        assert.equal(state.providerTurnId, null);
+        assert.equal(requeueCount, 1);
+        yield* worker.start;
+        yield* worker.drain;
+        assert.equal(state.attempt, 1);
+      }).pipe(
+        Effect.provide(testLayer.pipe(Layer.provide(Layer.succeed(ServerShutdown, shutdown)))),
+      );
+    }).pipe(Effect.scoped),
 );

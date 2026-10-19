@@ -57,6 +57,8 @@ import {
   Deferred,
   Duration,
   Effect,
+  Exit,
+  Scope,
   FileSystem,
   Layer,
   Option,
@@ -135,7 +137,14 @@ function storageError(cause: unknown): NextTurnQueueStorageError {
 export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
   const store = yield* NextTurnQueueStore;
   const worktreeSettings = yield* Effect.serviceOption(ServerSettingsService);
-  const scope = yield* Effect.scope;
+  const sourceScope = yield* Scope.make("sequential");
+  let stopping = false;
+  const stopSources = Effect.gen(function* () {
+    stopping = true;
+    yield* Scope.close(sourceScope, Exit.void);
+  });
+  yield* Effect.addFinalizer(() => stopSources);
+  yield* registerShutdown("queue-sources", "admission", () => stopSources);
   const secretsOption = yield* Effect.serviceOption(ServerSecretStore);
   const protectedFingerprint = (config: import("@t3tools/contracts").ProviderInstanceConfig) => {
     const fingerprint = executionProviderFingerprintFor(config);
@@ -613,6 +622,7 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
 
   const processThread = (threadId: ThreadId): Effect.Effect<void, NextTurnQueueError> =>
     Effect.gen(function* () {
+      if (stopping) return;
       let queue = yield* store.listByThread(threadId);
       if (
         (queue.state.paused && isDeliveryFailureCode(queue.state.pauseReasonCode)) ||
@@ -957,7 +967,8 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
 
   let workers: ReadonlyArray<DrainableWorker<ThreadId>> = [];
 
-  const enqueueDirect = (threadId: ThreadId) => workers[shardFor(threadId)]!.enqueue(threadId);
+  const enqueueDirect = (threadId: ThreadId) =>
+    Effect.suspend(() => (stopping ? Effect.void : workers[shardFor(threadId)]!.enqueue(threadId)));
 
   workers = yield* Effect.forEach(
     Array.from({ length: QUEUE_WORKER_SHARDS }),
@@ -977,6 +988,10 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
         { name: `NextTurnQueueDispatcher.${index}`, key: (item) => String(item) },
       ),
     { concurrency: 1 },
+  );
+
+  yield* registerShutdown("queue-work", "drain", () =>
+    Effect.forEach(workers, (worker) => worker.drain, { concurrency: "unbounded", discard: true }),
   );
 
   const notify = (threadId: ThreadId) =>
@@ -1315,7 +1330,7 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
                     }
                   }),
                 ),
-                Effect.forkIn(scope),
+                Effect.forkIn(sourceScope),
               );
             }
           }
@@ -1345,6 +1360,7 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
 
   let safetySweepCount = 0;
   const safetySweep = Effect.gen(function* () {
+    if (stopping) return;
     const maintenanceDue = safetySweepCount++ % SCAN_EVERY_SWEEPS === 0;
     yield* Ref.update(automaticCompacting, (current) => {
       const next = new Map(current);
@@ -1658,6 +1674,8 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
     changes: Stream.fromPubSub(changesPubSub),
     summaryChanges: Stream.fromPubSub(summaryChangesPubSub),
     start: Effect.gen(function* () {
+      if (stopping) return;
+      yield* Effect.addFinalizer(() => stopSources);
       if (Option.isSome(restartSettingsOption))
         yield* Stream.runForEach(yield* restartSettingsOption.value.subscribeChanges, (settings) =>
           scanUsageLimitResumes(true, undefined, settings).pipe(
@@ -1667,7 +1685,7 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
               }),
             ),
           ),
-        ).pipe(Effect.forkScoped);
+        ).pipe(Effect.forkIn(sourceScope));
       yield* Effect.gen(function* () {
         const live = yield* Ref.get(activeDispatches);
         yield* store.reclaimStaleLeases(live);
@@ -1685,13 +1703,13 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
         ),
       );
       yield* Stream.runForEach(engine.streamDomainEvents, reactToDomainEvent).pipe(
-        Effect.forkScoped({ startImmediately: true }),
+        Effect.forkIn(sourceScope, { startImmediately: true }),
       );
       yield* Stream.runForEach(receiptBus.stream, (receipt) => notify(receipt.threadId)).pipe(
-        Effect.forkScoped,
+        Effect.forkIn(sourceScope),
       );
       yield* Effect.forever(safetySweep.pipe(Effect.andThen(Effect.sleep("5 seconds")))).pipe(
-        Effect.forkScoped,
+        Effect.forkIn(sourceScope),
       );
     }),
   };

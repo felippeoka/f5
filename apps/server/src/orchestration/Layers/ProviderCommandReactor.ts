@@ -1,3 +1,4 @@
+import { registerShutdown } from "../../shutdown.ts";
 import { ProviderControlTarget } from "../../provider/controlTarget.ts";
 import { isControlEvent } from "../commandAdmission.ts";
 import { ServerConfig } from "../../config.ts";
@@ -2950,12 +2951,17 @@ const make = Effect.gen(function* () {
       Effect.mapError(toProviderTurnDeliveryError),
     );
 
-  return {
-    start,
-    drain: Effect.all([worker.drain, titleRegenerationWorker.drain, providerTitleWorker.drain], {
+  const drain = Effect.all(
+    [worker.drain, titleRegenerationWorker.drain, providerTitleWorker.drain],
+    {
       discard: true,
       concurrency: 2,
-    }),
+    },
+  );
+  yield* registerShutdown("provider-command-work", "drain", () => drain);
+  return {
+    start,
+    drain,
     deliverTurnStart,
     recordTurnStartFailure,
     applyMcpConfigToLiveSessions,

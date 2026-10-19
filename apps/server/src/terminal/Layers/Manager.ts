@@ -286,6 +286,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
   private readonly maxRetainedInactiveSessions: number;
   private subprocessPollTimer: ReturnType<typeof setInterval> | null = null;
   private subprocessPollInFlight = false;
+  private readonly sourceStops = new WeakMap<PtyProcess, Promise<void>>();
   private readonly killEscalationTimers = new Map<PtyProcess, ReturnType<typeof setTimeout>>();
   private readonly logger = createLogger("terminal");
 
@@ -358,7 +359,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
         JSON.stringify(currentRuntimeEnv) !== JSON.stringify(nextRuntimeEnv);
 
       if (existing.cwd !== input.cwd || runtimeEnvChanged) {
-        this.stopProcess(existing);
+        await this.stopProcess(existing);
         existing.cwd = input.cwd;
         existing.runtimeEnv = nextRuntimeEnv;
         existing.history.clear();
@@ -843,12 +844,25 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
   }
 
   /** Keep source listeners alive through graceful termination and decoder finish. */
-  private async stopProcess(
-    session: TerminalSessionState,
-    deadline = Date.now() + 1_800,
-  ): Promise<void> {
+  private stopProcess(session: TerminalSessionState, deadline = Date.now() + 1_800): Promise<void> {
     const source = session.process;
-    if (!source) return;
+    if (!source) return Promise.resolve();
+    const existing = this.sourceStops.get(source);
+    if (existing) return existing;
+    const completion = Promise.withResolvers<void>();
+    this.sourceStops.set(source, completion.promise);
+    void this.stopProcessSource(session, source, deadline).then(
+      completion.resolve,
+      completion.reject,
+    );
+    return completion.promise;
+  }
+
+  private async stopProcessSource(
+    session: TerminalSessionState,
+    source: PtyProcess,
+    deadline: number,
+  ): Promise<void> {
     let escalation: ReturnType<typeof setTimeout> | undefined;
     let sourceDeadline: ReturnType<typeof setTimeout> | undefined;
     let unsubscribe = () => {};

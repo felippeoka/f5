@@ -1,3 +1,4 @@
+import { ServerShutdown, ShutdownRegistry } from "../../shutdown.ts";
 import { ProviderControlTarget } from "../controlTarget.ts";
 import { PreviewAutomationBroker } from "../../mcp/PreviewAutomationBroker.ts";
 import { ComputerAutomationBroker } from "../../computer/ComputerAutomationBroker.ts";
@@ -4056,5 +4057,58 @@ it.effect.each(["interrupt", "approval", "input", "stop"] as const)(
     }).pipe(
       Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", codex.adapter]]))),
     );
+  },
+);
+
+it.live(
+  "shutdown refuses new provider starts and turns while allowing existing session controls",
+  () => {
+    const adapter = makeFakeCodexAdapter();
+    const shutdown = new ShutdownRegistry();
+    const layer = makeProviderServiceLayerForAdapters(new Map([["codex", adapter.adapter]])).pipe(
+      Layer.provide(Layer.succeed(ServerShutdown, shutdown)),
+    );
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const threadId = asThreadId("shutdown-admission");
+      yield* service.startSession(threadId, {
+        threadId,
+        provider: "codex",
+        runtimeMode: "full-access",
+        cwd: process.cwd(),
+      });
+      shutdown.register({
+        name: "test-existing-control",
+        phase: "flush",
+        run: () => Effect.runPromise(service.interruptTurn({ threadId })),
+      });
+      const results = yield* Effect.promise(() => shutdown.run());
+      assert.equal(
+        results.every((result) => result.outcome === "complete"),
+        true,
+      );
+      assert.equal(adapter.interruptTurn.mock.calls.length, 1);
+      const before = adapter.startSession.mock.calls.length;
+      const start = yield* service
+        .startSession(threadId, {
+          threadId,
+          provider: "codex",
+          runtimeMode: "full-access",
+          cwd: process.cwd(),
+        })
+        .pipe(Effect.flip);
+      assert.equal(start._tag, "ProviderTurnDeliveryError");
+      const send = yield* service
+        .sendTurn({ threadId, input: "not sent", attachments: [] })
+        .pipe(Effect.flip);
+      assert.equal(send._tag, "ProviderTurnDeliveryError");
+      if (send._tag === "ProviderTurnDeliveryError") assert.equal(send.certainty, "not_sent");
+      const prompt = yield* service
+        .runOneOffPrompt({ threadId, provider: "codex", prompt: "not sent" })
+        .pipe(Effect.flip);
+      assert.equal(prompt._tag, "ProviderTurnDeliveryError");
+      assert.equal(adapter.startSession.mock.calls.length, before);
+      assert.equal(adapter.sendTurn.mock.calls.length, 0);
+    }).pipe(Effect.provide(layer), Effect.scoped);
   },
 );

@@ -136,7 +136,8 @@ Native and canonical provider logs share one asynchronous append/rotation regist
 per canonical path. Record boundaries and the existing history format are preserved.
 Admission is bounded, repair evidence is never shed, critical records wait for append,
 and transient failures retry without blacklisting a thread. Partial final lines are
-removed before another append; they never prove completion. A log failure is reported
+removed before another append; they never prove completion. Both repair tools ignore
+unterminated tails, including valid JSON without the final newline. A log failure is reported
 while authoritative runtime events and terminal receipts continue to publish.
 
 Reducer batches reuse a private thread-array copy and leave the published input

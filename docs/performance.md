@@ -298,3 +298,12 @@ unchanged-row identity. Markdown state exposes parsed/validated character counts
 revision-based plain-paragraph and fenced-code tests verify linear growth without
 a whole-prefix validation. These deterministic invariants do not establish the
 production browser composer-latency gate.
+
+The 2026-10-19 deleted-thread measurement used clean local source snapshots
+`ebe292b4c85957f824621591224d30a0de23ce77` (foundation plus the matching harness)
+and `1f405a6f0787efd92eb098ce8fbdd9fed222948d` (candidate). Both recorded the
+same fixture and harness digests. The baseline retained 7,500 deleted-thread
+messages; the candidate retained zero. Median retained heap was 51,804,104 versus
+49,419,472 bytes; RSS was 304,611,328 versus 295,223,296 bytes. Reports are
+`.performance/stability-{baseline,candidate}-deleted-memory-20261019-37.json`.
+This is a three-process memory comparison, not a streaming or browser latency gate.

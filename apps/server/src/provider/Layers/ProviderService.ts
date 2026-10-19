@@ -82,6 +82,7 @@ import {
   Duration,
   Deferred,
   Effect,
+  Fiber,
   Layer,
   Option,
   PubSub,
@@ -346,6 +347,25 @@ function toInstructionContextFromSessionStartInput(
 const makeProviderService = (options?: ProviderServiceLiveOptions) =>
   Effect.gen(function* () {
     const nativeScope = yield* Effect.scope;
+    let accepting = true;
+    let nativePolling: Fiber.Fiber<unknown, never> | undefined;
+    const ensureAccepting = Effect.suspend(() =>
+      accepting
+        ? Effect.void
+        : Effect.fail(
+            new ProviderTurnDeliveryError({
+              certainty: "not_sent",
+              retryable: true,
+              detail: "The server is shutting down before provider work was sent.",
+            }),
+          ),
+    );
+    yield* registerShutdown("provider-admission", "admission", () =>
+      Effect.gen(function* () {
+        accepting = false;
+        if (nativePolling) yield* Fiber.interrupt(nativePolling);
+      }),
+    );
     const workspaceGit = yield* Effect.serviceOption(GitCore);
     const workspaceSql = yield* Effect.serviceOption(SqlClient.SqlClient);
     const checkWorkspace = (threadId: ThreadId, sessionCwd?: string) =>
@@ -1139,6 +1159,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 input.operation,
                 "A native operation is pending; session recovery is unavailable.",
               );
+            yield* ensureAccepting;
             const resumed = yield* adapter.startSession({
               mcpEventIdentity: {
                 providerInstanceId: bindingInstanceId,
@@ -1374,6 +1395,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
 
     const startSession: ProviderServiceShape["startSession"] = (threadId, rawInput) =>
       Effect.gen(function* () {
+        yield* ensureAccepting;
         if (hasNativeOperationReservation(threadId))
           return yield* toValidationError(
             "ProviderService.startSession",
@@ -1553,6 +1575,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               providerInstanceId: requestedInstanceId,
             },
             Effect.gen(function* () {
+              yield* ensureAccepting;
               const session = yield* adapter.startSession({
                 ...adapterInput,
                 mcpEventIdentity: { providerInstanceId: requestedInstanceId, sessionGeneration },
@@ -1843,6 +1866,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       onPrepared: (instanceId: ProviderInstanceId, generation: number) => void = () => {},
     ) =>
       Effect.gen(function* () {
+        yield* ensureAccepting;
         if (isRecord(rawInput) && typeof rawInput.input === "string") {
           const inputLengthIssue = getProviderTurnInputLengthIssue(rawInput.input);
           if (inputLengthIssue) {
@@ -2068,6 +2092,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 }),
             ),
           );
+          yield* ensureAccepting;
           const turn = yield* (
             input.expectedTurnId !== undefined
               ? routed.adapter.steerTurn!({
@@ -2727,6 +2752,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
 
     const runOneOffPrompt: ProviderServiceShape["runOneOffPrompt"] = (rawInput) =>
       Effect.gen(function* () {
+        yield* ensureAccepting;
         const input = yield* decodeInputOrValidationError({
           operation: "ProviderService.runOneOffPrompt",
           schema: ProviderConversationCompactionInputSchema,
@@ -3475,7 +3501,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
     if (nativeCoordinator) {
       // Restore every durable reservation before exposing the layer; provider reads happen later.
       yield* nativeCoordinator.restoreReservations.pipe(Effect.orDie);
-      yield* nativeCoordinator.reconcile(checkNativeOperation).pipe(
+      nativePolling = yield* nativeCoordinator.reconcile(checkNativeOperation).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("Native operation reconciliation failed", { cause }),
         ),
@@ -3510,6 +3536,16 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
 
     const submitTurn: NonNullable<ProviderServiceShape["submitTurn"]> = (input) =>
       Effect.gen(function* () {
+        if (!accepting) {
+          const rejected = Effect.fail(
+            new ProviderTurnDeliveryError({
+              certainty: "not_sent",
+              retryable: true,
+              detail: "The server is shutting down before provider work was sent.",
+            }),
+          );
+          return { acceptance: rejected, completion: rejected };
+        }
         const acceptance = yield* Deferred.make<
           import("@t3tools/contracts").ProviderTurnStartResult,
           import("../Errors").ProviderServiceError

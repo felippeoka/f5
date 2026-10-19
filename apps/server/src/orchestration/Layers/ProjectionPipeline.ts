@@ -2683,15 +2683,12 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
   const commitCursors: NonNullable<OrchestrationProjectionPipelineShape["commitCursors"]> = (
     event,
   ) =>
-    Effect.forEach(
-      projectors,
-      (projector) =>
-        projectionStateRepository.upsert({
-          projector: projector.name,
-          lastAppliedSequence: event.sequence,
-          updatedAt: event.occurredAt,
-        }),
-      { discard: true },
+    projectionStateRepository.upsertMany(
+      projectors.map((projector) => ({
+        projector: projector.name,
+        lastAppliedSequence: event.sequence,
+        updatedAt: event.occurredAt,
+      })),
     );
 
   const readEventHead = sql<{

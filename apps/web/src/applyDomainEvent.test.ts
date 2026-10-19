@@ -1,3 +1,4 @@
+import { messageAttachmentSources } from "./lib/streamingTextRevision";
 import { createTimelineEntryCache, deriveTimelineEntries } from "./session-logic";
 import { createTimelineRowCache, buildTimelineRows } from "./components/chat/MessagesTimeline";
 import { summarizeInvestigationWorkflow } from "@t3tools/shared/workflowSummary";
@@ -1499,7 +1500,15 @@ it.each(["running", "interrupted"] as const)(
 
 describe("streaming batch and timeline work", () => {
   it("copies the thread collection once and reuses timeline structure for text-only updates", () => {
-    const original = makeState();
+    const fixed = {
+      id: MessageId.makeUnsafe("fixed"),
+      role: "user" as const,
+      text: "Earlier question",
+      streaming: false,
+      createdAt: "2026-04-01T09:00:00.000Z",
+    };
+    const original = makeState({ threads: [makeThread({ messages: [fixed] })] });
+    const attachments = messageAttachmentSources(original.threads[0]!.messages);
     const id = MessageId.makeUnsafe("streaming");
     const event = (text: string, sequence: number) =>
       makeEvent(
@@ -1538,14 +1547,16 @@ describe("streaming batch and timeline work", () => {
         expandMcpToolCalls: false,
         cache: rows,
       });
-    build();
+    const fixedRow = build()[0];
     for (let index = 2; index < 20; index++) {
       state = applyDomainEvent(state, event("a", index), batch);
       expect(state.threads).toBe(owned);
       const rendered = build();
-      expect(rendered[0]?.kind === "message" && rendered[0].message.text.length).toBe(index);
+      expect(rendered[1]?.kind === "message" && rendered[1].message.text.length).toBe(index);
+      expect(rendered[0]).toBe(fixedRow);
+      expect(messageAttachmentSources(state.threads[0]!.messages)).toBe(attachments);
     }
-    expect(original.threads[0]?.messages).toEqual([]);
+    expect(original.threads[0]?.messages).toEqual([fixed]);
     expect(entries.structuralDerivations).toBe(1);
     expect(rows.structuralDerivations).toBe(1);
     expect(entries.contentUpdates).toBe(18);

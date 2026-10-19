@@ -737,6 +737,58 @@ describe("TerminalManager", () => {
     }
   });
 
+  it("waits for the old terminal source before changing directories and fences late old output", async () => {
+    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), "f5-terminal-directory-"));
+    tempDirs.push(logsDir);
+    const adapter = new FakePtyAdapter();
+    const manager = new TerminalManagerRuntime({
+      logsDir,
+      ptyAdapter: adapter,
+      shellResolver: () => process.execPath,
+    });
+    const input = openInput();
+    await manager.open(input);
+    const old = adapter.processes[0]!;
+    old.exitOnKill = false;
+    const next = manager.open({ ...input, cwd: logsDir });
+    await vi.waitFor(() => expect(old.killSignals).toEqual(["SIGTERM"]));
+    expect(adapter.processes).toHaveLength(1);
+    old.emitData("last old output");
+    old.emitExit({ exitCode: 0, signal: null });
+    const opened = await next;
+    expect(adapter.processes).toHaveLength(2);
+    expect(opened.status).toBe("running");
+    old.emitData("late old output");
+    old.emitExit({ exitCode: 0, signal: null });
+    adapter.processes[1]!.emitData("current output");
+    const current = await manager.open({ ...input, cwd: logsDir });
+    expect(current.status).toBe("running");
+    expect(current.history).toBe("current output");
+    await manager.dispose();
+  });
+
+  it("shares one source stop when close and shutdown overlap", async () => {
+    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), "f5-terminal-shared-stop-"));
+    tempDirs.push(logsDir);
+    const adapter = new FakePtyAdapter();
+    const manager = new TerminalManagerRuntime({
+      logsDir,
+      ptyAdapter: adapter,
+      shellResolver: () => process.execPath,
+    });
+    const input = openInput();
+    await manager.open(input);
+    const source = adapter.processes[0]!;
+    source.exitOnKill = false;
+    const close = manager.close({ threadId: input.threadId, terminalId: input.terminalId });
+    await vi.waitFor(() => expect(source.killSignals).toEqual(["SIGTERM"]));
+    const disposal = manager.dispose();
+    source.emitData("last output");
+    source.emitExit({ exitCode: 0, signal: null });
+    await Promise.all([close, disposal]);
+    expect(source.killSignals).toEqual(["SIGTERM"]);
+  });
+
   it("does not rewrite unchanged histories on repeated close, reopen and shutdown", async () => {
     const write = vi.fn(async (filePath: string, history: string) => {
       await fs.promises.writeFile(filePath, history, "utf8");
