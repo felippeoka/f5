@@ -783,14 +783,17 @@ export function createWsNativeApi(): NativeApi {
       onDiskSpaceUpdated: (callback) => onStorageDiskSpaceUpdated(callback),
     },
     worktrees: {
-      moveThread: requestMethod(WS_METHODS.worktreesMoveThread),
+      moveThread: (input) =>
+        transport.request(WS_METHODS.worktreesMoveThread, input, { timeoutMs: null }),
       discardMovedChanges: requestMethod(WS_METHODS.worktreesDiscardMovedChanges),
       list: requestMethod(WS_METHODS.worktreesList),
-      switchWorkspace: requestMethod(WS_METHODS.worktreesSwitchWorkspace),
+      switchWorkspace: (input) =>
+        transport.request(WS_METHODS.worktreesSwitchWorkspace, input, { timeoutMs: null }),
       getTransition: requestMethod(WS_METHODS.worktreesGetTransition),
       previewTransitionRecovery: (input) =>
         transport.request(WS_METHODS.worktreesPreviewTransitionRecovery, input),
-      resolveTransition: requestMethod(WS_METHODS.worktreesResolveTransition),
+      resolveTransition: (input) =>
+        transport.request(WS_METHODS.worktreesResolveTransition, input, { timeoutMs: null }),
 
       inspect: requestMethod(WS_METHODS.worktreesInspect),
       remove: requestMethod(WS_METHODS.worktreesRemove),

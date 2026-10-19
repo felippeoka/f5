@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import * as fs from "node:fs/promises";
+import fs from "node:fs/promises";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { Effect, Schema } from "effect";
@@ -102,7 +102,7 @@ export const sameMoveFile = (a: UntrackedFile, b: UntrackedFile | undefined) =>
   b !== undefined &&
   a.path === b.path &&
   a.sha256 === b.sha256 &&
-  a.mode === b.mode &&
+  (a.symlink || a.mode === b.mode) &&
   a.size === b.size &&
   a.symlink === b.symlink;
 const filesEqual = (a: readonly UntrackedFile[], b: readonly UntrackedFile[]) =>
@@ -153,6 +153,13 @@ export function makeMoveSnapshotOperations(run: Run): MoveSnapshotOperations {
         .sort();
       if (paths.length > MAX_FILES)
         return yield* Effect.fail(new Error("Move supports at most 5,000 untracked files."));
+      const nestedRepository = paths.find((file) => file.endsWith("/"));
+      if (nestedRepository)
+        return yield* Effect.fail(
+          new Error(
+            `Untracked nested repository ${JSON.stringify(nestedRepository)} cannot be copied. Commit, ignore, or remove it before moving this conversation.`,
+          ),
+        );
       const untracked = yield* io(async () => {
         const files: UntrackedFile[] = [];
         let bytes = 0;
@@ -211,7 +218,7 @@ export function makeMoveSnapshotOperations(run: Run): MoveSnapshotOperations {
         if (!filesEqual([file], [await inspectFile(target, file.path)]))
           throw new Error("A copied file changed during the move.");
       }
-    });
+    }).pipe(Effect.uninterruptible); // Settle every filesystem write before cancellation releases ownership.
   return {
     readMoveSnapshot,
     copyMoveUntracked,

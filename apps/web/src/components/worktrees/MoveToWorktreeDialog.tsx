@@ -1,3 +1,4 @@
+import { useStore } from "../../store";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ThreadId, WorktreesMoveThreadResult } from "@t3tools/contracts";
@@ -14,14 +15,33 @@ import {
 } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 
-export async function discardMovedChanges(threadId: ThreadId, operationId: string) {
-  await ensureNativeApi().worktrees.discardMovedChanges({ threadId, operationId });
+export async function discardMovedChanges(
+  threadId: ThreadId,
+  operationId: string,
+  sourcePath: string,
+  branch: string,
+) {
+  const api = ensureNativeApi();
+  const state = useStore.getState();
+  const linked = state.threads.filter(
+    (thread) =>
+      thread.id !== threadId &&
+      (thread.worktreePath ??
+        state.projects.find((project) => project.id === thread.projectId)?.cwd) === sourcePath,
+  );
+  const stashMessage = `f5: copied to ${branch} (${operationId})`;
+  const confirmed = await api.dialogs.confirm(
+    `Save the originals from ${sourcePath} in a Git stash and clear them from the project checkout?\n\nStash: ${stashMessage}\n\n${linked.length ? `Other conversations sharing these files: ${linked.map((thread) => thread.title).join(", ")}. Their visible working state will change too.` : "This affects every conversation sharing the project checkout, including conversations in other windows."}\n\nYou can restore the originals from Git's stash list.`,
+  );
+  if (!confirmed) return false;
+  await api.worktrees.discardMovedChanges({ threadId, operationId });
   toastManager.add({
     type: "success",
     title: "Original changes saved in a stash",
     description:
       "The project checkout is clean. You can restore the changes from Git's stash list.",
   });
+  return true;
 }
 
 export function MoveToWorktreeDialog({
@@ -58,7 +78,7 @@ export function MoveToWorktreeDialog({
       actionProps: {
         children: "Discard originals…",
         onClick: () => {
-          void discardMovedChanges(threadId, result.operationId)
+          void discardMovedChanges(threadId, result.operationId, projectCwd, result.branch)
             .then(invalidate)
             .catch((cause) =>
               toastManager.add({

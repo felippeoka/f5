@@ -4,16 +4,18 @@ import { ThreadId } from "@t3tools/contracts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
-import { MoveToWorktreeDialog } from "./MoveToWorktreeDialog";
+import { discardMovedChanges, MoveToWorktreeDialog } from "./MoveToWorktreeDialog";
 const mocks = vi.hoisted(() => ({
   status: vi.fn(),
   move: vi.fn(),
   discard: vi.fn(),
+  confirm: vi.fn(),
   toast: vi.fn(),
 }));
 vi.mock("../../nativeApi", () => ({
   ensureNativeApi: () => ({
     git: { status: mocks.status },
+    dialogs: { confirm: mocks.confirm },
     worktrees: { moveThread: mocks.move, discardMovedChanges: mocks.discard },
   }),
 }));
@@ -47,6 +49,7 @@ it("explains project-wide copying, submits an optional branch and offers reversi
     copiedFileCount: 2,
   });
   mocks.discard.mockResolvedValue({ discarded: true });
+  mocks.confirm.mockResolvedValue(true);
   screen = await render(dialog());
   await expect.element(page.getByRole("dialog")).toHaveTextContent("2 files");
   await expect
@@ -89,4 +92,14 @@ it("disables moving while a turn runs and supports cancelling by keyboard", asyn
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   expect(close).toHaveBeenCalledOnce();
   expect(mocks.move).not.toHaveBeenCalled();
+});
+
+it("does not discard when the shared-checkout confirmation is cancelled", async () => {
+  mocks.confirm.mockResolvedValue(false);
+  expect(await discardMovedChanges(threadId, "cancel-op", "/repo", "topic")).toBe(false);
+  expect(mocks.confirm).toHaveBeenCalledWith(
+    expect.stringContaining("f5: copied to topic (cancel-op)"),
+  );
+  expect(mocks.confirm).toHaveBeenCalledWith(expect.stringContaining("every conversation sharing"));
+  expect(mocks.discard).not.toHaveBeenCalled();
 });

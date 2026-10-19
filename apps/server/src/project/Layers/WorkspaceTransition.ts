@@ -307,7 +307,7 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
         );
       return yield* currentRecord(record.operationId);
     });
-  const releaseMoveRef = (record: WorkspaceTransitionRecord) =>
+  const releaseMoveRef = (record: WorkspaceTransitionRecord, cwd = record.source.path) =>
     Effect.gen(function* () {
       const move = record.moveData;
       if (!move?.snapshotRef) return record;
@@ -315,15 +315,42 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
         return yield* Effect.fail(
           new Error("Move snapshot ref identity changed; retained for inspection."),
         );
-      const sha = yield* git.resolveCommit(record.source.path, move.snapshotRef);
+      const sha = yield* git.resolveCommit(cwd, move.snapshotRef);
       if (sha && sha !== move.snapshot.trackedStashSha)
         return yield* Effect.fail(new Error("Move snapshot ref changed; retained for inspection."));
-      if (sha) yield* git.deleteMoveRef(record.source.path, move.snapshotRef, sha);
+      if (sha) yield* git.deleteMoveRef(cwd, move.snapshotRef, sha);
       return yield* store.update(record, { moveData: { ...move, snapshotRef: null } });
     });
+  // Private refs belong to the repository, so cleanup must work after archive/delete
+  // and even when the original project checkout no longer exists.
+  const releaseRetainedMove = (initial: WorkspaceTransitionRecord) =>
+    withRepositoryLifecycleLock(
+      config.baseDir,
+      initial.source.repository,
+      Effect.gen(function* () {
+        let record = yield* currentRecord(initial.operationId);
+        const repository = yield* git
+          .resolveCommonDir(record.source.repository)
+          .pipe(Effect.flatMap(canonicalWorkspace));
+        if (repository !== record.source.repository)
+          return yield* Effect.fail(
+            new Error("Move repository identity changed; private ref retained."),
+          );
+        if (record.phase !== "completed")
+          record = yield* store.update(record, {
+            phase: "cancelled",
+            error: `Move cancelled. Retained checkout ${record.target.path} and branch ${record.target.branch ?? "(unknown)"}; the project checkout was kept.`,
+          });
+        return yield* releaseMoveRef(record, repository);
+      }),
+    );
   // Only byte-for-byte copies are disposable. The shared gate still protects ignored files,
   // foreign claims, changed commits, registration and creation ownership.
-  const rollbackMove = (initial: WorkspaceTransitionRecord, message: string) =>
+  const rollbackMove = (
+    initial: WorkspaceTransitionRecord,
+    message: string,
+    phase: "failed" | "needs_recovery" = "failed",
+  ) =>
     locked(
       initial,
       Effect.gen(function* () {
@@ -381,10 +408,11 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
               else yield* git.removeWorktree({ cwd: record.source.path, path: record.target.path });
             }
           } else if (registration) retained.push("creation ownership could not be verified");
-          // The receipt was persisted before worktree add; delete only this operation's unchanged branch.
+          // Allocation proves intent only. A post-add marker proves branch creation.
           if (
             !retained.length &&
             receipt?.operationId === `move:${record.operationId}` &&
+            (receipt.createdCheckout || move.createdBranch) &&
             record.target.branch
           ) {
             const checkedOut = (yield* git.listWorktrees(record.source.path)).some(
@@ -398,11 +426,17 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
                 expectedSha: move.snapshot.baseSha,
               }));
             if (!removed) retained.push("the new branch changed and was retained");
+          } else if (
+            !retained.length &&
+            record.target.branch &&
+            (yield* git.branchExists(record.source.path, record.target.branch))
+          ) {
+            retained.push(`branch ${record.target.branch} has no creation proof and was retained`);
           }
         }
         record = yield* releaseMoveRef(record);
         return yield* store.update(record, {
-          phase: "failed",
+          phase,
           error:
             message +
             (retained.length ? ` Retained ${record.target.path}: ${retained.join("; ")}.` : ""),
@@ -1049,6 +1083,60 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
           const inspected = yield* recoveryInspection(record);
           if (inspected.token !== input.acceptanceToken)
             return yield* Effect.fail(new Error("The checkout changed. Preview recovery again."));
+          if (record.intent === "move_to_new_worktree" && input.action !== "retry") {
+            if (input.action === "accept_inspected_workspace") {
+              if (
+                !inspected.actual ||
+                inspected.actual.canonicalRoot !== record.target.path ||
+                !record.moveData ||
+                !sameMoveSnapshot(
+                  yield* git.readMoveSnapshot(record.target.path),
+                  record.moveData.snapshot,
+                )
+              )
+                return yield* Effect.fail(
+                  new Error(
+                    "The move copy is incomplete or changed. Keep the original workspace instead.",
+                  ),
+                );
+              const { project } = yield* checkContext(record);
+              yield* inspectAttachableWorkspace(
+                git,
+                config,
+                project.workspaceRoot,
+                record.target.path,
+                record.target.branch,
+              );
+              yield* validateClaims(record, record.target.path, false);
+              return yield* releaseMoveRef(yield* commit(record, inspected.actual));
+            }
+            const original =
+              input.action === "use_project_checkout"
+                ? inspected.projectCheckout
+                : inspected.original;
+            if (
+              !original ||
+              original.canonicalRoot !== record.source.path ||
+              original.commonDir !== record.source.repository ||
+              (input.action === "keep_original_workspace" &&
+                digest(identity(original)) !== digest(record.source))
+            )
+              return yield* Effect.fail(
+                new Error(
+                  "The original checkout no longer matches its recorded identity. No files were restored.",
+                ),
+              );
+            yield* checkContext(record);
+            const rolledBack = yield* rollbackMove(
+              record,
+              "Kept the original workspace.",
+              "needs_recovery",
+            );
+            const completed = yield* commit(rolledBack, original);
+            return rolledBack.error?.includes(" Retained ")
+              ? yield* store.update(completed, { error: rolledBack.error })
+              : completed;
+          }
           if (input.action === "retry") {
             if (record.mutationAttempted)
               return yield* Effect.fail(
@@ -1056,6 +1144,7 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
                   "The Git outcome may be partial. Accept a verified workspace instead of repeating Git.",
                 ),
               );
+            if (record.intent === "move_to_new_worktree") record = yield* releaseMoveRef(record);
             record = yield* store.reactivate(record);
             retry = true;
             return record;
@@ -1114,12 +1203,29 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
       else yield* store.cancel(threadId);
       const worker = workers.get(record.operationId);
       if (worker) yield* Fiber.interrupt(worker.fiber);
+      const latest = yield* currentRecord(record.operationId);
+      if (
+        !retainBarrier &&
+        latest.intent === "move_to_new_worktree" &&
+        latest.phase === "cancelled"
+      )
+        yield* releaseRetainedMove(latest);
     });
   yield* store.reconcile;
   for (const initial of yield* store.unfinishedMoves) {
     const model = yield* engine.getReadModel();
     const thread = model.threads.find((entry) => entry.id === initial.threadId);
-    if (!thread || thread.deletedAt !== null || thread.archivedAt !== null) continue;
+    if (
+      !thread ||
+      thread.deletedAt !== null ||
+      thread.archivedAt !== null ||
+      initial.phase === "cancelled"
+    ) {
+      yield* releaseRetainedMove(initial).pipe(
+        Effect.catch((error) => Effect.logWarning("Cancelled move retained artifacts", error)),
+      );
+      continue;
+    }
     yield* withOwner(
       initial.operationId,
       Effect.gen(function* () {
@@ -1216,6 +1322,11 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
                 "Another session, terminal, or operation uses the project checkout. Stop it before discarding.",
               ),
             );
+          yield* Effect.tryPromise({
+            try: () => assertExclusiveProfileCheckout(config, record.source.path),
+            catch: (cause) =>
+              new WorkspaceTransitionError(cause instanceof Error ? cause.message : String(cause)),
+          });
           const sourceCheckout = yield* inspect(record.source.path);
           if (
             (yield* canonicalWorkspace(project.workspaceRoot)) !== record.source.path ||
@@ -1233,13 +1344,38 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
             return yield* Effect.fail(
               new Error("The project checkout changed after the move; discard manually."),
             );
+          const stashBefore = yield* git.resolveCommit(record.source.path, "refs/stash");
           current = yield* store.update(current, {
             moveData: { ...current.moveData!, discardStarted: true },
           });
-          yield* git.stashPushAll(
-            record.source.path,
-            `f5: copied to ${record.target.branch} (${record.operationId})`,
-          );
+          yield* git
+            .stashPushAll(
+              record.source.path,
+              `f5: copied to ${record.target.branch} (${record.operationId})`,
+            )
+            .pipe(
+              Effect.catch((error) =>
+                Effect.gen(function* () {
+                  const snapshot = yield* git
+                    .readMoveSnapshot(record.source.path)
+                    .pipe(Effect.option);
+                  const stashAfter = yield* git
+                    .resolveCommit(record.source.path, "refs/stash")
+                    .pipe(Effect.option);
+                  if (
+                    Option.isSome(snapshot) &&
+                    Option.isSome(stashAfter) &&
+                    stashAfter.value === stashBefore &&
+                    sameMoveSnapshot(snapshot.value, current.moveData!.snapshot)
+                  )
+                    current = yield* store.update(current, {
+                      moveData: { ...current.moveData!, discardStarted: false },
+                    });
+                  return yield* Effect.fail(error);
+                }),
+              ),
+            );
+
           yield* store.update(current, {
             moveData: { ...current.moveData!, discarded: true },
             move: { copiedFileCount: current.move!.copiedFileCount, discarded: true },

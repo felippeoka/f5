@@ -128,6 +128,8 @@ export function WorktreeChip({
             <DiscardMovedChangesMenuItem
               threadId={threadId}
               operationId={completedMove.operationId}
+              sourcePath={completedMove.source.path}
+              branch={completedMove.target.branch ?? "worktree"}
               onDiscarded={() => setCompletedMove(null)}
             />
           )}
@@ -150,18 +152,23 @@ export function WorktreeChip({
 function DiscardMovedChangesMenuItem({
   threadId,
   operationId,
+  sourcePath,
+  branch,
   onDiscarded,
 }: {
   threadId: ThreadId;
   operationId: string;
+  sourcePath: string;
+  branch: string;
   onDiscarded: () => void;
 }) {
   const queryClient = useQueryClient();
   return (
     <MenuItem
       onClick={() => {
-        void discardMovedChanges(threadId, operationId)
-          .then(async () => {
+        void discardMovedChanges(threadId, operationId, sourcePath, branch)
+          .then(async (discarded) => {
+            if (!discarded) return;
             onDiscarded();
             await queryClient.invalidateQueries({ queryKey: ["worktrees"] });
             await queryClient.invalidateQueries({ queryKey: ["git"] });

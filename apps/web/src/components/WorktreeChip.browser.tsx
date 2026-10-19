@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   editor: vi.fn(),
   getTransition: vi.fn(),
   discard: vi.fn(),
+  confirm: vi.fn(),
 }));
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
@@ -22,6 +23,7 @@ vi.mock("./ui/toast", () => ({ toastManager: { add: vi.fn() } }));
 vi.mock("../nativeApi", () => ({
   ensureNativeApi: () => ({
     shell: { openInEditor: mocks.reveal },
+    dialogs: { confirm: mocks.confirm },
     worktrees: { getTransition: mocks.getTransition, discardMovedChanges: mocks.discard },
   }),
 }));
@@ -132,10 +134,12 @@ it("loads completed move actions on demand and discards originals through the se
     operationId: "done-move",
     intent: "move_to_new_worktree",
     phase: "completed",
-    target: { path },
+    source: { path: "/repo" },
+    target: { path, branch: "topic" },
     move: { copiedFileCount: 2, discarded: false },
   });
   mocks.discard.mockResolvedValue({ discarded: true });
+  mocks.confirm.mockResolvedValue(true);
   screen = await render(
     <QueryClientProvider client={new QueryClient()}>
       <WorktreeChip

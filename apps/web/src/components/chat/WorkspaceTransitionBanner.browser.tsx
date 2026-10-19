@@ -142,3 +142,20 @@ it("offers the inspected project checkout when a failed recreation left neither 
     action: "use_project_checkout",
   });
 });
+
+it("reports retained move checkouts after cancellation without blocking sending", async () => {
+  api.getTransition.mockResolvedValue({
+    ...transition,
+    intent: "move_to_new_worktree",
+    phase: "cancelled",
+    error: "Retained checkout /worktrees/topic and branch topic.",
+  });
+  await mount();
+  await expect.element(page.getByRole("status")).toHaveTextContent("does not block sending");
+  await expect
+    .element(page.getByRole("status"))
+    .toHaveTextContent("Retained checkout /worktrees/topic");
+  await expect
+    .element(page.getByRole("button", { name: "Inspect workspace" }))
+    .not.toBeInTheDocument();
+});

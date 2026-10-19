@@ -246,14 +246,21 @@ F5 stops an idle provider session, snapshots changes, and copies the checkout.
 
 After moving, **Discard originals…** in the success notification, or **Discard originals
 from move…** in the worktree menu, saves the originals in a reversible Git stash with a
-message identifying the branch and move. F5 refuses if the original checkout has changed,
-or a live session, terminal, queued operation, or conflicting transition uses it. Restore
-that stash manually if you want the originals back. An interrupted discard requires
-manual inspection of the project checkout and stash list rather than an automatic retry.
+message identifying the branch and move. A confirmation names that stash and any other
+loaded conversations sharing the project checkout. F5 refuses if the original checkout has changed,
+or a live session, terminal, queued operation, conflicting transition, or another profile
+references it. Restore
+that stash manually if you want the originals back. A failed discard can be retried only when the source snapshot and stash ref are both
+verified unchanged. An interrupted or ambiguous discard requires manual inspection of the
+project checkout and stash list.
 
 An interrupted move whose workspace transaction committed is completed on restart.
 Otherwise F5 rolls it back while leaving the source untouched. Only verified copies in
 an owned checkout at the unchanged base commit can be cleaned up. Unexpected files,
 ignored secrets, changed commits, or new references retain the checkout and branch with
 an explanation. The temporary private `refs/f5/moves/<operationId>` ref is removed after
-completion or rollback; it never uses `refs/stash`.
+completion, rollback, or cancellation; it never uses `refs/stash`. Archiving or deleting
+a conversation cancels the worker, waits for filesystem writes to settle, releases the
+private ref, and records any retained checkout and branch for manual review. Recovery can
+accept a verified complete copy, or keep the original workspace and clean up only proven
+copies. Untracked nested repositories must be committed, ignored, or removed before moving.
