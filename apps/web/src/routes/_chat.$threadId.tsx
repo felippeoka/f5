@@ -72,6 +72,7 @@ import { useThread } from "../threadSelectors";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
 import { AppTitlebar } from "~/components/AppTitlebar";
 
+const PrLinkedPanel = lazy(() => import("../components/prHub/PrLinkedPanel"));
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
 const AgentsPanel = lazy(() =>
   import("../components/AgentsPanel").then((module) => ({ default: module.AgentsPanel })),
@@ -655,6 +656,14 @@ function ChatThreadRouteView() {
     (mode: RightPanelRenderMode, loadingOnly = false) =>
       (surface: RightPanelSurface): ReactNode => {
         switch (surface.kind) {
+          case "pull-request":
+            return loadingOnly ? (
+              <DiffPanelLoadingState label="Loading pull request..." />
+            ) : (
+              <Suspense fallback={<DiffPanelLoadingState label="Loading pull request..." />}>
+                <PrLinkedPanel url={surface.url} threadId={threadId} />
+              </Suspense>
+            );
           case "diff":
             return loadingOnly ? (
               <DiffLoadingFallback mode={mode} />

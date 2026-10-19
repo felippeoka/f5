@@ -630,3 +630,32 @@ absence of a denied resolve action. Formatting, lint and all eight TypeScript
 checks pass. The required full command ran for this continuation: 330 script
 checks pass and the same two process-identity recovery checks fail. No full-gate
 waiver or ledger promotion is claimed.
+
+## PR link and panel continuation (2026-10-19)
+
+PR links now open a reusable PR surface beside the originating thread. The normal
+PR model and mutation paths are reused; opening a link only reads the forge and
+saves its local tracked-PR model. Tab identity is the PR reference, so repeated
+links reuse the tab; normal close history can restore it. No current thread uses
+the existing PR route. The Browser setting can send all PR clicks to the system
+browser, and modified/middle clicks explicitly bypass both the PR panel and the
+preview browser. The web-local setting lives only in `appSettings.ts`.
+
+Panel action confirmations reuse the existing forms and durable submission paths
+inside the panel. They preserve the thread draft, and preparation still requires
+a second explicit submit. Failed panel reads offer Retry and Open on forge. Every
+read captures the selected account generation and discards a response after an
+account change. This implements the F5 surfaces for #19719, #19854 and #17710.
+
+Validation passes 19 Chromium scenarios across link routing, account response
+ownership, inline merge preparation/confirmation, panel hosting and Browser
+settings. The focused unit run passes 148 cases. Formatting, lint and all eight
+TypeScript checks pass. A subsequent broad web run is recorded separately below.
+The release gate remains failed on the process-identity checks described above;
+these implementation scenarios do not promote the deferred entries.
+
+The broad web suite passes all 2,301 cases in 236 files. A follow-up directional
+permission regression also preserves a host's separate reply, resolve and reopen
+answers through shared native normalization; all 23 focused model/operation cases
+pass. The exhaustive real-Git matrix from the prior integration run remains 162
+passing cases; this UI continuation does not change Git execution.

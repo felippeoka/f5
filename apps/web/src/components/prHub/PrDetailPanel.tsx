@@ -37,6 +37,7 @@ export interface PrDetailHandle {
 }
 
 export interface PrDetailPanelProps {
+  confirmationMode?: "dialog" | "inline";
   pr: TrackedPullRequest;
   advisory?: PrHubAdvisory | undefined;
   isAnalyzingAdvisory?: boolean;
@@ -85,7 +86,14 @@ function stateBadge(pr: TrackedPullRequest): ReactNode {
  * {@link usePrActions}.
  */
 export const PrDetailPanel = forwardRef<PrDetailHandle, PrDetailPanelProps>(function PrDetailPanel(
-  { pr, advisory, isAnalyzingAdvisory = false, onAnalyzeAdvisory, onThreadCreated },
+  {
+    pr,
+    advisory,
+    isAnalyzingAdvisory = false,
+    onAnalyzeAdvisory,
+    onThreadCreated,
+    confirmationMode = "dialog",
+  },
   ref,
 ) {
   const [activeTab, setActiveTab] = useState<PrDetailTab>("summary");
@@ -385,7 +393,7 @@ export const PrDetailPanel = forwardRef<PrDetailHandle, PrDetailPanelProps>(func
         }
       />
 
-      <PrActionDialogs {...dialogProps} />
+      <PrActionDialogs {...dialogProps} confirmationMode={confirmationMode} />
     </div>
   );
 });

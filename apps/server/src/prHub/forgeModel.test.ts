@@ -48,3 +48,23 @@ describe("native per-item permissions", () => {
     expect(thread?.comments[0]).not.toHaveProperty("canEdit");
   });
 });
+
+it("retains native directional reply/resolve restrictions when normalizing a discussion", () => {
+  const [thread] = forgeReviewThreads(
+    [
+      {
+        id: "thread",
+        viewerCanReply: false,
+        viewerCanResolve: false,
+        viewerCanUnresolve: true,
+        comments: [{ id: 1, path: "a.ts" }],
+      },
+    ],
+    provider(),
+  );
+  expect(thread).toMatchObject({
+    viewerCanReply: false,
+    viewerCanResolve: false,
+    viewerCanUnresolve: true,
+  });
+});

@@ -302,6 +302,10 @@ export const WINDOW_TITLE_DETAIL_OPTIONS = ["project", "thread"] as const;
 export type WindowTitleDetail = (typeof WINDOW_TITLE_DETAIL_OPTIONS)[number];
 
 export const AppSettingsSchema = Schema.Struct({
+  pullRequestLinksOpenInApp: Schema.Boolean.pipe(
+    Schema.withConstructorDefault(() => Option.some(true)),
+    Schema.withDecodingDefault(() => true),
+  ),
   linkOpenTarget: Schema.Literals(["system", "preview"]).pipe(
     Schema.withConstructorDefault(() => Option.some("system" as const)),
     Schema.withDecodingDefault(() => "system" as const),

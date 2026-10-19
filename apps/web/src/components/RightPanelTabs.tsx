@@ -2,6 +2,7 @@ import { RightPanelTabMenu } from "./RightPanelTabMenu";
 import type { ContextMenuItem } from "@t3tools/contracts";
 import {
   BotIcon,
+  GitPullRequestIcon,
   ClipboardListIcon,
   FileDiffIcon,
   FilesIcon,
@@ -80,6 +81,8 @@ function surfaceTitle(
   previewPresentation?: PreviewPresentation,
 ): string {
   switch (surface.kind) {
+    case "pull-request":
+      return `PR ${surface.key.split("/").slice(1).join("/")}`;
     case "diff":
       return "Diff";
     case "files":
@@ -103,6 +106,8 @@ function SurfaceIcon({
   previewPresentation: PreviewPresentation | undefined;
 }) {
   switch (surface.kind) {
+    case "pull-request":
+      return <GitPullRequestIcon className="size-3.5 shrink-0" />;
     case "diff":
       return <FileDiffIcon className="size-3.5 shrink-0" />;
     case "files":

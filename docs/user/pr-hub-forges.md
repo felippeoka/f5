@@ -113,3 +113,23 @@ capabilities determine which check and review facts are available.
 
 - [Project settings](project-settings.md) (per-project merge method)
 - [Worktrees and storage automation](worktrees-and-storage-automation.md)
+
+## PR links beside a thread
+
+Click a PR link in a conversation or its linked-PR header to open a PR tab beside
+that thread. Your conversation and draft stay in place. Merge, review and other
+confirmations stay inside the panel and still require an explicit confirmation.
+You can close, reorder and reopen the PR tab like other panel tabs.
+
+Command-click, Control-click and middle-click always open the system browser.
+Enable **Settings → Browser → Open pull request links on the forge** to use the
+system browser for ordinary PR clicks too. **Open on forge** is always available
+in the PR panel. Without a current thread, ordinary clicks open the in-app PR page.
+The panel uses the selected forge account; connect or select a matching account
+in **Pull requests** if a read is refused. Failed reads offer **Retry**.
+
+In **Review threads → Filter comments**, choose whether to show bot comments and
+resolved conversations. These choices persist locally. A thread with hidden bot
+comments keeps **Load more comments** available for unloaded human replies.
+Host restrictions on individual comments and threads can disable editing or
+resolution even when the repository generally supports them.

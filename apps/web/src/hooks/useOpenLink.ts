@@ -1,4 +1,9 @@
 import { createContext, useContext, useCallback } from "react";
+import { useRouter } from "@tanstack/react-router";
+import {
+  formatSourceControlPullRequestKey,
+  parseSourceControlPullRequestUrl,
+} from "@t3tools/shared/sourceControl";
 import { ThreadId } from "@t3tools/contracts";
 import { useAppSettings } from "../appSettings";
 import * as nativeApi from "../nativeApi";
@@ -9,13 +14,30 @@ export const OpenLinkThread = createContext<ThreadId | undefined>(undefined);
 export function useOpenLink(threadId?: ThreadId) {
   const { settings } = useAppSettings();
   const currentThread = useContext(OpenLinkThread);
+  const router = useRouter({ warn: false });
   threadId ??= currentThread;
   return useCallback(
-    async (url: string) => {
+    async (url: string, options?: { external?: boolean }) => {
       const target = new URL(url, window.location.href);
       if (!["http:", "https:", "mailto:"].includes(target.protocol)) return;
       const owner = threadId;
+      const pr = parseSourceControlPullRequestUrl(target.href);
+      if (!options?.external && settings.pullRequestLinksOpenInApp && pr) {
+        if (owner) {
+          useRightPanelStore.getState().openPullRequest(owner, {
+            key: formatSourceControlPullRequestKey(pr),
+            url: target.href,
+          });
+          return;
+        }
+        if (router) {
+          await router.navigate({ to: "/pull-requests", search: { url: target.href } });
+          return;
+        }
+      }
       if (
+        !options?.external &&
+        !(pr && !settings.pullRequestLinksOpenInApp) &&
         window.desktopBridge?.preview &&
         settings.linkOpenTarget === "preview" &&
         owner &&
@@ -35,6 +57,12 @@ export function useOpenLink(threadId?: ThreadId) {
       }
       await window.desktopBridge.openExternal(target.href);
     },
-    [settings.linkOpenTarget, settings.previewDefaults.colorScheme, threadId],
+    [
+      settings.linkOpenTarget,
+      settings.pullRequestLinksOpenInApp,
+      settings.previewDefaults.colorScheme,
+      threadId,
+      router,
+    ],
   );
 }

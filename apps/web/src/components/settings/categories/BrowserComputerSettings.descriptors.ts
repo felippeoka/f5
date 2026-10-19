@@ -2,6 +2,14 @@ import type { SettingsItemDescriptor } from "../settingsSearch";
 
 export const BROWSER_SETTINGS_DESCRIPTORS = [
   {
+    id: "browser.pr-links",
+    category: "browser",
+    label: "Open pull request links on the forge",
+    description: "Choose whether PR links open beside the thread or in the system browser.",
+    keywords: ["pull request", "github", "gitlab", "links", "external", "panel"],
+    targetSelector: '[aria-label="Open pull request links on the forge"]',
+  },
+  {
     id: "browser.links",
     category: "browser",
     label: "Open links in",

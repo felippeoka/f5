@@ -229,3 +229,27 @@ it("native comment edits and reactions use saved operations instead of GitHub RP
     .element(page.getByRole("button", { name: "Prepare reaction to comment 4", exact: true }))
     .toBeInTheDocument();
 });
+
+it("panel merge confirmations stay in place and require an explicit second action", async () => {
+  await mount(
+    <div>
+      <label>
+        Thread draft
+        <input aria-label="Thread draft" defaultValue="Keep draft" />
+      </label>
+      <PrActionDialogs {...dialogProps("merge")} confirmationMode="inline" />
+    </div>,
+  );
+  expect(page.getByRole("dialog").query()).toBeNull();
+  await expect
+    .element(page.getByRole("textbox", { name: "Thread draft" }))
+    .toHaveValue("Keep draft");
+  expect(api.prepareOperation).not.toHaveBeenCalled();
+  await page.getByRole("button", { name: "Prepare merge", exact: true }).click();
+  expect(api.submitOperation).not.toHaveBeenCalled();
+  await page.getByRole("button", { name: "Confirm merge", exact: true }).click();
+  expect(api.submitOperation).toHaveBeenCalledTimes(1);
+  await expect
+    .element(page.getByRole("textbox", { name: "Thread draft" }))
+    .toHaveValue("Keep draft");
+});

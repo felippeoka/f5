@@ -1,7 +1,8 @@
-import type { ThreadId } from "@t3tools/contracts";
+import type { PullRequestKey, ThreadId } from "@t3tools/contracts";
 import { create } from "zustand";
 
 export type RightPanelSurface =
+  | { id: `pr:${string}`; kind: "pull-request"; key: PullRequestKey; url: string }
   | { id: "diff"; kind: "diff" }
   | { id: "files"; kind: "files"; revealPath?: string }
   | {
@@ -38,17 +39,18 @@ interface RightPanelStoreState {
   setTabMenuThread: (threadId: ThreadId | null) => void;
   moveSurface: (threadId: ThreadId, from: number, to: number) => void;
   reopenClosed: (threadId: ThreadId) => RightPanelSurface | null;
-  open: (threadId: ThreadId, kind: Exclude<RightPanelSurfaceKind, "file">) => void;
+  open: (threadId: ThreadId, kind: Exclude<RightPanelSurfaceKind, "file" | "pull-request">) => void;
   /**
    * Adds a surface tab without opening the panel or changing the active tab unless
    * `activate` is set. Agent-initiated surfaces use this so they never steal focus.
    */
   addSurface: (
     threadId: ThreadId,
-    kind: Exclude<RightPanelSurfaceKind, "file">,
+    kind: Exclude<RightPanelSurfaceKind, "file" | "pull-request">,
     options?: { readonly activate?: boolean },
   ) => void;
   openDirectory: (threadId: ThreadId, relativePath: string) => void;
+  openPullRequest: (threadId: ThreadId, input: { key: PullRequestKey; url: string }) => void;
   openFile: (threadId: ThreadId, input: OpenFileSurfaceInput) => RightPanelSurface;
   activateSurface: (threadId: ThreadId, surfaceId: string) => void;
   closeSurface: (threadId: ThreadId, surfaceId: string) => void;
@@ -69,7 +71,9 @@ function threadKey(threadId: ThreadId): string {
   return String(threadId);
 }
 
-function singletonSurface(kind: Exclude<RightPanelSurfaceKind, "file">): RightPanelSurface {
+function singletonSurface(
+  kind: Exclude<RightPanelSurfaceKind, "file" | "pull-request">,
+): RightPanelSurface {
   switch (kind) {
     case "diff":
       return { id: "diff", kind };
@@ -243,6 +247,12 @@ export const useRightPanelStore = create<RightPanelStoreState>()((set, get) => (
           activeSurfaceId: current.activeSurfaceId ?? surface.id,
         };
       }),
+    })),
+  openPullRequest: (threadId, input) =>
+    set((state) => ({
+      byThreadId: updateThread(state.byThreadId, threadId, (current) =>
+        upsertSurface(current, { id: `pr:${input.key}`, kind: "pull-request", ...input }),
+      ),
     })),
   openDirectory: (threadId, relativePath) =>
     set((state) => ({

@@ -229,10 +229,16 @@ export function forgeReviewThreads(
         path,
         line,
         originalLine: line,
-        viewerCanReply: provider.forgeCapabilities.review.reply,
+        viewerCanReply: provider.forgeCapabilities.review.reply && value.viewerCanReply !== false,
         ...(typeof value.canResolve === "boolean" ? { canResolve: value.canResolve } : {}),
-        viewerCanResolve: provider.forgeCapabilities.review.resolve && value.canResolve !== false,
-        viewerCanUnresolve: provider.forgeCapabilities.review.resolve && value.canResolve !== false,
+        viewerCanResolve:
+          provider.forgeCapabilities.review.resolve &&
+          value.canResolve !== false &&
+          value.viewerCanResolve !== false,
+        viewerCanUnresolve:
+          provider.forgeCapabilities.review.resolve &&
+          value.canResolve !== false &&
+          value.viewerCanUnresolve !== false,
         comments: inline.map((comment) => ({
           id: String(comment.id),
           ...(typeof comment.canEdit === "boolean" ? { canEdit: comment.canEdit } : {}),
