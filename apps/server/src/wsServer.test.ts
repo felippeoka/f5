@@ -30,6 +30,7 @@ import { runAgentBridgeStdio } from "./agentBridge/stdioShim.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   Data,
+  Deferred,
   Effect,
   Exit,
   Layer,
@@ -6027,6 +6028,59 @@ describe("WebSocket Server", () => {
     expect(response!.error).toBeDefined();
     expect(response!.error!.message).toContain("Invalid request format");
   });
+
+  for (const constructionThrow of [false, true]) {
+    it(`isolates route defects from concurrent and later requests, construction throw=${constructionThrow}`, async () => {
+      const started = Effect.runSync(Deferred.make<void>());
+      const released = Effect.runSync(Deferred.make<void>());
+      const open: OpenShape = {
+        ...defaultOpenService,
+        openInEditor: ({ cwd }) => {
+          if (cwd === "/fixture/pending") {
+            return Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Deferred.await(released)),
+            );
+          }
+          if (cwd === "/fixture/failing") {
+            if (constructionThrow) throw new Error("fixture route construction defect");
+            return Effect.die(new Error("fixture route defect"));
+          }
+          return Effect.void;
+        },
+      };
+      server = await createTestServer({ cwd: "/test", open });
+      const address = server.address();
+      const port = typeof address === "object" && address !== null ? address.port : 0;
+      const [ws] = await connectAndAwaitWelcome(port);
+      connections.push(ws);
+      const responses = channelsBySocket.get(ws)!.response;
+      const send = (id: string, cwd: string) =>
+        ws.send(
+          JSON.stringify({
+            id,
+            body: { _tag: WS_METHODS.shellOpenInEditor, cwd, editor: "cursor" },
+          }),
+        );
+      try {
+        send("pending", "/fixture/pending");
+        await Effect.runPromise(Deferred.await(started).pipe(Effect.timeout("5 seconds")));
+        send("failing", "/fixture/failing");
+        const failed = await dequeue(responses, 5_000);
+        expect(failed.id).toBe("failing");
+        expect(failed.error).toBeDefined();
+        send("later", "/fixture/success");
+        const later = await dequeue(responses, 5_000);
+        expect(later.id).toBe("later");
+        expect(later.error).toBeUndefined();
+        expect(ws.readyState).toBe(WebSocket.OPEN);
+      } finally {
+        Effect.runSync(Deferred.succeed(released, undefined));
+      }
+      const pending = await dequeue(responses, 5_000);
+      expect(pending.id).toBe("pending");
+      expect(pending.error).toBeUndefined();
+    });
+  }
 
   it("catches websocket message handler rejections and keeps the socket usable", async () => {
     const unhandledRejections: unknown[] = [];
