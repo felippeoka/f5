@@ -1,3 +1,4 @@
+import { recoverRestartBackgroundWork } from "../../nextTurnQueue/restartMarkerCapture.ts";
 import { readMcpAppReferenceForTool, readMcpAppToolResult } from "@t3tools/shared/mcpApp";
 import { stringifyWithinBytes } from "@t3tools/shared/boundedJson";
 import { CodexMcpEventBus } from "../../codex/CodexMcpEventBus.ts";
@@ -2375,9 +2376,10 @@ const make = Effect.gen(function* () {
   const providerTerminalEventRepository = yield* ProviderTerminalEventRepository;
   const threadBackgroundWork = yield* ThreadBackgroundWork;
   const computerAutomationBroker = yield* Effect.serviceOption(ComputerAutomationBroker);
+  const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
   const imageStorage = {
     config: yield* Effect.serviceOption(ServerConfig),
-    sql: yield* Effect.serviceOption(SqlClient.SqlClient),
+    sql: sqlOption,
     fileSystem: yield* Effect.serviceOption(FileSystem.FileSystem),
     path: yield* Effect.serviceOption(Path.Path),
   };
@@ -5789,6 +5791,12 @@ const make = Effect.gen(function* () {
       ]);
       const bindingsByThreadId = new Map(bindings.map((binding) => [binding.threadId, binding]));
       const liveThreadIds = new Set(liveSessions.map((session) => session.threadId));
+      if (Option.isSome(sqlOption))
+        yield* recoverRestartBackgroundWork({
+          bindings,
+          liveThreadIds,
+          settings: yield* serverSettings.getSettings,
+        }).pipe(Effect.provideService(SqlClient.SqlClient, sqlOption.value));
       const pendingTerminalKeys = new Set(
         pendingReceipts.map((receipt) => terminalReceiptKey(receipt.threadId, receipt.turnId)),
       );

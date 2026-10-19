@@ -1,3 +1,4 @@
+import { backgroundWorkSessionIdentity } from "../backgroundWorkIdentity.ts";
 import { PreviewAutomationBroker } from "../../mcp/PreviewAutomationBroker.ts";
 import { ComputerAutomationBroker } from "../../computer/ComputerAutomationBroker.ts";
 import { readPersistedSessionGeneration } from "../sessionCapabilities.ts";
@@ -4102,4 +4103,89 @@ it.effect(
       Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]))),
     );
   },
+);
+
+it.effect("marks only an opted-in idle session's owned live background work for restart", () =>
+  Effect.gen(function* () {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "f5-background-restart-"));
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => fs.rmSync(tempDir, { recursive: true, force: true })),
+    );
+    const persistence = makeSqlitePersistenceLive(path.join(tempDir, "state.sqlite"));
+    const repository = ProviderSessionRuntimeRepositoryLive.pipe(Layer.provide(persistence));
+    const directory = ProviderSessionDirectoryLive.pipe(Layer.provide(repository));
+    const codex = makeFakeCodexAdapter();
+    const providerLayer = makeProviderServiceLive().pipe(
+      Layer.provide(providerServiceConfigLayer),
+      Layer.provide(
+        Layer.succeed(ProviderAdapterRegistry, makeAdapterRegistryMock({ codex: codex.adapter })),
+      ),
+      Layer.provide(directory),
+      Layer.provide(makeProjectMcpConfigServiceTestLayer()),
+      Layer.provide(AnalyticsService.layerTest),
+      Layer.provide(
+        ServerSettingsService.layerTest({
+          resumeActiveTurnsAfterRestart: true,
+          projectSettingsOverrides: {
+            [ProjectId.makeUnsafe("opted-out")]: { resumeActiveTurnsAfterRestart: false },
+          },
+        }),
+      ),
+      Layer.provideMerge(persistence),
+    );
+    yield* Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const sql = yield* SqlClient.SqlClient;
+      const directoryService = yield* ProviderSessionDirectory;
+      const at = new Date().toISOString();
+      for (const id of [
+        "owned",
+        "other-owner",
+        "old-generation",
+        "inert",
+        "workflow",
+        "empty",
+        "opted-out",
+        "archived",
+      ]) {
+        const threadId = asThreadId(id);
+        yield* sql`INSERT INTO projection_threads (thread_id, project_id, title, model, created_at, last_interaction_at, updated_at, archived_at) VALUES (${id}, ${id}, ${id}, 'gpt-5', ${at}, ${at}, ${at}, ${id === "archived" ? at : null})`;
+        yield* sql`INSERT INTO projection_turns (thread_id, turn_id, pending_message_id, state, requested_at, started_at, checkpoint_files_json) VALUES (${id}, ${`turn-${id}`}, 'user-message', 'completed', ${at}, ${at}, '[]')`;
+        yield* service.startSession(threadId, {
+          provider: "codex",
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+          threadId,
+        });
+        const binding = Option.getOrThrow(yield* directoryService.getBinding(threadId));
+        const identity = backgroundWorkSessionIdentity(
+          id === "old-generation"
+            ? { ...binding, runtimePayload: { sessionGeneration: 0 } }
+            : binding,
+        );
+        if (id !== "empty")
+          yield* sql`INSERT INTO projection_thread_background_work (thread_id, provider_work_item_id, provider_name, provider_instance_id, provider_session_identity, turn_id, classification, ownership, status, active, kind, started_at, updated_at, last_seen_at) VALUES (${id}, 'native-task', 'codex', ${binding.providerInstanceId}, ${id === "other-owner" ? "other-owner" : identity}, ${`turn-${id}`}, ${id === "inert" ? "inert" : "working"}, ${id === "workflow" ? "workflow" : "direct-subagent"}, 'running', 1, 'agent', ${at}, ${at}, ${at})`;
+      }
+      yield* sql`WITH RECURSIVE extra(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM extra WHERE n < 250) INSERT INTO projection_thread_background_work (thread_id, provider_work_item_id, provider_name, provider_instance_id, provider_session_identity, turn_id, classification, ownership, status, active, kind, started_at, updated_at, last_seen_at) SELECT w.thread_id, 'overflow-' || extra.n, w.provider_name, w.provider_instance_id, w.provider_session_identity, w.turn_id, w.classification, w.ownership, w.status, w.active, w.kind, w.started_at, w.updated_at, w.last_seen_at FROM projection_thread_background_work w CROSS JOIN extra WHERE w.thread_id = 'owned' AND w.provider_work_item_id = 'native-task'`;
+      assert.equal(
+        (yield* service.listSessions()).every((session) => !session.activeTurnId),
+        true,
+      );
+    }).pipe(Effect.provide(Layer.mergeAll(providerLayer, directory)));
+    const markers = yield* Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      return yield* sql<{
+        thread_id: string;
+      }>`SELECT thread_id FROM restart_turn_markers ORDER BY thread_id`;
+    }).pipe(Effect.provide(persistence));
+    assert.deepEqual(
+      markers.map((row) => row.thread_id),
+      ["owned"],
+    );
+    const counts = yield* Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      return yield* sql`SELECT interrupted_background_work FROM restart_turn_markers WHERE thread_id = 'owned'`;
+    }).pipe(Effect.provide(persistence));
+    assert.deepEqual(counts, [{ interrupted_background_work: 201 }]);
+  }).pipe(Effect.provide(NodeServices.layer)),
 );

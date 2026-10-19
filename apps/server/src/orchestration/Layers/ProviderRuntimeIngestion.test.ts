@@ -1,3 +1,4 @@
+import { backgroundWorkSessionIdentity } from "../../provider/backgroundWorkIdentity.ts";
 import { CodexMcpEventBus } from "../../codex/CodexMcpEventBus.ts";
 import { withFixtureWorkspaceWrites } from "../testUtils/workspaceWrites.ts";
 import { NextTurnQueueStore } from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
@@ -1229,6 +1230,63 @@ describe("ProviderRuntimeIngestion", () => {
       expect(settled.session?.activeTurnId).toBeNull();
     },
   );
+
+  it.each([
+    { enabled: true, live: false },
+    { enabled: false, live: false },
+    { enabled: true, live: true },
+  ])("reconciles background work after an unplanned restart (%j)", async ({ enabled, live }) => {
+    const harness = await createHarness({
+      startIngestion: false,
+      settings: { resumeActiveTurnsAfterRestart: enabled },
+    });
+    const threadId = asThreadId("thread-1");
+    const at = new Date().toISOString();
+    for (const busy of [true, false])
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.makeUnsafe(`background-parent:${busy}`),
+          threadId,
+          createdAt: at,
+          session: {
+            threadId,
+            providerName: "codex",
+            status: busy ? "running" : "ready",
+            runtimeMode: "approval-required",
+            activeTurnId: busy ? asTurnId("background-parent") : null,
+            lastError: null,
+            updatedAt: at,
+          },
+        }),
+      );
+    await Effect.runPromise(
+      harness.providerSessionDirectory.upsert({
+        threadId,
+        provider: "codex",
+        status: "running",
+        runtimeMode: "approval-required",
+        runtimePayload: { activeTurnId: null, sessionGeneration: 3 },
+      }),
+    );
+    const binding = Option.getOrThrow(
+      await Effect.runPromise(harness.providerSessionDirectory.getBinding(threadId)),
+    );
+    await Effect.runPromise(
+      harness.sql`INSERT INTO projection_thread_background_work (thread_id, provider_work_item_id, provider_name, provider_instance_id, provider_session_identity, turn_id, classification, ownership, status, active, kind, started_at, updated_at, last_seen_at) VALUES (${threadId}, 'native-task', 'codex', ${binding.providerInstanceId ?? null}, ${backgroundWorkSessionIdentity(binding)}, 'background-parent', 'working', 'direct-subagent', 'running', 1, 'agent', ${at}, ${at}, ${at})`,
+    );
+    if (!live) harness.clearProviderSessions();
+    await harness.startIngestion();
+    await harness.drain();
+    const markers = await Effect.runPromise(
+      harness.sql`SELECT interrupted_background_work FROM restart_turn_markers WHERE thread_id = ${threadId}`,
+    );
+    expect(markers).toEqual(enabled && !live ? [{ interrupted_background_work: 1 }] : []);
+    const work = await Effect.runPromise(
+      harness.sql`SELECT active, status FROM projection_thread_background_work WHERE thread_id = ${threadId}`,
+    );
+    expect(work).toEqual([{ active: live ? 1 : 0, status: live ? "running" : "interrupted" }]);
+  });
 
   it("settles an orphaned active turn from a stopped provider generation on startup", async () => {
     const harness = await createHarness({ startIngestion: false });

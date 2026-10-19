@@ -1,3 +1,4 @@
+import { backgroundWorkSessionIdentity } from "../../provider/backgroundWorkIdentity.ts";
 import { nativeTaskWorkItemId } from "@t3tools/shared/nativeTaskIdentity";
 import {
   MAX_BACKGROUND_WORK_OUTPUT_BYTES,
@@ -299,12 +300,7 @@ const make = Effect.gen(function* () {
         const providerInstanceId =
           event.providerInstanceId ?? bindingValue?.providerInstanceId ?? null;
         const providerSessionIdentity = bindingValue
-          ? [
-              bindingValue.provider,
-              bindingValue.providerInstanceId ?? "default",
-              bindingValue.adapterKey ?? bindingValue.provider,
-              bindingValue.launchFingerprint ?? "default",
-            ].join("|")
+          ? backgroundWorkSessionIdentity(bindingValue)
           : `${event.provider}|${providerInstanceId ?? "default"}`;
         sessionIdentity = { providerInstanceId, providerSessionIdentity };
         if (sessionIdentityByThreadId.size >= 2_048) {
