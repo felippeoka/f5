@@ -5,7 +5,6 @@ import { SqlClient } from "effect/unstable/sql";
 import {
   ForgeOperation,
   PrHubPeek,
-  ThreadPullRequestLink,
   ThreadId,
   type ForgeOperationInput,
   type ForgePrepareOperationInput,
@@ -30,6 +29,7 @@ import {
 } from "./forgeModel.ts";
 import { readGitHubStack } from "./githubStacks.ts";
 import { mapGitHubCliError } from "../sourceControl/GitHubSourceControlProvider.ts";
+import { readThreadPullRequestLinks } from "./threadLinks.ts";
 
 const failure = (detail: string, kind: SourceControlProviderError["kind"] = "generic") =>
   new SourceControlProviderError({
@@ -230,14 +230,16 @@ export const makePrHubExtensions = Effect.gen(function* () {
       return yield* getViewedFiles(input);
     });
   const getThreadLinks = (threadId: ThreadId) =>
-    Effect.gen(function* () {
-      const rows = yield* db(
-        sql`SELECT provider,host,repository,number,title,url FROM projection_thread_pull_requests WHERE thread_id=${threadId} ORDER BY updated_at DESC LIMIT 50`,
-      );
-      return yield* Schema.decodeUnknownEffect(Schema.Array(ThreadPullRequestLink))(rows).pipe(
-        Effect.mapError(() => failure("Invalid stored pull request links.")),
-      );
-    });
+    readThreadPullRequestLinks(threadId).pipe(
+      Effect.provideService(SqlClient.SqlClient, sql),
+      Effect.mapError((error) =>
+        failure(
+          error._tag === "SchemaError"
+            ? "Invalid stored pull request links."
+            : "PR Hub storage is unavailable.",
+        ),
+      ),
+    );
   const getThreadsForPr = (key: string) =>
     Effect.gen(function* () {
       const ref = yield* refFor(key);

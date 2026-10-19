@@ -49,7 +49,11 @@ it("preserves Muse's models, prompts and normalization through the shared genera
         (yield* service.generateBranchName({ cwd: "/checkout", message: "Bound queues" })).branch,
       ).not.toContain(" ");
       expect(
-        yield* service.generateThreadTitle({ cwd: "/checkout", message: "Bound queues" }),
+        yield* service.generateThreadTitle({
+          cwd: "/checkout",
+          message: "Bound queues",
+          linkedContext: "team/repo#42: Fix native transport",
+        }),
       ).toEqual({ title: "Review Pi transport", needsRefinement: false });
       expect(
         yield* service.generateStructuredJson({
@@ -66,4 +70,5 @@ it("preserves Muse's models, prompts and normalization through the shared genera
   expect(calls[0]?.modelId).toBe("chosen-model");
   expect(calls[0]?.prompt).toContain("+bounded");
   expect(calls[1]?.modelId).toBe("muse-spark-1.3");
+  expect(calls[3]?.prompt).toContain("team/repo#42: Fix native transport");
 });

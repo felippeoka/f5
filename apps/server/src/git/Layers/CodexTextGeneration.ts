@@ -35,6 +35,7 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  threadTitleLinkedContextSections,
 } from "../Prompts.ts";
 import {
   type BranchNameGenerationInput,
@@ -550,6 +551,7 @@ export const makeCodexTextGeneration = (
           "",
           input.previousTitle !== undefined ? "Thread contents:" : "User message:",
           limitSection(input.message, 8_000),
+          ...threadTitleLinkedContextSections(input.linkedContext),
         ];
         if (attachmentLines.length > 0) {
           promptSections.push(

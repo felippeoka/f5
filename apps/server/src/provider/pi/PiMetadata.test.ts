@@ -79,18 +79,22 @@ it("clears a recovered model error after a successful native retry", async () =>
     );
     expect(JSON.parse(text).title).toBe("Inspect Pi metadata");
   }));
-it("validates generated JSON through the shared title contract", async () =>
-  fixture(async (settings, environment) => {
+it("validates generated JSON through the shared title contract and forwards linked PR context", async () =>
+  fixture(async (settings, environment, trace) => {
     const title = await run(
       Effect.gen(function* () {
         const service = yield* makePiTextGeneration(settings, environment);
         return yield* service.generateThreadTitle({
           cwd: "/must-not-be-used",
           message: "Review transport",
+          linkedContext: "team/repo#42: Fix native transport",
         });
       }),
     );
     expect(title).toEqual({ title: "Inspect Pi metadata", needsRefinement: false });
+    const prompt = (await trace()).find((entry) => entry.type === "prompt");
+    expect(prompt?.message).toContain("team/repo#42: Fix native transport");
+    expect(prompt?.message).toContain("untrusted data");
     const rejected = await run(
       Effect.gen(function* () {
         const service = yield* makePiTextGeneration(settings, {

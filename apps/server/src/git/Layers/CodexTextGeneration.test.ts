@@ -557,6 +557,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
           needsRefinement: false,
         }),
         requireSkipGitRepoCheck: true,
+        stdinMustContain: "team/repo#42: Fix native transport",
       },
       Effect.gen(function* () {
         const textGeneration = yield* TextGeneration;
@@ -564,6 +565,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
         const generated = yield* textGeneration.generateThreadTitle({
           cwd: process.cwd(),
           message: "Fix the sidebar sizing regression in the desktop layout.",
+          linkedContext: "team/repo#42: Fix native transport",
           model: "gpt-5.3-codex",
         });
 

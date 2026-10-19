@@ -100,6 +100,10 @@ import {
   type ProviderCommandReactorShape,
 } from "../Services/ProviderCommandReactor.ts";
 import { toCodexProviderStartOptions } from "../../provider/codexProviderOptions.ts";
+import {
+  readThreadPullRequestLinks,
+  threadTitlePullRequestContext,
+} from "../../prHub/threadLinks.ts";
 import { resolveEffectiveStartConfig } from "../../provider/effectiveStartConfig.ts";
 import {
   readPersistedCwd,
@@ -1608,10 +1612,24 @@ const make = Effect.gen(function* () {
             model: event.payload.titleGenerationModel,
           }
         : settings.textGenerationModelSelection);
+    const linkedContext = Option.isSome(sqlOption)
+      ? yield* readThreadPullRequestLinks(thread.id, 5).pipe(
+          Effect.provideService(SqlClient.SqlClient, sqlOption.value),
+          Effect.map(threadTitlePullRequestContext),
+          Effect.timeoutOption("250 millis"),
+          Effect.map(Option.getOrUndefined),
+          Effect.catch(() =>
+            Effect.logWarning("Thread title linked PR context is unavailable", {
+              threadId: thread.id,
+            }).pipe(Effect.as(undefined)),
+          ),
+        )
+      : undefined;
     const generated = yield* resolveBestEffortGeneratedTitleResult({
       cwd,
       titleSourceText,
       attachments,
+      ...(linkedContext !== undefined ? { linkedContext } : {}),
       titleGenerationModel: requestedSelection.model,
       titleGenerationModelSelection: requestedSelection,
       ...(event.payload.origin === "explicit" ? { previousTitle: thread.title } : {}),

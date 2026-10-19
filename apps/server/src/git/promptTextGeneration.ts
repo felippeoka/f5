@@ -98,11 +98,7 @@ export function makePromptTextGeneration(runJson: StructuredTextRunner): TextGen
   const generateThreadTitle: TextGenerationShape["generateThreadTitle"] = Effect.fn(
     "TextGeneration.generateThreadTitle",
   )(function* (input) {
-    const { prompt, outputSchema } = buildThreadTitlePrompt({
-      message: input.message,
-      previousTitle: input.previousTitle,
-      attachments: input.attachments,
-    });
+    const { prompt, outputSchema } = buildThreadTitlePrompt(input);
     const generated = yield* runJson({
       operation: "generateThreadTitle",
       cwd: input.cwd,

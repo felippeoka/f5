@@ -67,6 +67,11 @@ a new prompt. Buffers and concurrent admission are bounded.
 
 ## Current integration limits
 
+Title generation uses the thread's five most recent saved PR links when available.
+Reference labels are bounded and supplied as quoted, untrusted context alongside
+the user's request. This reads the local projection without probing a forge account.
+Missing or invalid link data leaves ordinary title generation available.
+
 The full October catch-up remains in progress. Pi computer automation and native
 history import are unavailable. Verified in-session rewinds now reconcile captured
 host turns against Pi's active ancestry. Unlocated turns and other providers remain;

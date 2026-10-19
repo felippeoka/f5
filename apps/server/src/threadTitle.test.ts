@@ -183,6 +183,7 @@ describe("resolveBestEffortGeneratedTitle", () => {
       resolveBestEffortGeneratedTitle({
         cwd: "/tmp/project",
         titleSourceText: "Plan title generation routing",
+        linkedContext: "team/repo#42: Fix native transport",
         attachments: [],
         titleGenerationModel: "ignored/title-model",
         titleGenerationModelSelection,
@@ -203,6 +204,7 @@ describe("resolveBestEffortGeneratedTitle", () => {
       expect.objectContaining({
         cwd: "/tmp/project",
         message: "Plan title generation routing",
+        linkedContext: "team/repo#42: Fix native transport",
         model: "custom/title-model",
         modelSelection: titleGenerationModelSelection,
       }),

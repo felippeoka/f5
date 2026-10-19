@@ -19,6 +19,7 @@ import type {
   McpReloadResult,
   ProviderRuntimeEvent,
   ProviderSession,
+  ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import {
   ApprovalRequestId,
@@ -62,6 +63,7 @@ import {
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   ProviderService,
   type ProviderServiceShape,
@@ -221,6 +223,7 @@ describe("ProviderCommandReactor", () => {
     readonly settings?: Partial<ServerSettings>;
     readonly stateDir?: string;
     readonly threadTitle?: string;
+    readonly pullRequest?: ThreadPullRequestLink;
     readonly threadModel?: string;
     readonly createThread?: boolean;
     readonly tracePath?: string;
@@ -760,7 +763,11 @@ describe("ProviderCommandReactor", () => {
       : Layer.succeed(ProviderService, service);
     const layer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(settingsLayer),
-      Layer.provideMerge(orchestrationLayer),
+      Layer.provideMerge(
+        input?.pullRequest
+          ? orchestrationLayer.pipe(Layer.provideMerge(SqlitePersistenceMemory))
+          : orchestrationLayer,
+      ),
       Layer.provideMerge(projectMcpLayer),
       Layer.provideMerge(providerLayer),
       Layer.provideMerge(Layer.succeed(ProviderSessionDirectory, providerSessionDirectory)),
@@ -858,6 +865,7 @@ describe("ProviderCommandReactor", () => {
             threadId: ThreadId.makeUnsafe("thread-1"),
             projectId: asProjectId("project-1"),
             title: input?.threadTitle ?? "Thread",
+            ...(input?.pullRequest ? { pullRequest: input.pullRequest } : {}),
             model: input?.threadModel ?? "gpt-5-codex",
             interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
             runtimeMode: "approval-required",
@@ -887,6 +895,14 @@ describe("ProviderCommandReactor", () => {
       generateBranchName,
       generateThreadTitle,
       runtimeSessions,
+      corruptTitleLink: () =>
+        runtime.runPromise(
+          Effect.gen(function* () {
+            const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+            if (Option.isNone(sql)) throw new Error("Fixture did not expose its link database");
+            yield* sql.value`UPDATE projection_thread_pull_requests SET title='' WHERE thread_id='thread-1'`;
+          }),
+        ),
       mcpReload,
       readEffectiveStoredConfig,
       readEffectiveRuntimeConfig: readEffectiveStoredConfig,
@@ -3734,74 +3750,91 @@ describe("ProviderCommandReactor", () => {
     expect(harness.startSession).toHaveBeenCalledTimes(1);
   });
 
-  it("generates a first-thread title asynchronously without blocking the provider turn", async () => {
-    const harness = await createHarness({ threadTitle: DEFAULT_NEW_THREAD_TITLE });
-    const now = new Date().toISOString();
-    const titleResult = Promise.withResolvers<{ title: string }>();
-    harness.generateThreadTitle.mockImplementationOnce(() =>
-      Effect.promise(() => titleResult.promise),
-    );
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.makeUnsafe("cmd-turn-start-title-1"),
-        threadId: ThreadId.makeUnsafe("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-title-1"),
-          role: "user",
-          text: "provider message text",
-          attachments: [],
+  it.each([false, true])(
+    "generates a first-thread title asynchronously without blocking the provider turn, corrupt PR=%s",
+    async (corrupt) => {
+      const harness = await createHarness({
+        threadTitle: DEFAULT_NEW_THREAD_TITLE,
+        pullRequest: {
+          provider: "github",
+          host: "github.com",
+          repository: "team/repo",
+          number: 42,
+          title: "Fix native transport",
+          url: "https://github.com/team/repo/pull/42",
         },
-        titleGenerationModel: "custom/title-model",
-        titleGenerationModelSelection: {
+      });
+      if (corrupt) await harness.corruptTitleLink();
+      const now = new Date().toISOString();
+      const titleResult = Promise.withResolvers<{ title: string }>();
+      harness.generateThreadTitle.mockImplementationOnce(() =>
+        Effect.promise(() => titleResult.promise),
+      );
+
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe("cmd-turn-start-title-1"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          message: {
+            messageId: asMessageId("user-message-title-1"),
+            role: "user",
+            text: "provider message text",
+            attachments: [],
+          },
+          titleGenerationModel: "custom/title-model",
+          titleGenerationModelSelection: {
+            instanceId: ProviderInstanceId.make("codex_personal"),
+            model: "custom/title-model",
+          },
+          titleSourceText: "Raw first prompt",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        }),
+      );
+
+      await waitFor(() => harness.generateThreadTitle.mock.calls.length === 1);
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      expect(harness.generateThreadTitle.mock.calls[0]?.[0]).toMatchObject({
+        message: "Raw first prompt",
+        model: "custom/title-model",
+        modelSelection: {
           instanceId: ProviderInstanceId.make("codex_personal"),
           model: "custom/title-model",
         },
-        titleSourceText: "Raw first prompt",
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: now,
-      }),
-    );
-
-    await waitFor(() => harness.generateThreadTitle.mock.calls.length === 1);
-    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
-    expect(harness.generateThreadTitle.mock.calls[0]?.[0]).toMatchObject({
-      message: "Raw first prompt",
-      model: "custom/title-model",
-      modelSelection: {
-        instanceId: ProviderInstanceId.make("codex_personal"),
-        model: "custom/title-model",
-      },
-    });
-
-    let readModel = await Effect.runPromise(harness.engine.getReadModel());
-    let thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
-    expect(thread?.title).toBe(DEFAULT_NEW_THREAD_TITLE);
-    expect(thread?.titleRegeneration).toMatchObject({
-      requestId: expect.stringContaining("server:thread-title-generate:"),
-    });
-
-    titleResult.resolve({ title: "Fix sidebar layout" });
-
-    await waitFor(async () => {
-      const nextReadModel = await Effect.runPromise(harness.engine.getReadModel());
-      const nextThread = nextReadModel.threads.find(
-        (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+      });
+      expect(harness.generateThreadTitle.mock.calls[0]?.[0].linkedContext).toEqual(
+        corrupt ? undefined : expect.stringContaining("Fix native transport"),
       );
-      return nextThread?.title === "Fix sidebar layout";
-    });
 
-    readModel = await Effect.runPromise(harness.engine.getReadModel());
-    thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
-    expect(thread).toMatchObject({
-      title: "Fix sidebar layout",
-      titleSource: "generated",
-      titleRevision: 1,
-      titleRegeneration: null,
-    });
-  });
+      let readModel = await Effect.runPromise(harness.engine.getReadModel());
+      let thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+      expect(thread?.title).toBe(DEFAULT_NEW_THREAD_TITLE);
+      expect(thread?.titleRegeneration).toMatchObject({
+        requestId: expect.stringContaining("server:thread-title-generate:"),
+      });
+
+      titleResult.resolve({ title: "Fix sidebar layout" });
+
+      await waitFor(async () => {
+        const nextReadModel = await Effect.runPromise(harness.engine.getReadModel());
+        const nextThread = nextReadModel.threads.find(
+          (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+        );
+        return nextThread?.title === "Fix sidebar layout";
+      });
+
+      readModel = await Effect.runPromise(harness.engine.getReadModel());
+      thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+      expect(thread).toMatchObject({
+        title: "Fix sidebar layout",
+        titleSource: "generated",
+        titleRevision: 1,
+        titleRegeneration: null,
+      });
+    },
+  );
 
   it("generates a first-thread title after draft-thread bootstrap", async () => {
     const harness = await createHarness({ createThread: false });
