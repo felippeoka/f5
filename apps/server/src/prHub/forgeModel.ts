@@ -128,6 +128,22 @@ const validTerminalDate = (value: unknown): string | null =>
   typeof value === "string" && Number.isFinite(Date.parse(value))
     ? new Date(value).toISOString()
     : null;
+/** Only actual terminal timestamps can prove completion; updated-at is not such proof. */
+export function forgeTerminalDates(
+  raw: Readonly<Record<string, unknown>>,
+  state: "open" | "merged" | "closed",
+) {
+  return {
+    mergedAt:
+      state === "merged"
+        ? validTerminalDate(raw.merged_at ?? raw.closedDate ?? raw.closed_on)
+        : null,
+    closedAt:
+      state === "closed"
+        ? validTerminalDate(raw.closed_at ?? raw.closedDate ?? raw.closed_on)
+        : null,
+  };
+}
 export function forgeDetail(pr: TrackedPullRequest, detail: ForgeDetail): PrHubDetailResult {
   return {
     detail: {
@@ -152,14 +168,7 @@ export function forgeDetail(pr: TrackedPullRequest, detail: ForgeDetail): PrHubD
       baseRefName: pr.baseRefName,
       createdAt: pr.createdAt,
       updatedAt: pr.updatedAt,
-      mergedAt:
-        pr.state === "merged"
-          ? validTerminalDate(detail.raw.merged_at ?? detail.raw.closedDate ?? detail.raw.closed_on)
-          : null,
-      closedAt:
-        pr.state === "closed"
-          ? validTerminalDate(detail.raw.closed_at ?? detail.raw.closedDate ?? detail.raw.closed_on)
-          : null,
+      ...forgeTerminalDates(detail.raw, pr.state),
       author: pr.author ? { login: pr.author, name: null, avatarUrl: null } : null,
       labels: pr.labels.map((name) => ({ name, color: null, description: null })),
       reviewers: [],

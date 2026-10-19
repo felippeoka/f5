@@ -617,6 +617,82 @@ function makeManager(input?: {
 const GitManagerTestLayer = Layer.merge(GitServiceTestLayer, NodeServices.layer);
 
 it.layer(GitManagerTestLayer)("GitManager", (it) => {
+  it.effect("looks up a saved branch independently of HEAD without refreshing the real index", () =>
+    Effect.gen(function* () {
+      const repo = yield* makeTempDir("f5-branch-pr-index-");
+      yield* initRepo(repo);
+      yield* runGit(repo, ["remote", "add", "origin", "https://github.com/team/repo.git"]);
+      yield* runGit(repo, ["branch", "topic"]);
+      const head = (yield* runGit(repo, ["rev-parse", "HEAD"])).stdout.trim();
+      const fs = yield* FileSystem.FileSystem;
+      yield* fs.writeFileString(path.join(repo, "README.md"), "uncommitted local work\n");
+      const before = yield* fs.readFile(path.join(repo, ".git/index"));
+      const { manager, ghCalls } = yield* makeManager({
+        ghScenario: {
+          prListSequence: [
+            JSON.stringify([
+              {
+                number: 7,
+                title: "Change",
+                url: "https://github.com/team/repo/pull/7",
+                baseRefName: "main",
+                headRefName: "topic",
+                headRefOid: head,
+                state: "MERGED",
+                mergedAt: "2026-10-02T00:00:00Z",
+                updatedAt: "2026-10-02T00:00:00Z",
+              },
+            ]),
+          ],
+        },
+      });
+      const pr = yield* manager.branchPullRequest({ cwd: repo, branch: "topic" });
+      expect(pr?.state).toBe("merged");
+      expect(pr?.headRefOid).toBe(head);
+      expect((yield* runGit(repo, ["symbolic-ref", "--short", "HEAD"])).stdout.trim()).toBe("main");
+      expect(yield* fs.readFile(path.join(repo, ".git/index"))).toEqual(before);
+      expect(yield* fs.readFileString(path.join(repo, "README.md"))).toBe(
+        "uncommitted local work\n",
+      );
+      expect(ghCalls.some((call) => call.includes("pr list --head topic --state all"))).toBe(true);
+    }),
+  );
+  it.effect(
+    "uses a surviving exact remote-tracking ref when the saved local branch no longer exists",
+    () =>
+      Effect.gen(function* () {
+        const repo = yield* makeTempDir("f5-branch-pr-tracking-");
+        yield* initRepo(repo);
+        yield* runGit(repo, ["remote", "add", "origin", "https://github.com/team/repo.git"]);
+        const head = (yield* runGit(repo, ["rev-parse", "HEAD"])).stdout.trim();
+        yield* runGit(repo, ["update-ref", "refs/remotes/origin/topic", head]);
+        const { manager } = yield* makeManager({
+          ghScenario: {
+            prListSequence: [
+              JSON.stringify([
+                {
+                  number: 7,
+                  title: "Change",
+                  url: "https://github.com/team/repo/pull/7",
+                  baseRefName: "main",
+                  headRefName: "topic",
+                  headRefOid: head,
+                  state: "MERGED",
+                  mergedAt: "2026-10-02T00:00:00Z",
+                },
+              ]),
+            ],
+          },
+        });
+        expect((yield* manager.branchPullRequest({ cwd: repo, branch: "topic" }))?.state).toBe(
+          "merged",
+        );
+        expect(
+          (yield* runGit(repo, ["show-ref", "--verify", "refs/heads/topic"], true)).code,
+        ).not.toBe(0);
+      }),
+  );
+
   it.effect("status includes PR metadata when branch already has an open PR", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");

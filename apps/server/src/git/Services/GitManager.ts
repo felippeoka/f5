@@ -34,6 +34,14 @@ export interface GitRunStackedActionOptions {
  * GitManagerShape - Service API for high-level Git workflow actions.
  */
 export interface GitManagerShape {
+  /** Fresh PR lookup for a saved branch, independent of the checked-out HEAD and status cache. */
+  readonly branchPullRequest: (input: {
+    readonly cwd: string;
+    readonly branch: string;
+  }) => Effect.Effect<
+    import("../../sourceControl/SourceControlProvider.ts").SourceControlPullRequestSummary | null,
+    GitManagerServiceError
+  >;
   /**
    * Read current repository Git status plus open PR metadata when available.
    */

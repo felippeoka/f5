@@ -410,10 +410,22 @@ export function makeForgeSourceControlProvider(options: {
             object(source.commit).hash ??
             object(v.lastMergeSourceCommit).commitId,
         ).trim() || null,
+      updatedAt:
+        text(
+          v.updated_at ??
+            v.updated_on ??
+            v.lastUpdatedDate ??
+            v.updatedDate ??
+            v.closedDate ??
+            v.creationDate,
+        ) || null,
       state:
         status === "merged" || status === "completed" || v.merged === true
           ? "merged"
-          : status === "closed" || status === "declined" || status === "abandoned"
+          : status === "closed" ||
+              status === "declined" ||
+              status === "abandoned" ||
+              status === "superseded"
             ? "closed"
             : "open",
       isCrossRepository:
@@ -1055,22 +1067,29 @@ export function makeForgeSourceControlProvider(options: {
     execute: () => unsupported("execute"),
     query: () => unsupported("graphql"),
     getPullRequest: (input) => refFrom(input.reference, input.cwd).pipe(Effect.flatMap(getDetail)),
-    listOpenPullRequests: (input) =>
-      request(
-        undefined,
-        input.cwd,
+    listOpenPullRequests: (input) => {
+      const all = input.state === "all";
+      const limit = Math.max(1, Math.min(input.limit ?? 100, kind === "bitbucket" ? 50 : 100));
+      const endpoint =
         kind === "gitlab"
-          ? `/merge_requests?state=opened&source_branch=${enc(input.headSelector)}&per_page=${Math.min(input.limit ?? 100, 100)}`
+          ? `/merge_requests?state=${all ? "all" : "opened"}&source_branch=${enc(input.headSelector)}&per_page=${limit}&order_by=updated_at&sort=desc`
           : kind === "azure-devops"
-            ? `/pullrequests?searchCriteria.status=active&searchCriteria.sourceRefName=${enc(`refs/heads/${input.headSelector}`)}`
-            : `/${kind === "forgejo" ? "pulls" : "pullrequests"}?${kind === "bitbucket" ? `q=${enc(`state="OPEN" AND source.branch.name="${input.headSelector.replace(/["\\]/g, "")}"`)}` : `state=open&head=${enc(input.headSelector)}&limit=${Math.min(input.limit ?? 100, 100)}`}`,
-      ).pipe(
-        Effect.map((result) =>
-          rows(result)
-            .map((value) => summary(value))
-            .filter((value) => kind !== "forgejo" || value.headRefName === input.headSelector),
-        ),
-      ),
+            ? `/pullrequests?searchCriteria.status=${all ? "all" : "active"}&searchCriteria.sourceRefName=${enc(`refs/heads/${input.headSelector}`)}&$top=${limit}`
+            : kind === "bitbucket"
+              ? `/pullrequests?${(all ? ["OPEN", "MERGED", "DECLINED", "SUPERSEDED"] : ["OPEN"]).map((state) => `state=${state}`).join("&")}&q=${enc(`source.branch.name=${JSON.stringify(input.headSelector)}`)}&pagelen=${limit}&sort=-updated_on`
+              : `/pulls?state=${all ? "all" : "open"}&head=${enc(input.headSelector)}&limit=${limit}`;
+      return request(undefined, input.cwd, endpoint).pipe(
+        Effect.flatMap((result) => {
+          if (all && (object(result).next || rows(result).length >= limit))
+            return unsupported("listOpenPullRequests: incomplete branch page");
+          return Effect.succeed(
+            rows(result)
+              .map((value) => summary(value))
+              .filter((value) => value.headRefName === input.headSelector),
+          );
+        }),
+      );
+    },
     searchPullRequests: (input) =>
       !caps.search
         ? unsupported("search")

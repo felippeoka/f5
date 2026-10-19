@@ -1,3 +1,8 @@
+import { GitHubRequestPolicy } from "../../git/githubRequestPolicy.ts";
+import { GitHubCliError } from "../../git/Errors.ts";
+import { GitManager } from "../../git/Services/GitManager.ts";
+import { isPrHubRepositoryExcluded } from "../../prHub/repositoryPolicy.ts";
+import { forgeTerminalDates } from "../../prHub/forgeModel.ts";
 import { makeThreadSettlementHooks } from "../threadSettlementHooks.ts";
 import {
   CommandId,
@@ -58,6 +63,7 @@ export const makeThreadSettlementService = Effect.gen(function* () {
   const settingsService = yield* ServerSettingsService;
   const federation = yield* Effect.serviceOption(PrHubFederation);
   const links = yield* Effect.serviceOption(PrHubExtensions);
+  const gitManager = yield* Effect.serviceOption(GitManager);
   const terminal = yield* Effect.serviceOption(TerminalManager);
   const dispatcher = yield* NextTurnQueueDispatcher;
   const hooks = yield* makeThreadSettlementHooks;
@@ -231,21 +237,108 @@ export const makeThreadSettlementService = Effect.gen(function* () {
           );
         if (!configured && !intents.size) return;
         const projectSettings = new Map<ProjectId, import("@t3tools/contracts").ServerSettings>();
-        const prReads = new Map<PullRequestKey, Effect.Effect<SettlementPullRequest | null>>();
+        const prReads = new Map<string, Effect.Effect<SettlementPullRequest | null>>();
+        const branchReads = new Map<
+          string,
+          Effect.Effect<
+            | import("../../sourceControl/SourceControlProvider.ts").SourceControlPullRequestSummary
+            | null
+            | undefined
+          >
+        >();
         const prCacheGate = yield* Semaphore.make(1);
-        const readPullRequest = (key: PullRequestKey, url: string) =>
+        const readBranch = (cwd: string, branch: string) =>
           Effect.gen(function* () {
+            const key = JSON.stringify([cwd, branch]);
             const cached = yield* prCacheGate.withPermits(1)(
               Effect.gen(function* () {
-                const existing = prReads.get(key);
+                const existing = branchReads.get(key);
+                if (existing) return existing;
+                if (prReads.size + branchReads.size >= 32 || Option.isNone(gitManager))
+                  return Effect.succeed(undefined);
+                const read = yield* Effect.cached(
+                  gitManager.value.branchPullRequest({ cwd, branch }).pipe(
+                    Effect.timeout("15 seconds"),
+                    Effect.catchCause((cause) =>
+                      Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.succeed(undefined),
+                    ),
+                  ),
+                );
+                branchReads.set(key, read);
+                return read;
+              }),
+            );
+            return yield* cached;
+          });
+        const readPullRequest = (
+          key: PullRequestKey,
+          url: string,
+          direct = false,
+          expectedHeadOid?: string | null,
+        ) =>
+          Effect.gen(function* () {
+            // Inbox freshness and exact branch-head proof have different admission rules.
+            const cacheKey = JSON.stringify([key, direct, expectedHeadOid ?? null]);
+            const cached = yield* prCacheGate.withPermits(1)(
+              Effect.gen(function* () {
+                const existing = prReads.get(cacheKey);
                 if (existing) return existing;
                 // Rotate the starting thread each sweep so the bounded remote budget remains fair.
-                if (prReads.size >= 32 || Option.isNone(federation)) return Effect.succeed(null);
+                if (prReads.size + branchReads.size >= 32 || Option.isNone(federation))
+                  return Effect.succeed(null);
                 const router = federation.value;
                 const read = yield* Effect.cached(
                   router.resolve({ key }).pipe(
                     Effect.flatMap((runtime) =>
                       Effect.gen(function* () {
+                        if (direct) {
+                          const ref = yield* router.parseUrl(url);
+                          if (!ref || formatSourceControlPullRequestKey(ref) !== key) return null;
+                          const policyFailure = () =>
+                            new GitHubCliError({
+                              operation: "settlement.read",
+                              kind: "forbidden",
+                              detail: "PR monitoring policy could not be verified.",
+                            });
+                          const allowed = settingsService.getSettings.pipe(
+                            Effect.mapError(policyFailure),
+                            Effect.flatMap((current) =>
+                              isPrHubRepositoryExcluded(current, ref.repository)
+                                ? Effect.fail(policyFailure())
+                                : Effect.void,
+                            ),
+                          );
+                          yield* allowed;
+                          const parent = yield* Effect.serviceOption(GitHubRequestPolicy);
+                          const detail = yield* runtime.provider.getDetail(ref).pipe(
+                            Effect.provideService(GitHubRequestPolicy, {
+                              beforeSend: (write) =>
+                                (Option.isSome(parent)
+                                  ? parent.value.beforeSend(write)
+                                  : Effect.void
+                                ).pipe(Effect.andThen(allowed)),
+                              readInvalidated: Option.isSome(parent)
+                                ? parent.value.readInvalidated
+                                : Effect.never,
+                            }),
+                          );
+                          yield* router.resolve({
+                            key,
+                            accountId: runtime.account.id,
+                            accountGeneration: runtime.account.generation,
+                          });
+                          yield* allowed;
+                          if (
+                            !detail.state ||
+                            !expectedHeadOid ||
+                            detail.headRefOid !== expectedHeadOid
+                          )
+                            return null;
+                          return {
+                            state: detail.state,
+                            ...forgeTerminalDates(detail.raw, detail.state),
+                          } satisfies SettlementPullRequest;
+                        }
                         const snapshot = yield* runtime.hub.getSnapshot;
                         if (
                           ![...snapshot.pullRequests, ...snapshot.recentlyResolved].some(
@@ -281,7 +374,7 @@ export const makeThreadSettlementService = Effect.gen(function* () {
                     ),
                   ),
                 );
-                prReads.set(key, read);
+                prReads.set(cacheKey, read);
                 return read;
               }),
             );
@@ -335,15 +428,19 @@ export const makeThreadSettlementService = Effect.gen(function* () {
                 yield* settle(initial, "auto", inactiveAt).pipe(Effect.ignore);
                 return;
               }
-              if (!settings.autoSettleOnPullRequestMerge || !candidate.linkedCount) return;
-              return { initial, candidate, settings };
+              if (
+                !settings.autoSettleOnPullRequestMerge ||
+                (!candidate.linkedCount && !initial.branch)
+              )
+                return;
+              return { initial, candidate, settings, project };
             }),
           { concurrency: 8 },
         );
         // Finish local inactivity and agent decisions before any remote host can stall them.
         yield* Effect.forEach(
           lookupCandidates.filter((candidate) => candidate !== undefined),
-          ({ initial, candidate, settings }) =>
+          ({ initial, candidate, settings, project }) =>
             Effect.gen(function* () {
               const linked =
                 candidate.linkedCount > 0 && Option.isSome(links)
@@ -359,15 +456,53 @@ export const makeThreadSettlementService = Effect.gen(function* () {
                 }
                 prs.push(yield* readPullRequest(key, ref.url));
               }
+              // A branch may have a newer open PR even when an older explicit link is terminal.
+              if (
+                initial.branch &&
+                (!linked.length || (prs.length > 0 && prs.every((pr) => pr && pr.state !== "open")))
+              ) {
+                const branchPr = yield* readBranch(project.workspaceRoot, initial.branch);
+                if (branchPr === undefined) return;
+                if (branchPr?.state === "open") prs.push({ state: "open" });
+                else if (branchPr) {
+                  const ref = Option.isSome(federation)
+                    ? yield* federation.value
+                        .parseUrl(branchPr.url)
+                        .pipe(Effect.orElseSucceed(() => null))
+                    : null;
+                  prs.push(
+                    ref
+                      ? yield* readPullRequest(
+                          formatSourceControlPullRequestKey(ref),
+                          branchPr.url,
+                          true,
+                          branchPr.headRefOid,
+                        )
+                      : null,
+                  );
+                }
+              }
+              // Re-read local guards and policy after remote waits. Admission still compares updatedAt atomically.
+              const latestModel = yield* engine.getReadModel();
+              const latestThread = latestModel.threads.find((thread) => thread.id === initial.id);
+              const latestProject = latestModel.projects.find(
+                (entry) => entry.id === project.id && !entry.deletedAt,
+              );
+              if (!latestThread || !latestProject || latestThread.updatedAt !== initial.updatedAt)
+                return;
+              const latestSettings = (yield* readProjectSettings(
+                yield* settingsService.getSettings,
+                latestProject,
+              )).settings;
               const settledAt = resolveAutoSettlementAt({
-                ...candidate,
-                nowMs: now,
+                ...(yield* readCandidate(latestThread)),
+                nowMs: yield* Clock.currentTimeMillis,
                 pullRequests: prs,
-                autoSettleOnPullRequestMerge: settings.autoSettleOnPullRequestMerge,
-                autoSettleAfterDays: settings.autoSettleAfterDays,
-                autoSettleKeepPullRequests: settings.autoSettleKeepPullRequests,
+                autoSettleOnPullRequestMerge: latestSettings.autoSettleOnPullRequestMerge,
+                autoSettleAfterDays: latestSettings.autoSettleAfterDays,
+                autoSettleKeepPullRequests: latestSettings.autoSettleKeepPullRequests,
               });
-              if (settledAt) yield* settle(initial, "auto", settledAt).pipe(Effect.ignore);
+              if (settledAt) yield* settle(latestThread, "auto", settledAt).pipe(Effect.ignore);
             }),
           { concurrency: 4, discard: true },
         );

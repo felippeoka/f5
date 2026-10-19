@@ -1,3 +1,4 @@
+import { isPrHubRepositoryExcluded } from "../repositoryPolicy.ts";
 import { resolveLocalCheckout as discoverLocalCheckout } from "../localCheckout.ts";
 import { nextPrHubRefreshAt } from "../refreshSchedule.ts";
 import { GitHubCliError } from "../../git/Errors.ts";
@@ -694,11 +695,7 @@ export const makePrHubServiceForHost = (accountHost = DEFAULT_HOST) =>
           return yield* prHubActionError("GitHub returned an inconsistent pull request identity.");
         // Exclusion changes during an on-demand read take precedence over tracking.
         const latest = yield* settings.getSettings.pipe(Effect.orDie);
-        if (
-          latest.prHub.excludeRepos.some(
-            (repo) => repo.trim().toLowerCase() === ref.repository.toLowerCase(),
-          )
-        )
+        if (isPrHubRepositoryExcluded(latest, ref.repository))
           return yield* prHubActionError("This repository is excluded from PR monitoring.");
         const previous = yield* viewerStateMap(String(viewer.context.viewerId));
         const pr = {

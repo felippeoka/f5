@@ -528,3 +528,107 @@ it("continues native Bitbucket metadata pagination without following arbitrary n
   );
   expect(calls.every((call) => !call.url.includes("untrusted"))).toBe(true);
 });
+
+it.each(["gitlab", "bitbucket", "azure-devops", "forgejo"] as const)(
+  "lists terminal %s branch PRs when all states are requested",
+  async (kind) => {
+    const row =
+      kind === "gitlab"
+        ? {
+            iid: 7,
+            title: "Change",
+            source_branch: "topic",
+            target_branch: "main",
+            state: "merged",
+            sha: "head",
+            updated_at: "2026-10-02T00:00:00Z",
+          }
+        : kind === "bitbucket"
+          ? {
+              id: 7,
+              title: "Change",
+              state: "MERGED",
+              source: { branch: { name: "topic" }, commit: { hash: "head" } },
+              destination: { branch: { name: "main" } },
+              updated_on: "2026-10-02T00:00:00Z",
+            }
+          : kind === "azure-devops"
+            ? {
+                pullRequestId: 7,
+                title: "Change",
+                status: "completed",
+                sourceRefName: "refs/heads/topic",
+                targetRefName: "refs/heads/main",
+                lastMergeSourceCommit: { commitId: "head" },
+                closedDate: "2026-10-02T00:00:00Z",
+              }
+            : {
+                number: 7,
+                title: "Change",
+                state: "closed",
+                merged: true,
+                head: { ref: "topic", sha: "head" },
+                base: { ref: "main" },
+                updated_at: "2026-10-02T00:00:00Z",
+              };
+    const payload =
+      kind === "bitbucket" ? { values: [row] } : kind === "azure-devops" ? { value: [row] } : [row];
+    const f = fixture(kind, [payload]);
+    const result = await Effect.runPromise(
+      f.provider.listOpenPullRequests({
+        cwd: "/repo",
+        headSelector: "topic",
+        state: "all",
+        limit: 100,
+      }),
+    );
+    expect(result).toMatchObject([
+      {
+        number: 7,
+        state: "merged",
+        headRefOid: "head",
+        headRefName: "topic",
+        updatedAt: "2026-10-02T00:00:00Z",
+      },
+    ]);
+    const url = new URL(f.calls[0]!.url);
+    expect(url.searchParams.get(kind === "azure-devops" ? "searchCriteria.status" : "state")).toBe(
+      kind === "bitbucket" ? "OPEN" : "all",
+    );
+    if (kind === "bitbucket") {
+      expect(url.searchParams.getAll("state")).toEqual([
+        "OPEN",
+        "MERGED",
+        "DECLINED",
+        "SUPERSEDED",
+      ]);
+      expect(url.searchParams.get("pagelen")).toBe("50");
+    }
+  },
+);
+it("refuses a partial Bitbucket all-state page instead of treating its terminal rows as complete proof", async () => {
+  const f = fixture("bitbucket", [{ values: [], next: "https://api.bitbucket.org/page/2" }]);
+  expect(
+    (
+      await Effect.runPromise(
+        f.provider
+          .listOpenPullRequests({ cwd: "/repo", headSelector: "topic", state: "all" })
+          .pipe(Effect.result),
+      )
+    )._tag,
+  ).toBe("Failure");
+});
+it("checks the raw page bound before filtering unrelated branches", async () => {
+  const f = fixture("forgejo", [
+    [
+      { number: 7, state: "closed", merged: true, head: { ref: "topic", sha: "head" } },
+      { number: 8, state: "open", head: { ref: "another", sha: "other" } },
+    ],
+  ]);
+  const result = await Effect.runPromise(
+    f.provider
+      .listOpenPullRequests({ cwd: "/repo", headSelector: "topic", state: "all", limit: 2 })
+      .pipe(Effect.result),
+  );
+  expect(result._tag).toBe("Failure");
+});

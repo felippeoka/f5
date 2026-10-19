@@ -1,3 +1,6 @@
+import { isPrHubRepositoryExcluded } from "../../prHub/repositoryPolicy.ts";
+import { GitHubRequestPolicy } from "../githubRequestPolicy.ts";
+import { lookupBranchPullRequest } from "../branchPullRequestLookup.ts";
 import { GitWorkspaceSwitch } from "../workspaceSwitch.ts";
 import { setupProjectScript } from "@t3tools/shared/projectScripts";
 import { readProjectSettings, readProjectForCwd } from "../../project/projectSettings";
@@ -60,6 +63,7 @@ interface OpenPrInfo {
 }
 
 interface PullRequestInfo extends OpenPrInfo, PullRequestHeadRemoteInfo {
+  headRefOid?: string | null;
   state: "open" | "closed" | "merged";
   updatedAt: string | null;
 }
@@ -754,10 +758,12 @@ export const makeGitManager = Effect.gen(function* () {
 
   const resolveBranchHeadContext = (
     cwd: string,
-    details: { branch: string; upstreamRef: string | null },
+    details: { branch: string; upstreamRef: string | null; remoteName?: string },
   ) =>
     Effect.gen(function* () {
-      const remoteName = yield* readConfigValueNullable(cwd, `branch.${details.branch}.remote`);
+      const remoteName =
+        details.remoteName ??
+        (yield* readConfigValueNullable(cwd, `branch.${details.branch}.remote`));
       const headBranchFromUpstream = details.upstreamRef
         ? extractBranchNameFromRemoteRef(details.upstreamRef, { remoteName })
         : "";
@@ -845,12 +851,12 @@ export const makeGitManager = Effect.gen(function* () {
 
   const findLatestPr = (
     cwd: string,
-    details: { branch: string; upstreamRef: string | null },
+    details: { branch: string; upstreamRef: string | null; remoteName?: string },
     provider: SourceControlProvider,
+    complete = false,
   ) =>
     Effect.gen(function* () {
       const headContext = yield* resolveBranchHeadContext(cwd, details);
-      if (provider.kind !== "github") return yield* findOpenPr(cwd, headContext, provider);
       const parsedByNumber = new Map<number, PullRequestInfo>();
 
       for (const headSelector of headContext.headSelectors) {
@@ -860,6 +866,11 @@ export const makeGitManager = Effect.gen(function* () {
           state: "all",
           limit: 100,
         });
+        if (complete && pullRequests.length >= (provider.kind === "bitbucket" ? 50 : 100))
+          return yield* new GitManagerError({
+            operation: "branchPullRequest",
+            detail: "The branch PR listing is incomplete.",
+          });
         for (const item of pullRequests) {
           const pr = { ...item, state: item.state ?? "open", updatedAt: item.updatedAt ?? null };
           if (!matchesBranchHeadContext(pr, headContext)) continue;
@@ -881,7 +892,7 @@ export const makeGitManager = Effect.gen(function* () {
       const parsed = Array.from(parsedByNumber.values()).toSorted((a, b) => {
         const left = a.updatedAt ? Date.parse(a.updatedAt) : 0;
         const right = b.updatedAt ? Date.parse(b.updatedAt) : 0;
-        return right - left;
+        return right - left || b.number - a.number;
       });
 
       const latestOpenPr = parsed.find((pr) => pr.state === "open");
@@ -890,6 +901,58 @@ export const makeGitManager = Effect.gen(function* () {
       }
       return parsed[0] ?? null;
     });
+
+  const branchPullRequest: GitManagerShape["branchPullRequest"] = (input) =>
+    lookupBranchPullRequest(gitCore, input, (details) =>
+      Effect.gen(function* () {
+        const identity = yield* resolveSourceControlProviderIdentity(input.cwd);
+        if (
+          identity.kind === "unknown" ||
+          !identity.host ||
+          !identity.owner ||
+          !identity.repository
+        )
+          return yield* new GitManagerError({
+            operation: "branchPullRequest",
+            detail: "The repository forge could not be verified.",
+          });
+        const repository = `${identity.owner}/${identity.repository}`;
+        const permitted = serverSettings.getSettings.pipe(
+          Effect.mapError(
+            () =>
+              new GitHubCliError({
+                operation: "branchPullRequest",
+                kind: "forbidden",
+                detail: "The PR monitoring policy could not be verified.",
+              }),
+          ),
+          Effect.flatMap((current) =>
+            isPrHubRepositoryExcluded(current, repository)
+              ? Effect.fail(
+                  new GitHubCliError({
+                    operation: "branchPullRequest",
+                    kind: "forbidden",
+                    detail: "The repository is excluded from PR monitoring.",
+                  }),
+                )
+              : Effect.void,
+          ),
+        );
+        yield* permitted;
+        const parent = yield* Effect.serviceOption(GitHubRequestPolicy);
+        const provider = yield* sourceControlProviderForIdentity(identity);
+        return yield* findLatestPr(input.cwd, details, provider, true).pipe(
+          Effect.tap(() => permitted),
+          Effect.provideService(GitHubRequestPolicy, {
+            beforeSend: (write) =>
+              (Option.isSome(parent) ? parent.value.beforeSend(write) : Effect.void).pipe(
+                Effect.andThen(permitted),
+              ),
+            readInvalidated: Option.isSome(parent) ? parent.value.readInvalidated : Effect.never,
+          }),
+        );
+      }),
+    );
 
   const resolveBaseBranch = (
     cwd: string,
@@ -1563,6 +1626,7 @@ export const makeGitManager = Effect.gen(function* () {
 
   return {
     status,
+    branchPullRequest,
     resolvePullRequest,
     preparePullRequestThread,
     runStackedAction,

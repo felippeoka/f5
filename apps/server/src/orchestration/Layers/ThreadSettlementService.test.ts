@@ -1,3 +1,5 @@
+import { GitManager } from "../../git/Services/GitManager.ts";
+import { GitManagerError } from "../../git/Errors.ts";
 import { assert, it } from "@effect/vitest";
 import {
   CommandId,
@@ -44,88 +46,93 @@ const engineLayer = OrchestrationEngineLive.pipe(
   Layer.provide(OrchestrationEventStoreLive),
   Layer.provide(OrchestrationCommandReceiptRepositoryLive),
 );
-const fixture = Effect.gen(function* () {
-  yield* TestClock.setTime(Date.parse("2026-10-19T12:00:00.000Z"));
-  const engine = yield* OrchestrationEngineService;
-  const sql = yield* SqlClient.SqlClient;
-  const snapshots = yield* ProjectionSnapshotQuery;
-  const settings = yield* ServerSettingsService;
-  const queue = yield* makeNextTurnQueueStore;
-  const watches = yield* makePullRequestWatchStore;
-  const makeService = makeThreadSettlementService.pipe(
-    Effect.provide(
-      Layer.mock(NextTurnQueueDispatcher)({ changes: Stream.empty, summaryChanges: Stream.empty }),
-    ),
-  );
-  const service = yield* makeService;
-  let index = 0;
-  const dispatch = (command: Omit<OrchestrationCommand, "commandId">) =>
-    engine.dispatch({
-      ...command,
-      commandId: CommandId.makeUnsafe(`settle-${index++}`),
-    } as OrchestrationCommand);
-  yield* dispatch({
-    type: "project.create",
-    projectId,
-    title: "Project",
-    workspaceRoot: "/tmp/settlement-test",
-    createdAt: old,
-  } as Omit<Extract<OrchestrationCommand, { type: "project.create" }>, "commandId">);
-  yield* engine.dispatch({
-    type: "thread.create",
-    commandId: CommandId.makeUnsafe("create-thread"),
-    threadId,
-    projectId,
-    title: "Thread",
-    model: "gpt-5.1-codex",
-    runtimeMode: "approval-required",
-    interactionMode: "default",
-    branch: null,
-    worktreePath: null,
-    createdAt: old,
+const makeFixture = (savedBranch: string | null = null) =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(Date.parse("2026-10-19T12:00:00.000Z"));
+    const engine = yield* OrchestrationEngineService;
+    const sql = yield* SqlClient.SqlClient;
+    const snapshots = yield* ProjectionSnapshotQuery;
+    const settings = yield* ServerSettingsService;
+    const queue = yield* makeNextTurnQueueStore;
+    const watches = yield* makePullRequestWatchStore;
+    const makeService = makeThreadSettlementService.pipe(
+      Effect.provide(
+        Layer.mock(NextTurnQueueDispatcher)({
+          changes: Stream.empty,
+          summaryChanges: Stream.empty,
+        }),
+      ),
+    );
+    const service = yield* makeService;
+    let index = 0;
+    const dispatch = (command: Omit<OrchestrationCommand, "commandId">) =>
+      engine.dispatch({
+        ...command,
+        commandId: CommandId.makeUnsafe(`settle-${index++}`),
+      } as OrchestrationCommand);
+    yield* dispatch({
+      type: "project.create",
+      projectId,
+      title: "Project",
+      workspaceRoot: "/tmp/settlement-test",
+      createdAt: old,
+    } as Omit<Extract<OrchestrationCommand, { type: "project.create" }>, "commandId">);
+    yield* engine.dispatch({
+      type: "thread.create",
+      commandId: CommandId.makeUnsafe("create-thread"),
+      threadId,
+      projectId,
+      title: "Thread",
+      model: "gpt-5.1-codex",
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: savedBranch,
+      worktreePath: null,
+      createdAt: old,
+    });
+    const thread = () =>
+      engine
+        .getReadModel()
+        .pipe(Effect.map((model) => model.threads.find((thread) => thread.id === threadId)!));
+    const settle = () =>
+      engine.dispatch({
+        type: "thread.settle",
+        commandId: CommandId.makeUnsafe(`settle-${index++}`),
+        threadId,
+        createdAt: new Date().toISOString(),
+      });
+    const watch = () =>
+      watches.start({
+        threadId,
+        key,
+        accountId: "account",
+        watch: {
+          startedAt: old,
+          headSha: "head",
+          failedChecks: [],
+          passed: false,
+          passedChecks: [],
+          remarksThrough: old,
+          remarkIds: [],
+          conflicting: false,
+          wakes: 0,
+        },
+      });
+    return {
+      engine,
+      sql,
+      snapshots,
+      settings,
+      queue,
+      watches,
+      service,
+      makeService,
+      thread,
+      settle,
+      watch,
+    };
   });
-  const thread = () =>
-    engine
-      .getReadModel()
-      .pipe(Effect.map((model) => model.threads.find((thread) => thread.id === threadId)!));
-  const settle = () =>
-    engine.dispatch({
-      type: "thread.settle",
-      commandId: CommandId.makeUnsafe(`settle-${index++}`),
-      threadId,
-      createdAt: new Date().toISOString(),
-    });
-  const watch = () =>
-    watches.start({
-      threadId,
-      key,
-      accountId: "account",
-      watch: {
-        startedAt: old,
-        headSha: "head",
-        failedChecks: [],
-        passed: false,
-        passedChecks: [],
-        remarksThrough: old,
-        remarkIds: [],
-        conflicting: false,
-        wakes: 0,
-      },
-    });
-  return {
-    engine,
-    sql,
-    snapshots,
-    settings,
-    queue,
-    watches,
-    service,
-    makeService,
-    thread,
-    settle,
-    watch,
-  };
-});
+const fixture = makeFixture();
 function run<A, E>(
   test: (
     f: Effect.Success<typeof fixture>,
@@ -138,8 +145,9 @@ function run<A, E>(
     | ServerConfig
     | ServerSettingsService
   >,
+  savedBranch: string | null = null,
 ) {
-  return Effect.scoped(fixture.pipe(Effect.flatMap(test))).pipe(
+  return Effect.scoped(makeFixture(savedBranch).pipe(Effect.flatMap(test))).pipe(
     Effect.provide(
       engineLayer.pipe(
         Layer.provideMerge(SqlitePersistenceMemory),
@@ -420,7 +428,10 @@ it.effect("checks pending approvals in the settlement transaction", () =>
   ),
 );
 
-const prFixture = (f: Effect.Success<typeof fixture>) =>
+const prFixture = (
+  f: Effect.Success<typeof fixture>,
+  options?: { branch?: boolean; noLink?: boolean },
+) =>
   Effect.gen(function* () {
     const ref = {
       provider: "gitlab" as const,
@@ -463,7 +474,36 @@ const prFixture = (f: Effect.Success<typeof fixture>) =>
     const nativeHub = yield* makeForgePrHubService(account, provider);
     const source = yield* provider.getDetail(ref);
     const detail = forgeDetail(forgeTracked(account, ref, source, provider), source);
-    const state = { reads: 0, tracks: 0, stale: false, changeAccount: false, generation: "gen-1" };
+    const state = {
+      reads: 0,
+      tracks: 0,
+      stale: false,
+      changeAccount: false,
+      generation: "gen-1",
+      branchCalls: [] as string[],
+      directReads: 0,
+      branchState: "merged" as "open" | "merged" | "none" | "unknown",
+      disableDuringRead: false,
+      excludeDuringRead: false,
+      directHead: "head",
+    };
+    const runtimeProvider = {
+      ...provider,
+      getDetail: (input: Parameters<typeof provider.getDetail>[0]) =>
+        Effect.gen(function* () {
+          state.directReads++;
+          if (state.changeAccount) state.generation = "gen-2";
+          if (state.disableDuringRead)
+            yield* f.settings
+              .updateSettings({ autoSettleOnPullRequestMerge: false })
+              .pipe(Effect.orDie);
+          if (state.excludeDuringRead)
+            yield* f.settings
+              .updateSettings({ prHub: { excludeRepos: ["team/repo"] } })
+              .pipe(Effect.orDie);
+          return { ...(yield* provider.getDetail(input)), headRefOid: state.directHead };
+        }),
+    };
     const hub = {
       ...nativeHub,
       track: (input: Parameters<typeof nativeHub.track>[0]) =>
@@ -494,17 +534,44 @@ const prFixture = (f: Effect.Success<typeof fixture>) =>
               )
             : Effect.succeed({
                 account: { ...account, generation: state.generation },
-                provider,
+                provider: runtimeProvider,
                 hub,
               }),
       }),
       Effect.provide(
-        Layer.mock(PrHubExtensions)({
-          getThreadLinks: () => Effect.succeed([{ ...ref, url, title: "Change" }]),
-        }),
+        Layer.mergeAll(
+          Layer.mock(PrHubExtensions)({
+            getThreadLinks: () => Effect.succeed([{ ...ref, url, title: "Change" }]),
+          }),
+          options?.branch
+            ? Layer.mock(GitManager)({
+                branchPullRequest: (input) =>
+                  Effect.gen(function* () {
+                    state.branchCalls.push(input.branch);
+                    if (state.branchState === "unknown")
+                      return yield* new GitManagerError({
+                        operation: "fixture",
+                        detail: "Cannot verify branch identity.",
+                      });
+                    return state.branchState === "none"
+                      ? null
+                      : {
+                          number: 7,
+                          title: "Change",
+                          url,
+                          baseRefName: "main",
+                          headRefName: input.branch,
+                          headRefOid: "head",
+                          state: state.branchState,
+                        };
+                  }),
+              })
+            : Layer.empty,
+        ),
       ),
     );
-    yield* f.sql`INSERT INTO projection_thread_pull_requests(link_id,thread_id,provider,host,repository,number,title,url,updated_at) VALUES('link',${threadId},${ref.provider},${ref.host},${ref.repository},7,'Change',${url},${old})`;
+    if (!options?.noLink)
+      yield* f.sql`INSERT INTO projection_thread_pull_requests(link_id,thread_id,provider,host,repository,number,title,url,updated_at) VALUES('link',${threadId},${ref.provider},${ref.host},${ref.repository},7,'Change',${url},${old})`;
     return { service, state };
   });
 it.effect(
@@ -584,4 +651,157 @@ it.effect(
         assert.equal(pr.state.tracks, 0);
       }),
     ),
+);
+
+function runWithBranch<A, E>(test: Parameters<typeof run<A, E>>[0]) {
+  return run(test, "topic");
+}
+
+it.effect(
+  "settles an unlinked branch from verified terminal details without adding it to PR Hub",
+  () =>
+    runWithBranch((f) =>
+      Effect.gen(function* () {
+        const pr = yield* prFixture(f, { branch: true, noLink: true });
+        yield* pr.service.sweep;
+        assert.deepEqual(pr.state.branchCalls, []);
+        assert.equal(pr.state.directReads, 0);
+        yield* f.settings.updateSettings({ autoSettleOnPullRequestMerge: true });
+        yield* pr.service.sweep;
+        assert.deepEqual(pr.state.branchCalls, ["topic"]);
+        assert.equal(pr.state.directReads, 1);
+        assert.equal(pr.state.tracks, 0);
+        assert.equal((yield* f.thread()).settledBy, "auto");
+      }),
+    ),
+);
+it.effect(
+  "a newer open PR on a reused branch keeps an older terminal linked PR's thread active",
+  () =>
+    runWithBranch((f) =>
+      Effect.gen(function* () {
+        const pr = yield* prFixture(f, { branch: true });
+        pr.state.branchState = "open";
+        yield* f.settings.updateSettings({ autoSettleOnPullRequestMerge: true });
+        yield* pr.service.sweep;
+        assert.equal(pr.state.reads, 1);
+        assert.deepEqual(pr.state.branchCalls, ["topic"]);
+        assert.isNull((yield* f.thread()).settledAt);
+      }),
+    ),
+);
+it.effect(
+  "unknown branch identity, changed accounts and disabled policy after remote waits keep threads active",
+  () =>
+    runWithBranch((f) =>
+      Effect.gen(function* () {
+        const pr = yield* prFixture(f, { branch: true, noLink: true });
+        yield* f.settings.updateSettings({ autoSettleOnPullRequestMerge: true });
+        pr.state.branchState = "unknown";
+        yield* pr.service.sweep;
+        assert.isNull((yield* f.thread()).settledAt);
+        assert.equal(pr.state.directReads, 0);
+        pr.state.branchState = "merged";
+        pr.state.changeAccount = true;
+        yield* pr.service.sweep;
+        assert.isNull((yield* f.thread()).settledAt);
+        pr.state.generation = "gen-1";
+        pr.state.changeAccount = false;
+        pr.state.disableDuringRead = true;
+        yield* pr.service.sweep;
+        assert.isNull((yield* f.thread()).settledAt);
+      }),
+    ),
+);
+it.effect("does not reuse linked-PR cache entries as head-fenced branch proof", () =>
+  runWithBranch((f) =>
+    Effect.gen(function* () {
+      const pr = yield* prFixture(f, { branch: true });
+      pr.state.directHead = "changed-head";
+      yield* f.settings.updateSettings({ autoSettleOnPullRequestMerge: true });
+      yield* pr.service.sweep;
+      assert.equal(pr.state.reads, 1);
+      assert.equal(pr.state.directReads, 1);
+      assert.isNull((yield* f.thread()).settledAt);
+    }),
+  ),
+);
+it.effect("honors repository exclusions before and after an unlinked PR read", () =>
+  runWithBranch((f) =>
+    Effect.gen(function* () {
+      const pr = yield* prFixture(f, { branch: true, noLink: true });
+      yield* f.settings.updateSettings({
+        autoSettleOnPullRequestMerge: true,
+        prHub: { excludeRepos: [" TEAM/REPO "] },
+      });
+      yield* pr.service.sweep;
+      assert.equal(pr.state.directReads, 0);
+      assert.isNull((yield* f.thread()).settledAt);
+      yield* f.settings.updateSettings({ prHub: { excludeRepos: [] } });
+      pr.state.excludeDuringRead = true;
+      yield* pr.service.sweep;
+      assert.equal(pr.state.directReads, 1);
+      assert.isNull((yield* f.thread()).settledAt);
+    }),
+  ),
+);
+it.effect("shares branch and detail reads among threads with the same project branch", () =>
+  runWithBranch((f) =>
+    Effect.gen(function* () {
+      const other = ThreadId.makeUnsafe("same-unlinked-branch");
+      yield* f.engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.makeUnsafe("create-same-unlinked"),
+        threadId: other,
+        projectId,
+        title: "Same branch",
+        model: "gpt-5.1-codex",
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        branch: "topic",
+        worktreePath: null,
+        createdAt: old,
+      });
+      const pr = yield* prFixture(f, { branch: true, noLink: true });
+      yield* f.settings.updateSettings({ autoSettleOnPullRequestMerge: true });
+      yield* pr.service.sweep;
+      assert.deepEqual(pr.state.branchCalls, ["topic"]);
+      assert.equal(pr.state.directReads, 1);
+      assert.equal(pr.state.tracks, 0);
+      assert.isNotNull((yield* f.thread()).settledAt);
+      assert.isNotNull(
+        (yield* f.engine.getReadModel()).threads.find((t) => t.id === other)?.settledAt,
+      );
+    }),
+  ),
+);
+it.effect("bounds branch lookups and rotates the next sweep so later threads are not starved", () =>
+  runWithBranch((f) =>
+    Effect.gen(function* () {
+      for (let n = 0; n < 40; n++)
+        yield* f.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe(`budget-${n}`),
+          threadId: ThreadId.makeUnsafe(`branch-budget-${n}`),
+          projectId,
+          title: "Budget",
+          model: "gpt-5.1-codex",
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          branch: `topic-${n}`,
+          worktreePath: null,
+          createdAt: old,
+        });
+      const pr = yield* prFixture(f, { branch: true, noLink: true });
+      pr.state.branchState = "none";
+      yield* f.settings.updateSettings({ autoSettleOnPullRequestMerge: true });
+      yield* pr.service.sweep;
+      assert.equal(pr.state.branchCalls.length, 32);
+      assert.equal(pr.state.directReads, 0);
+      const first = new Set(pr.state.branchCalls);
+      yield* pr.service.sweep;
+      assert.equal(pr.state.branchCalls.length, 64);
+      assert.isTrue(pr.state.branchCalls.slice(32).some((branch) => !first.has(branch)));
+    }),
+  ),
 );

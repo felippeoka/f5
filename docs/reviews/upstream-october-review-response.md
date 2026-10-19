@@ -824,3 +824,32 @@ settlement, storage and engine suites pass, with the two old policy-message
 expectations adjusted to the explicitly selected automatic policy. Formatting,
 lint and all eight typechecks pass. The required full command is repeated after
 integration; no process-identity failure is waived.
+
+## Branch-based settlement continuation (2026-10-19)
+
+Unlinked saved branches now use a bounded PR lookup without worktree status or
+index refresh. It captures remote URLs, saved upstream, branch refs and default
+branch before and after the request. Ambiguous tracking refs, missing identity,
+changed refs, unknown states and terminal heads that do not match the branch
+refuse settlement. A newer open PR blocks an older linked terminal PR. A surviving
+exact remote-tracking ref supports a removed local branch. GitLab, Azure, Forgejo
+and Bitbucket now support bounded all-state listing; incomplete pages fail closed.
+
+Terminal details use actual merge/close timestamps, never updated timestamps.
+Unlinked reads do not add inbox tracking. Account generation and repository
+exclusions are rechecked after reads, and GitHub checks exclusions at admission.
+Local thread guards and settings are reread after remote waits. Branch/detail
+reads share a 32-request sweep budget, coalesce matching proofs and rotate for
+fairness. Exact-head proof has a separate cache identity from inbox freshness;
+a failing-before regression caught and fixed unsafe reuse of the linked PR read.
+All automatic behavior remains off by default. Hosts without actual terminal
+timestamps retain the thread rather than guessing from recent updates.
+
+The five focused suites pass 142 cases. The exhaustive real-Git matrix passes
+165 cases, including preserved HEAD, index and dirty-file checks. Formatting,
+lint and all eight workspace typechecks pass. The required full command ran and
+fails the same two scripts migration process-identity cases (330 pass). The prior
+independent server run after main integration passed 5,133 cases with 12 skips
+and the three launcher process-inspection failures. These failures remain open;
+no ownership protection or full-gate requirement has been waived. The 26 settlement
+source records still need their individual final reconciliation and remain deferred.
