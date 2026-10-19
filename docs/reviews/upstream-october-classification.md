@@ -53,11 +53,11 @@ The artifact deliberately retains runtime changes whose source/scenario review i
 | `equivalent:packages/shared/src/codexProtocolManifest.ts:6`     |       2 |
 | `equivalent:packages/shared/src/model.ts:591`                   |       1 |
 | `equivalent:packages/shared/src/model.ts:71`                    |       2 |
-| `not-applicable:devices`                                        |      12 |
-| `not-applicable:maintenance`                                    |     122 |
+| `not-applicable:devices`                                        |      14 |
+| `not-applicable:maintenance`                                    |     138 |
 | `not-applicable:marketing`                                      |       3 |
 | `not-applicable:mobile`                                         |     136 |
-| `not-applicable:multi-environment`                              |       1 |
+| `not-applicable:multi-environment`                              |       2 |
 | `not-applicable:relay-cloud`                                    |      46 |
 | `not-applicable:release-ci`                                     |       4 |
 | `not-applicable:upstream-only-subsystem:context-handoff`        |       3 |
@@ -68,7 +68,7 @@ The artifact deliberately retains runtime changes whose source/scenario review i
 | `planned:11a`                                                   |      46 |
 | `planned:12a`                                                   |     102 |
 | `planned:13b`                                                   |      57 |
-| `planned:15a`                                                   |     255 |
+| `planned:15a`                                                   |     236 |
 | `planned:15b`                                                   |      16 |
 | `planned:15c`                                                   |      21 |
 | `planned:15d`                                                   |      11 |
@@ -295,3 +295,35 @@ This second source pass reads 40 more full patches and closes 31 compiler-only c
 | `242ec0ea2b89a1d5f28a5baa8bf5f89fe9835cbf` | highlighted search lines extract the same try/catch tokenization fallback and unwrap range normalization.                       |
 | `dd1ab3f059f16cc46b59c5620bd2df706df2e4f8` | orchestration commands unwrap the same authorization guard and execution callback without useCallback.                          |
 | `41f56d96d8e6dc92129ef156f6a8372510d410db` | project scans construct the same query Atom and registry refresh callbacks without useMemo.                                     |
+
+## Third source-inspected compiler pass (2026-10-20)
+
+This source pass reads 25 more full patches and closes 16 compiler-only cases. Nine patches involving browser-theme mount timing (#20585), media cleanup (#20487), inspector row identity (#20545), settings search state (#20628), updater state/cleanup (#20484), device cleanup (#20489), diff selection timing (#20631), search-window timing (#20641), and capture-shortcut cleanup (#20511) remain open for runtime or subsystem verification. No runtime delivery or measured performance credit is granted.
+
+| Upstream SHA                               | Source result                                                                                                                                       |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `998bcc226a70f307913296b859b02c80456b7100` | project favicon choices unwrap the same picker-match mapping and selected-file callbacks without useMemo.                                           |
+| `c712852d96ddc896cc347453916d134c3fdeeeb5` | update-everything builds the same environment and permission-status Atom without useMemo.                                                           |
+| `b78296a60b63f8721ae28b3c8a1b517f33bef90e` | TraitsPicker unwraps the same custom/sticky model-option callback without useCallback.                                                              |
+| `72b3340a168b02eb4f582d8f3e035a141da96235` | sidebar chrome unwraps the same resize, navigation and mobile-close callbacks without useCallback.                                                  |
+| `9e88a4f5935369eb24ecaaea43148ee9f5fe955e` | sidebar update capsule unwraps the same timer subscription and machine-status Atom without memoization.                                             |
+| `dec20cedc8145da7bed936a708bc96d9e363c402` | project scripts inline the same preferred-script fallback, import filter and submit callback without memoization.                                   |
+| `f0e060a3865d7d77300a920cef4c4405658d5579` | CLI command settings unwrap the unchanged install/uninstall Promise chain and pending-state finalizer.                                              |
+| `3c6df713d3d5dd6863183db8bef38aef5ed25b69` | terminal hooks inline the same attachment, error, known-session and running-subprocess projections without useMemo.                                 |
+| `0ed3ae8a2d6e2fc3173fd3e0dec6caedcbcbee58` | remote open inlines the same unresolved case, SSH alias and target-resolution projection without useMemo.                                           |
+| `c5310c26171024e5c1e671d1c33ea092f986b9ca` | HTML document frames inline the same modifier resolution, blocked shortcuts and deduplicated shortcut mapping without useMemo.                      |
+| `c8b3ebfdea50371f0f5e361d96c303167d7089ce` | changed-file trees extract unchanged tree/path calculations into a compiler-memoized helper and unwrap the same expansion callback.                 |
+| `a72d1fcc5a89b3576cccaa6f062ba7cda1589fc5` | device-host checks move the same running-set cleanup from try/finally to Promise.finally on checkDeviceHostConnections, which is an async function. |
+| `6a0587c9599f808840d8f63eb09d9481007c22cc` | agent authorization unwraps the unchanged approval/deny callback, CSRF selection and redirect handling without useCallback.                         |
+| `d209e56e00e96977d5e13afb6f117983c854deba` | sidebar project groups inline the same preferred ordering, labels, grouping and final sort without useMemo.                                         |
+| `8fcdcfe2089e743291978ebc6a9b2d8db516579f` | link opening unwraps the same in-app/external policy, interruption and history handling without useCallback.                                        |
+| `6ad62b8ab1a5bd3fdaa8fe84bf307c4d44a27818` | project-file choices unwrap the same fuzzy matches, labels, icons and open-file callbacks without useMemo.                                          |
+
+Three retained mixed compiler patches close by product scope after full source
+inspection: `7157b766996fcf983cdf76e15bf23465329e886d` (#20488) and
+`488af8d28b8ccbc11b83445af9ec0d0cbe48f1f8` (#20489) touch only DeviceSetup or
+DevicePanel runtime code and their compiler-list entries. The user excludes that
+device workspace. `079a349708dd6a257fd25576378fa1de105e327c` (#20490) touches only
+the native desktop SSH password dialog and its compiler-list entry; SSH connection
+management is excluded with multi-environment support. These are scope decisions,
+not claims that the error-cleanup rewrites are behavior-neutral.

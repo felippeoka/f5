@@ -1009,20 +1009,10 @@
     },
     {
       "upstreamSha": "8fcdcfe2089e743291978ebc6a9b2d8db516579f",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the link opener hook compiles without manual memoization (#20541).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; link opening unwraps the same in-app/external policy, interruption and history handling without useCallback. Upstream change: perf(web): the link opener hook compiles without manual memoization (#20541).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20541"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:299"]
     },
     {
       "upstreamSha": "7a08cdf5f2852fc82978a50cd2d53095b0393f2f",
@@ -1077,20 +1067,10 @@
     },
     {
       "upstreamSha": "b78296a60b63f8721ae28b3c8a1b517f33bef90e",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the traits picker compiles without manual memoization (#20540).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; TraitsPicker unwraps the same custom/sticky model-option callback without useCallback. Upstream change: perf(web): the traits picker compiles without manual memoization (#20540).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20540"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:299"]
     },
     {
       "upstreamSha": "d94ea2c47f415202653ddfb7176ed8cf7c5497da",
@@ -1371,20 +1351,10 @@
     },
     {
       "upstreamSha": "f0e060a3865d7d77300a920cef4c4405658d5579",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the CLI command settings row compiles without manual memoization (#20583).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; CLI command settings unwrap the unchanged install/uninstall Promise chain and pending-state finalizer. Upstream change: perf(web): the CLI command settings row compiles without manual memoization (#20583).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20583"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:299"]
     },
     {
       "upstreamSha": "ede009e762a77bb96eb9db118deb76996c91cd8e",
@@ -1531,20 +1501,10 @@
     },
     {
       "upstreamSha": "dec20cedc8145da7bed936a708bc96d9e363c402",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the project scripts control compiles without manual memoization (#20599).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; project scripts inline the same preferred-script fallback, import filter and submit callback without memoization. Upstream change: perf(web): the project scripts control compiles without manual memoization (#20599).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20599"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:299"]
     },
     {
       "upstreamSha": "0b110ce0dbd730a3e24acd605cec322e5300294a",
@@ -1960,20 +1920,10 @@
     },
     {
       "upstreamSha": "6a0587c9599f808840d8f63eb09d9481007c22cc",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the agent connect surface compiles without manual memoization (#20639).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; agent authorization unwraps the unchanged approval/deny callback, CSRF selection and redirect handling without useCallback. Upstream change: perf(web): the agent connect surface compiles without manual memoization (#20639).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20639"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:299"]
     },
     {
       "upstreamSha": "f22415a075ca3ac24ab0c853f39126678a1bdb66",
@@ -2021,20 +1971,10 @@
     },
     {
       "upstreamSha": "0ed3ae8a2d6e2fc3173fd3e0dec6caedcbcbee58",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the remote open hook compiles without manual memoization (#20646).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; remote open inlines the same unresolved case, SSH alias and target-resolution projection without useMemo. Upstream change: perf(web): the remote open hook compiles without manual memoization (#20646).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20646"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:299"]
     },
     {
       "upstreamSha": "9b62eae950e380752a94e797105832e19dfed20d",
@@ -2082,20 +2022,10 @@
     },
     {
       "upstreamSha": "c8b3ebfdea50371f0f5e361d96c303167d7089ce",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the changed files tree compiles without manual memoization (#20650).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; changed-file trees extract unchanged tree/path calculations into a compiler-memoized helper and unwrap the same expansion callback. Upstream change: perf(web): the changed files tree compiles without manual memoization (#20650).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20650"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:299"]
     },
     {
       "upstreamSha": "ec9f8e875ca01abcff45cc3cdc8c89f24130af5a",
@@ -2352,20 +2282,10 @@
     },
     {
       "upstreamSha": "d209e56e00e96977d5e13afb6f117983c854deba",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the sidebar project groups hook compiles without manual memoization (#20671).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; sidebar project groups inline the same preferred ordering, labels, grouping and final sort without useMemo. Upstream change: perf(web): the sidebar project groups hook compiles without manual memoization (#20671).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20671"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:299"]
     },
     {
       "upstreamSha": "92b896710b43e4e4f0a3cec73eb246658979a102",
@@ -2403,20 +2323,10 @@
     },
     {
       "upstreamSha": "c5310c26171024e5c1e671d1c33ea092f986b9ca",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the HTML document frame compiles without manual memoization (#20676).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; HTML document frames inline the same modifier resolution, blocked shortcuts and deduplicated shortcut mapping without useMemo. Upstream change: perf(web): the HTML document frame compiles without manual memoization (#20676).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20676"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:299"]
     },
     {
       "upstreamSha": "383d8cc6aedc7ffb27984c8dc0a64be6a3b67f7d",
@@ -2539,71 +2449,31 @@
     },
     {
       "upstreamSha": "72b3340a168b02eb4f582d8f3e035a141da96235",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the sidebar chrome compiles without manual memoization (#20684).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; sidebar chrome unwraps the same resize, navigation and mobile-close callbacks without useCallback. Upstream change: perf(web): the sidebar chrome compiles without manual memoization (#20684).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20684"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:299"]
     },
     {
       "upstreamSha": "6ad62b8ab1a5bd3fdaa8fe84bf307c4d44a27818",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the project file picker compiles without manual memoization (#20685).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; project-file choices unwrap the same fuzzy matches, labels, icons and open-file callbacks without useMemo. Upstream change: perf(web): the project file picker compiles without manual memoization (#20685).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20685"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:299"]
     },
     {
       "upstreamSha": "3c6df713d3d5dd6863183db8bef38aef5ed25b69",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the terminal session hooks compile without manual memoization (#20686).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; terminal hooks inline the same attachment, error, known-session and running-subprocess projections without useMemo. Upstream change: perf(web): the terminal session hooks compile without manual memoization (#20686).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20686"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:299"]
     },
     {
       "upstreamSha": "9e88a4f5935369eb24ecaaea43148ee9f5fe955e",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the sidebar update capsule compiles without manual memoization (#20687).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; sidebar update capsule unwraps the same timer subscription and machine-status Atom without memoization. Upstream change: perf(web): the sidebar update capsule compiles without manual memoization (#20687).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20687"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:299"]
     },
     {
       "upstreamSha": "4539e774685452e885879a9b84e0fb0339e1cff6",
@@ -2656,20 +2526,10 @@
     },
     {
       "upstreamSha": "c712852d96ddc896cc347453916d134c3fdeeeb5",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): update everything compiles without manual memoization (#20693).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; update-everything builds the same environment and permission-status Atom without useMemo. Upstream change: perf(web): update everything compiles without manual memoization (#20693).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20693"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:299"]
     },
     {
       "upstreamSha": "39bcf7c69c6b061a1f8e7a6e3dd3314560ee288e",
@@ -3326,20 +3186,10 @@
     },
     {
       "upstreamSha": "a72d1fcc5a89b3576cccaa6f062ba7cda1589fc5",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): device host connection checks compile with the React Compiler (#20501).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; device-host checks move the same running-set cleanup from try/finally to Promise.finally on checkDeviceHostConnections, which is an async function. Upstream change: perf(web): device host connection checks compile with the React Compiler (#20501).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20501"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:299"]
     },
     {
       "upstreamSha": "72dac237304e5c7dddc55ca880e39c374ee66e3c",
@@ -3464,54 +3314,24 @@
     },
     {
       "upstreamSha": "079a349708dd6a257fd25576378fa1de105e327c",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the SSH password prompt compiles with the React Compiler (#20490).",
+      "classification": "not-applicable:multi-environment",
+      "reason": "Not-applicable: the complete runtime patch changes only SshPasswordPromptDialog's native desktop SSH password response and its compiler-list entry. The plan excludes SSH multi-environment connection management; no shared local provider credential flow is changed. Upstream change: perf(web): the SSH password prompt compiles with the React Compiler (#20490).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20490"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:322"]
     },
     {
       "upstreamSha": "488af8d28b8ccbc11b83445af9ec0d0cbe48f1f8",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the device panel compiles with the React Compiler (#20489).",
+      "classification": "not-applicable:devices",
+      "reason": "Not-applicable: the complete runtime patch changes DevicePanel session grouping and opening a device surface, plus its compiler-list entry. F5 does not provide this excluded native device workspace or its device-session panel. Upstream change: perf(web): the device panel compiles with the React Compiler (#20489).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20489"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:322"]
     },
     {
       "upstreamSha": "7157b766996fcf983cdf76e15bf23465329e886d",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): device setup compiles with the React Compiler (#20488).",
+      "classification": "not-applicable:devices",
+      "reason": "Not-applicable: the complete runtime patch changes DeviceSetup's configure callback, and its only other change is that file's compiler-list entry. Both belong to the excluded device workspace, not F5's provider, preview or screenshot flows. Upstream change: perf(web): device setup compiles with the React Compiler (#20488).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20488"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:322"]
     },
     {
       "upstreamSha": "9f70fcc7b584f74049e643dc6ae3104df197f4ca",
@@ -3948,20 +3768,10 @@
     },
     {
       "upstreamSha": "998bcc226a70f307913296b859b02c80456b7100",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the project icon picker compiles with the React Compiler (#20457).",
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: source-inspected compiler/test maintenance; project favicon choices unwrap the same picker-match mapping and selected-file callbacks without useMemo. Upstream change: perf(web): the project icon picker compiles with the React Compiler (#20457).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20457"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:299"]
     },
     {
       "upstreamSha": "35dcdfb945374b3baf417b99b157d4d202020d62",

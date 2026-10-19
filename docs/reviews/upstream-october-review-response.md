@@ -1395,3 +1395,19 @@ link limits, corrupt data, and asynchronous title generation while a turn runs.
 All eight typechecks, formatter, lint and whitespace checks pass. Implementation
 proof is attached to #16210 without promoting the remaining Pi phase or release
 obligations. Installed Pi account validation remains pending.
+
+A third compiler pass reads 25 additional full patches and closes 16 mechanical
+cases, retaining nine mixed runtime patches. Across the three passes, 101 complete
+patches have been inspected and 80 individually documented as compiler/test
+maintenance. Full source inspection separately closes two excluded device UI
+patches (#20488, #20489) and the excluded native SSH password-dialog patch (#20490).
+Their runtime cleanup differences are not labeled behavior-neutral. The strict
+ledger and plan tests continue to protect the pinned interval and carrier sets.
+A fresh origin fetch also confirms no commits behind origin/main.
+
+At the linked-title checkpoint, the complete server suite reports 5,443 passing
+cases, 12 skips and the same three process-identity failures. The latest required
+full run fails the same two scripts recovery identity cases (332 pass), before the
+Git matrix. The strict ledger and 12 plan tests pass after the compiler/device/SSH
+triage: 4,084 records, 1,233 planned, 482 ported, 152 equivalent and two already
+present. None of these outstanding full-gate failures is waived.
