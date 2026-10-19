@@ -1,6 +1,6 @@
 import { GitWorkspaceSwitch } from "../workspaceSwitch.ts";
 import { setupProjectScript } from "@t3tools/shared/projectScripts";
-import { readProjectSettings, isInsideProjectWorkspace } from "../../project/projectSettings";
+import { readProjectSettings, readProjectForCwd } from "../../project/projectSettings";
 import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads";
 import { GitCommandError, GitHubCliError } from "../Errors.ts";
@@ -535,14 +535,11 @@ export const makeGitManager = Effect.gen(function* () {
   const projects = yield* ProjectionProjectRepository;
   const threads = yield* ProjectionThreadRepository;
   const getProject = (cwd: string) =>
-    Effect.gen(function* () {
-      const candidates = (yield* projects.listAll())
-        .filter((p) => p.deletedAt === null)
-        .sort((a, b) => b.workspaceRoot.length - a.workspaceRoot.length);
-      const root = candidates.find((p) => isInsideProjectWorkspace(p.workspaceRoot, cwd));
-      const ids = root ? [] : yield* threads.listProjectIdsByWorktreePath(cwd);
-      return root ?? candidates.find((p) => ids.includes(p.projectId));
-    }).pipe(Effect.mapError((cause) => gitManagerError("projectSettings", cause.message)));
+    readProjectForCwd(cwd).pipe(
+      Effect.provideService(ProjectionProjectRepository, projects),
+      Effect.provideService(ProjectionThreadRepository, threads),
+      Effect.mapError((cause) => gitManagerError("projectSettings", cause.message)),
+    );
   const getProjectSettings = (cwd: string) =>
     Effect.gen(function* () {
       const settings = yield* serverSettings.getSettings;

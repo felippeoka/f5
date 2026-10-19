@@ -9,7 +9,7 @@ Implementation is on `fix/upstream-october-review` in the isolated checkout
 `401725257a`; user work in the original checkout remains intact. The implementation
 through `8f0e182ac6` includes guided reviews, scoped thread tools, HTML renders,
 manual GitHub reset waits, durable PR watches and persisted settlement. The current
-continuation adds Codex MCP apps. Migration 127 and protocol 34 extend the merged baseline. Coverage remains 4,084 ledger records;
+continuation adds Codex MCP apps and per-project provider policy. Migration 127 and protocol 34 extend the merged baseline. Coverage remains 4,084 ledger records;
 implementation work does not automatically promote deferred obligations.
 
 The full gate and verify-first/security obligations remain incomplete. See

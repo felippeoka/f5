@@ -101,3 +101,20 @@ See [MCP servers](mcp-servers.md) for common and project inheritance, provider s
 Thread settlement overrides live in the project's Git settings. Resolved-PR and
 inactivity settlement both start disabled. Removing a project override restores
 the global rule; a checked-in configuration cannot enable these automatic actions.
+
+## Providers for one project
+
+Open Settings, choose a project, then open Project → Providers. Each switch
+controls one configured provider instance for that project. A project can enable
+an instance that is globally off, or disable an instance used elsewhere. Use
+**Use global providers** to restore inheritance.
+
+New-thread defaults, model pickers, Agent Bridge provider lists, and title/commit
+message generation follow these choices. If a saved helper model is disabled,
+background generation uses an enabled fallback; if every provider is off, it stops
+with an error. Disabling a provider blocks new turns and automatic recovery while
+allowing the current session to be stopped. Existing thread history stays available.
+
+Provider overrides are user settings. Checked-in project configuration cannot
+change them. Older clients editing unrelated project settings preserve the saved
+provider choices.

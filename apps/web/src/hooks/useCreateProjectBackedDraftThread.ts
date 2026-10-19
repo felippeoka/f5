@@ -1,3 +1,4 @@
+import { resolveProjectProviderInstanceEnabled } from "@t3tools/shared/serverSettings";
 import { providerSelectionsToModelOptions } from "../providerModelOptions";
 import { inferProviderForModel } from "@t3tools/shared/model";
 import {
@@ -8,7 +9,10 @@ import {
 import { ensureNativeApi } from "../nativeApi";
 import {
   isKnownProviderKind,
+  ProviderInstanceId,
+  DEFAULT_MODEL_BY_PROVIDER,
   type ProjectId,
+  type ProviderKind,
   type ServerSettings,
   ThreadId,
 } from "@t3tools/contracts";
@@ -55,7 +59,10 @@ export function seedDraftThreadFromModelPreferences(
   serverSettings = cachedGlobalDraftSettings(),
 ): void {
   const project = useStore.getState().projects.find((entry) => entry.id === projectId);
-  if (project?.defaultModelSelection) {
+  const enabled = (instanceId: ProviderInstanceId) =>
+    resolveProjectProviderInstanceEnabled(serverSettings, projectId, instanceId);
+  let needsFallback = !enabled(ProviderInstanceId.make("codex"));
+  if (project?.defaultModelSelection && enabled(project.defaultModelSelection.instanceId)) {
     const selection = project.defaultModelSelection;
     const driver =
       serverSettings.providerInstances[selection.instanceId]?.driver ?? selection.instanceId;
@@ -69,24 +76,51 @@ export function seedDraftThreadFromModelPreferences(
     draft.setModelOptions(threadId, providerSelectionsToModelOptions(provider, selection.options));
     return;
   }
+  if (project?.defaultModelSelection) needsFallback = true;
   if (project?.defaultModel) {
-    const draft = useComposerDraftStore.getState();
-    draft.setProvider(threadId, inferProviderForModel(project.defaultModel, "codex"));
-    draft.setModel(threadId, project.defaultModel);
-    return;
+    const provider = inferProviderForModel(project.defaultModel, "codex");
+    if (enabled(ProviderInstanceId.make(provider))) {
+      const draft = useComposerDraftStore.getState();
+      draft.setProvider(threadId, provider);
+      draft.setModel(threadId, project.defaultModel);
+      return;
+    }
+    needsFallback = true;
   }
   const preferences = getModelPreferences();
   const { setModel, setModelOptions, setProvider } = useComposerDraftStore.getState();
-  if (preferences.lastProvider) {
+  if (preferences.lastProvider && enabled(ProviderInstanceId.make(preferences.lastProvider))) {
     setProvider(threadId, preferences.lastProvider);
     const rememberedModel = preferences.lastModelByProvider[preferences.lastProvider];
     if (rememberedModel) {
       setModel(threadId, rememberedModel);
     }
   }
-  if (preferences.lastModelOptions) {
-    setModelOptions(threadId, preferences.lastModelOptions);
-  }
+  if (preferences.lastProvider && !enabled(ProviderInstanceId.make(preferences.lastProvider)))
+    needsFallback = true;
+  else if (preferences.lastModelOptions) setModelOptions(threadId, preferences.lastModelOptions);
+  if (
+    !needsFallback ||
+    (preferences.lastProvider && enabled(ProviderInstanceId.make(preferences.lastProvider)))
+  )
+    return;
+  const fallback = [
+    ...Object.keys(serverSettings.providers),
+    ...Object.keys(serverSettings.providerInstances),
+  ]
+    .map((id) => ProviderInstanceId.make(id))
+    .find(
+      (id) =>
+        enabled(id) && isKnownProviderKind(serverSettings.providerInstances[id]?.driver ?? id),
+    );
+  if (!fallback) return;
+  const driver = serverSettings.providerInstances[fallback]?.driver ?? fallback;
+  if (!isKnownProviderKind(driver)) return;
+  const draft = useComposerDraftStore.getState();
+  draft.setProvider(threadId, driver);
+  draft.setProviderInstance(threadId, fallback);
+  draft.setModel(threadId, DEFAULT_MODEL_BY_PROVIDER[driver as ProviderKind]);
+  draft.setModelOptions(threadId, null);
 }
 
 function maybeMarkOnboardingLiteCompleted(

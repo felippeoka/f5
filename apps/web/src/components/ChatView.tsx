@@ -1,3 +1,4 @@
+import { projectProviderSnapshots } from "@t3tools/shared/serverSettings";
 import { WorkspaceTransitionBanner } from "./chat/WorkspaceTransitionBanner";
 import { flushSync } from "react-dom";
 import { WorktreeMissingBanner } from "./chat/WorktreeMissingBanner";
@@ -2580,7 +2581,15 @@ export default function ChatView({
   );
   const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
   const availableEditors = serverConfigQuery.data?.availableEditors ?? EMPTY_AVAILABLE_EDITORS;
-  const providerStatuses = serverConfigQuery.data?.providers ?? EMPTY_PROVIDER_STATUSES;
+  const providerStatuses = useMemo(
+    () =>
+      projectProviderSnapshots(
+        serverConfigQuery.data?.providers ?? EMPTY_PROVIDER_STATUSES,
+        projectSettings,
+        activeThread?.projectId,
+      ),
+    [serverConfigQuery.data?.providers, projectSettings, activeThread?.projectId],
+  );
   const activeProvider = activeThread?.session?.provider ?? "codex";
   const activeProviderDefaultInstanceId = defaultInstanceIdForDriver(
     ProviderDriverKind.make(activeProvider),

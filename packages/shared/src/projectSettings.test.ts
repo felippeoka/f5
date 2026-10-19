@@ -1,7 +1,13 @@
 import legacySettings from "./fixtures/server-settings-290d261c9.json";
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
-import { DEFAULT_SERVER_SETTINGS, ProjectId, ServerSettings } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  ProjectId,
+  ServerSettings,
+  ProviderInstanceId,
+  ProviderDriverKind,
+} from "@t3tools/contracts";
 import { parseCheckedInProjectFile } from "./checkedInProjectFile";
 import {
   agentBrowserPolicyFromSettings,
@@ -202,4 +208,37 @@ describe("project settings", () => {
       textGenerationModelSelection: legacySettings.textGenerationModelSelection,
     });
   });
+});
+
+it("keeps instance configuration while falling back to a project-enabled custom text generator", () => {
+  const custom = ProviderInstanceId.make("custom-codex");
+  const providerInstances = Object.fromEntries(
+    Object.keys(DEFAULT_SERVER_SETTINGS.providers).map((driver) => [driver, { enabled: false }]),
+  );
+  const global = {
+    ...DEFAULT_SERVER_SETTINGS,
+    providerInstances: {
+      [custom]: {
+        driver: ProviderDriverKind.make("codex"),
+        enabled: false,
+        config: { binaryPath: "/custom/codex", homePath: "/private/home" },
+      },
+    },
+    projectSettingsOverrides: {
+      [id]: { providerInstances: { ...providerInstances, [custom]: { enabled: true } } },
+    },
+  };
+  const resolved = resolveProjectSettings({
+    global,
+    projectId: id,
+    checkedIn: { providerInstances: { [custom]: { enabled: false } } },
+  });
+  expect(resolved.settings.textGenerationModelSelection.instanceId).toBe(custom);
+  expect(resolved.settings.providerInstances[custom]?.config).toEqual(
+    global.providerInstances[custom]?.config,
+  );
+  expect(resolved.settings.providerInstances[custom]?.enabled).toBe(true);
+  expect(resolved.settings.providers.codex.enabled).toBe(false);
+  expect(global.providerInstances[custom]?.enabled).toBe(false);
+  expect(resolved.sources.providerInstances).toBe("project");
 });

@@ -960,6 +960,59 @@ it.effect("does not fall back to compaction for explicitly selected unsupported 
     ),
   );
 });
+it.effect(
+  "allows a project-only provider while rejecting the same instance in other projects",
+  () => {
+    const codex = makeFakeCodexAdapter();
+    const projectId = ProjectId.makeUnsafe("provider-only-project");
+    const settingsLayer = ServerSettingsService.layerTest({
+      providers: { codex: { enabled: false } },
+      projectSettingsOverrides: {
+        [projectId]: {
+          providerInstances: { [ProviderInstanceId.make("codex")]: { enabled: true } },
+        },
+      },
+    });
+    const layer = makeProviderServiceLayerForAdapters(new Map([["codex", codex.adapter]])).pipe(
+      Layer.provideMerge(settingsLayer),
+    );
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const threadId = asThreadId("project-only-provider");
+      const input = { threadId, provider: "codex" as const, runtimeMode: "full-access" as const };
+      const failure = yield* service.startSession(threadId, input).pipe(Effect.flip);
+      assert.equal(failure._tag, "ProviderValidationError");
+      assert.equal(codex.startSession.mock.calls.length, 0);
+      yield* service.startSession(threadId, { ...input, projectId });
+      assert.equal(codex.startSession.mock.calls.length, 1);
+      const other = asThreadId("other-project-provider");
+      const rejected = yield* service
+        .startSession(other, {
+          ...input,
+          threadId: other,
+          projectId: ProjectId.makeUnsafe("other-project"),
+        })
+        .pipe(Effect.result);
+      assert.equal(rejected._tag, "Failure");
+      assert.equal(codex.startSession.mock.calls.length, 1);
+      const settings = yield* ServerSettingsService;
+      yield* settings.updateSettings({
+        projectSettingsOverrides: {
+          [projectId]: {
+            providerInstances: { [ProviderInstanceId.make("codex")]: { enabled: false } },
+          },
+        },
+      });
+      const blocked = yield* service
+        .sendTurn({ threadId, input: "New work", attachments: [] })
+        .pipe(Effect.flip);
+      assert.equal(blocked._tag, "ProviderTurnDeliveryError");
+      assert.equal(codex.sendTurn.mock.calls.length, 0);
+      yield* service.stopSession({ threadId });
+    }).pipe(Effect.provide(layer));
+  },
+);
+
 it.effect("rejects disabled explicit summary instances", () => {
   const codex = makeFakeCodexAdapter();
   const registry = makeAdapterRegistryMock({ codex: codex.adapter });

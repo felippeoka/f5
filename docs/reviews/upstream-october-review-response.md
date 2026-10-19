@@ -544,3 +544,33 @@ and the final web host/session/timeline unit suites pass 165. All eight workspac
 TypeScript checks pass, lint has no errors, and the required full command ran:
 330 script checks pass and two process-identity recovery checks fail because this
 host denies `ps`. The full gate remains failed; no completion waiver is claimed.
+
+## Project provider policy continuation (2026-10-19)
+
+Project settings now include a narrow per-instance enabled policy. Omitted policy
+maps survive partial project patches, an explicit empty map restores inheritance,
+and resetting the whole project clears it. Checked-in files cannot change it.
+The shared resolver handles default and custom instances. Project resolution
+preserves opaque driver configuration and selects a project-enabled fallback for
+background text generation. The original saved model preference remains intact.
+
+Runtime hydration activates a provider when a project explicitly enables it,
+while registry reads, refresh results and push streams retain global enablement.
+Session admission checks the requested project independently. Turn delivery and
+session recovery recheck that policy, while stopping a session remains available. Model pickers and
+new-draft defaults apply that same resolver. The Project settings page lists each
+configured provider and can restore global inheritance. Agent Bridge lists accept
+an optional exposed project ID, reject hidden projects and apply the policy before
+new-thread provider selection. Title and Git generation resolve the registered
+root or linked worktree with the same shared project lookup, use an enabled
+fallback and fail closed when every provider is off. Custom ACP remains a separate
+unfinished part of 15k.
+
+Focused validation passes 111 server policy/admission/bridge/generation tests,
+28 publication/Git-manager regressions, 25 shared settings cases, 22 web unit cases
+and 12 settings/model-picker Chromium scenarios. All eight workspace typechecks
+pass before the final admission regression. The required full command ran again:
+330 script tests pass and the same two migration-recovery checks fail on denied
+process-identity probes. Formatting, lint and the upstream ledger check pass.
+No deferred ledger obligation is promoted solely by these implementation tests;
+the full gate is still failed.

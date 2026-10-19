@@ -1,3 +1,4 @@
+import { resolveProjectProviderInstanceEnabled } from "@t3tools/shared/serverSettings";
 import { resolveOwnedMcpServerName } from "../mcpObservation.ts";
 import { carryPreparedComputerEvidence } from "../prepareAutomationRuntimeEvent";
 import { resolveBindingInstanceId } from "../bindingIdentity.ts";
@@ -339,6 +340,35 @@ function toInstructionContextFromSessionStartInput(
 const makeProviderService = (options?: ProviderServiceLiveOptions) =>
   Effect.gen(function* () {
     const nativeScope = yield* Effect.scope;
+    const settingsOption = yield* Effect.serviceOption(ServerSettingsService);
+    const requireProjectProvider = (binding: ProviderRuntimeBinding) =>
+      Effect.gen(function* () {
+        if (Option.isNone(settingsOption)) return;
+        const settings = yield* settingsOption.value.getSettings.pipe(
+          Effect.mapError(
+            () =>
+              new ProviderTurnDeliveryError({
+                certainty: "not_sent",
+                retryable: false,
+                detail: "Provider settings could not be read.",
+              }),
+          ),
+        );
+        if (
+          !resolveProjectProviderInstanceEnabled(
+            settings,
+            binding.projectId,
+            resolveBindingInstanceId(binding),
+          )
+        )
+          return yield* new ProviderTurnDeliveryError({
+            certainty: "not_sent",
+            retryable: false,
+            detail:
+              "This provider is disabled for the project. Enable it or select another provider before sending.",
+          });
+      });
+
     const workspaceGit = yield* Effect.serviceOption(GitCore);
     const workspaceSql = yield* Effect.serviceOption(SqlClient.SqlClient);
     const checkWorkspace = (threadId: ThreadId, sessionCwd?: string) =>
@@ -900,6 +930,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       readonly fallbackActiveTurnId?: TurnId;
     }) =>
       Effect.gen(function* () {
+        yield* requireProjectProvider(input.binding);
         const bindingInstanceId = resolveBindingInstanceId(input.binding);
         yield* Effect.annotateCurrentSpan({
           "provider.operation": "recover-session",
@@ -1375,7 +1406,21 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               `Provider instance '${requestedInstanceId}' belongs to driver '${resolvedProvider}', not '${parsed.provider}'.`,
             );
           }
-          if (!instanceInfo.enabled) {
+          const enabledForProject = Option.isSome(settingsOption)
+            ? resolveProjectProviderInstanceEnabled(
+                yield* settingsOption.value.getSettings.pipe(
+                  Effect.mapError(() =>
+                    toValidationError(
+                      "ProviderService.startSession",
+                      "Provider settings could not be read.",
+                    ),
+                  ),
+                ),
+                parsed.projectId,
+                requestedInstanceId,
+              )
+            : instanceInfo.enabled;
+          if (!enabledForProject) {
             return yield* toValidationError(
               "ProviderService.startSession",
               `Provider instance '${requestedInstanceId}' is disabled in settings.`,
@@ -1836,6 +1881,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           "provider.attachment_count": input.attachments.length,
         });
         const binding = yield* directory.getBinding(input.threadId);
+        if (Option.isSome(binding)) yield* requireProjectProvider(binding.value);
         const instanceId = Option.isSome(binding) ? resolveBindingInstanceId(binding.value) : "";
         let metricProvider = "unknown";
         let metricModel = input.model;
@@ -2024,6 +2070,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 }),
             ),
           );
+          yield* requireProjectProvider(deliveryBinding.value);
           const turn = yield* input.expectedTurnId !== undefined
             ? routed.adapter.steerTurn!({
                 ...input,
@@ -3273,7 +3320,6 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         return { sessions: sessions.flat() };
       });
 
-    const settingsOption = yield* Effect.serviceOption(ServerSettingsService);
     const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
     const markRestartTurns = Effect.gen(function* () {
       if (Option.isNone(settingsOption) || Option.isNone(sqlOption)) return;

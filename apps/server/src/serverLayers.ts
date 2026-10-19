@@ -230,6 +230,7 @@ export function makeServerProviderLayer(): Layer.Layer<
       Layer.provide(providerInstanceRegistryLayer),
     );
     const providerRegistryLayer = ProviderRegistryLive.pipe(
+      Layer.provide(serverSettingsLayer),
       Layer.provide(providerInstanceRegistryLayer),
     );
     const codexMcpEventBusLayer = CodexMcpEventBusLive;
@@ -315,7 +316,10 @@ export function makeServerProviderLayer(): Layer.Layer<
 export function makeServerRuntimeServicesLayer() {
   const forgeAccountsLayer = ForgeAccountsLive.pipe(Layer.provideMerge(ServerSecretStoreLive));
   const githubCliLayer = GitHubCliLive.pipe(Layer.provideMerge(ServerSecretStoreLive));
-  const textGenerationLayer = TextGenerationLive;
+  const textGenerationLayer = TextGenerationLive.pipe(
+    Layer.provide(ProjectionProjectRepositoryLive),
+    Layer.provide(ProjectionThreadRepositoryLive),
+  );
 
   const { gitLayer, checkpointDiffQueryLayer } = makeServerGitLayers();
   const threadCommandExecutionQueryLayer = ThreadCommandExecutionQueryLive.pipe(
@@ -378,7 +382,10 @@ export function makeServerRuntimeServicesLayer() {
 
 /** Build orchestration workers with the same credential-aware Git composition as server routes. */
 export function makeServerOrchestrationRuntimeLayer() {
-  const textGenerationLayer = TextGenerationLive;
+  const textGenerationLayer = TextGenerationLive.pipe(
+    Layer.provide(ProjectionProjectRepositoryLive),
+    Layer.provide(ProjectionThreadRepositoryLive),
+  );
   const providerSessionDirectoryLayer = ProviderSessionDirectoryLive.pipe(
     Layer.provide(ProviderSessionRuntimeRepositoryLive),
   );

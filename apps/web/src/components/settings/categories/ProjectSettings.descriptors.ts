@@ -3,6 +3,15 @@ import type { SettingsItemDescriptor } from "../settingsSearch";
 /** The project-scope "Project" page: settings that belong to one project only. */
 export const PROJECT_SETTINGS_DESCRIPTORS = [
   {
+    id: "project.providers",
+    category: "project",
+    label: "Project providers",
+    description: "Enable or disable configured provider instances for this project.",
+    keywords: ["agent", "model", "enable", "disable"],
+    targetSelector: '[data-settings-search-target="project.providers"]',
+    scope: "project",
+  },
+  {
     id: "project.icon",
     category: "project",
     label: "Project icon",

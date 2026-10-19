@@ -336,7 +336,14 @@ export const AutoSettleAfterDays = Schema.NullOr(
   Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 365 })),
 );
 
+export const ProjectProviderOverrides = Schema.Record(
+  ProviderInstanceId,
+  Schema.Struct({ enabled: Schema.optionalKey(Schema.Boolean) }),
+);
+export type ProjectProviderOverrides = typeof ProjectProviderOverrides.Type;
+
 export const ProjectSettingsOverrides = Schema.Struct({
+  providerInstances: Schema.optionalKey(ProjectProviderOverrides),
   autoSettleOnPullRequestMerge: Schema.optionalKey(Schema.Boolean),
   autoSettleAfterDays: Schema.optionalKey(AutoSettleAfterDays),
   autoSettleKeepPullRequests: Schema.optionalKey(Schema.Boolean),
@@ -620,6 +627,7 @@ export const ServerSettingsPatch = Schema.Struct({
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
 export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
+  "providerInstances",
   "autoSettleOnPullRequestMerge",
   "autoSettleAfterDays",
   "autoSettleKeepPullRequests",

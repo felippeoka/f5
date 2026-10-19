@@ -1,5 +1,8 @@
 import { parsePreviewHostPattern } from "./preview";
-import { resolveTextGenerationProvider } from "./serverSettings";
+import {
+  resolveProjectProviderInstanceEnabled,
+  resolveTextGenerationProvider,
+} from "./serverSettings";
 import {
   type WorktreeCleanupRules,
   DEFAULT_SERVER_SETTINGS,
@@ -17,6 +20,7 @@ import {
  * that removes worktrees or pulls branches.
  */
 const USER_ONLY_PROJECT_SETTING_KEYS: ReadonlySet<string> = new Set([
+  "providerInstances",
   "autoSettleOnPullRequestMerge",
   "autoSettleAfterDays",
   "autoSettleKeepPullRequests",
@@ -66,7 +70,36 @@ export function resolveProjectSettings(input: {
           : overrides[key];
       source = "project";
     }
-    Object.assign(settings, { [key]: value });
+    if (key === "providerInstances") {
+      // Never replace driver configuration with the narrow project policy map.
+      const providerInstances = Object.fromEntries(
+        Object.entries(global.providerInstances).map(([id, config]) => [
+          id,
+          {
+            ...config,
+            enabled: resolveProjectProviderInstanceEnabled(
+              global,
+              input.projectId,
+              id as keyof typeof global.providerInstances,
+            ),
+          },
+        ]),
+      );
+      const providers = Object.fromEntries(
+        Object.entries(global.providers).map(([id, config]) => [
+          id,
+          {
+            ...config,
+            enabled: resolveProjectProviderInstanceEnabled(
+              global,
+              input.projectId,
+              id as keyof typeof global.providerInstances,
+            ),
+          },
+        ]),
+      );
+      Object.assign(settings, { providerInstances, providers });
+    } else Object.assign(settings, { [key]: value });
     Object.assign(sources, { [key]: source });
   }
   return { settings: resolveTextGenerationProvider(settings), sources, overrides };

@@ -1,3 +1,5 @@
+import { projectProviderSnapshots } from "@t3tools/shared/serverSettings";
+import { useSettingsRouteContext } from "./SettingsRouteContext";
 import type { ModelSelection, ServerProvider } from "@t3tools/contracts";
 import { useSettings } from "../../hooks/useSettings";
 import { getCustomModelOptionsByInstance } from "../../modelSelection";
@@ -17,8 +19,10 @@ export function GenerationModelPicker({
   onChange: (value: ModelSelection) => void;
 }) {
   const settings = useSettings();
-  const entries = deriveProviderInstanceEntries(providers);
-  const selectable = providers.filter((provider) =>
+  const { selectedProject } = useSettingsRouteContext();
+  const scopedProviders = projectProviderSnapshots(providers, settings, selectedProject?.id);
+  const entries = deriveProviderInstanceEntries(scopedProviders);
+  const selectable = scopedProviders.filter((provider) =>
     entries.some((entry) => entry.instanceId === provider.instanceId && entry.enabled),
   );
   const selected = entries.find((entry) => entry.instanceId === value.instanceId);
