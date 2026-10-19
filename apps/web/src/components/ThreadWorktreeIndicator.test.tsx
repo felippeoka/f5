@@ -18,7 +18,7 @@ describe("ThreadWorktreeIndicator", () => {
 
     expect(markup).toContain('role="img"');
     expect(markup).toContain(
-      'aria-label="Worktree: sidebar-indicator (feature/sidebar-indicator)"',
+      'aria-label="Worktree: feature/sidebar-indicator · sidebar-indicator"',
     );
     expect(markup).toContain('data-testid="thread-worktree-thread-1"');
   });

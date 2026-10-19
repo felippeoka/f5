@@ -1226,6 +1226,7 @@ const uploadedFiles = new Map<string, import("@t3tools/contracts").AttachmentUpl
 
 function resolveWsRpc(body: WsRequestEnvelope["body"]): unknown {
   const tag = body._tag;
+  if (tag === WS_METHODS.worktreesGetTransition) return null;
   if (tag === WS_METHODS.attachmentsGetUploads)
     return (body.uploadIds as string[]).map((id) => uploadedFiles.get(id) ?? null);
   if (tag === AGENTS_WS_METHODS.getSnapshot) {
@@ -1428,7 +1429,6 @@ function resolveWsRpc(body: WsRequestEnvelope["body"]): unknown {
       reclaimable: [],
     };
   }
-  if (tag === WS_METHODS.worktreesGetTransition) return null;
   return {};
 }
 

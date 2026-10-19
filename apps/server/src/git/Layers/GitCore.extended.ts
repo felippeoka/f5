@@ -104,6 +104,7 @@ const makeIsolatedGitCore = (gitService: GitServiceShape) =>
 
     return {
       listWorktrees: (cwd) => core.listWorktrees(cwd),
+      isDirty: (cwd) => core.isDirty(cwd),
       inspectCheckoutIdentity: (path) => core.inspectCheckoutIdentity(path),
       inspectCheckout: (path, options) => core.inspectCheckout(path, options),
       clearMissingRegistration: (cwd, path) => core.clearMissingRegistration(cwd, path),
@@ -2073,6 +2074,21 @@ it.layer(TestLayer)("git integration", (it) => {
   });
 
   describe("GitCore", () => {
+    it.effect(
+      "inspects inventory dirtiness without fetching and returns null for non-checkouts",
+      () =>
+        Effect.gen(function* () {
+          const tmp = yield* makeTmpDir();
+          yield* initRepoWithCommit(tmp);
+          const core = yield* GitCore;
+          expect(yield* core.isDirty(tmp)).toBe(false);
+          yield* writeTextFile(path.join(tmp, "untracked file "), "contents");
+          expect(yield* core.isDirty(tmp)).toBe(true);
+          const nonRepo = yield* makeTmpDir();
+          expect(yield* core.isDirty(nonRepo)).toBeNull();
+        }),
+    );
+
     it.effect("supports branch lifecycle operations through the service API", () =>
       Effect.gen(function* () {
         const tmp = yield* makeTmpDir();

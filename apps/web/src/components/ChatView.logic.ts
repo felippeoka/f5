@@ -517,6 +517,8 @@ export function resolveAttachedFileReferencePaths(input: {
 }
 
 export function buildFirstSendBootstrap(input: {
+  worktreeBranchName?: string | null;
+  runSetupScript?: boolean | null;
   sharedFilesystemConfirmed?: boolean;
   isLocalDraftThread: boolean;
   projectId: ProjectId;
@@ -552,7 +554,11 @@ export function buildFirstSendBootstrap(input: {
     ? {
         projectCwd: input.projectCwd,
         baseBranch: input.baseBranchForWorktree,
-        branch: buildTemporaryWorktreeBranchName(),
+        branch: input.worktreeBranchName ?? buildTemporaryWorktreeBranchName(),
+        ...(input.worktreeBranchName ? { namingIntent: "explicit" as const } : {}),
+        ...(input.runSetupScript !== null && input.runSetupScript !== undefined
+          ? { runSetupScript: input.runSetupScript }
+          : {}),
         requireWorktree: true,
       }
     : undefined;
@@ -561,7 +567,8 @@ export function buildFirstSendBootstrap(input: {
     return undefined;
   }
 
-  const shouldRunSetupScript = prepareWorktree && setupProjectScript(input.projectScripts);
+  const shouldRunSetupScript =
+    prepareWorktree && (input.runSetupScript ?? Boolean(setupProjectScript(input.projectScripts)));
 
   return {
     ...(createThread ? { createThread } : {}),

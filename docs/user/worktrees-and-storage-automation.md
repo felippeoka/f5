@@ -151,6 +151,42 @@ no Git mutation could have occurred.
 If the checkout changes after inspection, inspect again before accepting it.
 Archiving or deleting the conversation cancels its switch and keeps checkout files.
 
+## Manage worktrees
+
+Open **Worktrees** beside Usage in the sidebar, search for **Open worktrees** in the
+command palette, or choose **Worktrees…** in a project's context menu. Storage settings
+also links to this page through **Manage worktrees**. Filter by project or search a branch,
+full path, or linked conversation. The project checkout appears first, followed by
+referenced and unreferenced checkouts. **Refresh** rechecks local state; there is no polling.
+Unreadable projects report an error, and an unavailable status is shown as unknown.
+Projects opened at a subfolder of a Git checkout report its checkout root instead of
+offering an attachment to that subfolder. Add the checkout root as a project to manage its worktrees.
+
+Rows show missing directories, local changes, locked registrations, and detached HEADs.
+Choose **Inspect** for current removal blockers and branch deletion eligibility. **Remove…**
+opens the same guarded dialog used for thread deletion. Missing managed checkouts offer
+**Remove stale entry**. Project checkouts cannot be removed. External, other-profile, and
+detached checkouts are inspect-only; paths can still be copied, revealed, or opened in an editor.
+
+Use **New conversation here** to attach a new draft to an eligible checkout. Select an
+existing conversation and choose **Use for this conversation** to switch it through the durable
+workspace transition. Joining a different checkout used by other conversations prompts for
+confirmation because they see the same files and uncommitted changes. New local conversations
+already share the project checkout. The server rechecks eligibility when attaching or switching,
+so a list entry never grants permission to mutate a checkout.
+
+The conversation's worktree chip shows its branch and shortened path. Open it with a mouse
+or keyboard to copy the exact path, open an editor or terminal, reveal the directory, or review
+removal. The **Local** menu links to existing worktrees and offers **New worktree**.
+
+Before sending in **New worktree** mode, choose **Branch: auto** to enter an explicit branch
+name, or **Clear** to restore automatic naming. The existing branch selector chooses the base.
+The new worktree starts from committed contents of the base branch; uncommitted edits stay
+where they are. **Run setup script** can be turned off when the project has an opted-in setup
+script. Both choices persist with the draft. Multi-model sends generate independent names;
+explicit naming is disabled for them. Invalid or occupied branch names are rejected by the
+server before creating a conversation, keeping the draft available for correction.
+
 ## Related
 
 - [Project settings](project-settings.md)
