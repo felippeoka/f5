@@ -1378,3 +1378,20 @@ further code-shape exclusions, each with an individual result. Nine patches with
 save/error cleanup, state timing, late theme adoption, retry fencing or SSH-specific
 behavior stay open for runtime/subsystem review. The strict ledger and all 12 plan
 tests pass with 1,252 planned records; no delivery dispositions are promoted.
+
+Pi #16210 reproduces in the shared title path: five cases fail before the fix,
+including the real metadata process receiving no linked PR context. The title
+contract and all provider prompt paths now preserve that context. ProviderCommandReactor
+reads the thread's five most recent saved links through a shared projection reader,
+which PR Hub also uses. Lookup is asynchronous and best-effort with a short timeout;
+it adds no forge/account probe and does not block the provider turn. Labels and
+prompt context are bounded separately, JSON-quoted and marked as untrusted
+reference data. Invalid persisted links cannot become prompt context and do not
+prevent ordinary title generation.
+
+The 12 focused suites pass all 205 cases, covering Pi's process, Codex's stdin,
+Muse's shared factory, the other generation backends, exact thread ownership and
+link limits, corrupt data, and asynchronous title generation while a turn runs.
+All eight typechecks, formatter, lint and whitespace checks pass. Implementation
+proof is attached to #16210 without promoting the remaining Pi phase or release
+obligations. Installed Pi account validation remains pending.

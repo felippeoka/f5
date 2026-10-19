@@ -12049,12 +12049,25 @@
     {
       "upstreamSha": "4ae976dbae39b3e80243b864a8b61da00f642dc4",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(server): Pi thread titles use linked PR context (#16210).",
+      "reason": "Planned: implementation and focused evidence exist for five title-context cases fail before the fix. Saved links now reach asynchronous title generation and the real Pi metadata process through shared provider input, with a five-link local projection lookup and separately bounded, quoted untrusted prompt context. Ordinary titles and corrupt/missing link fallback remain available without a forge probe or active-turn delay. All 205 cases in 12 title, provider, PR-reader and reactor suites, all eight typechecks, formatter and lint pass; real installed Pi account proof and the remaining 15l release obligations are still open. The remaining 15l per-SHA audit and required release gates are not complete. Upstream change: fix(server): Pi thread titles use linked PR context (#16210).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-16210"],
-        "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+        "targetModules": [
+          "apps/server/src/git/Layers/PiTextGeneration.ts",
+          "apps/server/src/git/promptTextGeneration.ts",
+          "apps/server/src/prHub/threadLinks.ts",
+          "apps/server/src/orchestration/Layers/ProviderCommandReactor.ts"
+        ]
+      },
+      "f5Shas": ["df422a304e160ba3782bc2bdf95b00c8390e7c45"],
+      "evidence": [
+        "apps/server/src/provider/pi/PiMetadata.test.ts:84",
+        "apps/server/src/git/promptTextGeneration.ts:98",
+        "apps/server/src/prHub/threadLinks.test.ts:1",
+        "apps/server/src/orchestration/Layers/ProviderCommandReactor.test.ts:3751",
+        "apps/server/src/git/Prompts.test.ts:15"
+      ]
     },
     {
       "upstreamSha": "442735897f6f92af33798075baa12d4fd4d710dd",
