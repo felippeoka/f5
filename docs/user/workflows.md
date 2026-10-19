@@ -85,8 +85,11 @@ shows the template, cost and per-step context.
 Archiving a workflow archives its threads, stops their agent sessions, and pauses queued work.
 Restore the workflow from Archive to restore the threads it archived; threads archived separately
 stay archived. Restoring does not automatically restart interrupted turns or resume paused queues.
-An archived workflow's clean, unused worktrees can be reclaimed through Storage settings. Its
-threads remain protected from permanent storage purging until the workflow is deleted.
+Pending workflow stages can continue from completed results after restoration; interrupted stages
+remain available for an explicit retry.
+An archived workflow's clean, unused worktrees can be reclaimed through Storage settings.
+Threads belonging to active or archived workflows remain protected from permanent storage
+purging until the workflow or its project is deleted.
 
 ## Related
 

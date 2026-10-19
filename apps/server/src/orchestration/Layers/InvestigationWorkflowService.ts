@@ -12,7 +12,7 @@ import {
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { isArchivedWorkflow, isDeletedWorkflow } from "@t3tools/shared/workflowArchive";
-import { setWorkflowArchived } from "../workflowArchiveLifecycle.ts";
+import { makeWorkflowArchiveLifecycle } from "../workflowArchiveLifecycle.ts";
 import { Cause, Effect, Layer, Stream } from "effect";
 
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
@@ -2648,11 +2648,18 @@ export const makeInvestigationWorkflowService = Effect.gen(function* () {
       });
     });
 
+  const changeWorkflowArchive = makeWorkflowArchiveLifecycle(orchestrationEngine, "investigation");
+
   const archiveWorkflow: InvestigationWorkflowServiceShape["archiveWorkflow"] = (workflowId) =>
-    setWorkflowArchived(orchestrationEngine, "investigation", workflowId, true);
+    changeWorkflowArchive(workflowId, true);
 
   const unarchiveWorkflow: InvestigationWorkflowServiceShape["unarchiveWorkflow"] = (workflowId) =>
-    setWorkflowArchived(orchestrationEngine, "investigation", workflowId, false);
+    changeWorkflowArchive(workflowId, false, (snapshot) =>
+      Effect.gen(function* () {
+        const workflow = snapshot.investigationWorkflows.find((entry) => entry.id === workflowId);
+        if (workflow) yield* reconcileStuckWorkflow(workflow, snapshot);
+      }),
+    );
 
   const retryWorkflow: InvestigationWorkflowServiceShape["retryWorkflow"] = (input) =>
     Effect.gen(function* () {

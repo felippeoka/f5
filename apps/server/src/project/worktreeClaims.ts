@@ -576,13 +576,61 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
       common,
       Effect.scoped(
         Effect.gen(function* () {
-          if (input.policy.kind === "storageMaintenance") {
-            const gate = yield* engine.acquireMaintenanceLock();
-            yield* Effect.addFinalizer(() => Scope.close(gate, Exit.void));
-          }
           if (input.isCancelled?.())
             return { ...preview, blockedReasons: ["Cleanup was cancelled."] };
+          const inspectedProjectRoots = new Set(
+            (yield* engine.getReadModel()).projects
+              .filter((project) => project.deletedAt === null)
+              .map((project) => project.workspaceRoot),
+          );
           const checked = yield* evaluateWorktreeRemoval(input);
+          // Git inspection can be slow. Only freeze orchestration writes for the
+          // final state/claim check and removal, inside the lifecycle locks.
+          const maintenanceGate =
+            input.policy.kind === "storageMaintenance"
+              ? yield* engine.acquireMaintenanceLock()
+              : null;
+          if (maintenanceGate)
+            yield* Effect.addFinalizer(() => Scope.close(maintenanceGate, Exit.void));
+          const finalModel = yield* engine.getReadModel();
+          const claims = yield* readWorktreeClaims(input.path);
+          if (input.policy.kind === "storageMaintenance") {
+            if (
+              finalModel.threads.some(
+                (thread) =>
+                  claims.threadIds.includes(thread.id) &&
+                  thread.deletedAt === null &&
+                  thread.archivedAt === null,
+              )
+            )
+              checked.blockedReasons.push("Referenced by an active thread.");
+            const finalProjectRoots = new Set(
+              finalModel.projects
+                .filter((project) => project.deletedAt === null)
+                .map((project) => project.workspaceRoot),
+            );
+            if (
+              finalProjectRoots.size !== inspectedProjectRoots.size ||
+              [...finalProjectRoots].some((root) => !inspectedProjectRoots.has(root))
+            )
+              checked.blockedReasons.push(
+                "Project roots changed during inspection. Rescan before removal.",
+              );
+            checked.blockedReasons.push(
+              ...foreignClaims(
+                {
+                  ...claims,
+                  sessions: claims.sessions.filter(
+                    (session) => !claims.deletedThreadIds.some((id) => id === session.threadId),
+                  ),
+                  terminals: claims.terminals.filter(
+                    (terminal) => !claims.deletedThreadIds.some((id) => id === terminal.threadId),
+                  ),
+                },
+                null,
+              ),
+            );
+          }
           if (
             input.expectedHead !== undefined &&
             (checked.registration?.headSha ?? null) !== input.expectedHead
@@ -590,7 +638,6 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
             checked.blockedReasons.push(
               "HEAD changed since inspection. Review the checkout again.",
             );
-          const claims = yield* readWorktreeClaims(input.path);
           if (claims.unknown) checked.blockedReasons.push("workspace usage could not be verified");
           // The caller must stop all processes belonging to deleted/owned threads before locking.
           const owned = new Set<string>([
@@ -629,6 +676,7 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
               return checked;
             }
             yield* git.removeWorktree({ cwd: input.projectCwd, path: input.path });
+            if (maintenanceGate) yield* Scope.close(maintenanceGate, Exit.void);
             if (input.afterRemoval) yield* input.afterRemoval(checked.registration);
           }
           return checked;

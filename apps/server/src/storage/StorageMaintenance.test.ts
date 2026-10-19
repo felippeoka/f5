@@ -1694,6 +1694,55 @@ layer("StorageMaintenance", (it) => {
 });
 
 for (const kind of ["planning", "codeReview", "investigation"] as const) {
+  it.effect("releases " + kind + " workflow retention after parent project deletion", () => {
+    const fixture = workflowArchiveFixture(kind);
+    const engine = makeOrchestrationEngineStub({
+      getWorkflows: () => ({
+        planningWorkflows: fixture.model.planningWorkflows.map((workflow) => ({
+          ...workflow,
+          projectId: ProjectId.makeUnsafe("project-storage-maintenance"),
+        })),
+        codeReviewWorkflows: fixture.model.codeReviewWorkflows.map((workflow) => ({
+          ...workflow,
+          projectId: ProjectId.makeUnsafe("project-storage-maintenance"),
+        })),
+        investigationWorkflows: fixture.model.investigationWorkflows.map((workflow) => ({
+          ...workflow,
+          projectId: ProjectId.makeUnsafe("project-storage-maintenance"),
+        })),
+      }),
+    });
+    return withHomeSandbox(
+      Effect.gen(function* () {
+        const storage = yield* StorageMaintenance;
+        const sql = yield* SqlClient.SqlClient;
+        yield* seedThread({ sql, threadId: fixture.a, archivedAt: daysAgo(90), deletedAt: null });
+        {
+          const report = yield* storage.inspect({ force: true });
+          assert.isFalse(
+            report.categories
+              .find((category) => category.id === "purgeArchivedThreads")
+              ?.targets.some((target) => target.id === fixture.a),
+          );
+        }
+        yield* sql`UPDATE projection_projects SET deleted_at = ${daysAgo(40)}`;
+        const report = yield* storage.inspect({ force: true });
+        assert.isTrue(
+          report.categories
+            .find((category) => category.id === "purgeArchivedThreads")
+            ?.targets.some((target) => target.id === fixture.a),
+        );
+        const result = yield* storage.purgeThreads({
+          operationId: "deleted-parent-" + kind,
+          archivedBefore: daysAgo(30),
+          deletedBefore: daysAgo(0),
+          maxThreads: 10,
+        });
+        assert.deepEqual(result.purgedThreadIds, [fixture.a]);
+      }).pipe(Effect.provide(makeStorageTestLayer({ orchestrationEngine: engine }))),
+    );
+  });
+
   it.effect("retains " + kind + " workflow threads until their workflow is deleted", () => {
     const fixture = workflowArchiveFixture(kind);
     let retained = false;
@@ -1773,6 +1822,59 @@ for (const kind of ["planning", "codeReview", "investigation"] as const) {
     );
   });
 }
+
+it.effect("keeps filesystem cleanup outside the exclusive orchestration gate", () => {
+  let gateHeld = false;
+  let removals = 0;
+  const base = makeOrchestrationEngineStub();
+  const engine = {
+    ...base,
+    acquireMaintenanceLock: () =>
+      Effect.gen(function* () {
+        gateHeld = true;
+        const scope = yield* Scope.make("sequential");
+        yield* Scope.addFinalizer(
+          scope,
+          Effect.sync(() => {
+            gateHeld = false;
+          }),
+        );
+        return scope;
+      }),
+  };
+  const original = vi.mocked(removeFileIfSafe).getMockImplementation()!;
+  return withHomeSandbox(
+    Effect.gen(function* () {
+      const storage = yield* StorageMaintenance;
+      const sql = yield* SqlClient.SqlClient;
+      const config = yield* ServerConfig;
+      const threadId = ThreadId.makeUnsafe("slow-purge-outside-gate");
+      yield* seedThread({ sql, threadId, archivedAt: daysAgo(90), deletedAt: null });
+      const file = NodePath.join(
+        config.providerLogsDir,
+        toSafeThreadAttachmentSegment(threadId)! + ".log",
+      );
+      yield* Effect.promise(() => writeFile(file, "cleanup bytes"));
+      vi.mocked(removeFileIfSafe).mockImplementationOnce(async (input) => {
+        assert.isFalse(gateHeld, "Filesystem removal must not freeze command writes");
+        removals++;
+        return original(input);
+      });
+      const result = yield* storage.purgeThreads({
+        operationId: "purge-outside-engine-gate",
+        archivedBefore: daysAgo(30),
+        deletedBefore: daysAgo(0),
+        maxThreads: 10,
+      });
+      assert.deepEqual(result.purgedThreadIds, [threadId]);
+      assert.equal(removals, 1);
+      assert.isFalse(gateHeld);
+    }).pipe(
+      Effect.provide(makeStorageTestLayer({ orchestrationEngine: engine })),
+      Effect.ensuring(Effect.sync(() => vi.mocked(removeFileIfSafe).mockImplementation(original))),
+    ),
+  );
+});
 
 function seedThread(input: {
   readonly sql: SqlClient.SqlClient;

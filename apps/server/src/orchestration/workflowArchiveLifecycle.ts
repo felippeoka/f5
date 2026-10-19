@@ -17,6 +17,7 @@ import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import { withEventBase } from "./eventBase.ts";
 import type { OrchestrationEngineShape } from "./Services/OrchestrationEngine.ts";
 import { CommandId } from "@t3tools/contracts";
+import { makeOperationGate } from "../provider/operationGate.ts";
 
 type WorkflowEntry =
   | { kind: "planning"; workflow: PlanningWorkflow }
@@ -62,6 +63,37 @@ export function workflowEntries(
   }));
 }
 
+/** Project deletion releases workflow retention even when old workflow JSON remains. */
+export function retainedWorkflowThreadIds(model: OrchestrationReadModel): Set<ThreadId> {
+  const deletedProjects = new Set(
+    model.projects.filter((project) => project.deletedAt !== null).map((project) => project.id),
+  );
+  return new Set(
+    workflowEntries(model)
+      .filter(
+        (entry) =>
+          entry.workflow.deletedAt === null && !deletedProjects.has(entry.workflow.projectId),
+      )
+      .flatMap((entry) => entry.threadIds),
+  );
+}
+
+/** Deleted threads cannot gain new owners once permanent cleanup may have started. */
+export function requireAttachableWorkflowThreads(
+  model: OrchestrationReadModel,
+  command: OrchestrationCommand,
+  ids: ReadonlyArray<ThreadId>,
+) {
+  return model.threads.some((thread) => ids.includes(thread.id) && thread.deletedAt !== null)
+    ? Effect.fail(
+        new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Cannot attach a deleted thread to a workflow.",
+        }),
+      )
+    : Effect.void;
+}
+
 /** One decision yields one atomic event batch; stage upserts cannot overwrite archive ownership. */
 export const decideWorkflowArchive = Effect.fn("decideWorkflowArchive")(function* (input: {
   entry: WorkflowEntry;
@@ -75,6 +107,11 @@ export const decideWorkflowArchive = Effect.fn("decideWorkflowArchive")(function
   const current = entries.find(
     (entry) => entry.kind === input.entry.kind && entry.workflow.id === input.entry.workflow.id,
   )?.workflow;
+  const previousThreadIds = new Set(
+    entries.find(
+      (entry) => entry.kind === input.entry.kind && entry.workflow.id === input.entry.workflow.id,
+    )?.threadIds ?? [],
+  );
   const archivedAt =
     operation === "archive"
       ? (current?.archivedAt ?? occurredAt)
@@ -97,6 +134,13 @@ export const decideWorkflowArchive = Effect.fn("decideWorkflowArchive")(function
   const ids = new Set(workflowThreadIds(input.entry));
   if (operation === "unarchive") for (const item of restorations) ids.add(item.threadId);
   if (deletedAt !== null) ids.clear();
+  // Once deleted, an unowned thread can be permanently purged. A stage update
+  // must not acquire ownership halfway through that cleanup.
+  yield* requireAttachableWorkflowThreads(
+    readModel,
+    command,
+    [...ids].filter((id) => !previousThreadIds.has(id)),
+  );
   for (const threadId of ids) {
     const thread = readModel.threads.find((thread) => thread.id === threadId);
     if (!thread || thread.deletedAt !== null) continue;
@@ -145,7 +189,7 @@ export const decideWorkflowArchive = Effect.fn("decideWorkflowArchive")(function
     archivedAt,
     deletedAt,
     archiveRestorations: operation === "unarchive" ? [] : restorations,
-    updatedAt: occurredAt,
+    updatedAt: operation === "preserve" ? input.entry.workflow.updatedAt : occurredAt,
   };
   const base = withEventBase({
     commandId: command.commandId,
@@ -197,18 +241,32 @@ export const reconcileWorkflowArchives = (engine: OrchestrationEngineShape) =>
         )
       )
         continue;
-      yield* engine.dispatch({
-        type: "project.workflow.archive",
-        commandId: CommandId.makeUnsafe(crypto.randomUUID()),
-        projectId: entry.workflow.projectId,
-        workflowId: entry.workflow.id,
-        workflowKind: entry.kind,
-        createdAt: new Date().toISOString(),
-      });
+      yield* engine
+        .dispatch({
+          type: "project.workflow.archive",
+          commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+          projectId: entry.workflow.projectId,
+          workflowId: entry.workflow.id,
+          workflowKind: entry.kind,
+          createdAt: new Date().toISOString(),
+        })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError("Failed to reconcile archived workflow; continuing startup", {
+              workflowKind: entry.kind,
+              workflowId: entry.workflow.id,
+              cause,
+            }),
+          ),
+        );
     }
-  });
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logError("Failed to read workflows for archive reconciliation", { cause }),
+    ),
+  );
 
-export const setWorkflowArchived = (
+const setWorkflowArchived = (
   engine: OrchestrationEngineShape,
   kind: WorkflowEntry["kind"],
   workflowId: WorkflowEntry["workflow"]["id"],
@@ -232,4 +290,25 @@ export const setWorkflowArchived = (
         createdAt: new Date().toISOString(),
       })
       .pipe(Effect.mapError((cause) => new Error(String(cause))));
+    return entry.workflow.archivedAt !== null;
   });
+
+/** Keep concurrent lifecycle RPCs and restore continuation ordered per workflow. */
+export function makeWorkflowArchiveLifecycle(
+  engine: OrchestrationEngineShape,
+  kind: WorkflowEntry["kind"],
+) {
+  const withWorkflowGate = makeOperationGate<WorkflowEntry["workflow"]["id"]>();
+  return <E = never>(
+    workflowId: WorkflowEntry["workflow"]["id"],
+    archived: boolean,
+    reconcile?: (model: OrchestrationReadModel) => Effect.Effect<void, E>,
+  ) =>
+    withWorkflowGate(
+      workflowId,
+      Effect.gen(function* () {
+        const wasArchived = yield* setWorkflowArchived(engine, kind, workflowId, archived);
+        if (wasArchived && !archived && reconcile) yield* reconcile(yield* engine.getReadModel());
+      }).pipe(Effect.mapError((cause) => new Error(String(cause)))),
+    );
+}

@@ -1,5 +1,8 @@
 import { purgeThreadRows } from "./threadPurgePolicy.ts";
-import { workflowEntries } from "../orchestration/workflowArchiveLifecycle.ts";
+import {
+  retainedWorkflowThreadIds as workflowRetention,
+  workflowEntries,
+} from "../orchestration/workflowArchiveLifecycle.ts";
 import { storageLstat, storageReadDir } from "./diskUsage.ts";
 import { recordStorageAutomationAudit, pruneStorageAutomationAudit } from "./automationAudit.ts";
 import { databaseMaintenanceEffect } from "./databaseMaintenance.ts";
@@ -734,17 +737,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
       ORDER BY thread.thread_id ASC
     `;
 
-  const retainedWorkflowThreadIds = () =>
-    engine.getReadModel().pipe(
-      Effect.map(
-        (model) =>
-          new Set(
-            workflowEntries(model)
-              .filter((entry) => entry.workflow.deletedAt === null)
-              .flatMap((entry) => entry.threadIds),
-          ),
-      ),
-    );
+  const retainedWorkflowThreadIds = () => engine.getReadModel().pipe(Effect.map(workflowRetention));
 
   const inspectWorktreeRemovalReadiness = (input: {
     readonly targetPath: string;
@@ -2476,10 +2469,8 @@ const makeStorageMaintenance = Effect.gen(function* () {
                 crossedBoundary = true;
                 markStorageMutation(request.operationId);
               }
-              // Ownership can change during preflight. Freeze command writes before
-              // removing checkpoint refs, files or rows, and repeat the retention check.
-              const purgeGate = yield* engine.acquireMaintenanceLock();
-              yield* Effect.addFinalizer(() => Scope.close(purgeGate, Exit.void));
+              // thread.delete validates ownership atomically; deleted threads cannot
+              // acquire a new workflow owner while files are being removed.
               const retainedReason = yield* purgeBlockReason(thread);
               if (retainedReason) {
                 warnings.push(warningFor(thread.threadId, retainedReason));
@@ -2580,6 +2571,8 @@ const makeStorageMaintenance = Effect.gen(function* () {
                       message: "Provider session remained active after stop.",
                     });
                   return yield* Effect.gen(function* () {
+                    const purgeGate = yield* engine.acquireMaintenanceLock();
+                    yield* Effect.addFinalizer(() => Scope.close(purgeGate, Exit.void));
                     const finalBlock = yield* purgeBlockReason(thread);
                     if (
                       (yield* terminals.listSessions).some(
@@ -2615,7 +2608,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
                       return yield* Effect.failCause(transactionExit.cause);
                     markStorageMutation(request.operationId);
                     return true;
-                  });
+                  }).pipe(Effect.scoped);
                 }),
               );
             }).pipe(Effect.scoped),

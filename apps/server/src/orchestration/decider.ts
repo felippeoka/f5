@@ -12,7 +12,12 @@ import {
 } from "@t3tools/contracts";
 import { Effect } from "effect";
 import { withEventBase } from "./eventBase.ts";
-import { decideWorkflowArchive, workflowEntries } from "./workflowArchiveLifecycle.ts";
+import {
+  decideWorkflowArchive,
+  requireAttachableWorkflowThreads,
+  retainedWorkflowThreadIds,
+  workflowEntries,
+} from "./workflowArchiveLifecycle.ts";
 import {
   documentWorkflowForThread,
   defaultDocumentReaderSlot,
@@ -338,6 +343,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "project.workflow.create": {
+      yield* requireAttachableWorkflowThreads(readModel, command, [
+        command.authorThreadIdA,
+        command.authorThreadIdB,
+      ]);
       yield* requireProject({
         readModel,
         command,
@@ -471,6 +480,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "project.code-review-workflow.create": {
+      yield* requireAttachableWorkflowThreads(readModel, command, [
+        command.reviewerThreadIdA,
+        command.reviewerThreadIdB,
+      ]);
       yield* requireProject({
         readModel,
         command,
@@ -530,6 +543,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "project.investigation-workflow.create":
     case "project.debug-workflow.create": {
+      yield* requireAttachableWorkflowThreads(readModel, command, [
+        command.investigationThreadIdA,
+        command.investigationThreadIdB,
+      ]);
       yield* requireProject({
         readModel,
         command,
@@ -652,10 +669,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     case "thread.delete": {
       if (
         command.expectedArchivedAt !== undefined &&
-        workflowEntries(readModel).some(
-          (entry) =>
-            entry.workflow.deletedAt === null && entry.threadIds.includes(command.threadId),
-        )
+        retainedWorkflowThreadIds(readModel).has(command.threadId)
       )
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -1276,7 +1290,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Restore the owning workflow before starting a turn.",
         });
       }
-      const targetThread = yield* requireThread({
+      const targetThread = yield* requireThreadNotArchived({
         readModel,
         command,
         threadId: command.threadId,
