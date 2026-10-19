@@ -54,7 +54,7 @@ The artifact deliberately retains runtime changes whose source/scenario review i
 | `equivalent:packages/shared/src/model.ts:591`                   |       1 |
 | `equivalent:packages/shared/src/model.ts:71`                    |       2 |
 | `not-applicable:devices`                                        |      12 |
-| `not-applicable:maintenance`                                    |      58 |
+| `not-applicable:maintenance`                                    |      91 |
 | `not-applicable:marketing`                                      |       3 |
 | `not-applicable:mobile`                                         |     136 |
 | `not-applicable:multi-environment`                              |       1 |
@@ -68,7 +68,7 @@ The artifact deliberately retains runtime changes whose source/scenario review i
 | `planned:11a`                                                   |      46 |
 | `planned:12a`                                                   |     102 |
 | `planned:13b`                                                   |      57 |
-| `planned:15a`                                                   |     319 |
+| `planned:15a`                                                   |     286 |
 | `planned:15b`                                                   |      16 |
 | `planned:15c`                                                   |      21 |
 | `planned:15d`                                                   |      11 |
@@ -217,3 +217,43 @@ providers and unlocated history, and pauses queued prompts for review. Migration
 The real built-server/SQLite/Chromium fixture passes without a fork or extra prompt.
 Installed Pi/account evidence, remaining metadata follow-ups and the full release
 gates still prevent marking 15l or the catch-up delivered.
+
+## Source-inspected compiler maintenance (2026-10-20)
+
+The following 33 full patches were read individually. Their changes fit the user's compiler/test maintenance exclusion. This closes classification obligations only; it grants no runtime port or performance credit. Settings refresh error ordering (#20503), device setup error cleanup (#20488), and stable callback retention (#20556) remain open because those patches also affect runtime behavior.
+
+| Upstream SHA                               | Source result                                                                                                                        |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `b103346ba6a3a599c85a8c108f9aa4875c1f4d16` | combobox context construction only removes useMemo around the same literal.                                                          |
+| `1e42057c97bad2194a836f73ce8a9b71930fc5be` | GuideStop computes the same letter-stop notes without useMemo.                                                                       |
+| `23d40e0a8cc40c516b05fd6dd1c0840d7ed0f875` | ProjectIconPicker applies the unchanged icon filter without useMemo.                                                                 |
+| `99544c9c1904473e234323c90c0a18af62aae4a6` | RedactedSensitiveText removes useMemo without changing its redaction algorithm.                                                      |
+| `99fac2687d43d50d523b440b06f20750c362f06b` | file reveal returns the same callback body without useCallback.                                                                      |
+| `dc060b113288753c0900911a97c0911899d265d1` | new-thread links call the unchanged search parser without useMemo.                                                                   |
+| `49c51bb11a4ad21d572119b55eb746a6f071cadf` | main navigation uses the same pop-out callback body without useCallback.                                                             |
+| `f241e7988d3d3347368c8aa32693a6b2391d7a61` | resource telemetry uses the same retry callback body without useCallback.                                                            |
+| `daf4643356c77feca9274bc8a62068eef93290ea` | project-file queries use the same refresh callback bodies without useCallback.                                                       |
+| `dab2d5c771e2fff27e55d8f23e940702793456b8` | ProposedPlanCard inlines its existing expand callback into the same find ref.                                                        |
+| `16e6a6ab50c39206108f3bf6f9e3d9be6d87ba4b` | AnimatedHeight changes only a lint comment and formatting; effect dependencies are identical.                                        |
+| `366106ac510a0b254a6ac746d3ae2db34975b19c` | back navigation removes useCallback around the unchanged navigation body.                                                            |
+| `6d22719b03cb25f11fa1b843bcd966dff4ba4ae9` | CommandPaletteResults removes useCallback around the unchanged highlight handler.                                                    |
+| `6f68d6d7d50054530819b2b84323d75faf6bc9f2` | primary session refresh passes the existing global refresh function in place of its zero-argument wrapper.                           |
+| `0b110ce0dbd730a3e24acd605cec322e5300294a` | ThreadFindBar changes only a lint comment and formatting; focus dependencies are identical.                                          |
+| `e08b38a9f8fa3071f0c3a150cd6187448dc66b8a` | T3 Connect account settings unwrap the existing open callback.                                                                       |
+| `2ff8e7413b75de485066c4754cf3cb85f950b12e` | SnapShotShortcut unwraps the existing stop callback without changing cleanup.                                                        |
+| `e6483180610d8364c052b733998d11c4afe1665f` | ModelPickerSidebar changes only a lint comment and formatting; dependencies are identical.                                           |
+| `54b191547218b1e88754a0ea81976c7836873ba7` | context drop changes only a lint comment and formatting; listener dependencies are identical.                                        |
+| `19a760c3e32005e10eb96d33bad81aaa836a1306` | PierreEntryIcon calls the same icon resolver without useMemo.                                                                        |
+| `7c74a35ea6766a6c4567164da896da51457f300d` | ShellCommandBlock computes the same shell embedded-script list without useMemo.                                                      |
+| `e9712d261e74ca54e7fb662d7a04a033423aa0f8` | ToggleGroup removes a memoized literal and spells out the same undefined-only size default.                                          |
+| `3ff9a734584b92f5220e8abc1fed18a5e4aebfa8` | useAtomCommand returns the unchanged command callback without useCallback.                                                           |
+| `fad673225650193fad2a85487ecffc903f8ff30a` | only tests and a test-helper comment change to existing renamed layer factories.                                                     |
+| `6805b64e3917f974708f9a104971db4face70b2d` | ProviderModelPicker performs the same instance lookup without useMemo.                                                               |
+| `22585fd9ff701ff4f43b38f8a045440002618a05` | managed relay hooks unwrap the same refresh callbacks.                                                                               |
+| `e36d0b2d1f3c7eee763ab566accf50fc601d5234` | archived-thread hooks compute the same environment key and refresh loop without memoization.                                         |
+| `54d090062732280987a1f3e1515e44491618d063` | device access hooks construct the same success payload without useMemo.                                                              |
+| `1b13922a25ffab315639b636d101fd8406e2e34a` | CLI authorization unwraps the sign-in callback and reads it through useEffectEvent without changing authorization or redirect logic. |
+| `54bffb912e82b514deef44769cb68f84758538ba` | CustomModelEditor computes the same presets and model candidates without useMemo.                                                    |
+| `c7fe6d37b3a328fb5427b330d1cb11ae66a6da14` | device controls inline the same host/device request fields and depend on their primitive values instead of a memoized object.        |
+| `68b47e71c057164b9ee40681a7a73681c39659cf` | ThreadNotificationCoordinator unwraps its callback and retains the same notification cleanup loop.                                   |
+| `687f1e94872e7b7191355a536aac3f3070379f1c` | ZoomableImage unwraps the same zoom callback without changing clamp or viewport calculations.                                        |

@@ -1324,3 +1324,19 @@ rewind regression pass: one child, three intentional prompts, no extra prompt or
 fork, exact reconciliation, an empty paused queue and no browser errors. This
 checkpoint predates the subsequent Copilot change. Required release gates and
 the full catch-up remain incomplete.
+
+At the Copilot checkpoint, the complete server suite reports 5,433 passing cases,
+12 skips and the same three launcher process-identity failures. The required
+`test:full` attempt fails the same two scripts recovery identity cases (332 pass),
+before reaching the exhaustive Git command. The current six-task production build
+passes. No process-identity safeguard is bypassed, and the required full gate is
+still unmet.
+
+A subsequent 15a source pass reads 36 small compiler candidates individually.
+Thirty-three qualify for the plan's compiler/test maintenance exclusion; each
+record now states the exact code-shape change, with a source-review table in the
+classification document. Three patches with error-cleanup or closure-retention
+behavior remain open. These are classification decisions, not runtime ports or
+performance claims. The strict ledger check and all 12 October/September plan tests
+pass: 4,084 records, 1,283 planned, 482 ported, 152 equivalent and two already
+present. The interval and frozen September memberships are unchanged.
