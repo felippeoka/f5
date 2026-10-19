@@ -1,5 +1,6 @@
 import { makeMoveSnapshotOperations } from "../moveSnapshot.ts";
 import { checkoutFingerprint } from "../checkoutFingerprint.ts";
+import { blockingIgnoredEntries } from "../worktreeIgnoredFiles.ts";
 import { createHash } from "node:crypto";
 import { basename, dirname } from "node:path";
 import {
@@ -2708,7 +2709,7 @@ const makeGitCore = Effect.gen(function* () {
         inspection.hasTrackedChanges ||
         inspection.hasUntrackedChanges ||
         inspection.ignoredTruncated ||
-        inspection.ignoredEntries.some((entry) => !/(^|\/)node_modules\/?$/.test(entry))
+        blockingIgnoredEntries(inspection.ignoredEntries, input.approvedIgnoredEntries).length > 0
       ) {
         return yield* createGitCommandError(
           "GitCore.removeWorktree",

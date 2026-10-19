@@ -88,6 +88,89 @@ it("defaults merged branches on, keeps pushed branches optional, and disables bl
   await screen.getByRole("button", { name: "Keep all" }).click();
   expect(close).toHaveBeenCalledOnce();
 });
+it("shows all ignored paths and requires explicit confirmation before sending their approval", async () => {
+  const entries = [
+    "apps/desktop/.turbo/",
+    "apps/desktop/dist-electron/",
+    "apps/desktop/dist-native/",
+    "docs/ci-issue-drafts/",
+    ".env",
+    "node_modules/",
+  ];
+  const blockedReason = "Ignored files and folders require explicit deletion confirmation.";
+  api.worktrees.inspect.mockResolvedValue(
+    inspection("feature", {
+      branchMerged: false,
+      blockedReasons: [blockedReason],
+      ignoredFiles: { entries, truncated: false, blockedReason },
+    }),
+  );
+  api.worktrees.remove.mockResolvedValue({
+    removed: true,
+    branchDeleted: false,
+    blockedReasons: [],
+  });
+  const screen = await mount(
+    <WorktreeRemovalDialog rows={[{ projectId, path: "/ignored" }]} onClose={vi.fn()} />,
+  );
+  const select = screen.getByRole("checkbox", { name: "/ignored", exact: true });
+  await expect.element(select).toBeDisabled();
+  for (const entry of entries)
+    await expect.element(screen.getByText(entry, { exact: true })).toBeVisible();
+  const approval = screen.getByRole("checkbox", {
+    name: /Also delete the ignored files and folders/,
+  });
+  await expect.element(approval).not.toBeChecked();
+  await expect.element(screen.getByRole("button", { name: "Remove selected" })).toBeDisabled();
+  await approval.click();
+  await expect.element(select).toBeChecked();
+  await expect.element(screen.getByRole("button", { name: "Remove selected" })).toBeEnabled();
+  await approval.click();
+  await expect.element(select).not.toBeChecked();
+  await expect.element(screen.getByRole("button", { name: "Remove selected" })).toBeDisabled();
+  await approval.click();
+  await screen.getByRole("button", { name: "Remove selected" }).click();
+  await expect.poll(() => api.worktrees.remove.mock.calls.length).toBe(1);
+  expect(api.worktrees.remove.mock.calls[0]?.[0]).toMatchObject({
+    approvedIgnoredEntries: entries,
+    deleteBranch: false,
+    expectedHead: "abc",
+  });
+});
+
+it.each(["local changes", "truncated"])(
+  "keeps ignored approval from bypassing %s",
+  async (condition) => {
+    const truncated = condition === "truncated";
+    const ignoredReason = truncated
+      ? "too many ignored files to check"
+      : "Ignored files and folders require explicit deletion confirmation.";
+    api.worktrees.inspect.mockResolvedValue(
+      inspection("feature", {
+        blockedReasons: truncated ? [ignoredReason] : [ignoredReason, "it has uncommitted changes"],
+        ignoredFiles: { entries: [".env"], truncated, blockedReason: ignoredReason },
+      }),
+    );
+    const screen = await mount(
+      <WorktreeRemovalDialog rows={[{ projectId, path: "/blocked" }]} onClose={vi.fn()} />,
+    );
+    await expect.element(screen.getByText(".env", { exact: true })).toBeVisible();
+    await expect
+      .element(screen.getByRole("checkbox", { name: "/blocked", exact: true }))
+      .toBeDisabled();
+    if (truncated)
+      await expect.element(screen.getByText(/ignored-file list is incomplete/)).toBeVisible();
+    else
+      await expect
+        .element(
+          screen.getByRole("checkbox", { name: /Also delete the ignored files and folders/ }),
+        )
+        .toBeDisabled();
+    await expect.element(screen.getByRole("button", { name: "Remove selected" })).toBeDisabled();
+    expect(api.worktrees.remove).not.toHaveBeenCalled();
+  },
+);
+
 it("closes after every removal succeeds", async () => {
   api.worktrees.inspect.mockResolvedValue(inspection("feature"));
   api.worktrees.remove.mockResolvedValue({

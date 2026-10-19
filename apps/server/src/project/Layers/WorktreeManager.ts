@@ -162,13 +162,13 @@ export const makeWorktreeManager = Effect.gen(function* () {
         branchBlockedReason,
       };
     });
-  const inspect: WorktreeManagerShape["inspect"] = (input) =>
+  const inspect = (input: WorktreesInspectInput, approvedIgnoredEntries?: ReadonlyArray<string>) =>
     Effect.gen(function* () {
       const project = yield* projectFor(input.projectId);
       const gate = yield* evaluateWorktreeRemoval({
         projectCwd: project.workspaceRoot,
         path: input.path,
-        policy: { kind: "manual", ownThreadId: null },
+        policy: { kind: "manual", ownThreadId: null, approvedIgnoredEntries },
       }).pipe(Effect.provideServices(services));
       const branch = gate.registration?.branch ?? null;
       const headSha = gate.registration?.headSha ?? null;
@@ -192,7 +192,7 @@ export const makeWorktreeManager = Effect.gen(function* () {
   const remove: WorktreeManagerShape["remove"] = (input) =>
     Effect.gen(function* () {
       const project = yield* projectFor(input.projectId);
-      const preview = yield* inspect(input);
+      const preview = yield* inspect(input, input.approvedIgnoredEntries);
       if (preview.blockedReasons.length)
         return { removed: false, branchDeleted: false, blockedReasons: preview.blockedReasons };
       yield* stopDeletedWorktreeClaims(preview.deletedThreadClaims).pipe(
@@ -203,7 +203,11 @@ export const makeWorktreeManager = Effect.gen(function* () {
       const checked = yield* removeWorktreeSafely({
         projectCwd: project.workspaceRoot,
         path: input.path,
-        policy: { kind: "manual", ownThreadId: null },
+        policy: {
+          kind: "manual",
+          ownThreadId: null,
+          approvedIgnoredEntries: input.approvedIgnoredEntries,
+        },
         expectedHead: input.expectedHead,
         afterRemoval: (registration) =>
           Effect.gen(function* () {

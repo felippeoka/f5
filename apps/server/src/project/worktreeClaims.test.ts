@@ -203,12 +203,23 @@ describe("effective workspace claims and removal gate", () => {
         expect((yield* inspect()).blockedReasons.join(" ")).toContain("stop that session");
         world.sessions.length = 0;
         yield* Effect.promise(() => fs.writeFile(path.join(target, ".env"), "SECRET=value\n"));
-        expect((yield* inspect()).blockedReasons.join(" ")).toContain("ignored");
+        expect((yield* inspect()).blockedReasons.join(" ")).toMatch(/ignored/i);
         yield* Effect.promise(() => fs.rm(path.join(target, ".env")));
         yield* Effect.promise(() =>
           fs.mkdir(path.join(target, "node_modules", "dep"), { recursive: true }),
         );
-        expect((yield* inspect()).blockedReasons).toEqual([]);
+        expect((yield* inspect()).blockedReasons.join(" ")).toMatch(/ignored/i);
+        expect(
+          (yield* evaluateWorktreeRemoval({
+            projectCwd: repo.root,
+            path: target,
+            policy: {
+              kind: "manual",
+              ownThreadId: null,
+              approvedIgnoredEntries: ["node_modules/"],
+            },
+          })).blockedReasons,
+        ).toEqual([]);
         world.queuedThreadIds.add("idle");
         expect((yield* inspect()).blockedReasons.join(" ")).toContain("queued");
         world.queuedThreadIds.clear();

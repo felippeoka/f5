@@ -11,6 +11,13 @@ export const WorktreesInspectResult = Schema.Struct({
   exists: Schema.Boolean,
   registration: Schema.NullOr(WorktreeRegistration),
   blockedReasons: Schema.Array(Schema.String),
+  ignoredFiles: Schema.optional(
+    Schema.Struct({
+      entries: Schema.Array(Schema.String),
+      truncated: Schema.Boolean,
+      blockedReason: Schema.NullOr(Schema.String),
+    }),
+  ),
   linkedThreads: WorktreeLinkedThreads,
   deletedThreadClaims: Schema.Array(ThreadId),
   branch: Schema.NullOr(Schema.String),

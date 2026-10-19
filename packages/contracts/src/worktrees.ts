@@ -13,6 +13,7 @@ export const WorktreesRemoveInput = Schema.Struct({
   ...WorktreesInspectInput.fields,
   deleteBranch: Schema.Boolean,
   expectedHead: Schema.NullOr(Schema.String),
+  approvedIgnoredEntries: Schema.optional(Schema.Array(Schema.String)),
 });
 export type WorktreesRemoveInput = typeof WorktreesRemoveInput.Type;
 

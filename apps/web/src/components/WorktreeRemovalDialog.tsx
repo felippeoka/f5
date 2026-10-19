@@ -16,6 +16,7 @@ interface RowState {
   inspection?: WorktreesInspectResult;
   selected: boolean;
   deleteBranch: boolean;
+  ignoredApproved: boolean;
   error?: string;
   removed?: boolean;
 }
@@ -27,7 +28,7 @@ export function WorktreeRemovalDialog({
   onClose: () => void;
 }) {
   const [states, setStates] = useState<RowState[]>(() =>
-    rows.map(() => ({ selected: false, deleteBranch: false })),
+    rows.map(() => ({ selected: false, deleteBranch: false, ignoredApproved: false })),
   );
   const [busy, setBusy] = useState(false);
   const queryClient = useQueryClient();
@@ -39,6 +40,7 @@ export function WorktreeRemovalDialog({
         rows.map(() => ({
           selected: false,
           deleteBranch: false,
+          ignoredApproved: false,
           error: "Server connection is unavailable.",
         })),
       );
@@ -56,6 +58,7 @@ export function WorktreeRemovalDialog({
                       inspection,
                       selected: inspection.blockedReasons.length === 0,
                       deleteBranch: inspection.branchDeletable && inspection.branchMerged,
+                      ignoredApproved: false,
                     }
                   : state,
               ),
@@ -96,6 +99,9 @@ export function WorktreeRemovalDialog({
           ...row,
           deleteBranch: state.deleteBranch,
           expectedHead: state.inspection.headSha,
+          ...(state.ignoredApproved && state.inspection.ignoredFiles
+            ? { approvedIgnoredEntries: state.inspection.ignoredFiles.entries }
+            : {}),
         });
         const error = result.blockedReasons.join("; ");
         if (!result.removed || error) failed = true;
@@ -132,7 +138,18 @@ export function WorktreeRemovalDialog({
           {rows.map((row, index) => {
             const state = states[index]!;
             const inspection = state.inspection;
-            const blocked = !inspection || inspection.blockedReasons.length > 0;
+            const ignored = inspection?.ignoredFiles;
+            const canApproveIgnored = ignored && !ignored.truncated && ignored.entries.length > 0;
+            const hardBlocked =
+              !inspection ||
+              inspection.blockedReasons.some(
+                (reason) => !canApproveIgnored || reason !== ignored.blockedReason,
+              );
+            const blocked = hardBlocked || (canApproveIgnored && !state.ignoredApproved);
+            const reasons = inspection?.blockedReasons.filter(
+              (reason) =>
+                !state.ignoredApproved || !canApproveIgnored || reason !== ignored.blockedReason,
+            );
             return (
               <fieldset
                 key={`${row.projectId}:${row.path}`}
@@ -153,12 +170,54 @@ export function WorktreeRemovalDialog({
                     ? "Worktree removed"
                     : inspection
                       ? blocked
-                        ? inspection.blockedReasons.join("; ")
+                        ? reasons?.join("; ") || "Confirm deletion of the ignored files below."
                         : "Safe to remove"
                       : state.error
                         ? "Inspection failed"
                         : "Inspecting…"}
                 </p>
+                {ignored && (ignored.entries.length > 0 || ignored.truncated) && (
+                  <div className="space-y-2">
+                    <p>Ignored files and folders in this checkout:</p>
+                    <ul
+                      aria-label="Ignored files and folders"
+                      className="max-h-48 overflow-y-auto rounded border p-2"
+                    >
+                      {ignored.entries.map((entry) => (
+                        <li key={entry} className="break-all whitespace-pre-wrap">
+                          <code>{entry}</code>
+                        </li>
+                      ))}
+                    </ul>
+                    {ignored.truncated ? (
+                      <p className="text-destructive">
+                        The ignored-file list is incomplete. Removal is blocked until every path can
+                        be reviewed.
+                      </p>
+                    ) : (
+                      <label className="flex items-start gap-2">
+                        <input
+                          type="checkbox"
+                          checked={state.ignoredApproved}
+                          disabled={hardBlocked}
+                          onChange={(event) =>
+                            update(index, {
+                              ignoredApproved: event.target.checked,
+                              selected: event.target.checked && !hardBlocked,
+                            })
+                          }
+                        />
+                        <span>
+                          Also delete the ignored files and folders listed above.
+                          <span className="block text-muted-foreground">
+                            These local files are not saved by Git. Deleting a folder deletes
+                            everything inside it.
+                          </span>
+                        </span>
+                      </label>
+                    )}
+                  </div>
+                )}
                 {inspection && inspection.linkedThreads.length > 0 && (
                   <p className="text-muted-foreground">
                     Linked idle conversations will recreate on next send:{" "}

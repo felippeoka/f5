@@ -57,6 +57,8 @@ export interface InternalRemoveWorktreeInput {
   readonly cwd: string;
   readonly path: string;
   readonly force?: boolean;
+  /** Manual removal's exact, explicitly approved ignored paths; absent for automation. */
+  readonly approvedIgnoredEntries?: ReadonlyArray<string>;
 }
 
 import type { GitCommandError } from "../Errors.ts";

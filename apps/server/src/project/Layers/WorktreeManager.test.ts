@@ -344,6 +344,138 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
       }),
     );
   });
+  it("lists every ignored path and removes only after explicit approval while keeping the branch", async () => {
+    const { repo, projectId, run } = await fixture();
+    await run((manager, root) =>
+      Effect.gen(function* () {
+        const target = path.join(root, "ignored-review");
+        git(repo.root, "worktree", "add", "-q", "-b", "ignored-review", target, "main");
+        git(target, "config", "core.excludesFile", path.join(repo.root, "no-global-ignore"));
+        yield* Effect.promise(() =>
+          fs.writeFile(
+            path.join(target, ".gitignore"),
+            "dist/\n.env\n.cache/\nnode_modules/\nsecret.txt\n",
+          ),
+        );
+        git(target, "add", ".gitignore");
+        git(target, "commit", "-qm", "Ignore local content");
+        for (const directory of ["dist", ".cache", "node_modules"]) {
+          yield* Effect.promise(() => fs.mkdir(path.join(target, directory)));
+          yield* Effect.promise(() =>
+            fs.writeFile(path.join(target, directory, "local"), "local content"),
+          );
+        }
+        yield* Effect.promise(() => fs.writeFile(path.join(target, ".env"), "local config"));
+        yield* Effect.promise(() => fs.writeFile(path.join(target, "secret.txt"), "local content"));
+        const preview = yield* manager.inspect({ projectId, path: target });
+        expect(preview.ignoredFiles?.entries.toSorted()).toEqual([
+          ".cache/",
+          ".env",
+          "dist/",
+          "node_modules/",
+          "secret.txt",
+        ]);
+        expect(preview.ignoredFiles?.truncated).toBe(false);
+        expect(preview.blockedReasons).toEqual([preview.ignoredFiles?.blockedReason]);
+        const input = {
+          projectId,
+          path: target,
+          deleteBranch: false,
+          expectedHead: preview.headSha,
+        };
+        expect((yield* manager.remove(input)).removed).toBe(false);
+        expect(
+          (yield* manager.remove({ ...input, approvedIgnoredEntries: ["dist/"] })).removed,
+        ).toBe(false);
+        expect(
+          yield* manager.remove({
+            ...input,
+            approvedIgnoredEntries: preview.ignoredFiles!.entries,
+          }),
+        ).toEqual({ removed: true, branchDeleted: false, blockedReasons: [] });
+        expect(git(repo.root, "rev-parse", "refs/heads/ignored-review")).toBe(preview.headSha);
+      }),
+    );
+  });
+
+  it("blocks removal when the ignored-file listing is incomplete even with approval", async () => {
+    const { repo, projectId, run } = await fixture();
+    let realCore: GitCoreShape;
+    await run(
+      (manager, root) =>
+        Effect.gen(function* () {
+          realCore = yield* GitCore;
+          const target = path.join(root, "ignored-incomplete");
+          git(repo.root, "worktree", "add", "-q", "-b", "ignored-incomplete", target, "main");
+          const preview = yield* manager.inspect({ projectId, path: target });
+          expect(preview.ignoredFiles?.truncated).toBe(true);
+          expect(
+            (yield* manager.remove({
+              projectId,
+              path: target,
+              deleteBranch: false,
+              expectedHead: preview.headSha,
+              approvedIgnoredEntries: [".env"],
+            })).removed,
+          ).toBe(false);
+          expect((yield* Effect.promise(() => fs.stat(target))).isDirectory()).toBe(true);
+        }),
+      {
+        inspectCheckout: (cwd, options) =>
+          realCore.inspectCheckout(cwd, options).pipe(
+            Effect.map((inspection) => ({
+              ...inspection,
+              ignoredEntries: [".env"],
+              ignoredTruncated: true,
+            })),
+          ),
+      },
+    );
+  });
+
+  it("retains new ignored paths that appear during locked revalidation", async () => {
+    const { repo, projectId, run } = await fixture();
+    let realCore: GitCoreShape;
+    let inspections = 0;
+    await run(
+      (manager, root) =>
+        Effect.gen(function* () {
+          realCore = yield* GitCore;
+          const target = path.join(root, "ignored-race");
+          git(repo.root, "worktree", "add", "-q", "-b", "ignored-race", target, "main");
+          yield* Effect.promise(() =>
+            fs.writeFile(path.join(target, ".gitignore"), ".env\n.env.local\n"),
+          );
+          git(target, "add", ".gitignore");
+          git(target, "commit", "-qm", "Ignore config");
+          yield* Effect.promise(() => fs.writeFile(path.join(target, ".env"), "original"));
+          const preview = yield* manager.inspect({ projectId, path: target });
+          const result = yield* manager.remove({
+            projectId,
+            path: target,
+            deleteBranch: false,
+            expectedHead: preview.headSha,
+            approvedIgnoredEntries: preview.ignoredFiles!.entries,
+          });
+          expect(result.removed).toBe(false);
+          expect(result.blockedReasons.join(" ")).toContain("Ignored files changed since review");
+          expect(
+            yield* Effect.promise(() => fs.readFile(path.join(target, ".env.local"), "utf8")),
+          ).toBe("new local config");
+        }),
+      {
+        inspectCheckout: (cwd, options) =>
+          Effect.gen(function* () {
+            if (++inspections === 4)
+              yield* Effect.promise(() =>
+                fs.writeFile(path.join(cwd, ".env.local"), "new local config"),
+              );
+            return yield* realCore.inspectCheckout(cwd, options);
+          }),
+      },
+    );
+  });
+
   it("stops deleted owners but retains unmerged commits when the upstream is gone", async () => {
     const { repo, world, projectId, run } = await fixture();
     await run((manager, root) =>
