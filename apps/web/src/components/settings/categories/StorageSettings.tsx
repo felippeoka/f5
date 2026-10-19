@@ -8,6 +8,7 @@ import {
   newerStorageUsage,
 } from "../../../hooks/useStorageStatus";
 import { useDiskSpaceStatus, diskSpaceQueryKey } from "../../../hooks/useDiskSpaceStatus";
+import { Link } from "@tanstack/react-router";
 import { beginProtocolUpload, protocolFetch } from "../../../protocolState";
 import {
   type StorageCleanupCategoryId,
@@ -1287,6 +1288,11 @@ export function StorageSettings() {
                         selectedTargetCount < selectableTargets.length;
                       return (
                         <div key={category.id} className="space-y-2">
+                          {category.id === "inactiveF5Worktrees" && (
+                            <Link to="/worktrees" className="text-sm text-primary underline">
+                              Manage worktrees
+                            </Link>
+                          )}
                           <CategoryRow
                             category={category}
                             selected={categorySelected}

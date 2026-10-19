@@ -4,6 +4,8 @@ import { Schema } from "effect";
 import { FilesystemPath } from "./baseSchemas";
 import { GitRemoveWorktreeInput } from "./git";
 import {
+  WorktreesListInput,
+  WorktreesListResult,
   WorktreesInspectInput,
   WorktreesRecoverInput,
   WorktreesSwitchWorkspaceInput,
@@ -63,4 +65,35 @@ describe("worktree safety wire contracts", () => {
       }),
     ).toThrow();
   });
+});
+
+it("decodes optional inventory filters, unknown dirty state and exact paths", () => {
+  expect(Schema.decodeUnknownSync(WorktreesListInput)({})).toEqual({});
+  const path = "/managed/line\ntrailing ";
+  const decoded = Schema.decodeUnknownSync(WorktreesListResult)({
+    projects: [
+      {
+        projectId: "p",
+        name: "Repository",
+        workspaceRoot: "/repo",
+        error: null,
+        entries: [
+          {
+            path,
+            canonicalPath: path,
+            registration: null,
+            branch: "topic",
+            classification: "managed",
+            missing: true,
+            locked: false,
+            detached: false,
+            hasChanges: null,
+            linkedThreads: [{ threadId: "t", title: "Archived", archived: true }],
+          },
+        ],
+      },
+    ],
+  });
+  expect(decoded.projects[0]?.entries[0]?.path).toBe(path);
+  expect(decoded.projects[0]?.entries[0]?.hasChanges).toBeNull();
 });

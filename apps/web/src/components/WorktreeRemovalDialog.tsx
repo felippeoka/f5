@@ -2,10 +2,7 @@ import type { WorktreesInspectResult } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { readNativeApi } from "../nativeApi";
-import {
-  useWorktreeRemovalDialogStore,
-  type WorktreeRemovalRow,
-} from "../worktreeRemovalDialogStore";
+import type { WorktreeRemovalRow } from "../worktreeRemovalDialogStore";
 import {
   Dialog,
   DialogPopup,
@@ -210,11 +207,4 @@ export function WorktreeRemovalDialog({
       </DialogPopup>
     </Dialog>
   );
-}
-export function WorktreeRemovalDialogHost() {
-  const request = useWorktreeRemovalDialogStore((state) => state.requests[0]);
-  const close = useWorktreeRemovalDialogStore((state) => state.close);
-  return request ? (
-    <WorktreeRemovalDialog key={request.id} rows={request.rows} onClose={close} />
-  ) : null;
 }

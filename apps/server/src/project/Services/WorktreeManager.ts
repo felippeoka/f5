@@ -1,4 +1,6 @@
 import type {
+  WorktreesListInput,
+  WorktreesListResult,
   WorktreesInspectInput,
   WorktreesInspectResult,
   WorktreesRemoveInput,
@@ -11,6 +13,7 @@ import type {
 import { ServiceMap } from "effect";
 import type { Effect } from "effect";
 export interface WorktreeManagerShape {
+  readonly list: (input: WorktreesListInput) => Effect.Effect<WorktreesListResult, Error>;
   readonly inspect: (input: WorktreesInspectInput) => Effect.Effect<WorktreesInspectResult, Error>;
   readonly remove: (input: WorktreesRemoveInput) => Effect.Effect<WorktreesRemoveResult, Error>;
   readonly threadState: (

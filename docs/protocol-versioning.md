@@ -80,9 +80,14 @@ This implements the Phase 0c prerequisite. Phase 0b's full 1,836-SHA classificat
 remains outstanding; the existing frozen ledger is unchanged. No upstream commit
 is marked ported for this f5-specific compatibility infrastructure.
 
-Storage scan release uses version 26: `storage.getUsage` returns immediately with
+Worktree management Release 4 uses version 26. It adds `worktrees.list`, returning
+project-scoped inventory, checkout classification, missing/status information, and linked
+conversations. Inventory is informational; existing removal and transition methods recheck
+identity, ownership, and claims before mutating anything.
+
+Storage scan contract uses version 27: `storage.getUsage` returns immediately with
 `report`, `confirmation`, and `status`; profile-wide `storage.statusUpdated` carries scan progress.
-Storage operation release uses version 27: cleanup accepts a backend epoch and returns
+Storage operation contract uses version 28: cleanup accepts a backend epoch and returns
 an accepted operation; results survive socket disconnects, and `storage.getOperation`
-and `storage.getTargets` page retained details. Versions 25 and 26 are rejected by
-the version 27 server before any queued mutation can execute.
+and `storage.getTargets` page retained details. Versions 25 through 27 are rejected by
+the version 28 server before any queued mutation can execute.

@@ -452,6 +452,7 @@ function isRelativePathOutsideRoot(relativePath: string, path: Path.Path): boole
 }
 
 function validateWorkspaceRelativeTarget(params: {
+  allowWorkspaceRoot?: boolean;
   workspaceRoot: string;
   relativePath: string;
   path: Path.Path;
@@ -473,7 +474,10 @@ function validateWorkspaceRelativeTarget(params: {
   const relativeToRoot = toPosixRelativePath(
     params.path.relative(workspaceAbsolutePath, requestedAbsolutePath),
   );
-  if (isRelativePathOutsideRoot(relativeToRoot, params.path)) {
+  if (
+    isRelativePathOutsideRoot(relativeToRoot, params.path) &&
+    !(params.allowWorkspaceRoot && params.relativePath === "." && relativeToRoot.length === 0)
+  ) {
     return Effect.fail(
       new RouteRequestError({
         message: "Workspace file path must stay within the project root.",
@@ -586,6 +590,7 @@ export function resolveWorkspaceWritePath(params: {
 }
 
 export function resolveWorkspaceReadPath(params: {
+  allowWorkspaceRoot?: boolean;
   workspaceRoot: string;
   relativePath: string;
   path: Path.Path;
@@ -611,6 +616,7 @@ export function resolveWorkspaceReadPath(params: {
         workspaceRootRealPath,
         targetRealPath: targetRealPathResult.value,
         path: params.path,
+        allowWorkspaceRoot: params.allowWorkspaceRoot ?? false,
       });
       return {
         absolutePath: targetRealPathResult.value,
@@ -5021,6 +5027,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             onSome: (thread) => thread.workspaceRoot,
           }),
           relativePath: body.relativePath,
+          allowWorkspaceRoot: true,
           path,
           fileSystem,
         });
@@ -6128,6 +6135,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const { workspaceTransition } = yield* awaitOrchestrationRuntimeForRoute;
         return yield* workspaceTransition
           .resolve(stripRequestTag(request.body))
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+      }
+      case WS_METHODS.worktreesList: {
+        const { worktreeManager } = yield* awaitOrchestrationRuntimeForRoute;
+        return yield* worktreeManager
+          .list(stripRequestTag(request.body))
           .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
       }
       case WS_METHODS.worktreesInspect: {

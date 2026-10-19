@@ -5,6 +5,8 @@ import type {
   WorktreesResolveTransitionInput,
   WorkspaceTransitionSnapshot,
   WorkspaceTransitionRecoveryPreview,
+  WorktreesListInput,
+  WorktreesListResult,
   WorktreesInspectInput,
   WorktreesInspectResult,
   WorktreesRemoveInput,
@@ -965,6 +967,7 @@ export interface NativeApi {
     onSummaryUpdated: (callback: (payload: NextTurnQueueSummary) => void) => () => void;
   };
   worktrees: {
+    list: (input: WorktreesListInput) => Promise<WorktreesListResult>;
     switchWorkspace: (input: WorktreesSwitchWorkspaceInput) => Promise<WorkspaceTransitionSnapshot>;
     getTransition: (
       input: WorktreesGetTransitionInput,

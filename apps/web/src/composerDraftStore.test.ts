@@ -989,6 +989,35 @@ describe("composerDraftStore project draft thread mapping", () => {
     });
   });
 
+  it("persists creation options without a version bump and keeps them across context changes", async () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectId, threadId, { envMode: "worktree", branch: "main" });
+    store.setDraftThreadContext(threadId, {
+      worktreeBranchName: "feature/named",
+      runSetupScript: false,
+    });
+    store.setDraftThreadContext(threadId, { branch: "other-base" });
+    store.setProjectDraftThreadId(projectId, threadId, { envMode: "worktree" });
+    await flushComposerDraftPersistence();
+    useComposerDraftStore.setState({
+      draftThreadsByThreadId: {},
+      projectDraftThreadIdByProjectId: {},
+    });
+    await useComposerDraftStore.persist.rehydrate();
+    expect(useComposerDraftStore.getState().getDraftThread(threadId)).toMatchObject({
+      branch: "other-base",
+      worktreeBranchName: "feature/named",
+      runSetupScript: false,
+    });
+    useComposerDraftStore
+      .getState()
+      .setDraftThreadContext(threadId, { worktreeBranchName: null, runSetupScript: null });
+    expect(useComposerDraftStore.getState().getDraftThread(threadId)).toMatchObject({
+      worktreeBranchName: null,
+      runSetupScript: null,
+    });
+  });
+
   it("moves a failed bootstrap draft to a fresh thread id without losing its prompt", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectId, threadId, {
@@ -1032,6 +1061,8 @@ describe("composerDraftStore project draft thread mapping", () => {
       branch: "feature/test",
       worktreePath: "/tmp/worktree-test",
       envMode: "worktree",
+      worktreeBranchName: null,
+      runSetupScript: null,
       runtimeMode: "approval-required",
       interactionMode: "default",
       createdAt: "2026-01-01T00:00:00.000Z",
@@ -1041,6 +1072,8 @@ describe("composerDraftStore project draft thread mapping", () => {
       branch: "feature/test",
       worktreePath: "/tmp/worktree-test",
       envMode: "worktree",
+      worktreeBranchName: null,
+      runSetupScript: null,
       runtimeMode: "approval-required",
       interactionMode: "default",
       createdAt: "2026-01-01T00:00:00.000Z",

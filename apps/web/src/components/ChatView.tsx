@@ -5154,6 +5154,11 @@ export default function ChatView({
 
     try {
       const bootstrap = buildFirstSendBootstrap({
+        worktreeBranchName:
+          useComposerDraftStore.getState().getDraftThread(threadIdForSend)?.worktreeBranchName ??
+          null,
+        runSetupScript:
+          useComposerDraftStore.getState().getDraftThread(threadIdForSend)?.runSetupScript ?? null,
         sharedFilesystemConfirmed:
           useComposerDraftStore.getState().getDraftThread(threadIdForSend)
             ?.sharedFilesystemConfirmed ?? false,
@@ -6072,6 +6077,9 @@ export default function ChatView({
         );
         const modelSelection = createModelSelection(target.instanceId, target.model);
         const bootstrap = buildFirstSendBootstrap({
+          runSetupScript:
+            useComposerDraftStore.getState().getDraftThread(input.draftThreadId)?.runSetupScript ??
+            null,
           isLocalDraftThread: true,
           projectId: input.projectId,
           projectCwd: input.projectCwd,
@@ -7580,6 +7588,8 @@ export default function ChatView({
                       threadId={activeThread.id}
                       onEnvModeChange={onEnvModeChange}
                       envLocked={envLocked}
+                      multiModel={fanOutModels.length > 1}
+                      onOpenTerminal={createNewTerminal}
                       onComposerFocusRequest={scheduleComposerFocus}
                       {...(canCheckoutPullRequestIntoThread
                         ? { onCheckoutPullRequestRequest: openPullRequestDialog }

@@ -14,7 +14,7 @@ export function ThreadWorktreeIndicator(props: {
 
   const displayPath = formatWorktreePathForDisplay(worktreePath);
   const label = props.thread.branch
-    ? `Worktree: ${displayPath} (${props.thread.branch})`
+    ? `Worktree: ${props.thread.branch} · ${displayPath}`
     : `Worktree: ${displayPath}`;
 
   return (

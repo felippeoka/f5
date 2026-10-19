@@ -1118,6 +1118,17 @@ const makeGitCore = Effect.gen(function* () {
         ),
     });
 
+  const isDirty: GitCoreShape["isDirty"] = (cwd) =>
+    executeGit(
+      "GitCore.isDirty",
+      cwd,
+      ["--no-optional-locks", "status", "--porcelain", "-z", "--untracked-files=normal"],
+      { timeoutMs: 5_000 },
+    ).pipe(
+      Effect.map((result) => result.stdout.length > 0),
+      Effect.catch(() => Effect.succeed(null)),
+    );
+
   const listWorktrees: GitCoreShape["listWorktrees"] = (cwd) =>
     runGitStdout("GitCore.listWorktrees", cwd, ["worktree", "list", "--porcelain", "-z"]).pipe(
       Effect.flatMap((stdout) =>
@@ -2926,6 +2937,7 @@ const makeGitCore = Effect.gen(function* () {
       ),
     initializeWorktreeSubmodules: (path, policy) => initializeSubmodules(path, policy),
     listWorktrees,
+    isDirty,
     inspectCheckout,
     inspectCheckoutIdentity,
     clearMissingRegistration,

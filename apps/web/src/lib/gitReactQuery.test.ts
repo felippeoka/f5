@@ -1,6 +1,8 @@
+import { ProjectId } from "@t3tools/contracts";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import {
+  worktreesListQueryOptions,
   gitBranchesQueryOptions,
   gitQueryKeys,
   gitMutationKeys,
@@ -147,5 +149,17 @@ describe("gitBranchesQueryOptions", () => {
     expect(options.refetchInterval).toBe(false);
     expect(options.refetchOnWindowFocus).toBe(false);
     expect(options.refetchOnReconnect).toBe(false);
+  });
+});
+
+describe("worktreesListQueryOptions", () => {
+  it("scopes inventories by project, only refreshes stale results on focus, and never polls", () => {
+    const a = worktreesListQueryOptions(ProjectId.makeUnsafe("a"));
+    const b = worktreesListQueryOptions(ProjectId.makeUnsafe("b"));
+    expect(a.queryKey).not.toEqual(b.queryKey);
+    expect(a.queryKey).not.toEqual(worktreesListQueryOptions().queryKey);
+    expect(a.staleTime).toBe(30_000);
+    expect(a.refetchOnWindowFocus).toBe(true);
+    expect(a.refetchInterval).toBe(false);
   });
 });

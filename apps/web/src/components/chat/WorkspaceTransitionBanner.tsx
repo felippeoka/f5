@@ -1,5 +1,6 @@
 import type {
   ThreadId,
+  WorkspaceTransitionSnapshot,
   WorkspaceTransitionRecoveryPreview,
   WorktreesResolveTransitionInput,
 } from "@t3tools/contracts";
@@ -8,6 +9,22 @@ import { useState } from "react";
 import { ensureNativeApi } from "../../nativeApi";
 import { useNextTurnQueueStore } from "../../nextTurnQueueStore";
 import { Button } from "../ui/button";
+
+export function WorkspaceTransitionSummary({
+  transition,
+}: {
+  transition: WorkspaceTransitionSnapshot;
+}) {
+  return (
+    <div className="space-y-1 text-xs">
+      <p>Workspace switch: {transition.phase.replaceAll("_", " ")}</p>
+      <p className="break-all whitespace-pre-wrap font-mono">
+        {transition.source.path} → {transition.target.path}
+      </p>
+      {transition.error && <p className="break-words">{transition.error}</p>}
+    </div>
+  );
+}
 
 export function WorkspaceTransitionBanner({ threadId }: { threadId: ThreadId }) {
   const revision = useNextTurnQueueStore((state) => state.byThreadId[threadId]?.snapshot?.revision);
@@ -77,10 +94,7 @@ export function WorkspaceTransitionBanner({ threadId }: { threadId: ThreadId }) 
           ? "Switching workspace. Sending is blocked until it finishes."
           : "Workspace switching needs attention. Your files have been kept."}
       </p>
-      {record.error && <p className="break-words text-xs">{record.error}</p>}
-      <p className="break-all font-mono text-xs">
-        {record.source.path} → {record.target.path}
-      </p>
+      <WorkspaceTransitionSummary transition={record} />
       {!active && (
         <Button size="sm" variant="outline" disabled={busy} onClick={() => void inspect()}>
           Inspect workspace

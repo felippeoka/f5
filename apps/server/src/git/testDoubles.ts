@@ -43,6 +43,7 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
       "fastForwardTo",
       "initializeWorktreeSubmodules",
       "listWorktrees",
+      "isDirty",
       "inspectCheckout",
       "inspectCheckoutIdentity",
       "resolveCheckoutTarget",
@@ -79,6 +80,7 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
   ) as unknown as { [K in keyof GitCoreShape]: Array<ReadonlyArray<unknown>> };
 
   const implementations: GitCoreShape = {
+    isDirty: () => Effect.succeed(false),
     readWorktreePreparation: () => Effect.succeed(null),
     allocateWorktreePath: ({ cwd, branch }) =>
       Effect.succeed(`${cwd}/worktrees/${branch.replaceAll("/", "-")}`),
@@ -187,6 +189,10 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
   };
 
   const service: GitCoreShape = {
+    isDirty: (cwd) => {
+      record("isDirty", [cwd]);
+      return implementations.isDirty(cwd);
+    },
     fastForwardTo: (cwd, sha) => {
       record("fastForwardTo", [cwd, sha]);
       return implementations.fastForwardTo(cwd, sha);

@@ -628,6 +628,7 @@ export default function Sidebar() {
       if (!api) return;
       const clicked = await api.contextMenu.show(
         [
+          { id: "worktrees", label: "Worktrees…" },
           { id: "icon", label: "Change project icon..." },
           { id: "change-path", label: "Change project path..." },
           { id: "rename", label: "Rename project" },
@@ -637,6 +638,10 @@ export default function Sidebar() {
       );
       const project = projects.find((entry) => entry.id === projectId);
       if (!project) return;
+      if (clicked === "worktrees") {
+        await navigate({ to: "/worktrees", search: { projectId } });
+        return;
+      }
       if (clicked === "icon") {
         await navigate({
           to: "/settings",

@@ -149,28 +149,40 @@ export async function assertExclusiveProfileCheckout(
   }
 }
 
+/** Read ownership once per inventory; an unreadable registry fails closed. */
+export async function readOtherProfileManagedRoots(
+  config: Pick<import("../config.ts").ServerConfigShape, "defaultStateDir" | "profile" | "baseDir">,
+): Promise<string[]> {
+  if (!config.defaultStateDir || !config.profile) return [];
+  const { ProfileRegistryStore } = await import("./ProfileRegistryStore.ts");
+  const { profileStateDir } = await import("@t3tools/shared/profilePaths");
+  const { canonicalWorktreePath } = await import("../git/worktreePaths.ts");
+  const registry = await new ProfileRegistryStore(config.defaultStateDir).read();
+  if (!registry.ok) throw new Error("Managed workspace ownership could not be established.");
+  return Promise.all(
+    registry.registry.profiles
+      .filter((profile) => profile.id !== config.profile!.id)
+      .map((profile) =>
+        canonicalWorktreePath(
+          Path.join(
+            profile.isDefault ? config.baseDir : profileStateDir(config.defaultStateDir!, profile),
+            "worktrees",
+          ),
+        ),
+      ),
+  );
+}
+
 /** A project root cannot turn another profile's managed checkout into an attachable target. */
 export async function assertNotOtherProfileManagedCheckout(
   config: Pick<import("../config.ts").ServerConfigShape, "defaultStateDir" | "profile" | "baseDir">,
   checkout: string,
 ): Promise<void> {
   if (!config.defaultStateDir || !config.profile) return;
-  const { ProfileRegistryStore } = await import("./ProfileRegistryStore.ts");
-  const { profileStateDir } = await import("@t3tools/shared/profilePaths");
   const { canonicalWorktreePath } = await import("../git/worktreePaths.ts");
   const { pathContains } = await import("../project/Layers/WorktreeLifecycleCoordinator.ts");
-  const registry = await new ProfileRegistryStore(config.defaultStateDir).read();
-  if (!registry.ok) throw new Error("Managed workspace ownership could not be established.");
+  const roots = await readOtherProfileManagedRoots(config);
   const target = await canonicalWorktreePath(checkout);
-  for (const profile of registry.registry.profiles) {
-    if (profile.id === config.profile.id) continue;
-    const root = await canonicalWorktreePath(
-      Path.join(
-        profile.isDefault ? config.baseDir : profileStateDir(config.defaultStateDir, profile),
-        "worktrees",
-      ),
-    );
-    if (pathContains(root, target))
-      throw new Error("Another profile owns this managed checkout. It is inspect-only.");
-  }
+  if (roots.some((root) => pathContains(root, target)))
+    throw new Error("Another profile owns this managed checkout. It is inspect-only.");
 }
