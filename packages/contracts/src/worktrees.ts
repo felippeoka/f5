@@ -13,6 +13,10 @@ export const WorktreesRemoveInput = Schema.Struct({
   ...WorktreesInspectInput.fields,
   deleteBranch: Schema.Boolean,
   expectedHead: Schema.NullOr(Schema.String),
+  // A complete listing is capped at 64 KiB, including a NUL after each nonempty path.
+  approvedIgnoredEntries: Schema.optional(
+    Schema.Array(Schema.String.check(Schema.isMaxLength(65_535))).check(Schema.isMaxLength(32_768)),
+  ),
 });
 export type WorktreesRemoveInput = typeof WorktreesRemoveInput.Type;
 

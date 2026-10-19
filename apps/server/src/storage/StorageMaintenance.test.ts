@@ -28,6 +28,10 @@ import {
 } from "../checkpointing/Services/CheckpointStore.ts";
 import { ServerConfig } from "../config.ts";
 import { GitCore, type GitCoreShape } from "../git/Services/GitCore.ts";
+import { GitServiceLive } from "../git/Layers/GitService.ts";
+import { GitCoreTestLive } from "../git/testLayers.ts";
+import { git as runGit, makeClonedRepo } from "./storageAutomation.testHarness.ts";
+import { ProfileRegistryStore } from "../profiles/ProfileRegistryStore.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -165,7 +169,7 @@ function makeOrchestrationEngineStub(input?: {
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         const projects =
-          yield* sql`SELECT project_id AS id, workspace_root AS "workspaceRoot", deleted_at AS "deletedAt" FROM projection_projects`;
+          yield* sql`SELECT project_id AS id, title, workspace_root AS "workspaceRoot", deleted_at AS "deletedAt" FROM projection_projects`;
         const threads =
           yield* sql`SELECT thread_id AS id, project_id AS "projectId", worktree_path AS "worktreePath", archived_at AS "archivedAt", deleted_at AS "deletedAt" FROM projection_threads`;
         return {
@@ -217,7 +221,8 @@ function makeOrchestrationEngineStub(input?: {
 function makeStorageTestLayer(input?: {
   readonly providerService?: ProviderServiceShape;
   readonly checkpointStore?: CheckpointStoreShape;
-  readonly gitCore?: GitCoreShape;
+  /** A stub, or `"real"` for the live GitCore against temporary repositories. */
+  readonly gitCore?: GitCoreShape | "real";
   readonly orchestrationEngine?: OrchestrationEngineShape;
   /** Provide server settings; without them the Codex staging category is omitted. */
   readonly settings?: Parameters<typeof ServerSettingsService.layerTest>[0];
@@ -237,6 +242,11 @@ function makeStorageTestLayer(input?: {
     Layer.provideMerge(OrchestrationEventStoreLive),
     Layer.provideMerge(SqlitePersistenceMemory),
     Layer.provideMerge(
+      input?.gitCore === "real"
+        ? GitCoreTestLive.pipe(Layer.provideMerge(GitServiceLive))
+        : Layer.succeed(GitCore, input?.gitCore ?? makeGitCoreStub()),
+    ),
+    Layer.provideMerge(
       ServerConfig.layerTest(process.cwd(), {
         prefix: "t3-storage-maintenance-test-",
       }),
@@ -247,7 +257,6 @@ function makeStorageTestLayer(input?: {
     Layer.provideMerge(
       Layer.succeed(CheckpointStore, input?.checkpointStore ?? makeCheckpointStoreStub()),
     ),
-    Layer.provideMerge(Layer.succeed(GitCore, input?.gitCore ?? makeGitCoreStub())),
     Layer.provideMerge(
       Layer.succeed(
         OrchestrationEngineService,
@@ -1371,7 +1380,10 @@ layer("StorageMaintenance", (it) => {
         const target = category?.targets.find((entry) => entry.path === worktreePath);
 
         assert.equal(target?.safeToDelete, false);
-        assert.equal(target?.disabledReason, "unpushed commits could not be ruled out");
+        assert.match(
+          target?.disabledReason ?? "",
+          /^it has commits that are not in .+ and not pushed$/,
+        );
       }),
     ),
   );
@@ -1694,6 +1706,55 @@ layer("StorageMaintenance", (it) => {
 });
 
 for (const kind of ["planning", "codeReview", "investigation"] as const) {
+  it.effect("releases " + kind + " workflow retention after parent project deletion", () => {
+    const fixture = workflowArchiveFixture(kind);
+    const engine = makeOrchestrationEngineStub({
+      getWorkflows: () => ({
+        planningWorkflows: fixture.model.planningWorkflows.map((workflow) => ({
+          ...workflow,
+          projectId: ProjectId.makeUnsafe("project-storage-maintenance"),
+        })),
+        codeReviewWorkflows: fixture.model.codeReviewWorkflows.map((workflow) => ({
+          ...workflow,
+          projectId: ProjectId.makeUnsafe("project-storage-maintenance"),
+        })),
+        investigationWorkflows: fixture.model.investigationWorkflows.map((workflow) => ({
+          ...workflow,
+          projectId: ProjectId.makeUnsafe("project-storage-maintenance"),
+        })),
+      }),
+    });
+    return withHomeSandbox(
+      Effect.gen(function* () {
+        const storage = yield* StorageMaintenance;
+        const sql = yield* SqlClient.SqlClient;
+        yield* seedThread({ sql, threadId: fixture.a, archivedAt: daysAgo(90), deletedAt: null });
+        {
+          const report = yield* storage.inspect({ force: true });
+          assert.isFalse(
+            report.categories
+              .find((category) => category.id === "purgeArchivedThreads")
+              ?.targets.some((target) => target.id === fixture.a),
+          );
+        }
+        yield* sql`UPDATE projection_projects SET deleted_at = ${daysAgo(40)}`;
+        const report = yield* storage.inspect({ force: true });
+        assert.isTrue(
+          report.categories
+            .find((category) => category.id === "purgeArchivedThreads")
+            ?.targets.some((target) => target.id === fixture.a),
+        );
+        const result = yield* storage.purgeThreads({
+          operationId: "deleted-parent-" + kind,
+          archivedBefore: daysAgo(30),
+          deletedBefore: daysAgo(0),
+          maxThreads: 10,
+        });
+        assert.deepEqual(result.purgedThreadIds, [fixture.a]);
+      }).pipe(Effect.provide(makeStorageTestLayer({ orchestrationEngine: engine }))),
+    );
+  });
+
   it.effect("retains " + kind + " workflow threads until their workflow is deleted", () => {
     const fixture = workflowArchiveFixture(kind);
     let retained = false;
@@ -1773,6 +1834,59 @@ for (const kind of ["planning", "codeReview", "investigation"] as const) {
     );
   });
 }
+
+it.effect("keeps filesystem cleanup outside the exclusive orchestration gate", () => {
+  let gateHeld = false;
+  let removals = 0;
+  const base = makeOrchestrationEngineStub();
+  const engine = {
+    ...base,
+    acquireMaintenanceLock: () =>
+      Effect.gen(function* () {
+        gateHeld = true;
+        const scope = yield* Scope.make("sequential");
+        yield* Scope.addFinalizer(
+          scope,
+          Effect.sync(() => {
+            gateHeld = false;
+          }),
+        );
+        return scope;
+      }),
+  };
+  const original = vi.mocked(removeFileIfSafe).getMockImplementation()!;
+  return withHomeSandbox(
+    Effect.gen(function* () {
+      const storage = yield* StorageMaintenance;
+      const sql = yield* SqlClient.SqlClient;
+      const config = yield* ServerConfig;
+      const threadId = ThreadId.makeUnsafe("slow-purge-outside-gate");
+      yield* seedThread({ sql, threadId, archivedAt: daysAgo(90), deletedAt: null });
+      const file = NodePath.join(
+        config.providerLogsDir,
+        toSafeThreadAttachmentSegment(threadId)! + ".log",
+      );
+      yield* Effect.promise(() => writeFile(file, "cleanup bytes"));
+      vi.mocked(removeFileIfSafe).mockImplementationOnce(async (input) => {
+        assert.isFalse(gateHeld, "Filesystem removal must not freeze command writes");
+        removals++;
+        return original(input);
+      });
+      const result = yield* storage.purgeThreads({
+        operationId: "purge-outside-engine-gate",
+        archivedBefore: daysAgo(30),
+        deletedBefore: daysAgo(0),
+        maxThreads: 10,
+      });
+      assert.deepEqual(result.purgedThreadIds, [threadId]);
+      assert.equal(removals, 1);
+      assert.isFalse(gateHeld);
+    }).pipe(
+      Effect.provide(makeStorageTestLayer({ orchestrationEngine: engine })),
+      Effect.ensuring(Effect.sync(() => vi.mocked(removeFileIfSafe).mockImplementation(original))),
+    ),
+  );
+});
 
 function seedThread(input: {
   readonly sql: SqlClient.SqlClient;
@@ -3011,4 +3125,473 @@ it.effect(
         ),
       );
     }),
+);
+
+function seedProject(input: {
+  readonly sql: SqlClient.SqlClient;
+  readonly projectId: string;
+  readonly workspaceRoot: string;
+}) {
+  const now = new Date().toISOString();
+  return input.sql`
+    INSERT INTO projection_projects (
+      project_id, title, workspace_root, default_model, scripts_json, created_at, updated_at, deleted_at
+    )
+    VALUES (
+      ${ProjectId.makeUnsafe(input.projectId)}, ${input.projectId}, ${input.workspaceRoot},
+      ${null}, ${"[]"}, ${now}, ${now}, ${null}
+    )
+  `;
+}
+
+const localBranches = (cwd: string) =>
+  runGit(cwd, "branch", "--format=%(refname:short)").split("\n").filter(Boolean);
+
+const registeredPaths = (cwd: string) =>
+  runGit(cwd, "worktree", "list", "--porcelain")
+    .split("\n")
+    .filter((line) => line.startsWith("worktree "))
+    .map((line) => line.slice("worktree ".length));
+
+it.layer(
+  makeStorageTestLayer({
+    gitCore: "real",
+    settings: {
+      worktreeDisposablePaths: ["README.md"],
+      providers: {
+        codex: { homePath: NodePath.join(NodeOS.tmpdir(), "f5-storage-real-git-codex-home") },
+      },
+    },
+  }),
+)("StorageMaintenance worktree cleanup against real repositories", (it) => {
+  it.effect(
+    "removes inactive F5 worktrees and deletes only merged, unreferenced branches",
+    () =>
+      withHomeSandbox(
+        Effect.gen(function* () {
+          const storage = yield* StorageMaintenance;
+          const config = yield* ServerConfig;
+          const sql = yield* SqlClient.SqlClient;
+          const repo = yield* Effect.promise(() => makeClonedRepo("f5-storage-managed-"));
+          yield* Effect.addFinalizer(() => Effect.promise(repo.cleanup));
+          const managed = (name: string) => NodePath.join(config.worktreesDir, "managed", name);
+          yield* Effect.promise(async () => {
+            runGit(repo.root, "worktree", "add", "-q", "-b", "merged-a", managed("a"), "main");
+            runGit(repo.root, "worktree", "add", "-q", "-b", "pushed-b", managed("b"), "main");
+            await writeFile(NodePath.join(managed("b"), "b.txt"), "b\n");
+            runGit(managed("b"), "add", ".");
+            runGit(managed("b"), "commit", "-q", "-m", "b");
+            runGit(managed("b"), "push", "-q", "-u", "origin", "pushed-b");
+            runGit(repo.root, "worktree", "add", "-q", "-b", "archived-c", managed("c"), "main");
+            runGit(repo.root, "worktree", "add", "-q", "-b", "ahead-d", managed("d"), "main");
+            await writeFile(NodePath.join(managed("d"), "d.txt"), "d\n");
+            runGit(managed("d"), "add", ".");
+            runGit(managed("d"), "commit", "-q", "-m", "d");
+            // Ignored build output no longer blocks storage cleanup.
+            await writeFile(
+              NodePath.join(repo.root, ".git", "info", "exclude"),
+              "dist/\n*.tsbuildinfo\n",
+            );
+            await writeFile(NodePath.join(managed("a"), "node_modules", "x", "index.js"), "x");
+            await writeFile(NodePath.join(managed("a"), "dist", "index.js"), "x");
+            await writeFile(NodePath.join(managed("a"), "app.tsbuildinfo"), "{}");
+            // The default branch, and a long-lived branch with a live upstream, are kept even
+            // when merged; a branch that only tracks origin/main is not long-lived.
+            runGit(repo.root, "checkout", "-q", "-b", "feature-x");
+            runGit(repo.root, "worktree", "add", "-q", managed("m"), "main");
+            runGit(repo.root, "branch", "release-1", "main");
+            runGit(repo.root, "push", "-q", "-u", "origin", "release-1");
+            runGit(repo.root, "worktree", "add", "-q", managed("r"), "release-1");
+            runGit(
+              repo.root,
+              "worktree",
+              "add",
+              "-q",
+              "--track",
+              "-b",
+              "tracks-main",
+              managed("t"),
+              "origin/main",
+            );
+          });
+          yield* seedProject({ sql, projectId: "project-managed", workspaceRoot: repo.root });
+          yield* seedThread({
+            sql,
+            threadId: ThreadId.makeUnsafe("thread-archived-managed-c"),
+            archivedAt: "2026-04-01T00:00:00.000Z",
+            deletedAt: null,
+            worktreePath: managed("c"),
+          });
+
+          const report = yield* storage.inspect({ force: true });
+          const category = report.categories.find((entry) => entry.id === "inactiveF5Worktrees");
+          const target = (name: string) =>
+            category?.targets.find((entry) => entry.path === managed(name));
+          assert.equal(target("a")?.safeToDelete, true, target("a")?.disabledReason);
+          assert.equal(target("b")?.safeToDelete, true, target("b")?.disabledReason);
+          assert.equal(target("c")?.safeToDelete, true, target("c")?.disabledReason);
+          assert.equal(target("d")?.safeToDelete, false);
+          assert.equal(
+            target("d")?.disabledReason,
+            "it has commits that are not in origin/main and not pushed",
+          );
+          // The managed worktrees are not offered again as external ones.
+          assert.deepEqual(
+            report.categories.find((entry) => entry.id === "externalWorktrees")?.targets ?? [],
+            [],
+          );
+
+          const result = yield* storage.cleanup({
+            operationId: "operation-real-managed-worktrees",
+            scanId: report.scanId,
+            nonce: report.confirmationNonce,
+            categoryIds: ["inactiveF5Worktrees"],
+            targetSelections: [
+              {
+                categoryId: "inactiveF5Worktrees",
+                targetIds: ["a", "b", "c", "m", "r", "t"].map((name) => target(name)!.id),
+              },
+            ],
+            confirmationText: "DELETE",
+            options: { vacuumAfterDeletes: false },
+          });
+
+          const reclaimed = result.results[0]?.perTargetReclaimed ?? [];
+          assert.equal(result.results[0]?.status, "Cleaned");
+          assert.deepEqual(reclaimed.map((entry) => [entry.path, entry.branch]).toSorted(), [
+            [managed("a"), "deleted"],
+            [managed("b"), "kept"],
+            [managed("c"), "kept"],
+            [managed("m"), "kept"],
+            [managed("r"), "kept"],
+            [managed("t"), "deleted"],
+          ]);
+          const branches = localBranches(repo.root);
+          assert.notInclude(branches, "merged-a");
+          assert.notInclude(branches, "tracks-main");
+          assert.include(branches, "main");
+          assert.include(branches, "release-1");
+          assert.include(branches, "pushed-b");
+          assert.include(branches, "archived-c");
+          assert.include(branches, "ahead-d");
+          assert.equal(yield* Effect.promise(() => pathExists(managed("d"))), true);
+        }),
+      ),
+    // Seven real worktrees, each inspected and removed with several Git calls.
+    60_000,
+  );
+
+  it.effect(
+    "offers external worktrees and missing registrations, discarding reviewed changes",
+    () =>
+      withHomeSandbox(
+        Effect.gen(function* () {
+          const storage = yield* StorageMaintenance;
+          const config = yield* ServerConfig;
+          const sql = yield* SqlClient.SqlClient;
+          yield* Effect.promise(() => new ProfileRegistryStore(config.defaultStateDir!).init());
+          const repo = yield* Effect.promise(() => makeClonedRepo("f5-storage-external-"));
+          yield* Effect.addFinalizer(() => Effect.promise(repo.cleanup));
+          const external = NodePath.join(repo.dir, "external-e");
+          const kept = NodePath.join(repo.dir, "external-kept");
+          const gone = NodePath.join(repo.dir, "gone-g");
+          yield* Effect.promise(async () => {
+            runGit(repo.root, "worktree", "add", "-q", "-b", "external-e", external, "main");
+            await NodeFS.writeFile(NodePath.join(external, "README.md"), "regenerated\n");
+            runGit(repo.root, "worktree", "add", "-q", "-b", "external-kept", kept, "main");
+            await NodeFS.writeFile(NodePath.join(kept, ".env"), "SECRET=1\n");
+            runGit(repo.root, "worktree", "add", "-q", "-b", "gone-g", gone, "main");
+            await NodeFS.rm(gone, { recursive: true, force: true });
+          });
+          yield* seedProject({ sql, projectId: "project-external", workspaceRoot: repo.root });
+
+          const report = yield* storage.inspect({ force: true });
+          const externalCategory = report.categories.find(
+            (entry) => entry.id === "externalWorktrees",
+          );
+          const staleCategory = report.categories.find(
+            (entry) => entry.id === "staleWorktreeRegistrations",
+          );
+          assert.equal(externalCategory?.defaultSelected, false);
+          assert.equal(externalCategory?.impact, "high");
+          assert.equal(staleCategory?.defaultSelected, true);
+          const externalTarget = externalCategory?.targets.find((entry) => entry.path === external);
+          const keptTarget = externalCategory?.targets.find((entry) => entry.path === kept);
+          const staleTarget = staleCategory?.targets.find((entry) => entry.path === gone);
+          assert.equal(externalTarget?.safeToDelete, true, externalTarget?.disabledReason);
+          assert.equal(
+            externalTarget?.detail,
+            "External · external-e · Discards 1 changed file: README.md",
+          );
+          assert.equal(keptTarget?.safeToDelete, false);
+          assert.match(keptTarget?.disabledReason ?? "", /\.env/);
+          assert.equal(staleTarget?.safeToDelete, true);
+          assert.equal(staleTarget?.bytes, 0);
+
+          const result = yield* storage.cleanup({
+            operationId: "operation-real-external-worktrees",
+            scanId: report.scanId,
+            nonce: report.confirmationNonce,
+            categoryIds: ["externalWorktrees", "staleWorktreeRegistrations"],
+            targetSelections: [
+              { categoryId: "externalWorktrees", targetIds: [externalTarget!.id] },
+              { categoryId: "staleWorktreeRegistrations", targetIds: [staleTarget!.id] },
+            ],
+            confirmationText: "DELETE",
+            options: { vacuumAfterDeletes: false },
+          });
+
+          assert.deepEqual(
+            result.results.map((entry) => [entry.categoryId, entry.status]),
+            [
+              ["externalWorktrees", "Cleaned"],
+              ["staleWorktreeRegistrations", "Cleaned"],
+            ],
+          );
+          assert.equal(yield* Effect.promise(() => pathExists(external)), false);
+          assert.equal(yield* Effect.promise(() => pathExists(kept)), true);
+          const registered = registeredPaths(repo.root);
+          assert.notInclude(registered, external);
+          assert.notInclude(registered, gone);
+          assert.include(registered, kept);
+          assert.notInclude(localBranches(repo.root), "external-e");
+        }),
+      ),
+  );
+
+  it.effect("refuses external cleanup when local changes differ from the reviewed ones", () =>
+    withHomeSandbox(
+      Effect.gen(function* () {
+        const storage = yield* StorageMaintenance;
+        const config = yield* ServerConfig;
+        const sql = yield* SqlClient.SqlClient;
+        yield* Effect.promise(() => new ProfileRegistryStore(config.defaultStateDir!).init());
+        const repo = yield* Effect.promise(() => makeClonedRepo("f5-storage-drift-"));
+        yield* Effect.addFinalizer(() => Effect.promise(repo.cleanup));
+        const external = NodePath.join(repo.dir, "external-drift");
+        yield* Effect.promise(async () => {
+          runGit(repo.root, "worktree", "add", "-q", "-b", "external-drift", external, "main");
+          await NodeFS.writeFile(NodePath.join(external, "README.md"), "regenerated\n");
+        });
+        yield* seedProject({ sql, projectId: "project-drift", workspaceRoot: repo.root });
+
+        const report = yield* storage.inspect({ force: true });
+        const target = report.categories
+          .find((entry) => entry.id === "externalWorktrees")
+          ?.targets.find((entry) => entry.path === external);
+        assert.equal(target?.safeToDelete, true, target?.disabledReason);
+        yield* Effect.promise(() =>
+          NodeFS.writeFile(NodePath.join(external, "README.md"), "edited after review\n"),
+        );
+
+        const result = yield* storage.cleanup({
+          operationId: "operation-real-external-drift",
+          scanId: report.scanId,
+          nonce: report.confirmationNonce,
+          categoryIds: ["externalWorktrees"],
+          targetSelections: [{ categoryId: "externalWorktrees", targetIds: [target!.id] }],
+          confirmationText: "DELETE",
+          options: { vacuumAfterDeletes: false },
+        });
+
+        assert.notEqual(result.results[0]?.status, "Cleaned");
+        assert.equal(yield* Effect.promise(() => pathExists(external)), true);
+        assert.equal(
+          yield* Effect.promise(() =>
+            NodeFS.readFile(NodePath.join(external, "README.md"), "utf8"),
+          ),
+          "edited after review\n",
+        );
+      }),
+    ),
+  );
+
+  it.effect("refuses removal when only staged content changed after review", () =>
+    withHomeSandbox(
+      Effect.gen(function* () {
+        const storage = yield* StorageMaintenance;
+        const config = yield* ServerConfig;
+        const sql = yield* SqlClient.SqlClient;
+        yield* Effect.promise(() => new ProfileRegistryStore(config.defaultStateDir!).init());
+        const repo = yield* Effect.promise(() => makeClonedRepo("f5-storage-index-"));
+        yield* Effect.addFinalizer(() => Effect.promise(repo.cleanup));
+        const external = NodePath.join(repo.dir, "external-index");
+        yield* Effect.promise(async () => {
+          runGit(repo.root, "worktree", "add", "-q", "-b", "external-index", external, "main");
+          await NodeFS.writeFile(NodePath.join(external, "README.md"), "staged\n");
+          runGit(external, "add", "README.md");
+          await NodeFS.writeFile(NodePath.join(external, "README.md"), "working\n");
+        });
+        yield* seedProject({ sql, projectId: "project-index", workspaceRoot: repo.root });
+
+        const report = yield* storage.inspect({ force: true });
+        const target = report.categories
+          .find((entry) => entry.id === "externalWorktrees")
+          ?.targets.find((entry) => entry.path === external);
+        assert.equal(target?.safeToDelete, true, target?.disabledReason);
+        // Stage other content without touching the working file; status stays `MM`.
+        yield* Effect.promise(async () => {
+          const blob = NodePath.join(repo.dir, "blob.txt");
+          await NodeFS.writeFile(blob, "written straight to the index\n");
+          const sha = runGit(external, "hash-object", "-w", blob);
+          runGit(external, "update-index", "--cacheinfo", `100644,${sha},README.md`);
+        });
+
+        const result = yield* storage.cleanup({
+          operationId: "operation-real-external-index",
+          scanId: report.scanId,
+          nonce: report.confirmationNonce,
+          categoryIds: ["externalWorktrees"],
+          targetSelections: [{ categoryId: "externalWorktrees", targetIds: [target!.id] }],
+          confirmationText: "DELETE",
+          options: { vacuumAfterDeletes: false },
+        });
+
+        assert.notEqual(result.results[0]?.status, "Cleaned");
+        assert.equal(yield* Effect.promise(() => pathExists(external)), true);
+      }),
+    ),
+  );
+
+  it.effect("applies disposable paths only for projects in the worktree's repository", () =>
+    withHomeSandbox(
+      Effect.gen(function* () {
+        const storage = yield* StorageMaintenance;
+        const config = yield* ServerConfig;
+        const sql = yield* SqlClient.SqlClient;
+        const owned = yield* Effect.promise(() => makeClonedRepo("f5-storage-owned-"));
+        const unowned = yield* Effect.promise(() => makeClonedRepo("f5-storage-unowned-"));
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(() => Promise.all([owned.cleanup(), unowned.cleanup()])),
+        );
+        const ownedTree = NodePath.join(config.worktreesDir, "owned", "regenerated");
+        const unownedTree = NodePath.join(config.worktreesDir, "unowned", "regenerated");
+        yield* Effect.promise(async () => {
+          runGit(owned.root, "worktree", "add", "-q", "-b", "regen", ownedTree, "main");
+          await NodeFS.writeFile(NodePath.join(ownedTree, "README.md"), "regenerated\n");
+          runGit(unowned.root, "worktree", "add", "-q", "-b", "regen", unownedTree, "main");
+          await NodeFS.writeFile(NodePath.join(unownedTree, "README.md"), "regenerated\n");
+          await NodeFS.mkdir(NodePath.join(owned.root, "packages", "app"), { recursive: true });
+        });
+        // A project rooted in a subdirectory still owns the repository's worktrees.
+        yield* seedProject({
+          sql,
+          projectId: "project-subdirectory",
+          workspaceRoot: NodePath.join(owned.root, "packages", "app"),
+        });
+
+        const report = yield* storage.inspect({ force: true });
+        const targets = report.categories.find(
+          (entry) => entry.id === "inactiveF5Worktrees",
+        )?.targets;
+        const ownedTarget = targets?.find((entry) => entry.path === ownedTree);
+        const unownedTarget = targets?.find((entry) => entry.path === unownedTree);
+
+        assert.equal(ownedTarget?.safeToDelete, true, ownedTarget?.disabledReason);
+        assert.match(ownedTarget?.detail ?? "", /Discards 1 changed file: README\.md/);
+        // No project owns this repository, so the global list does not apply.
+        assert.equal(unownedTarget?.safeToDelete, false);
+        assert.equal(
+          unownedTarget?.disabledReason,
+          "it has uncommitted changes (including untracked files)",
+        );
+      }),
+    ),
+  );
+
+  it.effect("reports a warning instead of failing when the default branch cannot be fetched", () =>
+    withHomeSandbox(
+      Effect.gen(function* () {
+        const storage = yield* StorageMaintenance;
+        const sql = yield* SqlClient.SqlClient;
+        const repo = yield* Effect.promise(() => makeClonedRepo("f5-storage-fetch-"));
+        yield* Effect.addFinalizer(() => Effect.promise(repo.cleanup));
+        runGit(repo.root, "remote", "set-url", "origin", NodePath.join(repo.dir, "missing.git"));
+        yield* seedProject({ sql, projectId: "project-fetch", workspaceRoot: repo.root });
+
+        const report = yield* storage.inspect({ force: true });
+
+        assert.isTrue(
+          report.warnings.some(
+            (warning) =>
+              warning.path === repo.root && /Could not refresh origin\/main/.test(warning.reason),
+          ),
+        );
+        assert.isTrue(report.categories.some((entry) => entry.id === "inactiveF5Worktrees"));
+      }),
+    ),
+  );
+});
+
+it.layer(makeStorageTestLayer({ gitCore: "real" }))(
+  "StorageMaintenance automatic worktree cleanup",
+  (it) => {
+    it.effect(
+      "removes safe managed worktrees and prunes missing entries, never external ones",
+      () =>
+        withHomeSandbox(
+          Effect.gen(function* () {
+            const storage = yield* StorageMaintenance;
+            const config = yield* ServerConfig;
+            const sql = yield* SqlClient.SqlClient;
+            yield* Effect.promise(() => new ProfileRegistryStore(config.defaultStateDir!).init());
+            const repo = yield* Effect.promise(() => makeClonedRepo("f5-storage-automatic-"));
+            yield* Effect.addFinalizer(() => Effect.promise(repo.cleanup));
+            const orphan = NodePath.join(config.worktreesDir, "automatic", "orphan");
+            const dirty = NodePath.join(config.worktreesDir, "automatic", "dirty");
+            const external = NodePath.join(repo.dir, "external-auto");
+            const gone = NodePath.join(repo.dir, "gone-auto");
+            const goneManaged = yield* Effect.promise(async () => {
+              runGit(repo.root, "worktree", "add", "-q", "-b", "orphan", orphan, "main");
+              runGit(repo.root, "worktree", "add", "-q", "-b", "dirty", dirty, "main");
+              await NodeFS.writeFile(NodePath.join(dirty, "work.txt"), "unsaved\n");
+              runGit(repo.root, "worktree", "add", "-q", "-b", "external-auto", external, "main");
+              runGit(repo.root, "worktree", "add", "-q", "-b", "gone-auto", gone, "main");
+              await NodeFS.rm(gone, { recursive: true, force: true });
+              const managedGone = NodePath.join(
+                await NodeFS.realpath(NodePath.dirname(orphan)),
+                "gone-managed",
+              );
+              runGit(repo.root, "worktree", "add", "-q", "-b", "gone-managed", managedGone, "main");
+              await NodeFS.rm(managedGone, { recursive: true, force: true });
+              return managedGone;
+            });
+            yield* seedProject({ sql, projectId: "project-automatic", workspaceRoot: repo.root });
+
+            // The preview lists what the hourly run would do, and only inside the F5 folder.
+            const preview = yield* storage.previewInactiveWorktrees;
+            const previewed = new Map(preview.map((entry) => [entry.path, entry.action]));
+            assert.equal(previewed.get(orphan), "remove");
+            assert.equal(previewed.get(dirty), "skip");
+            assert.equal(previewed.get(goneManaged), "remove");
+            assert.isFalse(previewed.has(external));
+            assert.isFalse(previewed.has(gone));
+
+            const results = yield* storage.cleanInactiveWorktreesAutomatically({
+              operationId: "operation-automatic-worktrees",
+            });
+
+            const byCategory = new Map(results?.map((entry) => [entry.categoryId, entry]));
+            assert.deepEqual(
+              byCategory.get("inactiveF5Worktrees")?.perTargetReclaimed.map((entry) => entry.path),
+              [orphan],
+            );
+            assert.deepEqual(
+              byCategory
+                .get("staleWorktreeRegistrations")
+                ?.perTargetReclaimed.map((entry) => entry.path),
+              [goneManaged],
+            );
+            assert.equal(yield* Effect.promise(() => pathExists(orphan)), false);
+            assert.equal(yield* Effect.promise(() => pathExists(dirty)), true);
+            assert.equal(yield* Effect.promise(() => pathExists(external)), true);
+            assert.notInclude(localBranches(repo.root), "orphan");
+            assert.include(registeredPaths(repo.root), external);
+            // A missing folder outside the F5 folder may be an unmounted disk: keep its entry.
+            assert.include(registeredPaths(repo.root), gone);
+            assert.notInclude(registeredPaths(repo.root), goneManaged);
+          }),
+        ),
+    );
+  },
 );

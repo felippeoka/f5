@@ -5,7 +5,7 @@ import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodePath from "@effect/platform-node/NodePath";
 import { describe, it, assert } from "@effect/vitest";
-import { Effect, Layer, Schema, Sink, Stream } from "effect";
+import { Effect, Fiber, Layer, Schema, Sink, Stream } from "effect";
 import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { vi } from "vitest";
@@ -36,6 +36,7 @@ import { McpRuntimeDiagnostics } from "./McpRuntimeDiagnostics.ts";
 import { McpRuntimeService, McpRuntimeServiceLive } from "./McpRuntimeService.ts";
 import { ProjectMcpConfigService } from "./ProjectMcpConfigService.ts";
 import { ProviderAdapterRequestError } from "../provider/Errors.ts";
+import type { ObservedMcpServer } from "../provider/mcpObservation.ts";
 
 // The spawner is simulated, so command discovery must not depend on installed CLIs.
 vi.mock("../spawn/resolveCommand.ts", async (importOriginal) => ({
@@ -125,6 +126,7 @@ function makeProviderServiceStub(): ProviderServiceShape {
 function makeProjectMcpConfigServiceLayer(
   servers: McpProjectServersConfig,
   effectiveVersion = "mcp-effective-v1",
+  runtimeConfigReadDelayMs = 0,
 ) {
   return Layer.succeed(ProjectMcpConfigService, {
     readCommonStoredConfig: () => Effect.die(new Error("unused in McpRuntimeService tests")),
@@ -141,7 +143,7 @@ function makeProjectMcpConfigServiceLayer(
         projectId: requestedProjectId,
         effectiveVersion,
         servers,
-      }),
+      }).pipe(runtimeConfigReadDelayMs > 0 ? Effect.delay(runtimeConfigReadDelayMs) : (e) => e),
     readCommonConfig: () => Effect.die(new Error("unused in McpRuntimeService tests")),
     replaceCommonConfig: (_input) => Effect.die(new Error("unused in McpRuntimeService tests")),
     readProjectConfig: (_projectId) => Effect.die(new Error("unused in McpRuntimeService tests")),
@@ -161,8 +163,129 @@ function makeProjectMcpConfigServiceLayer(
   });
 }
 
+function liveSession(provider: "codex" | "claudeAgent", generation = 1, busy = false) {
+  return {
+    threadId: ThreadId.make(`${provider}-thread`),
+    instanceId: ProviderInstanceId.make(provider),
+    generation,
+    lastSeenAt: "2026-10-19T10:00:00.000Z",
+    busy,
+    appliedVersion: "mcp-effective-v1",
+  };
+}
+
+function codexLiveObservation(
+  servers: ReadonlyArray<ObservedMcpServer>,
+): Partial<ProviderServiceShape> {
+  const selected = liveSession("codex");
+  return {
+    readMcpSessionStatuses: () =>
+      Effect.succeed({
+        sessions: [selected],
+        selected,
+        observation: {
+          servers,
+          complete: true,
+          capabilities: { tools: true, inputSchemas: true, resources: true },
+        },
+      }),
+  };
+}
+
+/** A running Claude session whose observed server status the test drives. */
+function makeClaudeLoginProvider(options: {
+  readonly authUrl?: string;
+  readonly callbackExpected?: boolean;
+  readonly ownership?: "managed" | "external";
+  readonly authError?: string;
+  readonly authHangs?: boolean;
+}) {
+  const state = {
+    serverStatus: "needs-auth" as ObservedMcpServer["status"],
+    serverError: undefined as string | undefined,
+    generation: 1,
+    // The session stays live unless a test ends it; reads can fail while it is live.
+    sessionLive: true,
+    busy: false,
+    readFails: false,
+    readDefect: false,
+    authCalls: [] as Array<unknown>,
+    reconnects: [] as Array<Record<string, unknown>>,
+  };
+  const providerService: Partial<ProviderServiceShape> = {
+    authenticateMcpServerForProject: (input) => {
+      state.authCalls.push(input);
+      if (options.authHangs) return Effect.never;
+      return options.authError
+        ? Effect.fail(
+            new ProviderAdapterRequestError({
+              provider: "claudeAgent",
+              method: "mcpAuthenticate",
+              detail: options.authError,
+            }),
+          )
+        : Effect.succeed({
+            threadId: liveSession("claudeAgent").threadId,
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            generation: 1,
+            ...(options.authUrl ? { authUrl: options.authUrl } : {}),
+            callbackExpected: options.callbackExpected ?? options.authUrl !== undefined,
+            ownership: options.ownership ?? "managed",
+          });
+    },
+    getLiveMcpSession: () =>
+      Effect.succeed(
+        state.sessionLive ? liveSession("claudeAgent", state.generation, state.busy) : undefined,
+      ),
+    readMcpSessionStatuses: () => {
+      if (state.readDefect) return Effect.die(new Error("status read defect"));
+      if (state.readFails)
+        return Effect.fail(
+          new ProviderAdapterRequestError({
+            provider: "claudeAgent",
+            method: "mcpServerStatus",
+            detail: "The conversation is not running in this project and account.",
+          }),
+        );
+      const selected = liveSession("claudeAgent", state.generation, state.busy);
+      return Effect.succeed({
+        sessions: [selected],
+        selected,
+        observation: {
+          servers: [
+            {
+              name: "docs",
+              status: state.serverStatus,
+              ownership: options.ownership ?? "managed",
+              ...(state.serverError ? { error: state.serverError } : {}),
+            },
+          ],
+          complete: true,
+          capabilities: { tools: true, inputSchemas: false, resources: false },
+        },
+      });
+    },
+    reconnectMcpServerForProject: (input) =>
+      Effect.sync(() => {
+        state.reconnects.push({
+          threadIds: input.threadIds,
+          excludeThreadIds: input.excludeThreadIds,
+          allowExternal: input.allowExternal,
+        });
+        return {
+          settingsConnectionReloaded: false,
+          sessionsMatched: 1,
+          sessionsReconnected: 1,
+          failures: [],
+        };
+      }),
+  };
+  return { state, providerService };
+}
+
 function makeRuntimeLayer(input?: {
   readonly servers?: McpProjectServersConfig;
+  readonly runtimeConfigReadDelayMs?: number;
   readonly providerService?: Partial<ProviderServiceShape>;
   readonly onControlClient?: () => void;
   readonly onControlReload?: () => void;
@@ -205,7 +328,11 @@ function makeRuntimeLayer(input?: {
   return McpRuntimeServiceLive.pipe(
     Layer.provide(
       Layer.mergeAll(
-        makeProjectMcpConfigServiceLayer(input?.servers ?? {}),
+        makeProjectMcpConfigServiceLayer(
+          input?.servers ?? {},
+          "mcp-effective-v1",
+          input?.runtimeConfigReadDelayMs,
+        ),
         Layer.succeed(CodexMcpSyncService, {
           getStatus: ({ projectId }) =>
             Effect.succeed({
@@ -685,31 +812,68 @@ describe("McpRuntimeService", () => {
     }).pipe(Effect.provide(makeRuntimeLayer())),
   );
 
-  it.effect("fails codex login when the server name is not defined in the shared config", () =>
-    Effect.gen(function* () {
-      const service = yield* McpRuntimeService;
-      const error = yield* Effect.flip(
-        service.startLogin({
-          provider: "codex",
-          projectId,
-          serverName: "missing-server",
-        }),
-      );
+  it.effect(
+    "fails codex login when the server is neither configured nor observed as external",
+    () =>
+      Effect.gen(function* () {
+        const service = yield* McpRuntimeService;
+        for (const serverName of ["missing-server", "f5-built-in"]) {
+          const error = yield* Effect.flip(
+            service.startLogin({ provider: "codex", projectId, serverName }),
+          );
+          assert.include(error.message, serverName);
+          assert.include(error.message, "not configured for this Codex account");
+        }
+      }).pipe(
+        Effect.provide(
+          makeRuntimeLayer({
+            servers: { otherServer: { type: "stdio", command: "npx" } },
+            providerService: codexLiveObservation([
+              { name: "f5-built-in", status: "needs-auth", ownership: "built-in" },
+            ]),
+          }),
+        ),
+      ),
+  );
 
-      assert.ok(error.message.includes("missing-server"));
+  it.effect("signs in external Codex servers through the app-server OAuth manager", () => {
+    const oauthStartCalls: Array<unknown> = [];
+    return Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      const started = yield* service.startLogin({
+        provider: "codex",
+        projectId,
+        serverName: "linear",
+        threadId: ThreadId.make("codex-thread"),
+      });
+      assert.deepEqual(
+        { mode: started.mode, status: started.status, url: started.authorizationUrl },
+        { mode: "oauth", status: "pending", url: "https://auth.example.test/authorize" },
+      );
+      assert.deepEqual(oauthStartCalls, [{ projectId, serverName: "linear" }]);
+      const status = yield* service.getLoginStatus({
+        provider: "codex",
+        projectId,
+        serverName: "linear",
+      });
+      assert.equal(status.mode, "oauth");
+      assert.equal(status.status, "pending");
     }).pipe(
       Effect.provide(
         makeRuntimeLayer({
-          servers: {
-            otherServer: {
-              type: "stdio",
-              command: "npx",
-            },
+          servers: { otherServer: { type: "stdio", command: "npx" } },
+          oauthStartCalls,
+          oauthStatus: {
+            status: "pending",
+            authorizationUrl: "https://auth.example.test/authorize",
           },
+          providerService: codexLiveObservation([
+            { name: "linear", status: "needs-auth", ownership: "external" },
+          ]),
         }),
       ),
-    ),
-  );
+    );
+  });
 
   for (const change of ["fingerprint", "workspace"] as const) {
     it.effect(`cancels pending CLI login after a ${change} change`, () => {
@@ -1086,3 +1250,282 @@ it.effect(
     );
   },
 );
+
+describe("Claude MCP sign-in", () => {
+  const claudeLogin = { provider: "claudeAgent" as const, projectId, serverName: "docs" };
+  const sourceThreadId = liveSession("claudeAgent").threadId;
+  const runtimeFor = (providerService: Partial<ProviderServiceShape>) =>
+    makeRuntimeLayer({
+      servers: { docs: { type: "http", url: "https://docs.example.test/mcp" } },
+      providerService,
+    });
+
+  it.effect("completes once the source session connects and reconnects the other sessions", () => {
+    const { state, providerService } = makeClaudeLoginProvider({
+      authUrl: "https://auth.example.test/authorize?state=s",
+    });
+    return Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      const pending = yield* service.startLogin({ ...claudeLogin, threadId: sourceThreadId });
+      assert.deepEqual(
+        { mode: pending.mode, status: pending.status, url: pending.authorizationUrl },
+        { mode: "oauth", status: "pending", url: "https://auth.example.test/authorize?state=s" },
+      );
+      assert.equal((yield* service.startLogin(claudeLogin)).status, "pending");
+      assert.equal(state.authCalls.length, 1);
+      assert.deepEqual(state.authCalls[0], {
+        provider: "claudeAgent",
+        projectId,
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        serverName: "docs",
+        threadId: sourceThreadId,
+        desiredVersion: "mcp-effective-v1",
+      });
+
+      yield* TestClock.adjust("2 seconds");
+      assert.equal((yield* service.getLoginStatus(claudeLogin)).status, "pending");
+      assert.deepEqual(state.reconnects, []);
+
+      state.serverStatus = "connected";
+      yield* TestClock.adjust("2 seconds");
+      assert.equal((yield* service.getLoginStatus(claudeLogin)).status, "completed");
+      assert.deepEqual(state.reconnects, [
+        { threadIds: undefined, excludeThreadIds: [sourceThreadId], allowExternal: undefined },
+      ]);
+    }).pipe(Effect.provide(runtimeFor(providerService)));
+  });
+
+  it.effect("propagates a failed connection after sign-in", () => {
+    const { state, providerService } = makeClaudeLoginProvider({
+      authUrl: "https://auth.example.test/authorize",
+    });
+    return Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      yield* service.startLogin(claudeLogin);
+      state.serverStatus = "failed";
+      state.serverError = "token exchange rejected";
+      yield* TestClock.adjust("2 seconds");
+      const status = yield* service.getLoginStatus(claudeLogin);
+      assert.equal(status.status, "failed");
+      assert.equal(status.error, "token exchange rejected");
+    }).pipe(Effect.provide(runtimeFor(providerService)));
+  });
+
+  it.effect("times out after five minutes without a connection", () => {
+    const { providerService } = makeClaudeLoginProvider({
+      authUrl: "https://auth.example.test/authorize",
+    });
+    return Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      yield* service.startLogin(claudeLogin);
+      yield* TestClock.adjust("4 minutes");
+      assert.equal((yield* service.getLoginStatus(claudeLogin)).status, "pending");
+      yield* TestClock.adjust("2 minutes");
+      const status = yield* service.getLoginStatus(claudeLogin);
+      assert.equal(status.status, "failed");
+      assert.equal(status.error, "Sign-in timed out. Try again.");
+    }).pipe(Effect.provide(runtimeFor(providerService)));
+  });
+
+  for (const ending of ["stopped", "replaced"] as const) {
+    it.effect(`fails when the conversation is ${ending} mid-flow`, () => {
+      const { state, providerService } = makeClaudeLoginProvider({
+        authUrl: "https://auth.example.test/authorize",
+      });
+      return Effect.gen(function* () {
+        const service = yield* McpRuntimeService;
+        yield* service.startLogin(claudeLogin);
+        if (ending === "stopped") {
+          state.readFails = true;
+          state.sessionLive = false;
+        } else state.generation = 2;
+        yield* TestClock.adjust("2 seconds");
+        const status = yield* service.getLoginStatus(claudeLogin);
+        assert.equal(status.status, "failed");
+        assert.equal(status.error, "The conversation ended before sign-in completed.");
+      }).pipe(Effect.provide(runtimeFor(providerService)));
+    });
+  }
+
+  it.effect("keeps waiting through status-read failures while the conversation is live", () => {
+    const { state, providerService } = makeClaudeLoginProvider({
+      authUrl: "https://auth.example.test/authorize",
+    });
+    return Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      yield* service.startLogin(claudeLogin);
+      // e.g. read timeouts, superseded observations, or a newly applied config version.
+      state.readFails = true;
+      yield* TestClock.adjust("20 seconds");
+      assert.equal((yield* service.getLoginStatus(claudeLogin)).status, "pending");
+      state.readFails = false;
+      state.serverStatus = "connected";
+      yield* TestClock.adjust("2 seconds");
+      assert.equal((yield* service.getLoginStatus(claudeLogin)).status, "completed");
+    }).pipe(Effect.provide(runtimeFor(providerService)));
+  });
+
+  it.effect("retries claude.ai connectors with backoff and never while a turn runs", () => {
+    const { state, providerService } = makeClaudeLoginProvider({
+      authUrl: "https://claude.ai/connect",
+      callbackExpected: false,
+      ownership: "external",
+    });
+    return Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      const sourceRetry = {
+        threadIds: [sourceThreadId],
+        excludeThreadIds: undefined,
+        allowExternal: true,
+      };
+      yield* service.startLogin(claudeLogin);
+      yield* TestClock.adjust("4 seconds");
+      assert.deepEqual(state.reconnects, []);
+      yield* TestClock.adjust("2 seconds");
+      assert.deepEqual(state.reconnects, [sourceRetry]);
+      // The next retry is due 10s later, but not while the conversation is busy.
+      state.busy = true;
+      yield* TestClock.adjust("10 seconds");
+      assert.equal(state.reconnects.length, 1);
+      state.busy = false;
+      yield* TestClock.adjust("2 seconds");
+      assert.deepEqual(state.reconnects, [sourceRetry, sourceRetry]);
+      // Backoff doubled to 20s.
+      yield* TestClock.adjust("10 seconds");
+      assert.equal(state.reconnects.length, 2);
+      state.serverStatus = "connected";
+      yield* TestClock.adjust("2 seconds");
+      assert.equal((yield* service.getLoginStatus(claudeLogin)).status, "completed");
+      assert.deepEqual(state.reconnects.slice(2), [
+        { threadIds: undefined, excludeThreadIds: [sourceThreadId], allowExternal: true },
+      ]);
+    }).pipe(Effect.provide(runtimeFor(providerService)));
+  });
+
+  it.effect("shares one sign-in between concurrent starts while config loads", () => {
+    const { state, providerService } = makeClaudeLoginProvider({
+      authUrl: "https://auth.example.test/authorize",
+    });
+    return Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      const both = yield* Effect.all(
+        [service.startLogin(claudeLogin), service.startLogin(claudeLogin)],
+        {
+          concurrency: "unbounded",
+        },
+      ).pipe(Effect.forkChild);
+      yield* TestClock.adjust("1 second");
+      const results = yield* Fiber.join(both);
+      assert.deepEqual(
+        results.map((result) => result.status),
+        ["pending", "pending"],
+      );
+      assert.equal(state.authCalls.length, 1);
+      assert.equal(
+        (yield* service.getLoginStatus(claudeLogin)).authorizationUrl,
+        "https://auth.example.test/authorize",
+      );
+    }).pipe(
+      Effect.provide(
+        makeRuntimeLayer({
+          servers: { docs: { type: "http", url: "https://docs.example.test/mcp" } },
+          providerService,
+          runtimeConfigReadDelayMs: 1_000,
+        }),
+      ),
+    );
+  });
+
+  it.effect("fails an interrupted start so a new sign-in can begin", () => {
+    const { state, providerService } = makeClaudeLoginProvider({ authHangs: true });
+    return Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      const start = yield* service.startLogin(claudeLogin).pipe(Effect.forkChild);
+      yield* TestClock.adjust(1);
+      assert.equal(state.authCalls.length, 1);
+      yield* Fiber.interrupt(start);
+      const status = yield* service.getLoginStatus(claudeLogin);
+      assert.equal(status.status, "failed");
+      assert.equal(status.error, "Sign-in was interrupted. Try again.");
+      const retry = yield* service.startLogin(claudeLogin).pipe(Effect.forkChild);
+      yield* TestClock.adjust(1);
+      assert.equal(state.authCalls.length, 2);
+      yield* Fiber.interrupt(retry);
+    }).pipe(Effect.provide(runtimeFor(providerService)));
+  });
+
+  it.effect("fails the attempt when the watcher dies unexpectedly", () => {
+    const { state, providerService } = makeClaudeLoginProvider({
+      authUrl: "https://auth.example.test/authorize",
+    });
+    return Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      yield* service.startLogin(claudeLogin);
+      state.readDefect = true;
+      yield* TestClock.adjust("2 seconds");
+      const status = yield* service.getLoginStatus(claudeLogin);
+      assert.equal(status.status, "failed");
+      assert.equal(status.error, "Sign-in stopped unexpectedly. Try again.");
+    }).pipe(Effect.provide(runtimeFor(providerService)));
+  });
+
+  it.effect("completes immediately and reconnects every session when no sign-in is needed", () => {
+    const { state, providerService } = makeClaudeLoginProvider({});
+    return Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      const status = yield* service.startLogin(claudeLogin);
+      assert.equal(status.status, "completed");
+      assert.equal(status.authorizationUrl, undefined);
+      yield* TestClock.adjust(1);
+      assert.deepEqual(state.reconnects, [
+        { threadIds: undefined, excludeThreadIds: undefined, allowExternal: undefined },
+      ]);
+    }).pipe(Effect.provide(runtimeFor(providerService)));
+  });
+
+  it.effect("reports a failed start when no conversation is running", () => {
+    const { providerService } = makeClaudeLoginProvider({
+      authError: "Start a conversation in this project to sign in to MCP servers.",
+    });
+    return Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      const error = yield* service.startLogin(claudeLogin).pipe(Effect.flip);
+      assert.include(error.message, "Start a conversation in this project");
+      const status = yield* service.getLoginStatus(claudeLogin);
+      assert.equal(status.status, "failed");
+      assert.include(status.error, "Start a conversation in this project");
+    }).pipe(Effect.provide(runtimeFor(providerService)));
+  });
+
+  it.effect("releases the claimed sign-in when the server is disabled", () => {
+    const { state, providerService } = makeClaudeLoginProvider({
+      authUrl: "https://auth.example.test/authorize",
+    });
+    return Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      const error = yield* service.startLogin(claudeLogin).pipe(Effect.flip);
+      assert.include(error.message, "disabled");
+      assert.equal((yield* service.getLoginStatus(claudeLogin)).status, "idle");
+      assert.equal(state.authCalls.length, 0);
+    }).pipe(
+      Effect.provide(
+        makeRuntimeLayer({
+          servers: { docs: { type: "http", url: "https://docs.example.test/mcp", enabled: false } },
+          providerService,
+        }),
+      ),
+    );
+  });
+
+  it.effect("keeps provider-scoped Claude login rejected and reports idle server status", () =>
+    Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      const error = yield* service
+        .startLogin({ provider: "claudeAgent", projectId })
+        .pipe(Effect.flip);
+      assert.include(error.message, "Settings > Profiles");
+      const idle = yield* service.getLoginStatus(claudeLogin);
+      assert.deepEqual({ mode: idle.mode, status: idle.status }, { mode: "oauth", status: "idle" });
+    }).pipe(Effect.provide(runtimeFor({}))),
+  );
+});

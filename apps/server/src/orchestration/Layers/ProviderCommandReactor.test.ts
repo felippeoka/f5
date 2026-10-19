@@ -226,6 +226,7 @@ describe("ProviderCommandReactor", () => {
     readonly tracePath?: string;
     readonly orphanedTitleRegenerationBeforeStart?: boolean;
     readonly nativeFallback?: boolean;
+    readonly bridgeTurnDelivery?: boolean;
     readonly recoverySummary?: string;
   }) {
     const simulateNativeFallback = input?.nativeFallback;
@@ -824,7 +825,7 @@ describe("ProviderCommandReactor", () => {
     // bridge committed turn intents directly into the exposed delivery entrypoint.
     await Effect.runPromise(
       Stream.runForEach(engine.streamDomainEvents, (event) =>
-        event.type === "thread.turn-start-requested"
+        event.type === "thread.turn-start-requested" && input?.bridgeTurnDelivery !== false
           ? Effect.promise(() => {
               const delivery = runtime.runPromise(
                 reactor.deliverTurnStart(event).pipe(Scope.provide(scope!)),
@@ -4732,6 +4733,74 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.archivedAt).toBe(now);
     expect(thread?.session?.status).toBe("stopped");
     expect(thread?.session?.activeTurnId).toBeNull();
+  });
+
+  it("rejects delivery when archiving races with worktree preparation", async () => {
+    const harness = await createHarness({ bridgeTurnDelivery: false });
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const createdAt = new Date().toISOString();
+    const worktreePath = path.join(harness.workspaceRoot, "race-worktree");
+    fs.mkdirSync(worktreePath);
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("prepare-workspace"),
+        threadId,
+        worktreePath,
+        branch: "f5/race",
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("race-delivery"),
+        threadId,
+        message: {
+          messageId: asMessageId("race-message"),
+          role: "user",
+          text: "hello",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt,
+      }),
+    );
+    const events = await Effect.runPromise(Stream.runCollect(harness.engine.readEvents(0)));
+    const intent = events.find((event) => event.type === "thread.turn-start-requested");
+    if (!intent || intent.type !== "thread.turn-start-requested") throw new Error("Missing intent");
+    const preparing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    harness.ensureWorktree.mockImplementationOnce(() =>
+      Effect.promise(async () => {
+        preparing.resolve();
+        await release.promise;
+        return { recreated: false };
+      }),
+    );
+    const delivery = Effect.runPromise(
+      harness.reactor.deliverTurnStart(intent).pipe(Effect.flip, Effect.scoped),
+    );
+    try {
+      await preparing.promise;
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.archive",
+          commandId: CommandId.makeUnsafe("archive-during-preparation"),
+          threadId,
+          createdAt,
+        }),
+      );
+    } finally {
+      release.resolve();
+    }
+    expect(await delivery).toMatchObject({ certainty: "not_sent", retryable: false });
+    await harness.drain();
+    expect(harness.startSession).not.toHaveBeenCalled();
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    expect(harness.runtimeSessions).toEqual([]);
+    const model = await Effect.runPromise(harness.engine.getReadModel());
+    expect(model.threads[0]?.session?.status).toBe("stopped");
   });
 
   it("does not deliver a pending turn after its thread was archived", async () => {

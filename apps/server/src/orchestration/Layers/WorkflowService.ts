@@ -1,5 +1,5 @@
 import { setupProjectScript } from "@t3tools/shared/projectScripts";
-import { setWorkflowArchived } from "../workflowArchiveLifecycle.ts";
+import { makeWorkflowArchiveLifecycle } from "../workflowArchiveLifecycle.ts";
 import {
   CommandId,
   DOCUMENT_WORKFLOW_TEMPLATE_ID,
@@ -5544,11 +5544,21 @@ export const makeWorkflowService = Effect.gen(function* () {
       });
     });
 
+  const changeWorkflowArchive = makeWorkflowArchiveLifecycle(orchestrationEngine, "planning");
+
   const archiveWorkflow: WorkflowServiceShape["archiveWorkflow"] = (workflowId) =>
-    setWorkflowArchived(orchestrationEngine, "planning", workflowId, true);
+    changeWorkflowArchive(workflowId, true);
 
   const unarchiveWorkflow: WorkflowServiceShape["unarchiveWorkflow"] = (workflowId) =>
-    setWorkflowArchived(orchestrationEngine, "planning", workflowId, false);
+    changeWorkflowArchive(workflowId, false, (snapshot) =>
+      Effect.gen(function* () {
+        const workflow = snapshot.planningWorkflows.find((entry) => entry.id === workflowId);
+        if (workflow) yield* reconcileStuckWorkflow(workflow, snapshot);
+        const latest = yield* orchestrationEngine.getReadModel();
+        const current = latest.planningWorkflows.find((entry) => entry.id === workflowId);
+        if (current) yield* reconcileWorkflowImplementationLifecycle(current, latest);
+      }),
+    );
 
   const retryWorkflow: WorkflowServiceShape["retryWorkflow"] = (input) =>
     Effect.gen(function* () {

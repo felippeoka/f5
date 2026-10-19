@@ -1,5 +1,5 @@
 import { userFacingCauseMessage } from "../../causeMessage.ts";
-import { setWorkflowArchived } from "../workflowArchiveLifecycle.ts";
+import { makeWorkflowArchiveLifecycle } from "../workflowArchiveLifecycle.ts";
 import {
   CodeReviewWorkflowId,
   CommandId,
@@ -1596,11 +1596,18 @@ export const makeCodeReviewWorkflowService = Effect.gen(function* () {
       });
     });
 
+  const changeWorkflowArchive = makeWorkflowArchiveLifecycle(orchestrationEngine, "codeReview");
+
   const archiveWorkflow: CodeReviewWorkflowServiceShape["archiveWorkflow"] = (workflowId) =>
-    setWorkflowArchived(orchestrationEngine, "codeReview", workflowId, true);
+    changeWorkflowArchive(workflowId, true);
 
   const unarchiveWorkflow: CodeReviewWorkflowServiceShape["unarchiveWorkflow"] = (workflowId) =>
-    setWorkflowArchived(orchestrationEngine, "codeReview", workflowId, false);
+    changeWorkflowArchive(workflowId, false, (snapshot) =>
+      Effect.gen(function* () {
+        const workflow = snapshot.codeReviewWorkflows.find((entry) => entry.id === workflowId);
+        if (workflow) yield* reconcileStuckWorkflow(workflow, snapshot);
+      }),
+    );
 
   const retryWorkflow: CodeReviewWorkflowServiceShape["retryWorkflow"] = (input) =>
     Effect.gen(function* () {

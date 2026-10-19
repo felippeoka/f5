@@ -533,7 +533,23 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 ) {
                   yield* sql`UPDATE thread_settlement_hooks SET state='canceled',updated_at=${savedEvent.occurredAt} WHERE thread_id=${savedEvent.payload.threadId} AND state='pending'`;
                 }
-                if (savedEvent.type === "thread.session-stop-requested") {
+                if (savedEvent.type === "thread.archived") {
+                  // Startup repair can precede queue subscribers. Persist the pause
+                  // with the archive so a restart cannot dispatch an archived child.
+                  yield* sql`INSERT INTO next_turn_queue_state
+                    (thread_id, paused, pause_reason_code, pause_detail, revision, updated_at)
+                    VALUES (${savedEvent.payload.threadId}, 1, 'thread_archived',
+                      'Queue paused because the thread was archived.', 1, ${savedEvent.occurredAt})
+                    ON CONFLICT(thread_id) DO UPDATE SET
+                      paused = 1,
+                      pause_reason_code = CASE WHEN paused = 1 THEN pause_reason_code ELSE 'thread_archived' END,
+                      pause_detail = CASE WHEN paused = 1 THEN pause_detail ELSE 'Queue paused because the thread was archived.' END,
+                      revision = revision + 1, updated_at = ${savedEvent.occurredAt}`;
+                }
+                if (
+                  savedEvent.type === "thread.session-stop-requested" ||
+                  savedEvent.type === "thread.archived"
+                ) {
                   // Commit cancellation with the stop intent: a crash before live
                   // subscribers run must never revive an unsent continuation.
                   yield* sql`UPDATE usage_limit_resumes SET state = 'cancelled',
@@ -549,7 +565,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                   `;
                   for (const item of cancelled) {
                     yield* sql`UPDATE turn_submissions SET disposition = 'canceled',
-                      reason_code = 'session_stopped', settled_at = ${savedEvent.occurredAt}
+                      reason_code = ${savedEvent.type === "thread.archived" ? "thread_archived" : "session_stopped"}, settled_at = ${savedEvent.occurredAt}
                       WHERE submission_id = ${item.submissionId} AND disposition IN ('pending', 'queued')`;
                   }
                   if (cancelled.length > 0)

@@ -2233,6 +2233,37 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
+  it.effect("maps Codex login-required startup failures to needs-auth", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+      const error =
+        "MCP server `Glean` requires OAuth reauthentication. Run `codex mcp login Glean`.";
+
+      lifecycleManager.emit("event", {
+        id: asEventId("evt-mcp-startup-status-login"),
+        kind: "notification",
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        createdAt: new Date().toISOString(),
+        method: "mcpServer/startupStatus/updated",
+        payload: { name: "Glean", status: "failed", error },
+      } satisfies ProviderEvent);
+
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+
+      assert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some" || firstEvent.value.type !== "mcp.status.updated") {
+        return;
+      }
+      assert.deepEqual(firstEvent.value.payload.status, {
+        name: "Glean",
+        status: "needs-auth",
+        error,
+      });
+    }),
+  );
+
   it.effect("preserves request type when mapping serverRequest/resolved", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;

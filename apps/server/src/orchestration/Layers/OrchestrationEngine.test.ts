@@ -175,7 +175,7 @@ async function createPersistentOrchestrationSystem(input: {
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(input.eventStoreLayer ?? OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
-    Layer.provide(persistenceLayer),
+    Layer.provideMerge(persistenceLayer),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
     Layer.provideMerge(NodeServices.layer),
   );
@@ -183,6 +183,7 @@ async function createPersistentOrchestrationSystem(input: {
   const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
   return {
     engine,
+    sql: await runtime.runPromise(Effect.service(SqlClient.SqlClient)),
     run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
     dispose: () => runtime.dispose(),
   };
@@ -283,6 +284,16 @@ describe("OrchestrationEngine", () => {
         let model = await system.run(system.engine.getReadModel());
         expect(model.threads.every((thread) => thread.archivedAt !== null)).toBe(true);
         expect(workflowEntries(model)[0]!.workflow.archiveRestorations).toHaveLength(2);
+        const pauses = await system.run(system.sql<{
+          threadId: string;
+          paused: number;
+          reason: string;
+        }>`SELECT thread_id AS "threadId", paused, pause_reason_code AS reason
+          FROM next_turn_queue_state ORDER BY thread_id`);
+        expect(pauses).toEqual([
+          { threadId: fixture.a, paused: 1, reason: "thread_archived" },
+          { threadId: fixture.b, paused: 1, reason: "thread_archived" },
+        ]);
         await system.dispose();
         system = await createPersistentOrchestrationSystem({ dbPath });
         model = await system.run(system.engine.getReadModel());
@@ -293,6 +304,10 @@ describe("OrchestrationEngine", () => {
         model = await system.run(system.engine.getReadModel());
         expect(model.threads.every((thread) => thread.archivedAt === null)).toBe(true);
         expect(workflowEntries(model)[0]!.workflow.archiveRestorations).toEqual([]);
+        expect(await system.run(system.sql`SELECT paused FROM next_turn_queue_state`)).toEqual([
+          { paused: 1 },
+          { paused: 1 },
+        ]);
       } finally {
         await system.dispose();
         fs.rmSync(directory, { recursive: true, force: true });

@@ -10,6 +10,7 @@ import { createMcpDiagnosticsSanitizer } from "@t3tools/shared/mcpDiagnostics";
 import { useState } from "react";
 import { Button } from "../../ui/button";
 import { LazyMcpServerInspector as McpServerInspector } from "./LazyMcpServerInspector";
+import { McpSignInControls } from "./McpSignInButton";
 
 export function McpObservedGroup(props: {
   servers: McpProjectServersConfig;
@@ -61,6 +62,17 @@ export function McpObservedGroup(props: {
                 {createMcpDiagnosticsSanitizer(props.servers).text(entry.message)}
               </p>
             )
+          ) : null}
+          {props.group === "external" &&
+          (props.provider === "claudeAgent" || props.provider === "codex") &&
+          (entry.state === "needs-auth" || entry.state === "login-required") ? (
+            <McpSignInControls
+              provider={props.provider}
+              instanceId={props.instanceId}
+              projectId={props.projectId}
+              serverName={entry.name}
+              threadId={props.provider === "claudeAgent" ? props.observation?.threadId : undefined}
+            />
           ) : null}
           {props.projectId ? (
             <Button

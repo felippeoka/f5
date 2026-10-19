@@ -839,39 +839,48 @@ describe("CodeReviewWorkflowService", () => {
     expect(harness.getSnapshot().codeReviewWorkflows[0]?.archivedAt).toBe(NOW);
   });
 
-  it("restarts pending reviewers during reconciliation", async () => {
-    const workflow = makeWorkflow();
-    harness = await createHarness(
-      makeReadModel({
-        workflow,
-        threads: [
-          makeThread({ id: workflow.reviewerA.threadId }),
-          makeThread({ id: workflow.reviewerB.threadId }),
-        ],
-      }),
-    );
-
-    await harness.start();
-
-    const turnStarts = harness.dispatched.filter(
-      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.start" }> =>
-        command.type === "thread.turn.start",
-    );
-    const lastUpsert = harness.dispatched
-      .toReversed()
-      .find(
-        (
-          command,
-        ): command is Extract<
-          OrchestrationCommand,
-          { type: "project.code-review-workflow.upsert" }
-        > => command.type === "project.code-review-workflow.upsert",
+  it.each(["startup", "restore"])(
+    "starts pending reviewers during %s reconciliation",
+    async (mode) => {
+      const workflow = makeWorkflow();
+      harness = await createHarness(
+        makeReadModel({
+          workflow,
+          threads: [
+            makeThread({ id: workflow.reviewerA.threadId }),
+            makeThread({ id: workflow.reviewerB.threadId }),
+          ],
+        }),
       );
 
-    expect(turnStarts).toHaveLength(2);
-    expect(lastUpsert?.workflow.reviewerA.status).toBe("running");
-    expect(lastUpsert?.workflow.reviewerB.status).toBe("running");
-  });
+      if (mode === "restore") {
+        await Effect.runPromise(harness.service.archiveWorkflow(workflow.id));
+        await Promise.all([
+          Effect.runPromise(harness.service.unarchiveWorkflow(workflow.id)),
+          Effect.runPromise(harness.service.unarchiveWorkflow(workflow.id)),
+        ]);
+      } else await harness.start();
+
+      const turnStarts = harness.dispatched.filter(
+        (command): command is Extract<OrchestrationCommand, { type: "thread.turn.start" }> =>
+          command.type === "thread.turn.start",
+      );
+      const lastUpsert = harness.dispatched
+        .toReversed()
+        .find(
+          (
+            command,
+          ): command is Extract<
+            OrchestrationCommand,
+            { type: "project.code-review-workflow.upsert" }
+          > => command.type === "project.code-review-workflow.upsert",
+        );
+
+      expect(turnStarts).toHaveLength(2);
+      expect(lastUpsert?.workflow.reviewerA.status).toBe("running");
+      expect(lastUpsert?.workflow.reviewerB.status).toBe("running");
+    },
+  );
 
   it("does not complete reviewers from diff capture while the latest turn is still running", async () => {
     const workflow = makeWorkflow({
@@ -1804,7 +1813,19 @@ describe("CodeReviewWorkflowService", () => {
     harness = await createHarness(
       makeReadModel({
         workflow,
-        threads: [makeThread({ id: workflow.reviewerA.threadId })],
+        threads: [
+          makeThread({
+            id: workflow.reviewerA.threadId,
+            latestTurn: {
+              turnId: TurnId.makeUnsafe("newer-active-reviewer"),
+              state: "running",
+              requestedAt: NOW,
+              startedAt: NOW,
+              completedAt: null,
+              assistantMessageId: null,
+            },
+          }),
+        ],
       }),
     );
 
@@ -2001,46 +2022,55 @@ describe("CodeReviewWorkflowService", () => {
     ).toBe(false);
   });
 
-  it("resumes a persisted pending consolidation after startup", async () => {
-    const reviewerAThread = makeCompletedThread({
-      threadId: ThreadId.makeUnsafe("reviewer-a"),
-      suffix: "review-a",
-    });
-    const reviewerBThread = makeCompletedThread({
-      threadId: ThreadId.makeUnsafe("reviewer-b"),
-      suffix: "review-b",
-    });
-    const workflow = makeWorkflow({
-      reviewerA: {
-        ...makeWorkflow().reviewerA,
-        status: "completed",
-        pinnedTurnId: reviewerAThread.latestTurn!.turnId,
-        pinnedAssistantMessageId: reviewerAThread.latestTurn!.assistantMessageId,
-      },
-      reviewerB: {
-        ...makeWorkflow().reviewerB,
-        status: "completed",
-        pinnedTurnId: reviewerBThread.latestTurn!.turnId,
-        pinnedAssistantMessageId: reviewerBThread.latestTurn!.assistantMessageId,
-      },
-      consolidation: {
-        ...makeWorkflow().consolidation,
-        status: "pending_start",
-      },
-    });
-    harness = await createHarness(
-      makeReadModel({ workflow, threads: [reviewerAThread, reviewerBThread] }),
-    );
+  it.each(["startup", "restore"])(
+    "resumes a persisted pending consolidation after %s",
+    async (mode) => {
+      const reviewerAThread = makeCompletedThread({
+        threadId: ThreadId.makeUnsafe("reviewer-a"),
+        suffix: "review-a",
+      });
+      const reviewerBThread = makeCompletedThread({
+        threadId: ThreadId.makeUnsafe("reviewer-b"),
+        suffix: "review-b",
+      });
+      const workflow = makeWorkflow({
+        reviewerA: {
+          ...makeWorkflow().reviewerA,
+          status: "completed",
+          pinnedTurnId: reviewerAThread.latestTurn!.turnId,
+          pinnedAssistantMessageId: reviewerAThread.latestTurn!.assistantMessageId,
+        },
+        reviewerB: {
+          ...makeWorkflow().reviewerB,
+          status: "completed",
+          pinnedTurnId: reviewerBThread.latestTurn!.turnId,
+          pinnedAssistantMessageId: reviewerBThread.latestTurn!.assistantMessageId,
+        },
+        consolidation: {
+          ...makeWorkflow().consolidation,
+          status: "pending_start",
+        },
+      });
+      harness = await createHarness(
+        makeReadModel({ workflow, threads: [reviewerAThread, reviewerBThread] }),
+      );
 
-    await harness.start();
+      if (mode === "restore") {
+        await Effect.runPromise(harness.service.archiveWorkflow(workflow.id));
+        await Promise.all([
+          Effect.runPromise(harness.service.unarchiveWorkflow(workflow.id)),
+          Effect.runPromise(harness.service.unarchiveWorkflow(workflow.id)),
+        ]);
+      } else await harness.start();
 
-    expect(
-      harness.dispatched.filter(
-        (command) => command.type === "thread.create" && command.title === "Review Merge",
-      ),
-    ).toHaveLength(1);
-    expect(harness.getSnapshot().codeReviewWorkflows[0]?.consolidation.status).toBe("running");
-  });
+      expect(
+        harness.dispatched.filter(
+          (command) => command.type === "thread.create" && command.title === "Review Merge",
+        ),
+      ).toHaveLength(1);
+      expect(harness.getSnapshot().codeReviewWorkflows[0]?.consolidation.status).toBe("running");
+    },
+  );
 
   it.each([
     {

@@ -970,6 +970,66 @@ describe("StorageSettings", () => {
     }
   });
 
+  it("selects missing worktree entries by default but never external worktrees", async () => {
+    const { screen, queryClient } = await renderStorageSettings(
+      usageReport({
+        categories: [
+          category({
+            id: "externalWorktrees",
+            section: "worktrees",
+            title: "Delete external worktrees",
+            bytes: 64 * 1024 * 1024,
+            reclaimableBytes: 64 * 1024 * 1024,
+            impact: "high",
+            targetCount: 1,
+            targets: [
+              {
+                id: "/tmp/elsewhere/feature",
+                label: "~/elsewhere/feature",
+                projectName: "f5",
+                path: "/tmp/elsewhere/feature",
+                bytes: 64 * 1024 * 1024,
+                safeToDelete: true,
+                detail: "External · feature · Discards 1 changed file: mockServiceWorker.js",
+              },
+            ],
+          }),
+          category({
+            id: "staleWorktreeRegistrations",
+            section: "worktrees",
+            title: "Prune missing worktree entries",
+            defaultSelected: true,
+            targetCount: 1,
+            targets: [
+              {
+                id: "/tmp/gone",
+                label: "/tmp/gone",
+                path: "/tmp/gone",
+                bytes: 0,
+                safeToDelete: true,
+                detail: "Missing folder · gone",
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+
+    try {
+      await expect
+        .element(page.getByRole("checkbox", { name: "Select ~/elsewhere/feature" }))
+        .not.toBeChecked();
+      await expect.element(page.getByRole("checkbox", { name: "Select /tmp/gone" })).toBeChecked();
+      expect(document.body.textContent).toContain(
+        "f5 · External · feature · Discards 1 changed file: mockServiceWorker.js",
+      );
+      expect(document.body.textContent).toContain("Missing folder · gone");
+    } finally {
+      queryClient.clear();
+      await screen.unmount();
+    }
+  });
+
   it("sends selected legacy worktree target ids for selected cleanup", async () => {
     const { screen, queryClient, nativeApi } = await renderStorageSettings(
       usageReport({

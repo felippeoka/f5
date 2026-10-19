@@ -1,8 +1,12 @@
-import { CommandId, ThreadId, PlanningWorkflow } from "@t3tools/contracts";
+import { CommandId, MessageId, ThreadId, PlanningWorkflow } from "@t3tools/contracts";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { applyArchiveTestCommand, workflowArchiveFixture } from "./workflowArchive.testUtils.ts";
-import { reconcileWorkflowArchives, workflowEntries } from "./workflowArchiveLifecycle.ts";
+import {
+  reconcileWorkflowArchives,
+  retainedWorkflowThreadIds,
+  workflowEntries,
+} from "./workflowArchiveLifecycle.ts";
 import {
   summarizePlanningWorkflow,
   summarizeCodeReviewWorkflow,
@@ -12,6 +16,98 @@ import {
 describe.each(["planning", "codeReview", "investigation"] as const)(
   "workflow archive (%s)",
   (kind) => {
+    it("does not create a new owner for a deleted thread", () => {
+      const fixture = workflowArchiveFixture(kind);
+      const entry = fixture.entry;
+      const base = {
+        commandId: CommandId.makeUnsafe("create-after-deletion"),
+        projectId: entry.workflow.projectId,
+        title: entry.workflow.title,
+        slug: entry.workflow.slug,
+        createdAt: entry.workflow.createdAt,
+      };
+      const slot = { provider: "codex" as const, model: "gpt-5-codex" };
+      const command =
+        entry.kind === "planning"
+          ? {
+              ...base,
+              type: "project.workflow.create" as const,
+              workflowId: entry.workflow.id,
+              requirementPrompt: "Plan",
+              plansDirectory: "/repo/plans",
+              selfReviewEnabled: false,
+              authorThreadIdA: fixture.a,
+              authorThreadIdB: fixture.b,
+              branchA: slot,
+              branchB: slot,
+              merge: slot,
+            }
+          : entry.kind === "codeReview"
+            ? {
+                ...base,
+                type: "project.code-review-workflow.create" as const,
+                workflowId: entry.workflow.id,
+                reviewPrompt: "Review",
+                branch: null,
+                reviewerThreadIdA: fixture.a,
+                reviewerThreadIdB: fixture.b,
+                reviewerA: slot,
+                reviewerB: slot,
+                consolidation: slot,
+              }
+            : {
+                ...base,
+                type: "project.investigation-workflow.create" as const,
+                workflowId: entry.workflow.id,
+                problemPrompt: "Investigate",
+                branch: null,
+                selfReviewEnabled: false,
+                investigationThreadIdA: fixture.a,
+                investigationThreadIdB: fixture.b,
+                investigatorA: slot,
+                investigatorB: slot,
+                synthesis: slot,
+              };
+      const model = {
+        ...fixture.model,
+        planningWorkflows: [],
+        codeReviewWorkflows: [],
+        investigationWorkflows: [],
+        threads: fixture.model.threads.map((thread) => ({
+          ...thread,
+          deletedAt: "2026-10-19T10:00:00.000Z",
+        })),
+      };
+      expect(() => applyArchiveTestCommand(model, command)).toThrow(
+        "Cannot attach a deleted thread",
+      );
+    });
+
+    it("releases retention when the parent project is deleted", () => {
+      const fixture = workflowArchiveFixture(kind);
+      expect(retainedWorkflowThreadIds(fixture.model).has(fixture.a)).toBe(true);
+      const model = {
+        ...fixture.model,
+        projects: fixture.model.projects.map((project) => ({
+          ...project,
+          deletedAt: "2026-10-19T10:00:00.000Z",
+        })),
+        threads: fixture.model.threads.map((thread) => ({
+          ...thread,
+          archivedAt: "2026-10-19T10:00:00.000Z",
+        })),
+      };
+      expect(retainedWorkflowThreadIds(model).size).toBe(0);
+      expect(() =>
+        applyArchiveTestCommand(model, {
+          type: "thread.delete",
+          commandId: CommandId.makeUnsafe("purge-deleted-project"),
+          threadId: fixture.a,
+          expectedArchivedAt: "2026-10-19T10:00:00.000Z",
+        }),
+      ).not.toThrow();
+    });
+
     it("archives children and restores only unchanged children archived by the workflow", () => {
       const fixture = workflowArchiveFixture(kind);
       let model = applyArchiveTestCommand(fixture.model, {
@@ -110,6 +206,95 @@ describe.each(["planning", "codeReview", "investigation"] as const)(
     });
   },
 );
+
+it("rejects standalone archived turn admission before saving the message or intent", () => {
+  const fixture = workflowArchiveFixture("codeReview");
+  const model = applyArchiveTestCommand(
+    { ...fixture.model, codeReviewWorkflows: [] },
+    {
+      type: "thread.archive",
+      commandId: CommandId.makeUnsafe("archive"),
+      threadId: fixture.a,
+      createdAt: "2026-10-19T10:00:00.000Z",
+    },
+  ).model;
+  expect(() =>
+    applyArchiveTestCommand(model, {
+      type: "thread.turn.start",
+      commandId: CommandId.makeUnsafe("unsent"),
+      threadId: fixture.a,
+      message: {
+        messageId: MessageId.makeUnsafe("unsent"),
+        role: "user",
+        text: "hello",
+        attachments: [],
+      },
+      interactionMode: "default",
+      runtimeMode: "full-access",
+      createdAt: "2026-10-19T11:00:00.000Z",
+    }),
+  ).toThrow("archived");
+  expect(model.threads[0]!.messages).toEqual([]);
+});
+
+it("continues legacy reconciliation after a failed workflow and retries it on the next sweep", async () => {
+  const a = workflowArchiveFixture("planning");
+  const b = workflowArchiveFixture("codeReview");
+  const model = {
+    ...a.model,
+    planningWorkflows: [
+      { ...a.model.planningWorkflows[0]!, archivedAt: "2026-10-19T10:00:00.000Z" },
+    ],
+    codeReviewWorkflows: [
+      { ...b.model.codeReviewWorkflows[0]!, archivedAt: "2026-10-19T10:00:00.000Z" },
+    ],
+  };
+  const attempts: string[] = [];
+  const engine = {
+    getReadModel: () => Effect.succeed(model),
+    dispatch: (command: { workflowKind: string }) => {
+      attempts.push(command.workflowKind);
+      return command.workflowKind === "planning"
+        ? Effect.fail(new Error("ownership conflict"))
+        : Effect.succeed({ sequence: 1 });
+    },
+  };
+  await Effect.runPromise(reconcileWorkflowArchives(engine as never));
+  await Effect.runPromise(reconcileWorkflowArchives(engine as never));
+  expect(attempts).toEqual(["planning", "codeReview", "planning", "codeReview"]);
+});
+
+it("preserves the stage timestamp and prevents newly attaching deleted threads", () => {
+  const fixture = workflowArchiveFixture("codeReview");
+  const original = fixture.model.codeReviewWorkflows[0]!;
+  const command = {
+    type: "project.code-review-workflow.upsert" as const,
+    commandId: CommandId.makeUnsafe("stage"),
+    projectId: original.projectId,
+    updatedAt: "2026-10-19T11:00:00.000Z",
+    workflow: original,
+  };
+  const result = applyArchiveTestCommand(fixture.model, command);
+  expect(result.model.codeReviewWorkflows[0]!.updatedAt).toBe(original.updatedAt);
+  const deletedId = ThreadId.makeUnsafe("deleted-unowned");
+  const model = {
+    ...fixture.model,
+    threads: [
+      ...fixture.model.threads,
+      {
+        ...fixture.model.threads[0]!,
+        id: deletedId,
+        deletedAt: "2026-10-19T10:00:00.000Z",
+      },
+    ],
+  };
+  expect(() =>
+    applyArchiveTestCommand(model, {
+      ...command,
+      workflow: { ...original, consolidation: { ...original.consolidation, threadId: deletedId } },
+    }),
+  ).toThrow("Cannot attach a deleted thread");
+});
 
 it("preserves archive ownership across stale stage upserts and archives new children", () => {
   const fixture = workflowArchiveFixture("codeReview");

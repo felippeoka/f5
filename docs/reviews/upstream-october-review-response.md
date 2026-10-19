@@ -1,21 +1,21 @@
 # October catch-up review response
 
-The complete available October implementation and its subsequent review fixes are
-now included on `fix/upstream-october-review`, based on
-main `9355a57a59`. They were integrated from `f5/upstream-october-2026` at
-`01c0497143`. Review the actual submitted changes with:
+The October implementation and review fixes live on `fix/upstream-october-review`
+in `../f5-upstream-october-review`. The latest integration retains origin/main
+`83e054f412` additively, including all 23 commits since the preceding main merge.
+The original shared checkout and user work remain intact. Review the catch-up
+against that main baseline with:
 
 ```sh
-git diff 9355a57a5958b88bfcf639c071222c16b43d57e6
+git diff 83e054f412
 ```
 
-All 17 main commits since the October branch's last merge are retained. The
-integration preserves main's atomic checkpoint-ref deletion, storage cleanup's
-cancellation and directory-replacement checks, and its MCP/storage contracts.
-The bundled protocol version is now 31, integrating main's released version 29 and
-adding the guided-review RPCs. No history was
-rewritten: the recommendation to rebase conflicts with AGENTS.md's explicit
-prohibition, so integration used a squash merge onto a new branch from main.
+Protocol 36 and migration 127 extend main's released baseline. The recommendation
+to rebase conflicts with AGENTS.md's prohibition on history rewriting; integration
+preserves both histories instead. The original October branch and subsequent
+implementation commits remain reachable. The full plan and mandatory cut line
+are still unfinished; the continuation entries below record implementation and
+validation without promoting deferred release obligations.
 
 Additional regressions exercise auto-pull and completed worktree setup against
 real checkouts with over 1 MB of expanded ignored dependency paths. They share
@@ -801,3 +801,26 @@ fails the two existing migration-recovery process-identity cases; the launcher
 suite reports its three existing failures before Turbo interrupts the server
 workspace. The web and shared workspaces pass. This is an outstanding gate, and
 process ownership checks have not been relaxed.
+
+## Current main integration continuation (2026-10-19)
+
+Main `83e054f412` is integrated without rewriting history. Conflict resolution
+retains the October settlement/watch cancellation and pending hook records along
+with main's durable archive queue pause, restore reconciliation and deleted-thread
+ownership checks. Main's explicit ignored-file confirmation, exact reviewed-change
+discard, project-root/active-thread checks and short orchestration maintenance
+locks remain in place. The relaxed environment-file-only ignored rule is a named
+internal policy for automatic settlement cleanup; storage maintenance and manual
+removal keep their own conservative and explicit-approval policies. Collapsed
+ignored folders, bounded protected-file scans, real truncation, index-preserving
+status and exact-head unused-branch deletion remain intact.
+
+The thread view retains the October media/quote/shell/PR/MCP-app behavior and main's
+MCP sign-in tray and runtime metadata actions. Both Git settings editors remain
+available. All 163 exhaustive Git cases and 146 Chromium cases across the actual
+thread view, PR confirmations and provider settings pass. The six targeted
+workflow/turn-admission/worktree suites pass 340 cases; the additional archive,
+settlement, storage and engine suites pass, with the two old policy-message
+expectations adjusted to the explicitly selected automatic policy. Formatting,
+lint and all eight typechecks pass. The required full command is repeated after
+integration; no process-identity failure is waived.

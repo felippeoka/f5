@@ -13292,3 +13292,101 @@ it.effect(
     }).pipe(Effect.provide(harness.layer));
   },
 );
+it.effect("reconnects external servers only when explicitly allowed", () => {
+  const harness = makeHarness();
+  const reconnect = vi.fn(async () => {});
+  Object.assign(harness.query, { reconnectMcpServer: reconnect });
+  harness.query.mcpServerStatusValue = [
+    { name: "external", status: "needs-auth", source: "claudeai" },
+  ];
+  return Effect.gen(function* () {
+    const adapter = yield* ClaudeAdapter;
+    yield* adapter.startSession({ threadId: THREAD_ID, runtimeMode: "full-access" });
+    assert.equal(
+      yield* adapter.reconnectMcpServer!({ threadId: THREAD_ID, serverName: "external" }),
+      false,
+    );
+    assert.equal(
+      yield* adapter.reconnectMcpServer!({
+        threadId: THREAD_ID,
+        serverName: "external",
+        allowExternal: true,
+      }),
+      true,
+    );
+    assert.equal(
+      yield* adapter.reconnectMcpServer!({
+        threadId: THREAD_ID,
+        serverName: "missing",
+        allowExternal: true,
+      }),
+      false,
+    );
+    assert.deepEqual(reconnect.mock.calls, [["external"]]);
+  }).pipe(Effect.provide(harness.layer));
+});
+it.effect("starts MCP sign-in for managed and external servers through the CLI", () => {
+  const harness = makeHarness();
+  const authenticate = vi.fn(async (serverName: string) =>
+    serverName === "connector"
+      ? { authUrl: "https://claude.ai/connect", requiresUserAction: true, callbackExpected: false }
+      : serverName === "ready"
+        ? { requiresUserAction: false, callbackExpected: false }
+        : {
+            authUrl: "https://auth.example.com/authorize?state=s",
+            requiresUserAction: true,
+            callbackExpected: true,
+            callbackPort: 4567,
+          },
+  );
+  Object.assign(harness.query, { mcpAuthenticate: authenticate });
+  harness.query.mcpServerStatusValue = [
+    { name: "docs", status: "needs-auth", source: "dynamic" },
+    { name: "connector", status: "needs-auth", source: "claudeai" },
+    { name: "ready", status: "needs-auth", source: "user" },
+  ];
+  return Effect.gen(function* () {
+    const adapter = yield* ClaudeAdapter;
+    yield* adapter.startSession({
+      threadId: THREAD_ID,
+      runtimeMode: "full-access",
+      providerOptions: { mcpServers: { docs: { type: "stdio", command: "node" } } },
+    });
+    assert.deepEqual(
+      yield* adapter.authenticateMcpServer!({ threadId: THREAD_ID, serverName: "docs" }),
+      {
+        authUrl: "https://auth.example.com/authorize?state=s",
+        callbackExpected: true,
+        ownership: "managed",
+      },
+    );
+    assert.deepEqual(
+      yield* adapter.authenticateMcpServer!({ threadId: THREAD_ID, serverName: "connector" }),
+      { authUrl: "https://claude.ai/connect", callbackExpected: false, ownership: "external" },
+    );
+    assert.deepEqual(
+      yield* adapter.authenticateMcpServer!({ threadId: THREAD_ID, serverName: "ready" }),
+      { callbackExpected: false, ownership: "external" },
+    );
+    const missing = yield* adapter.authenticateMcpServer!({
+      threadId: THREAD_ID,
+      serverName: "missing",
+    }).pipe(Effect.flip);
+    assert.include(missing.message, "not available in this conversation");
+    // No redirect URI: the CLI keeps its own localhost callback.
+    assert.deepEqual(authenticate.mock.calls, [["docs"], ["connector"], ["ready"]]);
+  }).pipe(Effect.provide(harness.layer));
+});
+it.effect("fails MCP sign-in cleanly when the Claude runtime lacks mcpAuthenticate", () => {
+  const harness = makeHarness();
+  harness.query.mcpServerStatusValue = [{ name: "docs", status: "needs-auth", source: "user" }];
+  return Effect.gen(function* () {
+    const adapter = yield* ClaudeAdapter;
+    yield* adapter.startSession({ threadId: THREAD_ID, runtimeMode: "full-access" });
+    const error = yield* adapter.authenticateMcpServer!({
+      threadId: THREAD_ID,
+      serverName: "docs",
+    }).pipe(Effect.flip);
+    assert.include(error.message, "does not support MCP sign-in");
+  }).pipe(Effect.provide(harness.layer));
+});

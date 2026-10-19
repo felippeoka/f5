@@ -25,6 +25,7 @@ const USER_ONLY_PROJECT_SETTING_KEYS: ReadonlySet<string> = new Set([
   "autoSettleAfterDays",
   "autoSettleKeepPullRequests",
   "worktreeCleanup",
+  "worktreeDisposablePaths",
   "autoPullDefaultBranch",
   // Capabilities that widen what an agent can reach must never come from a checked-in file.
   "previewExternalHosts",

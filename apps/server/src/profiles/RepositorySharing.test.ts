@@ -88,6 +88,12 @@ it("blocks shared-root changes for another profile's archived effective workspac
     await expect(
       assertExclusiveProfileCheckout({ defaultStateDir: state, profile: current }, checkout),
     ).rejects.toThrow(/could not be established/);
+    await expect(
+      assertNotOtherProfileManagedCheckout(
+        { defaultStateDir: state, profile: current, baseDir: root },
+        checkout,
+      ),
+    ).rejects.toThrow("Managed workspace ownership could not be established.");
   } finally {
     await FS.rm(root, { recursive: true, force: true });
   }

@@ -18,6 +18,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { toastManager } from "../ui/toast";
+import { WorktreeIgnoredFilesList } from "./WorktreeIgnoredFilesList";
 
 const classifications = {
   projectCheckout: "Project checkout",
@@ -187,6 +188,16 @@ function WorktreeRow({
                   ? inspection.data.blockedReasons.join("; ")
                   : "Safe to remove"}
               </p>
+              {inspection.data.ignoredFiles && (
+                <>
+                  <WorktreeIgnoredFilesList files={inspection.data.ignoredFiles} />
+                  {inspection.data.ignoredFiles.requiresApproval && !inspectOnly && (
+                    <p>
+                      Choose Remove… to review these paths and explicitly confirm their deletion.
+                    </p>
+                  )}
+                </>
+              )}
               <p>
                 {inspection.data.branchDeletable
                   ? "Branch may be deleted after removal."

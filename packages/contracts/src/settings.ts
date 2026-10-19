@@ -331,6 +331,12 @@ export const StorageCleanupSettings = Schema.Struct({
    * is on. Live threads keep their logs for transcript repair. Null keeps them.
    */
   terminalThreadLogsAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(() => 14)),
+  /**
+   * Hourly, remove clean, merged F5 worktrees that are orphaned or referenced
+   * only by archived threads, and prune missing worktree registrations. Needs
+   * `enabled`. Worktrees outside the F5 worktrees folder are never touched.
+   */
+  inactiveWorktrees: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
@@ -350,6 +356,7 @@ const StorageCleanupSettingsPatch = Schema.Struct({
   archivedThreadsPurgeAfterDays: Schema.optionalKey(StorageRetentionDays),
   deletedThreadsPurgeAfterDays: Schema.optionalKey(StorageRetentionDays),
   terminalThreadLogsAfterDays: Schema.optionalKey(StorageRetentionDays),
+  inactiveWorktrees: Schema.optionalKey(Schema.Boolean),
 });
 
 /** User-only allowlist of non-loopback hosts agents may open in the F5 preview. */
@@ -357,6 +364,15 @@ export const PreviewExternalHosts = Schema.Array(
   TrimmedNonEmptyString.check(Schema.isMaxLength(253 + "http://".length)),
 ).check(Schema.isMaxLength(200));
 export type PreviewExternalHosts = typeof PreviewExternalHosts.Type;
+
+/**
+ * Repo-relative globs (`**`, `*`, `?`, trailing `/` for a directory) whose
+ * uncommitted changes Storage cleanup may discard when removing a worktree.
+ */
+export const WorktreeDisposablePaths = Schema.Array(
+  TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
+).check(Schema.isMaxLength(100));
+export type WorktreeDisposablePaths = typeof WorktreeDisposablePaths.Type;
 
 export const ComputerUseExecutionMode = Schema.Literals(["foreground", "background"]);
 export type ComputerUseExecutionMode = typeof ComputerUseExecutionMode.Type;
@@ -389,6 +405,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
     Schema.NullOr(Schema.Literals(["squash", "merge", "rebase"])),
   ),
   worktreeCleanup: Schema.optionalKey(Schema.NullOr(WorktreeCleanup)),
+  worktreeDisposablePaths: Schema.optionalKey(WorktreeDisposablePaths),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
   previewExternalHosts: Schema.optionalKey(PreviewExternalHosts),
   enableClaudeInChrome: Schema.optionalKey(Schema.Boolean),
@@ -450,6 +467,8 @@ export const ServerSettings = Schema.Struct({
   storageCleanup: StorageCleanupSettings.pipe(Schema.withDecodingDefault(() => ({}))),
   /** Project-scopable worktree cleanup policy; null uses `storageCleanup.worktree`. */
   worktreeCleanup: Schema.NullOr(WorktreeCleanup).pipe(Schema.withDecodingDefault(() => null)),
+  /** Changes Storage cleanup may discard when removing a worktree. Empty discards nothing. */
+  worktreeDisposablePaths: WorktreeDisposablePaths.pipe(Schema.withDecodingDefault(() => [])),
   /** Fast-forward clean default branches in the background. Off by default. */
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   /** Non-loopback hosts agents may open in the preview. Empty keeps the preview localhost-only. */
@@ -616,6 +635,7 @@ export const ServerSettingsPatch = Schema.Struct({
   scheduledBackupsEnabled: Schema.optionalKey(Schema.Boolean),
   storageCleanup: Schema.optionalKey(StorageCleanupSettingsPatch),
   worktreeCleanup: Schema.optionalKey(Schema.NullOr(WorktreeCleanup)),
+  worktreeDisposablePaths: Schema.optionalKey(WorktreeDisposablePaths),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
   previewExternalHosts: Schema.optionalKey(PreviewExternalHosts),
   enableClaudeInChrome: Schema.optionalKey(Schema.Boolean),
@@ -673,6 +693,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "enableAssistantStreaming",
   "prHubDefaultMergeMethod",
   "worktreeCleanup",
+  "worktreeDisposablePaths",
   "enableAgentBrowserAccess",
   "previewExternalHosts",
   "enableClaudeInChrome",

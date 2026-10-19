@@ -105,7 +105,7 @@ export function workflowArchiveFixture(kind: "planning" | "codeReview" | "invest
       worktreePath: null,
       createdAt,
     }).model;
-  // Builders are discriminated by kind above; JSON decoding here exercises the wire schema too.
+  // Builders are discriminated by kind above; install the corresponding typed record.
   if (kind === "planning")
     model = {
       ...model,

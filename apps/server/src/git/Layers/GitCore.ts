@@ -1,13 +1,9 @@
 import { gitConfigArgs, literalGitPathspec } from "@t3tools/shared/git";
 import { makeMoveSnapshotOperations } from "../moveSnapshot.ts";
 import { checkoutFingerprint } from "../checkoutFingerprint.ts";
-
+import { blockingIgnoredEntries } from "../worktreeIgnoredFiles.ts";
 import { createHash } from "node:crypto";
-import {
-  isManualRemovalIgnoredBlocker,
-  isProtectedIgnoredPath,
-  parseCleanupSafetyStatus,
-} from "../cleanupSafety.ts";
+import { parseCleanupSafetyStatus } from "../cleanupSafety.ts";
 import { basename, dirname } from "node:path";
 import {
   WorktreePreparations,
@@ -107,6 +103,11 @@ interface ExecuteGitOptions {
   fallbackErrorMessage?: string | undefined;
   env?: NodeJS.ProcessEnv | undefined;
   onStderrChunk?: ((chunk: Uint8Array) => void) | undefined;
+}
+
+function sameStringSet(left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean {
+  const expected = new Set(right);
+  return new Set(left).size === expected.size && left.every((value) => expected.has(value));
 }
 
 function parseBranchAb(value: string): { ahead: number; behind: number } {
@@ -2556,7 +2557,8 @@ const makeGitCore = Effect.gen(function* () {
         // Stream the index: ordinary repositories can exceed the buffered output cap.
         // Retain only gitlinks and the current (possibly split) NUL-delimited record.
         const gitlinks: string[] = [];
-        const indexFingerprint = options?.recoveryFingerprint ? createHash("sha256") : null;
+        const indexFingerprint =
+          options?.recoveryFingerprint || options?.changesFingerprint ? createHash("sha256") : null;
         const decoder = new TextDecoder();
         let pending = "";
         yield* git.execute({
@@ -2609,11 +2611,13 @@ const makeGitCore = Effect.gen(function* () {
             )).stdout
           : "";
         const changedPaths: string[] = [];
+        const untrackedPaths: string[] = [];
         const records = status.split("\0");
         for (let i = 0; i < records.length; i++) {
           const record = records[i]!;
           if (!record) continue;
           changedPaths.push(record.slice(3));
+          if (record.startsWith("??")) untrackedPaths.push(record.slice(3));
           if (!record.startsWith("??")) {
             if (/^[RC]|^.[RC]/.test(record)) {
               if (records[i + 1]) changedPaths.push(records[i + 1]!);
@@ -2621,6 +2625,16 @@ const makeGitCore = Effect.gen(function* () {
             }
           }
         }
+        const indexDigest = indexFingerprint?.digest() ?? new Uint8Array();
+        // Only the changed paths: ignored build output can hold far more files than fit the
+        // budget. The index is included so content staged after review is detected too.
+        const changesFingerprint = options?.changesFingerprint
+          ? yield* Effect.tryPromise({
+              try: () => checkoutFingerprint(cwd, changedPaths, indexDigest, status),
+              catch: (cause) =>
+                createGitCommandError("GitCore.inspectCheckout", cwd, [], String(cause)),
+            })
+          : null;
         if (options?.recoveryFingerprint && safety.ignoredTruncated)
           return yield* createGitCommandError(
             "GitCore.inspectCheckout",
@@ -2628,13 +2642,13 @@ const makeGitCore = Effect.gen(function* () {
             [],
             "The ignored-file listing is incomplete; recovery inspection cannot verify all local files.",
           );
-        const localFingerprint = indexFingerprint
+        const localFingerprint = options?.recoveryFingerprint
           ? yield* Effect.tryPromise({
               try: () =>
                 checkoutFingerprint(
                   cwd,
                   [...changedPaths, ...safety.ignoredEntries],
-                  indexFingerprint.digest(),
+                  indexDigest,
                   status,
                 ),
               catch: (cause) =>
@@ -2677,6 +2691,9 @@ const makeGitCore = Effect.gen(function* () {
           hasInitializedSubmodules,
           hasTrackedChanges,
           hasUntrackedChanges,
+          changedPaths,
+          untrackedPaths,
+          ...(changesFingerprint ? { changesFingerprint } : {}),
           ignoredEntries: safety.ignoredEntries,
           ignoredTruncated: safety.ignoredTruncated,
           upstreamRef,
@@ -3021,7 +3038,10 @@ const makeGitCore = Effect.gen(function* () {
           ["worktree", "remove", "--", input.path],
           `The target ${input.path} is not an unlocked linked worktree.`,
         );
-      const inspection = yield* inspectCheckout(target);
+      const inspection = yield* inspectCheckout(
+        target,
+        input.discardChanges ? { changesFingerprint: true } : undefined,
+      );
       if (inspection.hasInitializedSubmodules)
         return yield* createGitCommandError(
           "GitCore.removeWorktree",
@@ -3030,20 +3050,22 @@ const makeGitCore = Effect.gen(function* () {
           "Initialized submodules prevent safe removal. Deinitialize them after preserving their local work, then retry.",
         );
       const expectedCommon = yield* resolveCommonDir(input.cwd).pipe(Effect.flatMap(canonicalPath));
+      const hasChanges = inspection.hasTrackedChanges || inspection.hasUntrackedChanges;
+      // Discarding is allowed only for the exact reviewed change set, unchanged since review.
+      const discardsReviewedChanges =
+        hasChanges &&
+        input.discardChanges !== undefined &&
+        inspection.changesFingerprint === input.discardChanges.fingerprint &&
+        sameStringSet(inspection.changedPaths ?? [], input.discardChanges.paths);
       if (
         inspection.commonDir !== expectedCommon ||
         inspection.canonicalRoot !== target ||
         inspection.registration?.canonicalPath !== target ||
-        inspection.branch === null ||
+        (inspection.branch === null && input.allowDetachedHead !== true) ||
         inspection.operation !== null ||
-        inspection.hasTrackedChanges ||
-        inspection.hasUntrackedChanges ||
+        (hasChanges && !discardsReviewedChanges) ||
         inspection.ignoredTruncated ||
-        inspection.ignoredEntries.some(
-          input.ignoredPolicy === "automatic"
-            ? isProtectedIgnoredPath
-            : isManualRemovalIgnoredBlocker,
-        )
+        blockingIgnoredEntries(inspection.ignoredEntries, input.ignoredFiles).length > 0
       ) {
         return yield* createGitCommandError(
           "GitCore.removeWorktree",
@@ -3051,6 +3073,35 @@ const makeGitCore = Effect.gen(function* () {
           ["worktree", "remove", "--", input.path],
           "Checkout identity, local changes, or protected ignored files prevent removal.",
         );
+      }
+      if (discardsReviewedChanges) {
+        // Discard exactly the reviewed paths instead of forcing removal: a file
+        // an editor or watcher writes after the review stays a local change, and
+        // the plain `worktree remove` below then refuses.
+        const untracked = new Set(inspection.untrackedPaths ?? []);
+        const tracked = (inspection.changedPaths ?? []).filter((path) => !untracked.has(path));
+        if (tracked.length > 0)
+          yield* executeGit(
+            "GitCore.removeWorktree.restore",
+            target,
+            [
+              "--literal-pathspecs",
+              "restore",
+              "--source=HEAD",
+              "--staged",
+              "--worktree",
+              "--",
+              ...tracked,
+            ],
+            { timeoutMs: 60_000 },
+          );
+        if (untracked.size > 0)
+          yield* executeGit(
+            "GitCore.removeWorktree.clean",
+            target,
+            ["--literal-pathspecs", "clean", "-f", "-q", "--", ...untracked],
+            { timeoutMs: 60_000 },
+          );
       }
       yield* executeGit(
         "GitCore.removeWorktree",
@@ -3062,7 +3113,15 @@ const makeGitCore = Effect.gen(function* () {
           "--",
           entry.path,
         ],
-        { timeoutMs: 300_000 },
+        {
+          timeoutMs: 300_000,
+          ...(discardsReviewedChanges
+            ? {
+                fallbackErrorMessage:
+                  "The reviewed changes were discarded, but new local changes appeared, so the worktree was kept.",
+              }
+            : {}),
+        },
       );
       yield* finishRemoval;
     });

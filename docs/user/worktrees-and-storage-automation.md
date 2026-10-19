@@ -41,6 +41,13 @@ Deleting conversations opens one removal dialog for their worktrees. Unsafe rows
 **Keep all** leaves every checkout in place. Branch deletion is optional and preselected only for
 merged branches.
 
+Manual removal lists every ignored file and folder, including build outputs and local configuration.
+This deliberately includes `node_modules/`: manual removal requires confirmation even when that is
+the only ignored folder. Confirm each checkout separately, including in bulk conversation deletion.
+Check **Also delete the ignored files and folders listed above** to include them in removal.
+Deleting a listed folder deletes everything inside it. If a removal recheck finds another ignored
+path, the dialog refreshes the list and requires confirmation again. An incomplete list blocks removal.
+
 If a thread's worktree goes missing, F5 never quietly moves the thread into the project checkout.
 Use **Recreate now** (the branch still exists), **Recreate from the default branch** (it doesn't),
 or **Continue in project checkout**. A checkout found on a different branch is kept untouched and
@@ -56,10 +63,11 @@ Restoring a backup takes effect on restart.
 ## Good to know
 
 > [!NOTE]
-> F5 never removes a worktree that has uncommitted, untracked or ignored files (other than
-> `node_modules/`), initialized submodules, an open terminal or provider session, queued turns,
+> F5 never removes a worktree that has uncommitted or untracked files, initialized submodules,
+> an open terminal or provider session, queued turns,
 > or an active turn in another conversation using it. Automatic cleanup always keeps the branch,
-> so the next message recreates the worktree.
+> so the next message recreates the worktree. Automatic cleanup also keeps ignored files other
+> than `node_modules/`; deleting ignored files requires confirmation through manual removal.
 
 - Cleanup and auto-pull can be set per project, but never from a checked-in `f5.json`.
 - If F5 restarts mid-setup, the setup shows as failed and nothing is removed.

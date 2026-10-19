@@ -178,7 +178,10 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
         return yield* Effect.fail(
           new Error("Confirm sharing this checkout's filesystem with the linked conversations."),
         );
-      if (inPlace) yield* Effect.tryPromise(() => assertExclusiveProfileCheckout(config, path));
+      if (inPlace)
+        yield* Effect.tryPromise(() => assertExclusiveProfileCheckout(config, path)).pipe(
+          Effect.mapError((error) => (error.cause instanceof Error ? error.cause : error)),
+        );
     });
   // Project root first when needed; remaining path locks are acquired in canonical order.
   const locked = <A, E, R>(record: WorkspaceTransitionRecord, effect: Effect.Effect<A, E, R>) =>

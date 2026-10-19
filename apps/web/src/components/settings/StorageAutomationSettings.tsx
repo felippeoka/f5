@@ -188,6 +188,23 @@ export function StorageAutomationSettings() {
         />
         <label className="flex items-center justify-between gap-4 py-2 text-sm">
           <span>
+            Remove inactive F5 worktrees and prune missing entries hourly
+            <span className="block text-xs text-muted-foreground">
+              Runs the Storage cleanup below for merged or pushed worktrees that are orphaned or
+              used only by archived threads. Build output and each project's disposable paths are
+              discarded, and a merged branch is deleted unless an archived thread uses it. Worktrees
+              outside F5's worktrees folder are never removed automatically.
+            </span>
+          </span>
+          <Switch
+            aria-label="Remove inactive F5 worktrees hourly"
+            checked={storageCleanup.inactiveWorktrees}
+            disabled={rulesDisabled}
+            onCheckedChange={(inactiveWorktrees) => saveCleanup({ inactiveWorktrees })}
+          />
+        </label>
+        <label className="flex items-center justify-between gap-4 py-2 text-sm">
+          <span>
             Delete provider logs after
             <span className="block text-xs text-muted-foreground">
               Per-thread agent logs and rotated event logs.

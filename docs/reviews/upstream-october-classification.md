@@ -5,8 +5,8 @@ This artifact tracks triage separately from delivery. `scripts/upstream-ports.js
 ## Current review handoff (2026-10-19)
 
 Implementation is on `fix/upstream-october-review` in the isolated checkout
-`../f5-upstream-october-review`. Main `f711d43051` was merged additively in
-`401725257a`; user work in the original checkout remains intact. The implementation
+`../f5-upstream-october-review`. Main `83e054f412` is integrated additively after the preceding `f711d43051`
+merge; user work in the original checkout remains intact. The implementation
 through `abaaa91e91` includes guided reviews, scoped thread tools, HTML renders,
 manual GitHub reset waits, durable PR watches, persisted settlement, Codex MCP apps
 and per-project provider policy. The current continuation adds PR review filters,

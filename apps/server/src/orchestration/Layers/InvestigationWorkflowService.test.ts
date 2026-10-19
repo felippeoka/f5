@@ -833,27 +833,35 @@ describe("InvestigationWorkflowService", () => {
     ).rejects.toThrow("Investigation investigator models must be different.");
   });
 
-  it("recreates missing initial investigation threads during reconciliation", async () => {
-    const workflow = makeWorkflow();
-    harness = await createHarness(makeReadModel({ workflow }));
+  it.each(["startup", "restore"])(
+    "recreates missing initial investigation threads during %s reconciliation",
+    async (mode) => {
+      const workflow = makeWorkflow();
+      harness = await createHarness(makeReadModel({ workflow }));
 
-    await harness.start();
+      if (mode === "restore") {
+        await Effect.runPromise(harness.service.archiveWorkflow(workflow.id));
+        await Promise.all([
+          Effect.runPromise(harness.service.unarchiveWorkflow(workflow.id)),
+          Effect.runPromise(harness.service.unarchiveWorkflow(workflow.id)),
+        ]);
+      } else await harness.start();
 
-    const investigationCreates = threadCreateCommands(harness.dispatched).filter((command) =>
-      command.title.startsWith("Investigator "),
-    );
-    expect(investigationCreates.map((command) => command.threadId)).toEqual([
-      "investigator-a",
-      "investigator-b",
-    ]);
-    expect(threadTurnStartCommands(harness.dispatched).map((command) => command.threadId)).toEqual([
-      "investigator-a",
-      "investigator-b",
-    ]);
-    const reconciled = harness.getSnapshot().investigationWorkflows[0]!;
-    expect(reconciled.investigatorA.investigationStatus).toBe("running");
-    expect(reconciled.investigatorB.investigationStatus).toBe("running");
-  });
+      const investigationCreates = threadCreateCommands(harness.dispatched).filter((command) =>
+        command.title.startsWith("Investigator "),
+      );
+      expect(investigationCreates.map((command) => command.threadId)).toEqual([
+        "investigator-a",
+        "investigator-b",
+      ]);
+      expect(
+        threadTurnStartCommands(harness.dispatched).map((command) => command.threadId),
+      ).toEqual(["investigator-a", "investigator-b"]);
+      const reconciled = harness.getSnapshot().investigationWorkflows[0]!;
+      expect(reconciled.investigatorA.investigationStatus).toBe("running");
+      expect(reconciled.investigatorB.investigationStatus).toBe("running");
+    },
+  );
 
   it("maps all owned threads back to workflow labels", async () => {
     const workflow = makeCompletedInvestigationWorkflow({
@@ -1154,38 +1162,47 @@ describe("InvestigationWorkflowService", () => {
     ).toContain("Retry Context");
   });
 
-  it("reconciles completed investigations into running cross-reviews without stale snapshot errors", async () => {
-    const workflow = makeCompletedInvestigationWorkflow();
-    harness = await createHarness(
-      makeReadModel({
-        workflow,
-        threads: [
-          makeReportThread({
-            threadId: workflow.investigatorA.investigationThreadId,
-            messageId: "message-investigation-a",
-            turnId: "turn-investigation-a",
-            text: "Investigation A report",
-          }),
-          makeReportThread({
-            threadId: workflow.investigatorB.investigationThreadId,
-            messageId: "message-investigation-b",
-            turnId: "turn-investigation-b",
-            text: "Investigation B report",
-          }),
-        ],
-      }),
-    );
+  it.each(["startup", "restore"])(
+    "reconciles completed investigations into cross-reviews after %s",
+    async (mode) => {
+      const workflow = makeCompletedInvestigationWorkflow();
+      harness = await createHarness(
+        makeReadModel({
+          workflow,
+          threads: [
+            makeReportThread({
+              threadId: workflow.investigatorA.investigationThreadId,
+              messageId: "message-investigation-a",
+              turnId: "turn-investigation-a",
+              text: "Investigation A report",
+            }),
+            makeReportThread({
+              threadId: workflow.investigatorB.investigationThreadId,
+              messageId: "message-investigation-b",
+              turnId: "turn-investigation-b",
+              text: "Investigation B report",
+            }),
+          ],
+        }),
+      );
 
-    await harness.start();
+      if (mode === "restore") {
+        await Effect.runPromise(harness.service.archiveWorkflow(workflow.id));
+        await Promise.all([
+          Effect.runPromise(harness.service.unarchiveWorkflow(workflow.id)),
+          Effect.runPromise(harness.service.unarchiveWorkflow(workflow.id)),
+        ]);
+      } else await harness.start();
 
-    const reconciled = harness.getSnapshot().investigationWorkflows[0]!;
-    expect(reconciled.investigatorA.crossReviewStatus).toBe("running");
-    expect(reconciled.investigatorA.error).toBeNull();
-    expect(reconciled.investigatorA.crossReviewThreadId).not.toBeNull();
-    expect(reconciled.investigatorB.crossReviewStatus).toBe("running");
-    expect(reconciled.investigatorB.error).toBeNull();
-    expect(reconciled.investigatorB.crossReviewThreadId).not.toBeNull();
-  });
+      const reconciled = harness.getSnapshot().investigationWorkflows[0]!;
+      expect(reconciled.investigatorA.crossReviewStatus).toBe("running");
+      expect(reconciled.investigatorA.error).toBeNull();
+      expect(reconciled.investigatorA.crossReviewThreadId).not.toBeNull();
+      expect(reconciled.investigatorB.crossReviewStatus).toBe("running");
+      expect(reconciled.investigatorB.error).toBeNull();
+      expect(reconciled.investigatorB.crossReviewThreadId).not.toBeNull();
+    },
+  );
 
   it("starts own-model reviews in parallel with cross-reviews when enabled", async () => {
     const workflow = makeCompletedInvestigationWorkflow({ selfReviewEnabled: true });

@@ -3760,6 +3760,134 @@ it.effect(
     );
   },
 );
+it.effect("routes MCP sign-in to the requested or default-selected live conversation", () => {
+  const fake = makeFakeCodexAdapter();
+  fake.hasSession.mockImplementation(() => Effect.succeed(true));
+  const calls: Array<{ threadId: ThreadId; serverName: string }> = [];
+  const adapter = {
+    ...fake.adapter,
+    authenticateMcpServer: (input: { threadId: ThreadId; serverName: string }) =>
+      Effect.sync(() => {
+        calls.push(input);
+        return {
+          authUrl: "https://auth.example.test/authorize",
+          callbackExpected: true,
+          ownership: "external" as const,
+        };
+      }),
+  };
+  return Effect.gen(function* () {
+    const service = yield* ProviderService;
+    const directory = yield* ProviderSessionDirectory;
+    const projectId = ProjectId.make("sign-in-project"),
+      instanceId = ProviderInstanceId.make("claudeAgent");
+    for (const [name, version] of [
+      ["current", "desired"],
+      ["newer-stale", "stale"],
+    ])
+      yield* directory.upsert({
+        threadId: asThreadId(name!),
+        provider: "claudeAgent",
+        providerInstanceId: instanceId,
+        projectId,
+        status: "running",
+        mcpEffectiveConfigVersion: version!,
+        runtimePayload: { sessionGeneration: 4 },
+      });
+    const input = {
+      provider: "claudeAgent" as const,
+      projectId,
+      instanceId,
+      serverName: "docs",
+      desiredVersion: "desired",
+    };
+    const selected = yield* service.authenticateMcpServerForProject!(input);
+    assert.deepEqual(selected, {
+      authUrl: "https://auth.example.test/authorize",
+      callbackExpected: true,
+      ownership: "external",
+      threadId: asThreadId("current"),
+      instanceId,
+      generation: 4,
+    });
+    const targeted = yield* service.authenticateMcpServerForProject!({
+      ...input,
+      threadId: asThreadId("newer-stale"),
+    });
+    assert.equal(targeted.threadId, asThreadId("newer-stale"));
+    const outOfScope = yield* service.authenticateMcpServerForProject!({
+      ...input,
+      threadId: asThreadId("not-in-scope"),
+    }).pipe(Effect.flip);
+    assert.include(outOfScope.message, "not running");
+    const wrongProject = yield* service.authenticateMcpServerForProject!({
+      ...input,
+      projectId: ProjectId.make("other-project"),
+      threadId: asThreadId("current"),
+    }).pipe(Effect.flip);
+    assert.include(wrongProject.message, "not running");
+    const noSession = yield* service.authenticateMcpServerForProject!({
+      ...input,
+      projectId: ProjectId.make("empty-project"),
+    }).pipe(Effect.flip);
+    assert.include(noSession.message, "Start a conversation in this project");
+    const lookup = { provider: "claudeAgent" as const, projectId, instanceId };
+    assert.equal(
+      (yield* service.getLiveMcpSession!({ ...lookup, threadId: asThreadId("current") }))
+        ?.generation,
+      4,
+    );
+    assert.equal(
+      yield* service.getLiveMcpSession!({ ...lookup, threadId: asThreadId("not-in-scope") }),
+      undefined,
+    );
+    assert.deepEqual(calls, [
+      { threadId: asThreadId("current"), serverName: "docs" },
+      { threadId: asThreadId("newer-stale"), serverName: "docs" },
+    ]);
+  }).pipe(Effect.provide(makeProviderServiceLayerForAdapters(new Map([["claudeAgent", adapter]]))));
+});
+it.effect("reconnects external servers by exact name and skips excluded conversations", () => {
+  const fake = makeFakeCodexAdapter();
+  fake.hasSession.mockImplementation(() => Effect.succeed(true));
+  const reconnect = vi.fn(
+    (_input: { threadId: ThreadId; serverName: string; allowExternal?: boolean }) =>
+      Effect.succeed(true),
+  );
+  const adapter = {
+    ...fake.adapter,
+    reconnectMcpServer: reconnect,
+    getOwnedMcpServerNames: () => Effect.succeed([] as string[]),
+  };
+  return Effect.gen(function* () {
+    const service = yield* ProviderService;
+    const directory = yield* ProviderSessionDirectory;
+    const projectId = ProjectId.make("external-reconnect"),
+      instanceId = ProviderInstanceId.make("claudeAgent");
+    for (const id of ["source", "sibling"])
+      yield* directory.upsert({
+        threadId: asThreadId(id),
+        projectId,
+        provider: "claudeAgent",
+        providerInstanceId: instanceId,
+        status: "running",
+        runtimePayload: { sessionGeneration: 1 },
+      });
+    const input = { provider: "claudeAgent" as const, projectId, instanceId, serverName: "linear" };
+    const managedOnly = yield* service.reconnectMcpServerForProject!(input);
+    assert.equal(managedOnly.sessionsReconnected, 0);
+    assert.equal(reconnect.mock.calls.length, 0);
+    const result = yield* service.reconnectMcpServerForProject!({
+      ...input,
+      allowExternal: true,
+      excludeThreadIds: [asThreadId("source")],
+    });
+    assert.equal(result.sessionsReconnected, 1);
+    assert.deepEqual(reconnect.mock.calls, [
+      [{ threadId: asThreadId("sibling"), serverName: "linear", allowExternal: true }],
+    ]);
+  }).pipe(Effect.provide(makeProviderServiceLayerForAdapters(new Map([["claudeAgent", adapter]]))));
+});
 it.effect("stamps MCP runtime activity with the live binding's account and generation", () => {
   const fake = makeFakeCodexAdapter();
   return Effect.gen(function* () {

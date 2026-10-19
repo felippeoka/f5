@@ -1,9 +1,13 @@
 import { WorkspaceRequiresNewWorktreeError } from "../git/workspaceSwitch.ts";
 import { stripPathTerminator } from "../git/worktreeList.ts";
+import { canonicalWorktreePath } from "../git/worktreePaths.ts";
+import { pathContains } from "../project/Layers/WorktreeLifecycleCoordinator.ts";
 import * as FS from "node:fs/promises";
 import * as Path from "node:path";
 import type { ProfileSummary } from "@t3tools/contracts";
+import { profileStateDir } from "@t3tools/shared/profilePaths";
 import { executionDirectoryIssue } from "./executionDirectory";
+import { ProfileRegistryStore } from "./ProfileRegistryStore.ts";
 
 export async function invalidExecutionDirectories(stateDir: string) {
   const file = Path.join(stateDir, "state.sqlite");
@@ -111,9 +115,6 @@ export async function assertExclusiveProfileCheckout(
   checkout: string,
 ): Promise<void> {
   if (!config.defaultStateDir || !config.profile) return;
-  const { ProfileRegistryStore } = await import("./ProfileRegistryStore.ts");
-  const { profileStateDir } = await import("@t3tools/shared/profilePaths");
-  const { canonicalWorktreePath } = await import("../git/worktreePaths.ts");
   const registry = await new ProfileRegistryStore(config.defaultStateDir).read();
   if (!registry.ok) throw new Error("Other-profile checkout ownership could not be established.");
   const target = await canonicalWorktreePath(checkout);
@@ -154,9 +155,6 @@ export async function readOtherProfileManagedRoots(
   config: Pick<import("../config.ts").ServerConfigShape, "defaultStateDir" | "profile" | "baseDir">,
 ): Promise<string[]> {
   if (!config.defaultStateDir || !config.profile) return [];
-  const { ProfileRegistryStore } = await import("./ProfileRegistryStore.ts");
-  const { profileStateDir } = await import("@t3tools/shared/profilePaths");
-  const { canonicalWorktreePath } = await import("../git/worktreePaths.ts");
   const registry = await new ProfileRegistryStore(config.defaultStateDir).read();
   if (!registry.ok) throw new Error("Managed workspace ownership could not be established.");
   return Promise.all(
@@ -179,8 +177,6 @@ export async function assertNotOtherProfileManagedCheckout(
   checkout: string,
 ): Promise<void> {
   if (!config.defaultStateDir || !config.profile) return;
-  const { canonicalWorktreePath } = await import("../git/worktreePaths.ts");
-  const { pathContains } = await import("../project/Layers/WorktreeLifecycleCoordinator.ts");
   const roots = await readOtherProfileManagedRoots(config);
   const target = await canonicalWorktreePath(checkout);
   if (roots.some((root) => pathContains(root, target)))

@@ -23,14 +23,27 @@ import {
   type McpGetProviderStatusRequest,
   type McpGetServerStatusesRequest,
   type McpLoginStatusResult,
+  type McpOauthLoginStatusResult,
   type McpProviderStatusResult,
   type McpServerStatusesResult,
   type McpStartLoginRequest,
   type McpStatusUpdatedReason,
   type McpServerDefinition,
   type ProviderStartOptions,
+  type ThreadId,
 } from "@t3tools/contracts";
-import { Effect, FiberSet, FileSystem, Layer, Option, Path, Schema, ServiceMap } from "effect";
+import {
+  Clock,
+  Effect,
+  Exit,
+  FiberSet,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Schema,
+  ServiceMap,
+} from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { CodexControlClientRegistry } from "../codex/CodexControlClientRegistry.ts";
@@ -57,6 +70,11 @@ import {
 
 const LOGIN_TIMEOUT_MS = 5 * 60_000;
 const LOGIN_STATUS_RETENTION_MS = 10 * 60_000;
+/** Claude's CLI completes OAuth itself; F5 only watches the source session for the result. */
+const CLAUDE_LOGIN_POLL_MS = 2_000;
+/** claude.ai connectors authorize on claude.ai without a callback, so F5 retries the connection. */
+const CLAUDE_CONNECTOR_RECONNECT_MS = 5_000;
+const CLAUDE_CONNECTOR_RECONNECT_MAX_MS = 30_000;
 const WINDOWS_SHELL_META_PATTERN = /[&|><^%!`"'\r\n]/u;
 const WINDOWS_SAFE_SERVER_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/u;
 const WINDOWS_SAFE_SCOPE_PATTERN = /^[A-Za-z0-9_./:-]+$/u;
@@ -734,12 +752,369 @@ const makeMcpRuntimeService = Effect.gen(function* () {
       return pendingStatus;
     });
 
+  const sanitizeLoginMessage = (input: McpStartLoginRequest, message: string) =>
+    readRedactionContext(input).pipe(
+      Effect.map(({ servers, additionalValues }) =>
+        createMcpDiagnosticsSanitizer(servers, additionalValues)
+          .text(message)
+          .trim()
+          .slice(0, 2000),
+      ),
+      Effect.orElseSucceed(() => ""),
+      Effect.map((text) => text || "MCP sign-in failed."),
+    );
+
+  const reconnectClaudeSessionsAfterLogin = (
+    input: McpStartLoginRequest & {
+      readonly serverName: string;
+      readonly instanceId: ProviderInstanceId;
+    },
+    ownership: "managed" | "external",
+    excludeThreadId?: ThreadId,
+  ) =>
+    providerService.reconnectMcpServerForProject
+      ? providerService
+          .reconnectMcpServerForProject({
+            provider: "claudeAgent",
+            projectId: input.projectId,
+            instanceId: input.instanceId,
+            serverName: input.serverName,
+            ...(ownership === "external" ? { allowExternal: true } : {}),
+            ...(excludeThreadId ? { excludeThreadIds: [excludeThreadId] } : {}),
+          })
+          .pipe(
+            Effect.flatMap((result) =>
+              result.failures.length > 0
+                ? Effect.logWarning(
+                    "Claude MCP sign-in succeeded but some sessions did not reconnect.",
+                    {
+                      projectId: input.projectId,
+                      instanceId: input.instanceId,
+                      failedSessions: result.failures.length,
+                    },
+                  )
+                : Effect.void,
+            ),
+            Effect.catch((cause) =>
+              Effect.logWarning(
+                "Claude MCP sign-in succeeded but reconnecting other sessions failed.",
+                { cause, projectId: input.projectId, instanceId: input.instanceId },
+              ),
+            ),
+          )
+      : Effect.void;
+
+  const watchClaudeServerLogin = (
+    input: McpStartLoginRequest & {
+      readonly serverName: string;
+      readonly instanceId: ProviderInstanceId;
+    },
+    attempt: McpLoginStatusResult,
+    started: {
+      readonly threadId: ThreadId;
+      readonly generation: number;
+      readonly callbackExpected: boolean;
+      readonly ownership: "managed" | "external";
+    },
+    desiredVersion: string,
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const key = loginStatusKey(input);
+      // A newer attempt (or retention expiry) replaces the stored status and ends this watcher.
+      const isCurrent = () => loginStatuses.get(key) === attempt;
+      const fail = (error: string) =>
+        Effect.sync(() => {
+          if (!isCurrent()) return;
+          setLoginStatus(input, { ...attempt, status: "failed", completedAt: nowIso(), error });
+        });
+      const ended = "The conversation ended before sign-in completed.";
+      const startedAtMs = yield* Clock.currentTimeMillis;
+      const deadline = startedAtMs + LOGIN_TIMEOUT_MS;
+      let reconnectDelayMs = CLAUDE_CONNECTOR_RECONNECT_MS;
+      let nextReconnectAtMs = startedAtMs + reconnectDelayMs;
+      while ((yield* Clock.currentTimeMillis) < deadline) {
+        yield* Effect.sleep(CLAUDE_LOGIN_POLL_MS);
+        if (!isCurrent()) return;
+        if (!providerService.readMcpSessionStatuses)
+          return yield* fail("This provider runtime cannot report MCP status.");
+        const live = yield* providerService
+          .readMcpSessionStatuses({
+            provider: "claudeAgent",
+            projectId: input.projectId,
+            instanceId: input.instanceId,
+            threadId: started.threadId,
+            desiredVersion,
+          })
+          .pipe(Effect.option);
+        if (!isCurrent()) return;
+        const selected = Option.isSome(live) ? live.value.selected : undefined;
+        if (selected && selected.generation !== started.generation) return yield* fail(ended);
+        if (Option.isNone(live) || !selected) {
+          // Reads also fail transiently (timeouts, superseded observations, a newly applied
+          // config version). Only a missing or replaced session ends the attempt.
+          const session = providerService.getLiveMcpSession
+            ? yield* providerService
+                .getLiveMcpSession({
+                  provider: "claudeAgent",
+                  projectId: input.projectId,
+                  instanceId: input.instanceId,
+                  threadId: started.threadId,
+                })
+                .pipe(Effect.option)
+            : Option.none();
+          if (!isCurrent()) return;
+          if (
+            Option.isSome(session) &&
+            (!session.value || session.value.generation !== started.generation)
+          )
+            return yield* fail(ended);
+          continue;
+        }
+        const server = live.value.observation?.servers.find(
+          (entry) => entry.name === input.serverName,
+        );
+        if (server?.status === "connected") {
+          setLoginStatus(input, { ...attempt, status: "completed", completedAt: nowIso() });
+          yield* publishLoginCompletion({
+            provider: "claudeAgent",
+            projectId: input.projectId,
+            instanceId: input.instanceId,
+            configVersion: desiredVersion,
+          });
+          yield* reconnectClaudeSessionsAfterLogin(input, started.ownership, started.threadId);
+          return;
+        }
+        if (server?.status === "failed")
+          return yield* fail(
+            yield* sanitizeLoginMessage(
+              input,
+              server.error ?? "The server failed to connect after sign-in.",
+            ),
+          );
+        // claude.ai connectors never call back. Retry the connection with backoff, and never
+        // while a turn is running, since a reconnect holds the conversation's session gate.
+        const now = yield* Clock.currentTimeMillis;
+        if (
+          !started.callbackExpected &&
+          !selected.busy &&
+          now >= nextReconnectAtMs &&
+          providerService.reconnectMcpServerForProject
+        ) {
+          yield* providerService
+            .reconnectMcpServerForProject({
+              provider: "claudeAgent",
+              projectId: input.projectId,
+              instanceId: input.instanceId,
+              serverName: input.serverName,
+              threadIds: [started.threadId],
+              allowExternal: true,
+            })
+            .pipe(Effect.ignore);
+          reconnectDelayMs = Math.min(reconnectDelayMs * 2, CLAUDE_CONNECTOR_RECONNECT_MAX_MS);
+          nextReconnectAtMs = (yield* Clock.currentTimeMillis) + reconnectDelayMs;
+        }
+      }
+      yield* fail("Sign-in timed out. Try again.");
+    });
+
+  /** Ends an attempt that stopped without settling (interruption or defect) so it can't stick. */
+  const failIfStillCurrent = (
+    input: McpGetLoginStatusRequest,
+    attempt: McpLoginStatusResult,
+    error: string,
+  ) =>
+    Effect.sync(() => {
+      if (loginStatuses.get(loginStatusKey(input)) !== attempt) return;
+      setLoginStatus(input, { ...attempt, status: "failed", completedAt: nowIso(), error });
+    });
+
+  const startClaudeServerLogin = (
+    rawInput: McpStartLoginRequest & { readonly serverName: string },
+  ) => {
+    const input = {
+      ...rawInput,
+      instanceId: rawInput.instanceId ?? ProviderInstanceId.make(rawInput.provider),
+    };
+    let claimed: McpLoginStatusResult | undefined;
+    return Effect.gen(function* () {
+      const key = loginStatusKey(input);
+      const existing = loginStatuses.get(key);
+      if (existing?.status === "pending") return existing;
+      if (!providerService.authenticateMcpServerForProject)
+        return yield* new McpRuntimeServiceError({
+          message: "This provider runtime does not support MCP sign-in.",
+        });
+      const placeholder: McpLoginStatusResult = {
+        target: "server",
+        mode: "oauth",
+        provider: input.provider,
+        projectId: input.projectId,
+        serverName: input.serverName,
+        status: "pending",
+        startedAt: nowIso(),
+      };
+      // Claim the key before any I/O so concurrent clicks share one sign-in.
+      setLoginStatus(input, placeholder);
+      claimed = placeholder;
+      // A start rejected before reaching the provider restores the previous outcome.
+      const release = Effect.sync(() => {
+        if (loginStatuses.get(key) !== placeholder) return;
+        if (existing) setLoginStatus(input, existing);
+        else {
+          clearLoginStatusTimer(key);
+          loginStatuses.delete(key);
+        }
+      });
+      const effective = yield* projectMcpConfigService
+        .readEffectiveRuntimeConfig(input.projectId)
+        .pipe(
+          Effect.mapError(runtimeError),
+          Effect.tapError(() => release),
+        );
+      if (effective.servers[input.serverName]?.enabled === false) {
+        yield* release;
+        return yield* new McpRuntimeServiceError({
+          message: `MCP server '${input.serverName}' is disabled in the shared effective config.`,
+        });
+      }
+      const started = yield* providerService
+        .authenticateMcpServerForProject({
+          provider: input.provider,
+          projectId: input.projectId,
+          instanceId: input.instanceId,
+          serverName: input.serverName,
+          ...(input.threadId ? { threadId: input.threadId } : {}),
+          desiredVersion: effective.effectiveVersion,
+        })
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.gen(function* () {
+              const message = yield* sanitizeLoginMessage(
+                input,
+                cause instanceof Error ? cause.message : "Failed to start MCP sign-in.",
+              );
+              if (loginStatuses.get(key) === placeholder)
+                setLoginStatus(input, {
+                  ...placeholder,
+                  status: "failed",
+                  completedAt: nowIso(),
+                  error: message,
+                });
+              return yield* new McpRuntimeServiceError({ message });
+            }),
+          ),
+        );
+      if (loginStatuses.get(key) !== placeholder) return loginStatuses.get(key) ?? placeholder;
+      if (!started.authUrl) {
+        const completed: McpLoginStatusResult = {
+          ...placeholder,
+          status: "completed",
+          completedAt: nowIso(),
+          message: "No sign-in was needed. Reconnecting the server.",
+        };
+        setLoginStatus(input, completed);
+        runLoginTask(
+          publishLoginCompletion({
+            provider: input.provider,
+            projectId: input.projectId,
+            instanceId: input.instanceId,
+            configVersion: effective.effectiveVersion,
+          }).pipe(Effect.andThen(reconnectClaudeSessionsAfterLogin(input, started.ownership))),
+        );
+        return completed;
+      }
+      const pending: McpLoginStatusResult = { ...placeholder, authorizationUrl: started.authUrl };
+      setLoginStatus(input, pending);
+      runLoginTask(
+        watchClaudeServerLogin(input, pending, started, effective.effectiveVersion).pipe(
+          Effect.ensuring(
+            failIfStillCurrent(input, pending, "Sign-in stopped unexpectedly. Try again."),
+          ),
+        ),
+      );
+      return pending;
+    }).pipe(
+      Effect.onExit((exit) =>
+        Exit.isSuccess(exit) || !claimed
+          ? Effect.void
+          : failIfStillCurrent(input, claimed, "Sign-in was interrupted. Try again."),
+      ),
+    );
+  };
+
+  const toCodexOauthLoginResult = (
+    input: McpStartLoginRequest & { readonly serverName: string },
+    status: McpOauthLoginStatusResult,
+  ): McpLoginStatusResult => ({
+    target: "server",
+    mode: "oauth",
+    provider: "codex",
+    projectId: input.projectId,
+    ...(input.instanceId ? { instanceId: input.instanceId } : {}),
+    serverName: input.serverName,
+    status: status.status,
+    ...(status.authorizationUrl ? { authorizationUrl: status.authorizationUrl } : {}),
+    ...(status.startedAt ? { startedAt: status.startedAt } : {}),
+    ...(status.completedAt ? { completedAt: status.completedAt } : {}),
+    ...(status.message ? { message: status.message } : {}),
+    ...(status.error ? { error: status.error } : {}),
+  });
+
+  const codexOauthManagerInput = (
+    input: McpStartLoginRequest & { readonly serverName: string },
+  ) => ({
+    projectId: input.projectId,
+    ...(input.instanceId ? { instanceId: input.instanceId } : {}),
+    serverName: input.serverName,
+    ...(input.binaryPath ? { binaryPath: input.binaryPath } : {}),
+    ...(input.homePath ? { homePath: input.homePath } : {}),
+  });
+
+  /** Servers from the profile's own Codex config sign in through the account's app-server. */
+  const startCodexExternalLogin = (input: McpStartLoginRequest & { readonly serverName: string }) =>
+    Effect.gen(function* () {
+      const observed = yield* observe({
+        provider: input.provider,
+        projectId: input.projectId,
+        ...(input.instanceId ? { instanceId: input.instanceId } : {}),
+        ...(input.binaryPath ? { binaryPath: input.binaryPath } : {}),
+        ...(input.homePath ? { homePath: input.homePath } : {}),
+      }).pipe(
+        Effect.timeoutOption("10 seconds"),
+        Effect.flatMap((result) =>
+          Option.isSome(result)
+            ? Effect.succeed(result.value.observation)
+            : Effect.fail(
+                new McpRuntimeServiceError({ message: "MCP read timed out. Try again." }),
+              ),
+        ),
+      );
+      const matches =
+        observed?.servers.filter(
+          (server) => mcpServerNameKey(server.name) === mcpServerNameKey(input.serverName),
+        ) ?? [];
+      const server =
+        matches.length === 1 && matches[0]!.ownership === "external" ? matches[0] : undefined;
+      if (!server)
+        return yield* new McpRuntimeServiceError({
+          message: `MCP server '${input.serverName}' is not configured for this Codex account.`,
+        });
+      return yield* codexOAuthManager
+        .startLogin(codexOauthManagerInput({ ...input, serverName: server.name }))
+        .pipe(
+          Effect.map((status) => toCodexOauthLoginResult(input, status)),
+          Effect.catch((error) =>
+            sanitizeLoginMessage(input, error.message).pipe(
+              Effect.flatMap((message) => Effect.fail(new McpRuntimeServiceError({ message }))),
+            ),
+          ),
+        );
+    });
+
   const startLogin: McpRuntimeServiceShape["startLogin"] = (input) =>
     Effect.gen(function* () {
       if (input.provider === "claudeAgent" && input.serverName) {
-        return yield* new McpRuntimeServiceError({
-          message: "Claude login is provider-scoped only in the current MCP settings flow.",
-        });
+        return yield* startClaudeServerLogin({ ...input, serverName: input.serverName });
       }
 
       if (input.provider === "codex" && !input.serverName) {
@@ -759,6 +1134,13 @@ const makeMcpRuntimeService = Effect.gen(function* () {
         });
       }
 
+      const configured = yield* projectMcpConfigService
+        .readEffectiveRuntimeConfig(input.projectId)
+        .pipe(Effect.mapError((error) => new McpRuntimeServiceError({ message: error.message })));
+      if (!configured.servers[input.serverName!]) {
+        return yield* startCodexExternalLogin({ ...input, serverName: input.serverName! });
+      }
+
       const { stored, server } = yield* readRequiredStoredServer({
         ...input,
         serverName: input.serverName!,
@@ -770,36 +1152,16 @@ const makeMcpRuntimeService = Effect.gen(function* () {
       }
 
       if (supportsCodexOauthLogin(server)) {
-        return yield* codexOAuthManager
-          .startLogin({
-            projectId: input.projectId,
-            ...(input.instanceId ? { instanceId: input.instanceId } : {}),
-            serverName: input.serverName!,
-            ...(input.binaryPath ? { binaryPath: input.binaryPath } : {}),
-            ...(input.homePath ? { homePath: input.homePath } : {}),
-          })
-          .pipe(
-            Effect.map((status) => ({
-              target: "server" as const,
-              mode: "oauth" as const,
-              provider: "codex" as const,
-              projectId: input.projectId,
-              ...(input.instanceId ? { instanceId: input.instanceId } : {}),
-              serverName: input.serverName!,
-              status: status.status,
-              ...(status.authorizationUrl ? { authorizationUrl: status.authorizationUrl } : {}),
-              ...(status.startedAt ? { startedAt: status.startedAt } : {}),
-              ...(status.completedAt ? { completedAt: status.completedAt } : {}),
-              ...(status.message ? { message: status.message } : {}),
-              ...(status.error ? { error: status.error } : {}),
-            })),
-            Effect.mapError(
-              (error) =>
-                new McpRuntimeServiceError({
-                  message: error.message,
-                }),
-            ),
-          );
+        const loginInput = { ...input, serverName: input.serverName! };
+        return yield* codexOAuthManager.startLogin(codexOauthManagerInput(loginInput)).pipe(
+          Effect.map((status) => toCodexOauthLoginResult(loginInput, status)),
+          Effect.mapError(
+            (error) =>
+              new McpRuntimeServiceError({
+                message: error.message,
+              }),
+          ),
+        );
       }
 
       const execution = yield* resolveExecution({
@@ -1004,32 +1366,28 @@ const makeMcpRuntimeService = Effect.gen(function* () {
 
   const getLoginStatus: McpRuntimeServiceShape["getLoginStatus"] = (input) =>
     Effect.gen(function* () {
-      if (input.provider === "codex" && input.serverName) {
-        const { server } = yield* readStoredServer(input).pipe(
-          Effect.catch(() => Effect.succeed({ stored: undefined, server: undefined })),
+      if (input.provider === "claudeAgent" && input.serverName) {
+        const normalized = {
+          ...input,
+          instanceId: input.instanceId ?? ProviderInstanceId.make(input.provider),
+        };
+        return (
+          loginStatuses.get(loginStatusKey(normalized)) ?? readIdleLoginStatus(normalized, "oauth")
         );
-        if (server && supportsCodexOauthLogin(server)) {
-          const status = yield* codexOAuthManager.getStatus({
-            projectId: input.projectId,
-            ...(input.instanceId ? { instanceId: input.instanceId } : {}),
-            serverName: input.serverName,
-            ...(input.binaryPath ? { binaryPath: input.binaryPath } : {}),
-            ...(input.homePath ? { homePath: input.homePath } : {}),
-          });
-          return {
-            target: "server",
-            mode: "oauth",
-            provider: "codex",
-            projectId: input.projectId,
-            ...(input.instanceId ? { instanceId: input.instanceId } : {}),
-            serverName: input.serverName,
-            status: status.status,
-            ...(status.authorizationUrl ? { authorizationUrl: status.authorizationUrl } : {}),
-            ...(status.startedAt ? { startedAt: status.startedAt } : {}),
-            ...(status.completedAt ? { completedAt: status.completedAt } : {}),
-            ...(status.message ? { message: status.message } : {}),
-            ...(status.error ? { error: status.error } : {}),
-          } satisfies McpLoginStatusResult;
+      }
+
+      if (input.provider === "codex" && input.serverName) {
+        const effective = yield* projectMcpConfigService
+          .readEffectiveRuntimeConfig(input.projectId)
+          .pipe(Effect.option);
+        const server = Option.isSome(effective)
+          ? effective.value.servers[input.serverName]
+          : undefined;
+        // Unstored names are external (profile config.toml) servers, which only use app-server OAuth.
+        if (Option.isSome(effective) && (!server || supportsCodexOauthLogin(server))) {
+          const loginInput = { ...input, serverName: input.serverName };
+          const status = yield* codexOAuthManager.getStatus(codexOauthManagerInput(loginInput));
+          return toCodexOauthLoginResult(loginInput, status);
         }
       }
 

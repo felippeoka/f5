@@ -2699,6 +2699,31 @@ describe("WorkflowService", () => {
     expect(unarchivedWorkflow?.deletedAt).toBeNull();
   });
 
+  it("reconciles pending stages on restore without retrying an interrupted turn", async () => {
+    const base = makeWorkflow();
+    const workflow = makeWorkflow({
+      branchA: { ...base.branchA, status: "pending" },
+      branchB: { ...base.branchB, status: "authoring" },
+    });
+    harness = await createHarness(
+      makeReadModel({
+        workflow,
+        threads: [
+          makeThread({ id: workflow.branchA.authorThreadId }),
+          makeThread({ id: workflow.branchB.authorThreadId }),
+        ],
+      }),
+    );
+    await Effect.runPromise(harness.service.archiveWorkflow(workflow.id));
+    await Promise.all([
+      Effect.runPromise(harness.service.unarchiveWorkflow(workflow.id)),
+      Effect.runPromise(harness.service.unarchiveWorkflow(workflow.id)),
+    ]);
+    const starts = harness.dispatched.filter((command) => command.type === "thread.turn.start");
+    expect(starts.map((command) => command.threadId)).toEqual([workflow.branchA.authorThreadId]);
+    expect(harness.getSnapshot().planningWorkflows[0]?.branchB.status).toBe("error");
+  });
+
   it("accepts repeated archive and restore requests", async () => {
     const archivedWorkflow = makeWorkflow({ archivedAt: NOW });
     harness = await createHarness(makeReadModel({ workflow: archivedWorkflow }));

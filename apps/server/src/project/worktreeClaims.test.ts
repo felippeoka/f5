@@ -17,10 +17,12 @@ import {
 } from "../storage/storageAutomation.testHarness.ts";
 import { GitCore } from "../git/Services/GitCore.ts";
 import { makeFakeGitCore } from "../git/testDoubles.ts";
+import { ProfileRegistryStore } from "../profiles/ProfileRegistryStore.ts";
 import {
   evaluateWorktreeRemoval,
   readWorktreeClaims,
   removeWorktreeSafely,
+  type WorktreeRemovalPolicy,
 } from "./worktreeClaims.ts";
 
 describe("effective workspace claims and removal gate", () => {
@@ -28,6 +30,42 @@ describe("effective workspace claims and removal gate", () => {
   afterEach(async () => {
     for (const cleanup of cleanups.splice(0)) await cleanup();
   });
+  it.each(["autoCleanup", "storageMaintenance"] as const)(
+    "ignores manual approval fields injected into %s policy",
+    async (kind) => {
+      const repo = await makeClonedRepo("f5-ignored-automation-");
+      cleanups.push(repo.cleanup);
+      const world = makeWorld();
+      world.projects.push(project("p", repo.root));
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const target = path.join((yield* ServerConfig).worktreesDir, "protected");
+          git(repo.root, "worktree", "add", "-q", "-b", "protected", target, "main");
+          yield* Effect.promise(() => fs.writeFile(path.join(target, ".env"), "keep local config"));
+          const policy = {
+            kind,
+            ownThreadId: null,
+            approvedIgnoredEntries: [".env"],
+          } as WorktreeRemovalPolicy;
+          const result = yield* evaluateWorktreeRemoval({
+            projectCwd: repo.root,
+            path: target,
+            policy,
+          });
+          expect(result.blockedReasons.join(" ")).toContain(
+            kind === "autoCleanup"
+              ? "protected ignored environment files"
+              : "ignored files that are not build output",
+          );
+          expect(result.ignoredFiles?.requiresApproval).toBe(false);
+          expect(result.ignoredFiles?.canRemoveAfterApproval).toBe(false);
+        }).pipe(
+          Effect.provide(automationLayer(world, {}, "f5-ignored-automation-state-")),
+          Effect.scoped,
+        ),
+      );
+    },
+  );
   it("rechecks archive state after acquiring the maintenance gate", async () => {
     const repo = await makeClonedRepo("f5-archive-recheck-");
     cleanups.push(repo.cleanup);
@@ -203,12 +241,23 @@ describe("effective workspace claims and removal gate", () => {
         expect((yield* inspect()).blockedReasons.join(" ")).toContain("stop that session");
         world.sessions.length = 0;
         yield* Effect.promise(() => fs.writeFile(path.join(target, ".env"), "SECRET=value\n"));
-        expect((yield* inspect()).blockedReasons.join(" ")).toContain("ignored");
+        expect((yield* inspect()).blockedReasons.join(" ")).toMatch(/ignored/i);
         yield* Effect.promise(() => fs.rm(path.join(target, ".env")));
         yield* Effect.promise(() =>
           fs.mkdir(path.join(target, "node_modules", "dep"), { recursive: true }),
         );
-        expect((yield* inspect()).blockedReasons).toEqual([]);
+        expect((yield* inspect()).blockedReasons.join(" ")).toMatch(/ignored/i);
+        expect(
+          (yield* evaluateWorktreeRemoval({
+            projectCwd: repo.root,
+            path: target,
+            policy: {
+              kind: "manual",
+              ownThreadId: null,
+              approvedIgnoredEntries: ["node_modules/"],
+            },
+          })).blockedReasons,
+        ).toEqual([]);
         world.queuedThreadIds.add("idle");
         expect((yield* inspect()).blockedReasons.join(" ")).toContain("queued");
         world.queuedThreadIds.clear();
@@ -253,7 +302,7 @@ describe("effective workspace claims and removal gate", () => {
             path: target,
             policy: { kind: "manual", ownThreadId: null },
           });
-          expect(result.blockedReasons.join(" ")).toContain("ignored");
+          expect(result.blockedReasons.join(" ").toLowerCase()).toContain("ignored");
           const raw = yield* Effect.result(core.removeWorktree({ cwd: repo.root, path: target }));
           expect(raw._tag).toBe("Failure");
           expect(yield* Effect.promise(() => fs.readFile(path.join(target, name), "utf8"))).toBe(
@@ -383,14 +432,237 @@ describe("effective workspace claims and removal gate", () => {
             policy: { kind: "storageMaintenance", ownThreadId: null },
           });
         expect((yield* inspect()).blockedReasons).toEqual([]);
+        expect((yield* inspect()).headMerged).toBe(true);
         git(target, "commit", "--allow-empty", "-qm", "unpublished");
         expect((yield* inspect()).blockedReasons).toContain(
-          "unpushed commits could not be ruled out",
+          "it has commits that are not in origin/main and not pushed",
         );
       }).pipe(
         Effect.provide(automationLayer(world, {}, "f5-maintenance-base-state-")),
         Effect.scoped,
       ),
+    );
+  });
+
+  it("treats a branch merged into origin/main as removable after its upstream is gone", async () => {
+    const repo = await makeClonedRepo("f5-merged-gone-");
+    cleanups.push(repo.cleanup);
+    const world = makeWorld();
+    world.projects.push(project("p", repo.root));
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const target = path.join((yield* ServerConfig).worktreesDir, "merged");
+        git(repo.root, "worktree", "add", "-q", "-b", "merged", target, "main");
+        git(target, "commit", "--allow-empty", "-qm", "feature");
+        git(target, "push", "-q", "-u", "origin", "merged");
+        // Merge on the remote, delete the branch there, and prune: the upstream is gone
+        // while the local `main` still lags behind `origin/main`.
+        git(target, "push", "-q", "origin", "merged:main");
+        git(target, "push", "-q", "origin", "--delete", "merged");
+        git(repo.root, "fetch", "-q", "--prune", "origin");
+        const result = yield* evaluateWorktreeRemoval({
+          projectCwd: repo.root,
+          path: target,
+          policy: { kind: "storageMaintenance", ownThreadId: null },
+        });
+        expect(result.blockedReasons).toEqual([]);
+        expect(result.headMerged).toBe(true);
+        expect(result.branch).toBe("merged");
+      }).pipe(Effect.provide(automationLayer(world, {}, "f5-merged-gone-state-")), Effect.scoped),
+    );
+  });
+
+  it("lets storage cleanup delete rebuildable build output but not other ignored files", async () => {
+    const repo = await makeClonedRepo("f5-rebuildable-");
+    cleanups.push(repo.cleanup);
+    const world = makeWorld();
+    world.projects.push(project("p", repo.root));
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Effect.promise(() =>
+          fs.appendFile(
+            path.join(repo.root, ".git", "info", "exclude"),
+            "dist/\n*.tsbuildinfo\ndata.sqlite\n",
+          ),
+        );
+        const target = path.join((yield* ServerConfig).worktreesDir, "built");
+        git(repo.root, "worktree", "add", "-q", "-b", "built", target, "main");
+        yield* Effect.promise(async () => {
+          await fs.mkdir(path.join(target, "dist"), { recursive: true });
+          await fs.writeFile(path.join(target, "dist", "index.js"), "built\n");
+          await fs.writeFile(path.join(target, "tsconfig.tsbuildinfo"), "{}\n");
+          await fs.mkdir(path.join(target, "node_modules", "dep"), { recursive: true });
+        });
+        const inspect = (kind: "storageMaintenance" | "autoCleanup") =>
+          evaluateWorktreeRemoval({
+            projectCwd: repo.root,
+            path: target,
+            policy: { kind, ownThreadId: null },
+          });
+        expect((yield* inspect("storageMaintenance")).blockedReasons).toEqual([]);
+        expect((yield* inspect("autoCleanup")).blockedReasons).toEqual([]);
+        yield* Effect.promise(() => fs.writeFile(path.join(target, "data.sqlite"), "rows"));
+        expect((yield* inspect("storageMaintenance")).blockedReasons.join(" ")).toContain(
+          "ignored files that are not build output (data.sqlite)",
+        );
+        yield* Effect.promise(() => fs.rm(path.join(target, "data.sqlite")));
+        const removed = yield* removeWorktreeSafely({
+          projectCwd: repo.root,
+          path: target,
+          policy: { kind: "storageMaintenance", ownThreadId: null },
+        });
+        expect(removed.blockedReasons).toEqual([]);
+        expect(yield* Effect.promise(() => fs.stat(target).catch(() => null))).toBeNull();
+      }).pipe(Effect.provide(automationLayer(world, {}, "f5-rebuildable-state-")), Effect.scoped),
+    );
+  });
+
+  it("allows a merged detached HEAD for storage cleanup only", async () => {
+    const repo = await makeClonedRepo("f5-detached-");
+    cleanups.push(repo.cleanup);
+    const world = makeWorld();
+    world.projects.push(project("p", repo.root));
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const target = path.join((yield* ServerConfig).worktreesDir, "detached");
+        git(repo.root, "worktree", "add", "-q", "--detach", target, "main");
+        const inspect = (kind: "storageMaintenance" | "manual") =>
+          evaluateWorktreeRemoval({
+            projectCwd: repo.root,
+            path: target,
+            policy: { kind, ownThreadId: null },
+          });
+        expect((yield* inspect("storageMaintenance")).blockedReasons).toEqual([]);
+        expect((yield* inspect("manual")).blockedReasons).toContain("HEAD is detached");
+        git(target, "commit", "--allow-empty", "-qm", "detached work");
+        const unmerged = (yield* inspect("storageMaintenance")).blockedReasons;
+        expect(unmerged).toContain("HEAD is detached");
+        expect(unmerged).toContain("it has commits that are not in origin/main and not pushed");
+        git(target, "checkout", "-q", "--detach", "main");
+        const removed = yield* removeWorktreeSafely({
+          projectCwd: repo.root,
+          path: target,
+          policy: { kind: "storageMaintenance", ownThreadId: null },
+        });
+        expect(removed.blockedReasons).toEqual([]);
+      }).pipe(Effect.provide(automationLayer(world, {}, "f5-detached-state-")), Effect.scoped),
+    );
+  });
+
+  it("discards only reviewed changes that match the disposable paths", async () => {
+    const repo = await makeClonedRepo("f5-disposable-");
+    cleanups.push(repo.cleanup);
+    const world = makeWorld();
+    world.projects.push(project("p", repo.root));
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const target = path.join((yield* ServerConfig).worktreesDir, "noisy");
+        git(repo.root, "worktree", "add", "-q", "-b", "noisy", target, "main");
+        yield* Effect.promise(async () => {
+          await fs.writeFile(path.join(target, "README.md"), "regenerated\n");
+          await fs.mkdir(path.join(target, "__screenshots__"), { recursive: true });
+          await fs.writeFile(path.join(target, "__screenshots__", "a.png"), "png");
+          // A staged new file is discarded by restoring the index too.
+          await fs.mkdir(path.join(target, "generated"), { recursive: true });
+          await fs.writeFile(path.join(target, "generated", "x.js"), "x\n");
+          git(target, "add", "generated/x.js");
+        });
+        const disposablePaths = ["README.md", "**/__screenshots__/", "generated/"];
+        const policy = (paths: ReadonlyArray<string>): WorktreeRemovalPolicy => ({
+          kind: "storageMaintenance",
+          ownThreadId: null,
+          disposablePaths: paths,
+        });
+        const blocked = yield* evaluateWorktreeRemoval({
+          projectCwd: repo.root,
+          path: target,
+          policy: policy([]),
+        });
+        expect(blocked.blockedReasons.join(" ")).toContain("uncommitted changes");
+        const reviewed = yield* evaluateWorktreeRemoval({
+          projectCwd: repo.root,
+          path: target,
+          policy: policy(disposablePaths),
+        });
+        expect(reviewed.blockedReasons).toEqual([]);
+        // Untracked folders are listed file by file, so only reviewed files are cleaned.
+        expect(reviewed.discardChanges?.paths).toEqual([
+          "README.md",
+          "__screenshots__/a.png",
+          "generated/x.js",
+        ]);
+        // A change after review must not be discarded.
+        yield* Effect.promise(() =>
+          fs.writeFile(path.join(target, "README.md"), "edited again after review\n"),
+        );
+        const refused = yield* removeWorktreeSafely({
+          projectCwd: repo.root,
+          path: target,
+          policy: policy(disposablePaths),
+          expectedDiscardChanges: reviewed.discardChanges,
+        });
+        expect(refused.blockedReasons.join(" ")).toContain("differ from the reviewed ones");
+        expect((yield* Effect.promise(() => fs.stat(target))).isDirectory()).toBe(true);
+        const current = yield* evaluateWorktreeRemoval({
+          projectCwd: repo.root,
+          path: target,
+          policy: policy(disposablePaths),
+        });
+        const removed = yield* removeWorktreeSafely({
+          projectCwd: repo.root,
+          path: target,
+          policy: policy(disposablePaths),
+          expectedDiscardChanges: current.discardChanges,
+        });
+        expect(removed.blockedReasons).toEqual([]);
+        expect(yield* Effect.promise(() => fs.stat(target).catch(() => null))).toBeNull();
+        // The branch is untouched; only the checkout went away.
+        expect(git(repo.root, "rev-parse", "--verify", "noisy")).toMatch(/^[0-9a-f]{40}$/);
+      }).pipe(Effect.provide(automationLayer(world, {}, "f5-disposable-state-")), Effect.scoped),
+    );
+  });
+
+  it("limits external cleanup to linked worktrees of an F5 project's repository", async () => {
+    const repo = await makeClonedRepo("f5-external-");
+    const other = await makeClonedRepo("f5-external-other-");
+    cleanups.push(repo.cleanup, other.cleanup);
+    const world = makeWorld();
+    world.projects.push(project("p", repo.root));
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const config = yield* ServerConfig;
+        yield* Effect.promise(() => new ProfileRegistryStore(config.defaultStateDir!).init());
+        const external = path.join(repo.dir, "sibling-checkout");
+        git(repo.root, "worktree", "add", "-q", "-b", "sibling", external, "main");
+        const foreign = path.join(other.dir, "foreign-checkout");
+        git(other.root, "worktree", "add", "-q", "-b", "foreign", foreign, "main");
+        const managed = path.join(config.worktreesDir, "managed");
+        git(repo.root, "worktree", "add", "-q", "-b", "managed", managed, "main");
+        const inspect = (target: string, projectCwd = repo.root) =>
+          evaluateWorktreeRemoval({
+            projectCwd,
+            path: target,
+            policy: { kind: "externalCleanup", ownThreadId: null },
+          }).pipe(Effect.map((result) => result.blockedReasons.join(" ")));
+        expect(yield* inspect(external)).toBe("");
+        expect(yield* inspect(repo.root)).toMatch(/main checkout|project checkout/);
+        expect(yield* inspect(foreign)).toContain("not registered in the expected repository");
+        expect(yield* inspect(foreign, other.root)).toContain("not a worktree of an F5 project");
+        expect(yield* inspect(managed)).toContain("inside the F5 worktrees folder");
+        const storage = yield* evaluateWorktreeRemoval({
+          projectCwd: repo.root,
+          path: external,
+          policy: { kind: "storageMaintenance", ownThreadId: null },
+        });
+        expect(storage.blockedReasons).toContain("outside the allowed worktrees root");
+        const removed = yield* removeWorktreeSafely({
+          projectCwd: repo.root,
+          path: external,
+          policy: { kind: "externalCleanup", ownThreadId: null },
+        });
+        expect(removed.blockedReasons).toEqual([]);
+        expect(yield* Effect.promise(() => fs.stat(external).catch(() => null))).toBeNull();
+      }).pipe(Effect.provide(automationLayer(world, {}, "f5-external-state-")), Effect.scoped),
     );
   });
 

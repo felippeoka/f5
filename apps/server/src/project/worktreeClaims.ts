@@ -3,7 +3,6 @@ import { sameMoveSnapshot, isMoveCopySnapshot, type MoveSnapshot } from "../git/
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { WorkspaceTransitionError } from "../persistence/Services/WorkspaceTransitions.ts";
 import * as FS from "node:fs/promises";
-import { isManualRemovalIgnoredBlocker, isProtectedIgnoredPath } from "../git/cleanupSafety.ts";
 import * as Path from "node:path";
 import { legacyT3BaseDir } from "@t3tools/shared/appStatePaths";
 import { ServerConfig } from "../config.ts";
@@ -19,6 +18,14 @@ import { Effect, Exit, Option, Schema, Scope } from "effect";
 
 import { GitCore, type GitCoreShape, type RegisteredWorktree } from "../git/Services/GitCore.ts";
 import { canonicalWorktreePath } from "../git/worktreePaths.ts";
+import { nonDisposablePaths } from "../git/worktreeDisposablePaths.ts";
+import { readOtherProfileManagedRoots } from "../profiles/RepositorySharing.ts";
+import { resolveHeadInDefaultBranch } from "./worktreeMerge.ts";
+import {
+  blockingIgnoredEntries,
+  type IgnoredFilesRemovalPolicy,
+} from "../git/worktreeIgnoredFiles.ts";
+export { blockingIgnoredEntries } from "../git/worktreeIgnoredFiles.ts";
 import { NextTurnQueueStore } from "../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProviderService } from "../provider/Services/ProviderService.ts";
@@ -258,23 +265,19 @@ export const readWorktreeClaims = Effect.fn("readWorktreeClaims")(function* (pat
   } satisfies WorktreeClaims;
 });
 
-/** Automatic cleanup audits reproducible output and protects environment files. */
-export function blockingIgnoredEntries(entries: ReadonlyArray<string>): ReadonlyArray<string> {
-  return entries.filter(isProtectedIgnoredPath);
-}
-
 /**
  * Why ignored files make removing `worktreePath` unsafe, or null when they do
  * not. `git worktree remove` refuses on tracked changes and untracked files but
- * silently deletes ignored ones. Manual removal preserves everything except
- * dependency directories; automatic cleanup protects environment files and
- * audits the remaining ignored paths.
+ * silently deletes ignored ones. Manual removal requires explicit approval of
+ * every ignored entry. Automatic settlement cleanup protects environment files
+ * and audits the remaining ignored paths; storage maintenance uses its own
+ * conservative build-output policy.
  */
 export const ignoredFilesBlockRemoval = (
   git: GitCoreShape,
   worktreePath: string,
   inspected?: { readonly entries: ReadonlyArray<string>; readonly truncated: boolean },
-  policy: "manual" | "automatic" = "manual",
+  policy: IgnoredFilesRemovalPolicy = { kind: "protect" },
 ) =>
   (inspected
     ? Effect.succeed(inspected)
@@ -287,12 +290,17 @@ export const ignoredFilesBlockRemoval = (
   ).pipe(
     Effect.map(({ entries, truncated }) => {
       if (truncated) return "too many ignored files to check";
-      const blocking =
-        policy === "automatic"
-          ? blockingIgnoredEntries(entries)
-          : entries.filter(isManualRemovalIgnoredBlocker);
+      const blocking = blockingIgnoredEntries(entries, policy);
       return blocking.length > 0
-        ? `${policy === "automatic" ? "protected ignored environment files" : "ignored files other than node_modules/"} (${blocking.slice(0, 3).join(", ")})`
+        ? policy.kind === "manual"
+          ? policy.approvedEntries === undefined
+            ? "Ignored files and folders require explicit deletion confirmation."
+            : "Ignored files changed since review. Inspect this checkout again."
+          : policy.kind === "automatic"
+            ? `protected ignored environment files (${blocking.slice(0, 3).join(", ")})`
+            : policy.kind === "rebuildable"
+              ? `ignored files that are not build output (${blocking.slice(0, 3).join(", ")})`
+              : `ignored files other than node_modules/ (${blocking.slice(0, 3).join(", ")})`
         : null;
     }),
     Effect.orElseSucceed(() => "ignored files could not be listed"),
@@ -326,13 +334,7 @@ export function foreignClaims(
   return reasons;
 }
 
-export interface WorktreeRemovalPolicy {
-  readonly kind:
-    | "manual"
-    | "autoCleanup"
-    | "storageMaintenance"
-    | "legacyCleanup"
-    | "ownedRollback";
+interface WorktreeRemovalContext {
   readonly ownThreadId: ThreadId | null;
   readonly ownedCreation?: {
     readonly path: string;
@@ -343,6 +345,56 @@ export interface WorktreeRemovalPolicy {
     readonly transitionOperationId?: string;
   };
 }
+
+export type WorktreeRemovalPolicy = WorktreeRemovalContext &
+  (
+    | {
+        readonly kind: "manual";
+        readonly approvedIgnoredEntries?: ReadonlyArray<string> | undefined;
+      }
+    | { readonly kind: "autoCleanup" | "legacyCleanup" | "ownedRollback" }
+    | {
+        /**
+         * Storage cleanup of inactive worktrees: managed ones under the F5
+         * worktrees root, or `externalCleanup` for linked worktrees of a project
+         * repository that live elsewhere.
+         */
+        readonly kind: "storageMaintenance" | "externalCleanup";
+        /** Project globs whose uncommitted changes may be discarded. */
+        readonly disposablePaths?: ReadonlyArray<string> | undefined;
+      }
+  );
+
+const isStorageCleanupPolicy = (
+  policy: WorktreeRemovalPolicy,
+): policy is Extract<WorktreeRemovalPolicy, { kind: "storageMaintenance" | "externalCleanup" }> =>
+  policy.kind === "storageMaintenance" || policy.kind === "externalCleanup";
+
+const ignoredRemovalPolicy = (policy: WorktreeRemovalPolicy): IgnoredFilesRemovalPolicy =>
+  policy.kind === "manual"
+    ? { kind: "manual", approvedEntries: policy.approvedIgnoredEntries }
+    : policy.kind === "autoCleanup"
+      ? { kind: "automatic" }
+      : isStorageCleanupPolicy(policy)
+        ? { kind: "rebuildable" }
+        : { kind: "protect" };
+
+/** Reviewed uncommitted changes Storage cleanup may discard. */
+export interface DiscardableChanges {
+  readonly paths: ReadonlyArray<string>;
+  readonly fingerprint: string;
+}
+
+const sameDiscardableChanges = (
+  left: DiscardableChanges | undefined,
+  right: DiscardableChanges | undefined,
+) =>
+  left === right ||
+  (left !== undefined &&
+    right !== undefined &&
+    left.fingerprint === right.fingerprint &&
+    left.paths.length === right.paths.length &&
+    left.paths.every((path, index) => path === right.paths[index]));
 
 /** Local-only, fail-closed evaluation. Call again under path then repository locks before mutation. */
 export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(function* (input: {
@@ -355,6 +407,25 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
   const config = yield* ServerConfig;
   const blockedReasons: string[] = [];
   let ignoredEntries: ReadonlyArray<string> = [];
+  let ignoredFiles:
+    | {
+        entries: ReadonlyArray<string>;
+        truncated: boolean;
+        requiresApproval: boolean;
+      }
+    | undefined;
+  let ignoredReason: string | null = null;
+  let branch: string | null = null;
+  let headSha: string | null = null;
+  /** Storage cleanup: HEAD is reachable from the default branch. */
+  let headMerged = false;
+  /**
+   * Storage cleanup: the branch may be deleted with the worktree. It must be
+   * merged, not the default branch, and without a live upstream other than
+   * `origin/<default>` (so release or develop branches on the remote are kept).
+   */
+  let branchDeletable = false;
+  let discardChanges: DiscardableChanges | undefined;
   const target = yield* canonical(input.path);
   const root = yield* canonical(
     input.policy.kind === "legacyCleanup"
@@ -362,7 +433,27 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
       : config.worktreesDir,
   );
   if (!target || !root) blockedReasons.push("workspace identity could not be verified");
-  else if (target === root || !pathContains(root, target))
+  else if (input.policy.kind === "externalCleanup") {
+    // External checkouts are only ever linked worktrees of a project's own repository.
+    const legacyRoot = yield* canonical(Path.join(legacyT3BaseDir(), "worktrees"));
+    if (pathContains(root, target)) blockedReasons.push("inside the F5 worktrees folder");
+    else if (legacyRoot && pathContains(legacyRoot, target))
+      blockedReasons.push("inside the legacy T3 worktrees folder");
+    const otherRoots = yield* Effect.tryPromise(() => readOtherProfileManagedRoots(config)).pipe(
+      Effect.orElseSucceed(() => null),
+    );
+    if (otherRoots === null)
+      blockedReasons.push("other profiles' worktree folders could not be verified");
+    else if (otherRoots.some((other) => pathContains(other, target)))
+      blockedReasons.push("another F5 profile owns this checkout");
+    const projectCwd = yield* canonical(input.projectCwd);
+    const projectRoots = yield* Effect.forEach(
+      (yield* engine.getReadModel()).projects.filter((project) => project.deletedAt === null),
+      (project) => canonical(project.workspaceRoot),
+    );
+    if (!projectCwd || !projectRoots.includes(projectCwd))
+      blockedReasons.push("not a worktree of an F5 project");
+  } else if (target === root || !pathContains(root, target))
     blockedReasons.push("outside the allowed worktrees root");
   // Never execute Git in an arbitrary client-supplied checkout.
   if (blockedReasons.length)
@@ -373,6 +464,10 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
       linkedThreads: [] as ThreadId[],
       deletedThreadClaims: [] as ThreadId[],
       ignoredEntries,
+      branch,
+      headSha,
+      headMerged,
+      branchDeletable,
     };
   const exists = yield* Effect.tryPromise(() => FS.lstat(input.path)).pipe(
     Effect.map(() => true),
@@ -411,7 +506,9 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
   if (registration?.isMain) blockedReasons.push("the main checkout cannot be removed");
   if (registration?.locked !== null && registration?.locked !== undefined)
     blockedReasons.push("the worktree is locked");
-  if (registration?.detached) blockedReasons.push("HEAD is detached");
+  // Storage cleanup allows a detached HEAD once it is known to be merged (checked below).
+  if (registration?.detached && !isStorageCleanupPolicy(input.policy))
+    blockedReasons.push("HEAD is detached");
   for (const project of (yield* engine.getReadModel()).projects) {
     if (project.deletedAt !== null) continue;
     const projectRoot = yield* canonical(project.workspaceRoot);
@@ -449,6 +546,18 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
       operation.target.path === target &&
       ["applying", "applied", "needs_recovery"].includes(operation.phase);
     if (ownedTransition) originalMoveSnapshot = operation?.moveData?.snapshot;
+  }
+  if (isStorageCleanupPolicy(input.policy)) {
+    const model = yield* engine.getReadModel();
+    if (
+      model.threads.some(
+        (thread) =>
+          claims.threadIds.includes(thread.id) &&
+          thread.deletedAt === null &&
+          thread.archivedAt === null,
+      )
+    )
+      blockedReasons.push("Referenced by an active thread.");
   }
   blockedReasons.push(
     ...foreignClaims(
@@ -495,19 +604,66 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
       identity.commonDir === common;
     if (!matches) blockedReasons.push("checkout identity does not match the expected repository");
     // Status can invoke repository-configured helpers. Only run it after identity matches.
+    const disposablePaths = isStorageCleanupPolicy(input.policy)
+      ? (input.policy.disposablePaths ?? [])
+      : [];
     const inspected = matches
-      ? yield* git.inspectCheckout(input.path).pipe(Effect.orElseSucceed(() => null))
+      ? yield* git
+          .inspectCheckout(
+            input.path,
+            disposablePaths.length > 0 ? { changesFingerprint: true } : undefined,
+          )
+          .pipe(Effect.orElseSucceed(() => null))
       : null;
     if (!inspected && matches) blockedReasons.push("checkout status could not be read");
     if (inspected) {
       ignoredEntries = inspected.ignoredEntries;
+      branch = inspected.branch;
+      headSha = inspected.headSha;
+      if (isStorageCleanupPolicy(input.policy)) {
+        // Merged into the default branch, or fully pushed to a live upstream.
+        const containment = inspected.headSha
+          ? yield* resolveHeadInDefaultBranch(git, input.projectCwd, inspected.headSha)
+          : { defaultBranch: null, merged: null };
+        headMerged = containment.merged === true;
+        branchDeletable =
+          headMerged &&
+          inspected.branch !== null &&
+          containment.defaultBranch !== null &&
+          inspected.branch !== containment.defaultBranch &&
+          (inspected.upstreamRef === null ||
+            inspected.upstreamRef === `refs/remotes/origin/${containment.defaultBranch}`);
+        const pushed = inspected.upstreamRef !== null && inspected.aheadCount === 0;
+        if (!headMerged && !pushed)
+          blockedReasons.push(
+            `it has commits that are not in ${
+              containment.defaultBranch
+                ? `origin/${containment.defaultBranch}`
+                : "the default branch"
+            } and not pushed`,
+          );
+      }
       if (inspected.hasInitializedSubmodules)
         blockedReasons.push(
           "initialized submodules prevent safe removal; preserve their local work and deinitialize them before retrying",
         );
-      if (inspected.branch === null) blockedReasons.push("HEAD is detached");
+      if (inspected.branch === null && !(isStorageCleanupPolicy(input.policy) && headMerged))
+        blockedReasons.push("HEAD is detached");
       if (inspected.operation) blockedReasons.push(`a ${inspected.operation} is in progress`);
-      if (inspected.hasTrackedChanges || inspected.hasUntrackedChanges) {
+      const changedPaths = inspected.changedPaths;
+      const discardable =
+        (inspected.hasTrackedChanges || inspected.hasUntrackedChanges) &&
+        disposablePaths.length > 0 &&
+        changedPaths !== undefined &&
+        changedPaths.length > 0 &&
+        inspected.changesFingerprint !== undefined &&
+        nonDisposablePaths(changedPaths, disposablePaths).length === 0;
+      if (discardable)
+        discardChanges = {
+          paths: [...changedPaths].toSorted(),
+          fingerprint: inspected.changesFingerprint!,
+        };
+      else if (inspected.hasTrackedChanges || inspected.hasUntrackedChanges) {
         const copies =
           input.policy.kind === "ownedRollback"
             ? input.policy.ownedCreation?.copiedSnapshot
@@ -522,31 +678,18 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
         if (!verifiedCopies)
           blockedReasons.push("it has uncommitted changes (including untracked files)");
       }
-      const ignoredReason = yield* ignoredFilesBlockRemoval(
+      ignoredReason = yield* ignoredFilesBlockRemoval(
         git,
         input.path,
-        {
-          entries: inspected.ignoredEntries,
-          truncated: inspected.ignoredTruncated,
-        },
-        input.policy.kind === "autoCleanup" ? "automatic" : "manual",
+        { entries: inspected.ignoredEntries, truncated: inspected.ignoredTruncated },
+        ignoredRemovalPolicy(input.policy),
       );
-      if (ignoredReason) blockedReasons.push(ignoredReason);
-      if (input.policy.kind === "storageMaintenance") {
-        let aheadCount = inspected.aheadCount;
-        if (inspected.upstreamRef === null) {
-          const base = yield* git
-            .readDefaultBranch(input.projectCwd)
-            .pipe(Effect.orElseSucceed(() => null));
-          if (base)
-            aheadCount = yield* git.inspectCheckout(input.path, { aheadOf: base }).pipe(
-              Effect.map((inspection) => inspection.aheadCount),
-              Effect.orElseSucceed(() => null),
-            );
-        }
-        if (aheadCount === null || aheadCount > 0)
-          blockedReasons.push("unpushed commits could not be ruled out");
-      }
+      ignoredFiles = {
+        entries: inspected.ignoredEntries,
+        truncated: inspected.ignoredTruncated,
+        requiresApproval:
+          input.policy.kind === "manual" && !inspected.ignoredTruncated && ignoredReason !== null,
+      };
       if (input.policy.kind === "ownedRollback") {
         const proof = input.policy.ownedCreation;
         const receipt = yield* git
@@ -572,10 +715,23 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
   return {
     exists,
     registration,
-    blockedReasons: [...new Set(blockedReasons)],
+    blockedReasons: [...new Set([...blockedReasons, ...(ignoredReason ? [ignoredReason] : [])])],
     linkedThreads: claims.threadIds,
     deletedThreadClaims: claims.deletedThreadIds,
     ignoredEntries,
+    branch,
+    headSha,
+    headMerged,
+    branchDeletable,
+    ...(discardChanges ? { discardChanges } : {}),
+    ...(ignoredFiles
+      ? {
+          ignoredFiles: {
+            ...ignoredFiles,
+            canRemoveAfterApproval: ignoredFiles.requiresApproval && blockedReasons.length === 0,
+          },
+        }
+      : {}),
   };
 });
 
@@ -586,6 +742,11 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
   readonly policy: WorktreeRemovalPolicy;
   readonly expectedHead?: string | null;
   readonly expectedRootIdentity?: { readonly dev: number; readonly ino: number } | null | undefined;
+  /**
+   * Storage cleanup: the uncommitted changes the user reviewed for discarding.
+   * Removal is refused when the current discardable changes differ.
+   */
+  readonly expectedDiscardChanges?: DiscardableChanges | undefined;
   /** Checked again under both locks, immediately before Git mutates the checkout. */
   readonly isCancelled?: () => boolean;
   /** Runs under the same repository lock after the verified checkout is removed. */
@@ -613,13 +774,60 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
       common,
       Effect.scoped(
         Effect.gen(function* () {
-          if (input.policy.kind === "storageMaintenance") {
-            const gate = yield* engine.acquireMaintenanceLock();
-            yield* Effect.addFinalizer(() => Scope.close(gate, Exit.void));
-          }
           if (input.isCancelled?.())
             return { ...preview, blockedReasons: ["Cleanup was cancelled."] };
+          const inspectedProjectRoots = new Set(
+            (yield* engine.getReadModel()).projects
+              .filter((project) => project.deletedAt === null)
+              .map((project) => project.workspaceRoot),
+          );
           const checked = yield* evaluateWorktreeRemoval(input);
+          // Git inspection can be slow. Only freeze orchestration writes for the
+          // final state/claim check and removal, inside the lifecycle locks.
+          const maintenanceGate = isStorageCleanupPolicy(input.policy)
+            ? yield* engine.acquireMaintenanceLock()
+            : null;
+          if (maintenanceGate)
+            yield* Effect.addFinalizer(() => Scope.close(maintenanceGate, Exit.void));
+          const finalModel = yield* engine.getReadModel();
+          const claims = yield* readWorktreeClaims(input.path);
+          if (isStorageCleanupPolicy(input.policy)) {
+            if (
+              finalModel.threads.some(
+                (thread) =>
+                  claims.threadIds.includes(thread.id) &&
+                  thread.deletedAt === null &&
+                  thread.archivedAt === null,
+              )
+            )
+              checked.blockedReasons.push("Referenced by an active thread.");
+            const finalProjectRoots = new Set(
+              finalModel.projects
+                .filter((project) => project.deletedAt === null)
+                .map((project) => project.workspaceRoot),
+            );
+            if (
+              finalProjectRoots.size !== inspectedProjectRoots.size ||
+              [...finalProjectRoots].some((root) => !inspectedProjectRoots.has(root))
+            )
+              checked.blockedReasons.push(
+                "Project roots changed during inspection. Rescan before removal.",
+              );
+            checked.blockedReasons.push(
+              ...foreignClaims(
+                {
+                  ...claims,
+                  sessions: claims.sessions.filter(
+                    (session) => !claims.deletedThreadIds.some((id) => id === session.threadId),
+                  ),
+                  terminals: claims.terminals.filter(
+                    (terminal) => !claims.deletedThreadIds.some((id) => id === terminal.threadId),
+                  ),
+                },
+                null,
+              ),
+            );
+          }
           if (
             input.expectedHead !== undefined &&
             (checked.registration?.headSha ?? null) !== input.expectedHead
@@ -627,8 +835,14 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
             checked.blockedReasons.push(
               "HEAD changed since inspection. Review the checkout again.",
             );
-          const claims = yield* readWorktreeClaims(input.path);
           if (claims.unknown) checked.blockedReasons.push("workspace usage could not be verified");
+          if (
+            isStorageCleanupPolicy(input.policy) &&
+            !sameDiscardableChanges(checked.discardChanges, input.expectedDiscardChanges)
+          )
+            checked.blockedReasons.push(
+              "Local changes differ from the reviewed ones. Rescan before removal.",
+            );
           // The caller must stop all processes belonging to deleted/owned threads before locking.
           const owned = new Set<string>([
             ...checked.deletedThreadClaims,
@@ -668,10 +882,15 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
             yield* git.removeWorktree({
               cwd: input.projectCwd,
               path: input.path,
-              ...(input.policy.kind === "autoCleanup"
-                ? { ignoredPolicy: "automatic" as const }
+              ignoredFiles: ignoredRemovalPolicy(input.policy),
+              ...(isStorageCleanupPolicy(input.policy)
+                ? {
+                    allowDetachedHead: checked.headMerged,
+                    ...(checked.discardChanges ? { discardChanges: checked.discardChanges } : {}),
+                  }
                 : {}),
             });
+            if (maintenanceGate) yield* Scope.close(maintenanceGate, Exit.void);
             if (input.afterRemoval) yield* input.afterRemoval(checked.registration);
           }
           return checked;

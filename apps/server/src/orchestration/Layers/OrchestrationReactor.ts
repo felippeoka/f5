@@ -39,7 +39,8 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const start: OrchestrationReactorShape["start"] = Effect.gen(function* () {
     yield* providerRuntimeIngestion.start;
     yield* providerCommandReactor.start;
-    yield* reconcileWorkflowArchives(orchestrationEngine).pipe(Effect.orDie);
+    yield* startThreadSnoozeReactor(orchestrationEngine);
+    yield* reconcileWorkflowArchives(orchestrationEngine);
     yield* Stream.runForEach(providerTurnDeliveryWorker.outcomes, (outcome) =>
       Effect.gen(function* () {
         let projectionSucceeded = true;
@@ -115,7 +116,6 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
     yield* investigationWorkflowService.start;
     yield* nextTurnQueueDispatcher.start;
     yield* nativeSessionCleanupReactor.start;
-    yield* startThreadSnoozeReactor(orchestrationEngine);
   });
 
   return {

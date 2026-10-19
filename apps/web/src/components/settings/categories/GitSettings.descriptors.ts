@@ -37,6 +37,15 @@ export const GIT_SETTINGS_DESCRIPTORS = [
     scope: "both",
   },
   {
+    id: "git.worktree-disposable-paths",
+    category: "git",
+    label: "Disposable worktree changes",
+    description: "Uncommitted changes Storage cleanup may discard when removing a worktree.",
+    keywords: ["worktree", "cleanup", "discard", "regenerated", "glob"],
+    targetSelector: '[data-settings-search-target="git.worktree-disposable-paths"]',
+    scope: "both",
+  },
+  {
     id: "git.status-refresh",
     category: "git",
     label: "Auto-refresh git status",

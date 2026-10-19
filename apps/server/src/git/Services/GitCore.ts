@@ -1,4 +1,5 @@
 import type { MoveSnapshotOperations } from "../moveSnapshot.ts";
+import type { IgnoredFilesRemovalPolicy } from "../worktreeIgnoredFiles.ts";
 /**
  * GitCore - Effect service contract for low-level Git operations.
  *
@@ -44,6 +45,15 @@ export interface CheckoutInspection extends CheckoutIdentity {
   readonly hasInitializedSubmodules: boolean;
   readonly hasTrackedChanges: boolean;
   readonly hasUntrackedChanges: boolean;
+  /**
+   * Repo-relative paths from `git status`. Untracked directories end in `/`,
+   * except with `changesFingerprint`, which lists every untracked file.
+   */
+  readonly changedPaths?: ReadonlyArray<string>;
+  /** The untracked subset of `changedPaths`. */
+  readonly untrackedPaths?: ReadonlyArray<string>;
+  /** Status, index and file metadata of `changedPaths`, when requested with `changesFingerprint`. */
+  readonly changesFingerprint?: string;
   readonly ignoredEntries: ReadonlyArray<string>;
   readonly ignoredTruncated: boolean;
   readonly upstreamRef: string | null;
@@ -57,8 +67,18 @@ export interface InternalRemoveWorktreeInput {
   readonly cwd: string;
   readonly path: string;
   readonly force?: boolean;
-  /** Explicitly selected only by automatic cleanup; manual removal remains conservative. */
-  readonly ignoredPolicy?: "automatic";
+  /** Explicit ignored-file policy; omitted by automated callers to protect local files. */
+  readonly ignoredFiles?: IgnoredFilesRemovalPolicy;
+  /** Storage cleanup only: the caller verified that the detached HEAD is merged. */
+  readonly allowDetachedHead?: boolean;
+  /**
+   * Storage cleanup only: discard exactly these reviewed changes. Removal is
+   * refused unless the current changed paths and their fingerprint still match.
+   */
+  readonly discardChanges?: {
+    readonly paths: ReadonlyArray<string>;
+    readonly fingerprint: string;
+  };
 }
 
 import type { GitCommandError } from "../Errors.ts";
@@ -178,7 +198,13 @@ export interface GitCoreShape extends MoveSnapshotOperations {
   ) => Effect.Effect<CheckoutIdentity, GitCommandError>;
   readonly inspectCheckout: (
     path: string,
-    options?: { aheadOf?: string; statusTimeoutMs?: number; recoveryFingerprint?: boolean },
+    options?: {
+      aheadOf?: string;
+      statusTimeoutMs?: number;
+      recoveryFingerprint?: boolean;
+      /** Fingerprint the changes and list untracked files individually, for exact discard. */
+      changesFingerprint?: boolean;
+    },
   ) => Effect.Effect<CheckoutInspection, GitCommandError>;
   readonly clearMissingRegistration: (
     cwd: string,
