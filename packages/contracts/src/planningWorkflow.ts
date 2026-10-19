@@ -11,6 +11,7 @@ import {
 import { ProviderModelOptions } from "./model";
 import { ProviderKind } from "./providerKind";
 import { ProviderStartOptions } from "./providerStartOptions";
+import { WorkflowArchiveRestorations } from "./workflowArchive";
 
 export const PlanningWorkflowId = makeEntityId("PlanningWorkflowId");
 export type PlanningWorkflowId = typeof PlanningWorkflowId.Type;
@@ -285,6 +286,7 @@ export const PlanningWorkflow = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  archiveRestorations: WorkflowArchiveRestorations,
   deletedAt: Schema.NullOr(IsoDateTime),
 });
 export type PlanningWorkflow = typeof PlanningWorkflow.Type;

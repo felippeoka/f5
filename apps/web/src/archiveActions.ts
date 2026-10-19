@@ -80,7 +80,9 @@ export async function setWorkflowArchived(input: {
   }
 
   if (input.archived && input.confirm !== false) {
-    const confirmed = await api.dialogs.confirm(`Archive workflow "${input.workflowTitle ?? ""}"?`);
+    const confirmed = await api.dialogs.confirm(
+      `Archive workflow "${input.workflowTitle ?? ""}" and its threads? Running agents will stop and queued work will pause.`,
+    );
     if (!confirmed) {
       return;
     }

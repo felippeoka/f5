@@ -4724,4 +4724,38 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.status).toBe("stopped");
     expect(thread?.session?.activeTurnId).toBeNull();
   });
+
+  it("does not deliver a pending turn after its thread was archived", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const createdAt = "2026-10-19T10:00:00.000Z";
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.makeUnsafe("archive-before-delivery"),
+        threadId,
+        createdAt,
+      }),
+    );
+    const error = await Effect.runPromise(
+      harness.reactor
+        .deliverTurnStart({
+          type: "thread.turn-start-requested",
+          sequence: 1,
+          eventId: EventId.makeUnsafe("pending-before-archive"),
+          commandId: CommandId.makeUnsafe("pending"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: createdAt,
+          correlationId: null,
+          causationEventId: null,
+          metadata: {},
+          payload: { threadId, messageId: MessageId.makeUnsafe("pending-message"), createdAt },
+        } as never)
+        .pipe(Effect.flip, Effect.scoped),
+    );
+    expect(error).toMatchObject({ certainty: "not_sent", retryable: false });
+    expect(harness.startSession).not.toHaveBeenCalled();
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+  });
 });

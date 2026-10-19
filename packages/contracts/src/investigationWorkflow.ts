@@ -9,6 +9,7 @@ import {
 } from "./baseSchemas";
 import { WorkflowStageDispatchCommandId } from "./codeReviewWorkflow";
 import { WorkflowModelSlot, WorkflowStepStatus } from "./planningWorkflow";
+import { WorkflowArchiveRestorations } from "./workflowArchive";
 
 export const InvestigationWorkflowId = makeEntityId("InvestigationWorkflowId");
 export type InvestigationWorkflowId = typeof InvestigationWorkflowId.Type;
@@ -89,6 +90,7 @@ export const InvestigationWorkflow = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  archiveRestorations: WorkflowArchiveRestorations,
   deletedAt: Schema.NullOr(IsoDateTime),
 });
 export type InvestigationWorkflow = typeof InvestigationWorkflow.Type;

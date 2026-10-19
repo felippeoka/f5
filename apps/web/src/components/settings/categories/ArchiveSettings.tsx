@@ -9,6 +9,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { isArchivedWorkflow } from "@t3tools/shared/workflowArchive";
+import { archivedWorkflowThreadIds } from "@t3tools/shared/workflowThreads";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import {
   ArchiveRestoreIcon,
@@ -160,8 +161,13 @@ export function ArchiveSettings() {
     [projects],
   );
   const allItems = useMemo<ArchiveItem[]>(() => {
+    const workflowChildren = archivedWorkflowThreadIds(
+      planningWorkflows,
+      codeReviewWorkflows,
+      investigationWorkflows,
+    );
     const archivedThreads = threads
-      .filter((thread) => isArchivedThread(thread))
+      .filter((thread) => isArchivedThread(thread) && !workflowChildren.has(thread.id))
       .map((thread) => ({
         kind: "thread" as const,
         key: `thread:${thread.id}`,

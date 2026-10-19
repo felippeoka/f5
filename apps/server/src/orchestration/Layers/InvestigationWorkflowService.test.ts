@@ -1,3 +1,4 @@
+import { applyArchiveTestCommand } from "../workflowArchive.testUtils.ts";
 import {
   CommandId,
   InvestigationWorkflowId,
@@ -311,6 +312,9 @@ function applyInvestigationWorkflowCommandToSnapshot(
   command: OrchestrationCommand,
 ): OrchestrationReadModel {
   switch (command.type) {
+    case "project.workflow.archive":
+    case "project.workflow.unarchive":
+      return applyArchiveTestCommand(snapshot, command).model;
     case "project.investigation-workflow.create": {
       const workflow = makeWorkflow({
         id: command.workflowId,
