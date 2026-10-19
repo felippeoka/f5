@@ -226,6 +226,10 @@ export function forgeReviewThreads(
           id: String(comment.id),
           url: text(comment.html_url ?? comment.web_url) ?? "",
           author: login(comment.author ?? comment.user),
+          ...(record(comment.author ?? comment.user).bot === true ||
+          record(comment.author ?? comment.user).type === "Bot"
+            ? { authorIsBot: true }
+            : {}),
           bodyText:
             text(comment.body) ?? text(record(comment.content).raw) ?? text(comment.content) ?? "",
           body:

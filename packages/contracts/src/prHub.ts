@@ -781,6 +781,7 @@ export const PrHubChangedFile = Schema.Struct({
 export type PrHubChangedFile = typeof PrHubChangedFile.Type;
 
 export const PrHubReviewComment = Schema.Struct({
+  authorIsBot: Schema.optionalKey(Schema.Boolean),
   id: Schema.String,
   url: Schema.String,
   author: Schema.NullOr(Schema.String),

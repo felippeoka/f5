@@ -597,3 +597,19 @@ process-identity checks fail under the host's `ps` restriction. This is not a wa
 The ledger and classification artifact attach implementation SHAs and scenario
 files to the six MCP app entries and #17879. Their dispositions stay deferred
 while the required full-workspace gate is failed.
+
+## PR comment filter continuation (2026-10-19)
+
+The Review threads tab now has persisted, independent bot-comment and resolved-thread
+filters, both hidden by default. GitHub bot metadata and native forge bot flags are
+retained, with the standard `[bot]` suffix as a fallback. Unknown authors remain
+visible. Filtering never changes resolution or reads extra pages automatically;
+a bot-rooted thread with unloaded replies stays reachable so a human reply cannot
+be stranded. Both thread and reply pagination remain available.
+
+Nine focused server cases, 131 web unit cases and both Chromium scenarios pass.
+The browser scenarios cover persisted choices across remounts, independent filters,
+and loading a human reply beneath a hidden bot root. Formatting, lint, all eight
+workspace typechecks and the pinned upstream ledger check pass. This implements
+the plan's Review threads surface for #17645; the remaining PR UX work and full
+release gate are still outstanding. Ledger dispositions remain deferred.

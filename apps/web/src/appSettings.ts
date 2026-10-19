@@ -410,6 +410,14 @@ export const AppSettingsSchema = Schema.Struct({
     Schema.withConstructorDefault(() => Option.some({})),
     Schema.withDecodingDefault(() => ({})),
   ),
+  prHubShowBotComments: Schema.Boolean.pipe(
+    Schema.withConstructorDefault(() => Option.some(false)),
+    Schema.withDecodingDefault(() => false),
+  ),
+  prHubShowResolvedComments: Schema.Boolean.pipe(
+    Schema.withConstructorDefault(() => Option.some(false)),
+    Schema.withDecodingDefault(() => false),
+  ),
   prHubStalledAfterHours: Schema.Number.check(
     Schema.isInt(),
     Schema.isBetween({ minimum: 0, maximum: 720 }),

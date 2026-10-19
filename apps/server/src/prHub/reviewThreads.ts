@@ -2,7 +2,7 @@ import type { PrHubReviewThread } from "@t3tools/contracts";
 export type ReviewThreadFact = PrHubReviewThread;
 export type ReviewCommentFact = PrHubReviewThread["comments"][number];
 
-export const GITHUB_REVIEW_COMMENT_FIELDS = `id body bodyText url author { login ... on User { databaseId } } createdAt updatedAt outdated diffHunk`;
+export const GITHUB_REVIEW_COMMENT_FIELDS = `id body bodyText url author { __typename login ... on User { databaseId } } createdAt updatedAt outdated diffHunk`;
 export const GITHUB_REVIEW_THREAD_FIELDS = `id isResolved isOutdated path line originalLine diffSide startLine originalStartLine startDiffSide viewerCanReply viewerCanResolve viewerCanUnresolve`;
 export const GITHUB_REVIEW_THREADS_SELECTION = `
   reviewThreads(first:100) {
@@ -84,6 +84,7 @@ export function parseReviewThreads(connection: unknown): ReviewThreadFact[] {
       id: stringValue(comment.id) ?? "",
       url: stringValue(comment.url) ?? "",
       author: stringValue(asRecord(comment.author)?.login),
+      ...(asRecord(comment.author)?.__typename === "Bot" ? { authorIsBot: true } : {}),
       bodyText: stringValue(comment.bodyText) ?? "",
       ...(typeof comment.body === "string" ? { body: comment.body } : {}),
       createdAt: stringValue(comment.createdAt),
