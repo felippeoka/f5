@@ -307,3 +307,15 @@ messages; the candidate retained zero. Median retained heap was 51,804,104 versu
 49,419,472 bytes; RSS was 304,611,328 versus 295,223,296 bytes. Reports are
 `.performance/stability-{baseline,candidate}-deleted-memory-20261019-37.json`.
 This is a three-process memory comparison, not a streaming or browser latency gate.
+
+The next controlled full comparison used baseline
+`ebe292b4c85957f824621591224d30a0de23ce77` and candidate
+`4089fda501eda0adf0715c29616a0ded6b7e7099`, five warmups and thirty repetitions.
+All latency and resource bounds passed, including terminal persistence and replay.
+For uncoalesced Claude, median wall time changed from 7,569.44 to 6,369.71 ms,
+median CPU from 6,494.09 to 5,876.95 ms, and SQL statements from 80,266 to 37,022.
+However CPU p95 changed only from 7,870.84 to 7,535.64 ms, so the required 20%
+CPU improvement failed. This candidate is not performance-qualified. Reports are
+`.performance/stability-baseline-full-20261019-37.json` and
+`.performance/stability-candidate-full-20261019-45.json`; do not substitute median
+improvements for the documented p95 comparison gate.

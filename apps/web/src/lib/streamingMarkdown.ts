@@ -492,11 +492,77 @@ function scanFence(progress: FenceProgress, suffix: string): boolean {
   }
   return true;
 }
+interface BlockLineProgress {
+  readonly tail: string;
+  readonly compatible: boolean;
+}
+const blockLineProgress = new WeakMap<StreamingMarkdownState, BlockLineProgress>();
+function appendCompatibleLines(
+  previous: StreamingMarkdownState,
+  suffix: string,
+): { parsed: ParsedFragment; lines: BlockLineProgress; scannedCharacters: number } | null {
+  const kind = previous.activeBlockKind;
+  if (kind !== "list" && kind !== "blockquote" && kind !== "table") return null;
+  const compatibleLine = (line: string) =>
+    kind === "list"
+      ? isListLine(line) || isIndentedContinuationLine(line)
+      : kind === "blockquote"
+        ? isBlockquoteLine(line)
+        : looksLikeTableRow(line);
+  let before = blockLineProgress.get(previous);
+  let initialScan = 0;
+  if (!before) {
+    const lines = splitLines(previous.activeBlock);
+    // An unfinished table delimiter can still turn back into ordinary prose.
+    if (kind === "table" && lines.filter((line) => line.hasTerminator).length < 2) return null;
+    const last = lines.at(-1);
+    const tail = last?.hasTerminator ? "" : (last?.raw ?? "");
+    before = { tail, compatible: tail.length > 0 && compatibleLine(tail.replace(/\r$/u, "")) };
+    initialScan = previous.activeBlock.length;
+  }
+  let next: BlockLineProgress;
+  let scannedCharacters = initialScan + suffix.length;
+  if (!suffix.includes("\n")) {
+    const tail = before.tail + suffix;
+    if (!before.compatible && !compatibleLine(tail.replace(/\r$/u, ""))) return null;
+    next = { tail, compatible: true };
+  } else {
+    const lines = splitLines(before.tail + suffix);
+    scannedCharacters += before.tail.length;
+    for (let index = 0; index < lines.length; index++) {
+      if (index === 0 && before.compatible) continue;
+      if (!compatibleLine(lines[index]!.content)) return null;
+    }
+    const last = lines.at(-1);
+    next = {
+      tail: last?.hasTerminator ? "" : (last?.raw ?? ""),
+      compatible: Boolean(last && !last.hasTerminator),
+    };
+  }
+  return {
+    parsed: {
+      sealedBlocks: EMPTY_BLOCKS,
+      activeBlock: previous.activeBlock + suffix,
+      activeBlockKind: kind,
+    },
+    lines: next,
+    scannedCharacters,
+  };
+}
+
 /** Revisit the full active block only when its grammar can actually change. */
 function appendStableActive(
   previous: StreamingMarkdownState,
   suffix: string,
-): { parsed: ParsedFragment; fence?: FenceProgress; paragraph?: true } | null {
+): {
+  parsed: ParsedFragment;
+  fence?: FenceProgress;
+  paragraph?: true;
+  lines?: BlockLineProgress;
+  scannedCharacters?: number;
+} | null {
+  const compatible = appendCompatibleLines(previous, suffix);
+  if (compatible) return compatible;
   if (previous.activeBlockKind === "paragraph" && !suffix.includes("\n")) {
     const tailStart = stableParagraphs.has(previous)
       ? 0
@@ -603,7 +669,9 @@ export function advanceStreamingMarkdown(
     textRevision,
     parsedCharacters:
       (previous.parsedCharacters ?? 0) +
-      (incremental ? suffix.length : previous.activeBlock.length + suffix.length),
+      (incremental
+        ? (incremental.scannedCharacters ?? suffix.length)
+        : previous.activeBlock.length + suffix.length),
     validatedCharacters:
       (previous.validatedCharacters ?? 0) + (knownSuffix === null ? previous.text.length : 0),
     sealedBlocks,
@@ -611,6 +679,7 @@ export function advanceStreamingMarkdown(
     activeBlockKind: parsed.activeBlockKind,
     needsFullRebuild: false,
   };
+  if (incremental?.lines) blockLineProgress.set(result, incremental.lines);
   if (incremental?.fence) fenceProgress.set(result, incremental.fence);
   if (incremental?.paragraph) stableParagraphs.add(result);
   return result;

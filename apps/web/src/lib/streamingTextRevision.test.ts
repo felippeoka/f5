@@ -101,3 +101,28 @@ it("keeps reasoning display trimming and append provenance exact across whitespa
     current = next;
   }
 });
+
+it.each([
+  { prefix: "- first item\n", suffix: "- another item\n" },
+  { prefix: "> first line\n", suffix: "> another line\n" },
+  { prefix: "| A | B |\n| --- | --- |\n", suffix: "| one | two |\n" },
+])("processes growing structured blocks linearly: $prefix", ({ prefix, suffix }) => {
+  let current = message(prefix);
+  const initialized = append(current, "");
+  let state = advanceStreamingMarkdown(null, current.text, messageTextRevision(current));
+  current = initialized;
+  for (let index = 0; index < 1000; index++) {
+    current = append(current, suffix);
+    state = advanceStreamingMarkdown(state, current.text, messageTextRevision(current));
+  }
+  expect(state.parsedCharacters).toBeLessThanOrEqual(current.text.length * 3);
+  expect(state.validatedCharacters).toBe(0);
+  const rebuilt = advanceStreamingMarkdown(null, current.text);
+  expect(state.sealedBlocks).toEqual(rebuilt.sealedBlocks);
+  expect(state.activeBlock).toBe(rebuilt.activeBlock);
+  current = append(current, "\nEnd of block");
+  state = advanceStreamingMarkdown(state, current.text, messageTextRevision(current));
+  const finished = advanceStreamingMarkdown(null, current.text);
+  expect(state.sealedBlocks).toEqual(finished.sealedBlocks);
+  expect(state.activeBlock).toBe(finished.activeBlock);
+});

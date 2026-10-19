@@ -1,5 +1,5 @@
 import { once } from "node:events";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 
@@ -228,3 +228,62 @@ it("aborts an in-flight SDK request when the owning server lifetime ends", async
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+it.skipIf(process.platform === "win32")(
+  "reaps an owned server and its descendant after both ignore TERM",
+  async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "f5-opencode-process-tree-"));
+    const executable = path.join(directory, "opencode-mock");
+    const identities = path.join(directory, "pids.json");
+    let pids: number[] = [];
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+        throw error;
+      }
+    };
+    try {
+      writeFileSync(
+        executable,
+        `#!${process.execPath}
+const { spawn } = require("node:child_process");
+const { writeFileSync } = require("node:fs");
+process.on("SIGTERM", () => {});
+const child = spawn(process.execPath, ["-e", 'process.on("SIGTERM", () => {}); process.send("ready"); setInterval(() => {}, 1000);'], { stdio: ["ignore", "ignore", "ignore", "ipc"] });
+child.on("message", () => {
+  writeFileSync(process.env.F5_MOCK_PID_FILE, JSON.stringify([process.pid, child.pid]));
+  console.log("opencode server listening on http://127.0.0.1:54321");
+});
+setInterval(() => {}, 1000);
+`,
+        { mode: 0o755 },
+      );
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const runtime = yield* OpenCodeRuntime;
+            const server = yield* runtime.startOpenCodeServerProcess({
+              binaryPath: executable,
+              environment: { ...process.env, F5_MOCK_PID_FILE: identities },
+            });
+            expect(server.url).toBe("http://127.0.0.1:54321");
+            pids = JSON.parse(readFileSync(identities, "utf8"));
+            expect(pids).toHaveLength(2);
+            expect(pids.every(alive)).toBe(true);
+          }),
+        ).pipe(Effect.provide(OpenCodeRuntimeLive.pipe(Layer.provide(NodeServices.layer)))),
+      );
+      for (let attempt = 0; attempt < 100 && pids.some(alive); attempt++)
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(pids.filter(alive)).toEqual([]);
+    } finally {
+      // Only fixture-owned identities; a failed assertion must not leak processes.
+      for (const pid of pids) if (alive(pid)) process.kill(pid, "SIGKILL");
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+  10_000,
+);

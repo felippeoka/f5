@@ -1,3 +1,4 @@
+import { makeStreamingProjectionUpdates } from "../../persistence/streamingProjectionUpdates.ts";
 import { PerformanceStageProbe, measurePerformanceStage } from "../../observability/Metrics.ts";
 import {
   ELICITATION_SUBMITTED_ACTIVITY_KIND,
@@ -448,6 +449,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
   // Streaming emits a message-sent event per delta, so only the null-estimate
   // recompute may read the whole thread; verified appends use just delta lengths.
   const appendedStreamingEvents = new WeakSet<OrchestrationEvent>();
+  const streamingUpdates = makeStreamingProjectionUpdates(sql);
   const estimateContextTokensForMessageEvent = (
     event: Extract<OrchestrationEvent, { type: "thread.message-sent" }>,
     estimatedContextTokens: number | null,
@@ -1113,6 +1115,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
         }
 
         case "thread.message-sent": {
+          if (appendedStreamingEvents.has(event) && (yield* streamingUpdates.thread(event))) return;
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
           });
@@ -1800,6 +1803,8 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
         }
 
         case "thread.message-sent": {
+          if (appendedStreamingEvents.has(event) && (yield* streamingUpdates.session(event)))
+            return;
           const existingRow = yield* projectionThreadSessionRepository.getByThreadId({
             threadId: event.payload.threadId,
           });
@@ -2062,6 +2067,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           if (event.payload.turnId === null || event.payload.role !== "assistant") {
             return;
           }
+          if (appendedStreamingEvents.has(event) && (yield* streamingUpdates.turn(event))) return;
           const existingTurn = yield* projectionTurnRepository.getByTurnId({
             threadId: event.payload.threadId,
             turnId: event.payload.turnId,
