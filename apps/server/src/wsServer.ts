@@ -1,3 +1,5 @@
+import { PullRequestWatchService } from "./orchestration/Layers/PullRequestWatchService.ts";
+import { PR_WATCH_WS_METHODS, PR_WATCH_CHANGED_CHANNEL } from "@t3tools/contracts";
 import { HTML_RENDER_WS_METHODS } from "@t3tools/contracts";
 import { makeHtmlPreviewBroker } from "./htmlRender/HtmlPreviewBroker.ts";
 import { makeHtmlRenderRuntime } from "./htmlRender/HtmlRenderRuntime.ts";
@@ -909,6 +911,7 @@ function formatServerLifecycleRouteFailure(error: ServerLifecycleError): string 
 const ORCHESTRATION_RUNTIME_ROUTE_WAIT_MS = 55_000;
 
 interface OrchestrationRuntimeServices {
+  readonly pullRequestWatches: PullRequestWatchService["Service"];
   readonly projectSkillSyncService: ProjectSkillSyncServiceShape;
   readonly threadBackgroundWork: ThreadBackgroundWorkShape;
   readonly usageService: UsageServiceShape;
@@ -2746,6 +2749,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         orchestrationRuntimeServices,
         NextTurnQueueDispatcher,
       );
+      const pullRequestWatches = ServiceMap.get(
+        orchestrationRuntimeServices,
+        PullRequestWatchService,
+      );
       const worktreeManager = ServiceMap.get(orchestrationRuntimeServices, WorktreeManager);
       const workspaceTransition = ServiceMap.get(orchestrationRuntimeServices, WorkspaceTransition);
       const worktreeSetup = ServiceMap.get(orchestrationRuntimeServices, WorktreeSetup);
@@ -2779,6 +2786,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
               engine: orchestrationEngine,
               federation: threadMcpFederation.value,
               guides: prHubReviewGuide,
+              watches: pullRequestWatches,
               links: prHubExtensions.value,
               html,
             }),
@@ -2910,6 +2918,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         }),
       ).pipe(Effect.forkIn(subscriptionsScope));
       yield* Scope.provide(storageCleanupWorker.start, subscriptionsScope);
+      yield* Stream.runForEach(pullRequestWatches.changes, (threadId) =>
+        pushBus.publishAll(PR_WATCH_CHANGED_CHANNEL, { threadId }),
+      ).pipe(Effect.forkIn(subscriptionsScope));
+      yield* Scope.provide(pullRequestWatches.start, subscriptionsScope);
       yield* Scope.provide(defaultBranchAutoPull.start, subscriptionsScope);
       if (diskSpaceMonitor._tag === "Some")
         yield* Scope.provide(
@@ -2921,6 +2933,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       yield* Ref.set(nextTurnQueueDispatcherRef, nextTurnQueueDispatcher);
       yield* readiness.markOrchestrationSubscriptionsReady;
       yield* Deferred.succeed(orchestrationRuntime, {
+        pullRequestWatches,
         threadBackgroundWork,
         usageService,
         orchestrationEngine,
@@ -5474,6 +5487,18 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return yield* prHubAdvisory.analyzeAdvisories(body);
       }
 
+      case PR_WATCH_WS_METHODS.list:
+        return yield* (yield* awaitOrchestrationRuntimeForRoute).pullRequestWatches.list(
+          request.body.threadId,
+        );
+      case PR_WATCH_WS_METHODS.start:
+        return yield* (yield* awaitOrchestrationRuntimeForRoute).pullRequestWatches.startWatch(
+          stripRequestTag(request.body),
+        );
+      case PR_WATCH_WS_METHODS.stop:
+        return yield* (yield* awaitOrchestrationRuntimeForRoute).pullRequestWatches.stopWatch(
+          stripRequestTag(request.body),
+        );
       case PR_HUB_WS_METHODS.getReviewGuide:
         return yield* prHubReviewGuide.get(stripRequestTag(request.body));
       case PR_HUB_WS_METHODS.generateReviewGuide:

@@ -1,3 +1,4 @@
+import Migration0125 from "./Migrations/125_ThreadPullRequestWatches.ts";
 import Migration0124 from "./Migrations/124_PrHubReviewGuides.ts";
 import Migration0123 from "./Migrations/123_WorkspaceMoveRecoveryIndex.ts";
 import Migration0122 from "./Migrations/122_StorageActivity.ts";
@@ -157,6 +158,7 @@ import Migration0102 from "./Migrations/102_ForgeAccounts.ts";
 import Migration0101 from "./Migrations/101_UsageResetCreditRequests.ts";
 
 export const MIGRATIONS = {
+  "125_ThreadPullRequestWatches": Migration0125,
   "124_PrHubReviewGuides": Migration0124,
   "122_StorageActivity": Migration0122,
   "123_WorkspaceMoveRecoveryIndex": Migration0123,

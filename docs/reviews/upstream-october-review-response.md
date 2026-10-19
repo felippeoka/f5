@@ -417,3 +417,44 @@ suite; together with scheduler and wait tests, all 62 targeted cases pass. The b
 run before this correction passed 4,890 server cases, failed that scenario and the
 three existing launcher creation-identity cases, and skipped 12. Those launcher
 failures still reproduce the host's denial of `/bin/ps`; they are not waived.
+
+## PR watch continuation (2026-10-19)
+
+The pinned upstream `evaluatePullRequestWatch` decision logic is ported with its
+15 behavior cases. Migration 125 persists watches per thread, account and PR.
+Incarnation IDs and version compare-and-swap checks reject late results after
+Stop/restart. Polls share account/PR reads, use conditional GitHub fingerprints,
+revalidate the verified account generation before publication, bound pagination,
+and preserve the remark watermark after partial reads. Quiet native-forge reads
+fall back after ten minutes; GitHub activity has a thirty-minute safety refresh.
+The real GraphQL quota cost has not been certified against a live account.
+
+Watch state and automatic NextTurnQueue submissions commit in one transaction.
+Trusted automation provenance is stored separately from message text. The new
+`pull_request_watch` queue reason allows Stop to remove pending watch continuations
+while retaining restart-recovery protections and the ordinary queue capacity.
+Manual Stop atomically removes the watch and cancels its pending wakes. Archive,
+turn interruption and terminal PR state stop watches; rate limits pause without
+counting toward eight failed reads. Watch state has a 64 KiB bound, global/thread
+limits, four concurrent PR reads and a sixty-second read deadline.
+
+Protocol 32 exposes list/start/stop and change pushes. Scoped thread catalogs gain
+watch/unwatch for Codex, Claude and eligible ACP providers. The header's PR menu
+starts/stops a watch; its eye stops it directly. Watches without an explicit PR
+link remain visible and stoppable. The feature starts only on explicit request.
+
+Validation so far: 90 focused watch, forge, cache, catalog and queue tests passed;
+the final service suite adds account-incarnation and quiet-fallback cases (8 pass).
+Three Chromium menu/eye/push/failure scenarios pass. Formatting, lint and the
+4,084-record ledger check pass. Full workspace typechecking initially found two
+incomplete mock definitions; those definitions have been corrected and all eight
+workspace typechecks pass. `bun run test:full` ran again and failed on the same two
+migration recovery process-identity checks (`ps` EPERM): 330 script tests passed.
+This is not a waiver or a declaration that the full plan or cut line is complete.
+Settlement and the other outstanding workstreams remain implementation obligations.
+
+Durable Stop follow-up: archive, deletion, turn interruption and session Stop now
+remove saved watches and pending watch submissions inside the orchestration command
+transaction. This prevents a restart between command acceptance and live subscribers
+from reviving a watch. Already admitted/dispatching deliveries remain recoverable.
+The direct transactional regression and full engine suite pass 32 tests.

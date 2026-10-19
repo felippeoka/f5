@@ -621,6 +621,7 @@ export const PrHubCheckStatus = Schema.Literals([
 export type PrHubCheckStatus = typeof PrHubCheckStatus.Type;
 
 export const PrHubCheck = Schema.Struct({
+  required: Schema.optional(Schema.Boolean),
   name: Schema.String,
   status: PrHubCheckStatus,
   description: Schema.NullOr(Schema.String),
@@ -657,6 +658,7 @@ export const PrHubDetailProviderDetails = Schema.Union([
   Schema.Struct({
     provider: Schema.Literals(["gitlab", "azure-devops", "bitbucket", "forgejo", "unknown"]),
     externalId: Schema.optional(Schema.NullOr(Schema.String)),
+    headRefOid: Schema.optional(Schema.NullOr(Schema.String)),
   }),
 ]);
 export type PrHubDetailProviderDetails = typeof PrHubDetailProviderDetails.Type;
@@ -694,6 +696,7 @@ export const PrHubDetailResult = Schema.Struct({
   detail: PrHubDetail,
   stale: Schema.Boolean,
   warning: Schema.optional(Schema.String),
+  readErrorKind: Schema.optional(Schema.Literals(["rate_limited", "failed"])),
   refreshedAt: IsoDateTime,
   rateLimit: Schema.optional(SourceControlRateLimit),
 });
@@ -738,6 +741,7 @@ export const PrHubTimelineEntry = Schema.Union([PrHubTimelineComment, PrHubTimel
 export type PrHubTimelineEntry = typeof PrHubTimelineEntry.Type;
 
 export const PrHubTimelineInput = Schema.Struct({
+  commentsOnly: Schema.optional(Schema.Boolean),
   accountGeneration: Schema.optional(Schema.String),
   key: PullRequestKey,
   cursor: Schema.optional(Schema.String.check(Schema.isMaxLength(4_096))),
@@ -788,6 +792,7 @@ export const PrHubReviewComment = Schema.Struct({
   diffHunk: Schema.NullOr(Schema.String),
   authorId: Schema.optional(Schema.NullOr(NonNegativeInt)),
 });
+export type PrHubReviewComment = typeof PrHubReviewComment.Type;
 export const PrHubReviewThread = Schema.Struct({
   id: Schema.String,
   isResolved: Schema.Boolean,

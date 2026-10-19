@@ -128,10 +128,13 @@ export function forgeDetail(pr: TrackedPullRequest, detail: ForgeDetail): PrHubD
   return {
     detail: {
       key: pr.key,
-      providerDetails: pr.providerDetails as Exclude<
-        NonNullable<TrackedPullRequest["providerDetails"]>,
-        { provider: "github" }
-      >,
+      providerDetails: {
+        ...(pr.providerDetails as Exclude<
+          NonNullable<TrackedPullRequest["providerDetails"]>,
+          { provider: "github" }
+        >),
+        headRefOid: detail.headRefOid ?? null,
+      },
       title: pr.title,
       body: detail.body,
       url: pr.url,

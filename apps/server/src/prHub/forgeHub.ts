@@ -345,6 +345,8 @@ export const makeForgePrHubService = (account: ForgeAccount, provider: ForgeProv
               return {
                 ...cached.detail,
                 stale: true,
+                readErrorKind: read.failure.kind === "rate_limited" ? "rate_limited" : "failed",
+                ...(read.failure.rateLimit ? { rateLimit: read.failure.rateLimit } : {}),
                 warning: "Forge refresh failed; showing the last verified detail.",
               };
             return yield* read.failure;

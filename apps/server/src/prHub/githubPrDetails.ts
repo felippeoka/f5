@@ -25,8 +25,8 @@ query F5PrDetail($owner:String!,$repo:String!,$number:Int!){
       reactionGroups { content viewerHasReacted users(first:20){ totalCount nodes { login } } }
       commits(last:1){ nodes { commit { statusCheckRollup { contexts(first:100){ totalCount pageInfo { hasNextPage } nodes {
         __typename
-        ... on CheckRun { name status conclusion detailsUrl }
-        ... on StatusContext { context state description targetUrl }
+        ... on CheckRun { name status conclusion detailsUrl isRequired(pullRequestNumber:$number) }
+        ... on StatusContext { context state description targetUrl isRequired(pullRequestNumber:$number) }
       } } } } } }
     }
   }
@@ -37,13 +37,13 @@ export const GITHUB_PR_TIMELINE_QUERY = `
 query F5PrTimeline($owner:String!,$repo:String!,$number:Int!,$issueLimit:Int!,$issueCursor:String,$reviewLimit:Int!,$reviewCursor:String,$commitLimit:Int!,$commitCursor:String){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$number){
-      comments(last:$issueLimit,before:$issueCursor){
+      comments(last:$issueLimit,before:$issueCursor,orderBy:{field:UPDATED_AT,direction:ASC}){
         nodes { id databaseId body createdAt updatedAt url viewerDidAuthor author { login avatarUrl ... on User { name } } reactionGroups { content viewerHasReacted users(first:20){ totalCount nodes { login } } } }
         pageInfo { hasPreviousPage startCursor }
       }
       reviews(last:$reviewLimit,before:$reviewCursor){
         nodes {
-          id body state submittedAt url author { login avatarUrl ... on User { name } }
+          id body state submittedAt lastEditedAt url author { login avatarUrl ... on User { name } }
           comments(first:25){ totalCount nodes { id databaseId body createdAt updatedAt url path line originalLine viewerDidAuthor author { login avatarUrl ... on User { name } } reactionGroups { content viewerHasReacted users(first:20){ totalCount nodes { login } } } } }
         }
         pageInfo { hasPreviousPage startCursor }
@@ -210,6 +210,7 @@ function checkOf(value: UnknownRecord): PrHubCheck | null {
                 ? "skipped"
                 : "failure";
     return {
+      ...(typeof value.isRequired === "boolean" ? { required: value.isRequired } : {}),
       name: stringOf(value.name, "Check"),
       status: normalized,
       description: nullableString(value.conclusion),
@@ -219,6 +220,7 @@ function checkOf(value: UnknownRecord): PrHubCheck | null {
   if (value.__typename === "StatusContext") {
     const state = stringOf(value.state).toUpperCase();
     return {
+      ...(typeof value.isRequired === "boolean" ? { required: value.isRequired } : {}),
       name: stringOf(value.context, "Status"),
       status:
         state === "SUCCESS"
@@ -396,6 +398,7 @@ export function githubTimelineVariables(input: {
   readonly repo: string;
   readonly number: number;
   readonly cursor?: string | undefined;
+  readonly commentsOnly?: boolean | undefined;
 }): Readonly<Record<string, string | number>> {
   const cursor = decodeTimelineCursor(input.cursor);
   return {
@@ -404,7 +407,7 @@ export function githubTimelineVariables(input: {
     number: input.number,
     issueLimit: cursor.issueDone ? 1 : 25,
     reviewLimit: cursor.reviewDone ? 1 : 25,
-    commitLimit: cursor.commitDone ? 1 : 25,
+    commitLimit: input.commentsOnly || cursor.commitDone ? 1 : 25,
     ...(cursor.issueBefore ? { issueCursor: cursor.issueBefore } : {}),
     ...(cursor.reviewBefore ? { reviewCursor: cursor.reviewBefore } : {}),
     ...(cursor.commitBefore ? { commitCursor: cursor.commitBefore } : {}),
@@ -414,11 +417,15 @@ export function githubTimelineVariables(input: {
 export function decodeGitHubPrTimeline(
   response: unknown,
   inputCursor?: string | undefined,
+  commentsOnly = false,
 ): {
   readonly entries: ReadonlyArray<PrHubTimelineEntry>;
   readonly pageInfo: SourceControlPageInfo;
 } {
-  const previous = decodeTimelineCursor(inputCursor);
+  const previous = {
+    ...decodeTimelineCursor(inputCursor),
+    ...(commentsOnly ? { commitDone: true } : {}),
+  };
   const { root, pr } = pullRequestOf(response);
   const issueComments = recordOrNull(pr.comments);
   const reviews = recordOrNull(pr.reviews);
@@ -460,7 +467,7 @@ export function decodeGitHubPrTimeline(
         author: actorOf(review.author),
         body: stringOf(review.body),
         createdAt: submittedAt,
-        updatedAt: null,
+        updatedAt: nullableString(review.lastEditedAt),
         url: nullableString(review.url),
         path: null,
         line: null,

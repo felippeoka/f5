@@ -1,3 +1,9 @@
+import {
+  PR_WATCH_WS_METHODS,
+  PR_WATCH_CHANGED_CHANNEL,
+  PullRequestWatchEntry,
+  PullRequestWatchChanged,
+} from "@t3tools/contracts";
 import { HTML_RENDER_WS_METHODS, HtmlPreviewHostRequest } from "@t3tools/contracts";
 import { useAgentComputerActivityStore } from "./agentComputerActivityStore";
 import { NATIVE_OPERATION_WS_METHODS } from "@t3tools/contracts";
@@ -544,6 +550,23 @@ export function createWsNativeApi(): NativeApi {
       onLeaseChanged: (listener) =>
         transport.subscribe(WS_CHANNELS.agentComputerUseChanged, (message) =>
           listener(message.data),
+        ),
+    },
+    pullRequestWatches: {
+      list: async (input) =>
+        Schema.decodeUnknownSync(Schema.Array(PullRequestWatchEntry))(
+          await transport.request(PR_WATCH_WS_METHODS.list, input),
+        ),
+      start: async (input) =>
+        Schema.decodeUnknownSync(PullRequestWatchEntry)(
+          await transport.request(PR_WATCH_WS_METHODS.start, input),
+        ),
+      stop: async (input) => {
+        await transport.request(PR_WATCH_WS_METHODS.stop, input);
+      },
+      onChanged: (callback) =>
+        transport.subscribe(PR_WATCH_CHANGED_CHANNEL, (message) =>
+          callback(Schema.decodeUnknownSync(PullRequestWatchChanged)(message.data)),
         ),
     },
     htmlRender: {

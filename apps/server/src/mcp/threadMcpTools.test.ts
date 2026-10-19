@@ -108,6 +108,8 @@ it.effect(
             "thread_status",
             "pull_request_review_guide_read",
             "pull_request_review_guide_write",
+            "watch_pull_request",
+            "unwatch_pull_request",
             "html_render",
             "html_preview",
           ],

@@ -20,7 +20,11 @@ export type ThreadToolRequest =
   | { readonly name: "html_render"; readonly input: HtmlRenderInput }
   | { readonly name: "html_preview"; readonly input: HtmlPreviewInput }
   | {
-      readonly name: "pull_request_review_guide_read" | "pull_request_review_guide_write";
+      readonly name:
+        | "pull_request_review_guide_read"
+        | "pull_request_review_guide_write"
+        | "watch_pull_request"
+        | "unwatch_pull_request";
       readonly pr?: string | undefined;
     };
 export type ThreadToolHandler = (
@@ -123,6 +127,23 @@ export const THREAD_TOOL_DEFINITIONS = [
     alwaysLoad: false,
   },
   {
+    name: "watch_pull_request",
+    title: "Watch PR",
+    description:
+      "Watch a PR and queue follow-ups when checks or review comments change. Starts only on request and stops with the thread or PR.",
+    shape: guideShape,
+    annotations: annotations(false),
+    alwaysLoad: false,
+  },
+  {
+    name: "unwatch_pull_request",
+    title: "Stop watching PR",
+    description: "Stop a PR watch in this thread. Omit the PR to stop all watches in this thread.",
+    shape: guideShape,
+    annotations: annotations(false),
+    alwaysLoad: false,
+  },
+  {
     name: "html_render",
     title: "Render HTML in thread",
     description:
@@ -173,7 +194,12 @@ export async function callThreadTool(
         Schema.decodeUnknownSync(Schema.Struct({}))(arguments_ ?? {});
         return { name };
       }
-      if (name === "pull_request_review_guide_read" || name === "pull_request_review_guide_write")
+      if (
+        name === "pull_request_review_guide_read" ||
+        name === "pull_request_review_guide_write" ||
+        name === "watch_pull_request" ||
+        name === "unwatch_pull_request"
+      )
         return { name, ...Schema.decodeUnknownSync(GuideTarget)(arguments_ ?? {}) };
       throw new Error("Unknown tool");
     },

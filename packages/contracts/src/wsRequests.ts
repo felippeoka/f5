@@ -1,3 +1,8 @@
+import {
+  PR_WATCH_WS_METHODS,
+  PullRequestWatchInput,
+  PullRequestWatchListInput,
+} from "./pullRequestWatch";
 import { HTML_RENDER_WS_METHODS, HtmlPreviewHostInput, HtmlPreviewResponse } from "./threadTools";
 import { Schema, Struct, Tuple } from "effect";
 import { AttachmentCloneToUploadInput, AttachmentUploadsInput } from "./attachmentUpload";
@@ -654,6 +659,9 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(PR_HUB_WS_METHODS.listAccountRouting, Schema.Struct({})),
   tagRequestBody(PR_HUB_WS_METHODS.setAccountRouting, ForgeAccountRouting),
   tagRequestBody(PR_HUB_WS_METHODS.removeAccountRouting, ForgeAccountRouting),
+  tagRequestBody(PR_WATCH_WS_METHODS.list, PullRequestWatchListInput),
+  tagRequestBody(PR_WATCH_WS_METHODS.start, PullRequestWatchInput),
+  tagRequestBody(PR_WATCH_WS_METHODS.stop, PullRequestWatchInput),
   tagRequestBody(PR_HUB_WS_METHODS.peek, PrHubPeekInput),
   tagRequestBody(PR_HUB_WS_METHODS.getStack, PrHubStackInput),
   tagRequestBody(PR_HUB_WS_METHODS.getViewedFiles, PrHubViewedFilesInput),

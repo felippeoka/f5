@@ -4,12 +4,13 @@ This artifact tracks triage separately from delivery. `scripts/upstream-ports.js
 
 ## Current review handoff (2026-10-19)
 
-The implementation and review fixes through `01c0497143` are included directly
-in the working-tree patch on `fix/upstream-october-review`, based on main
-`9355a57a59`. The earlier implementation notes below are historical; the original
-checkout now contains the changes. Main's protocol 28 is retained and incremented
-to 29 for this bundle. Main's migration 120 remains unchanged. Coverage is still
-4,084 records, and no deferred obligation is promoted by the integration.
+Implementation is on `fix/upstream-october-review` in the isolated checkout
+`../f5-upstream-october-review`. Main `f711d43051` was merged additively in
+`401725257a`; user work in the original checkout remains intact. The implementation
+through `42d9a5862e` includes guided reviews, scoped thread tools, HTML renders and
+manual GitHub reset waits. PR watches are the current continuation. Migration 125
+and protocol 32 extend the merged baseline. Coverage remains 4,084 ledger records;
+implementation work does not automatically promote deferred obligations.
 
 The full gate and verify-first/security obligations remain incomplete. See
 [the review response](./upstream-october-review-response.md) for the current

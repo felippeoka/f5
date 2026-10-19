@@ -1,5 +1,6 @@
 export * from "./nativeOperation";
 export * from "./threadTools";
+export * from "./pullRequestWatch";
 export * from "./baseSchemas";
 export { PendingUserInput } from "./userInput";
 export * from "./elicitation";

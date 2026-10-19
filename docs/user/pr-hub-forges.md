@@ -95,6 +95,20 @@ GitHub has native stacks.
 
 </details>
 
+## PR watches
+
+Open a linked PR's menu in the thread header and select **Watch**. The eye button
+stops that watch. Agents can use `watch_pull_request` with a PR URL or F5 key;
+omitting the target uses the thread's single linked PR. `unwatch_pull_request`
+without a target stops every watch in the current thread.
+
+Watches run on the server every two minutes and queue an automatic follow-up when
+checks, conflicts or review activity change. They share reads for the same account
+and PR. Nothing starts watching by default. Stop, archive and PR closure end a watch.
+Rate limits pause it; eight consecutive read failures end it with a thread notice.
+Ten consecutive comment-only updates also end it to prevent bot loops. Forge
+capabilities determine which check and review facts are available.
+
 ## Related
 
 - [Project settings](project-settings.md) (per-project merge method)

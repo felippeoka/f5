@@ -1,3 +1,4 @@
+import type { PullRequestWatchService } from "../orchestration/Layers/PullRequestWatchService.ts";
 import type { makeHtmlRenderRuntime } from "../htmlRender/HtmlRenderRuntime.ts";
 import { PullRequestKey } from "@t3tools/contracts";
 import { Effect } from "effect";
@@ -14,6 +15,7 @@ import { ThreadToolError, type ThreadToolHandler } from "./threadMcpTools.ts";
 export function makeThreadToolHandler(input: {
   readonly engine: Pick<OrchestrationEngineShape, "getReadModel">;
   readonly federation: Pick<PrHubFederationShape, "resolve" | "parseUrl">;
+  readonly watches: Pick<PullRequestWatchService["Service"], "startWatch" | "stopWatch">;
   readonly guides: PrHubReviewGuideService["Service"];
   readonly html: Effect.Success<ReturnType<typeof makeHtmlRenderRuntime>>;
   readonly links: Pick<PrHubExtensions["Service"], "getThreadLinks">;
@@ -37,6 +39,12 @@ export function makeThreadToolHandler(input: {
       if (request.name === "html_preview")
         return yield* input.html.preview(threadId, request.input);
       if (request.name === "html_render") return yield* input.html.publish(threadId, request.input);
+      if (request.name === "watch_pull_request" || request.name === "unwatch_pull_request") {
+        const target = { threadId, ...(request.pr ? { pr: request.pr } : {}) };
+        return request.name === "watch_pull_request"
+          ? yield* input.watches.startWatch(target)
+          : yield* input.watches.stopWatch(target).pipe(Effect.as({ stopped: true }));
+      }
       if (thread.archivedAt && request.name === "pull_request_review_guide_write")
         return yield* new ThreadToolError({
           message: "Unarchive this thread before starting a guide.",

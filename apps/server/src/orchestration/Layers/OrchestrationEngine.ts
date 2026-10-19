@@ -1,3 +1,4 @@
+import { stopThreadPullRequestWatches } from "../stopThreadPullRequestWatches.ts";
 import { requireAttachmentOwner } from "../../attachmentOwnership.ts";
 import {
   WorkspaceWriteContext,
@@ -480,6 +481,18 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 if (savedEvent.type === "thread.archived" || savedEvent.type === "thread.deleted") {
                   if (Option.isSome(transitions))
                     yield* transitions.value.cancel(savedEvent.payload.threadId).pipe(Effect.orDie);
+                }
+                if (
+                  savedEvent.type === "thread.archived" ||
+                  savedEvent.type === "thread.deleted" ||
+                  savedEvent.type === "thread.turn-interrupt-requested" ||
+                  savedEvent.type === "thread.session-stop-requested"
+                ) {
+                  yield* stopThreadPullRequestWatches(
+                    sql,
+                    savedEvent.payload.threadId,
+                    savedEvent.occurredAt,
+                  );
                 }
                 if (savedEvent.type === "thread.session-stop-requested") {
                   // Commit cancellation with the stop intent: a crash before live

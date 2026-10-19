@@ -417,11 +417,17 @@ export const makePrHubServiceForHost = (accountHost = DEFAULT_HOST) =>
             const provider = yield* sourceControlProviders.get(pr.provider);
             const { owner, repo } = yield* repositoryParts(pr);
             const variables = yield* decodeDetailResponse(pr, "prHub.getTimeline.cursor", () =>
-              githubTimelineVariables({ owner, repo, number: pr.number, cursor: input.cursor }),
+              githubTimelineVariables({
+                owner,
+                repo,
+                number: pr.number,
+                cursor: input.cursor,
+                commentsOnly: input.commentsOnly,
+              }),
             );
             return yield* readPrDetailCache({
               cache: timelineCache,
-              key: `${pr.key}|${input.cursor ?? "first"}`,
+              key: `${pr.key}|${input.cursor ?? "first"}|${input.commentsOnly ? "comments" : "all"}`,
               mode: input.mode ?? "if_stale",
               fetch: provider
                 .query({
@@ -433,7 +439,11 @@ export const makePrHubServiceForHost = (accountHost = DEFAULT_HOST) =>
                 .pipe(
                   Effect.flatMap((response) =>
                     decodeDetailResponse(pr, "prHub.getTimeline.decode", () => {
-                      const decoded = decodeGitHubPrTimeline(response, input.cursor);
+                      const decoded = decodeGitHubPrTimeline(
+                        response,
+                        input.cursor,
+                        input.commentsOnly,
+                      );
                       return {
                         entries: [...decoded.entries],
                         pageInfo: decoded.pageInfo,

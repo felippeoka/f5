@@ -1,4 +1,9 @@
 import type {
+  PullRequestWatchEntry,
+  PullRequestWatchInput,
+  PullRequestWatchChanged,
+} from "./pullRequestWatch";
+import type {
   HtmlPreviewRequest,
   HtmlPreviewHostRequest,
   HtmlPreviewResult,
@@ -711,6 +716,12 @@ export interface DesktopPreviewBridge {
 }
 
 export interface NativeApi {
+  pullRequestWatches: {
+    list: (input: { threadId: ThreadId }) => Promise<ReadonlyArray<PullRequestWatchEntry>>;
+    start: (input: PullRequestWatchInput) => Promise<PullRequestWatchEntry>;
+    stop: (input: PullRequestWatchInput) => Promise<void>;
+    onChanged: (callback: (input: typeof PullRequestWatchChanged.Type) => void) => () => void;
+  };
   htmlRender: {
     setHost: (input: { available: boolean }) => Promise<void>;
     respond: (input: HtmlPreviewResponse) => Promise<void>;
