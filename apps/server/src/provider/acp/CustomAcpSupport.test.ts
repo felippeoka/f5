@@ -1,7 +1,8 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import type { AcpParsedSessionEvent } from "./AcpRuntimeModel.ts";
+import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { Effect, Schema } from "effect";
+import { Effect, Fiber, Schema, Stream } from "effect";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { AcpSettings } from "@t3tools/contracts";
@@ -16,19 +17,31 @@ const run = <A, E>(
     ChildProcessSpawner.ChildProcessSpawner | import("effect").FileSystem.FileSystem
   >,
 ) => Effect.runPromise(work.pipe(Effect.provide(NodeServices.layer)));
-async function fixture() {
+async function fixture(copilot = false) {
   const cwd = await mkdtemp(path.join(tmpdir(), "f5-custom-acp-"));
   const log = path.join(cwd, "requests.jsonl"),
     exitLog = path.join(cwd, "exit"),
     argv = path.join(cwd, "argv");
-  const command = writeAcpWrapper(
-    path.join(cwd, "agent with spaces"),
+  const wrapper = writeAcpWrapper(
+    path.join(cwd, copilot ? "copilot" : "agent with spaces"),
     path.resolve("scripts/acp-mock-agent.ts"),
     {
       argvLogPath: argv,
-      env: { T3_ACP_REQUEST_LOG_PATH: log, T3_ACP_EXIT_LOG_PATH: exitLog, ACP_MOCK_AUTH_FAIL: "1" },
+      env: {
+        T3_ACP_REQUEST_LOG_PATH: log,
+        T3_ACP_EXIT_LOG_PATH: exitLog,
+        ACP_MOCK_AUTH_FAIL: "1",
+        ...(copilot ? { T3_ACP_COPILOT_SUBAGENTS: "1" } : {}),
+      },
     },
   );
+  let command = wrapper;
+  if (copilot) {
+    command = path.join(cwd, process.platform === "win32" ? "copilot.cmd" : "copilot");
+    if (process.platform === "win32")
+      await writeFile(command, `@"${process.execPath}" "${wrapper}" %*\r\n`);
+    else await copyFile(wrapper, command);
+  }
   const config = Schema.decodeUnknownSync(AcpSettings)({
     command,
     args: ["--acp", "one argument with spaces", "$(echo unexpanded)"],
@@ -36,6 +49,64 @@ async function fixture() {
   return { cwd, log, exitLog, argv, config };
 }
 describe("custom local ACP", () => {
+  it.each([false, true])(
+    "keeps Copilot's attributed child text and tools out of the parent stream (hardening: %s)",
+    async (hardening) => {
+      const f = await fixture(true);
+      try {
+        await run(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const runtime = yield* makeCustomAcpRuntime(f.config, {
+                childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
+                grokSettings: null,
+                cwd: f.cwd,
+                environment: process.env,
+                clientInfo: { name: "test", version: "1" },
+                hardening: { enabled: hardening, provider: "acp" },
+              });
+              const events: AcpParsedSessionEvent[] = [];
+              const listener = yield* Stream.runForEach(runtime.getEvents(), (event) =>
+                Effect.sync(() => {
+                  events.push(event);
+                }),
+              ).pipe(Effect.forkChild);
+              yield* runtime.start();
+              yield* runtime.prompt({ prompt: [{ type: "text", text: "Explore" }] });
+              yield* runtime.awaitEventBarrier;
+              const text = events
+                .filter((event) => event._tag === "ContentDelta")
+                .map((event) => event.text)
+                .join("");
+              expect(text).not.toContain("PRIVATE_COPILOT");
+              expect(text).toContain("PUBLIC_PARENT");
+              expect(text.split("SAME_CHUNK").length - 1).toBe(1);
+              expect(
+                events.some(
+                  (event) =>
+                    event._tag === "ToolCallUpdated" &&
+                    event.toolCall.toolCallId === "private-child-read",
+                ),
+              ).toBe(false);
+              yield* Fiber.interrupt(listener);
+            }),
+          ),
+        );
+        const requests = (await readFile(f.log, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line));
+        expect(
+          requests.find((request) => request.method === "initialize")?.params.clientCapabilities
+            ._meta["github.com/copilot"].events,
+        ).toContain("assistant.message_delta");
+        await waitForAgentExit(f.exitLog);
+      } finally {
+        await rm(f.cwd, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("initializes only during health checks and closes its process", async () => {
     const f = await fixture();
     try {

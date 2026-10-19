@@ -572,6 +572,60 @@ const program = Effect.gen(function* () {
         return { stopReason: "end_turn" };
       }
 
+      if (process.env.T3_ACP_COPILOT_SUBAGENTS === "1") {
+        const raw = (type: string, data: Record<string, unknown>, agentId?: string) =>
+          agent.client.extNotification("github.com/copilot/sessionEvent", {
+            sessionId: requestedSessionId,
+            type,
+            data,
+            ...(agentId ? { agentId } : {}),
+          });
+        const chunk = (text: string) =>
+          agent.client.sessionUpdate({
+            sessionId: requestedSessionId,
+            update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+          });
+        yield* raw("subagent.started", { toolCallId: "copilot-task" }, "child-agent");
+        yield* raw("assistant.message_delta", {
+          parentToolCallId: "copilot-task",
+          deltaContent: "PRIVATE_COPILOT_CHILD",
+        });
+        yield* chunk("PRIVATE_COPILOT_CHILD");
+        yield* raw("assistant.message_delta", {
+          parentToolCallId: "copilot-task",
+          deltaContent: "SAME_CHUNK",
+        });
+        yield* chunk("SAME_CHUNK");
+        yield* raw("assistant.message_delta", { deltaContent: "SAME_CHUNK" });
+        yield* chunk("SAME_CHUNK");
+        yield* raw("assistant.reasoning_delta", {
+          parentToolCallId: "copilot-task",
+          deltaContent: "PRIVATE_COPILOT_THOUGHT",
+        });
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_thought_chunk",
+            content: { type: "text", text: "PRIVATE_COPILOT_THOUGHT" },
+          },
+        });
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "private-child-read",
+            title: "Private child read",
+            kind: "read",
+            status: "in_progress",
+            _meta: { "github.com/copilot": { agentId: "child-agent" } },
+          },
+        });
+        yield* raw("subagent.completed", {}, "child-agent");
+        yield* raw("assistant.message_delta", { deltaContent: "PUBLIC_PARENT" });
+        yield* chunk("PUBLIC_PARENT");
+        return { stopReason: "end_turn" };
+      }
+
       if (emitAskQuestion) {
         yield* agent.client.extRequest("cursor/ask_question", {
           toolCallId: "ask-question-tool-call-1",

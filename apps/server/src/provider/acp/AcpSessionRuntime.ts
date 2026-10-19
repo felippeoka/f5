@@ -90,6 +90,10 @@ export interface AcpSessionRuntimeOptions {
   readonly cwd: string;
   readonly resumeSessionId?: string;
   readonly clientCapabilities?: EffectAcpSchema.InitializeRequest["clientCapabilities"];
+  /** Provider-owned attribution runs on the wire reader, before state or text coalescing. */
+  readonly normalizeSessionUpdate?: (
+    notification: EffectAcpSchema.SessionNotification,
+  ) => EffectAcpSchema.SessionNotification | undefined;
   readonly clientInfo: {
     readonly name: string;
     readonly version: string;
@@ -400,6 +404,19 @@ const makeAcpSessionRuntime = (
 
     const acp = yield* Effect.service(EffectAcpClient.AcpClient).pipe(Effect.provide(acpContext));
 
+    // Typed handlers deliver the notifications. This private diagnostic copy is
+    // never exposed by the runtime, so drain it instead of retaining every frame.
+    yield* Stream.runDrain(acp.raw.notifications).pipe(Effect.forkScoped);
+
+    const recordReplayActivity = Clock.currentTimeMillis.pipe(
+      Effect.flatMap((now) =>
+        Ref.update(resumeReplayRef, (current) =>
+          current.active
+            ? { ...current, eventCount: current.eventCount + 1, lastActivityAt: now }
+            : current,
+        ),
+      ),
+    );
     const startupCommands = new Map<string, EffectAcpSchema.SessionNotification>();
     yield* acp.handleSessionUpdate((notification) =>
       Effect.gen(function* () {
@@ -416,28 +433,23 @@ const makeAcpSessionRuntime = (
             return;
           }
         }
+        const normalized = options.normalizeSessionUpdate
+          ? options.normalizeSessionUpdate(notification)
+          : notification;
+        if (!normalized) {
+          if (hardeningEnabled) yield* recordReplayActivity;
+          return;
+        }
         yield* handleSessionUpdate({
           queue: eventQueue,
           modeStateRef,
           toolCallsRef,
           toolEmissions,
           assistantSegmentRef,
-          params: notification,
+          params: normalized,
           ...(hardeningEnabled
             ? {
-                onActivity: Clock.currentTimeMillis.pipe(
-                  Effect.flatMap((now) =>
-                    Ref.update(resumeReplayRef, (current) =>
-                      current.active
-                        ? {
-                            ...current,
-                            eventCount: current.eventCount + 1,
-                            lastActivityAt: now,
-                          }
-                        : current,
-                    ),
-                  ),
-                ),
+                onActivity: recordReplayActivity,
               }
             : {}),
         });

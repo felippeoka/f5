@@ -1,3 +1,10 @@
+import {
+  COPILOT_ACP_SESSION_EVENT,
+  CopilotAcpSessionEvent,
+  copilotAcpCapabilities,
+  isCopilotAcpCommand,
+  makeCopilotAcpRouting,
+} from "./CopilotAcpRouting.ts";
 import { type AcpSettings, type ServerProviderModel } from "@t3tools/contracts";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { Effect, Layer } from "effect";
@@ -17,10 +24,18 @@ export function customAcpSpawn(
 /** Authentication is owned by the selected local agent; F5 never picks an auth method. */
 export function makeCustomAcpRuntime(config: AcpSettings, input: GrokAcpRuntimeInput) {
   return Effect.gen(function* () {
+    const routing = isCopilotAcpCommand(config.command) ? makeCopilotAcpRouting() : undefined;
+    if (routing) yield* Effect.addFinalizer(() => Effect.sync(routing.clear));
     const context = yield* Layer.build(
       AcpSessionRuntime.layer({
         ...input,
         spawn: customAcpSpawn(config, input.cwd, input.environment ?? {}),
+        ...(routing
+          ? {
+              clientCapabilities: { _meta: copilotAcpCapabilities },
+              normalizeSessionUpdate: routing.normalize,
+            }
+          : {}),
       }).pipe(
         Layer.provide(
           Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, input.childProcessSpawner),
@@ -28,6 +43,12 @@ export function makeCustomAcpRuntime(config: AcpSettings, input: GrokAcpRuntimeI
       ),
     );
     const runtime = yield* Effect.service(AcpSessionRuntime).pipe(Effect.provide(context));
+    if (routing)
+      yield* runtime.handleExtNotification(
+        COPILOT_ACP_SESSION_EVENT,
+        CopilotAcpSessionEvent,
+        (event) => Effect.sync(() => routing.onEvent(event)),
+      );
     return {
       ...runtime,
       setSessionModel: (modelId: string) =>
