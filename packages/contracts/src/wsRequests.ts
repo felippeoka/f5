@@ -52,6 +52,8 @@ import {
   ProviderAccountStartInput,
 } from "./profile";
 import {
+  WorktreesMoveThreadInput,
+  WorktreesDiscardMovedChangesInput,
   WorktreesGetTransitionInput,
   WorktreesInspectInput,
   WorktreesListInput,
@@ -596,6 +598,8 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.nextTurnQueueRecheckDelivery, NextTurnQueueRecheckDeliveryInput),
   tagRequestBody(WS_METHODS.nextTurnQueueRetryDelivery, NextTurnQueueRetryDeliveryInput),
   tagRequestBody(WS_METHODS.nextTurnQueueDiscardDelivery, NextTurnQueueDiscardDeliveryInput),
+  tagRequestBody(WS_METHODS.worktreesMoveThread, WorktreesMoveThreadInput),
+  tagRequestBody(WS_METHODS.worktreesDiscardMovedChanges, WorktreesDiscardMovedChangesInput),
   tagRequestBody(WS_METHODS.worktreesList, WorktreesListInput),
   tagRequestBody(WS_METHODS.worktreesInspect, WorktreesInspectInput),
   tagRequestBody(WS_METHODS.worktreesRemove, WorktreesRemoveInput),

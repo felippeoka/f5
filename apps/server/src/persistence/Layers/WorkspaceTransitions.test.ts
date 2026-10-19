@@ -159,6 +159,17 @@ it.layer(WorkspaceTransitionsLive.pipe(Layer.provideMerge(SqlitePersistenceMemor
         expect(yield* store.forThread(threadId)).toEqual(recovery);
       }),
     );
+    it.effect("uses the partial recovery index instead of scanning completed move manifests", () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const plan = yield* sql<{
+          detail: string;
+        }>`EXPLAIN QUERY PLAN SELECT record_json AS record,phase,version FROM workspace_transitions WHERE json_extract(record_json,'$.intent')='move_to_new_worktree' AND (phase IN ('reserved','stopping','applying','applied','needs_recovery') OR json_extract(record_json,'$.moveData.snapshotRef') IS NOT NULL)`;
+        expect(
+          plan.some((entry) => entry.detail.includes("workspace_transitions_move_recovery")),
+        ).toBe(true);
+      }),
+    );
     it.effect("rechecks pending work before retrying a confirmed pre-mutation failure", () =>
       Effect.gen(function* () {
         const store = yield* WorkspaceTransitions;

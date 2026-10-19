@@ -225,3 +225,35 @@ target; an irreversible thread cleanup finishes its current target. After a back
 rescan and confirm again. **Review remaining work** creates a fresh review and never replays
 a previous destructive request. Activity includes manual and automatic cleanup and can be
 filtered by source. Backup audit rows are history and never resume cleanup after restore.
+
+## Move a local conversation to a worktree
+
+For an existing local conversation, open the **Local** menu and choose **Move to new
+worktree…**. Finish the active turn and remove queued work first. You can supply a
+new branch name or let F5 generate one from the first user message.
+
+The dialog shows the project checkout's changed-file count. Moving copies all its
+uncommitted tracked, staged, and untracked changes, including edits made outside the
+conversation. Staged changes stay staged. Executable modes and symlinks are preserved.
+The project checkout is left unchanged, and existing Git stashes are untouched.
+Ignored files such as `.env` are excluded. The next send prepares the new checkout,
+including the project's submodule policy and opted-in setup script.
+
+Moves require a committed HEAD and no Git operation in progress. Commit or stash dirty
+submodule changes first. Untracked files are limited to 5,000 files and 500 MiB in total.
+Sending and competing workspace actions remain blocked by the durable transition while
+F5 stops an idle provider session, snapshots changes, and copies the checkout.
+
+After moving, **Discard originals…** in the success notification, or **Discard originals
+from move…** in the worktree menu, saves the originals in a reversible Git stash with a
+message identifying the branch and move. F5 refuses if the original checkout has changed,
+or a live session, terminal, queued operation, or conflicting transition uses it. Restore
+that stash manually if you want the originals back. An interrupted discard requires
+manual inspection of the project checkout and stash list rather than an automatic retry.
+
+An interrupted move whose workspace transaction committed is completed on restart.
+Otherwise F5 rolls it back while leaving the source untouched. Only verified copies in
+an owned checkout at the unchanged base commit can be cleaned up. Unexpected files,
+ignored secrets, changed commits, or new references retain the checkout and branch with
+an explanation. The temporary private `refs/f5/moves/<operationId>` ref is removed after
+completion or rollback; it never uses `refs/stash`.

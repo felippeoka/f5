@@ -1,3 +1,9 @@
+import { setupProjectScript } from "@t3tools/shared/projectScripts";
+import { ServerSettingsService } from "../../serverSettings.ts";
+import { readProjectSettings } from "../projectSettings.ts";
+import { sameMoveSnapshot, isMoveCopySnapshot } from "../../git/moveSnapshot.ts";
+import { TextGeneration } from "../../git/Services/TextGeneration.ts";
+import { buildGeneratedWorktreeBranchName } from "../../git/worktreeBranchNames.ts";
 import { WorkspaceRequiresNewWorktreeError } from "../../git/workspaceSwitch.ts";
 import { GitCommandError } from "../../git/Errors.ts";
 import { lstat } from "node:fs/promises";
@@ -25,7 +31,7 @@ import { NextTurnQueueDispatcher } from "../../nextTurnQueue/Services/NextTurnQu
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { TerminalManager } from "../../terminal/Services/Manager.ts";
 import { assertExclusiveProfileCheckout } from "../../profiles/RepositorySharing.ts";
-import { readWorktreeClaims } from "../worktreeClaims.ts";
+import { readWorktreeClaims, evaluateWorktreeRemoval } from "../worktreeClaims.ts";
 import { canonicalWorkspace, inspectAttachableWorkspace } from "../workspaceAttachment.ts";
 import { WorkspaceWriteContext } from "../workspaceTransitionContext.ts";
 import { WorktreePreparation } from "../Services/WorktreePreparation.ts";
@@ -64,8 +70,13 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
     | TerminalManager
     | NextTurnQueueStore
     | WorktreeSetupGate
+    | GitCore
+    | ServerConfig
+    | WorkspaceTransitions
   >();
   const scope = yield* Effect.scope;
+  const textGeneration = yield* Effect.serviceOption(TextGeneration);
+  const settings = yield* Effect.serviceOption(ServerSettingsService);
   const secret = randomBytes(32).toString("hex");
   const workers = new Map<
     string,
@@ -147,6 +158,13 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
           new WorkspaceRequiresNewWorktreeError(
             "Another conversation, terminal, session, or queued operation references this checkout. Create a new worktree instead.",
           ),
+        );
+      if (
+        record.intent === "move_to_new_worktree" &&
+        (foreign.length || usage.sessions.length || usage.terminals.length)
+      )
+        return yield* Effect.fail(
+          new Error("Another conversation or process references the new worktree."),
         );
       if (usage.setupThreadIds.some((id) => id !== record.threadId))
         return yield* Effect.fail(new Error("Another setup or transition owns this checkout."));
@@ -289,6 +307,205 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
         );
       return yield* currentRecord(record.operationId);
     });
+  const releaseMoveRef = (record: WorkspaceTransitionRecord) =>
+    Effect.gen(function* () {
+      const move = record.moveData;
+      if (!move?.snapshotRef) return record;
+      if (move.snapshotRef !== `refs/f5/moves/${record.operationId}`)
+        return yield* Effect.fail(
+          new Error("Move snapshot ref identity changed; retained for inspection."),
+        );
+      const sha = yield* git.resolveCommit(record.source.path, move.snapshotRef);
+      if (sha && sha !== move.snapshot.trackedStashSha)
+        return yield* Effect.fail(new Error("Move snapshot ref changed; retained for inspection."));
+      if (sha) yield* git.deleteMoveRef(record.source.path, move.snapshotRef, sha);
+      return yield* store.update(record, { moveData: { ...move, snapshotRef: null } });
+    });
+  // Only byte-for-byte copies are disposable. The shared gate still protects ignored files,
+  // foreign claims, changed commits, registration and creation ownership.
+  const rollbackMove = (initial: WorkspaceTransitionRecord, message: string) =>
+    locked(
+      initial,
+      Effect.gen(function* () {
+        let record = yield* currentRecord(initial.operationId);
+        const move = record.moveData;
+        const retained: string[] = [];
+        if (move && record.mutationAttempted) {
+          const receipt = yield* git.readWorktreePreparation(record.target.path);
+          const registrations = yield* git.listWorktrees(record.source.path);
+          const registration = registrations.find(
+            (entry) => entry.canonicalPath === record.target.path,
+          );
+          if (
+            registration &&
+            receipt?.operationId === `move:${record.operationId}` &&
+            receipt.createdCheckout
+          ) {
+            const actual = yield* git.readMoveSnapshot(record.target.path).pipe(Effect.option);
+            const snapshot = Option.getOrNull(actual);
+            const onlyCopies = snapshot && isMoveCopySnapshot(snapshot, move.snapshot);
+            const policy = {
+              kind: "ownedRollback" as const,
+              ownThreadId: record.threadId,
+              ownedCreation: {
+                path: record.target.path,
+                commonDir: record.source.repository,
+                baseSha: move.snapshot.baseSha,
+                created: true,
+                transitionOperationId: record.operationId,
+                ...(onlyCopies && snapshot ? { copiedSnapshot: snapshot } : {}),
+              },
+            };
+            const checked = yield* evaluateWorktreeRemoval({
+              projectCwd: record.source.path,
+              path: record.target.path,
+              policy,
+            }).pipe(Effect.provideServices(services));
+            const usage = yield* claims(record.target.path);
+            if (usage.threadIds.length || usage.sessions.length || usage.terminals.length)
+              checked.blockedReasons.push(
+                "another conversation or process references the copied checkout",
+              );
+            if (checked.blockedReasons.length) retained.push(...checked.blockedReasons);
+            else {
+              if (snapshot && onlyCopies) yield* git.cleanMoveCopies(record.target.path, snapshot);
+              const clean = yield* evaluateWorktreeRemoval({
+                projectCwd: record.source.path,
+                path: record.target.path,
+                policy: {
+                  ...policy,
+                  ownedCreation: { ...policy.ownedCreation, copiedSnapshot: undefined },
+                },
+              }).pipe(Effect.provideServices(services));
+              if (clean.blockedReasons.length) retained.push(...clean.blockedReasons);
+              else yield* git.removeWorktree({ cwd: record.source.path, path: record.target.path });
+            }
+          } else if (registration) retained.push("creation ownership could not be verified");
+          // The receipt was persisted before worktree add; delete only this operation's unchanged branch.
+          if (
+            !retained.length &&
+            receipt?.operationId === `move:${record.operationId}` &&
+            record.target.branch
+          ) {
+            const checkedOut = (yield* git.listWorktrees(record.source.path)).some(
+              (entry) => entry.branch === record.target.branch,
+            );
+            const removed =
+              !checkedOut &&
+              (yield* git.deleteBranchIfAt({
+                cwd: record.source.path,
+                branch: record.target.branch,
+                expectedSha: move.snapshot.baseSha,
+              }));
+            if (!removed) retained.push("the new branch changed and was retained");
+          }
+        }
+        record = yield* releaseMoveRef(record);
+        return yield* store.update(record, {
+          phase: "failed",
+          error:
+            message +
+            (retained.length ? ` Retained ${record.target.path}: ${retained.join("; ")}.` : ""),
+        });
+      }),
+    );
+  const applyMove = (initial: WorkspaceTransitionRecord) =>
+    Effect.gen(function* () {
+      let record = initial;
+      const { thread, project } = yield* checkContext(record);
+      if (thread.worktreePath !== null)
+        return yield* Effect.fail(
+          new Error("Only a local conversation can be moved to a new worktree."),
+        );
+      const before = yield* inspect(record.source.path);
+      if (!before.headSha)
+        return yield* Effect.fail(
+          new Error("Commit to the project checkout before moving this conversation."),
+        );
+      if (before.operation)
+        return yield* Effect.fail(
+          new Error(`Finish the ${before.operation} before moving this conversation.`),
+        );
+      if (
+        before.commonDir !== record.source.repository ||
+        before.canonicalRoot !== record.source.path ||
+        before.headSha !== record.source.headSha ||
+        before.branch !== record.source.branch
+      )
+        return yield* Effect.fail(
+          new Error("The project checkout changed before the move. Try again."),
+        );
+      if (yield* git.branchExists(project.workspaceRoot, record.target.branch!))
+        return yield* Effect.fail(new Error(`Branch '${record.target.branch}' already exists.`));
+      const snapshot = yield* git.readMoveSnapshot(record.source.path);
+      if (snapshot.baseSha !== record.source.headSha)
+        return yield* Effect.fail(new Error("The project HEAD changed before the move."));
+      record = yield* store.update(record, {
+        phase: "applying",
+        moveData: {
+          snapshot,
+          snapshotRef: `refs/f5/moves/${record.operationId}`,
+          createdBranch: false,
+          createdWorktree: false,
+          copyStarted: false,
+          discarded: false,
+          discardStarted: false,
+        },
+        move: { copiedFileCount: snapshot.copiedFileCount, discarded: false },
+      });
+      if (snapshot.trackedStashSha)
+        yield* git.setMoveRef(
+          record.source.path,
+          record.moveData!.snapshotRef!,
+          snapshot.trackedStashSha,
+        );
+      record = yield* store.update(record, { mutationAttempted: true });
+      yield* git.createWorktree({
+        cwd: project.workspaceRoot,
+        branch: snapshot.baseSha,
+        baseRefName: snapshot.baseSha,
+        newBranch: record.target.branch!,
+        path: record.target.path,
+        submodules: "none",
+        preparation: {
+          owner: `thread:${thread.id}`,
+          operationId: `move:${record.operationId}`,
+          runSetupScript: true,
+          setupIdentity: setupProjectScript(project.scripts)?.command ?? null,
+          namingIntent: record.request.branch ? "explicit" : "generated",
+        },
+      });
+      record = yield* store.update(record, {
+        moveData: {
+          ...record.moveData!,
+          createdBranch: true,
+          createdWorktree: true,
+          copyStarted: true,
+        },
+      });
+      if (snapshot.trackedStashSha)
+        yield* git.stashApplySha(record.target.path, snapshot.trackedStashSha);
+      yield* git.copyMoveUntracked(record.source.path, record.target.path, snapshot.untracked);
+      const copied = yield* git.readMoveSnapshot(record.target.path);
+      const source = yield* git.readMoveSnapshot(record.source.path);
+      if (!sameMoveSnapshot(snapshot, copied) || !sameMoveSnapshot(snapshot, source))
+        return yield* Effect.fail(
+          new Error("The project checkout or copied files changed during the move. Try again."),
+        );
+      const checkout = yield* inspectAttachableWorkspace(
+        git,
+        config,
+        project.workspaceRoot,
+        record.target.path,
+        record.target.branch,
+      );
+      return yield* store.update(record, {
+        phase: "applied",
+        observed: identity(checkout),
+        fingerprint: digest(checkout),
+        error: null,
+      });
+    });
   const apply = (initial: WorkspaceTransitionRecord) =>
     Effect.gen(function* () {
       let record = yield* store.update(initial, { phase: "stopping", error: null });
@@ -297,6 +514,7 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
         record,
         Effect.gen(function* () {
           const { thread, project } = yield* checkContext(record);
+          if (record.intent === "move_to_new_worktree") return yield* applyMove(record);
           const inPlace =
             record.intent === "checkout_branch" || record.intent === "create_branch_and_checkout";
           if (thread.session && thread.session.status !== "stopped")
@@ -441,7 +659,7 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
           retry: true,
         });
       }
-      return yield* locked(
+      const completed = yield* locked(
         record,
         Effect.gen(function* () {
           const { project } = yield* checkContext(record);
@@ -464,6 +682,9 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
           return yield* commit(record, checkout);
         }),
       );
+      if (completed.intent === "move_to_new_worktree")
+        return yield* locked(completed, releaseMoveRef(completed));
+      return completed;
     });
   const resumeMissingPause = (record: WorkspaceTransitionSnapshot) =>
     Effect.gen(function* () {
@@ -495,6 +716,22 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
             )
               return live;
             const failure = Cause.squash(cause);
+            if (live.intent === "move_to_new_worktree") {
+              if (live.phase === "completed" || live.phase === "cancelled") return live;
+              const message = failure instanceof Error ? failure.message : String(failure);
+              return yield* rollbackMove(live, message).pipe(
+                Effect.catch((error) =>
+                  currentRecord(live.operationId).pipe(
+                    Effect.flatMap((current) =>
+                      store.update(current, {
+                        phase: "needs_recovery",
+                        error: `${message} Cleanup needs attention: ${error.message}`,
+                      }),
+                    ),
+                  ),
+                ),
+              );
+            }
             const conflict = Schema.is(GitCommandError)(failure)
               ? failure.checkoutConflict
               : undefined;
@@ -598,7 +835,65 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
         return yield* Effect.fail(new Error("The source belongs to another repository."));
       let target = source;
       let baseRef: string | undefined;
-      if (input.intent === "attach_existing" || input.intent === "use_project_checkout") {
+      if (input.intent === "move_to_new_worktree") {
+        if (!/^[a-zA-Z0-9-]{1,100}$/.test(input.operationId))
+          return yield* Effect.fail(new Error("Invalid move operation ID."));
+        if (thread.worktreePath !== null)
+          return yield* Effect.fail(
+            new Error("Only a local conversation can be moved to a new worktree."),
+          );
+        if (!source.headSha)
+          return yield* Effect.fail(
+            new Error("Commit to the project checkout before moving this conversation."),
+          );
+        let branch = input.branch;
+        if (branch) {
+          if (!(yield* git.isValidBranchName(branch)) || /^t3code\/[0-9a-f]{8}$/i.test(branch))
+            return yield* Effect.fail(new Error("Invalid branch name."));
+          if (yield* git.branchExists(project.workspaceRoot, branch))
+            return yield* Effect.fail(new Error(`Branch '${branch}' already exists.`));
+        } else {
+          const first = thread.messages.find((message) => message.role === "user");
+          const namingSettings = Option.isSome(settings)
+            ? (yield* readProjectSettings(yield* settings.value.getSettings, project)).settings
+            : null;
+          const generated =
+            Option.isSome(textGeneration) &&
+            first &&
+            (first.text.trim() || (first.attachments?.length ?? 0) > 0)
+              ? yield* textGeneration.value
+                  .generateBranchName({
+                    cwd: project.workspaceRoot,
+                    message: first.text,
+                    attachments: first.attachments,
+                    ...(namingSettings
+                      ? {
+                          modelSelection: namingSettings.textGenerationModelSelection,
+                          writingPreferences: namingSettings.sourceControlWriting,
+                        }
+                      : {}),
+                  })
+                  .pipe(Effect.timeout("3 seconds"), Effect.option)
+              : Option.none();
+          branch = Option.isSome(generated)
+            ? yield* git.resolveAvailableBranchName(
+                project.workspaceRoot,
+                buildGeneratedWorktreeBranchName(
+                  generated.value.branch,
+                  namingSettings?.sourceControlWriting.branchNamePrefix ?? "f5",
+                ),
+              )
+            : `t3code/${crypto.randomUUID().replaceAll("-", "").slice(0, 8)}`;
+        }
+        target = {
+          path: yield* canonicalWorkspace(
+            yield* git.allocateWorktreePath({ cwd: project.workspaceRoot, branch }),
+          ),
+          repository,
+          branch,
+          headSha: source.headSha,
+        };
+      } else if (input.intent === "attach_existing" || input.intent === "use_project_checkout") {
         const path =
           input.intent === "use_project_checkout" ? project.workspaceRoot : input.targetPath;
         if (!path) return yield* Effect.fail(new Error("Choose a checkout."));
@@ -821,6 +1116,27 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
       if (worker) yield* Fiber.interrupt(worker.fiber);
     });
   yield* store.reconcile;
+  for (const initial of yield* store.unfinishedMoves) {
+    const model = yield* engine.getReadModel();
+    const thread = model.threads.find((entry) => entry.id === initial.threadId);
+    if (!thread || thread.deletedAt !== null || thread.archivedAt !== null) continue;
+    yield* withOwner(
+      initial.operationId,
+      Effect.gen(function* () {
+        let record = initial;
+        if (thread.worktreePath === record.target.path && thread.branch === record.target.branch) {
+          if (record.phase !== "completed")
+            record = yield* store.update(record, { phase: "completed", error: null });
+          yield* locked(record, releaseMoveRef(record));
+        } else if (transitionIsActive(record)) {
+          yield* rollbackMove(
+            record,
+            "Move interrupted before workspace commit; the project checkout was kept.",
+          );
+        } else yield* locked(record, releaseMoveRef(record));
+      }),
+    ).pipe(Effect.catch((error) => Effect.logWarning("Move recovery retained artifacts", error)));
+  }
   yield* Effect.forkIn(
     Stream.runForEach(engine.streamDomainEvents, (event) => {
       if (event.type !== "thread.archived" && event.type !== "thread.deleted") return Effect.void;
@@ -828,7 +1144,113 @@ export const makeWorkspaceTransition = Effect.gen(function* () {
     }),
     scope,
   );
+  const moveThread: WorkspaceTransitionShape["moveThread"] = (input) =>
+    Effect.gen(function* () {
+      const { thread } = yield* context(input.threadId);
+      const operationId = crypto.randomUUID();
+      const result = yield* withOwner(
+        operationId,
+        switchWorkspace({
+          operationId,
+          threadId: input.threadId,
+          intent: "move_to_new_worktree",
+          expected: {
+            branch: thread.branch,
+            worktreePath: thread.worktreePath,
+            sessionUpdatedAt: thread.session?.updatedAt ?? null,
+          },
+          ...(input.branch ? { branch: input.branch } : {}),
+        }),
+      );
+      if (result.phase !== "completed" || !result.result?.worktreePath || !result.result.branch)
+        return yield* Effect.fail(
+          new Error(result.error ?? "Move did not complete. Inspect the workspace transition."),
+        );
+      return {
+        operationId,
+        branch: result.result.branch,
+        worktreePath: result.result.worktreePath,
+        copiedFileCount: result.move?.copiedFileCount ?? 0,
+      };
+    });
+  const discardMovedChanges: WorkspaceTransitionShape["discardMovedChanges"] = (input) =>
+    Effect.gen(function* () {
+      const record = yield* currentRecord(input.operationId);
+      if (
+        record.threadId !== input.threadId ||
+        record.intent !== "move_to_new_worktree" ||
+        record.phase !== "completed" ||
+        !record.moveData
+      )
+        return yield* Effect.fail(
+          new Error("No completed move is available for this conversation."),
+        );
+      return yield* locked(
+        record,
+        Effect.gen(function* () {
+          let current = yield* currentRecord(record.operationId);
+          const { thread, project } = yield* context(record.threadId);
+          if (thread.worktreePath !== record.target.path || thread.branch !== record.target.branch)
+            return yield* Effect.fail(
+              new Error("The conversation workspace changed after the move."),
+            );
+          if (current.moveData!.discarded) return { discarded: true };
+          if (current.moveData!.discardStarted)
+            return yield* Effect.fail(
+              new Error(
+                "Discard was interrupted. Inspect the project checkout and saved stashes manually.",
+              ),
+            );
+          const usage = yield* claims(project.workspaceRoot);
+          if (
+            usage.unknown ||
+            usage.sessions.length ||
+            usage.terminals.length ||
+            usage.activeThreadIds.length ||
+            usage.queuedThreadIds.length ||
+            usage.transitionThreadIds.length ||
+            usage.setupThreadIds.some((id) => id !== record.threadId)
+          )
+            return yield* Effect.fail(
+              new Error(
+                "Another session, terminal, or operation uses the project checkout. Stop it before discarding.",
+              ),
+            );
+          const sourceCheckout = yield* inspect(record.source.path);
+          if (
+            (yield* canonicalWorkspace(project.workspaceRoot)) !== record.source.path ||
+            sourceCheckout.commonDir !== record.source.repository ||
+            sourceCheckout.branch !== record.source.branch
+          )
+            return yield* Effect.fail(
+              new Error("The project checkout changed after the move; discard manually."),
+            );
+          const actual = yield* git.readMoveSnapshot(record.source.path);
+          if (
+            (yield* git.readOperationInProgress(record.source.path)) ||
+            !sameMoveSnapshot(actual, current.moveData!.snapshot)
+          )
+            return yield* Effect.fail(
+              new Error("The project checkout changed after the move; discard manually."),
+            );
+          current = yield* store.update(current, {
+            moveData: { ...current.moveData!, discardStarted: true },
+          });
+          yield* git.stashPushAll(
+            record.source.path,
+            `f5: copied to ${record.target.branch} (${record.operationId})`,
+          );
+          yield* store.update(current, {
+            moveData: { ...current.moveData!, discarded: true },
+            move: { copiedFileCount: current.move!.copiedFileCount, discarded: true },
+          });
+          return { discarded: true };
+        }),
+      );
+    });
   return {
+    moveThread,
+    discardMovedChanges,
     switchWorkspace: (input, owner) =>
       withOwner(input.operationId, switchWorkspace(input, owner)).pipe(
         Effect.map((record) => workspaceTransitionSnapshot(record)),

@@ -1,4 +1,8 @@
 import type {
+  WorktreesMoveThreadInput,
+  WorktreesMoveThreadResult,
+  WorktreesDiscardMovedChangesInput,
+  WorktreesDiscardMovedChangesResult,
   WorktreesSwitchWorkspaceInput,
   WorktreesGetTransitionInput,
   WorktreesPreviewTransitionRecoveryInput,
@@ -967,6 +971,10 @@ export interface NativeApi {
     onSummaryUpdated: (callback: (payload: NextTurnQueueSummary) => void) => () => void;
   };
   worktrees: {
+    moveThread: (input: WorktreesMoveThreadInput) => Promise<WorktreesMoveThreadResult>;
+    discardMovedChanges: (
+      input: WorktreesDiscardMovedChangesInput,
+    ) => Promise<WorktreesDiscardMovedChangesResult>;
     list: (input: WorktreesListInput) => Promise<WorktreesListResult>;
     switchWorkspace: (input: WorktreesSwitchWorkspaceInput) => Promise<WorkspaceTransitionSnapshot>;
     getTransition: (

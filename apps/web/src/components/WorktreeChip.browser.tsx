@@ -1,4 +1,5 @@
 import "../index.css";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { afterEach, expect, it, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
@@ -10,13 +11,19 @@ const mocks = vi.hoisted(() => ({
   copy: vi.fn(),
   navigate: vi.fn(),
   editor: vi.fn(),
+  getTransition: vi.fn(),
+  discard: vi.fn(),
 }));
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   useNavigate: () => mocks.navigate,
 }));
+vi.mock("./ui/toast", () => ({ toastManager: { add: vi.fn() } }));
 vi.mock("../nativeApi", () => ({
-  ensureNativeApi: () => ({ shell: { openInEditor: mocks.reveal } }),
+  ensureNativeApi: () => ({
+    shell: { openInEditor: mocks.reveal },
+    worktrees: { getTransition: mocks.getTransition, discardMovedChanges: mocks.discard },
+  }),
 }));
 vi.mock("../hooks/useCopyToClipboard", () => ({ writeTextToClipboard: mocks.copy }));
 vi.mock("../editorPreferences", () => ({ openInPreferredEditor: mocks.editor }));
@@ -25,9 +32,11 @@ afterEach(async () => {
   await screen?.unmount();
   screen = undefined;
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+  mocks.getTransition.mockResolvedValue(null);
   useWorktreeRemovalDialogStore.setState({ requests: [] });
 });
+mocks.getTransition.mockResolvedValue(null);
 const threadId = ThreadId.makeUnsafe("chip");
 const projectId = ProjectId.makeUnsafe("project");
 const path = "/managed/topic with spaces ";
@@ -98,4 +107,51 @@ it("supports keyboard opening and returns focus after Escape", async () => {
     .toBeVisible();
   await userEvent.keyboard("{Escape}");
   await expect.element(trigger, { timeout: 1000 }).toHaveFocus();
+});
+
+it("disables moving a persisted local conversation while its turn runs", async () => {
+  screen = await render(
+    <WorktreeChip
+      threadId={threadId}
+      projectId={projectId}
+      branch="main"
+      path="/repo"
+      isWorktree={false}
+      canMove
+      moveDisabled
+    />,
+  );
+  await page.getByRole("button", { name: "Local: main · /repo" }).click();
+  await expect
+    .element(page.getByRole("menuitem", { name: "Move to new worktree…" }))
+    .toHaveAttribute("aria-disabled", "true");
+});
+
+it("loads completed move actions on demand and discards originals through the server", async () => {
+  mocks.getTransition.mockResolvedValue({
+    operationId: "done-move",
+    intent: "move_to_new_worktree",
+    phase: "completed",
+    target: { path },
+    move: { copiedFileCount: 2, discarded: false },
+  });
+  mocks.discard.mockResolvedValue({ discarded: true });
+  screen = await render(
+    <QueryClientProvider client={new QueryClient()}>
+      <WorktreeChip
+        threadId={threadId}
+        projectId={projectId}
+        branch="topic"
+        path={path}
+        isWorktree
+      />
+    </QueryClientProvider>,
+  );
+  expect(mocks.getTransition).not.toHaveBeenCalled();
+  await page.getByRole("button", { name: `Worktree: topic · ${path}` }).click();
+  await page.getByRole("menuitem", { name: "Discard originals from move…" }).click();
+  await expect
+    .poll(() => mocks.discard.mock.calls)
+    .toEqual([[{ threadId, operationId: "done-move" }]]);
+  expect(mocks.getTransition).toHaveBeenCalledOnce();
 });

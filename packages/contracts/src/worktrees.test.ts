@@ -97,3 +97,23 @@ it("decodes optional inventory filters, unknown dirty state and exact paths", ()
   expect(decoded.projects[0]?.entries[0]?.path).toBe(path);
   expect(decoded.projects[0]?.entries[0]?.hasChanges).toBeNull();
 });
+
+it("decodes move and discard RPCs without trimming paths", async () => {
+  const { WorktreesMoveThreadInput, WorktreesMoveThreadResult, WorktreesDiscardMovedChangesInput } =
+    await import("./worktrees");
+  const input = { threadId: "thread", branch: "feature/copied" };
+  expect(Schema.decodeUnknownSync(WorktreesMoveThreadInput)(input)).toEqual(input);
+  const result = {
+    operationId: "move",
+    branch: "feature/copied",
+    worktreePath: "/managed/trailing ",
+    copiedFileCount: 4,
+  };
+  expect(Schema.decodeUnknownSync(WorktreesMoveThreadResult)(result)).toEqual(result);
+  expect(
+    Schema.decodeUnknownSync(WorktreesDiscardMovedChangesInput)({
+      threadId: "thread",
+      operationId: "move",
+    }).operationId,
+  ).toBe("move");
+});

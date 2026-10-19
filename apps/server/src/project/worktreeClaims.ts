@@ -1,3 +1,5 @@
+import { WorkspaceTransitions } from "../persistence/Services/WorkspaceTransitions.ts";
+import { sameMoveSnapshot, isMoveCopySnapshot, type MoveSnapshot } from "../git/moveSnapshot.ts";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { WorkspaceTransitionError } from "../persistence/Services/WorkspaceTransitions.ts";
 import * as FS from "node:fs/promises";
@@ -310,6 +312,8 @@ export interface WorktreeRemovalPolicy {
     readonly commonDir: string;
     readonly baseSha: string;
     readonly created: boolean;
+    readonly copiedSnapshot?: MoveSnapshot | undefined;
+    readonly transitionOperationId?: string;
   };
 }
 
@@ -387,10 +391,31 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
       blockedReasons.push("it contains a project checkout");
   }
   const claims = yield* readWorktreeClaims(input.path);
+  let ownedTransition = false;
+  let originalMoveSnapshot: MoveSnapshot | undefined;
+  const transitionStore = yield* Effect.serviceOption(WorkspaceTransitions);
+  if (
+    input.policy.kind === "ownedRollback" &&
+    input.policy.ownedCreation?.transitionOperationId &&
+    Option.isSome(transitionStore)
+  ) {
+    const operation = yield* transitionStore.value
+      .get(input.policy.ownedCreation.transitionOperationId)
+      .pipe(Effect.orElseSucceed(() => null));
+    ownedTransition =
+      operation?.threadId === input.policy.ownThreadId &&
+      operation?.intent === "move_to_new_worktree" &&
+      operation.target.path === target &&
+      ["applying", "applied", "needs_recovery"].includes(operation.phase);
+    if (ownedTransition) originalMoveSnapshot = operation?.moveData?.snapshot;
+  }
   blockedReasons.push(
     ...foreignClaims(
       {
         ...claims,
+        transitionThreadIds: claims.transitionThreadIds.filter(
+          (id) => !ownedTransition || id !== input.policy.ownThreadId,
+        ),
         sessions: claims.sessions.filter(
           (session) => !claims.deletedThreadIds.some((id) => id === session.threadId),
         ),
@@ -440,8 +465,21 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
         );
       if (inspected.branch === null) blockedReasons.push("HEAD is detached");
       if (inspected.operation) blockedReasons.push(`a ${inspected.operation} is in progress`);
-      if (inspected.hasTrackedChanges || inspected.hasUntrackedChanges)
-        blockedReasons.push("it has uncommitted changes (including untracked files)");
+      if (inspected.hasTrackedChanges || inspected.hasUntrackedChanges) {
+        const copies =
+          input.policy.kind === "ownedRollback"
+            ? input.policy.ownedCreation?.copiedSnapshot
+            : undefined;
+        const verifiedCopies =
+          copies && originalMoveSnapshot && isMoveCopySnapshot(copies, originalMoveSnapshot)
+            ? yield* git.readMoveSnapshot(input.path).pipe(
+                Effect.map((actual) => sameMoveSnapshot(actual, copies)),
+                Effect.orElseSucceed(() => false),
+              )
+            : false;
+        if (!verifiedCopies)
+          blockedReasons.push("it has uncommitted changes (including untracked files)");
+      }
       const ignoredReason = yield* ignoredFilesBlockRemoval(git, input.path, {
         entries: inspected.ignoredEntries,
         truncated: inspected.ignoredTruncated,
@@ -469,6 +507,8 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
           .pipe(Effect.orElseSucceed(() => null));
         if (
           !receipt?.createdCheckout ||
+          (input.policy.ownedCreation?.copiedSnapshot !== undefined &&
+            receipt.operationId !== `move:${input.policy.ownedCreation.transitionOperationId}`) ||
           (input.policy.ownThreadId !== null &&
             receipt.owner !== `thread:${input.policy.ownThreadId}`) ||
           receipt.repositoryIdentity !== common ||

@@ -2,6 +2,7 @@ import { WorkspaceTransitionSnapshot, WorktreesSwitchWorkspaceInput } from "@t3t
 import { Effect, Layer, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
+  WorkspaceMoveData,
   WorkspaceTransitions,
   WorkspaceTransitionError,
   transitionIsActive,
@@ -15,6 +16,7 @@ export const makeWorkspaceTransitions = Effect.gen(function* () {
     cause instanceof WorkspaceTransitionError ? cause : new WorkspaceTransitionError(String(cause));
   const recordSchema = Schema.Struct({
     ...WorkspaceTransitionSnapshot.fields,
+    moveData: Schema.optional(WorkspaceMoveData),
     request: WorktreesSwitchWorkspaceInput,
     requestHash: Schema.String,
     baseRef: Schema.optional(Schema.String),
@@ -232,6 +234,15 @@ export const makeWorkspaceTransitions = Effect.gen(function* () {
     reserve,
     reactivate,
     update,
+    unfinishedMoves: sql<{
+      record: string;
+      phase: string;
+      version: number;
+    }>`SELECT record_json AS record,phase,version FROM workspace_transitions WHERE json_extract(record_json,'$.intent')='move_to_new_worktree' AND (phase IN ('reserved','stopping','applying','applied','needs_recovery') OR json_extract(record_json,'$.moveData.snapshotRef') IS NOT NULL)`.pipe(
+      Effect.flatMap((rows) => Effect.forEach(rows, (row) => decode([row]))),
+      Effect.map((records) => records.filter((record) => record !== null)),
+      Effect.mapError(error),
+    ),
     reconcile,
     cancel,
   });

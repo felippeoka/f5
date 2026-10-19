@@ -6107,6 +6107,18 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return { entries, scheduledBackupStatus };
       }
 
+      case WS_METHODS.worktreesMoveThread: {
+        const { workspaceTransition } = yield* awaitOrchestrationRuntimeForRoute;
+        return yield* workspaceTransition
+          .moveThread(stripRequestTag(request.body))
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+      }
+      case WS_METHODS.worktreesDiscardMovedChanges: {
+        const { workspaceTransition } = yield* awaitOrchestrationRuntimeForRoute;
+        return yield* workspaceTransition
+          .discardMovedChanges(stripRequestTag(request.body))
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+      }
       case WS_METHODS.worktreesSwitchWorkspace: {
         const { workspaceTransition } = yield* awaitOrchestrationRuntimeForRoute;
         return yield* workspaceTransition.switchWorkspace(stripRequestTag(request.body)).pipe(

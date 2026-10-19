@@ -1,3 +1,4 @@
+import Migration0123 from "./Migrations/123_WorkspaceMoveRecoveryIndex.ts";
 import Migration0122 from "./Migrations/122_StorageActivity.ts";
 import Migration0121 from "./Migrations/121_AttachmentDeletionGuards.ts";
 import Migration0120 from "./Migrations/120_ProjectMcpDisabledCommonServers.ts";
@@ -156,6 +157,7 @@ import Migration0101 from "./Migrations/101_UsageResetCreditRequests.ts";
 
 export const MIGRATIONS = {
   "122_StorageActivity": Migration0122,
+  "123_WorkspaceMoveRecoveryIndex": Migration0123,
   "121_AttachmentDeletionGuards": Migration0121,
   "119_WorkspaceTransitions": Migration0119,
   "120_ProjectMcpDisabledCommonServers": Migration0120,

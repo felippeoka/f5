@@ -1,3 +1,4 @@
+import { WorkspaceWriteContext } from "../workspaceTransitionContext.ts";
 import { WorktreePreparations } from "../../persistence/Services/WorktreePreparations.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { GitCommandError } from "../../git/Errors.ts";
@@ -46,7 +47,7 @@ import { WorktreePreparation } from "../Services/WorktreePreparation.ts";
 import { WorkspaceTransition } from "../Services/WorkspaceTransition.ts";
 import { ServerConfig } from "../../config.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
-import { WorkspaceTransitionLive } from "./WorkspaceTransition.ts";
+import { makeWorkspaceTransition, WorkspaceTransitionLive } from "./WorkspaceTransition.ts";
 import {
   holdsWorktreeLifecycleLock,
   withWorktreeLifecycleLock,
@@ -68,6 +69,9 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
     const preparationEntered = Deferred.makeUnsafe<void>();
     const mutationEntered = Deferred.makeUnsafe<void>();
     const mutationControl = { fail: false, block: false };
+    const copyControl = { fail: false, unexpected: false, block: false };
+    const copyEntered = Deferred.makeUnsafe<void>();
+    const copyRelease = Deferred.makeUnsafe<void>();
     const gitLayer = Layer.effect(
       GitCore,
       Effect.gen(function* () {
@@ -92,6 +96,24 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
         );
         return {
           ...gitCore,
+          copyMoveUntracked: (
+            source: string,
+            target: string,
+            files: Parameters<typeof gitCore.copyMoveUntracked>[2],
+          ) =>
+            Effect.gen(function* () {
+              if (copyControl.fail) {
+                yield* gitCore.copyMoveUntracked(source, target, files.slice(0, 1));
+                if (copyControl.unexpected)
+                  yield* Effect.promise(() =>
+                    fs.writeFile(path.join(target, ".env"), "generated secret"),
+                  );
+                return yield* Effect.fail(new Error("copy failed"));
+              }
+              yield* gitCore.copyMoveUntracked(source, target, files);
+              yield* Deferred.succeed(copyEntered, undefined);
+              if (copyControl.block) yield* Deferred.await(copyRelease);
+            }),
           ensureWorktree: (input: Parameters<typeof gitCore.ensureWorktree>[0]) =>
             beforeMutation.pipe(Effect.andThen(gitCore.ensureWorktree(input))),
           createWorktree: (input: Parameters<typeof gitCore.createWorktree>[0]) =>
@@ -255,9 +277,411 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
       preparationEntered,
       mutationControl,
       mutationEntered,
+      copyControl,
+      copyEntered,
+      copyRelease,
       manager: await runtime.runPromise(makeWorktreeManager),
     };
   }
+  it("moves staged, tracked, binary, executable and symlink files while keeping the root and refs/stash intact", async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.repo.root, "README.md"), "previous stash\n");
+    git(f.repo.root, "stash", "push", "-m", "existing");
+    const existingStash = git(f.repo.root, "rev-parse", "refs/stash");
+    await fs.writeFile(path.join(f.repo.root, "README.md"), "staged\n");
+    git(f.repo.root, "add", "README.md");
+    await fs.writeFile(path.join(f.repo.root, "README.md"), "staged and unstaged\n");
+    await fs.writeFile(path.join(f.repo.root, "binary \n"), Buffer.from([0, 255, 12]));
+    await fs.writeFile(path.join(f.repo.root, "run"), "#!/bin/sh\necho copied\n", { mode: 0o751 });
+    await fs.symlink("/outside/never-follow", path.join(f.repo.root, "link"));
+    await fs.writeFile(path.join(f.repo.root, ".env"), "secret");
+    const before = git(f.repo.root, "status", "--porcelain=v2", "-z");
+    const index = git(f.repo.root, "write-tree");
+    const moved = await f.runtime.runPromise(
+      f.transition.moveThread({ threadId: f.threadId, branch: "feature/copied" }),
+    );
+    expect(moved.copiedFileCount).toBe(4);
+    expect(git(f.repo.root, "status", "--porcelain=v2", "-z")).toBe(before);
+    expect(git(f.repo.root, "write-tree")).toBe(index);
+    expect(git(moved.worktreePath, "write-tree")).toBe(index);
+    expect(git(f.repo.root, "rev-parse", "refs/stash")).toBe(existingStash);
+    expect(git(f.repo.root, "for-each-ref", "refs/f5/moves")).toBe("");
+    expect(await fs.readFile(path.join(moved.worktreePath, "README.md"), "utf8")).toBe(
+      "staged and unstaged\n",
+    );
+    expect(await fs.readFile(path.join(moved.worktreePath, "binary \n"))).toEqual(
+      Buffer.from([0, 255, 12]),
+    );
+    expect((await fs.stat(path.join(moved.worktreePath, "run"))).mode & 0o777).toBe(0o751);
+    expect(await fs.readlink(path.join(moved.worktreePath, "link"))).toBe("/outside/never-follow");
+    expect(await fs.stat(path.join(moved.worktreePath, ".env")).catch(() => null)).toBeNull();
+    const receipt = await f.runtime.runPromise(
+      Effect.flatMap(Effect.service(GitCore), (git) =>
+        git.readWorktreePreparation(moved.worktreePath),
+      ),
+    );
+    expect(receipt?.phase).toBe("checkout_created");
+    expect(f.preparations).toEqual([]);
+    expect((await f.runtime.runPromise(f.engine.getReadModel())).threads[0]?.worktreePath).toBe(
+      moved.worktreePath,
+    );
+    await expect(
+      f.runtime.runPromise(f.transition.moveThread({ threadId: f.threadId })),
+    ).rejects.toThrow("Only a local conversation");
+  });
+  it("saves the originals in a reversible stash only while the source still matches", async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.repo.root, "README.md"), "copy me\n");
+    git(f.repo.root, "add", "README.md");
+    await fs.writeFile(path.join(f.repo.root, "untracked"), "original");
+    const moved = await f.runtime.runPromise(
+      f.transition.moveThread({ threadId: f.threadId, branch: "discard-test" }),
+    );
+    await fs.writeFile(path.join(f.repo.root, "untracked"), "changed after move");
+    await expect(
+      f.runtime.runPromise(
+        f.transition.discardMovedChanges({ threadId: f.threadId, operationId: moved.operationId }),
+      ),
+    ).rejects.toThrow("changed after the move");
+    expect(git(f.repo.root, "stash", "list")).toBe("");
+    await fs.writeFile(path.join(f.repo.root, "untracked"), "original");
+    await f.runtime.runPromise(
+      f.transition.discardMovedChanges({ threadId: f.threadId, operationId: moved.operationId }),
+    );
+    expect(git(f.repo.root, "status", "--porcelain")).toBe("");
+    expect(git(f.repo.root, "stash", "list")).toContain(
+      `f5: copied to discard-test (${moved.operationId})`,
+    );
+    expect(await fs.readFile(path.join(moved.worktreePath, "untracked"), "utf8")).toBe("original");
+    expect((await f.runtime.runPromise(f.store.get(moved.operationId)))?.move?.discarded).toBe(
+      true,
+    );
+    await f.runtime.runPromise(
+      f.transition.discardMovedChanges({ threadId: f.threadId, operationId: moved.operationId }),
+    );
+    expect(git(f.repo.root, "stash", "list").split("\n")).toHaveLength(1);
+  });
+  it.each([false, true])(
+    "rolls back verified copies and retains unexpected ignored files (unexpected=%s)",
+    async (unexpected) => {
+      const f = await fixture();
+      await fs.writeFile(path.join(f.repo.root, "README.md"), "tracked copy\n");
+      await fs.writeFile(path.join(f.repo.root, "a"), "first");
+      await fs.writeFile(path.join(f.repo.root, "b"), "second");
+      const before = git(f.repo.root, "status", "--porcelain=v2", "-z");
+      f.copyControl.fail = true;
+      f.copyControl.unexpected = unexpected;
+      await expect(
+        f.runtime.runPromise(
+          f.transition.moveThread({ threadId: f.threadId, branch: "copy-failure" }),
+        ),
+      ).rejects.toThrow("copy failed");
+      const record = (await f.runtime.runPromise(f.store.forThread(f.threadId)))!;
+      expect(record.phase).toBe("failed");
+      if (!unexpected) expect(record.error).toBe("copy failed");
+      expect(git(f.repo.root, "status", "--porcelain=v2", "-z")).toBe(before);
+      expect(git(f.repo.root, "for-each-ref", "refs/f5/moves")).toBe("");
+      expect(git(f.repo.root, "branch", "--list", "copy-failure").length > 0).toBe(unexpected);
+      expect(
+        await fs
+          .stat(record.target.path)
+          .then(() => true)
+          .catch(() => false),
+      ).toBe(unexpected);
+      if (unexpected) expect(record.error).toContain("Retained");
+      expect(
+        (await f.runtime.runPromise(f.engine.getReadModel())).threads[0]?.worktreePath,
+      ).toBeNull();
+    },
+  );
+  it("refuses dirty submodules and invalid or existing branch names", async () => {
+    const f = await fixture();
+    await expect(
+      f.runtime.runPromise(f.transition.moveThread({ threadId: f.threadId, branch: "bad name" })),
+    ).rejects.toThrow("Invalid branch");
+    await expect(
+      f.runtime.runPromise(f.transition.moveThread({ threadId: f.threadId, branch: "main" })),
+    ).rejects.toThrow("already exists");
+    git(f.repo.root, "-c", "protocol.file.allow=always", "submodule", "add", f.repo.origin, "sub");
+    git(f.repo.root, "commit", "-am", "submodule");
+    await fs.writeFile(path.join(f.repo.root, "sub", "README.md"), "dirty submodule");
+    await expect(
+      f.runtime.runPromise(f.transition.moveThread({ threadId: f.threadId })),
+    ).rejects.toThrow("Commit or stash submodule changes first");
+  });
+  it.each(["reserved", "snapshot", "ref", "checkout", "copy", "applied", "committed"])(
+    "reconciles an interrupted move after %s",
+    async (step) => {
+      const f = await fixture();
+      await fs.writeFile(path.join(f.repo.root, "README.md"), "snapshot tracked\n");
+      await fs.writeFile(path.join(f.repo.root, "loose"), "snapshot loose");
+      const before = git(f.repo.root, "status", "--porcelain=v2", "-z");
+      const request = await f.request("move_to_new_worktree", { branch: "restart-move" });
+      const gitCore = await f.runtime.runPromise(Effect.service(GitCore));
+      const source = await f.runtime.runPromise(gitCore.inspectCheckout(f.repo.root));
+      const snapshot = await f.runtime.runPromise(gitCore.readMoveSnapshot(f.repo.root));
+      const targetPath = await canonicalWorktreePath(
+        await f.runtime.runPromise(
+          gitCore.allocateWorktreePath({ cwd: f.repo.root, branch: "restart-move" }),
+        ),
+      );
+      const at = new Date().toISOString();
+      let record = await f.runtime.runPromise(
+        f.store.reserve({
+          operationId: request.operationId,
+          threadId: f.threadId,
+          version: 0,
+          intent: request.intent,
+          phase: "reserved",
+          request,
+          requestHash: "restart-fixture",
+          source: {
+            path: source.canonicalRoot,
+            repository: source.commonDir,
+            branch: source.branch,
+            headSha: source.headSha,
+          },
+          target: {
+            path: targetPath,
+            repository: source.commonDir,
+            branch: "restart-move",
+            headSha: source.headSha,
+          },
+          observed: null,
+          fingerprint: null,
+          mutationAttempted: false,
+          commandId: `workspace:${request.operationId}`,
+          setupOwnerToken: null,
+          result: null,
+          error: null,
+          createdAt: at,
+          updatedAt: at,
+        }),
+      );
+      if (step !== "reserved") {
+        record = await f.runtime.runPromise(
+          f.store.update(record, {
+            phase: "applying",
+            moveData: {
+              snapshot,
+              snapshotRef: `refs/f5/moves/${record.operationId}`,
+              createdBranch: false,
+              createdWorktree: false,
+              copyStarted: false,
+              discarded: false,
+              discardStarted: false,
+            },
+            move: { copiedFileCount: snapshot.copiedFileCount, discarded: false },
+          }),
+        );
+        if (step !== "snapshot")
+          await f.runtime.runPromise(
+            gitCore.setMoveRef(
+              f.repo.root,
+              record.moveData!.snapshotRef!,
+              snapshot.trackedStashSha!,
+            ),
+          );
+        if (["checkout", "copy", "applied", "committed"].includes(step)) {
+          record = await f.runtime.runPromise(f.store.update(record, { mutationAttempted: true }));
+          await f.runtime.runPromise(
+            gitCore.createWorktree({
+              cwd: f.repo.root,
+              path: targetPath,
+              branch: snapshot.baseSha,
+              newBranch: "restart-move",
+              submodules: "none",
+              preparation: {
+                owner: `thread:${f.threadId}`,
+                operationId: `move:${record.operationId}`,
+                runSetupScript: true,
+              },
+            }),
+          );
+          if (step !== "checkout") {
+            await f.runtime.runPromise(
+              gitCore.stashApplySha(targetPath, snapshot.trackedStashSha!),
+            );
+            await f.runtime.runPromise(
+              gitCore.copyMoveUntracked(f.repo.root, targetPath, snapshot.untracked),
+            );
+          }
+          if (["applied", "committed"].includes(step))
+            record = await f.runtime.runPromise(
+              f.store.update(record, { phase: "applied", observed: record.target }),
+            );
+          if (step === "committed") {
+            record = await f.runtime.runPromise(
+              f.store.update(record, {
+                result: {
+                  branch: "restart-move",
+                  worktreePath: targetPath,
+                  sessionUpdatedAt: null,
+                },
+              }),
+            );
+            await f.runtime.runPromise(
+              f.engine
+                .dispatch({
+                  type: "thread.meta.update",
+                  commandId: CommandId.makeUnsafe(record.commandId),
+                  threadId: f.threadId,
+                  branch: "restart-move",
+                  worktreePath: targetPath,
+                })
+                .pipe(
+                  Effect.provideService(WorkspaceWriteContext, {
+                    expected: request.expected,
+                    operationId: record.operationId,
+                    version: record.version,
+                  }),
+                ),
+            );
+          }
+        }
+      }
+      await f.runtime.runPromise(Effect.scoped(makeWorkspaceTransition));
+      const recovered = (await f.runtime.runPromise(f.store.get(record.operationId)))!;
+      expect(recovered.phase).toBe(step === "committed" ? "completed" : "failed");
+      expect(git(f.repo.root, "status", "--porcelain=v2", "-z")).toBe(before);
+      expect(git(f.repo.root, "for-each-ref", "refs/f5/moves")).toBe("");
+      expect(
+        await fs
+          .stat(targetPath)
+          .then(() => true)
+          .catch(() => false),
+      ).toBe(step === "committed");
+      expect(git(f.repo.root, "branch", "--list", "restart-move").length > 0).toBe(
+        step === "committed",
+      );
+    },
+  );
+  it.each(["count", "size"])(
+    "enforces the untracked %s limit before creating a worktree",
+    async (limit) => {
+      const f = await fixture();
+      if (limit === "count") {
+        for (let batch = 0; batch < 51; batch++)
+          await Promise.all(
+            Array.from({ length: batch === 50 ? 1 : 100 }, (_, i) =>
+              fs.writeFile(path.join(f.repo.root, `loose-${batch * 100 + i}`), ""),
+            ),
+          );
+      } else {
+        const file = await fs.open(path.join(f.repo.root, "large"), "w");
+        await file.truncate(500 * 1024 * 1024 + 1);
+        await file.close();
+      }
+      await expect(
+        f.runtime.runPromise(f.transition.moveThread({ threadId: f.threadId, branch: "limit" })),
+      ).rejects.toThrow(limit === "count" ? "5,000" : "500 MB");
+      expect(git(f.repo.root, "branch", "--list", "limit")).toBe("");
+      expect(git(f.repo.root, "for-each-ref", "refs/f5/moves")).toBe("");
+    },
+  );
+  it("serializes competing move/recovery requests and blocks final turn acceptance without deadlocking", async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.repo.root, "loose"), "copy");
+    f.copyControl.block = true;
+    const running = f.runtime.runPromise(
+      f.transition.moveThread({ threadId: f.threadId, branch: "concurrent-move" }),
+    );
+    await f.runtime.runPromise(Deferred.await(f.copyEntered));
+    const second = f.runtime
+      .runPromise(f.transition.moveThread({ threadId: f.threadId, branch: "second-move" }))
+      .then(
+        () => null,
+        (error: Error) => error,
+      );
+    const request = await f.request("use_project_checkout");
+    const recovery = f.runtime.runPromise(f.transition.switchWorkspace(request)).then(
+      (result) => result,
+      (error: Error) => error,
+    );
+    const at = new Date().toISOString();
+    await expect(
+      f.runtime.runPromise(
+        f.engine
+          .dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.makeUnsafe("send-during-move"),
+            threadId: f.threadId,
+            message: {
+              messageId: MessageId.makeUnsafe("move-message"),
+              role: "user",
+              text: "wait",
+              attachments: [],
+            },
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            createdAt: at,
+          })
+          .pipe(Effect.timeout("2 seconds")),
+      ),
+    ).rejects.toThrow(/transition|switch/i);
+    await f.runtime.runPromise(Deferred.succeed(f.copyRelease, undefined));
+    const moved = await running;
+    expect(await second).toBeInstanceOf(Error);
+    const recovered = await recovery;
+    expect(recovered instanceof Error || recovered.phase === "failed").toBe(true);
+    expect((await f.runtime.runPromise(f.engine.getReadModel())).threads[0]?.worktreePath).toBe(
+      moved.worktreePath,
+    );
+    expect(git(f.repo.root, "branch", "--list", "second-move")).toBe("");
+  });
+  it("keeps copied checkout files when the conversation is archived during a move", async () => {
+    const f = await fixture();
+    await fs.writeFile(path.join(f.repo.root, "loose"), "keep me");
+    f.copyControl.block = true;
+    const running = f.runtime
+      .runPromise(f.transition.moveThread({ threadId: f.threadId, branch: "archive-move" }))
+      .then(
+        () => null,
+        (error: Error) => error,
+      );
+    await f.runtime.runPromise(Deferred.await(f.copyEntered));
+    await f.runtime.runPromise(
+      f.engine.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.makeUnsafe("archive-move"),
+        threadId: f.threadId,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    const result = await running;
+    expect(result).toBeInstanceOf(Error);
+    const record = (await f.runtime.runPromise(f.store.forThread(f.threadId)))!;
+    expect(record.phase).toBe("cancelled");
+    expect(await fs.readFile(path.join(record.target.path, "loose"), "utf8")).toBe("keep me");
+    expect(await fs.readFile(path.join(f.repo.root, "loose"), "utf8")).toBe("keep me");
+  });
+  it("refuses active sessions, Git operations and discarding while another session uses the root", async () => {
+    const f = await fixture();
+    f.world.sessions.push({ threadId: f.threadId, cwd: f.repo.root, status: "running" });
+    await expect(
+      f.runtime.runPromise(f.transition.moveThread({ threadId: f.threadId, branch: "busy" })),
+    ).rejects.toThrow(/active turn|session startup/);
+    f.world.sessions.length = 0;
+    await fs.writeFile(
+      path.join(f.repo.root, ".git", "MERGE_HEAD"),
+      git(f.repo.root, "rev-parse", "HEAD"),
+    );
+    await expect(
+      f.runtime.runPromise(f.transition.moveThread({ threadId: f.threadId, branch: "busy" })),
+    ).rejects.toThrow("Finish the merge");
+    await fs.unlink(path.join(f.repo.root, ".git", "MERGE_HEAD"));
+    await fs.writeFile(path.join(f.repo.root, "loose"), "keep");
+    const moved = await f.runtime.runPromise(
+      f.transition.moveThread({ threadId: f.threadId, branch: "busy" }),
+    );
+    f.world.sessions.push({ threadId: "other", cwd: f.repo.root, status: "idle" });
+    await expect(
+      f.runtime.runPromise(
+        f.transition.discardMovedChanges({ threadId: f.threadId, operationId: moved.operationId }),
+      ),
+    ).rejects.toThrow("uses the project checkout");
+    expect(await fs.readFile(path.join(f.repo.root, "loose"), "utf8")).toBe("keep");
+  });
   it("joins identical retries, commits once, and never accepts a changed payload", async () => {
     const f = await fixture();
     const target = path.join(f.config.worktreesDir, "topic");

@@ -29,6 +29,14 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
 } {
   const recorded = Object.fromEntries(
     [
+      "readMoveSnapshot",
+      "copyMoveUntracked",
+      "stashCreate",
+      "stashApplySha",
+      "stashPushAll",
+      "setMoveRef",
+      "deleteMoveRef",
+      "cleanMoveCopies",
       "status",
       "statusDetails",
       "prepareCommitContext",
@@ -80,6 +88,22 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
   ) as unknown as { [K in keyof GitCoreShape]: Array<ReadonlyArray<unknown>> };
 
   const implementations: GitCoreShape = {
+    readMoveSnapshot: () =>
+      Effect.succeed({
+        baseSha: "abc123",
+        trackedStashSha: null,
+        trackedTree: null,
+        indexTree: null,
+        untracked: [],
+        copiedFileCount: 0,
+      }),
+    copyMoveUntracked: () => Effect.void,
+    stashCreate: () => Effect.succeed(null),
+    stashApplySha: () => Effect.void,
+    stashPushAll: () => Effect.void,
+    setMoveRef: () => Effect.void,
+    deleteMoveRef: () => Effect.void,
+    cleanMoveCopies: () => Effect.void,
     isDirty: () => Effect.succeed(false),
     readWorktreePreparation: () => Effect.succeed(null),
     allocateWorktreePath: ({ cwd, branch }) =>
@@ -189,6 +213,39 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
   };
 
   const service: GitCoreShape = {
+    readMoveSnapshot: (cwd) => {
+      record("readMoveSnapshot", [cwd]);
+      return implementations.readMoveSnapshot(cwd);
+    },
+    copyMoveUntracked: (source, target, files) => {
+      record("copyMoveUntracked", [source, target, files]);
+      return implementations.copyMoveUntracked(source, target, files);
+    },
+    stashCreate: (cwd) => {
+      record("stashCreate", [cwd]);
+      return implementations.stashCreate(cwd);
+    },
+    stashApplySha: (cwd, sha) => {
+      record("stashApplySha", [cwd, sha]);
+      return implementations.stashApplySha(cwd, sha);
+    },
+    stashPushAll: (cwd, message) => {
+      record("stashPushAll", [cwd, message]);
+      return implementations.stashPushAll(cwd, message);
+    },
+    setMoveRef: (cwd, ref, sha) => {
+      record("setMoveRef", [cwd, ref, sha]);
+      return implementations.setMoveRef(cwd, ref, sha);
+    },
+    deleteMoveRef: (cwd, ref, sha) => {
+      record("deleteMoveRef", [cwd, ref, sha]);
+      return implementations.deleteMoveRef(cwd, ref, sha);
+    },
+    cleanMoveCopies: (cwd, snapshot) => {
+      record("cleanMoveCopies", [cwd, snapshot]);
+      return implementations.cleanMoveCopies(cwd, snapshot);
+    },
+
     isDirty: (cwd) => {
       record("isDirty", [cwd]);
       return implementations.isDirty(cwd);
