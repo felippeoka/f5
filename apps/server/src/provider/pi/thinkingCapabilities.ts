@@ -1,4 +1,8 @@
-import { type ModelCapabilities, type ProviderOptionChoice } from "@t3tools/contracts";
+import {
+  PI_THINKING_LEVELS,
+  type ModelCapabilities,
+  type ProviderOptionChoice,
+} from "@t3tools/contracts";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { piRecordField as recordField } from "./PiProtocol.ts";
 
@@ -7,7 +11,6 @@ import { piRecordField as recordField } from "./PiProtocol.ts";
  * model via `thinkingLevelMap`; advertising them globally makes
  * `set_thinking_level` fail on models that lack them.
  */
-const PI_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 export type PiThinkingLevel = (typeof PI_THINKING_LEVELS)[number];
 

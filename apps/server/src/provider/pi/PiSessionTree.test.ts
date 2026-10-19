@@ -52,5 +52,9 @@ it.each([
 it.each([
   { leafId: null, entries: [entry("duplicate", null), entry("duplicate", null)] },
   { leafId: 12, entries: [] },
+  { leafId: " ", entries: [] },
+  { leafId: null, entries: [entry(" padded", null)] },
+  { leafId: null, entries: [entry("x".repeat(1025), null)] },
+  { leafId: null, entries: [entry("valid", "\0")] },
   { leafId: null, entries: [{ id: "missing-parent" }] },
 ])("rejects ambiguous native listings", (data) => expect(parsePiSessionTree(data)).toBeNull());

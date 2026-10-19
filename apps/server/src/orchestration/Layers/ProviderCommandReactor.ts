@@ -22,6 +22,7 @@ import { readProjectSettings } from "../../project/projectSettings";
 import { isTemporaryWorktreeBranch } from "../../git/worktreePaths.ts";
 import { ensureWorkspaceDirectory } from "../../provider/workspaceDirectory.ts";
 import {
+  PROVIDER_DISPLAY_NAMES,
   type ChatAttachment,
   CommandId,
   DEFAULT_RUNTIME_MODE,
@@ -143,24 +144,7 @@ function toNonEmptyProviderInput(value: string | undefined): string | undefined 
 }
 
 function providerDisplayName(provider: ProviderKind): string {
-  switch (provider) {
-    case "claudeAgent":
-      return "Claude";
-    case "codex":
-      return "Codex";
-    case "cursor":
-      return "Cursor";
-    case "opencode":
-      return "OpenCode";
-    case "grok":
-      return "Grok";
-    case "antigravity":
-      return "Antigravity";
-    case "muse":
-      return "Muse Code";
-    case "acp":
-      return "Custom ACP agent";
-  }
+  return PROVIDER_DISPLAY_NAMES[provider];
 }
 
 function providerFromSessionName(value: string | null | undefined): ProviderKind | undefined {
@@ -172,6 +156,7 @@ function providerFromSessionName(value: string | null | undefined): ProviderKind
     case "grok":
     case "antigravity":
     case "muse":
+    case "pi":
     case "acp":
       return value;
     default:

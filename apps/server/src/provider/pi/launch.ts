@@ -1,5 +1,6 @@
 import { parseLaunchArgv } from "@t3tools/shared/cliArgs";
 import {
+  F5_PI_READ_ONLY_ENV,
   F5_PI_MCP_URL_ENV,
   F5_PI_MCP_BEARER_ENV,
   F5_PI_RUNTIME_MODE_ENV,
@@ -229,6 +230,7 @@ export function buildPiRpcLaunch(input: {
   readonly ephemeral?: boolean;
   readonly disableExtensions?: boolean;
   readonly disableTools?: boolean;
+  readonly readOnly?: boolean;
   readonly runtimeMode?: "approval-required" | "auto-accept-edits" | "auto" | "full-access";
 }): {
   readonly args: ReadonlyArray<string>;
@@ -267,11 +269,13 @@ export function buildPiRpcLaunch(input: {
   delete environment[F5_PI_MCP_BEARER_ENV];
   delete environment[F5_PI_MCP_EXTENSION_PATH_ENV];
   delete environment[F5_PI_RUNTIME_MODE_ENV];
+  delete environment[F5_PI_READ_ONLY_ENV];
 
   return {
     args,
     env: {
       ...environment,
+      ...(hasF5Extension && input.readOnly === true ? { [F5_PI_READ_ONLY_ENV]: "1" } : {}),
       ...(hasF5Extension && input.extensionPath !== undefined
         ? { [F5_PI_MCP_EXTENSION_PATH_ENV]: input.extensionPath }
         : {}),

@@ -2770,6 +2770,86 @@ describe("ChatView timeline (full app)", () => {
     });
   });
 
+  it.each(["Changed editor text", ""])(
+    "keeps a provider editor prefill editable and restores the original composer draft: %s",
+    async (answer) => {
+      const snapshot = createSnapshotForTargetUser({
+        targetMessageId: "editor-user" as MessageId,
+        targetText: "Ask me",
+      });
+      const question = createThreadActivity({
+        id: "editor-question",
+        createdAt: isoAt(201),
+        kind: "user-input.requested",
+        summary: "Edit",
+        payload: {
+          requestId: "editor-request",
+          questions: [
+            {
+              id: "editor",
+              header: "Edit",
+              question: "Edit draft",
+              options: [],
+              initialAnswer: "Provider prefilled draft",
+              optional: true,
+            },
+          ],
+        },
+      });
+      const withQuestion = {
+        ...snapshot,
+        threads: snapshot.threads.map((thread) => ({ ...thread, activities: [question] })),
+      };
+      const mounted = await mountChatView({
+        viewport: DEFAULT_VIEWPORT,
+        snapshot: withQuestion,
+        configureFixture: () =>
+          useComposerDraftStore.getState().setPrompt(THREAD_ID, "Keep original composer draft"),
+      });
+      try {
+        const editor = await waitForComposerEditor();
+        await vi.waitFor(() => expect(editor.textContent).toContain("Provider prefilled draft"));
+        expect(
+          wsRequests.some(
+            (request) =>
+              (request.command as { type?: string } | undefined)?.type === "thread.turn.start",
+          ),
+        ).toBe(false);
+        await page.elementLocator(editor).fill(answer);
+        await page.getByRole("button", { name: "Submit answers", exact: true }).click();
+        await vi.waitFor(() =>
+          expect(wsRequests).toContainEqual(
+            expect.objectContaining({
+              command: expect.objectContaining({
+                type: "thread.user-input.respond",
+                answers: { editor: answer },
+              }),
+            }),
+          ),
+        );
+        const resolved = createThreadActivity({
+          id: "editor-resolved",
+          createdAt: isoAt(202),
+          kind: "user-input.resolved",
+          summary: "Answered",
+          payload: { requestId: "editor-request", answers: { editor: answer } },
+        });
+        useStore.getState().syncServerReadModel({
+          ...withQuestion,
+          threads: withQuestion.threads.map((thread) => ({
+            ...thread,
+            activities: [question, resolved],
+          })),
+        });
+        await vi.waitFor(() =>
+          expect(editor.textContent).toContain("Keep original composer draft"),
+        );
+      } finally {
+        await mounted.cleanup();
+      }
+    },
+  );
+
   it("submits a form with required free text and an empty optional field", async () => {
     const snapshot = createSnapshotForTargetUser({
       targetMessageId: "form-user" as MessageId,

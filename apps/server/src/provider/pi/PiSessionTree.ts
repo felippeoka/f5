@@ -10,17 +10,25 @@ export interface PiSessionTree {
   readonly leafId: string | null;
 }
 
+const validEntryId = (value: unknown): value is string =>
+  typeof value === "string" &&
+  value.length > 0 &&
+  value.length <= 1024 &&
+  value.trim() === value &&
+  !value.includes("\0");
+
 /** The listing contains abandoned branches; array order is never conversation order. */
 export function parsePiSessionTree(data: unknown): PiSessionTree | null {
   const raw = piRecordField(data, "entries");
   const leafId = piRecordField(data, "leafId");
-  if (!Array.isArray(raw) || raw.length > 20_000 || (leafId !== null && typeof leafId !== "string"))
+  if (!Array.isArray(raw) || raw.length > 20_000 || (leafId !== null && !validEntryId(leafId)))
     return null;
   const entries = new Map<string, PiSessionEntry>();
   for (const entry of raw) {
     const id = piRecordString(entry, "id");
     const parentId = piRecordField(entry, "parentId");
-    if (!id || entries.has(id) || (parentId !== null && typeof parentId !== "string")) return null;
+    if (!validEntryId(id) || entries.has(id) || (parentId !== null && !validEntryId(parentId)))
+      return null;
     entries.set(id, {
       id,
       parentId,

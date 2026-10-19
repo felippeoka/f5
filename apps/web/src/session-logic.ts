@@ -87,6 +87,7 @@ export const PROVIDER_OPTIONS: Array<{
   { value: "antigravity", label: "Antigravity", available: true },
   { value: "muse", label: "Muse Code", available: true },
   { value: "acp", label: "Custom ACP agent", available: true },
+  { value: "pi", label: "Pi", available: true },
 ];
 
 export interface WorkLogEntry {
@@ -472,12 +473,15 @@ function parseUserInputQuestions(
         options: UserInputQuestion["options"];
         multiSelect?: boolean;
         optional?: boolean;
+        initialAnswer?: string;
       } = {
         id: question.id,
         header: question.header,
         question: question.question,
         options,
       };
+      if (typeof question.initialAnswer === "string" && question.initialAnswer.length <= 64 * 1024)
+        parsedQuestion.initialAnswer = question.initialAnswer;
       if (typeof question.optional === "boolean") parsedQuestion.optional = question.optional;
       if (typeof question.multiSelect === "boolean") {
         parsedQuestion.multiSelect = question.multiSelect;

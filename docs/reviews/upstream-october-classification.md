@@ -189,3 +189,11 @@ whitespace (#12465), and `dd5c7bd09e` is concurrent-fetch recovery (#19411).
 The passive index-write fix is `447046b589` (#14718), and disabling fetch maintenance
 is `95030dc674` (#13812). Delivery evidence follows each actual diff; these references
 do not establish equivalence for the other scenarios.
+
+Pi continuation now registers an explicit-instance Early Access driver with owned
+RPC sessions, account admission, scoped F5 MCP credentials, bounded text/tool/image
+projection, editable editor prefills, native-history read-back and verified host
+rollback recovery. Native extension continuation admission and automatic in-session
+rewind projection reconciliation remain outstanding. This is implementation evidence,
+not 15l delivery credit; the Pi dispositions and catch-up cut line remain deferred.
+See the Pi session continuation in the review response for exact validation limits.

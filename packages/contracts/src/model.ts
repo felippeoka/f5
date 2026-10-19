@@ -63,6 +63,20 @@ export const MuseModelOptions = Schema.Struct({
 });
 export type MuseModelOptions = typeof MuseModelOptions.Type;
 
+export const PI_THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+export const PiModelOptions = Schema.Struct({
+  thinking: Schema.optional(Schema.Literals(PI_THINKING_LEVELS)),
+});
+export type PiModelOptions = typeof PiModelOptions.Type;
+
 export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
   claudeAgent: Schema.optional(ClaudeModelOptions),
@@ -72,6 +86,7 @@ export const ProviderModelOptions = Schema.Struct({
   antigravity: Schema.optional(Schema.Struct({})),
   muse: Schema.optional(MuseModelOptions),
   acp: Schema.optional(Schema.Struct({})),
+  pi: Schema.optional(PiModelOptions),
 });
 export type ProviderModelOptions = typeof ProviderModelOptions.Type;
 
@@ -254,6 +269,7 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
   antigravity: [{ slug: "antigravity-default", name: "Antigravity Default" }],
   muse: [{ slug: "muse-spark-1.3", name: "Muse Spark 1.3" }],
   acp: [{ slug: "acp-default", name: "Agent default" }],
+  pi: [{ slug: "default", name: "Pi default" }],
 } as const satisfies Record<ProviderKind, readonly ModelOption[]>;
 export type ModelOptionsByProvider = typeof MODEL_OPTIONS_BY_PROVIDER;
 export type ClaudeBuiltInModelSlug = ModelOptionsByProvider["claudeAgent"][number]["slug"];
@@ -270,6 +286,7 @@ export const DEFAULT_MODEL_BY_PROVIDER = {
   antigravity: "antigravity-default",
   muse: "muse-spark-1.3",
   acp: "acp-default",
+  pi: "default",
 } as const satisfies Record<ProviderKind, ModelSlug>;
 
 export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
@@ -287,6 +304,7 @@ export const DEFAULT_THREAD_TITLE_MODEL_BY_PROVIDER = {
   antigravity: "antigravity-default",
   muse: "muse-spark-1.3",
   acp: "acp-default",
+  pi: "default",
 } as const satisfies Record<ProviderKind, ModelSlug>;
 
 export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER = {
@@ -298,6 +316,7 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER = {
   antigravity: "antigravity-default",
   muse: "muse-spark-1.3",
   acp: "acp-default",
+  pi: "default",
 } as const satisfies Record<ProviderKind, ModelSlug>;
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER = {
@@ -377,6 +396,7 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER = {
   antigravity: {},
   muse: {},
   acp: {},
+  pi: {},
 } as const satisfies Record<ProviderKind, Record<string, ModelSlug>>;
 
 export const PROVIDER_DISPLAY_NAMES = {
@@ -388,6 +408,7 @@ export const PROVIDER_DISPLAY_NAMES = {
   antigravity: "Antigravity",
   muse: "Muse Code",
   acp: "Custom ACP agent",
+  pi: "Pi",
 } as const satisfies Record<ProviderKind, string>;
 
 export const REASONING_EFFORT_OPTIONS_BY_PROVIDER = {
@@ -399,6 +420,7 @@ export const REASONING_EFFORT_OPTIONS_BY_PROVIDER = {
   antigravity: [],
   muse: MUSE_REASONING_EFFORT_OPTIONS,
   acp: [],
+  pi: [],
 } as const satisfies Record<ProviderKind, readonly ProviderReasoningEffort[]>;
 
 export const DEFAULT_REASONING_EFFORT_BY_PROVIDER = {
@@ -410,4 +432,5 @@ export const DEFAULT_REASONING_EFFORT_BY_PROVIDER = {
   antigravity: "high",
   muse: "high",
   acp: "high",
+  pi: "high",
 } as const satisfies Record<ProviderKind, ProviderReasoningEffort>;

@@ -7,6 +7,7 @@ import {
   GrokIcon,
   type Icon,
   MuseIcon,
+  PiIcon,
   OpenAI,
   OpenCodeIcon,
 } from "../Icons";
@@ -75,6 +76,27 @@ export const DRIVER_OPTIONS: readonly DriverOption[] = [
         format: "json-record",
         description:
           "For credentials, use sensitive environment variables in the instance settings.",
+      },
+    ],
+  },
+  {
+    value: ProviderDriverKind.make("pi"),
+    label: "Pi",
+    icon: PiIcon,
+    badgeLabel: "Early Access",
+    fields: [
+      {
+        key: "binaryPath",
+        label: "Binary path",
+        placeholder: "pi",
+        description: "Pi 0.80.5 or newer, installed on the server machine.",
+      },
+      {
+        key: "launchArgs",
+        label: "Launch arguments",
+        placeholder: "--provider vendor --model model-id",
+        description:
+          "Pi model and extension flags. F5 owns RPC mode, sessions and permission policy.",
       },
     ],
   },

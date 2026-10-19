@@ -31,7 +31,8 @@ export function providerRuntimeCapabilities(
   driver: string,
   version?: string | null,
 ): ProviderRuntimeCapabilities {
-  const rollback = driver === "codex" || driver === "claudeAgent" || driver === "opencode";
+  const rollback =
+    driver === "codex" || driver === "claudeAgent" || driver === "opencode" || driver === "pi";
   const codexNative = driver === "codex" && supportsCodexNativeOperations(version);
   return {
     nativeReview: codexNative,
@@ -53,9 +54,17 @@ export function providerRuntimeCapabilities(
     maxImagesPerTurn: isKnownProviderKind(driver) ? providerMaxImages(driver) : 0,
     // Claude reports models through SDK initialization; Codex and Muse through `model/list`.
     reportedModels:
-      driver === "claudeAgent" || driver === "codex" || driver === "muse" || driver === "acp",
+      driver === "claudeAgent" ||
+      driver === "codex" ||
+      driver === "muse" ||
+      driver === "acp" ||
+      driver === "pi",
     sessionCommandCatalog:
-      driver === "claudeAgent" || driver === "codex" || driver === "grok" || driver === "acp",
+      driver === "claudeAgent" ||
+      driver === "codex" ||
+      driver === "grok" ||
+      driver === "acp" ||
+      driver === "pi",
     instanceInventory: driver === "claudeAgent" || driver === "codex",
     nativeSessionCleanup: driver === "claudeAgent",
   };

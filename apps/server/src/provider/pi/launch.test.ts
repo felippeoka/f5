@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildPiRpcLaunch, resolvePiLaunchArgs } from "./launch.ts";
 import {
+  F5_PI_READ_ONLY_ENV,
   F5_PI_MCP_URL_ENV,
   F5_PI_MCP_BEARER_ENV,
   F5_PI_RUNTIME_MODE_ENV,
@@ -50,6 +51,7 @@ describe("Pi launch admission", () => {
   it("keeps current credentials in the child environment only and clears inherited session ownership", () => {
     const environment = {
       PATH: "/bin",
+      [F5_PI_READ_ONLY_ENV]: "1",
       [F5_PI_MCP_URL_ENV]: "old-url",
       [F5_PI_MCP_BEARER_ENV]: "old-secret",
       [F5_PI_RUNTIME_MODE_ENV]: "full-access",
@@ -120,4 +122,17 @@ describe("Pi launch admission", () => {
     });
     expect(launch.args).toEqual(["--mode", "rpc", "-e", "C:\\f5\\extension.ts"]);
   });
+});
+
+it("owns the read-only policy independently of runtime mode", () => {
+  const launch = buildPiRpcLaunch({
+    launchArgs: [],
+    environment: {},
+    extensionPath: "/f5.ts",
+    mcpSession: undefined,
+    readOnly: true,
+    runtimeMode: "full-access",
+  });
+  expect(launch.env[F5_PI_READ_ONLY_ENV]).toBe("1");
+  expect(launch.env[F5_PI_RUNTIME_MODE_ENV]).toBe("full-access");
 });

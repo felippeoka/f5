@@ -1376,6 +1376,41 @@ describe("ProviderRuntimeIngestion", () => {
     expect(receipts).toEqual([{ count: 0 }]);
   });
 
+  it("keeps Pi's authoritative context occupancy separate from billable multi-message turn totals", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const turnId = asTurnId("pi-usage");
+    const now = new Date().toISOString();
+    harness.emit({
+      type: "thread.token-usage.updated",
+      eventId: asEventId("pi-context"),
+      provider: "pi",
+      threadId,
+      turnId,
+      createdAt: now,
+      payload: { usage: {}, contextTokens: 42, modelContextWindowTokens: 128_000 },
+    });
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("pi-billing"),
+      provider: "pi",
+      threadId,
+      turnId,
+      createdAt: now,
+      payload: {
+        state: "completed",
+        usage: { input_tokens: 100_000, output_tokens: 2000, total_tokens: 102_000 },
+        totalCostUsd: 0.25,
+      },
+    });
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) => entry.session?.status === "ready" && entry.session.updatedAt === now,
+    );
+    expect(thread.estimatedContextTokens).toBe(42);
+    expect(thread.session?.estimatedContextTokens).toBe(42);
+  });
+
   it("extracts provider-reported context tokens from non-Claude turn.completed usage", async () => {
     const harness = await createHarness();
     const completedAt = new Date().toISOString();

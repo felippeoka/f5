@@ -33,6 +33,7 @@ const MODEL_SLUG_SET_BY_PROVIDER: Record<ProviderKind, ReadonlySet<ModelSlug>> =
   antigravity: new Set(MODEL_OPTIONS_BY_PROVIDER.antigravity.map((option) => option.slug)),
   muse: new Set(MODEL_OPTIONS_BY_PROVIDER.muse.map((option) => option.slug)),
   acp: new Set(MODEL_OPTIONS_BY_PROVIDER.acp.map((option) => option.slug)),
+  pi: new Set(MODEL_OPTIONS_BY_PROVIDER.pi.map((option) => option.slug)),
 };
 
 const CLAUDE_FABLE_5_MODEL = "claude-fable-5";
@@ -236,6 +237,7 @@ function toBuiltInProviderKind(provider: ProviderKind | ProviderDriverKind): Pro
     case "antigravity":
     case "muse":
     case "acp":
+    case "pi":
       return provider as ProviderKind;
     default:
       return "codex";

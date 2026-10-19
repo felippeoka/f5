@@ -461,6 +461,19 @@ export const OpenCodeIcon: Icon = (props) => (
   </svg>
 );
 
+/** Neutral Pi monogram. */
+export const PiIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M6 10h20M12 10v13M22 10v11q0 3 4 2"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 /** Neutral monogram for Muse Code; F5 does not ship Meta's brand mark. */
 export const MuseIcon: Icon = (props) => (
   <svg {...props} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">

@@ -12,7 +12,8 @@ const SUPPORTED_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([
   "image/webp",
 ]);
 const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
-const MAX_SCAN_DEPTH = 8;
+// Matches the retained JSON depth bound; deeper output is omitted by its projector.
+const MAX_SCAN_DEPTH = 32;
 
 export interface ExtractedToolResultImage {
   readonly mimeType: string;

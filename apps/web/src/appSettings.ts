@@ -115,6 +115,7 @@ const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>
   antigravity: new Set(getModelOptions("antigravity").map((option) => option.slug)),
   muse: new Set(getModelOptions("muse").map((option) => option.slug)),
   acp: new Set(getModelOptions("acp").map((option) => option.slug)),
+  pi: new Set(getModelOptions("pi").map((option) => option.slug)),
 };
 
 type PersistedAppSettingsValue = Record<string, unknown> & {

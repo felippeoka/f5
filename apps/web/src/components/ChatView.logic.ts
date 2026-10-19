@@ -741,6 +741,7 @@ export function getProviderDispatchModelsByProvider(
     antigravity: modelsFor("antigravity"),
     muse: modelsFor("muse"),
     acp: modelsFor("acp"),
+    pi: modelsFor("pi"),
   };
 }
 

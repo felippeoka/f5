@@ -43,9 +43,11 @@ export async function loadMcpBridge(
     readonly toolSearchAvailable?: boolean;
     readonly toolSearchDisabled?: boolean;
     readonly allowsTool?: (name: string) => boolean;
+    readonly readOnly?: boolean;
     readonly runtimeMode?: string | undefined;
     readonly nativeTools?: readonly { name: string; sourceInfo: { path: string } }[];
     readonly catalogResponse?: unknown;
+    readonly beforeToolResponse?: () => Promise<void>;
     readonly toolHttpResponse?: { readonly status: number; readonly body: string };
   } = {},
 ) {
@@ -91,6 +93,7 @@ export async function loadMcpBridge(
         F5_PI_MCP_BEARER_TOKEN: "fixture-token",
         F5_PI_MCP_EXTENSION_PATH: "/fixture/pi-t3-extension.ts",
         F5_PI_RUNTIME_MODE: options.runtimeMode,
+        F5_PI_READ_ONLY: options.readOnly ? "1" : undefined,
       },
     },
     AbortSignal,
@@ -114,6 +117,7 @@ export async function loadMcpBridge(
         params?: unknown;
       };
       requests.push(request);
+      if (request.method === "tools/call") await options.beforeToolResponse?.();
       if (request.method === "tools/call" && options.toolHttpResponse)
         return new Response(options.toolHttpResponse.body, {
           status: options.toolHttpResponse.status,

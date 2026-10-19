@@ -13,6 +13,7 @@ import {
   GrokIcon,
   Icon,
   MuseIcon,
+  PiIcon,
   OpenAI,
   OpenCodeIcon,
 } from "../Icons";
@@ -36,6 +37,7 @@ export const PROVIDER_LABEL_BY_PROVIDER: Record<ProviderKind, string> = {
   antigravity: "Antigravity",
   muse: "Muse Code",
   acp: "Custom ACP agent",
+  pi: "Pi",
 };
 
 export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<string, Icon>> = {
@@ -47,6 +49,7 @@ export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<string, Icon>> = {
   [ProviderDriverKind.make("antigravity")]: Gemini,
   [ProviderDriverKind.make("muse")]: MuseIcon,
   [ProviderDriverKind.make("acp")]: ACPRegistryIcon,
+  [ProviderDriverKind.make("pi")]: PiIcon,
 };
 
 export const PROVIDER_ICON_BY_PICKER_KIND: Record<ProviderPickerKind, Icon> = {
@@ -58,6 +61,7 @@ export const PROVIDER_ICON_BY_PICKER_KIND: Record<ProviderPickerKind, Icon> = {
   antigravity: Gemini,
   muse: MuseIcon,
   acp: ACPRegistryIcon,
+  pi: PiIcon,
 };
 
 export const COMING_SOON_PROVIDER_OPTIONS = [

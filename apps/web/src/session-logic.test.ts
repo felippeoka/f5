@@ -629,6 +629,24 @@ describe("derivePendingApprovals", () => {
 });
 
 describe("derivePendingUserInputs", () => {
+  it("preserves bounded editor prefills from persisted activities", () => {
+    const question = {
+      id: "editor",
+      header: "Edit",
+      question: "Edit draft",
+      options: [],
+      initialAnswer: "Existing\ntext",
+      optional: true,
+    };
+    const input = derivePendingUserInputs([
+      makeActivity({
+        kind: "user-input.requested",
+        payload: { requestId: "editor-request", questions: [question] },
+      }),
+    ]);
+    expect(input[0]?.questions).toEqual([question]);
+  });
+
   it("tracks open structured prompts and removes resolved ones", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -3312,6 +3330,7 @@ describe("PROVIDER_OPTIONS", () => {
       { value: "antigravity", label: "Antigravity", available: true },
       { value: "muse", label: "Muse Code", available: true },
       { value: "acp", label: "Custom ACP agent", available: true },
+      { value: "pi", label: "Pi", available: true },
     ]);
     expect(claude).toEqual({
       value: "claudeAgent",

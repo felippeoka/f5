@@ -8,6 +8,7 @@ import { buildPiRpcLaunch, resolvePiLaunchArgs } from "../../provider/pi/launch.
 import { makePiRpcConnection, PiRpcError } from "../../provider/pi/PiRpc.ts";
 import { piRecordField, piRecordString, parsePiModelSlug } from "../../provider/pi/PiProtocol.ts";
 import type { PiLaunchSettings } from "../../provider/pi/PiMetadata.ts";
+import type { OwnedOperation } from "../../provider/ownedOperation.ts";
 
 const MAX_OUTPUT_BYTES = 512 * 1024;
 
@@ -137,20 +138,22 @@ export const makePiTextGeneration = (
   settings: PiLaunchSettings,
   environment: NodeJS.ProcessEnv,
   beforeLaunch?: Parameters<typeof runPiMetadataPrompt>[0]["beforeLaunch"],
+  ownOperation?: OwnedOperation<PiRpcError>,
 ) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const runJson: StructuredTextRunner = (input) =>
       Effect.gen(function* () {
-        const text = yield* runPiMetadataPrompt({
+        const prompt = runPiMetadataPrompt({
           settings,
           environment,
           prompt: input.prompt,
           model: input.modelSelection?.model ?? input.model,
           thinking: getModelSelectionStringOptionValue(input.modelSelection, "thinking"),
           ...(beforeLaunch ? { beforeLaunch } : {}),
-        }).pipe(
+        });
+        const text = yield* (ownOperation ? ownOperation(prompt) : prompt).pipe(
           Effect.provideService(FileSystem.FileSystem, fs),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           Effect.mapError(

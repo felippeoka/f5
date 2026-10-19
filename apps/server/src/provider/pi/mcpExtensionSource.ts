@@ -3,6 +3,7 @@
  * `@earendil-works/pi-coding-agent` and `typebox` from the user's pi install.
  */
 import {
+  F5_PI_READ_ONLY_ENV,
   F5_PI_MCP_URL_ENV,
   F5_PI_MCP_BEARER_ENV,
   F5_PI_RUNTIME_MODE_ENV,
@@ -24,6 +25,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { Type } from "typebox";
 
+const READ_ONLY_ENV = ${JSON.stringify(F5_PI_READ_ONLY_ENV)};
 const URL_ENV = ${JSON.stringify(F5_PI_MCP_URL_ENV)};
 const TOKEN_ENV = ${JSON.stringify(F5_PI_MCP_BEARER_ENV)};
 const RUNTIME_MODE_ENV = ${JSON.stringify(F5_PI_RUNTIME_MODE_ENV)};
@@ -209,6 +211,8 @@ async function readBoundedResponse(response: Response): Promise<string> {
 function createMcpClient(endpoint: string, token: string) {
   let nextId = 1;
   let sessionId: string | undefined;
+  let protocol = PROTOCOL;
+  let pendingRequests = 0;
 
   const headers = (): Record<string, string> => {
     const next: Record<string, string> = {
@@ -218,19 +222,22 @@ function createMcpClient(endpoint: string, token: string) {
       // Effect's HTTP MCP rejects post-initialize requests without this
       // (400). The worktree client in McpHttpServer tests sends the same
       // header; initialize itself does not require it.
-      "mcp-protocol-version": PROTOCOL,
+      "mcp-protocol-version": protocol,
     };
     if (sessionId !== undefined) next["mcp-session-id"] = sessionId;
     return next;
   };
 
   const request = async (method: string, params?: unknown, signal?: AbortSignal) => {
+    if (pendingRequests >= 8) throw new Error("F5 MCP has too many pending requests.");
+    pendingRequests++;
+    try {
     const id = nextId++;
     const response = await fetch(endpoint, {
       method: "POST",
       headers: headers(),
       body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
-      signal,
+      signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(60_000)]),
     });
     const nextSession = response.headers.get("mcp-session-id");
     if (nextSession) sessionId = nextSession;
@@ -244,6 +251,7 @@ function createMcpClient(endpoint: string, token: string) {
       throw new Error(\`MCP \${method} returned an error\`);
     }
     return parsed.result;
+    } finally { pendingRequests--; }
   };
 
   const notify = async (method: string, params?: unknown, signal?: AbortSignal) => {
@@ -257,7 +265,7 @@ function createMcpClient(endpoint: string, token: string) {
 
   return {
     async connect(signal?: AbortSignal) {
-      await request(
+      const initialized = await request(
         "initialize",
         {
           protocolVersion: PROTOCOL,
@@ -266,6 +274,11 @@ function createMcpClient(endpoint: string, token: string) {
         },
         signal,
       );
+      if (initialized && typeof initialized === "object" && !Array.isArray(initialized)) {
+        const agreed = initialized.protocolVersion;
+        if (agreed === "2024-11-05" || agreed === "2025-03-26" || agreed === PROTOCOL) protocol = agreed;
+        else if (agreed !== undefined) throw new Error("F5 MCP negotiated an unsupported protocol version.");
+      }
       await notify("notifications/initialized", {}, signal).catch(() => undefined);
     },
     async listTools(signal?: AbortSignal) {
@@ -375,10 +388,11 @@ export default async function f5McpExtension(pi: ExtensionAPI) {
 
   pi.on("tool_call", async (event, ctx) => {
     const mode = runtimeMode();
-    if (mode === "full-access") return;
-    if ((event.toolName === "tool_search" ? hasBuiltinToolSearch() : (READ_ONLY_TOOLS.has(event.toolName) && isBuiltinTool(event.toolName))) || isReadOnlyMcpTool(event.toolName)) {
-      return;
-    }
+    const safeRead = (event.toolName === "tool_search" ? hasBuiltinToolSearch() : (READ_ONLY_TOOLS.has(event.toolName) && isBuiltinTool(event.toolName))) || isReadOnlyMcpTool(event.toolName);
+    // Read-only workflow restrictions precede even full-access mode. No modal
+    // approval can grant a mutation to an unattended run.
+    if (env(READ_ONLY_ENV) === "1") return safeRead ? undefined : { block: true, reason: "This F5 turn permits read-only tools only." };
+    if (mode === "full-access" || safeRead) return;
     if (mode === "auto-accept-edits" && FILE_CHANGE_TOOLS.has(event.toolName) && isBuiltinTool(event.toolName)) {
       return;
     }
@@ -415,13 +429,11 @@ export default async function f5McpExtension(pi: ExtensionAPI) {
   let started: Promise<void> | undefined;
 
   const registerTools = () => {
-    // Preserve public names for saved loadouts and tool selectors. Hidden
-    // canonical names reserve ownership against Pi's configured MCP servers.
-    const prefixes = supportsExposure ? ["mcp__f5__"] : ["mcp__f5__"];
+    // Preserve the canonical public names for saved loadouts and tool selectors.
+    const prefix = "mcp__f5__";
     readOnlyMcpTools.clear();
     for (const tool of catalog) {
       const name = tool.name;
-      for (const prefix of prefixes) {
         if (tool.annotations?.readOnlyHint === true) readOnlyMcpTools.add(\`\${prefix}\${name}\`);
         const exposure = deferOptionalTools && !directTools.has(name) ? "deferred" : "direct";
         pi.registerTool({
@@ -449,7 +461,6 @@ export default async function f5McpExtension(pi: ExtensionAPI) {
             };
           },
         });
-      }
     }
   };
 

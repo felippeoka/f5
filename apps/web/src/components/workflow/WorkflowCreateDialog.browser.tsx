@@ -427,6 +427,7 @@ describe("WorkflowCreateDialog", () => {
           antigravity: [],
           muse: [],
           acp: [],
+          pi: [],
         }}
         onProviderModelChange={() => {}}
         onModelOptionsChange={onModelOptionsChange}
@@ -475,6 +476,7 @@ describe("WorkflowCreateDialog", () => {
           antigravity: [],
           muse: [],
           acp: [],
+          pi: [],
         }}
         onProviderModelChange={() => {}}
         onModelOptionsChange={onModelOptionsChange}
@@ -516,6 +518,7 @@ describe("WorkflowCreateDialog", () => {
           antigravity: [],
           muse: [],
           acp: [],
+          pi: [],
         }}
         onProviderModelChange={() => {}}
         onModelOptionsChange={onModelOptionsChange}

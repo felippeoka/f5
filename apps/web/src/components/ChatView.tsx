@@ -174,6 +174,7 @@ import {
   buildPendingUserInputAnswers,
   carryDisplacedCustomAnswerIntoPrompt,
   derivePendingUserInputProgress,
+  seedPendingUserInputAnswers,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOption,
   type PendingUserInputDraftAnswer,
@@ -1911,11 +1912,25 @@ export default function ChatView({
     }
   }, [threadActivities, threadId, pendingUserInputAnswersByRequestId, setComposerDraftPrompt]);
 
+  useEffect(() => {
+    if (!activePendingUserInput) return;
+    setPendingUserInputAnswersByRequestId((existing) => {
+      const drafts = existing[activePendingUserInput.requestId] ?? EMPTY_PENDING_USER_INPUT_ANSWERS;
+      const seeded = seedPendingUserInputAnswers(activePendingUserInput.questions, drafts);
+      return seeded === drafts
+        ? existing
+        : { ...existing, [activePendingUserInput.requestId]: seeded };
+    });
+  }, [activePendingUserInput]);
+
   const activePendingDraftAnswers = useMemo(
     () =>
       activePendingUserInput
-        ? (pendingUserInputAnswersByRequestId[activePendingUserInput.requestId] ??
-          EMPTY_PENDING_USER_INPUT_ANSWERS)
+        ? seedPendingUserInputAnswers(
+            activePendingUserInput.questions,
+            pendingUserInputAnswersByRequestId[activePendingUserInput.requestId] ??
+              EMPTY_PENDING_USER_INPUT_ANSWERS,
+          )
         : EMPTY_PENDING_USER_INPUT_ANSWERS,
     [activePendingUserInput, pendingUserInputAnswersByRequestId],
   );

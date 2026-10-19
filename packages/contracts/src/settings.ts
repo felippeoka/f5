@@ -183,6 +183,18 @@ export const AntigravitySettings = Schema.Struct({
 });
 export type AntigravitySettings = typeof AntigravitySettings.Type;
 
+/** Pi is instantiated only through an explicit provider-instance entry. */
+export const PiSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  binaryPath: makeBinaryPathSetting("pi"),
+  launchArgs: Schema.String.check(
+    Schema.isMaxLength(32 * 1024),
+    Schema.makeFilter((value) => !value.includes("\0")),
+  ).pipe(Schema.withDecodingDefault(() => "")),
+  customModels: Schema.Array(CustomModelSetting).pipe(Schema.withDecodingDefault(() => [])),
+});
+export type PiSettings = typeof PiSettings.Type;
+
 /** Local ACP commands are executed directly, with an argument vector and instance environment. */
 export const AcpSettings = Schema.Struct({
   command: TrimmedNonEmptyString.check(

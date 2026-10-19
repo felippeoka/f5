@@ -217,7 +217,10 @@ describe("Pi MCP tool exposure", () => {
       const controller = new AbortController();
       const result = await tool!.execute("call-1", { depth: 2 }, controller.signal);
       assert.equal(result.content[0]?.text, "browser snapshot");
-      assert.strictEqual(bridge.transports.at(-1)?.signal, controller.signal);
+      const transportSignal = bridge.transports.at(-1)?.signal;
+      assert.isFalse(transportSignal?.aborted);
+      controller.abort();
+      assert.isTrue(transportSignal?.aborted);
       assert.equal(bridge.transports.at(-1)?.url, "http://fixture.invalid/mcp");
       assert.equal(bridge.transports.at(-1)?.authorization, "Bearer fixture-token");
       assert.deepEqual(JSON.parse(JSON.stringify(bridge.requests.at(-1))), {
@@ -403,6 +406,22 @@ describe("Pi tool discovery permissions", () => {
 });
 
 describe("Pi MCP bounds and private failures", () => {
+  it("bounds concurrent HTTP requests and releases admission after responses finish", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const bridge = await loadMcpBridge({ beforeToolResponse: () => gate });
+    const tool = bridge.tools[0]!;
+    const pending = Array.from({ length: 8 }, (_, index) => tool.execute(String(index), {}));
+    try {
+      await expect(tool.execute("excess", {})).rejects.toThrow("too many pending requests");
+    } finally {
+      release();
+    }
+    await Promise.all(pending);
+    await expect(tool.execute("recovered", {})).resolves.toBeDefined();
+  });
   it("stops repeated tool pagination and leaves the failed catalog unpublished", async () => {
     const bridge = await loadMcpBridge({ catalogResponse: { tools: [], nextCursor: "same" } });
     expect(bridge.tools).toEqual([]);
@@ -580,3 +599,34 @@ describe("Pi skill references", () => {
     }
   });
 });
+
+it.each(["full-access", "auto-accept-edits", "approval-required"])(
+  "enforces unattended read-only tool policy before %s without a confirmation dialog",
+  async (runtimeMode) => {
+    const bridge = await loadMcpBridge({
+      modern: true,
+      runtimeMode,
+      readOnly: true,
+      nativeTools: [
+        { name: "read", sourceInfo: { path: "builtin:read" } },
+        { name: "edit", sourceInfo: { path: "builtin:edit" } },
+        { name: "grep", sourceInfo: { path: "/user/replaced.ts" } },
+      ],
+    });
+    const hook = bridge.handlers.get("tool_call") as unknown as (
+      event: { toolName: string; input: unknown },
+      ctx: { ui: { confirm: () => Promise<boolean> } },
+    ) => Promise<{ block: true } | undefined>;
+    const ctx = {
+      ui: {
+        confirm: async () => {
+          throw new Error("Unattended turns must never ask for mutation approval.");
+        },
+      },
+    };
+    expect(await hook({ toolName: "read", input: {} }, ctx)).toBeUndefined();
+    expect(await hook({ toolName: "mcp__f5__thread_status", input: {} }, ctx)).toBeUndefined();
+    for (const toolName of ["edit", "bash", "grep", "mcp__f5__html_render"])
+      expect(await hook({ toolName, input: {} }, ctx)).toMatchObject({ block: true });
+  },
+);

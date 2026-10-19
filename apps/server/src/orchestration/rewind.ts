@@ -44,6 +44,18 @@ const MAX_REWIND_ERROR_LENGTH = 400;
 const sameIds = (left: readonly string[], right: readonly string[]) =>
   left.length === right.length && left.every((id, index) => id === right[index]);
 
+/** Native identity is shared by preparation, confirmation and recovery. */
+function nativeRewindSessionIdentity(cursor: unknown, fallback: string): string {
+  if (cursor !== null && typeof cursor === "object" && !Array.isArray(cursor)) {
+    const record = cursor as Record<string, unknown>;
+    for (const key of ["resume", "threadId", "sessionFile"]) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim().length > 0) return value;
+    }
+  }
+  return fallback;
+}
+
 /** Short, user-facing description of a rewind failure. The full cause is only logged. */
 export const describeRewindFailure = (cause: Cause.Cause<unknown>): string => {
   const error = Cause.squash(cause);
@@ -222,9 +234,14 @@ export const makeConversationRewind = Effect.gen(function* () {
             return yield* fail("The provider workspace differs from the worktree.");
         }
         const cursor = session?.resumeCursor as
-          | { resume?: string; threadId?: string; rewindSourceThreadId?: string }
+          | {
+              resume?: string;
+              threadId?: string;
+              sessionFile?: string;
+              rewindSourceThreadId?: string;
+            }
           | undefined;
-        const identity = cursor?.resume ?? cursor?.threadId ?? snapshot.threadId;
+        const identity = nativeRewindSessionIdentity(session?.resumeCursor, snapshot.threadId);
         const history = yield* listHistory(thread.id);
         if (!op) {
           if (
@@ -291,7 +308,7 @@ export const makeConversationRewind = Effect.gen(function* () {
           // native identity. Recovery must prove the retained boundary before
           // adopting either replacement; a prepared operation sent nothing.
           const replacementAllowed =
-            (thread.session?.providerName === "codex" &&
+            ((thread.session?.providerName === "codex" || thread.session?.providerName === "pi") &&
               cursor?.rewindSourceThreadId === op.provider_session_id) ||
             (thread.session?.providerName === "claudeAgent" &&
               op.retained_count === 0 &&
@@ -463,11 +480,10 @@ export const makeConversationRewind = Effect.gen(function* () {
           const confirmedSession = (yield* provider.listSessions()).find(
             (session) => session.threadId === thread.id,
           );
-          const confirmedCursor = confirmedSession?.resumeCursor as
-            | { resume?: string; threadId?: string; rewindSourceThreadId?: string }
-            | undefined;
-          const confirmedIdentity =
-            confirmedCursor?.resume ?? confirmedCursor?.threadId ?? after.threadId;
+          const confirmedIdentity = nativeRewindSessionIdentity(
+            confirmedSession?.resumeCursor,
+            after.threadId,
+          );
           yield* sql`UPDATE rewind_operations SET provider_session_id = ${confirmedIdentity}, state = 'provider-confirmed', error = NULL, updated_at = ${new Date().toISOString()} WHERE operation_id = ${op.operation_id}`;
         }
         if (state !== "files-confirmed") {

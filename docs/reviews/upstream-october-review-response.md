@@ -934,7 +934,75 @@ still fails the same two migration-recovery process-identity cases (330 scripts
 pass); its other completed workspaces pass 723 shared, 570 desktop, 2,333 web and
 21 ACP cases. The strict upstream ledger check passes without disposition changes.
 
-This groundwork does not register a Pi driver or expose Pi in provider selection.
-The adapter, session/approval lifecycle, native rewinds, background-continuation
-ownership, driver/UI wiring and native integration evidence remain required before
-15l can be considered delivered. No Pi ledger records have been promoted.
+At groundwork commit `165260f360`, Pi was not registered or selectable. The following
+continuation adds the driver and session integration; neither checkpoint promotes
+Pi ledger records or claims the complete 15l phase.
+
+## Pi session and driver continuation (15l; delivery still deferred)
+
+Pi is now a registered, explicit-instance driver with an Early Access settings entry,
+qualified model/thinking selection, version admission at 0.80.5, five-minute status
+refresh, live workspace models/commands/skills and `pi update --self`. Hydration does
+not synthesize a Pi instance from legacy settings. The F5 thread catalog is supplied
+through a scoped HTTP MCP session; only the owned live child receives its bearer.
+Account admission guards probes, sessions and isolated text generation. Isolated
+profiles strip ambient Pi roots and additional model credentials while preserving
+explicit instance API keys. Setup remains described in `docs/providers/pi.md`.
+
+The adapter owns startup, child processes, event pumps and metadata operations in
+its instance scope. Caller cancellation and instance replacement interrupt in-flight
+startup and reap its child. A Deferred-based completion bridge avoids a pinned
+Effect observer-notification problem when scope closure interrupts an owned fiber.
+Shutdown closes the bounded event bus before session cleanup; a regression fills
+it with 600 native notifications while its consumer is blocked and proves shutdown
+still reaps the child. No unbounded event queue was introduced.
+
+Native acknowledgements, settlement and stream-ordered idle probes fence turn
+completion. Late replies and duplicate acknowledgements cannot finish another
+turn. Aborts, command-only prompts, failed/crashed processes, compaction and retry
+outcomes retain explicit ownership. Model changes require native read-back; a
+mismatch blocks the session and reports the prompt as known not sent. Read-only
+workflow tool restrictions precede all permission modes and never ask to grant a
+mutation. Replaced tools cannot inherit builtin read/edit exemptions.
+
+Assistant text and reasoning get bounded start/delta/completion projection, including
+final-only messages and missing suffixes. Completed message buffers are released.
+Tool calls have correlated, bounded structured completion envelopes, original shell
+exit codes and separate transport/semantic outcomes. Native inline image bytes are
+scrubbed before events are queued; the existing authenticated attachment store
+retains at most one supported final-result image and counts omissions. The shared
+image-store extraction does not certify Pi computer automation. Per-message usage
+replaces streaming counters rather than adding them repeatedly; billable turn totals
+remain separate from Pi's authoritative native context occupancy.
+
+Editor prefill now survives the shared question schema, persisted-activity parsing
+and both question panels. Initial drafts seed once; editing or clearing a draft
+cannot restore the provider's original text. Chromium checks cover explicit empty
+answers, no automatic turn submission and restoration of the original composer
+draft. Approval generations, native ids, deadlines and one-shot responses prevent
+answers from crossing session replacement or surviving native expiry.
+
+Native history reads walk active ancestry and verify the file/leaf before returning.
+F5 rollback forks at a captured native user entry, adopts and persists the new file
+before hydration, verifies exact retained native/host boundaries and recognizes a
+verified retry without issuing another fork. Lost acknowledgement, changed history
+or failed read-back blocks further prompts. Pi's session-file identity now participates
+in the shared rewind preparation and recovery path. Uncoordinated native extension
+rewinds/session switches also block prompts instead of silently continuing against
+stale F5 history; their automatic projection reconciliation remains unfinished.
+
+Validation: the combined targeted server run passes 279 cases in 24 files; the
+latest adapter run passes 19 cases including native mutation blocking. The runtime
+ingestion/lifecycle run passes 181 cases, web unit tests pass 150 cases, the async
+question panel passes 14 Chromium cases and the focused ChatView prefill run passes
+2 cases. Formatter, lint (31 existing warnings, zero errors), all eight workspace
+typechecks and strict upstream coverage passed at this checkpoint. The required
+`bun run test:full` was run again and failed: 330 scripts pass, two migration recovery
+cases cannot verify process identity, and three launcher cases fail before Turbo
+interrupts the remaining server run. `/bin/ps` remains denied with EPERM in this
+host. No safety check was weakened and no release-gate waiver is claimed.
+
+Remaining Pi obligations include owned extension continuations, corresponding queue
+admission and automatic native-history projection reconciliation, plus real installed
+Pi/account evidence. The broader catch-up and mandatory verify-first cut line also
+remain incomplete. All Pi dispositions stay deferred.

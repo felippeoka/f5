@@ -9,6 +9,7 @@ export const KNOWN_PROVIDER_KINDS = [
   "antigravity",
   "muse",
   "acp",
+  "pi",
 ] as const;
 export const ProviderKind = Schema.Literals([
   "codex",
@@ -19,6 +20,7 @@ export const ProviderKind = Schema.Literals([
   "antigravity",
   "muse",
   "acp",
+  "pi",
 ]);
 export type ProviderKind = typeof ProviderKind.Type;
 

@@ -26,7 +26,6 @@ import {
 } from "../../provider/msp/MspSessionRuntime.ts";
 import { makeMspTransport } from "../../provider/msp/MspTransport.ts";
 import { TextGenerationError } from "../Errors.ts";
-import type { TextGenerationShape } from "../Services/TextGeneration.ts";
 import { extractJsonObject } from "../Utils.ts";
 import { makePromptTextGeneration } from "../promptTextGeneration.ts";
 

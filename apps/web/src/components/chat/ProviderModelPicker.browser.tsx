@@ -39,6 +39,7 @@ const MODEL_OPTIONS_BY_PROVIDER = {
   antigravity: [],
   muse: [],
   acp: [],
+  pi: [],
 } satisfies Record<ProviderKind, ReadonlyArray<ModelPickerModelOption>>;
 
 async function mountPicker(props?: {
@@ -243,6 +244,7 @@ describe("ProviderModelPicker", () => {
       antigravity: [],
       muse: [],
       acp: [],
+      pi: [],
     } satisfies Record<ProviderKind, ReadonlyArray<ModelPickerModelOption>>;
     const mounted = await mountPicker({
       provider: "codex",

@@ -4,7 +4,7 @@ export type ComputerAgentProvider = "claude" | "codex" | "cursor" | "grok" | "an
 export function computerAgentProviderFor(kind: ProviderKind): ComputerAgentProvider | undefined {
   return kind === "claudeAgent"
     ? "claude"
-    : kind === "opencode" || kind === "muse" || kind === "acp"
+    : kind === "opencode" || kind === "muse" || kind === "acp" || kind === "pi"
       ? undefined
       : kind;
 }
@@ -66,6 +66,7 @@ export const AGENT_AUTOMATION_SUPPORT: Record<
     computer: { state: "unsupported", reason: openCodeReason },
   },
   acp: { preview: awaitingVerification, computer: awaitingVerification },
+  pi: { preview: awaitingVerification, computer: awaitingVerification },
   muse: {
     preview: { state: "unsupported", reason: museReason },
     computer: { state: "unsupported", reason: museReason },
