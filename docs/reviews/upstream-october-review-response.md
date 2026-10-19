@@ -677,3 +677,26 @@ then explicitly sends and asserts that the complete PR URL reaches the turn
 command with no file authorization. All eight TypeScript checks passed before
 the final browser fixtures; the final check includes those fixtures. The full
 release gate remains failed and ledger obligations stay deferred.
+
+## Merge-message attribution continuation (2026-10-19)
+
+The profile setting for #16192 is opt-in and off by default. GitHub HTTP merges
+read the host's proposed message only when needed, remove recognized agent credits
+with the pinned upstream parser, and retain human/unknown credits and fenced or
+quoted examples. A changed body is tied to the read head SHA; stale or incomplete
+reads fail before a merge write. An explicitly empty cleaned body is sent as empty,
+while unchanged bodies leave the host default intact. Rebase skips the read.
+
+The native forge action uses the same HTTP merge implementation. Auto-merge uses
+the same cleanup and an `expectedHeadOid` fence, retaining the prepared method.
+The [GitHub auto-merge input schema](https://docs.github.com/en/graphql/reference/pulls#enablepullrequestautomergeinput)
+confirms the head fence and optional body fields. Merge queues retain the host's
+message, and the existing native stack merge endpoint bypasses this cleanup.
+F5 exposes a profile setting; the plan did not require project overrides for this
+setting. No automatic merge or branch deletion is introduced.
+
+The five focused server suites pass 115 cases, including default/off behavior,
+merge/squash, human credits, empty/unchanged bodies, queues, rebase, failed reads,
+head changes and auto-merge activation. All 15 settings-contract cases and all
+eight workspace TypeScript checks pass. Formatting and lint pass. The required
+full gate remains a separate outstanding condition; dispositions stay deferred.

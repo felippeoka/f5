@@ -37,6 +37,8 @@ export interface GitHubMergePullRequestInput {
   readonly url: string;
   readonly method: "squash" | "merge" | "rebase";
   readonly expectedHeadOid?: string | undefined;
+  /** Internal override; stack merges retain the host-generated message. */
+  readonly removeAgentCreditsOnMerge?: boolean;
 }
 
 /**

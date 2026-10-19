@@ -2,6 +2,15 @@ import type { SettingsItemDescriptor } from "../settingsSearch";
 
 export const GIT_SETTINGS_DESCRIPTORS = [
   {
+    id: "git.merge-agent-credits",
+    category: "git",
+    label: "Remove agent credits when merging",
+    description:
+      "Remove recognized agent attribution from GitHub merge messages, keeping human co-authors.",
+    keywords: ["github", "squash", "co-authored-by", "merge", "attribution"],
+    targetSelector: '[aria-label="Remove agent credits when merging"]',
+  },
+  {
     id: "git.review-guide-model",
     category: "git",
     label: "Review guide model",

@@ -191,3 +191,13 @@ describe("thread settlement opt-ins", () => {
       );
   });
 });
+
+it("keeps merge-message attribution changes off by default and accepts explicit patches", () => {
+  expect(decodeServerSettings({}).removeAgentCreditsOnMerge).toBe(false);
+  expect(
+    decodeServerSettingsPatch({ removeAgentCreditsOnMerge: true }).removeAgentCreditsOnMerge,
+  ).toBe(true);
+  expect(
+    decodeServerSettingsPatch({ removeAgentCreditsOnMerge: false }).removeAgentCreditsOnMerge,
+  ).toBe(false);
+});

@@ -410,6 +410,7 @@ function WritingSettings() {
 function PullRequestSettings() {
   const { settings, updateSettings } = useSettingsRouteContext();
   const defaultMergeMethod = useSettings((unified) => unified.prHubDefaultMergeMethod);
+  const removeAgentCredits = useSettings((unified) => unified.removeAgentCreditsOnMerge);
   const { updateSettings: updateServerSettings } = useUpdateSettings();
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const queryClient = useQueryClient();
@@ -479,6 +480,26 @@ function PullRequestSettings() {
               <SelectItem value="rebase">{MERGE_METHOD_LABELS.rebase}</SelectItem>
             </SelectPopup>
           </Select>
+        }
+      />
+      <SettingsRow
+        title="Remove agent credits when merging"
+        description="Remove recognized agent co-author and generated-by lines from GitHub merge and squash messages. Keeps human credits and original commits. Includes auto-merge; excludes merge queues and stack merges."
+        control={
+          <Switch
+            aria-label="Remove agent credits when merging"
+            checked={removeAgentCredits}
+            onCheckedChange={(enabled) =>
+              void updateServerSettings({ removeAgentCreditsOnMerge: enabled }).catch(
+                (error: unknown) =>
+                  toastManager.add({
+                    type: "error",
+                    title: "Could not save merge-message setting",
+                    description: errorMessage(error),
+                  }),
+              )
+            }
+          />
         }
       />
       <SettingsRow

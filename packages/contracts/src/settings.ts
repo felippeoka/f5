@@ -369,6 +369,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
 export type ProjectSettingsOverrides = typeof ProjectSettingsOverrides.Type;
 
 export const ServerSettings = Schema.Struct({
+  removeAgentCreditsOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   autoSettleOnPullRequestMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   autoSettleAfterDays: AutoSettleAfterDays.pipe(Schema.withDecodingDefault(() => null)),
   autoSettleKeepPullRequests: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
@@ -555,6 +556,7 @@ const PrHubSettingsPatch = Schema.Struct({
 });
 
 export const ServerSettingsPatch = Schema.Struct({
+  removeAgentCreditsOnMerge: Schema.optionalKey(Schema.Boolean),
   autoSettleOnPullRequestMerge: Schema.optionalKey(Schema.Boolean),
   autoSettleAfterDays: Schema.optionalKey(AutoSettleAfterDays),
   autoSettleKeepPullRequests: Schema.optionalKey(Schema.Boolean),

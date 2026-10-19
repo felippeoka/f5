@@ -137,3 +137,12 @@ resolution even when the repository generally supports them.
 Drag a linked PR from the thread header into the composer to add a PR context chip.
 It keeps the PR URL in your draft and sends that reference only when you submit
 the prompt. Deleting the chip removes the reference; undo restores it.
+
+## Merge-message attribution
+
+**Settings → Git → Remove agent credits when merging** is off by default. Enable
+it to remove recognized agent co-author and generated-by lines from new GitHub
+merge and squash commit messages, including auto-merge. Human co-authors, quoted
+examples and original commits retain their text. Merge queues and native stack
+merges keep their host-generated messages. The setting applies to this profile;
+other forges retain their existing merge-message behavior.

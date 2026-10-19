@@ -1,3 +1,4 @@
+import { ServerSettingsService } from "../serverSettings.ts";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeGitHubCli } from "./Layers/GitHubCli.ts";
@@ -357,5 +358,112 @@ describe("GitHub HTTP operations", () => {
         expect(error.kind).toBe("invalid_json");
       }),
     );
+  });
+});
+
+describe("opt-in merge message attribution", () => {
+  const response = (body: string, queued = false, head = "abc123") => ({
+    data: {
+      repository: {
+        pullRequest: {
+          isMergeQueueEnabled: queued,
+          headRefOid: head,
+          viewerMergeBodyText: body,
+        },
+      },
+    },
+  });
+  it.each(["merge", "squash"] as const)(
+    "uses the configured policy for %s and keeps human credits",
+    async (method) => {
+      const f = fixture((call) =>
+        call.url.pathname === "/graphql"
+          ? response(
+              "Details\n\nCo-authored-by: Alice <alice@example.com>\nCo-authored-by: Claude <noreply@anthropic.com>",
+            )
+          : { merged: true },
+      );
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const gh = yield* f.make;
+          yield* gh.mergePullRequest({ cwd: "/repo", url, method, expectedHeadOid: "abc123" });
+        }).pipe(
+          Effect.provide(ServerSettingsService.layerTest({ removeAgentCreditsOnMerge: true })),
+        ),
+      );
+      expect(
+        f.calls.filter((call) => call.url.pathname === "/graphql")[0]?.body.variables,
+      ).toMatchObject({ method: method.toUpperCase() });
+      expect(f.calls.at(-1)?.body).toEqual({
+        merge_method: method,
+        sha: "abc123",
+        commit_message: "Details\n\nCo-authored-by: Alice <alice@example.com>",
+      });
+    },
+  );
+  it.each([
+    { body: "Human text", queued: false, expected: undefined },
+    { body: "Co-authored-by: Claude <noreply@anthropic.com>", queued: true, expected: undefined },
+    { body: "Co-authored-by: Claude <noreply@anthropic.com>", queued: false, expected: "" },
+  ])("only overrides a changed non-queue body: %j", async ({ body, queued, expected }) => {
+    const f = fixture((call) =>
+      call.url.pathname === "/graphql" ? response(body, queued) : { merged: true },
+    );
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const gh = yield* f.make;
+        yield* gh.mergePullRequest({
+          cwd: "/repo",
+          url,
+          method: "merge",
+          expectedHeadOid: "abc123",
+          removeAgentCreditsOnMerge: true,
+        });
+      }),
+    );
+    if (expected === undefined) expect(f.calls.at(-1)?.body).not.toHaveProperty("commit_message");
+    else expect(f.calls.at(-1)?.body.commit_message).toBe("");
+  });
+  it.each([false, true])(
+    "does not read or override for disabled policy or rebase: %j",
+    async (rebase) => {
+      const f = fixture(() => ({ merged: true }));
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const gh = yield* f.make;
+          yield* gh.mergePullRequest({
+            cwd: "/repo",
+            url,
+            method: rebase ? "rebase" : "merge",
+            removeAgentCreditsOnMerge: rebase,
+          });
+        }),
+      );
+      expect(f.calls.some((call) => call.url.pathname === "/graphql")).toBe(false);
+      expect(f.calls.at(-1)?.body).not.toHaveProperty("commit_message");
+    },
+  );
+  it.each([
+    response("Agent", false, "new-head"),
+    { data: { repository: { pullRequest: null } } },
+    { errors: [{ message: "Incomplete" }] },
+  ])("fails before a merge write for stale or incomplete proposed messages", async (body) => {
+    const f = fixture(() => body);
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const gh = yield* f.make;
+        return yield* gh
+          .mergePullRequest({
+            cwd: "/repo",
+            url,
+            method: "merge",
+            expectedHeadOid: "abc123",
+            removeAgentCreditsOnMerge: true,
+          })
+          .pipe(Effect.result);
+      }),
+    );
+    expect(result._tag).toBe("Failure");
+    expect(f.calls.some((call) => call.method === "PUT")).toBe(false);
   });
 });

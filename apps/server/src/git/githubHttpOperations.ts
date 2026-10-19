@@ -1,3 +1,4 @@
+import { mergeCreditRemovalEnabled, readGitHubMergeMessage } from "./githubMergeMessage.ts";
 import { open } from "node:fs/promises";
 import { Effect, Exit, Option, Request, RequestResolver, Schema, Semaphore } from "effect";
 import { PositiveInt, TrimmedNonEmptyString } from "@t3tools/contracts";
@@ -615,12 +616,22 @@ export function makeGitHubHttpOperations(
     mergePullRequest: (input) =>
       Effect.gen(function* () {
         const target = yield* pullTarget(input.cwd, input.url);
+        const message = yield* readGitHubMergeMessage({
+          ref: target.ref,
+          method: input.method,
+          enabled: yield* mergeCreditRemovalEnabled(input.removeAgentCreditsOnMerge),
+          expectedHeadOid: input.expectedHeadOid,
+          query: (query, variables) => graphql(input.cwd, target.context, query, variables),
+          invalid: (detail) => invalid("mergePullRequest", detail),
+        });
+        const expectedHead = message.expectedHeadOid ?? input.expectedHeadOid;
         const result = yield* request(input.cwd, target.context, {
           method: "PUT",
           endpoint: `${target.endpoint}/merge`,
           body: {
             merge_method: input.method,
-            ...(input.expectedHeadOid ? { sha: input.expectedHeadOid } : {}),
+            ...(expectedHead ? { sha: expectedHead } : {}),
+            ...(message.commitBody === undefined ? {} : { commit_message: message.commitBody }),
           },
         });
         if (record(result).merged !== true)

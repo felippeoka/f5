@@ -191,6 +191,7 @@ export interface ForgeProvider extends SourceControlProvider {
   readonly performAction: (input: {
     readonly ref: SourceControlPullRequestRef;
     readonly action: ForgeAction;
+    readonly removeAgentCreditsOnMerge?: boolean;
     readonly method?: "merge" | "squash" | "rebase";
     readonly expectedHeadOid?: string;
   }) => Effect.Effect<unknown, SourceControlProviderError>;
