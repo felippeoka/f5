@@ -1,3 +1,5 @@
+import { ThreadFindBar, type ThreadFindMatch } from "./chat/ThreadFindBar";
+import { ThreadFindContext } from "./chat/threadFindContext";
 import {
   hasPullRequestReferenceDrag,
   readPullRequestReferenceDrag,
@@ -57,7 +59,7 @@ import {
   DEFAULT_MODEL_BY_PROVIDER,
   type EditorId,
   type KeybindingCommand,
-  type MessageId,
+  MessageId,
   type OrchestrationCommandExecutionSummary,
   type OrchestrationGetThreadFileChangesResult,
   type OrchestrationFileChangeId,
@@ -661,9 +663,23 @@ function providerKindForDriver(driver: ProviderDriverKind): ProviderKind | null 
 export default function ChatView({
   threadId,
   liveAgentCount,
-  focusTimelineEntryId,
+  focusTimelineEntryId: routeFocusTimelineEntryId,
   focusTimelineEntryKind = "message",
 }: ChatViewProps) {
+  const [findOpenThreadId, setFindOpenThreadId] = useState<ThreadId | null>(null);
+  const [findSelection, setFindSelection] = useState<{
+    threadId: ThreadId;
+    match: ThreadFindMatch;
+  } | null>(null);
+  const findMatch = findSelection?.threadId === threadId ? findSelection.match : null;
+  const focusTimelineEntryId = findMatch?.entryId ?? routeFocusTimelineEntryId;
+  useEffect(() => {
+    const open = (event: Event) => {
+      if ((event as CustomEvent<ThreadId>).detail === threadId) setFindOpenThreadId(threadId);
+    };
+    window.addEventListener("f5:find-thread", open);
+    return () => window.removeEventListener("f5:find-thread", open);
+  }, [threadId]);
   const testRenderCountProps = useTestRenderCountProps();
   const nextTurnQueueState = useNextTurnQueueStore(
     (store) => store.byThreadId[threadId] ?? EMPTY_QUEUE_THREAD_STATE,
@@ -2284,13 +2300,17 @@ export default function ChatView({
     () =>
       deriveTimelineEntries(
         timelineMessages,
-        activeThread?.proposedPlans ?? [],
+        findMatch?.plan &&
+          !activeThread?.proposedPlans.some((plan) => plan.id === findMatch.plan?.id)
+          ? [...(activeThread?.proposedPlans ?? []), findMatch.plan]
+          : (activeThread?.proposedPlans ?? []),
         workLogEntries,
         commandExecutions,
         timelineEntryCache,
       ),
     [
       activeThread?.proposedPlans,
+      findMatch?.plan,
       commandExecutions,
       timelineEntryCache,
       timelineMessages,
@@ -2311,7 +2331,7 @@ export default function ChatView({
       onIsAtEndChange(false);
       void legendListRef.current?.scrollToIndex({
         index,
-        animated: true,
+        animated: !findMatch,
         viewPosition: 0.3,
       });
       lastFocusedTimelineEntryIdRef.current = focusTimelineEntryId;
@@ -2354,6 +2374,7 @@ export default function ChatView({
     activeThread?.detailsLoaded,
     activeThread?.id,
     focusTimelineEntryId,
+    findMatch,
     focusTimelineEntryKind,
     onIsAtEndChange,
   ]);
@@ -4079,6 +4100,19 @@ export default function ChatView({
           newThreadComposer: composerFocused && !isServerThread,
         },
       });
+      if (
+        command === "chat.find" &&
+        isServerThread &&
+        !dialogFocus &&
+        !isTerminalFocused() &&
+        !(activeElement instanceof Element && activeElement.closest('[data-find-scope="preview"]'))
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        setFindOpenThreadId(threadId);
+        document.querySelector<HTMLInputElement>('input[aria-label="Find in thread"]')?.focus();
+        return;
+      }
       if (command === "chat.pageUp" || command === "chat.pageDown") {
         if (composerFocused || dialogFocus || isTerminalFocused()) return;
         const scroller = document.querySelector<HTMLElement>(
@@ -7448,6 +7482,33 @@ export default function ChatView({
             />
           </AppTitlebar>
 
+          {findOpenThreadId === activeThread.id && isServerThread ? (
+            <ThreadFindBar
+              key={activeThread.id}
+              threadId={activeThread.id}
+              onMatch={async (match, signal) => {
+                if (
+                  match?.kind === "message" &&
+                  !timelineEntryRowIndexMapRef.current?.has(match.entryId)
+                )
+                  await loadThreadHistoryAroundMessage(
+                    activeThread.id,
+                    MessageId.makeUnsafe(match.entryId),
+                    "message",
+                    signal,
+                  );
+                if (signal.aborted) return;
+                lastFocusedTimelineEntryIdRef.current = null;
+                setFindSelection(match ? { threadId: activeThread.id, match } : null);
+              }}
+              onClose={() => {
+                setFindOpenThreadId(null);
+                setFindSelection(null);
+                focusComposer();
+              }}
+            />
+          ) : null}
+
           {(activeThread.session != null ||
             latestConfiguredRuntimeActivity != null ||
             (settings.showProviderRuntimeMetadata && providerRuntimeInfoEntries.length > 0)) && (
@@ -7511,72 +7572,74 @@ export default function ChatView({
                   }
                 />
                 {shouldRenderTimeline ? (
-                  <MessagesTimeline
-                    key={activeThread.id}
-                    threadId={activeThread.id}
-                    hasMessages={timelineEntries.length > 0}
-                    isWorking={isWorking}
-                    activeTurnStartedAt={activeWorkStartedAt}
-                    liveActivity={liveActivity}
-                    listRef={legendListRef}
-                    entryRowIndexMapRef={timelineEntryRowIndexMapRef}
-                    onIsAtEndChange={onIsAtEndChange}
-                    followNextTailNonce={followNextTailNonce}
-                    hasOlderHistory={hasOlderTimelineHistory}
-                    isLoadingOlderHistory={activeThreadHistory.stage === "backfilling"}
-                    hasHistoryLoadError={activeThreadHistory.stage === "error"}
-                    onLoadOlderHistory={loadOlderTimelineHistory}
-                    timelineEntries={timelineEntries}
-                    completionDividerBeforeEntryId={completionDividerBeforeEntryId}
-                    completionSummary={completionSummary}
-                    turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
-                    turnDiffSummaryByTurnId={turnDiffSummaryByTurnId}
-                    expandedWorkGroups={expandedWorkGroups}
-                    onToggleWorkGroup={onToggleWorkGroup}
-                    workGroupCollapseOverrides={workGroupCollapseOverrides}
-                    onSetWorkGroupExpanded={onSetWorkGroupExpanded}
-                    emptyState={timelineEmptyState}
-                    onOpenTurnDiff={onOpenTurnDiff}
-                    revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
-                    nativeSessionCapabilities={activeThread.session?.capabilities}
-                    canRestoreFiles={
-                      !rewindWorkspaceShared &&
-                      (Boolean(activeThread.worktreePath) ||
-                        (branchesQuery.data?.isRepo === false &&
-                          activeThread.session?.provider === "claudeAgent" &&
-                          activeThread.session.capabilities?.actions.some(
-                            (action) => action.action === "fileCheckpointing" && action.supported,
-                          ) === true))
-                    }
-                    onRevertUserMessage={onRevertUserMessageFromTimeline}
-                    isRevertingCheckpoint={isRevertingCheckpoint}
-                    revertDisabledReason={revertDisabledReason}
-                    revertPreferenceKey={activeThread.projectId}
-                    pendingRevert={pendingRevertDisplay}
-                    revertReopenRequest={revertReopenRequest ?? null}
-                    onRevertReopenHandled={onRevertReopenHandled}
-                    latestMessageId={activeThread.messages.at(-1)?.id ?? null}
-                    onImageExpand={onExpandTimelineImage}
-                    onImageActionMenu={onImageActionMenu}
-                    usesCustomImageContextMenu={usesCustomImageContextMenu}
-                    markdownCwd={gitCwd ?? undefined}
-                    resolvedTheme={resolvedTheme}
-                    timestampFormat={timestampFormat}
-                    workspaceRoot={workspaceRoot}
-                    expandedCommandExecutions={expandedCommandExecutions}
-                    onToggleCommandExecution={onToggleCommandExecution}
-                    allDirectoriesExpanded={allDirectoriesExpanded}
-                    onToggleAllDirectories={onToggleAllDirectories}
-                    chatDiffContext={chatDiffContext}
-                    onWorkingRibbonFocusLost={scheduleComposerFocus}
-                    listHeaderContent={
-                      <>
-                        {historyStatusContent}
-                        <NewerMessageHistoryControl threadId={activeThread.id} />
-                        <OlderActivityHistoryControl threadId={activeThread.id} />
-                      </>
-                    }
-                  />
+                  <ThreadFindContext value={findMatch}>
+                    <MessagesTimeline
+                      key={activeThread.id}
+                      threadId={activeThread.id}
+                      hasMessages={timelineEntries.length > 0}
+                      isWorking={isWorking}
+                      activeTurnStartedAt={activeWorkStartedAt}
+                      liveActivity={liveActivity}
+                      listRef={legendListRef}
+                      entryRowIndexMapRef={timelineEntryRowIndexMapRef}
+                      onIsAtEndChange={onIsAtEndChange}
+                      followNextTailNonce={followNextTailNonce}
+                      hasOlderHistory={hasOlderTimelineHistory}
+                      isLoadingOlderHistory={activeThreadHistory.stage === "backfilling"}
+                      hasHistoryLoadError={activeThreadHistory.stage === "error"}
+                      onLoadOlderHistory={loadOlderTimelineHistory}
+                      timelineEntries={timelineEntries}
+                      completionDividerBeforeEntryId={completionDividerBeforeEntryId}
+                      completionSummary={completionSummary}
+                      turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
+                      turnDiffSummaryByTurnId={turnDiffSummaryByTurnId}
+                      expandedWorkGroups={expandedWorkGroups}
+                      onToggleWorkGroup={onToggleWorkGroup}
+                      workGroupCollapseOverrides={workGroupCollapseOverrides}
+                      onSetWorkGroupExpanded={onSetWorkGroupExpanded}
+                      emptyState={timelineEmptyState}
+                      onOpenTurnDiff={onOpenTurnDiff}
+                      revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+                      nativeSessionCapabilities={activeThread.session?.capabilities}
+                      canRestoreFiles={
+                        !rewindWorkspaceShared &&
+                        (Boolean(activeThread.worktreePath) ||
+                          (branchesQuery.data?.isRepo === false &&
+                            activeThread.session?.provider === "claudeAgent" &&
+                            activeThread.session.capabilities?.actions.some(
+                              (action) => action.action === "fileCheckpointing" && action.supported,
+                            ) === true))
+                      }
+                      onRevertUserMessage={onRevertUserMessageFromTimeline}
+                      isRevertingCheckpoint={isRevertingCheckpoint}
+                      revertDisabledReason={revertDisabledReason}
+                      revertPreferenceKey={activeThread.projectId}
+                      pendingRevert={pendingRevertDisplay}
+                      revertReopenRequest={revertReopenRequest ?? null}
+                      onRevertReopenHandled={onRevertReopenHandled}
+                      latestMessageId={activeThread.messages.at(-1)?.id ?? null}
+                      onImageExpand={onExpandTimelineImage}
+                      onImageActionMenu={onImageActionMenu}
+                      usesCustomImageContextMenu={usesCustomImageContextMenu}
+                      markdownCwd={gitCwd ?? undefined}
+                      resolvedTheme={resolvedTheme}
+                      timestampFormat={timestampFormat}
+                      workspaceRoot={workspaceRoot}
+                      expandedCommandExecutions={expandedCommandExecutions}
+                      onToggleCommandExecution={onToggleCommandExecution}
+                      allDirectoriesExpanded={allDirectoriesExpanded}
+                      onToggleAllDirectories={onToggleAllDirectories}
+                      chatDiffContext={chatDiffContext}
+                      onWorkingRibbonFocusLost={scheduleComposerFocus}
+                      listHeaderContent={
+                        <>
+                          {historyStatusContent}
+                          <NewerMessageHistoryControl threadId={activeThread.id} />
+                          <OlderActivityHistoryControl threadId={activeThread.id} />
+                        </>
+                      }
+                    />
+                  </ThreadFindContext>
                 ) : (
                   <ThreadDetailsLoadingState testId="chat-thread-details-loading" />
                 )}

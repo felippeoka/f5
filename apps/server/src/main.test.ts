@@ -565,6 +565,7 @@ it.layer(testLayer)("server CLI command", (it) => {
 
       yield* recordStartupHeartbeat.pipe(
         Effect.provideService(ProjectionSnapshotQuery, {
+          searchThread: () => Effect.die("unused thread search"),
           getSnapshot,
           getBootstrapSnapshot: getSnapshot,
           getStartupSnapshot: () =>

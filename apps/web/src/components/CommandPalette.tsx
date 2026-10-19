@@ -104,7 +104,7 @@ import {
   RECENT_THREAD_LIMIT,
 } from "./CommandPalette.logic";
 import { CommandPaletteResults } from "./CommandPaletteResults";
-import { resolveSettingsNavigationSearch } from "./settings/settingsCategories";
+import { resolveSettingsNavigationSearch } from "./settings/settingsRouting";
 import { resolvePrimaryNewThreadProjectId } from "./Sidebar.logic";
 import {
   Command,
@@ -757,6 +757,18 @@ function OpenCommandPaletteDialog(props: {
   }, [clearOpenIntent, openAddProjectFlow, openIntent]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+  if (activeThread)
+    actionItems.push({
+      kind: "action",
+      value: "action:find-thread",
+      searchTerms: ["find", "search", "messages", "plans", "thread"],
+      title: "Find in thread",
+      icon: <SearchIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "chat.find",
+      run: async () => {
+        window.dispatchEvent(new CustomEvent("f5:find-thread", { detail: activeThread.id }));
+      },
+    });
 
   if (projects.length > 0) {
     const activeProjectTitle = newThreadProjectId

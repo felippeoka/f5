@@ -952,3 +952,15 @@ label:has(> select#reasoning-effort) select {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+
+::highlight(f5-thread-find) {
+  background: color-mix(in oklch, var(--primary) 25%, transparent);
+}
+::highlight(f5-thread-find-active) {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+[data-thread-find-active="true"] {
+  outline: 1px solid color-mix(in oklch, var(--primary) 35%, transparent);
+  outline-offset: -1px;
+}

@@ -7,7 +7,7 @@ import { QuitHoldOverlay } from "../components/QuitHoldOverlay";
 import { ProjectCloneController } from "../components/ProjectCloneController";
 import { ThreadNavigationController } from "../components/ThreadNavigationController";
 import { Outlet, createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
-import { useEffect, useLayoutEffect, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useState, type CSSProperties } from "react";
 
 import { CommandPalette } from "../components/CommandPalette";
 import ThreadStatusNotificationController from "../components/ThreadStatusNotificationController";
@@ -20,10 +20,9 @@ import { NextTurnQueueController } from "../components/NextTurnQueueController";
 import { LegacyPinnedThreadsMigrationController } from "../components/LegacyPinnedThreadsMigrationController";
 import { SnoozedThreadWakeController } from "../components/SnoozedThreadWakeController";
 import ThreadSidebar from "../components/Sidebar";
-import { WorkflowCreateDialog } from "../components/workflow/WorkflowCreateDialog";
 import { useWorkflowCreateDialogStore } from "../workflowCreateDialogStore";
 import { Sidebar, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
-import { resolveSettingsNavigationSearch } from "~/components/settings/settingsCategories";
+import { resolveSettingsNavigationSearch } from "~/components/settings/settingsRouting";
 import {
   canAcceptThreadSidebarWidth,
   readInitialThreadSidebarWidth,
@@ -35,20 +34,28 @@ import {
 } from "../threadSidebarWidth";
 
 /** App-wide "New workflow" dialog, opened through `workflowCreateDialogStore`. */
+const WorkflowCreateDialog = lazy(() =>
+  import("../components/workflow/WorkflowCreateDialog").then((module) => ({
+    default: module.WorkflowCreateDialog,
+  })),
+);
+
 function WorkflowCreateDialogHost() {
   const projectId = useWorkflowCreateDialogStore((state) => state.projectId);
   const close = useWorkflowCreateDialogStore((state) => state.close);
   const notifyCreated = useWorkflowCreateDialogStore((state) => state.notifyCreated);
   if (!projectId) return null;
   return (
-    <WorkflowCreateDialog
-      open
-      projectId={projectId}
-      onOpenChange={(open) => {
-        if (!open) close();
-      }}
-      onWorkflowCreated={notifyCreated}
-    />
+    <Suspense fallback={null}>
+      <WorkflowCreateDialog
+        open
+        projectId={projectId}
+        onOpenChange={(open) => {
+          if (!open) close();
+        }}
+        onWorkflowCreated={notifyCreated}
+      />
+    </Suspense>
   );
 }
 

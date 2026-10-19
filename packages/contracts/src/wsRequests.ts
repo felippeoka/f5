@@ -1,3 +1,4 @@
+import { ThreadSearchInput } from "./threadSearch";
 import {
   MCP_APPS_WS_METHODS,
   McpAppCallToolInput,
@@ -377,6 +378,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(NATIVE_OPERATION_WS_METHODS.inspect, NativeOperationInspectInput),
   tagRequestBody(ELICITATION_WS_METHODS.submit, ElicitationSubmitInput),
   // Orchestration methods
+  tagRequestBody(ORCHESTRATION_WS_METHODS.searchThread, ThreadSearchInput),
   tagRequestBody(
     ORCHESTRATION_WS_METHODS.dispatchCommand,
     Schema.Struct({ command: ClientOrchestrationCommand }),

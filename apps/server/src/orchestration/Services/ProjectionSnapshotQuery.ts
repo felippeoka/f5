@@ -7,6 +7,8 @@
  * @module ProjectionSnapshotQuery
  */
 import type {
+  ThreadSearchInput,
+  ThreadSearchResult,
   OrchestrationGetThreadHistoryPageInput,
   OrchestrationGetStartupSnapshotInput,
   OrchestrationGetStartupSnapshotResult,
@@ -28,6 +30,9 @@ import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
  * ProjectionSnapshotQueryShape - Service API for read-model snapshots.
  */
 export interface ProjectionSnapshotQueryShape {
+  readonly searchThread: (
+    input: ThreadSearchInput,
+  ) => Effect.Effect<ThreadSearchResult, ProjectionRepositoryError>;
   /**
    * Read the latest orchestration projection snapshot.
    *

@@ -91,6 +91,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "workflow.new", when: "!terminalFocus" },
   { key: "mod+enter", command: "chat.scrollToBottom", when: "!dialogFocus" },
+  { key: "mod+f", command: "chat.find", when: "!terminalFocus && !dialogFocus" },
   { key: "mod+shift+enter", command: "chat.queueTurn", when: "!dialogFocus" },
   {
     key: "mod+alt+enter",

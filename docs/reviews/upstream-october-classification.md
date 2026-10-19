@@ -12,7 +12,9 @@ manual GitHub reset waits, durable PR watches, persisted settlement, Codex MCP a
 and per-project provider policy. The current continuation adds PR review filters,
 per-item forge permissions, thread-owned PR panels, reference chips and opt-in
 merge-message attribution cleanup, forge-aware quick actions opt-in branch cleanup and custom local ACP agents. It also repairs cross-feature migration and
-runtime integration and attaches per-SHA implementation evidence. Migration 127 and protocol 36 extend the merged baseline. Coverage remains 4,084 ledger records;
+runtime integration and attaches per-SHA implementation evidence. Saved-branch settlement
+now verifies ref identity and exact PR heads, and Find in thread searches persisted
+messages and plans through a dedicated read connection. Migration 127 and protocol 37 extend the merged baseline. Coverage remains 4,084 ledger records;
 implementation work does not automatically promote deferred obligations.
 
 The full gate and verify-first/security obligations remain incomplete. See

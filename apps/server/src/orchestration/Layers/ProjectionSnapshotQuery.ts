@@ -1,3 +1,5 @@
+import { ReadSqlClient } from "../../persistence/ReadSqlClient.ts";
+import { makeThreadFind } from "../threadFind.ts";
 import {
   PlanningWorkflowSummary,
   CodeReviewWorkflowSummary,
@@ -789,6 +791,13 @@ function buildThreadHistoryPageResult(params: {
 
 const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const reader = yield* Effect.serviceOption(ReadSqlClient);
+  const searchThread = yield* makeThreadFind.pipe(
+    Effect.provideService(
+      SqlClient.SqlClient,
+      Option.getOrElse(reader, () => sql),
+    ),
+  );
 
   /** Unresolved rewind drafts by thread, for every thread or just `threadId`. */
   const loadRewindDrafts = (threadId: string | null) =>
@@ -3047,6 +3056,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     });
 
   return {
+    searchThread,
     getSnapshot,
     getBootstrapSnapshot,
     getStartupSnapshot,

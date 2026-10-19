@@ -370,6 +370,14 @@
     "./boundedJson": {
       "types": "./src/boundedJson.ts",
       "import": "./src/boundedJson.ts"
+    },
+    "./threadSearch": {
+      "types": "./src/threadSearch.ts",
+      "import": "./src/threadSearch.ts"
+    },
+    "./threadFindText": {
+      "types": "./src/threadFindText.ts",
+      "import": "./src/threadFindText.ts"
     }
   },
   "scripts": {
@@ -379,6 +387,9 @@
   "dependencies": {
     "@t3tools/contracts": "workspace:*",
     "effect": "catalog:",
+    "mdast-util-from-markdown": "2.0.3",
+    "mdast-util-gfm": "3.1.0",
+    "micromark-extension-gfm": "3.0.0",
     "smol-toml": "1.6.0"
   },
   "devDependencies": {

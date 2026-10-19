@@ -1157,6 +1157,7 @@ describe("OrchestrationEngine", () => {
 
     const readCursors: number[] = [];
     const failingSnapshotQueryLayer = Layer.succeed(ProjectionSnapshotQuery, {
+      searchThread: () => Effect.die("unused thread search"),
       getBootstrapSnapshot: () =>
         Effect.fail(
           new PersistenceSqlError({

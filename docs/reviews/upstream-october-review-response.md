@@ -853,3 +853,56 @@ independent server run after main integration passed 5,133 cases with 12 skips
 and the three launcher process-inspection failures. These failures remain open;
 no ownership protection or full-gate requirement has been waived. The 26 settlement
 source records still need their individual final reconciliation and remain deferred.
+
+## Find in thread continuation (2026-10-19)
+
+`chat.find` opens with Mod+F or the command palette, outside the terminal and
+preview browser. The new read-only `threads.search` RPC searches persisted user
+and assistant messages and proposed plans, including history outside the loaded
+tail. Enter/Shift+Enter navigate occurrences; Escape closes and restores composer
+focus. Failed searches or history loads offer Retry. Replaced queries cannot
+publish stale results. Opening, typing and navigating never submit a turn.
+
+A dedicated read-only SQLite connection uses deferred transactions and does not
+reserve the writer. Both Node and Bun reject writes through that connection. A
+real two-connection test holds a reader snapshot while the writer commits, then
+observes the new value after the snapshot closes. Searches page metadata in
+64-entry batches, hold one message body at a time, retain counts rather than
+bodies, and bound cached scans. Every projector's revision contributes to cache
+invalidation, including a lagging projector advancing below the maximum cursor.
+Oversized bodies, excessive entries and deadlines report failure instead of
+claiming partial coverage. Unicode case folding preserves offsets; Markdown
+formatting and link targets are excluded from displayed-text matching.
+
+Navigation hydrates unloaded message history and the selected historical plan.
+The selected plan expands through its collapsed preview. Highlights span inline
+syntax nodes, retain the selected occurrence beyond the 2,000-highlight display
+bound, and scroll that occurrence into view. Cleanup checks highlight ownership
+so an old virtualized row cannot clear the next row's highlights. Protocol 37
+adds the RPC; it introduces no automatic provider action.
+
+The full thread/find Chromium run passes 127 cases. The additional settings,
+workflow-dialog and recency suites pass 89 cases; focus guards pass separately.
+All 2,333 web unit cases pass. The focused snapshot/SQLite/WebSocket run passes
+173 cases with two existing skips. The independent full server run passes 5,169
+cases with 12 skips and the same three launcher process-inspection failures.
+The required root full command ran and still fails the two migration recovery
+identity cases (330 pass), so the release gate remains open.
+
+The production build initially failed the fixed JavaScript budget. Routing now
+shares one identity/scope record with each full settings descriptor; descriptive
+search text loads only with Settings. Registry parity, legacy item/category links
+and project scopes retain their existing behavior. The last measured initial
+JavaScript is 1,489,048 bytes, below the unchanged 1,507,108-byte limit. Workflow
+creation loads its dialog on demand. This is bundle-size evidence, not a CPU or
+latency comparison.
+
+Production startup also exposed a generated-helper import cycle. A separate
+bundler runtime chunk prevents consumers from calling an uninitialized helper,
+following [Rolldown's runtime chunk guidance](https://github.com/rolldown/rolldown/blob/main/docs/in-depth/manual-code-splitting.md).
+The OpenCode v2 SDK and diff parser are bundled because their import-only exports
+cannot be required by the CommonJS artifact. Node ESM and CommonJS and Bun ESM
+`--help` now run. Chromium against the actual built Node server passes in both ESM
+and CommonJS: an older message and a long folded plan are found and highlighted,
+with two search RPCs, no mutations and no page errors. This does not replace the
+remaining native desktop and comparative-performance obligations.

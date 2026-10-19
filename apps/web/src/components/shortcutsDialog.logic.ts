@@ -86,6 +86,7 @@ const SHORTCUT_SECTION_DEFINITIONS: ReadonlyArray<{
       "chat.pageUp",
       "chat.pageDown",
       "chat.scrollToBottom",
+      "chat.find",
     ],
   },
   {

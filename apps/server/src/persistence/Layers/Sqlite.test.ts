@@ -3,12 +3,60 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Effect, Layer } from "effect";
+import { Deferred, Effect, Fiber, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { describe, expect, it } from "vitest";
 import { makeSqlitePersistenceLive } from "./Sqlite.ts";
+import { ReadSqlClient } from "../ReadSqlClient.ts";
 
 describe("SQLite persistence setup", () => {
+  it("keeps reads in a deferred read-only snapshot while the writer commits independently", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "f5-sqlite-reader-"));
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const writer = yield* SqlClient.SqlClient;
+          const reader = yield* ReadSqlClient;
+          yield* writer`CREATE TABLE read_fixture(value INTEGER)`;
+          yield* writer`INSERT INTO read_fixture VALUES(1)`;
+          expect((yield* reader`INSERT INTO read_fixture VALUES(2)`.pipe(Effect.result))._tag).toBe(
+            "Failure",
+          );
+          const entered = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          const snapshot = yield* reader
+            .withTransaction(
+              Effect.gen(function* () {
+                expect(
+                  (yield* reader<{ value: number }>`SELECT value FROM read_fixture`)[0]?.value,
+                ).toBe(1);
+                yield* Deferred.succeed(entered, undefined);
+                yield* Deferred.await(release);
+                return (yield* reader<{ value: number }>`SELECT value FROM read_fixture`)[0]?.value;
+              }),
+            )
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(entered);
+          yield* writer
+            .withTransaction(writer`UPDATE read_fixture SET value=3`)
+            .pipe(Effect.timeout("1 second"));
+          yield* Deferred.succeed(release, undefined);
+          expect(yield* Fiber.join(snapshot)).toBe(1);
+          expect((yield* reader<{ value: number }>`SELECT value FROM read_fixture`)[0]?.value).toBe(
+            3,
+          );
+        }).pipe(
+          Effect.provide(
+            makeSqlitePersistenceLive(join(directory, "state.sqlite")).pipe(
+              Layer.provide(NodeServices.layer),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
   it.each([false, true])(
     "applies durable bounded-WAL settings after migrations (existing=%s)",
     async (existing) => {

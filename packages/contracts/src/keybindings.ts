@@ -62,6 +62,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "chat.newLocal",
   "workflow.new",
   "chat.scrollToBottom",
+  "chat.find",
   "chat.queueTurn",
   "chat.steerTurn",
   "chat.queueTurnNext",

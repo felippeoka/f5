@@ -1,3 +1,4 @@
+import type { ThreadSearchInput, ThreadSearchResult } from "./threadSearch";
 import type {
   McpAppCallToolInput,
   McpAppReadResourceInput,
@@ -1184,6 +1185,7 @@ export interface NativeApi {
     onAdvisoriesUpdated: (callback: (snapshot: PrHubAdvisoriesChanged) => void) => () => void;
   };
   orchestration: {
+    searchThread: (input: ThreadSearchInput) => Promise<ThreadSearchResult>;
     getSnapshot: () => Promise<OrchestrationReadModel>;
     getStartupSnapshot: (
       input?: OrchestrationGetStartupSnapshotInput,

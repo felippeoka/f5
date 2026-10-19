@@ -87,7 +87,7 @@ import {
 } from "./Sidebar.logic";
 import { isWsInteractionBlocked, useWsConnectionState } from "../wsConnectionState";
 import { StartupSidebarSkeleton } from "./StartupLoadingState";
-import { resolveSettingsNavigationSearch } from "./settings/settingsCategories";
+import { resolveSettingsNavigationSearch } from "./settings/settingsRouting";
 import { orderedPinnedThreadIds, replacePinnedThreads } from "../threadPinSnooze";
 import { SidebarThreadSearchResults } from "./SidebarThreadSearch";
 import { SidebarAddProjectForm, useAddProject } from "./sidebar/SidebarAddProjectForm";

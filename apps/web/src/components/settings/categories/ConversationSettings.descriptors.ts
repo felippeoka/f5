@@ -1,3 +1,4 @@
+import { SETTINGS_ITEM_ROUTES } from "../settingsRouting";
 import type { SettingsItemDescriptor } from "../settingsSearch";
 
 const CONVERSATION_CONTROL_DESCRIPTORS = (
@@ -138,8 +139,7 @@ const CONVERSATION_CONTROL_DESCRIPTORS = (
   ] as const
 ).map(
   ([id, label, description, ariaLabel, keywords]): SettingsItemDescriptor => ({
-    id: `conversation.${id}`,
-    category: "conversation",
+    ...SETTINGS_ITEM_ROUTES[`conversation.${id}`],
     label,
     description,
     keywords,
@@ -150,8 +150,7 @@ const CONVERSATION_CONTROL_DESCRIPTORS = (
 export const CONVERSATION_SETTINGS_DESCRIPTORS = [
   ...CONVERSATION_CONTROL_DESCRIPTORS,
   {
-    id: "conversation.display-density",
-    category: "conversation",
+    ...SETTINGS_ITEM_ROUTES["conversation.display-density"],
     label: "Display density",
     description: "Pick a minimal, balanced, or detailed preset for thread activity.",
     keywords: ["preset", "verbosity", "detail", "minimal", "detailed"],

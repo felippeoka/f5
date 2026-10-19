@@ -29,6 +29,7 @@ export * from "./preview";
 export * from "./previewAutomation";
 export * from "./computerAutomation";
 export * from "./orchestration";
+export * from "./threadSearch";
 export * from "./mcp";
 export * from "./mcpServer";
 export * from "./planningWorkflow";

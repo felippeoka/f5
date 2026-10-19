@@ -229,6 +229,8 @@ export function formatKeybindingCommandLabel(
       return "New workflow";
     case "chat.scrollToBottom":
       return "Scroll to bottom";
+    case "chat.find":
+      return "Find in thread";
     case "chat.queueTurn":
       return "Queue turn at end";
     case "chat.queueTurnNext":

@@ -1,4 +1,6 @@
+import { OrchestrationProposedPlanId, OrchestrationProposedPlan } from "./proposedPlan";
 import { FilesystemPath } from "./baseSchemas";
+import { ThreadSearchInput, ThreadSearchResult } from "./threadSearch";
 import {
   PlanningWorkflowSummary,
   CodeReviewWorkflowSummary,
@@ -55,6 +57,7 @@ import {
 } from "./baseSchemas";
 
 export const ORCHESTRATION_WS_METHODS = {
+  searchThread: "threads.search",
   getSnapshot: "orchestration.getSnapshot",
   getStartupSnapshot: "orchestration.getStartupSnapshot",
   getThreadTailDetails: "orchestration.getThreadTailDetails",
@@ -390,20 +393,7 @@ export const OrchestrationMessage = Schema.Struct({
 });
 export type OrchestrationMessage = typeof OrchestrationMessage.Type;
 
-export const OrchestrationProposedPlanId = TrimmedNonEmptyString;
-export type OrchestrationProposedPlanId = typeof OrchestrationProposedPlanId.Type;
-
-export const OrchestrationProposedPlan = Schema.Struct({
-  id: OrchestrationProposedPlanId,
-  turnId: Schema.NullOr(TurnId),
-  planMarkdown: TrimmedNonEmptyString,
-  implementedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
-  implementationThreadId: Schema.NullOr(ThreadId).pipe(Schema.withDecodingDefault(() => null)),
-  createdAt: IsoDateTime,
-  updatedAt: IsoDateTime,
-});
-export type OrchestrationProposedPlan = typeof OrchestrationProposedPlan.Type;
-
+export { OrchestrationProposedPlanId, OrchestrationProposedPlan } from "./proposedPlan";
 export const TaskItemStatus = Schema.Literals(["pending", "in_progress", "completed"]);
 export type TaskItemStatus = typeof TaskItemStatus.Type;
 
@@ -3314,6 +3304,7 @@ export type OrchestrationStartImplementationInput =
   typeof OrchestrationStartImplementationInput.Type;
 
 export const OrchestrationRpcSchemas = {
+  searchThread: { input: ThreadSearchInput, output: ThreadSearchResult },
   getSnapshot: {
     input: OrchestrationGetSnapshotInput,
     output: OrchestrationGetSnapshotResult,

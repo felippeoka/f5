@@ -2002,6 +2002,158 @@ async function mountChatView(options: {
 }
 
 describe("ChatView timeline (full app)", () => {
+  it.each(["message", "plan"] as const)(
+    "finds and reveals an unloaded older %s without changing the draft or sending",
+    async (kind) => {
+      const snapshot = createSnapshotForTargetUser({
+        targetMessageId: "find-current" as MessageId,
+        targetText: "Current conversation",
+        fillerPairCount: 25,
+        targetPairIndex: 24,
+      });
+      const oldMessage = {
+        ...snapshot.threads[0]!.messages[0]!,
+        id: "find-unloaded" as MessageId,
+        turnId: null,
+        text: "Needle in older history",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      };
+      const plan = {
+        id: "find-unloaded-plan",
+        turnId: null,
+        planMarkdown:
+          "# An older plan\n\n" +
+          "Other plan paragraph.\n\n".repeat(40) +
+          "Needle near the end of the expanded plan.",
+        implementedAt: null,
+        implementationThreadId: null,
+        createdAt: "2025-02-01T00:00:00.000Z",
+        updatedAt: "2025-02-01T00:00:00.000Z",
+      };
+      const requests: string[] = [];
+      useComposerDraftStore.getState().setPrompt(THREAD_ID, "Keep this draft");
+      const mounted = await mountChatView({
+        viewport: DEFAULT_VIEWPORT,
+        snapshot,
+        configureFixture: (next) => {
+          next.serverConfig = {
+            ...next.serverConfig,
+            keybindings: [createModKeybinding("chat.find", "f")],
+          };
+          next.resolveWsRequest = (body) => {
+            requests.push(body._tag);
+            if (body._tag === ORCHESTRATION_WS_METHODS.searchThread)
+              return {
+                type: "result",
+                result: {
+                  totalMatches: 1,
+                  activeIndex: 0,
+                  match: {
+                    entryId: kind === "message" ? oldMessage.id : plan.id,
+                    kind,
+                    occurrence: 0,
+                    snippet: "Needle",
+                    ...(kind === "plan" ? { plan } : {}),
+                  },
+                },
+              };
+            if (body._tag === ORCHESTRATION_WS_METHODS.getThreadHistoryPage)
+              return {
+                type: "result",
+                result: {
+                  threadId: THREAD_ID,
+                  messages: [oldMessage],
+                  checkpoints: [],
+                  activities: [],
+                  commandExecutions: [],
+                  hasOlderMessages: false,
+                  hasNewerMessages: true,
+                  hasOlderCheckpoints: false,
+                  hasOlderActivities: false,
+                  hasOlderCommandExecutions: false,
+                  oldestLoadedMessageCursor: {
+                    createdAt: oldMessage.createdAt,
+                    messageId: oldMessage.id,
+                  },
+                  newestLoadedMessageCursor: {
+                    createdAt: oldMessage.createdAt,
+                    messageId: oldMessage.id,
+                  },
+                  oldestLoadedCheckpointTurnCount: null,
+                  oldestLoadedActivityCursor: null,
+                  oldestLoadedCommandExecutionCursor: null,
+                  detailSequence: 1,
+                },
+              };
+            return null;
+          };
+        },
+      });
+      try {
+        const editor = await waitForComposerEditor();
+        for (const scope of ["terminal", "preview"]) {
+          const pane = document.createElement("div");
+          const input = document.createElement("textarea");
+          if (scope === "terminal") input.className = "xterm-helper-textarea";
+          else pane.dataset.findScope = "preview";
+          pane.append(input);
+          document.body.append(pane);
+          input.focus();
+          const key = new KeyboardEvent("keydown", {
+            key: "f",
+            metaKey: /Mac/.test(navigator.platform),
+            ctrlKey: !/Mac/.test(navigator.platform),
+            bubbles: true,
+            cancelable: true,
+          });
+          input.dispatchEvent(key);
+          expect(key.defaultPrevented).toBe(false);
+          expect(document.querySelector('input[aria-label="Find in thread"]')).toBeNull();
+          pane.remove();
+        }
+        editor.focus();
+        editor.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "f",
+            metaKey: /Mac/.test(navigator.platform),
+            ctrlKey: !/Mac/.test(navigator.platform),
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        await page.getByRole("textbox", { name: "Find in thread" }).fill("Needle");
+        await expect.element(page.getByRole("status").filter({ hasText: "1 of 1" })).toBeVisible();
+        await waitForTimelineRowVisible(
+          `[data-timeline-row-id="${kind === "message" ? oldMessage.id : plan.id}"]`,
+          "The search result should be visible in the timeline",
+        );
+        await vi.waitFor(() =>
+          expect([...(CSS.highlights.get("f5-thread-find-active") ?? [])][0]?.toString()).toBe(
+            "Needle",
+          ),
+        );
+        if (kind === "plan") {
+          await expect
+            .element(page.getByText("Needle near the end of the expanded plan.", { exact: true }))
+            .toBeVisible();
+          await expect
+            .element(page.getByRole("button", { name: "Expand plan" }))
+            .not.toBeInTheDocument();
+        }
+        expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt).toBe(
+          "Keep this draft",
+        );
+        expect(requests).not.toContain(WS_METHODS.nextTurnQueueSubmit);
+        expect(requests).not.toContain(ORCHESTRATION_WS_METHODS.dispatchCommand);
+        expect(
+          requests.filter((method) => method === ORCHESTRATION_WS_METHODS.getThreadHistoryPage),
+        ).toHaveLength(kind === "message" ? 1 : 0);
+      } finally {
+        await mounted.cleanup();
+      }
+    },
+  );
   beforeAll(async () => {
     fixture = buildFixture(
       createSnapshotForTargetUser({

@@ -4,11 +4,13 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { runMigrations } from "../Migrations.ts";
 import { ServerConfig } from "../../config.ts";
 import { withImmediateTransactions } from "../sqliteTransactions.ts";
+import { ReadSqlClient } from "../ReadSqlClient.ts";
 
 type RuntimeSqliteLayerConfig = {
   readonly filename: string;
   readonly disableWAL?: boolean;
   readonly checkpointWorker?: boolean;
+  readonly readonly?: boolean;
 };
 
 type Loader = {
@@ -30,9 +32,9 @@ const makeRuntimeSqliteLayer = (
     const layer = clientModule.layer({
       ...config,
       disableWAL: true,
-      checkpointWorker: runtime === "node",
+      checkpointWorker: runtime === "node" && !config.readonly,
     });
-    return runtime === "bun"
+    return runtime === "bun" && !config.readonly
       ? Layer.effect(
           SqlClient.SqlClient,
           Effect.map(Effect.service(SqlClient.SqlClient), withImmediateTransactions),
@@ -63,7 +65,15 @@ export const makeSqlitePersistenceLive = (dbPath: string) =>
     const path = yield* Path.Path;
     yield* fs.makeDirectory(path.dirname(dbPath), { recursive: true });
 
-    return Layer.provideMerge(setup, makeRuntimeSqliteLayer({ filename: dbPath }));
+    const writer = Layer.provideMerge(setup, makeRuntimeSqliteLayer({ filename: dbPath }));
+    // The dependency ensures schema setup finishes before the read-only connection opens.
+    const reader = Layer.effect(
+      ReadSqlClient,
+      Effect.service(SqlClient.SqlClient).pipe(
+        Effect.tap((sql) => sql`PRAGMA query_only = ON`.pipe(Effect.orDie, Effect.asVoid)),
+      ),
+    ).pipe(Layer.provide(makeRuntimeSqliteLayer({ filename: dbPath, readonly: true })));
+    return Layer.provideMerge(reader, writer);
   }).pipe(Layer.unwrap);
 
 export const SqlitePersistenceMemory = Layer.provideMerge(

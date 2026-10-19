@@ -1,4 +1,6 @@
 import { McpAppFrame } from "./McpAppFrame";
+import { ThreadFindContext } from "./threadFindContext";
+import { highlightThreadFind } from "./threadFindHighlights";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { computerToolHeading } from "@t3tools/shared/computerAction";
 import { NativeFilePreview } from "./NativeFilePreview";
@@ -1369,8 +1371,36 @@ const TimelineRowWrapper = memo(function TimelineRowWrapper({
   testRenderCountProps?: { "data-render-count": number } | undefined;
   children: ReactNode;
 }) {
+  const find = useContext(ThreadFindContext);
+  const element = useRef<HTMLDivElement>(null);
+  const active = find?.entryId === row.id;
+  useEffect(() => {
+    const root = element.current;
+    if (!active || !find || !root) return;
+    let clear = () => {};
+    let frame = 0;
+    const refresh = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = window.requestAnimationFrame(() => {
+          clear();
+          clear = highlightThreadFind(root, find.query, find.occurrence);
+        });
+      });
+    };
+    const observer = new MutationObserver(refresh);
+    observer.observe(root, { childList: true, subtree: true, characterData: true });
+    refresh();
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+      clear();
+    };
+  }, [active, find]);
   return (
     <div
+      ref={element}
+      data-thread-find-active={active ? "true" : undefined}
       className="pb-4"
       {...testRenderCountProps}
       data-timeline-row-id={row.id}
@@ -3954,9 +3984,11 @@ function ProposedPlanRowContent(props: { row: ProposedPlanTimelineRow }) {
   "use memo";
   const { row } = props;
   const { markdownCwd, workspaceRoot } = useTimelineRowContext();
+  const find = useContext(ThreadFindContext);
   return (
     <div className="min-w-0 px-1 py-0.5">
       <ProposedPlanCard
+        forceExpanded={find?.entryId === row.id}
         planMarkdown={row.proposedPlan.planMarkdown}
         cwd={markdownCwd}
         workspaceRoot={workspaceRoot}

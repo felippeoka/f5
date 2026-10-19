@@ -4266,6 +4266,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         });
       }
 
+      case ORCHESTRATION_WS_METHODS.searchThread: {
+        return yield* projectionReadModelQuery.searchThread(stripRequestTag(request.body));
+      }
+
       case ORCHESTRATION_WS_METHODS.getThreadHistoryPage: {
         const body = stripRequestTag(request.body);
         return yield* withWsThreadOpenTiming({
