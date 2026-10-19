@@ -361,6 +361,51 @@ const program = Effect.gen(function* () {
   yield* agent.handlePrompt((request) =>
     Effect.gen(function* () {
       const requestedSessionId = String(request.sessionId ?? sessionId);
+      if (process.env.ACP_MOCK_ARGUMENT_STREAM === "1") {
+        const toolCallId = "argument-stream";
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId,
+            kind: "edit",
+            title: "Edit file",
+            status: "pending",
+            rawInput: { path: "/fixture/file", content: "" },
+          },
+        });
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: { sessionUpdate: "tool_call_update", toolCallId, status: "in_progress" },
+        });
+        for (let index = 1; index <= 120; index++)
+          yield* agent.client.sessionUpdate({
+            sessionId: requestedSessionId,
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId,
+              rawInput: { path: "/fixture/file", content: "x".repeat(index) },
+            },
+          });
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: { sessionUpdate: "tool_call_update", toolCallId, title: "Arguments finished" },
+        });
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            rawOutput: { output: "visible result" },
+          },
+        });
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: { sessionUpdate: "tool_call_update", toolCallId, status: "completed" },
+        });
+        return { stopReason: "end_turn" };
+      }
+
       if (process.env.ACP_MOCK_PRIVATE_TOOL_EVENTS === "1") {
         for (const update of [
           {
