@@ -401,7 +401,7 @@ export function AgentRow(props: {
                 {typeLabel}
               </span>
             ) : null}
-            <span className="ml-auto shrink-0 font-mono text-2xs text-muted-foreground tabular-nums group-hover/agent:invisible group-focus-within/agent:invisible">
+            <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums group-hover/agent:invisible group-focus-within/agent:invisible">
               {elapsed}
             </span>
           </span>

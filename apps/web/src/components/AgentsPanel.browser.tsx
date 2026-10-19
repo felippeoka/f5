@@ -146,6 +146,21 @@ describe("AgentsPanelView", () => {
     document.body.innerHTML = "";
   });
 
+  it("uses the panel's text font and tabular numbers for agent elapsed time", async () => {
+    await render(<Harness />);
+    await expect
+      .element(page.getByRole("button", { name: "Expand Review pagination" }))
+      .toBeVisible();
+    const row = [...document.querySelectorAll<HTMLElement>('[data-testid="agent-row"]')].find(
+      (node) => node.textContent?.includes("Review pagination"),
+    )!;
+    const spans = [...row.querySelectorAll<HTMLElement>("span")];
+    const duration = spans.find((node) => node.textContent === "15s")!;
+    const title = spans.find((node) => node.textContent === "Review pagination")!;
+    expect(getComputedStyle(duration).fontFamily).toBe(getComputedStyle(title).fontFamily);
+    expect(getComputedStyle(duration).fontVariantNumeric).toContain("tabular-nums");
+  });
+
   it("switches between this thread and all threads", async () => {
     const screen = await render(<Harness />);
     try {
