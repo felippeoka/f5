@@ -7,7 +7,9 @@ import {
   type ProjectId,
   type CompactMcpStatusActivityPayload,
   type ProviderKind,
+  type ThreadId,
 } from "@t3tools/contracts";
+import { McpSignInControls } from "../settings/mcp/McpSignInButton";
 import { memo, useRef, useState } from "react";
 
 interface ProviderRuntimeInfoEntry {
@@ -20,11 +22,13 @@ export const ProviderRuntimeInfoBanner = memo(function ProviderRuntimeInfoBanner
   entries,
   mcpServers,
   projectId,
+  threadId,
 }: {
   provider: ProviderKind | null;
   entries: ReadonlyArray<ProviderRuntimeInfoEntry>;
   mcpServers?: ReadonlyArray<CompactMcpStatusActivityPayload> | undefined;
   projectId?: ProjectId | undefined;
+  threadId?: ThreadId | undefined;
 }) {
   if (!provider || entries.length === 0) {
     return null;
@@ -54,6 +58,8 @@ export const ProviderRuntimeInfoBanner = memo(function ProviderRuntimeInfoBanner
             summary={entry.value}
             servers={mcpServers}
             projectId={projectId}
+            provider={provider}
+            threadId={threadId}
           />
         ) : (
           <span key={entry.label} className="flex min-w-0 shrink-0 items-center gap-1">
@@ -72,10 +78,14 @@ function McpRuntimeChip({
   summary,
   servers,
   projectId,
+  provider,
+  threadId,
 }: {
   readonly summary: string;
   readonly servers: ReadonlyArray<CompactMcpStatusActivityPayload>;
   readonly projectId: ProjectId | undefined;
+  readonly provider: ProviderKind;
+  readonly threadId: ThreadId | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const settingsLink = useRef<HTMLAnchorElement>(null);
@@ -115,6 +125,17 @@ function McpRuntimeChip({
                       ? sanitizer.text(server.error)
                       : "Error details unavailable until configuration loads. Open MCP settings for details."}
                   </p>
+                ) : null}
+                {server.status === "needs-auth" &&
+                server.name &&
+                (provider === "claudeAgent" || provider === "codex") ? (
+                  <McpSignInControls
+                    provider={provider}
+                    instanceId={server.providerInstanceId}
+                    projectId={projectId ?? null}
+                    serverName={server.name}
+                    threadId={threadId}
+                  />
                 ) : null}
               </div>
             ))}

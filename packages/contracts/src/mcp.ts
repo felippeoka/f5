@@ -87,6 +87,8 @@ export const McpStartLoginRequest = Schema.Struct({
   instanceId: Schema.optional(ProviderInstanceId),
   binaryPath: Schema.optional(TrimmedNonEmptyString),
   homePath: Schema.optional(TrimmedNonEmptyString),
+  /** Running conversation that performs a session-routed sign-in (Claude). */
+  threadId: Schema.optional(ThreadId),
 });
 export type McpStartLoginRequest = typeof McpStartLoginRequest.Type;
 

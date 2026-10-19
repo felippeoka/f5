@@ -263,7 +263,24 @@ export interface ProviderAdapterShape<TError> {
   readonly reconnectMcpServer?: (input: {
     readonly threadId: ThreadId;
     readonly serverName: string;
+    /** Also reconnect servers from the provider's own configuration, never built-ins. */
+    readonly allowExternal?: boolean;
   }) => Effect.Effect<boolean, TError>;
+  /**
+   * Starts an explicit, user-initiated MCP OAuth sign-in through a live session.
+   * `authUrl` is absent when the server needed no user action.
+   */
+  readonly authenticateMcpServer?: (input: {
+    readonly threadId: ThreadId;
+    readonly serverName: string;
+  }) => Effect.Effect<
+    {
+      readonly authUrl?: string;
+      readonly callbackExpected: boolean;
+      readonly ownership: "managed" | "external";
+    },
+    TError
+  >;
 
   readonly reloadMcpConfig?: (input: {
     readonly threadId: ThreadId;

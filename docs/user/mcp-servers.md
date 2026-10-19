@@ -27,7 +27,7 @@ Common and project configuration is shared by Codex and Claude. Support labels i
 | Inspector tools                                             | Names, descriptions, annotations, input schemas         | Names, descriptions, annotations; input schemas unavailable |
 | Inspector resources and templates                           | Metadata available                                      | Unavailable from Claude                                     |
 
-Selecting SSE shows the transport warning. If the endpoint supports streamable HTTP, choose HTTP. Authentication is provider-owned. For Claude's **needs-auth** status, use `/mcp` in an interactive Claude Code session with the same account, then click **Reconnect** in F5.
+Selecting SSE shows the transport warning. If the endpoint supports streamable HTTP, choose HTTP. Authentication is provider-owned: tokens are stored by the provider for the selected account, so later sessions connect without asking. When a server needs sign-in, click **Sign in** on its settings row, its **External** entry, or next to it in the chat MCP details. F5 never opens the browser on its own.
 
 ## Saved configuration and live status
 
@@ -37,11 +37,18 @@ Settings labels live results **Observed in <conversation> at <time>** and lets y
 
 Rows show tool and resource counts when known. Expand **Connection details** to read or copy an error with supplemental redaction. Open **Inspect** for Overview, Tools, Resources, and Diagnostics. Unsupported capabilities and incomplete listings are marked explicitly. Inspection never runs tools or fetches resource contents. The chat's MCP chip summarizes the latest session generation for Codex and Claude; click it or focus it and press Enter for each server's name, state, error, and a keyboard-accessible **Open MCP settings** link.
 
+## Sign in
+
+OAuth needs your approval in the browser, so F5 never signs in automatically. **Sign in** appears when a server reports that it needs sign-in, for servers configured in F5 and for **External** servers from the account's own provider configuration.
+
+- **Claude** signs in through a running Claude conversation in the project: the one you click from in chat, or the conversation settings is observing. Start a conversation first if none is running. Claude Code completes the browser flow itself; F5 waits up to five minutes for the server to connect, then reconnects it in the account's other running conversations. claude.ai connectors authorize on claude.ai, and F5 retries the connection for up to five minutes.
+- **Codex** signs in through the account's Codex app server, also for servers defined in the profile's `config.toml`, then reloads live Codex sessions. Servers that do not support OAuth report the provider's error.
+
 ## Apply, Reconnect, and Test
 
 After saving, the banner says: **Saved. Running sessions pick up MCP changes on their next message, restarting if needed.** Use **Apply to all live sessions** to apply now across all eligible Codex and Claude accounts in the selected scope: this project for project scope, or every project for common scope. Sessions already on that version are skipped unless they need a retry. Active-turn protections still apply. Per-session outcomes and targeted Retry appear in the inspector. The banner clears after Apply or a scope change.
 
-**Reconnect** appears on failed, login-required, and unknown rows. It recovers connections used by running sessions for the selected project and account. Claude reconnects the selected owned server; Codex reloads its settings connection and applies through the normal session path, which can reload every MCP server in the affected sessions. The result distinguishes reconnected sessions, no running session using the server, and failures. Reconnect does not perform Claude sign-in. Pending Codex sign-in can be reopened without cancelling the login if the browser fails to open.
+**Reconnect** appears on failed, login-required, and unknown rows. It recovers connections used by running sessions for the selected project and account. Claude reconnects the selected owned server; Codex reloads its settings connection and applies through the normal session path, which can reload every MCP server in the affected sessions. The result distinguishes reconnected sessions, no running session using the server, and failures. Reconnect does not perform sign-in; use **Sign in** instead. A pending sign-in can be reopened without cancelling it if the browser fails to open.
 
 ## Import
 

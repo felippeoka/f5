@@ -248,8 +248,34 @@ export interface ProviderServiceShape {
   readonly reconnectMcpServerForProject?: (
     input: import("@t3tools/contracts").McpReconnectServerRequest & {
       readonly provider: ProviderKind;
+      /** Server-internal: also reconnect provider-configured (external) servers by exact name. */
+      readonly allowExternal?: boolean;
+      /** Server-internal: skip these conversations (for example the one that just signed in). */
+      readonly excludeThreadIds?: ReadonlyArray<ThreadId>;
     },
   ) => Effect.Effect<import("@t3tools/contracts").McpReconnectServerResult, ProviderServiceError>;
+  /**
+   * Starts a user-initiated MCP sign-in through one running session: the requested
+   * conversation, or the session `readMcpSessionStatuses` would select.
+   */
+  readonly authenticateMcpServerForProject?: (input: {
+    readonly provider: ProviderKind;
+    readonly projectId: ProjectId;
+    readonly instanceId?: ProviderInstanceId;
+    readonly serverName: string;
+    readonly threadId?: ThreadId;
+    readonly desiredVersion?: string;
+  }) => Effect.Effect<
+    {
+      readonly threadId: ThreadId;
+      readonly instanceId: ProviderInstanceId;
+      readonly generation: number;
+      readonly authUrl?: string;
+      readonly callbackExpected: boolean;
+      readonly ownership: "managed" | "external";
+    },
+    ProviderServiceError
+  >;
 
   readonly reloadMcpConfigForProject: (input: {
     readonly provider: ProviderKind;

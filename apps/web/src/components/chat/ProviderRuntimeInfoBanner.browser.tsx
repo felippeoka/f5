@@ -1,5 +1,5 @@
 import "../../index.css";
-import { ProjectId, type ProviderKind } from "@t3tools/contracts";
+import { ProjectId, ProviderInstanceId, ThreadId, type ProviderKind } from "@t3tools/contracts";
 import { latestMcpStatusActivities } from "@t3tools/shared/orchestrationActivityPayload";
 import {
   createMemoryHistory,
@@ -16,8 +16,25 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { vi } from "vitest";
 import { ProviderRuntimeInfoBanner } from "./ProviderRuntimeInfoBanner";
 
-const { getEffectiveConfig } = vi.hoisted(() => ({ getEffectiveConfig: vi.fn() }));
-vi.mock("../../nativeApi", () => ({ ensureNativeApi: () => ({ mcp: { getEffectiveConfig } }) }));
+const { getEffectiveConfig, getLoginStatus, startLogin, openExternal } = vi.hoisted(() => ({
+  getEffectiveConfig: vi.fn(),
+  getLoginStatus: vi.fn(
+    async (input: { provider: string; projectId: string; serverName: string }) => ({
+      ...input,
+      target: "server",
+      mode: "oauth",
+      status: "idle",
+    }),
+  ),
+  startLogin: vi.fn(),
+  openExternal: vi.fn(async (_url: string) => undefined),
+}));
+vi.mock("../../nativeApi", () => ({
+  ensureNativeApi: () => ({
+    mcp: { getEffectiveConfig, getLoginStatus, startLogin },
+    shell: { openExternal },
+  }),
+}));
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -116,6 +133,78 @@ it.each(["codex", "claudeAgent"] as ProviderKind[])(
         .toBeVisible();
       expect(document.body.textContent).not.toContain("configured-secret-value");
     } finally {
+      queryClient.clear();
+      await screen.unmount();
+    }
+  },
+);
+
+it.each(["codex", "claudeAgent"] as ProviderKind[])(
+  "starts sign-in for a needs-auth server from the chat MCP details for %s",
+  async (provider) => {
+    const threadId = ThreadId.make("chat-thread");
+    const instanceId = ProviderInstanceId.make(`${provider}-work`);
+    getEffectiveConfig.mockResolvedValue({
+      projectId: "project-1",
+      effectiveVersion: "v1",
+      servers: {},
+    });
+    startLogin.mockResolvedValue({
+      target: "server",
+      mode: "oauth",
+      provider,
+      projectId: "project-1",
+      serverName: "search",
+      status: "pending",
+      authorizationUrl: "https://auth.example.test/search",
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const root = createRootRoute({ component: () => <Outlet /> });
+    const index = createRoute({
+      getParentRoute: () => root,
+      path: "/",
+      component: () => (
+        <ProviderRuntimeInfoBanner
+          provider={provider}
+          projectId={ProjectId.make("project-1")}
+          threadId={threadId}
+          entries={[{ label: "MCP", value: "1/2 connected" }]}
+          mcpServers={[
+            { name: "docs", status: "ready", providerInstanceId: instanceId },
+            { name: "search", status: "needs-auth", providerInstanceId: instanceId },
+          ]}
+        />
+      ),
+    });
+    const router = createRouter({
+      routeTree: root.addChildren([index]),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    });
+    await router.load();
+    const screen = await render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+    try {
+      await page.getByRole("button", { name: "MCP: 1/2 connected" }).click();
+      expect(document.querySelector('[aria-label="Sign in to docs"]')).toBeNull();
+      await page.getByRole("button", { name: "Sign in to search" }).click();
+      await vi.waitFor(() =>
+        expect(startLogin).toHaveBeenCalledWith({
+          provider,
+          instanceId,
+          projectId: "project-1",
+          serverName: "search",
+          threadId,
+        }),
+      );
+      await vi.waitFor(() =>
+        expect(openExternal).toHaveBeenCalledWith("https://auth.example.test/search"),
+      );
+    } finally {
+      startLogin.mockReset();
+      openExternal.mockClear();
       queryClient.clear();
       await screen.unmount();
     }
