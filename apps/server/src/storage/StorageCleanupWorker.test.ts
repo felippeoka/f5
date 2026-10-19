@@ -665,6 +665,48 @@ describe("StorageCleanupWorker Codex marketplace staging", () => {
     }
   });
 
+  it("previews hourly worktree cleanup only when it is turned on", async () => {
+    const preview = async (storageCleanup: Record<string, unknown>) => {
+      const world = makeWorld();
+      const layer = StorageCleanupWorkerLive.pipe(
+        Layer.provideMerge(automationLayer(world, { storageCleanup }, "f5-cleanup-preview-")),
+      );
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const config = yield* ServerConfig;
+          world.inactiveWorktreePreviews = [
+            {
+              path: path.join(config.worktreesDir, "repo", "merged"),
+              kind: "worktree",
+              action: "remove",
+              reason: "inactive worktree",
+            },
+            {
+              path: path.join(config.worktreesDir, "repo", "dirty"),
+              kind: "worktree",
+              action: "skip",
+              reason: "it has uncommitted changes (including untracked files)",
+            },
+          ];
+          const result = yield* (yield* StorageCleanupWorker).dryRun;
+          return result.targets
+            .filter((target) => target.job === "worktree-cleanup")
+            .map((target) => [target.action, target.target, target.reason]);
+        }).pipe(Effect.provide(layer), Effect.scoped),
+      );
+    };
+
+    expect(await preview({ enabled: true, inactiveWorktrees: true })).toEqual([
+      ["remove", path.join("repo", "merged"), "inactive worktree"],
+      [
+        "skip",
+        path.join("repo", "dirty"),
+        "it has uncommitted changes (including untracked files)",
+      ],
+    ]);
+    expect(await preview({ enabled: true })).toEqual([]);
+  });
+
   it("labels paths under the user's home with ~", () => {
     expect(redactHomePath("/Users/me/.codex/.tmp", "/Users/me")).toBe(
       path.join("~", ".codex", ".tmp"),

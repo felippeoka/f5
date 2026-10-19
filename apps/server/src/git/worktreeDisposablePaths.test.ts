@@ -44,6 +44,14 @@ it("treats a trailing slash as the directory and everything under it", () => {
   ]);
 });
 
+it("discards a collapsed untracked directory only with a subtree pattern", () => {
+  // `git status --untracked-files=normal` reports `src/new/` for `src/new/file.txt`.
+  expect(nonDisposablePaths(["src/new/", "src/a.js"], ["src/*"])).toEqual(["src/new/"]);
+  expect(nonDisposablePaths(["x.log/"], ["*.log"])).toEqual(["x.log/"]);
+  expect(nonDisposablePaths(["src/new/"], ["src/**"])).toEqual([]);
+  expect(nonDisposablePaths(["src/new/"], ["src/new/"])).toEqual([]);
+});
+
 it("escapes regular-expression characters in patterns", () => {
   expect(nonDisposablePaths(["a+b.js", "aab.js"], ["a+b.js"])).toEqual(["aab.js"]);
 });

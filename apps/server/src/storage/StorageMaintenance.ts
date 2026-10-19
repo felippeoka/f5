@@ -53,6 +53,7 @@ import {
   type StorageGetOperationRequest,
   type StorageGetOperationResult,
   type StoragePathWarning,
+  type StorageScanStatus,
   type StorageUsageReport,
   ThreadId,
 } from "@t3tools/contracts";
@@ -120,6 +121,8 @@ import {
 } from "./storagePathSafety.ts";
 
 const USAGE_CACHE_TTL_MS = 10 * 60_000;
+/** Total time a scan may spend refreshing `origin/<default>` across repositories. */
+const REMOTE_REFRESH_BUDGET = "60 seconds";
 const NONCE_TTL_MS = 15 * 60_000;
 const EVENTS_ROTATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const ARCHIVED_THREAD_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -251,14 +254,30 @@ export interface StorageMaintenanceShape {
     readonly includeArchived: boolean;
   }) => Effect.Effect<StorageCleanupCategoryResult, StorageMaintenanceError>;
   /**
-   * Hourly automation: refresh each project's default branch, then remove
-   * every eligible inactive F5 worktree and prune missing registrations with
-   * the same checks as the Storage settings cleanup. External worktrees are
-   * never touched. Null when a Storage settings cleanup is running.
+   * Hourly automation: refresh the default branch of each repository with an
+   * F5 worktree, then remove every eligible inactive F5 worktree and prune
+   * missing registrations inside the F5 worktrees folder, with the same checks
+   * as the Storage settings cleanup. External worktrees are never touched.
+   * Null when a Storage settings cleanup is running.
    */
   readonly cleanInactiveWorktreesAutomatically: (input: {
     readonly operationId: string;
   }) => Effect.Effect<ReadonlyArray<StorageCleanupCategoryResult> | null, StorageMaintenanceError>;
+  /**
+   * Read-only preview of the hourly run, from the last fetched refs. Each
+   * candidate is removed, or skipped with its reason.
+   */
+  readonly previewInactiveWorktrees: Effect.Effect<
+    ReadonlyArray<InactiveWorktreePreview>,
+    StorageMaintenanceError
+  >;
+}
+
+export interface InactiveWorktreePreview {
+  readonly path: string;
+  readonly kind: "worktree" | "missingRegistration";
+  readonly action: "remove" | "skip";
+  readonly reason: string;
 }
 
 export class StorageMaintenance extends ServiceMap.Service<
@@ -305,8 +324,6 @@ interface WorktreeReview {
   readonly head: string | null;
   readonly registration: string;
   readonly branch?: string | null;
-  /** HEAD was in the default branch at review: the branch may be deleted after removal. */
-  readonly headMerged?: boolean;
   /** Uncommitted changes matching the project's disposable paths, discarded on removal. */
   readonly discardChanges?: DiscardableChanges;
   /** External worktrees: the project checkout Git runs in. */
@@ -334,6 +351,11 @@ interface WorktreeRemovalReadiness {
   readonly commandCwd: string | null;
   readonly disabledReason?: string;
   readonly warnings: ReadonlyArray<StoragePathWarning>;
+  /**
+   * Whether the branch may be deleted after removal. Kept out of the hashed
+   * review: a fetch between scan and confirmation must not invalidate it.
+   */
+  readonly branchDeletable?: boolean;
 }
 
 function storageCauseMessage(cause: Cause.Cause<unknown>): string {
@@ -779,7 +801,18 @@ const makeStorageMaintenance = Effect.gen(function* () {
       );
     });
 
-  /** The owning project's disposable worktree paths; the global list when no project matches. */
+  const commonDirOf = (cwd: string) =>
+    git.resolveCommonDir(cwd).pipe(
+      Effect.flatMap(canonicalOrNull),
+      Effect.orElseSucceed(() => null),
+    );
+
+  /**
+   * Disposable worktree paths of the projects in the worktree's repository,
+   * matched by Git common dir so subdirectory and linked-worktree projects
+   * count. With several projects, only patterns they all list apply. No
+   * matching project, or unreadable settings, means nothing is discardable.
+   */
   const disposablePathsFor = (commandCwd: string): Effect.Effect<ReadonlyArray<string>> =>
     Effect.gen(function* () {
       if (settingsService._tag === "None") return [];
@@ -787,61 +820,97 @@ const makeStorageMaintenance = Effect.gen(function* () {
         Effect.orElseSucceed(() => null),
       );
       if (global === null) return [];
-      const root = yield* canonicalOrNull(commandCwd);
-      const match = (yield* listProjectRoots()).find(
-        (entry) => entry.root !== null && entry.root === root,
-      );
-      if (!match) return global.worktreeDisposablePaths;
-      // Unreadable project settings fail closed: nothing is discardable.
-      return yield* readProjectSettings(global, match.project).pipe(
-        Effect.map((resolved): ReadonlyArray<string> => resolved.settings.worktreeDisposablePaths),
-        Effect.catchCause(() => Effect.succeed([])),
-      );
+      const commonDir = yield* commonDirOf(commandCwd);
+      if (commonDir === null) return [];
+      const owners: Array<ReadonlyArray<string>> = [];
+      for (const { project, root } of yield* listProjectRoots()) {
+        if (root === null || (yield* commonDirOf(project.workspaceRoot)) !== commonDir) continue;
+        const paths = yield* readProjectSettings(global, project).pipe(
+          Effect.map(
+            (resolved): ReadonlyArray<string> | null => resolved.settings.worktreeDisposablePaths,
+          ),
+          Effect.catchCause(() => Effect.succeed(null)),
+        );
+        if (paths === null) return [];
+        owners.push(paths);
+      }
+      const [first, ...rest] = owners;
+      return (first ?? []).filter((pattern) => rest.every((paths) => paths.includes(pattern)));
     });
 
   /** Set by a forced scan (Rescan): refresh `origin/<default>` before measuring. */
   let refreshRemotesBeforeNextScan = false;
 
-  /** Refresh each project repository's default branch once; failures become warnings. */
-  const refreshProjectRemotes = (): Effect.Effect<ReadonlyArray<StoragePathWarning>> =>
+  /**
+   * Refresh each project repository's default branch once; failures become
+   * warnings. Repositories without `origin` are skipped, and `onlyCommonDirs`
+   * limits the refresh to repositories that own a candidate.
+   */
+  const refreshProjectRemotes = (
+    onlyCommonDirs?: ReadonlySet<string>,
+  ): Effect.Effect<ReadonlyArray<StoragePathWarning>> =>
     Effect.gen(function* () {
       const seen = new Set<string>();
       const roots: string[] = [];
       for (const { project, root } of yield* listProjectRoots()) {
         if (root === null) continue;
-        const commonDir = yield* git.resolveCommonDir(project.workspaceRoot).pipe(
-          Effect.flatMap(canonicalOrNull),
-          Effect.orElseSucceed(() => null),
-        );
+        const commonDir = yield* commonDirOf(project.workspaceRoot);
         if (commonDir === null || seen.has(commonDir)) continue;
         seen.add(commonDir);
-        roots.push(project.workspaceRoot);
+        if (onlyCommonDirs && !onlyCommonDirs.has(commonDir)) continue;
+        const hasOrigin = yield* git.listRemotes(project.workspaceRoot).pipe(
+          Effect.map((remotes) => remotes.some((remote) => remote.name === "origin")),
+          Effect.orElseSucceed(() => false),
+        );
+        if (hasOrigin) roots.push(project.workspaceRoot);
       }
-      const messages = yield* Effect.forEach(
+      const warnings: StoragePathWarning[] = [];
+      yield* Effect.forEach(
         roots,
         (root) =>
           refreshDefaultBranch(git, root).pipe(
-            Effect.map((message) => (message ? warningFor(root, message) : null)),
+            Effect.map((message) => {
+              if (message) warnings.push(warningFor(root, message));
+            }),
           ),
-        { concurrency: 2 },
+        { concurrency: 2, discard: true },
+      ).pipe(
+        Effect.timeout(REMOTE_REFRESH_BUDGET),
+        Effect.catchCause(() =>
+          Effect.sync(() => {
+            warnings.push(
+              warningFor(
+                "origin",
+                "Refreshing remotes took too long; merge checks use refs from the last fetch.",
+              ),
+            );
+          }),
+        ),
       );
-      return messages.filter((warning): warning is StoragePathWarning => warning !== null);
+      return warnings;
     });
 
   /**
    * Delete the removed worktree's local branch when it was merged at review,
    * no thread still references the worktree (an archived thread recreates its
    * checkout from the branch), and no other worktree has it checked out.
+   * The default branch and branches with a live upstream are always kept.
    */
   const deleteMergedBranch = (input: {
     readonly cwd: string;
     readonly review: WorktreeReview | undefined;
+    readonly branchDeletable: boolean;
     readonly referencedByThreads: boolean;
   }): Effect.Effect<"deleted" | "kept" | undefined> =>
     Effect.gen(function* () {
       const { review } = input;
       if (!review?.branch) return undefined;
-      if (!review.headMerged || !review.head || input.referencedByThreads) return "kept" as const;
+      if (!input.branchDeletable || !review.head || input.referencedByThreads)
+        return "kept" as const;
+      const defaultBranch = yield* git
+        .readDefaultBranch(input.cwd)
+        .pipe(Effect.orElseSucceed(() => null));
+      if (defaultBranch === null || defaultBranch === review.branch) return "kept" as const;
       const registrations = yield* git
         .listWorktrees(input.cwd)
         .pipe(Effect.orElseSucceed(() => null));
@@ -937,6 +1006,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
         commandCwd,
         warnings,
         policy,
+        branchDeletable: gate.branchDeletable,
         ...(gate.registration
           ? {
               review: {
@@ -945,7 +1015,6 @@ const makeStorageMaintenance = Effect.gen(function* () {
                 head: gate.registration.headSha,
                 registration: gate.registration.path,
                 branch: gate.branch,
-                headMerged: gate.headMerged,
                 ...(gate.discardChanges ? { discardChanges: gate.discardChanges } : {}),
                 ...(policy.kind === "externalCleanup" ? { projectRoot: commandCwd } : {}),
               },
@@ -1145,12 +1214,16 @@ const makeStorageMaintenance = Effect.gen(function* () {
       return clampBytes((rows[0]?.pageSize ?? 0) * (freeRows[0]?.freelistCount ?? 0));
     }).pipe(Effect.catch(() => Effect.succeed(0)));
 
-  const computeF5WorktreeTargets = (scan?: {
-    threads: ReadonlyArray<ThreadRow>;
-    paths: ReadonlyArray<string>;
-    byCheckpoint: Map<string, { bytes: number; latestMtimeMs: number }>;
-    worktreeReviews: Map<string, WorktreeReview>;
-  }) =>
+  const computeF5WorktreeTargets = (
+    scan?: {
+      threads: ReadonlyArray<ThreadRow>;
+      paths: ReadonlyArray<string>;
+      byCheckpoint: Map<string, { bytes: number; latestMtimeMs: number }>;
+      worktreeReviews: Map<string, WorktreeReview>;
+    },
+    /** Cleanup re-measures each target as it removes it, so it skips sizing here. */
+    options?: { readonly skipSizing?: boolean },
+  ) =>
     Effect.gen(function* () {
       const warnings: StoragePathWarning[] = [];
       const allThreads = scan?.threads ?? (yield* queryThreadRows());
@@ -1178,9 +1251,9 @@ const makeStorageMaintenance = Effect.gen(function* () {
             const usageExit = yield* Effect.exit(
               Effect.tryPromise({
                 try: () =>
-                  scan
+                  scan || options?.skipSizing
                     ? Promise.resolve({
-                        bytes: scan.byCheckpoint.get(Path.resolve(targetPath))?.bytes ?? 0,
+                        bytes: scan?.byCheckpoint.get(Path.resolve(targetPath))?.bytes ?? 0,
                         errors: [] as ReadonlyArray<StoragePathWarning>,
                         fileCount: 0,
                         directoryCount: 0,
@@ -1487,10 +1560,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
   /** The read-only scan behind a usage report, without its confirmation nonce. */
   const scanUsage = (
     signal?: AbortSignal,
-    progress: (
-      phase: "database" | "files" | "worktrees" | "legacy" | "providers" | "finalizing",
-      entries?: number,
-    ) => void = () => {},
+    progress: (phase: NonNullable<StorageScanStatus["phase"]>, entries?: number) => void = () => {},
   ) =>
     Effect.gen(function* () {
       const nowMs = Date.now();
@@ -1509,7 +1579,9 @@ const makeStorageMaintenance = Effect.gen(function* () {
       const warnings: StoragePathWarning[] = [];
       if (refreshRemotesBeforeNextScan) {
         refreshRemotesBeforeNextScan = false;
+        phase("remotes");
         warnings.push(...(yield* refreshProjectRemotes()));
+        phase("database");
       }
       const allThreads = yield* queryThreadRows();
       const archivedThreadCutoffIso = new Date(nowMs - ARCHIVED_THREAD_RETENTION_MS).toISOString();
@@ -3244,6 +3316,8 @@ const makeStorageMaintenance = Effect.gen(function* () {
                 deleteMergedBranch({
                   cwd: commandCwd,
                   review,
+                  // Re-evaluated under the lock just now, not taken from the scan.
+                  branchDeletable: readiness.branchDeletable === true,
                   referencedByThreads: claims.threadIds.length > 0,
                 }).pipe(
                   Effect.map((outcome) => {
@@ -3359,19 +3433,39 @@ const makeStorageMaintenance = Effect.gen(function* () {
       });
     });
 
-  /** Forget registrations whose folder is still missing, one at a time. */
+  /** Missing worktree folders that were inside the F5 worktrees folder. */
+  const isManagedWorktreePath = (path: string) =>
+    Effect.gen(function* () {
+      const managedRoot = yield* canonicalOrNull(config.worktreesDir);
+      const resolved = Path.resolve(path);
+      return (
+        pathContains(Path.resolve(config.worktreesDir), resolved) ||
+        (managedRoot !== null && pathContains(managedRoot, resolved))
+      );
+    });
+
+  /**
+   * Forget registrations whose folder is still missing, one at a time.
+   * `managedOnly` (the hourly run) leaves entries outside the F5 worktrees
+   * folder alone: an unmounted disk must not lose its checkout's registration.
+   */
   const clearStaleRegistrations = (
     request: CleanupOperation,
     context: StorageCleanupContext | undefined,
     selectedTargetIds: ReadonlySet<string> | undefined,
+    options?: { readonly managedOnly?: boolean },
   ) =>
     Effect.gen(function* () {
       const warnings: StoragePathWarning[] = [];
       const perTargetReclaimed: PerTargetReclaimed = [];
       const candidates = yield* computeStaleRegistrationTargets();
       warnings.push(...candidates.warnings);
-      const targets = candidates.targets.filter(
-        (target) => selectedTargetIds === undefined || selectedTargetIds.has(target.id),
+      const targets = yield* Effect.filter(candidates.targets, (target) =>
+        selectedTargetIds !== undefined && !selectedTargetIds.has(target.id)
+          ? Effect.succeed(false)
+          : options?.managedOnly
+            ? isManagedWorktreePath(target.id)
+            : Effect.succeed(true),
       );
       let completedTargets = 0;
       for (const target of targets) {
@@ -3426,7 +3520,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
     Effect.gen(function* () {
       const warnings: StoragePathWarning[] = [...preflightWarnings];
       const perTargetReclaimed: PerTargetReclaimed = [];
-      const candidates = yield* computeF5WorktreeTargets();
+      const candidates = yield* computeF5WorktreeTargets(undefined, { skipSizing: true });
       warnings.push(...candidates.warnings);
       const targets =
         selectedTargetIds !== undefined
@@ -4435,7 +4529,14 @@ const makeStorageMaintenance = Effect.gen(function* () {
       Effect.gen(function* () {
         // A Storage settings cleanup owns the profile while it runs.
         if (cleanupStatus && activeStates.has(cleanupStatus.state)) return null;
-        const fetchWarnings = yield* refreshProjectRemotes();
+        // Fetch only repositories that own an F5 worktree.
+        const owners = new Set<string>();
+        for (const { entry, projectRoot } of (yield* listProjectRegistrations()).registrations) {
+          if (!(yield* isManagedWorktreePath(entry.canonicalPath))) continue;
+          const commonDir = yield* commonDirOf(projectRoot);
+          if (commonDir !== null) owners.add(commonDir);
+        }
+        const fetchWarnings = owners.size > 0 ? yield* refreshProjectRemotes(owners) : [];
         const removed = yield* cleanF5Worktrees(
           { operationId: input.operationId },
           undefined,
@@ -4447,6 +4548,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
           { operationId: input.operationId },
           undefined,
           undefined,
+          { managedOnly: true },
         );
         return [removed, pruned];
       }).pipe(
@@ -4455,6 +4557,35 @@ const makeStorageMaintenance = Effect.gen(function* () {
           toStorageMaintenanceError("StorageMaintenance.cleanInactiveWorktreesAutomatically"),
         ),
       );
+
+  const previewInactiveWorktrees: StorageMaintenanceShape["previewInactiveWorktrees"] = Effect.gen(
+    function* () {
+      const previews: InactiveWorktreePreview[] = [];
+      const worktrees = yield* computeF5WorktreeTargets(undefined, { skipSizing: true });
+      for (const target of worktrees.targets) {
+        previews.push({
+          path: target.path ?? target.id,
+          kind: "worktree",
+          action: target.safeToDelete ? "remove" : "skip",
+          reason: target.safeToDelete
+            ? ["inactive worktree", target.detail].filter(Boolean).join(" · ")
+            : (target.disabledReason ?? "Target is not safe."),
+        });
+      }
+      for (const target of (yield* computeStaleRegistrationTargets()).targets) {
+        if (!(yield* isManagedWorktreePath(target.id))) continue;
+        previews.push({
+          path: target.id,
+          kind: "missingRegistration",
+          action: target.safeToDelete ? "remove" : "skip",
+          reason: target.safeToDelete
+            ? "the worktree folder is missing; its registration would be pruned"
+            : (target.disabledReason ?? "Target is not safe."),
+        });
+      }
+      return previews;
+    },
+  ).pipe(Effect.mapError(toStorageMaintenanceError("StorageMaintenance.previewInactiveWorktrees")));
 
   const pruneTerminalThreadLogs: StorageMaintenanceShape["pruneTerminalThreadLogs"] = (input) =>
     Effect.gen(function* () {
@@ -4772,6 +4903,7 @@ const makeStorageMaintenance = Effect.gen(function* () {
     listTerminalThreadLogs,
     pruneTerminalThreadLogs,
     cleanInactiveWorktreesAutomatically,
+    previewInactiveWorktrees,
   } satisfies StorageMaintenanceShape;
 });
 

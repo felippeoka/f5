@@ -3155,6 +3155,24 @@ it.layer(
           await writeFile(NodePath.join(managed("a"), "node_modules", "x", "index.js"), "x");
           await writeFile(NodePath.join(managed("a"), "dist", "index.js"), "x");
           await writeFile(NodePath.join(managed("a"), "app.tsbuildinfo"), "{}");
+          // The default branch, and a long-lived branch with a live upstream, are kept even
+          // when merged; a branch that only tracks origin/main is not long-lived.
+          runGit(repo.root, "checkout", "-q", "-b", "feature-x");
+          runGit(repo.root, "worktree", "add", "-q", managed("m"), "main");
+          runGit(repo.root, "branch", "release-1", "main");
+          runGit(repo.root, "push", "-q", "-u", "origin", "release-1");
+          runGit(repo.root, "worktree", "add", "-q", managed("r"), "release-1");
+          runGit(
+            repo.root,
+            "worktree",
+            "add",
+            "-q",
+            "--track",
+            "-b",
+            "tracks-main",
+            managed("t"),
+            "origin/main",
+          );
         });
         yield* seedProject({ sql, projectId: "project-managed", workspaceRoot: repo.root });
         yield* seedThread({
@@ -3191,7 +3209,7 @@ it.layer(
           targetSelections: [
             {
               categoryId: "inactiveF5Worktrees",
-              targetIds: ["a", "b", "c"].map((name) => target(name)!.id),
+              targetIds: ["a", "b", "c", "m", "r", "t"].map((name) => target(name)!.id),
             },
           ],
           confirmationText: "DELETE",
@@ -3204,15 +3222,23 @@ it.layer(
           [managed("a"), "deleted"],
           [managed("b"), "kept"],
           [managed("c"), "kept"],
+          [managed("m"), "kept"],
+          [managed("r"), "kept"],
+          [managed("t"), "deleted"],
         ]);
         const branches = localBranches(repo.root);
         assert.notInclude(branches, "merged-a");
+        assert.notInclude(branches, "tracks-main");
+        assert.include(branches, "main");
+        assert.include(branches, "release-1");
         assert.include(branches, "pushed-b");
         assert.include(branches, "archived-c");
         assert.include(branches, "ahead-d");
         assert.equal(yield* Effect.promise(() => pathExists(managed("d"))), true);
       }),
     ),
+    // Seven real worktrees, each inspected and removed with several Git calls.
+    60_000,
   );
 
   it.effect(
@@ -3340,6 +3366,99 @@ it.layer(
     ),
   );
 
+  it.effect("refuses removal when only staged content changed after review", () =>
+    withHomeSandbox(
+      Effect.gen(function* () {
+        const storage = yield* StorageMaintenance;
+        const config = yield* ServerConfig;
+        const sql = yield* SqlClient.SqlClient;
+        yield* Effect.promise(() => new ProfileRegistryStore(config.defaultStateDir!).init());
+        const repo = yield* Effect.promise(() => makeClonedRepo("f5-storage-index-"));
+        yield* Effect.addFinalizer(() => Effect.promise(repo.cleanup));
+        const external = NodePath.join(repo.dir, "external-index");
+        yield* Effect.promise(async () => {
+          runGit(repo.root, "worktree", "add", "-q", "-b", "external-index", external, "main");
+          await NodeFS.writeFile(NodePath.join(external, "README.md"), "staged\n");
+          runGit(external, "add", "README.md");
+          await NodeFS.writeFile(NodePath.join(external, "README.md"), "working\n");
+        });
+        yield* seedProject({ sql, projectId: "project-index", workspaceRoot: repo.root });
+
+        const report = yield* storage.inspect({ force: true });
+        const target = report.categories
+          .find((entry) => entry.id === "externalWorktrees")
+          ?.targets.find((entry) => entry.path === external);
+        assert.equal(target?.safeToDelete, true, target?.disabledReason);
+        // Stage other content without touching the working file; status stays `MM`.
+        yield* Effect.promise(async () => {
+          const blob = NodePath.join(repo.dir, "blob.txt");
+          await NodeFS.writeFile(blob, "written straight to the index\n");
+          const sha = runGit(external, "hash-object", "-w", blob);
+          runGit(external, "update-index", "--cacheinfo", `100644,${sha},README.md`);
+        });
+
+        const result = yield* storage.cleanup({
+          operationId: "operation-real-external-index",
+          scanId: report.scanId,
+          nonce: report.confirmationNonce,
+          categoryIds: ["externalWorktrees"],
+          targetSelections: [{ categoryId: "externalWorktrees", targetIds: [target!.id] }],
+          confirmationText: "DELETE",
+          options: { vacuumAfterDeletes: false },
+        });
+
+        assert.notEqual(result.results[0]?.status, "Cleaned");
+        assert.equal(yield* Effect.promise(() => pathExists(external)), true);
+      }),
+    ),
+  );
+
+  it.effect("applies disposable paths only for projects in the worktree's repository", () =>
+    withHomeSandbox(
+      Effect.gen(function* () {
+        const storage = yield* StorageMaintenance;
+        const config = yield* ServerConfig;
+        const sql = yield* SqlClient.SqlClient;
+        const owned = yield* Effect.promise(() => makeClonedRepo("f5-storage-owned-"));
+        const unowned = yield* Effect.promise(() => makeClonedRepo("f5-storage-unowned-"));
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(() => Promise.all([owned.cleanup(), unowned.cleanup()])),
+        );
+        const ownedTree = NodePath.join(config.worktreesDir, "owned", "regenerated");
+        const unownedTree = NodePath.join(config.worktreesDir, "unowned", "regenerated");
+        yield* Effect.promise(async () => {
+          runGit(owned.root, "worktree", "add", "-q", "-b", "regen", ownedTree, "main");
+          await NodeFS.writeFile(NodePath.join(ownedTree, "README.md"), "regenerated\n");
+          runGit(unowned.root, "worktree", "add", "-q", "-b", "regen", unownedTree, "main");
+          await NodeFS.writeFile(NodePath.join(unownedTree, "README.md"), "regenerated\n");
+          await NodeFS.mkdir(NodePath.join(owned.root, "packages", "app"), { recursive: true });
+        });
+        // A project rooted in a subdirectory still owns the repository's worktrees.
+        yield* seedProject({
+          sql,
+          projectId: "project-subdirectory",
+          workspaceRoot: NodePath.join(owned.root, "packages", "app"),
+        });
+
+        const report = yield* storage.inspect({ force: true });
+        const targets = report.categories.find(
+          (entry) => entry.id === "inactiveF5Worktrees",
+        )?.targets;
+        const ownedTarget = targets?.find((entry) => entry.path === ownedTree);
+        const unownedTarget = targets?.find((entry) => entry.path === unownedTree);
+
+        assert.equal(ownedTarget?.safeToDelete, true, ownedTarget?.disabledReason);
+        assert.match(ownedTarget?.detail ?? "", /Discards 1 changed file: README\.md/);
+        // No project owns this repository, so the global list does not apply.
+        assert.equal(unownedTarget?.safeToDelete, false);
+        assert.equal(
+          unownedTarget?.disabledReason,
+          "it has uncommitted changes (including untracked files)",
+        );
+      }),
+    ),
+  );
+
   it.effect("reports a warning instead of failing when the default branch cannot be fetched", () =>
     withHomeSandbox(
       Effect.gen(function* () {
@@ -3382,15 +3501,31 @@ it.layer(makeStorageTestLayer({ gitCore: "real" }))(
             const dirty = NodePath.join(config.worktreesDir, "automatic", "dirty");
             const external = NodePath.join(repo.dir, "external-auto");
             const gone = NodePath.join(repo.dir, "gone-auto");
-            yield* Effect.promise(async () => {
+            const goneManaged = yield* Effect.promise(async () => {
               runGit(repo.root, "worktree", "add", "-q", "-b", "orphan", orphan, "main");
               runGit(repo.root, "worktree", "add", "-q", "-b", "dirty", dirty, "main");
               await NodeFS.writeFile(NodePath.join(dirty, "work.txt"), "unsaved\n");
               runGit(repo.root, "worktree", "add", "-q", "-b", "external-auto", external, "main");
               runGit(repo.root, "worktree", "add", "-q", "-b", "gone-auto", gone, "main");
               await NodeFS.rm(gone, { recursive: true, force: true });
+              const managedGone = NodePath.join(
+                await NodeFS.realpath(NodePath.dirname(orphan)),
+                "gone-managed",
+              );
+              runGit(repo.root, "worktree", "add", "-q", "-b", "gone-managed", managedGone, "main");
+              await NodeFS.rm(managedGone, { recursive: true, force: true });
+              return managedGone;
             });
             yield* seedProject({ sql, projectId: "project-automatic", workspaceRoot: repo.root });
+
+            // The preview lists what the hourly run would do, and only inside the F5 folder.
+            const preview = yield* storage.previewInactiveWorktrees;
+            const previewed = new Map(preview.map((entry) => [entry.path, entry.action]));
+            assert.equal(previewed.get(orphan), "remove");
+            assert.equal(previewed.get(dirty), "skip");
+            assert.equal(previewed.get(goneManaged), "remove");
+            assert.isFalse(previewed.has(external));
+            assert.isFalse(previewed.has(gone));
 
             const results = yield* storage.cleanInactiveWorktreesAutomatically({
               operationId: "operation-automatic-worktrees",
@@ -3405,14 +3540,16 @@ it.layer(makeStorageTestLayer({ gitCore: "real" }))(
               byCategory
                 .get("staleWorktreeRegistrations")
                 ?.perTargetReclaimed.map((entry) => entry.path),
-              [gone],
+              [goneManaged],
             );
             assert.equal(yield* Effect.promise(() => pathExists(orphan)), false);
             assert.equal(yield* Effect.promise(() => pathExists(dirty)), true);
             assert.equal(yield* Effect.promise(() => pathExists(external)), true);
             assert.notInclude(localBranches(repo.root), "orphan");
             assert.include(registeredPaths(repo.root), external);
-            assert.notInclude(registeredPaths(repo.root), gone);
+            // A missing folder outside the F5 folder may be an unmounted disk: keep its entry.
+            assert.include(registeredPaths(repo.root), gone);
+            assert.notInclude(registeredPaths(repo.root), goneManaged);
           }),
         ),
     );

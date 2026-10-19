@@ -2270,7 +2270,8 @@ const makeGitCore = Effect.gen(function* () {
         // Stream the index: ordinary repositories can exceed the buffered output cap.
         // Retain only gitlinks and the current (possibly split) NUL-delimited record.
         const gitlinks: string[] = [];
-        const indexFingerprint = options?.recoveryFingerprint ? createHash("sha256") : null;
+        const indexFingerprint =
+          options?.recoveryFingerprint || options?.changesFingerprint ? createHash("sha256") : null;
         const decoder = new TextDecoder();
         let pending = "";
         yield* git.execute({
@@ -2328,10 +2329,12 @@ const makeGitCore = Effect.gen(function* () {
             }
           }
         }
-        // Only the changed paths: ignored build output can hold far more files than fit the budget.
+        const indexDigest = indexFingerprint?.digest() ?? new Uint8Array();
+        // Only the changed paths: ignored build output can hold far more files than fit the
+        // budget. The index is included so content staged after review is detected too.
         const changesFingerprint = options?.changesFingerprint
           ? yield* Effect.tryPromise({
-              try: () => checkoutFingerprint(cwd, changedPaths, new Uint8Array(), status),
+              try: () => checkoutFingerprint(cwd, changedPaths, indexDigest, status),
               catch: (cause) =>
                 createGitCommandError("GitCore.inspectCheckout", cwd, [], String(cause)),
             })
@@ -2344,13 +2347,13 @@ const makeGitCore = Effect.gen(function* () {
             [],
             "The ignored-file listing is incomplete; recovery inspection cannot verify all local files.",
           );
-        const localFingerprint = indexFingerprint
+        const localFingerprint = options?.recoveryFingerprint
           ? yield* Effect.tryPromise({
               try: () =>
                 checkoutFingerprint(
                   cwd,
                   [...changedPaths, ...ignored.entries],
-                  indexFingerprint.digest(),
+                  indexDigest,
                   status,
                 ),
               catch: (cause) =>

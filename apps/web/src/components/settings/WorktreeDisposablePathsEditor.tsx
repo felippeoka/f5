@@ -41,7 +41,8 @@ export function WorktreeDisposablePathsEditor(props: {
       <p className="text-muted-foreground text-xs">
         One glob per line, relative to the repository. <code>**</code> matches any folders,{" "}
         <code>*</code> matches within one folder, and a trailing <code>/</code> matches a folder and
-        everything in it. Storage cleanup discards matching changes when it removes an inactive
+        everything in it. A new untracked folder only matches a pattern ending in <code>/</code> or{" "}
+        <code>**</code>. Storage cleanup discards matching changes when it removes an inactive
         worktree; any other change keeps the worktree.
       </p>
       <Button

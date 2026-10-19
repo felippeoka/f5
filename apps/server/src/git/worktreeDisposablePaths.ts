@@ -3,7 +3,13 @@
  * `**` crosses directories, `*` and `?` stay within one segment, and a
  * trailing `/` matches the directory and everything under it.
  */
-function globToRegExp(pattern: string): RegExp {
+interface DisposableMatcher {
+  readonly regex: RegExp;
+  /** True when a match also covers everything under the matched path. */
+  readonly coversSubtree: boolean;
+}
+
+function compileGlob(pattern: string): DisposableMatcher {
   const directory = pattern.endsWith("/");
   const body = pattern.replace(/^\.?\/+/, "").replace(/\/+$/, "");
   let source = "";
@@ -24,7 +30,10 @@ function globToRegExp(pattern: string): RegExp {
       source += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
     }
   }
-  return new RegExp(`^${source}${directory ? "(?:/.*)?" : ""}$`);
+  return {
+    regex: new RegExp(`^${source}${directory ? "(?:/.*)?" : ""}$`),
+    coversSubtree: directory || body.endsWith("**"),
+  };
 }
 
 /** Paths that are not covered by any disposable pattern; empty means all may be discarded. */
@@ -35,10 +44,15 @@ export function nonDisposablePaths(
   const matchers = patterns
     .map((pattern) => pattern.trim())
     .filter((pattern) => pattern.length > 0)
-    .map(globToRegExp);
+    .map(compileGlob);
   return paths.filter((path) => {
-    // Untracked directories are reported with a trailing slash.
+    // A wholly untracked directory is reported once, with a trailing slash, and
+    // stands for its whole subtree: only a pattern covering that subtree
+    // (a trailing `/` or `**`) may discard it.
+    const isDirectory = path.endsWith("/");
     const normalized = path.replace(/\/+$/, "");
-    return !matchers.some((matcher) => matcher.test(normalized) || matcher.test(`${normalized}/`));
+    return !matchers.some(
+      (matcher) => matcher.regex.test(normalized) && (!isDirectory || matcher.coversSubtree),
+    );
   });
 }

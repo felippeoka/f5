@@ -391,6 +391,12 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
   let headSha: string | null = null;
   /** Storage cleanup: HEAD is reachable from the default branch. */
   let headMerged = false;
+  /**
+   * Storage cleanup: the branch may be deleted with the worktree. It must be
+   * merged, not the default branch, and without a live upstream other than
+   * `origin/<default>` (so release or develop branches on the remote are kept).
+   */
+  let branchDeletable = false;
   let discardChanges: DiscardableChanges | undefined;
   const target = yield* canonical(input.path);
   const root = yield* canonical(
@@ -432,6 +438,7 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
       branch,
       headSha,
       headMerged,
+      branchDeletable,
     };
   const exists = yield* Effect.tryPromise(() => FS.lstat(input.path)).pipe(
     Effect.map(() => true),
@@ -577,6 +584,13 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
           ? yield* resolveHeadInDefaultBranch(git, input.projectCwd, inspected.headSha)
           : { defaultBranch: null, merged: null };
         headMerged = containment.merged === true;
+        branchDeletable =
+          headMerged &&
+          inspected.branch !== null &&
+          containment.defaultBranch !== null &&
+          inspected.branch !== containment.defaultBranch &&
+          (inspected.upstreamRef === null ||
+            inspected.upstreamRef === `refs/remotes/origin/${containment.defaultBranch}`);
         const pushed = inspected.upstreamRef !== null && inspected.aheadCount === 0;
         if (!headMerged && !pushed)
           blockedReasons.push(
@@ -665,6 +679,7 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
     branch,
     headSha,
     headMerged,
+    branchDeletable,
     ...(discardChanges ? { discardChanges } : {}),
     ...(ignoredFiles
       ? {

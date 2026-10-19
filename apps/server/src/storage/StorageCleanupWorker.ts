@@ -761,6 +761,20 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
       }
     }
     targets.push(...codexLeftoverDryRunTargets(yield* codexMarketplaceLeftovers));
+    if (global?.storageCleanup.enabled && global.storageCleanup.inactiveWorktrees) {
+      const previews = yield* storageMaintenance.previewInactiveWorktrees.pipe(
+        Effect.orElseSucceed(() => []),
+      );
+      for (const preview of previews)
+        targets.push({
+          job: "worktree-cleanup",
+          target: worktreeAuditTarget(preview.path),
+          projectId: null,
+          threadId: null,
+          action: preview.action,
+          reason: preview.reason,
+        });
+    }
     if (global !== null) {
       targets.push(...(yield* purgeThreadDryRunTargets(global)));
       const days = global.storageCleanup.terminalThreadLogsAfterDays;

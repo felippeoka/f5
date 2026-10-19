@@ -30,6 +30,7 @@ import { TerminalManager, type TerminalSessionSummary } from "../terminal/Servic
 import {
   type AutomaticThreadPurgeResult,
   type DatabaseSpaceResult,
+  type InactiveWorktreePreview,
   StorageMaintenance,
 } from "./StorageMaintenance.ts";
 
@@ -63,6 +64,8 @@ export interface AutomationWorld {
   spaceResult: DatabaseSpaceResult;
   /** Result the stubbed `cleanInactiveWorktreesAutomatically` returns. */
   inactiveWorktreeResults: ReadonlyArray<StorageCleanupCategoryResult> | null;
+  /** Result the stubbed `previewInactiveWorktrees` returns. */
+  inactiveWorktreePreviews: ReadonlyArray<InactiveWorktreePreview>;
 }
 
 export const makeWorld = (): AutomationWorld => ({
@@ -78,6 +81,7 @@ export const makeWorld = (): AutomationWorld => ({
   purgeResult: { purgedThreadIds: [], archivedThreadIds: [], reclaimedBytes: 0, warnings: [] },
   spaceResult: { action: "none", reclaimedBytes: 0 },
   inactiveWorktreeResults: [],
+  inactiveWorktreePreviews: [],
 });
 
 export function git(cwd: string, ...args: string[]): string {
@@ -288,6 +292,11 @@ export function automationLayer(
       })),
     cleanInactiveWorktreesAutomatically: (input: unknown) =>
       call("cleanInactiveWorktreesAutomatically", input, () => world.inactiveWorktreeResults),
+    previewInactiveWorktrees: call(
+      "previewInactiveWorktrees",
+      undefined,
+      () => world.inactiveWorktreePreviews,
+    ),
   } as never);
   return Layer.mergeAll(
     WorktreePreparationsTestLive,

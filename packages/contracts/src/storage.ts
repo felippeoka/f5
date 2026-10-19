@@ -327,7 +327,15 @@ export type StorageCleanupResult = typeof StorageCleanupResult.Type;
 export const StorageScanStatus = Schema.Struct({
   state: Schema.Literals(["idle", "scanning", "failed"]),
   phase: Schema.NullOr(
-    Schema.Literals(["database", "files", "worktrees", "legacy", "providers", "finalizing"]),
+    Schema.Literals([
+      "remotes",
+      "database",
+      "files",
+      "worktrees",
+      "legacy",
+      "providers",
+      "finalizing",
+    ]),
   ),
   entriesVisited: NonNegativeInt,
   startedAt: Schema.NullOr(IsoDateTime),
