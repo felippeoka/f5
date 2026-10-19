@@ -1,4 +1,9 @@
 import {
+  ProviderNativeHistory,
+  ProviderNativeHistoryLive,
+} from "./provider/ProviderNativeHistory.ts";
+import { ProviderNativeHistoryWorkerLive } from "./orchestration/Layers/ProviderNativeHistory.ts";
+import {
   ProviderContinuationRequests,
   ProviderContinuationRequestsLive,
 } from "./provider/ProviderContinuationRequests.ts";
@@ -173,6 +178,7 @@ export function makeServerProviderLayer(): Layer.Layer<
   | ProviderAdvisoryProjection
   | ProviderInstanceRegistry
   | ProviderContinuationRequests
+  | ProviderNativeHistory
   | AgentControlPauseService
   | ProviderAdapterRegistry
   | ServerSettingsService
@@ -226,6 +232,7 @@ export function makeServerProviderLayer(): Layer.Layer<
     );
     const providerInstanceRegistryLayer = ProviderInstanceRegistryHydrationLive.pipe(
       Layer.provide(ProviderContinuationRequestsLive),
+      Layer.provide(ProviderNativeHistoryLive),
       Layer.provide(ThreadMcpBrokerLive),
       Layer.provide(serverSettingsLayer),
       Layer.provide(providerEventLoggersLayer),
@@ -298,6 +305,7 @@ export function makeServerProviderLayer(): Layer.Layer<
     );
     return Layer.mergeAll(
       ProviderContinuationRequestsLive,
+      ProviderNativeHistoryLive,
       AgentControlPauseLive,
       serverSettingsLayer,
       DiskSpaceMonitorLive.pipe(Layer.provide(serverSettingsLayer)),
@@ -504,7 +512,11 @@ export function makeServerOrchestrationRuntimeLayer() {
     Layer.provideMerge(NextTurnQueueStoreLive),
     Layer.provideMerge(nextTurnQueueDispatcherLayer),
   );
+  const nativeHistoryWorkerLayer = ProviderNativeHistoryWorkerLive.pipe(
+    Layer.provideMerge(runtimeServicesLayer),
+  );
   const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
+    Layer.provideMerge(nativeHistoryWorkerLayer),
     Layer.provideMerge(continuationWorkerLayer),
     Layer.provideMerge(orchestrationLayer),
     Layer.provideMerge(runtimeIngestionLayer),

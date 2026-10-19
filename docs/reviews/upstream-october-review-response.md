@@ -1059,3 +1059,49 @@ the same two process-identity migration cases; the server reports the same three
 launcher-identity failures before interruption. The exhaustive Git matrix is not
 reached by that failed root run. The strict 4,084-record ledger check passes.
 No full-gate waiver or delivered Pi disposition is claimed.
+
+## Pi native rewind projection reconciliation (15l; delivery remains deferred)
+
+The adapter now verifies complete active ancestry in the same idle session before
+and after a bounded orchestration acknowledgement. Only captured native entries
+missing from that branch identify abandoned host turns. Session switches, malformed
+or partial ancestry, lost acknowledgement and changed read-back keep prompts
+blocked. No native fork or file restore is issued by reconciliation.
+
+A server-only command fences the exact active Pi instance and current turn. Its
+event removes only proven abandoned turn ids and the user/assistant message ids
+linked through their persisted turn rows. The latter is necessary because F5 user
+messages normally have null turn ids: a real production fixture found and now
+covers that association. Unlocated messages, other provider turns and the current
+native command remain. Server, SQLite and browser projections share these rules;
+plans, tools, tasks, pending input and attachment ownership follow the selected
+turns. The WebSocket protocol advances to 38 so older clients cannot apply native
+rewinds as a prefix truncation.
+
+The commit transaction pauses queued prompts for review and retains any existing
+user/environment pause. Migration 128 stores retired native turn identities;
+late checkpoints, messages and tool updates cannot resurrect those turns, including
+after restart. The projection replay also repairs these retirement receipts. Indexed
+lookups apply only to threads with native reconciliation history. The orchestration
+rendezvous bounds pending work at 64, concurrent handlers at eight and acknowledgement
+at ten seconds. Its scope-owned fibers wait for cancellation cleanup; deadline tests
+also cover a pinned Effect race-helper cancellation issue without changing Effect.
+
+Focused validation currently passes 124 server cases across six files, 33 browser
+store unit cases and 30 shared projection/input cases. The persisted engine fixture
+also verifies exact user-message removal and late-checkpoint refusal after restart.
+Required full-gate and final production results are recorded below once complete;
+no Pi record is promoted by these partial implementation checkpoints.
+
+Final production validation for this continuation passes on the built Node server,
+SQLite and Chromium with protocol 38: three user prompts use one Pi child, native
+rewind removes the second prompt/reply, the first turn and current command remain,
+no fork/additional prompt occurs, the queue is empty and paused for review, and no
+page errors occur. The new engine regression uses real turn-start commands with
+null-turn user messages and verifies persisted restart plus late-checkpoint refusal.
+All eight workspace typechecks and all five build tasks pass. The formatter and
+lint pass. The required full run was repeated after the prompt ownership correction and
+still stops on the same two migration process-identity cases (330 scripts pass);
+Turbo interrupts the remaining workspaces before the exhaustive Git stage. No
+process-identity check or release gate was weakened. Independent server and Git
+matrix results follow once those complete.

@@ -1,4 +1,8 @@
 import {
+  reconcileNativeHistoryProjection,
+  retainNativeTurnRows,
+} from "@t3tools/shared/nativeHistoryReconciliation";
+import {
   summarizePlanningWorkflow,
   summarizeCodeReviewWorkflow,
   summarizeInvestigationWorkflow,
@@ -1313,6 +1317,28 @@ export function applyDomainEvent(state: AppState, event: OrchestrationEvent): Ap
             ...(nextSession !== thread.session ? { session: nextSession } : {}),
             estimatedContextTokens: null,
             estimatedThinkingTokens: null,
+            lastInteractionAt: event.occurredAt,
+          };
+        }
+        if (event.payload.removedTurnIds) {
+          const removed = new Set(event.payload.removedTurnIds);
+          return {
+            ...thread,
+            ...reconcileNativeHistoryProjection(
+              thread,
+              removed,
+              new Set(event.payload.removedMessageIds ?? []),
+            ),
+            pendingUserInputs,
+            turnDiffSummaries: retainNativeTurnRows(thread.turnDiffSummaries, removed),
+            commandExecutions: retainNativeTurnRows(thread.commandExecutions, removed),
+            estimatedThinkingTokens: null,
+            session: thread.session
+              ? (() => {
+                  const { tokenUsageSource: _source, ...session } = thread.session;
+                  return session;
+                })()
+              : null,
             lastInteractionAt: event.occurredAt,
           };
         }

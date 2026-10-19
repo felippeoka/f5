@@ -424,6 +424,66 @@ it.each(["native-rewind", "native-switch"])(
     }),
 );
 
+it.each([true, false])(
+  "requires native rewind projection acknowledgement before reopening prompts: %s",
+  async (accepted) =>
+    fixture(async ({ settings, options, trace }) => {
+      options.environment.F5_PI_CASE = "native-rewind-deep";
+      await run(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const reconciliations: import("../ProviderNativeHistory.ts").NativeHistoryReconciliation[] =
+              [];
+            const adapter = yield* makePiAdapter(settings, {
+              ...options,
+              reconcileNativeHistory: (request) =>
+                Effect.gen(function* () {
+                  expect(yield* request.isCurrent).toBe(true);
+                  reconciliations.push(request);
+                  return accepted;
+                }),
+            });
+            const completed = yield* Queue.unbounded<ProviderRuntimeEvent>();
+            yield* adapter.streamEvents.pipe(
+              Stream.runForEach((event) =>
+                event.type === "turn.completed"
+                  ? Queue.offer(completed, event).pipe(Effect.asVoid)
+                  : Effect.void,
+              ),
+              Effect.forkScoped,
+            );
+            yield* adapter.startSession({
+              threadId,
+              cwd: tmpdir(),
+              runtimeMode: "approval-required",
+            });
+            const turns: string[] = [];
+            for (const input of ["First", "Second", "Rewind natively"]) {
+              yield* adapter.sendTurn({ threadId, input });
+              const event = yield* Queue.take(completed).pipe(Effect.timeout("5 seconds"));
+              expect(event.type).toBe("turn.completed");
+              if (event.type !== "turn.completed") throw new Error("Missing terminal event");
+              turns.push(event.turnId!);
+              expect(event.payload.state).toBe(
+                input === "Rewind natively" && !accepted ? "failed" : "completed",
+              );
+            }
+            expect(reconciliations).toHaveLength(1);
+            expect(reconciliations[0]?.removedTurnIds).toEqual([turns[1]]);
+            expect(reconciliations[0]?.turnId).toBe(turns[2]);
+            expect(yield* adapter.hasSession(threadId)).toBe(accepted);
+            const readback = yield* adapter.readThread(threadId);
+            expect(readback.turns.map((turn) => turn.id)).toEqual([turns[0]]);
+            expect(
+              (yield* Effect.promise(trace)).filter((record) => record.type === "fork"),
+            ).toHaveLength(0);
+            yield* adapter.stopSession(threadId);
+          }),
+        ),
+      );
+    }),
+);
+
 it("adopts an exact native extension wake without another prompt and fences competing or stale sends", async () =>
   fixture(async ({ settings, options, trace }) => {
     options.environment.F5_PI_CASE = "wake";

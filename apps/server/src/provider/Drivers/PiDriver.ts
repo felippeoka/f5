@@ -1,3 +1,4 @@
+import { ProviderNativeHistory } from "../ProviderNativeHistory.ts";
 import { PiSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
 import { Duration, Effect, FileSystem, Option, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -77,6 +78,9 @@ export const PiDriver: ProviderDriver<PiSettings, PiDriverEnv> = {
       const continuations = Option.getOrUndefined(
         yield* Effect.serviceOption(ProviderContinuationRequests),
       );
+      const nativeHistory = Option.getOrUndefined(
+        yield* Effect.serviceOption(ProviderNativeHistory),
+      );
       const preview = Option.getOrUndefined(yield* Effect.serviceOption(PreviewMcpHttpServer));
       let liveCatalog: PiCatalog | undefined;
       let baseSnapshot = buildInitialPiProviderSnapshot(settings);
@@ -87,6 +91,7 @@ export const PiDriver: ProviderDriver<PiSettings, PiDriverEnv> = {
         cacheDir: path.join(server.stateDir, "provider-extensions", "pi"),
         beforeLaunch,
         ...(continuations ? { offerContinuation: continuations.offer } : {}),
+        ...(nativeHistory ? { reconcileNativeHistory: nativeHistory.reconcile } : {}),
         onCatalog: (catalog) =>
           Effect.gen(function* () {
             liveCatalog = catalog;

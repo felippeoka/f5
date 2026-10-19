@@ -1,3 +1,4 @@
+import { ProviderNativeHistoryWorker } from "./ProviderNativeHistory.ts";
 import { ProviderContinuationWorker } from "../../provider/ProviderContinuationWorker.ts";
 import { CommandId } from "@t3tools/contracts";
 import { Effect, Layer, Option, Stream } from "effect";
@@ -37,9 +38,11 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const nativeSessionCleanupReactor = yield* NativeSessionCleanupReactor;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const continuationWorker = yield* Effect.serviceOption(ProviderContinuationWorker);
+  const nativeHistoryWorker = yield* Effect.serviceOption(ProviderNativeHistoryWorker);
 
   const start: OrchestrationReactorShape["start"] = Effect.gen(function* () {
     yield* providerRuntimeIngestion.start;
+    if (Option.isSome(nativeHistoryWorker)) yield* nativeHistoryWorker.value.start;
     yield* providerCommandReactor.start;
     yield* startThreadSnoozeReactor(orchestrationEngine);
     yield* reconcileWorkflowArchives(orchestrationEngine);

@@ -1,3 +1,4 @@
+import { retainNativeTurnRows } from "@t3tools/shared/nativeHistoryReconciliation";
 import { readSubmissionSource } from "../../provider/submissionProvenance.ts";
 import {
   ELICITATION_SUBMITTED_ACTIVITY_KIND,
@@ -170,7 +171,18 @@ function extractActivityRequestId(payload: unknown): ApprovalRequestId | null {
   return typeof requestId === "string" ? ApprovalRequestId.makeUnsafe(requestId) : null;
 }
 
-function retainedProjectionTurns(turns: ReadonlyArray<ProjectionTurn>, turnCount: number) {
+type RevertSelection = Extract<OrchestrationEvent, { type: "thread.reverted" }>["payload"];
+function retainedProjectionTurns(
+  turns: ReadonlyArray<ProjectionTurn>,
+  turnCount: number,
+  selection?: RevertSelection,
+) {
+  if (selection?.removedTurnIds)
+    return retainNativeTurnRows(turns, new Set(selection.removedTurnIds));
+  if (selection?.retainedTurnIds) {
+    const retained = new Set(selection.retainedTurnIds);
+    return turns.filter((turn) => turn.turnId !== null && retained.has(turn.turnId));
+  }
   return turns
     .filter((turn) => turn.turnId !== null)
     .toSorted((a, b) => a.requestedAt.localeCompare(b.requestedAt))
@@ -181,10 +193,17 @@ function retainProjectionMessagesAfterRevert(
   messages: ReadonlyArray<ProjectionThreadMessage>,
   turns: ReadonlyArray<ProjectionTurn>,
   turnCount: number,
+  selection?: RevertSelection,
 ): ReadonlyArray<ProjectionThreadMessage> {
+  if (selection?.removedTurnIds) {
+    const removedMessages = new Set(selection.removedMessageIds ?? []);
+    return retainNativeTurnRows(messages, new Set(selection.removedTurnIds)).filter(
+      (message) => !removedMessages.has(message.messageId),
+    );
+  }
   const retainedMessageIds = new Set<string>();
   const retainedTurnIds = new Set<string>();
-  const keptTurns = retainedProjectionTurns(turns, turnCount);
+  const keptTurns = retainedProjectionTurns(turns, turnCount, selection);
   for (const turn of keptTurns) {
     if (turn.turnId !== null) {
       retainedTurnIds.add(turn.turnId);
@@ -371,9 +390,12 @@ function retainProjectionActivitiesAfterRevert(
   activities: ReadonlyArray<ProjectionThreadActivity>,
   turns: ReadonlyArray<ProjectionTurn>,
   turnCount: number,
+  selection?: RevertSelection,
 ): ReadonlyArray<ProjectionThreadActivity> {
+  if (selection?.removedTurnIds)
+    return retainNativeTurnRows(activities, new Set(selection.removedTurnIds));
   const retainedTurnIds = new Set<string>(
-    retainedProjectionTurns(turns, turnCount).flatMap((turn) =>
+    retainedProjectionTurns(turns, turnCount, selection).flatMap((turn) =>
       turn.turnId === null ? [] : [turn.turnId],
     ),
   );
@@ -386,9 +408,12 @@ function retainProjectionProposedPlansAfterRevert(
   proposedPlans: ReadonlyArray<ProjectionThreadProposedPlan>,
   turns: ReadonlyArray<ProjectionTurn>,
   turnCount: number,
+  selection?: RevertSelection,
 ): ReadonlyArray<ProjectionThreadProposedPlan> {
+  if (selection?.removedTurnIds)
+    return retainNativeTurnRows(proposedPlans, new Set(selection.removedTurnIds));
   const retainedTurnIds = new Set<string>(
-    retainedProjectionTurns(turns, turnCount).flatMap((turn) =>
+    retainedProjectionTurns(turns, turnCount, selection).flatMap((turn) =>
       turn.turnId === null ? [] : [turn.turnId],
     ),
   );
@@ -1297,11 +1322,17 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
                   threadId: event.payload.threadId,
                 }),
                 event.payload.turnCount,
+                event.payload,
               ).flatMap((turn) => (turn.turnId === null ? [] : [turn.turnId])),
           );
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
-            latestTurnId: null,
+            latestTurnId:
+              event.payload.removedTurnIds &&
+              existingRow.value.latestTurnId &&
+              !event.payload.removedTurnIds.includes(existingRow.value.latestTurnId)
+                ? existingRow.value.latestTurnId
+                : null,
             // Same rule as the in-memory projector: TodoWrite snapshots clear;
             // native Task tool state suppresses discarded-turn tasks.
             ...(() => {
@@ -1311,11 +1342,30 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
                   tracking: existingRow.value.tasksTracking ?? null,
                 },
                 retainedTurnIds,
+                event.payload.removedTurnIds
+                  ? { removedTurnIds: new Set(event.payload.removedTurnIds) }
+                  : undefined,
               );
               return {
-                tasks: [...reverted.tasks],
-                tasksTurnId: null,
-                tasksUpdatedAt: null,
+                tasks:
+                  event.payload.removedTurnIds &&
+                  !existingRow.value.tasksTracking &&
+                  (existingRow.value.tasksTurnId === null ||
+                    !event.payload.removedTurnIds.includes(existingRow.value.tasksTurnId))
+                    ? existingRow.value.tasks
+                    : [...reverted.tasks],
+                tasksTurnId:
+                  event.payload.removedTurnIds &&
+                  existingRow.value.tasksTurnId &&
+                  !event.payload.removedTurnIds.includes(existingRow.value.tasksTurnId)
+                    ? existingRow.value.tasksTurnId
+                    : null,
+                tasksUpdatedAt:
+                  event.payload.removedTurnIds &&
+                  (existingRow.value.tasksTurnId === null ||
+                    !event.payload.removedTurnIds.includes(existingRow.value.tasksTurnId))
+                    ? existingRow.value.tasksUpdatedAt
+                    : null,
                 tasksTracking: reverted.tracking,
               };
             })(),
@@ -1396,6 +1446,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             existingRows,
             existingTurns,
             event.payload.turnCount,
+            event.payload,
           );
           if (keptRows.length === existingRows.length) {
             return;
@@ -1500,6 +1551,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             existingRows,
             existingTurns,
             event.payload.turnCount,
+            event.payload,
           );
           if (keptRows.length === existingRows.length) {
             return;
@@ -1555,6 +1607,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             existingRows,
             existingTurns,
             event.payload.turnCount,
+            event.payload,
           );
           if (keptRows.length === existingRows.length) {
             return;
@@ -1673,8 +1726,8 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             threadId: event.payload.threadId,
           });
           const retainedTurnIds = new Set(
-            retainedProjectionTurns(existingTurns, event.payload.turnCount).flatMap((turn) =>
-              turn.turnId === null ? [] : [turn.turnId],
+            retainedProjectionTurns(existingTurns, event.payload.turnCount, event.payload).flatMap(
+              (turn) => (turn.turnId === null ? [] : [turn.turnId]),
             ),
           );
           const removedTurnIds = [
@@ -1734,8 +1787,8 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             threadId: event.payload.threadId,
           });
           const retainedTurnIds = new Set(
-            retainedProjectionTurns(existingTurns, event.payload.turnCount).flatMap((turn) =>
-              turn.turnId === null ? [] : [turn.turnId],
+            retainedProjectionTurns(existingTurns, event.payload.turnCount, event.payload).flatMap(
+              (turn) => (turn.turnId === null ? [] : [turn.turnId]),
             ),
           );
           const removedTurnIds = existingRows
@@ -1900,7 +1953,16 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           event.type === "thread.reverted" ||
           (event.type === "thread.session-set" &&
             ["error", "stopped"].includes(event.payload.session.status));
-        if (releaseThread || turnId !== undefined)
+        if (event.type === "thread.reverted" && event.payload.removedTurnIds) {
+          if (event.payload.removedTurnIds.length)
+            yield* sql`UPDATE provider_turn_deliveries SET reservation_released_at = ${event.occurredAt}
+              WHERE thread_id = ${event.payload.threadId} AND state = 'accepted' AND reservation_released_at IS NULL
+                AND ${sql.in("provider_turn_id", event.payload.removedTurnIds)}`.pipe(
+              Effect.mapError(
+                toPersistenceSqlError("ProjectionPipeline.releaseNativeRewindReservation"),
+              ),
+            );
+        } else if (releaseThread || turnId !== undefined)
           yield* sql`
           UPDATE provider_turn_deliveries SET reservation_released_at = ${event.occurredAt}
           WHERE thread_id = ${event.payload.threadId} AND state = 'accepted' AND reservation_released_at IS NULL
@@ -2229,7 +2291,23 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           const existingTurns = yield* projectionTurnRepository.listByThreadId({
             threadId: event.payload.threadId,
           });
-          const keptTurns = retainedProjectionTurns(existingTurns, event.payload.turnCount);
+          const keptTurns = retainedProjectionTurns(
+            existingTurns,
+            event.payload.turnCount,
+            event.payload,
+          );
+          if (event.payload.removedTurnIds) {
+            for (const turnId of event.payload.removedTurnIds)
+              yield* sql`INSERT OR IGNORE INTO native_history_retired_turns(thread_id, turn_id, retired_at)
+                VALUES (${event.payload.threadId}, ${turnId}, ${event.occurredAt})`.pipe(
+                Effect.mapError(toPersistenceSqlError("ProjectionPipeline.retireNativeTurns")),
+              );
+            for (const turnId of event.payload.removedTurnIds)
+              yield* sql`DELETE FROM projection_turns WHERE thread_id = ${event.payload.threadId} AND turn_id = ${turnId}`.pipe(
+                Effect.mapError(toPersistenceSqlError("ProjectionPipeline.removeNativeTurns")),
+              );
+            return;
+          }
           yield* projectionTurnRepository.deleteByThreadId({
             threadId: event.payload.threadId,
           });
@@ -2259,6 +2337,21 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
     _attachmentSideEffects,
   ) =>
     Effect.gen(function* () {
+      if (event.type === "thread.reverted" && event.payload.removedTurnIds) {
+        const removed = new Set(event.payload.removedTurnIds);
+        for (const row of yield* projectionPendingApprovalRepository.listByThreadId({
+          threadId: event.payload.threadId,
+        })) {
+          if (row.turnId !== null && removed.has(row.turnId))
+            yield* projectionPendingApprovalRepository.upsert({
+              ...row,
+              status: "resolved",
+              decision: "cancel",
+              resolvedAt: event.occurredAt,
+            });
+        }
+        return;
+      }
       switch (event.type) {
         case "thread.activity-appended": {
           const requestId =
@@ -2400,7 +2493,9 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
         else yield* Effect.logWarning("Skipping invalid pending user input", { threadId });
       }
       const pendingEvent =
-        event.type === "thread.reverted" && event.payload.retainedTurnIds === undefined
+        event.type === "thread.reverted" &&
+        event.payload.retainedTurnIds === undefined &&
+        event.payload.removedTurnIds === undefined
           ? {
               ...event,
               payload: {
@@ -2408,6 +2503,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
                 retainedTurnIds: retainedProjectionTurns(
                   yield* projectionTurnRepository.listByThreadId({ threadId }),
                   event.payload.turnCount,
+                  event.payload,
                 ).flatMap((turn) => (turn.turnId === null ? [] : [turn.turnId])),
               },
             }

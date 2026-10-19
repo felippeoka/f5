@@ -1045,3 +1045,17 @@ it("keeps buffered native continuation identities internal to server queue comma
   const { continuationRequestId: _internal, ...client } = command;
   assert.doesNotThrow(() => Schema.decodeUnknownSync(ClientOrchestrationCommand)(client));
 });
+
+it("rejects client commands that try to reconcile native provider history", () => {
+  assert.throws(() =>
+    Schema.decodeUnknownSync(ClientOrchestrationCommand)({
+      type: "thread.native-history.reconcile",
+      commandId: "native-reconcile",
+      threadId: "thread",
+      providerInstanceId: "pi",
+      expectedTurnId: "native-turn",
+      removedTurnIds: ["old-turn"],
+      createdAt: "2026-10-19T00:00:00.000Z",
+    }),
+  );
+});

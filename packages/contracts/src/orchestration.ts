@@ -1795,6 +1795,17 @@ const ThreadSessionNotesRecordCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+// Only an owned provider session can reconcile an already-observed native rewind.
+const ThreadNativeHistoryReconcileCommand = Schema.Struct({
+  type: Schema.Literal("thread.native-history.reconcile"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  providerInstanceId: ProviderInstanceId,
+  expectedTurnId: TurnId,
+  removedTurnIds: Schema.Array(TurnId).check(Schema.isMaxLength(500)),
+  createdAt: IsoDateTime,
+});
+
 const ThreadRevertCompleteCommand = Schema.Struct({
   retainedTurnIds: Schema.optional(Schema.Array(TurnId)),
   operationId: Schema.optional(CommandId),
@@ -1906,6 +1917,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadCompactedRecordCommand,
   ThreadSessionNotesRecordCommand,
   ThreadRevertCompleteCommand,
+  ThreadNativeHistoryReconcileCommand,
   ThreadTitleGenerationStartCommand,
   ThreadTitleRegenerationCompleteCommand,
   ThreadTitleRegenerationFailCommand,
@@ -2329,6 +2341,10 @@ export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
 });
 
 export const ThreadRevertedPayload = Schema.Struct({
+  /** Native reconciliation removes only strongly identified abandoned turns. */
+  removedTurnIds: Schema.optional(Schema.Array(TurnId).check(Schema.isMaxLength(500))),
+  nativeTurnId: Schema.optional(TurnId),
+  removedMessageIds: Schema.optional(Schema.Array(MessageId).check(Schema.isMaxLength(1000))),
   retainedTurnIds: Schema.optional(Schema.Array(TurnId)),
   operationId: Schema.optional(CommandId),
   threadId: ThreadId,

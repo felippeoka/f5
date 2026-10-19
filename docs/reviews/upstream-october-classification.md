@@ -206,3 +206,13 @@ instance capability routing. The focused server run passes 285 tests; all eight
 typechecks pass. Installed Pi/account evidence, native rewind projection
 reconciliation and required full release gates remain outstanding. These changes
 do not promote any Pi disposition or satisfy the catch-up cut line.
+
+Pi native in-session rewind reconciliation is now implemented behind exact active
+instance/turn ownership and complete same-session ancestry read-back. It removes
+only captured abandoned turns and their persisted message links, preserves other
+providers and unlocated history, and pauses queued prompts for review. Migration
+128 prevents late writes from resurrecting retired turns across restart. Protocol
+38 keeps older clients from applying native reconciliation as prefix truncation.
+The real built-server/SQLite/Chromium fixture passes without a fork or extra prompt.
+Installed Pi/account evidence, remaining metadata follow-ups and the full release
+gates still prevent marking 15l or the catch-up delivered.

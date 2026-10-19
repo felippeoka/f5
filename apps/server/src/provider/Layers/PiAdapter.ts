@@ -1,3 +1,4 @@
+import type { NativeHistoryReconciliation } from "../ProviderNativeHistory.ts";
 import { randomUUID } from "node:crypto";
 import {
   ApprovalRequestId,
@@ -112,6 +113,9 @@ export interface PiAdapterOptions {
   readonly environment: NodeJS.ProcessEnv;
   readonly cacheDir: string;
   readonly offerContinuation?: (request: ProviderContinuationRequest) => Effect.Effect<boolean>;
+  readonly reconcileNativeHistory?: (
+    request: NativeHistoryReconciliation,
+  ) => Effect.Effect<boolean>;
   readonly onCatalog?: (catalog: PiCatalog) => Effect.Effect<void>;
   readonly beforeLaunch?: Effect.Effect<void, PiRpcError, Scope.Scope>;
   readonly createMcpSession?: (
@@ -304,9 +308,10 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
         const state = yield* ctx.rpc
           .request({ type: "get_state" }, 2000)
           .pipe(Effect.orElseSucceed(() => undefined));
-        const nativeHistoryChanged =
-          boundary?.retainedUserEntryIds !== undefined ||
-          piRecordString(state, "sessionFile") !== ctx.cursor.sessionFile;
+        const previousCursor = ctx.cursor;
+        const sameSession = piRecordString(state, "sessionFile") === previousCursor.sessionFile;
+        let nativeHistoryChanged =
+          !boundary || boundary.retainedUserEntryIds !== undefined || !sameSession;
         if (nativeHistoryChanged) ctx.ready = false;
         const activeEntries = new Set(tree ? piActiveBranch(tree)?.map((entry) => entry.id) : []);
         if (boundary)
@@ -331,6 +336,58 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
                   : []),
             ].slice(-500),
           };
+        if (
+          boundary?.retainedUserEntryIds &&
+          sameSession &&
+          options.reconcileNativeHistory &&
+          piRecordField(state, "isStreaming") === false
+        ) {
+          const cursor = ctx.cursor;
+          const branchHash = piHistoryBoundaryHash([...activeEntries]);
+          const verify = () =>
+            readPiHistory({
+              threadId: ctx.threadId,
+              cursor,
+              request: (record) =>
+                ctx.rpc.request(record).pipe(
+                  Effect.mapError(
+                    () =>
+                      new PiRpcError({
+                        operation: "history",
+                        detail: "Pi native history verification failed.",
+                      }),
+                  ),
+                ),
+            }).pipe(
+              Effect.map(
+                (snapshot) => piHistoryBoundaryHash(snapshot.activeEntryIds) === branchHash,
+              ),
+            );
+          const reconciled = yield* Effect.gen(function* () {
+            if (!(yield* verify())) return false;
+            const accepted = yield* options.reconcileNativeHistory!({
+              requestId: `pi-native-rewind:${ctx.generation}:${action.turnId}`,
+              threadId: ctx.threadId,
+              providerInstanceId: options.instanceId,
+              turnId: TurnId.make(action.turnId),
+              removedTurnIds: previousCursor.boundaries
+                .filter((known) => !activeEntries.has(known.entryId))
+                .map((known) => TurnId.make(known.turnId)),
+              isCurrent: Effect.sync(
+                () =>
+                  !closing &&
+                  !ctx.closed &&
+                  sessions.get(ctx.threadId) === ctx &&
+                  ctx.cursor === cursor,
+              ),
+            });
+            return accepted && (yield* verify());
+          }).pipe(Effect.orElseSucceed(() => false));
+          if (reconciled) {
+            nativeHistoryChanged = false;
+            ctx.ready = true;
+          }
+        }
         yield* completeOpenItems(
           ctx,
           action.turnId,

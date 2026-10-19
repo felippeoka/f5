@@ -68,7 +68,10 @@ a new prompt. Buffers and concurrent admission are bounded.
 ## Current integration limits
 
 The full October catch-up remains in progress. Pi computer automation and native
-history import are unavailable. Native in-session rewinds and unexpected native
-session switches block new prompts until projection reconciliation is implemented.
-Real Pi account validation remains pending. These items and the required full
-validation gates prevent marking the Pi phase delivered.
+history import are unavailable. Verified in-session rewinds now reconcile captured
+host turns against Pi's active ancestry. Unlocated turns and other providers remain;
+queued prompts pause for review, and late writes cannot recreate retired turns.
+Reconciliation needs the same idle native session before and after acknowledgement.
+Unexpected native session switches, incomplete ancestry or unconfirmed projection
+still block new prompts. Real Pi account validation remains pending. These items
+and the required full validation gates prevent marking the Pi phase delivered.

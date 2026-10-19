@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./nativeHistoryReconciliation": {
+      "types": "./src/nativeHistoryReconciliation.ts",
+      "import": "./src/nativeHistoryReconciliation.ts"
+    },
     "./forgeCapabilities": {
       "types": "./src/forgeCapabilities.ts",
       "import": "./src/forgeCapabilities.ts"

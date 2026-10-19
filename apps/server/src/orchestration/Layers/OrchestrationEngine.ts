@@ -10,7 +10,7 @@ import { GitCore } from "../../git/Services/GitCore.ts";
 import type { OrchestrationReadModel, ProjectId, ThreadId } from "@t3tools/contracts";
 import { NextTurnQueueStore } from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { canonicalRequestHash } from "../../nextTurnQueue/canonicalRequestHash.ts";
-import { OrchestrationCommand, OrchestrationEvent } from "@t3tools/contracts";
+import { MessageId, OrchestrationCommand, OrchestrationEvent } from "@t3tools/contracts";
 import {
   Cause,
   Deferred,
@@ -123,6 +123,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const diskSpaceMonitor = yield* Effect.serviceOption(DiskSpaceMonitor);
 
   let readModel = createEmptyReadModel(new Date().toISOString());
+  const nativeReconciledThreads = new Set<string>();
 
   const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
   const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
@@ -235,10 +236,38 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           });
         }
 
+        const command = envelope.command;
+        if ("threadId" in command && nativeReconciledThreads.has(command.threadId)) {
+          const turnId =
+            "turnId" in command
+              ? command.turnId
+              : command.type === "thread.activity.append"
+                ? command.activity.turnId
+                : command.type === "thread.proposed-plan.upsert"
+                  ? command.proposedPlan.turnId
+                  : command.type === "thread.command-execution.record"
+                    ? command.commandExecution.turnId
+                    : command.type === "thread.file-change.record"
+                      ? command.fileChange.turnId
+                      : command.type === "thread.session.set"
+                        ? (command.session.activeTurnId ?? command.settledTurnId)
+                        : undefined;
+          if (
+            turnId &&
+            (yield* sql`SELECT 1 FROM native_history_retired_turns WHERE thread_id = ${command.threadId} AND turn_id = ${turnId}`)
+              .length
+          )
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "This turn was retired by verified native history reconciliation.",
+            });
+        }
+
         if (
           envelope.command.type === "thread.turn.start" ||
           envelope.command.type === "thread.turn.steer" ||
-          envelope.command.type === "thread.conversation.revert"
+          envelope.command.type === "thread.conversation.revert" ||
+          envelope.command.type === "thread.native-history.reconcile"
         ) {
           const active = yield* sql<{
             readonly operationId: string;
@@ -441,7 +470,21 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 "Conversations still reference this project workspace. Create a separate project for the new workspace.",
             });
         }
+        const nativeRemovedMessageIds =
+          envelope.command.type === "thread.native-history.reconcile" &&
+          envelope.command.removedTurnIds.length
+            ? (yield* sql<{ pendingMessageId: string | null; assistantMessageId: string | null }>`
+              SELECT pending_message_id AS "pendingMessageId", assistant_message_id AS "assistantMessageId"
+              FROM projection_turns WHERE thread_id = ${envelope.command.threadId}
+                AND ${sql.in("turn_id", envelope.command.removedTurnIds)}
+            `).flatMap((row) =>
+                [row.pendingMessageId, row.assistantMessageId].flatMap((id) =>
+                  id ? [MessageId.make(id)] : [],
+                ),
+              )
+            : [];
         const eventBase = yield* decideOrchestrationCommand({
+          nativeRemovedMessageIds,
           command: envelope.command,
           readModel,
           ...(envelope.command.type === "thread.turn.start" && providerRegistry._tag === "Some"
@@ -715,6 +758,20 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                     yield* sql`UPDATE rewind_operations SET draft_resolved_at = ${savedEvent.occurredAt} WHERE operation_id = ${operationId} AND thread_id = ${threadId} AND state = 'completed'`;
                   }
                 }
+                if (savedEvent.type === "thread.reverted" && savedEvent.payload.removedTurnIds) {
+                  const { threadId } = savedEvent.payload;
+                  for (const turnId of savedEvent.payload.removedTurnIds)
+                    yield* sql`INSERT OR IGNORE INTO native_history_retired_turns(thread_id, turn_id, retired_at)
+                      VALUES (${threadId}, ${turnId}, ${savedEvent.occurredAt})`;
+                  // Queued prompts were written against the abandoned branch. Keep them
+                  // for review and preserve any pause the user/environment already chose.
+                  yield* sql`INSERT INTO next_turn_queue_state(thread_id, paused, pause_reason_code, revision, updated_at)
+                    VALUES (${threadId}, 1, 'thread_reverted', 1, ${savedEvent.occurredAt})
+                    ON CONFLICT(thread_id) DO UPDATE SET paused = 1,
+                      pause_reason_code = CASE WHEN paused = 1 THEN pause_reason_code ELSE 'thread_reverted' END,
+                      revision = revision + 1, updated_at = ${savedEvent.occurredAt}`;
+                  yield* sql`DELETE FROM restart_turn_markers WHERE thread_id = ${threadId}`;
+                }
                 if (savedEvent.type === "thread.reverted" && savedEvent.payload.operationId) {
                   const { operationId, threadId } = savedEvent.payload;
                   yield* sql`DELETE FROM restart_turn_markers WHERE thread_id = ${threadId}`;
@@ -828,6 +885,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           );
 
         readModel = committedCommand.nextReadModel;
+        for (const event of committedCommand.committedEvents)
+          if (event.type === "thread.reverted" && event.payload.removedTurnIds?.length)
+            nativeReconciledThreads.add(event.payload.threadId);
         for (const [index, event] of committedCommand.committedEvents.entries()) {
           yield* PubSub.publish(eventPubSub, event);
           if (index === 0) {
@@ -918,6 +978,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   };
 
   yield* withStartupPhaseTiming("orchestration.projection.bootstrap", projectionPipeline.bootstrap);
+  for (const row of yield* sql<{
+    threadId: string;
+  }>`SELECT DISTINCT thread_id AS "threadId" FROM native_history_retired_turns`)
+    nativeReconciledThreads.add(row.threadId);
 
   let replayFromSequence = 0;
   let bootstrapSource: "projection-snapshot" | "event-replay" = "event-replay";

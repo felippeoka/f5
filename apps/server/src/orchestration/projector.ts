@@ -1,4 +1,8 @@
 import {
+  reconcileNativeHistoryProjection,
+  retainNativeTurnRows,
+} from "@t3tools/shared/nativeHistoryReconciliation";
+import {
   ThreadSettledPayload,
   ThreadUnsettledPayload,
   ThreadAutoSettleChangedPayload,
@@ -1517,6 +1521,31 @@ export function projectEvent(
           const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
           if (!thread) {
             return nextBase;
+          }
+
+          if (payload.removedTurnIds) {
+            const removed = new Set(payload.removedTurnIds);
+            return {
+              ...nextBase,
+              threads: updateThread(nextBase.threads, payload.threadId, {
+                ...reconcileNativeHistoryProjection(
+                  thread,
+                  removed,
+                  new Set(payload.removedMessageIds ?? []),
+                ),
+                checkpoints: retainNativeTurnRows(thread.checkpoints, removed),
+                pendingUserInputs: projectPendingUserInputs(thread.pendingUserInputs ?? [], event),
+                session: thread.session
+                  ? {
+                      ...thread.session,
+                      estimatedContextTokens: undefined,
+                      tokenUsageSource: undefined,
+                    }
+                  : null,
+                lastInteractionAt: event.occurredAt,
+                updatedAt: event.occurredAt,
+              }),
+            };
           }
 
           const checkpoints = thread.checkpoints

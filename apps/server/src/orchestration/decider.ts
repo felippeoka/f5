@@ -86,9 +86,11 @@ const decideCommand = Effect.fn("decideOrchestrationCommand")(function* ({
   command,
   readModel,
   providerInstances = [],
+  nativeRemovedMessageIds = [],
 }: {
   readonly command: OrchestrationCommand;
   readonly readModel: OrchestrationReadModel;
+  readonly nativeRemovedMessageIds?: readonly import("@t3tools/contracts").MessageId[];
   readonly providerInstances?: ReadonlyArray<Pick<ServerProvider, "instanceId" | "driver">>;
 }): Effect.fn.Return<
   Omit<OrchestrationEvent, "sequence"> | ReadonlyArray<Omit<OrchestrationEvent, "sequence">>,
@@ -2063,6 +2065,43 @@ const decideCommand = Effect.fn("decideOrchestrationCommand")(function* ({
           threadId: command.threadId,
           turnId: command.turnId,
           processingQuiescedAt: command.processingQuiescedAt,
+        },
+      };
+    }
+
+    case "thread.native-history.reconcile": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      if (
+        thread.deletedAt ||
+        thread.archivedAt ||
+        thread.session?.providerName !== "pi" ||
+        thread.session.providerInstanceId !== command.providerInstanceId ||
+        thread.session.status !== "running" ||
+        thread.session.activeTurnId !== command.expectedTurnId ||
+        thread.latestTurn?.turnId !== command.expectedTurnId ||
+        command.removedTurnIds.includes(command.expectedTurnId)
+      )
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The native history owner changed before reconciliation.",
+        });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.reverted",
+        payload: {
+          threadId: command.threadId,
+          turnCount: Math.max(
+            0,
+            ...thread.checkpoints.map((checkpoint) => checkpoint.checkpointTurnCount),
+          ),
+          removedTurnIds: [...new Set(command.removedTurnIds)],
+          removedMessageIds: [...new Set(nativeRemovedMessageIds)],
+          nativeTurnId: command.expectedTurnId,
         },
       };
     }

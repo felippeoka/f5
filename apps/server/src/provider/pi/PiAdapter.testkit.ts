@@ -50,7 +50,7 @@ case 'prompt':{
  const userId='u'+entries.length, assistantId='a'+entries.length;
  entries.push({id:userId,parentId:leafId,type:'message',message:{role:'user',content:record.message}});
  entries.push({id:assistantId,parentId:userId,type:'message',message:{role:'assistant',content:[{type:'text',text:'Pi reply'}]}});leafId=assistantId;
- if(mode==='native-rewind'&&entries.length>=4)leafId=entries[0].id;
+ if((mode==='native-rewind'&&entries.length>=4)||(mode==='native-rewind-deep'&&entries.length>=6))leafId=entries[0].id;
  if(mode==='native-switch'&&entries.length>=4)sessionFile+='.switched';
  emit({type:'agent_start'});emit({type:'message_start',message:{role:'assistant'}});
  if(mode!=='final-only')emit({type:'message_update',assistantMessageEvent:{type:'text_delta',contentIndex:0,delta:'Pi reply'}});
