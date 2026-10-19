@@ -5939,12 +5939,20 @@
     {
       "upstreamSha": "339179f50a84dc599cce373dbb48f172f182f44e",
       "classification": "planned:15j",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: feat(pr): delete branches after merge or close (#19257).",
+      "reason": "Planned: implementation and focused scenario evidence exist for opt-in merge/close branch cleanup with fresh source permissions, exact-head remote/local compare-and-delete, occupied-worktree preservation and read-only unknown-outcome recovery; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(pr): delete branches after merge or close (#19257).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15j-pr-19257"],
         "targetModules": ["apps/server/src/prHub", "apps/web/src/components/prHub"]
-      }
+      },
+      "f5Shas": ["9bec7e8c0639014203a1e3bb3f81f6102c44f8d4"],
+      "evidence": [
+        "apps/server/src/git/githubBranchDeletion.test.ts:1",
+        "apps/server/src/prHub/localBranchCleanup.test.ts:1",
+        "apps/server/src/prHub/PrHubExtensions.test.ts:1",
+        "apps/server/src/git/Layers/GitCore.extended.ts:1",
+        "apps/web/src/components/prHub/PrNativeActions.browser.tsx:1"
+      ]
     },
     {
       "upstreamSha": "e536bfd33bc3c351997141d93790df75eeded7b9",
@@ -9162,12 +9170,17 @@
     {
       "upstreamSha": "9b40d3746388e573370488f73b50e1e869b79a45",
       "classification": "planned:15j",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: feat(pull-requests): quick actions follow each host's capabilities, not GitHub (#17774).",
+      "reason": "Planned: implementation and focused scenario evidence exist for shared forge capability defaults narrowed by server permissions and fresh PR state; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(pull-requests): quick actions follow each host's capabilities, not GitHub (#17774).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15j-pr-17774"],
         "targetModules": ["apps/server/src/prHub", "apps/web/src/components/prHub"]
-      }
+      },
+      "f5Shas": ["2dab633b1158538e98e083e1eefc0fbf392017f0"],
+      "evidence": [
+        "apps/web/src/lib/prQuickActions.test.ts:1",
+        "apps/web/src/components/prHub/PrNativeActions.browser.tsx:1"
+      ]
     },
     {
       "upstreamSha": "b0249ac8711703f1a1b8cd0f3acd11155f5bf172",
@@ -12027,12 +12040,17 @@
     {
       "upstreamSha": "ab28039ef77ca8847c6bfe845c3502ff7e348c30",
       "classification": "planned:15j",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: feat(web): add fast actions to linked pull requests (#16627).",
+      "reason": "Planned: implementation and focused scenario evidence exist for linked-PR quick actions routed through a fresh thread-owned PR panel and explicit confirmation; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(web): add fast actions to linked pull requests (#16627).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15j-pr-16627"],
         "targetModules": ["apps/server/src/prHub", "apps/web/src/components/prHub"]
-      }
+      },
+      "f5Shas": ["2dab633b1158538e98e083e1eefc0fbf392017f0"],
+      "evidence": [
+        "apps/web/src/components/ThreadPrLinks.browser.tsx:1",
+        "apps/web/src/components/prHub/PrNativeActions.browser.tsx:1"
+      ]
     },
     {
       "upstreamSha": "c5c6f9cb485b2db0f205797394bc95f9f575d139",
@@ -12077,12 +12095,17 @@
     {
       "upstreamSha": "d8d037eae1b77a77f372fd1afd2662a31ebe37c8",
       "classification": "planned:15j",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: fix(web): open pull request row actions on right-click (#16612).",
+      "reason": "Planned: implementation and focused scenario evidence exist for inbox and linked-PR row context menus with explicit saved-operation confirmation; delivery remains deferred until the required full-workspace release gate passes. Upstream change: fix(web): open pull request row actions on right-click (#16612).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15j-pr-16612"],
         "targetModules": ["apps/server/src/prHub", "apps/web/src/components/prHub"]
-      }
+      },
+      "f5Shas": ["2dab633b1158538e98e083e1eefc0fbf392017f0"],
+      "evidence": [
+        "apps/web/src/components/prHub/PrSpineList.browser.tsx:1",
+        "apps/web/src/components/ThreadPrLinks.browser.tsx:1"
+      ]
     },
     {
       "upstreamSha": "13aabf3d7d0ec13e902234e86d3df27149c0e4a9",
@@ -13681,12 +13704,17 @@
     {
       "upstreamSha": "33b7d7b3ae2a7b1c3d1bd58c04cb9bf581ec2fe7",
       "classification": "planned:15j",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: feat(web): add shift-held pull request quick actions (#15549).",
+      "reason": "Planned: implementation and focused scenario evidence exist for Shift-only quick actions clearing on other modifiers, focus and visibility changes; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(web): add shift-held pull request quick actions (#15549).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15j-pr-15549"],
         "targetModules": ["apps/server/src/prHub", "apps/web/src/components/prHub"]
-      }
+      },
+      "f5Shas": ["2dab633b1158538e98e083e1eefc0fbf392017f0"],
+      "evidence": [
+        "apps/web/src/components/ThreadPrLinks.browser.tsx:1",
+        "apps/web/src/lib/prQuickActions.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "eac52f0087d9ba5dee5542f24788d1482affae43",

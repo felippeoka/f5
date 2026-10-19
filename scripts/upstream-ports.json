@@ -6931,10 +6931,18 @@
     {
       "upstreamSha": "339179f50a84dc599cce373dbb48f172f182f44e",
       "subject": "feat(pr): delete branches after merge or close (#19257)",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: feat(pr): delete branches after merge or close (#19257).",
+      "reason": "Planned: implementation and focused scenario evidence exist for opt-in merge/close branch cleanup with fresh source permissions, exact-head remote/local compare-and-delete, occupied-worktree preservation and read-only unknown-outcome recovery; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(pr): delete branches after merge or close (#19257).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15j"
+      "plannedWorkstream": "15j",
+      "f5Shas": ["9bec7e8c0639014203a1e3bb3f81f6102c44f8d4"],
+      "evidence": [
+        "apps/server/src/git/githubBranchDeletion.test.ts:1",
+        "apps/server/src/prHub/localBranchCleanup.test.ts:1",
+        "apps/server/src/prHub/PrHubExtensions.test.ts:1",
+        "apps/server/src/git/Layers/GitCore.extended.ts:1",
+        "apps/web/src/components/prHub/PrNativeActions.browser.tsx:1"
+      ]
     },
     {
       "upstreamSha": "33a03c8a7bf4a398f410c9e6def903531237958a",
@@ -6975,10 +6983,15 @@
     {
       "upstreamSha": "33b7d7b3ae2a7b1c3d1bd58c04cb9bf581ec2fe7",
       "subject": "feat(web): add shift-held pull request quick actions (#15549)",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: feat(web): add shift-held pull request quick actions (#15549).",
+      "reason": "Planned: implementation and focused scenario evidence exist for Shift-only quick actions clearing on other modifiers, focus and visibility changes; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(web): add shift-held pull request quick actions (#15549).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15j"
+      "plannedWorkstream": "15j",
+      "f5Shas": ["2dab633b1158538e98e083e1eefc0fbf392017f0"],
+      "evidence": [
+        "apps/web/src/components/ThreadPrLinks.browser.tsx:1",
+        "apps/web/src/lib/prQuickActions.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "33c1e36fd097fe4f8e4498db653ee97b17184791",
@@ -20748,10 +20761,15 @@
     {
       "upstreamSha": "9b40d3746388e573370488f73b50e1e869b79a45",
       "subject": "feat(pull-requests): quick actions follow each host's capabilities, not GitHub (#17774)",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: feat(pull-requests): quick actions follow each host's capabilities, not GitHub (#17774).",
+      "reason": "Planned: implementation and focused scenario evidence exist for shared forge capability defaults narrowed by server permissions and fresh PR state; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(pull-requests): quick actions follow each host's capabilities, not GitHub (#17774).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15j"
+      "plannedWorkstream": "15j",
+      "f5Shas": ["2dab633b1158538e98e083e1eefc0fbf392017f0"],
+      "evidence": [
+        "apps/web/src/lib/prQuickActions.test.ts:1",
+        "apps/web/src/components/prHub/PrNativeActions.browser.tsx:1"
+      ]
     },
     {
       "upstreamSha": "9b5d416872591d215c4a16d6f87798c8486522d8",
@@ -22729,10 +22747,15 @@
     {
       "upstreamSha": "ab28039ef77ca8847c6bfe845c3502ff7e348c30",
       "subject": "feat(web): add fast actions to linked pull requests (#16627)",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: feat(web): add fast actions to linked pull requests (#16627).",
+      "reason": "Planned: implementation and focused scenario evidence exist for linked-PR quick actions routed through a fresh thread-owned PR panel and explicit confirmation; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(web): add fast actions to linked pull requests (#16627).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15j"
+      "plannedWorkstream": "15j",
+      "f5Shas": ["2dab633b1158538e98e083e1eefc0fbf392017f0"],
+      "evidence": [
+        "apps/web/src/components/ThreadPrLinks.browser.tsx:1",
+        "apps/web/src/components/prHub/PrNativeActions.browser.tsx:1"
+      ]
     },
     {
       "upstreamSha": "ab3a3cd162d90fd9f01ac62efdb9d4ad55c33639",
@@ -28691,10 +28714,15 @@
     {
       "upstreamSha": "d8d037eae1b77a77f372fd1afd2662a31ebe37c8",
       "subject": "fix(web): open pull request row actions on right-click (#16612)",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: fix(web): open pull request row actions on right-click (#16612).",
+      "reason": "Planned: implementation and focused scenario evidence exist for inbox and linked-PR row context menus with explicit saved-operation confirmation; delivery remains deferred until the required full-workspace release gate passes. Upstream change: fix(web): open pull request row actions on right-click (#16612).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15j"
+      "plannedWorkstream": "15j",
+      "f5Shas": ["2dab633b1158538e98e083e1eefc0fbf392017f0"],
+      "evidence": [
+        "apps/web/src/components/prHub/PrSpineList.browser.tsx:1",
+        "apps/web/src/components/ThreadPrLinks.browser.tsx:1"
+      ]
     },
     {
       "upstreamSha": "d9068d38099fe5cb4f3fed4cb5455fee878db491",
