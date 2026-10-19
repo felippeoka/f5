@@ -108,6 +108,10 @@
       "types": "./src/serverSettings.ts",
       "import": "./src/serverSettings.ts"
     },
+    "./subagentDisplay": {
+      "types": "./src/subagentDisplay.ts",
+      "import": "./src/subagentDisplay.ts"
+    },
     "./toolActivity": {
       "types": "./src/toolActivity.ts",
       "import": "./src/toolActivity.ts"

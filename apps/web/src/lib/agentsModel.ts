@@ -1,3 +1,4 @@
+import { formatSubagentDisplayTitle } from "@t3tools/shared/subagentDisplay";
 import type {
   AgentsSnapshot,
   ProviderInstanceId,
@@ -426,13 +427,13 @@ function panelEntryTitle(
   entry: ThreadBackgroundWorkEntry,
   detail: AgentActivityDetail | undefined,
 ): string {
-  return (
+  const title =
     asTrimmedString(entry.title) ??
     detail?.description ??
     detail?.path ??
     humanizeType(entry.phase ?? detail?.type ?? null) ??
-    (entry.kind === "workflow" ? "Workflow work" : "Subagent")
-  );
+    (entry.kind === "workflow" ? "Workflow work" : "Subagent");
+  return entry.kind === "agent" ? formatSubagentDisplayTitle(title) : title;
 }
 
 function matchesStatus(entry: AgentsPanelEntry, status: AgentsStatusFilter): boolean {

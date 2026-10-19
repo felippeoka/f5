@@ -456,3 +456,17 @@ it("resolves only the task's recorded provider instance and driver", () => {
     ),
   ).toBeUndefined();
 });
+
+it("formats native subagent paths as display names while preserving shell titles", () => {
+  const title = "Subagent: /root/coordinator/review_api";
+  const model = derive([
+    workEntry({ workItemId: "agent-title", kind: "agent", title }),
+    workEntry({ workItemId: "shell-title", kind: "shell", title }),
+  ]);
+  expect(model.agents.find((agent) => agent.nativeWorkItemId === "agent-title")?.title).toBe(
+    "Review Api",
+  );
+  expect(model.backgroundTasks.find((task) => task.nativeWorkItemId === "shell-title")?.title).toBe(
+    title,
+  );
+});
