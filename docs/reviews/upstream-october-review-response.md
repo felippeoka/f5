@@ -1287,3 +1287,40 @@ SDK is 1.14.33 and the local supported CLI reports 1.18.32. Its task calls have
 no OpenCode 2 inbox/report path. The joined-report settlement scenario is therefore
 not applicable to this supported protocol. This individual classification does not
 discard other OpenCode fixes or add OpenCode 2 support.
+
+The mixed Copilot #17714 patch needs an F5 adaptation even though native child
+threads are excluded: its attributed child text, reasoning and tools reproduce in
+F5's parent stream. The local Copilot ACP runtime now subscribes to the five raw
+attribution events and filters private frames on the ordered wire reader, before
+text coalescing. Public parent text is retained even when it is byte-identical to
+a child's chunk. Other configured executables retain their existing capabilities.
+Ownership is session-scoped, bounded and cleared on disposal; late child tools
+remain private after a terminal raw event. Unattributed chunks cannot prove parent
+ownership while native children are active. Filtered activity still advances native
+resume-replay liveness. A real stdio fixture fails before the change and passes in
+both hardening modes. All 68 focused ACP tests, all eight typechecks, formatter and
+lint pass. Native task-card lifecycle and installed-Copilot workflow validation
+remain review obligations; this is partial evidence, not a completed 15r claim.
+
+Source inspection also finds that the shared ACP protocol retains an unbounded
+raw notification copy alongside reliable typed delivery. The session wrapper never
+exposes that diagnostic stream. It now drains the copy in its own scope so the
+new feed does not accumulate those frames; the callback delivery path is preserved.
+The same real-transport suites verify notification delivery and process disposal.
+This is structural retention evidence, not a retained-heap benchmark result.
+
+Source inspection closes #15281 as a native-child-thread UI exclusion. Both runtime
+files add and render `SubagentNotificationLink`, resolving the parent's projected
+child-thread record and linking to that child. F5 has no such notification source,
+child-thread projection or native subagent navigation. Its independent Agents
+panel retains completed work through its existing lifecycle instead.
+
+At the preceding names checkpoint the complete server suite reports 5,418 passing
+cases, 12 skips and only the three known launcher identity failures. The required
+full run passes shared (742; one skip), desktop (570), effect-acp (21) and marketing
+(12), then fails the same two scripts identity cases (332 pass) and interrupts the
+remaining workspaces. The five-task build and fresh built Node/SQLite/Chromium Pi
+rewind regression pass: one child, three intentional prompts, no extra prompt or
+fork, exact reconciliation, an empty paused queue and no browser errors. This
+checkpoint predates the subsequent Copilot change. Required release gates and
+the full catch-up remain incomplete.

@@ -152,6 +152,7 @@ describe("October 2026 classification artifact", () => {
       "d668ffcd64d74daba16520cbbfb0fdb431983eac",
       "1550058056ba660b8581c8eda990c9d40c493a4b",
       "22af947e0d353c9e89c6db2a268836baa71bece5",
+      "dab26f582cf7826fec67fbed64b46f59f3421280",
     ])
       expect(bySha.get(sha)?.disposition).toBe("not-applicable");
   });

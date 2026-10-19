@@ -9051,12 +9051,18 @@
     {
       "upstreamSha": "818e2be75e1a68bbcac122eac1b6fb815ccf4b73",
       "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): route Copilot ACP subagent output into subagent threads (#17714).",
+      "reason": "Planned: implementation and focused evidence exist for the explicit local Copilot ACP runtime requests bounded raw attribution and filters private child text, reasoning and tool frames before parent coalescing; a real stdio reproduction fails before the fix and passes in both hardening modes, including identical parent/child text, late frames, ownership bounds and disposal. Native child-thread UI remains excluded; remaining Agents lifecycle and installed-provider validation are deferred. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(server): route Copilot ACP subagent output into subagent threads (#17714).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15r-pr-17714"],
         "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      },
+      "f5Shas": ["17d7e773a76af058efae7d74d2414bb42df749cf"],
+      "evidence": [
+        "apps/server/src/provider/acp/CopilotAcpRouting.test.ts:1",
+        "apps/server/src/provider/acp/CustomAcpSupport.test.ts:47",
+        "apps/server/src/provider/acp/AcpSessionRuntime.ts:408"
+      ]
     },
     {
       "upstreamSha": "9afde1c6dbe00d2b87829732c88789c10f3429c0",
@@ -14224,13 +14230,10 @@
     },
     {
       "upstreamSha": "dab26f582cf7826fec67fbed64b46f59f3421280",
-      "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): subagent finish notifications look like subagent cards (#15281).",
+      "classification": "not-applicable:upstream-only-subsystem:lineage-delegation",
+      "reason": "Not-applicable: both runtime files add or render SubagentNotificationLink from a parent's projected native child-thread record and navigate to that child. F5 has no such notification source, native child-thread projection or subagent child-thread navigation, and retains completed work in its independent Agents panel. Upstream change: fix(web): subagent finish notifications look like subagent cards (#15281).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-15281"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:123"]
     },
     {
       "upstreamSha": "2a455570e6ee70a59241c30126b50c7df1696a6a",
