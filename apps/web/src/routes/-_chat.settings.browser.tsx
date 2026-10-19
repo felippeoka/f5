@@ -378,6 +378,7 @@ async function renderSettingsRoute(
     initialEntries: [initialEntry],
   });
   const router = getRouter(history);
+  await router.load();
   const screen = await render(<RouterProvider router={router} />);
 
   await vi.waitFor(() => {
@@ -1107,6 +1108,34 @@ describe("settings route", () => {
           document.querySelector<HTMLInputElement>('input[placeholder="filesystem"]')?.value,
         ).toBe("");
       });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("guards a dirty MCP draft when switching projects through the settings router", async () => {
+    const { screen, router } = await renderSettingsRoute(
+      `/settings?category=tools&project=${PROJECT_ONE}`,
+    );
+    try {
+      await page.getByRole("textbox", { name: "Name", exact: true }).fill("unsaved-project-draft");
+      await page.getByRole("combobox", { name: "Settings scope" }).click();
+      await page.getByRole("option", { name: "Project Two", exact: false }).click();
+      await expect
+        .element(page.getByRole("alertdialog"))
+        .toHaveTextContent("Discard unsaved MCP changes?");
+      await page.getByRole("button", { name: "Keep editing", exact: true }).click();
+      expect(router.state.location.search.project).toBe(PROJECT_ONE);
+      await expect
+        .element(page.getByRole("textbox", { name: "Name", exact: true }))
+        .toHaveValue("unsaved-project-draft");
+      await page.getByRole("combobox", { name: "Settings scope" }).click();
+      await page.getByRole("option", { name: "Project Two", exact: false }).click();
+      await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+      await vi.waitFor(() => expect(router.state.location.search.project).toBe(PROJECT_TWO));
+      await expect
+        .element(page.getByRole("textbox", { name: "Name", exact: true }))
+        .toHaveValue("");
     } finally {
       await screen.unmount();
     }

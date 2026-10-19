@@ -1,3 +1,4 @@
+import { McpErrorDetails } from "./McpErrorDetails";
 import type {
   McpServerStatusesResult,
   ProjectId,
@@ -43,9 +44,13 @@ export function McpObservedGroup(props: {
             {entry.origin ??
               (props.group === "built-in" ? "Registered by F5" : "Provider configuration")}
           </p>
-          {entry.message ? (
-            <p className="whitespace-pre-wrap break-words">{entry.message}</p>
+          {entry.state === "ready" || entry.toolCount > 0 || entry.resourceCount > 0 ? (
+            <p>
+              {entry.toolCount} tools
+              {props.provider !== "claudeAgent" ? ` · ${entry.resourceCount} resources` : ""}
+            </p>
           ) : null}
+          {entry.message ? <McpErrorDetails message={entry.message} /> : null}
           {props.projectId ? (
             <Button
               size="xs"
