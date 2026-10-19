@@ -689,8 +689,8 @@ export function McpServersSettings(props: {
 
         {selectedProject === null ? (
           <p className="rounded-lg border border-dashed border-border bg-background px-3 py-2 text-xs text-muted-foreground">
-            Switch the settings scope to a project to edit its servers and inspect provider-specific
-            live status and the effective merged JSON.
+            Switch the settings scope to a project to edit its servers, inspect provider-specific
+            live status and the effective merged JSON, and sign in to servers that need it.
           </p>
         ) : null}
 

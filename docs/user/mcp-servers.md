@@ -27,7 +27,7 @@ Common and project configuration is shared by Codex and Claude. Support labels i
 | Inspector tools                                             | Names, descriptions, annotations, input schemas         | Names, descriptions, annotations; input schemas unavailable |
 | Inspector resources and templates                           | Metadata available                                      | Unavailable from Claude                                     |
 
-Selecting SSE shows the transport warning. If the endpoint supports streamable HTTP, choose HTTP. Authentication is provider-owned: tokens are stored by the provider for the selected account, so later sessions connect without asking. When a server needs sign-in, click **Sign in** on its settings row, its **External** entry, or next to it in the chat MCP details. F5 never opens the browser on its own.
+Selecting SSE shows the transport warning. If the endpoint supports streamable HTTP, choose HTTP. Authentication is provider-owned: tokens are stored by the provider for the selected account, so later sessions connect without asking. When a server needs sign-in, click **Sign in** in the conversation's sign-in row above the composer, in **Runtime details**, or on its row in a project-scoped MCP settings view (see [Sign in](#sign-in)). F5 never opens the browser on its own.
 
 ## Saved configuration and live status
 
@@ -39,10 +39,14 @@ Rows show tool and resource counts when known. Expand **Connection details** to 
 
 ## Sign in
 
-OAuth needs your approval in the browser, so F5 never signs in automatically. **Sign in** appears when a server reports that it needs sign-in, for servers configured in F5 and for **External** servers from the account's own provider configuration.
+OAuth needs your approval in the browser, so F5 never signs in automatically. **Sign in** appears when a server reports that it needs sign-in, for servers configured in F5 and for **External** servers from the account's own provider configuration:
+
+- In a conversation, a row above the composer lists the servers that need sign-in; **Sign in…** expands one button per server. **Runtime details** lists the same servers with Sign in. Claude offers this while the conversation's session is live.
+- In MCP settings, with a project scope selected. The Global scope has no live status, so it shows **Unknown**; a **Test** that reports **Sign-in required** points you to a project scope or the conversation prompt.
 
 - **Claude** signs in through a running Claude conversation in the project: the one you click from in chat, or the conversation settings is observing. Start a conversation first if none is running. Claude Code completes the browser flow itself; F5 waits up to five minutes for the server to connect, then reconnects it in the account's other running conversations. claude.ai connectors authorize on claude.ai, and F5 retries the connection with increasing delays for up to five minutes, skipping retries while a turn is running. If you deny or abandon consent in the browser, the attempt stays pending until those five minutes pass; use **Reopen sign-in** to return to it, or start a new attempt afterwards.
-- **Codex** signs in through the account's Codex app server, also for servers defined in the profile's `config.toml`, then reloads live Codex sessions. Servers that do not support OAuth report the provider's error.
+- **Codex** signs in through the account's Codex app server, also for servers defined in the profile's `config.toml`, then reloads live Codex sessions. Codex startup failures that ask you to run `codex mcp login` (an expired or missing OAuth token) are shown as needing sign-in. Servers that do not support OAuth report the provider's error.
+- The chat's MCP chip also shows how many servers need sign-in; open it for a **Sign in** button per server.
 
 ## Apply, Reconnect, and Test
 
