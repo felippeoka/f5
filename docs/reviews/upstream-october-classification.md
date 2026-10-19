@@ -7,10 +7,12 @@ This artifact tracks triage separately from delivery. `scripts/upstream-ports.js
 Implementation is on `fix/upstream-october-review` in the isolated checkout
 `../f5-upstream-october-review`. Main `f711d43051` was merged additively in
 `401725257a`; user work in the original checkout remains intact. The implementation
-through `7d3a3b9430` includes guided reviews, scoped thread tools, HTML renders,
+through `4c564ea546` includes guided reviews, scoped thread tools, HTML renders,
 manual GitHub reset waits, durable PR watches, persisted settlement, Codex MCP apps
-and per-project provider policy. The current continuation repairs cross-feature
-migration and runtime integration and attaches per-SHA implementation evidence. Migration 127 and protocol 34 extend the merged baseline. Coverage remains 4,084 ledger records;
+and per-project provider policy. The current continuation adds PR review filters,
+per-item forge permissions, thread-owned PR panels, reference chips and opt-in
+merge-message attribution cleanup. It also repairs cross-feature migration and
+runtime integration and attaches per-SHA implementation evidence. Migration 127 and protocol 34 extend the merged baseline. Coverage remains 4,084 ledger records;
 implementation work does not automatically promote deferred obligations.
 
 The full gate and verify-first/security obligations remain incomplete. See
@@ -152,7 +154,7 @@ This is a partial implementation. The catch-up cut line has not been met and the
 
 Feature commits do not change the delivery ledger. Separate ledger commits record only verified per-SHA proof. Artifact reapplication preserves that proof. The ledger includes the separately verified Claude-goal port. Commit-generation delivery proof is recorded only after its feature commit; no unresolved performance, security or carrier obligation is promoted automatically.
 
-The 299 September carrier obligations and 26 settlement overlays are preserved but remain unreconciled as delivery work. Verify-first triage across 15a, 15r, 15t and 15u is unfinished. HTML/MCP apps, PR transport/watches/guides, settlement, custom providers/Pi, scratch projects, prompt links, usage history, desktop installation/passkeys, the full observability work and the remaining chat/panel changes have not been implemented in this slice.
+At the original branch baseline, the 299 September carrier obligations and 26 settlement overlays were preserved without delivery reconciliation. Current continuations implement several of these features as described above and in the review response; their per-SHA release dispositions remain deferred. Verify-first triage across 15a, 15r, 15t and 15u, custom ACP/Pi, scratch projects, prompt links, usage history, gated passkeys and the remaining PR/chat/panel work are still unfinished.
 
 ## Check results
 

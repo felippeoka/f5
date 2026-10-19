@@ -700,3 +700,9 @@ merge/squash, human credits, empty/unchanged bodies, queues, rebase, failed read
 head changes and auto-merge activation. All 15 settings-contract cases and all
 eight workspace TypeScript checks pass. Formatting and lint pass. The required
 full gate remains a separate outstanding condition; dispositions stay deferred.
+
+The required full command was repeated after the PR chip and merge-message changes.
+It still stops at the two migration process-identity failures (330 script cases
+pass). Seven PR UX records now carry concrete implementation SHAs and scenario
+files in both October artifacts; every disposition remains deferred. The ten
+September/October artifact reconciliation tests and pinned ledger validation pass.

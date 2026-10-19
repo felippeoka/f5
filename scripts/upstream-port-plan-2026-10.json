@@ -5208,12 +5208,19 @@
     {
       "upstreamSha": "b67ac65b74feae961f5bdb39e65027bebb99f0cf",
       "classification": "planned:15j",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: feat(web): drag a linked pull request into the composer as a context chip (#20102).",
+      "reason": "Planned: implementation and focused scenario evidence exist for bounded linked-PR drags and persistent Lexical reference chips with explicit-send and undo proof; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(web): drag a linked pull request into the composer as a context chip (#20102).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15j-pr-20102"],
         "targetModules": ["apps/server/src/prHub", "apps/web/src/components/prHub"]
-      }
+      },
+      "f5Shas": ["8009be2ed8abfaebf0f425fcf0780c20b6bd6934"],
+      "evidence": [
+        "apps/web/src/lib/pullRequestReference.test.ts:1",
+        "apps/web/src/components/ComposerPromptEditor.browser.tsx:1",
+        "apps/web/src/components/prHub/ThreadPrLinks.browser.tsx:1",
+        "apps/web/src/components/ChatView.browser.tsx:1"
+      ]
     },
     {
       "upstreamSha": "d5139979d427d94d71714e9e59bca1b47832c9a7",
@@ -5879,22 +5886,29 @@
     {
       "upstreamSha": "00cdceb196edf661652dee6efe983c0d40662971",
       "classification": "planned:15j",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: fix(web): middle-click opens pull requests in the browser, like cmd+click (#19854).",
+      "reason": "Planned: implementation and focused scenario evidence exist for modified and middle PR clicks explicitly bypassing both panel and preview; delivery remains deferred until the required full-workspace release gate passes. Upstream change: fix(web): middle-click opens pull requests in the browser, like cmd+click (#19854).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15j-pr-19854"],
         "targetModules": ["apps/server/src/prHub", "apps/web/src/components/prHub"]
-      }
+      },
+      "f5Shas": ["144d0a24603f77fd51f7cf8935bc418d471fb864"],
+      "evidence": ["apps/web/src/components/OpenLinkAnchor.browser.tsx:1"]
     },
     {
       "upstreamSha": "cd34df59a1ba7eb48318549d628b5ec7c9b759c5",
       "classification": "planned:15j",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: feat(web): setting to open pull request links on GitHub (#19719).",
+      "reason": "Planned: implementation and focused scenario evidence exist for profile-local PR-link preference with thread-owned PR panels and system-browser escape; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(web): setting to open pull request links on GitHub (#19719).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15j-pr-19719"],
         "targetModules": ["apps/server/src/prHub", "apps/web/src/components/prHub"]
-      }
+      },
+      "f5Shas": ["144d0a24603f77fd51f7cf8935bc418d471fb864"],
+      "evidence": [
+        "apps/web/src/components/OpenLinkAnchor.browser.tsx:1",
+        "apps/web/src/components/prHub/PrLinkedPanel.browser.tsx:1"
+      ]
     },
     {
       "upstreamSha": "45b5993a527fd51813393c3bafcddab430b3a8e1",
@@ -9537,12 +9551,22 @@
     {
       "upstreamSha": "c3243f05088c3c20e9439f285fc6d7b0bfe1747d",
       "classification": "planned:15j",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: feat(pull-requests): hosts can report edit and resolve permissions per item (#17667).",
+      "reason": "Planned: implementation and focused scenario evidence exist for host per-item edit and directional thread permissions, including revocation before saved operation dispatch; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(pull-requests): hosts can report edit and resolve permissions per item (#17667).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15j-pr-17667"],
         "targetModules": ["apps/server/src/prHub", "apps/web/src/components/prHub"]
-      }
+      },
+      "f5Shas": [
+        "98944a6cfef77b479b9a7d92d574039cfc73de93",
+        "144d0a24603f77fd51f7cf8935bc418d471fb864"
+      ],
+      "evidence": [
+        "apps/server/src/prHub/forgeModel.test.ts:1",
+        "apps/server/src/prHub/PrHubExtensions.test.ts:1",
+        "apps/server/src/prHub/githubPrDetails.test.ts:1",
+        "apps/web/src/components/prHub/PrReviewThreadsTab.browser.tsx:1"
+      ]
     },
     {
       "upstreamSha": "0be20c86c2962b7b581dfc79df9ab34b4fbdab14",
@@ -9577,12 +9601,17 @@
     {
       "upstreamSha": "1f093d119b91263deb83f0d18e1504b791fdbbd4",
       "classification": "planned:15j",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: feat(web): pr panel actions confirm in place (#17710).",
+      "reason": "Planned: implementation and focused scenario evidence exist for PR-panel confirmations reusing durable action forms in place while preserving the thread draft; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(web): pr panel actions confirm in place (#17710).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15j-pr-17710"],
         "targetModules": ["apps/server/src/prHub", "apps/web/src/components/prHub"]
-      }
+      },
+      "f5Shas": ["144d0a24603f77fd51f7cf8935bc418d471fb864"],
+      "evidence": [
+        "apps/web/src/components/prHub/PrNativeActions.browser.tsx:1",
+        "apps/web/src/components/prHub/PrActionDialogs.tsx:1"
+      ]
     },
     {
       "upstreamSha": "c2a301b12af6e18148eb1d46123c4187f4bdb78e",
@@ -10084,12 +10113,18 @@
     {
       "upstreamSha": "6cd02e98f7edd78b7bde9ceff26c829476dbeb77",
       "classification": "planned:15j",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: feat(web): filter PR comments by bots and resolved threads (#17645).",
+      "reason": "Planned: implementation and focused scenario evidence exist for persisted Review threads bot/resolution filters with reachable human-reply pagination; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(web): filter PR comments by bots and resolved threads (#17645).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15j-pr-17645"],
         "targetModules": ["apps/server/src/prHub", "apps/web/src/components/prHub"]
-      }
+      },
+      "f5Shas": ["9a81a5a47ccc3f1d9294a8503648d942b1f53115"],
+      "evidence": [
+        "apps/web/src/components/prHub/PrReviewThreadsTab.browser.tsx:1",
+        "apps/web/src/components/prHub/prCommentFilters.test.ts:1",
+        "apps/server/src/prHub/reviewThreads.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "e30852213ed3954037091582057f71918918e19f",
@@ -13053,12 +13088,19 @@
     {
       "upstreamSha": "24238fee321e2c6bc711832b8cf3698b1f6b30ca",
       "classification": "planned:15j",
-      "reason": "Planned: implement and verify the explicitly approved 15j scenario. Upstream change: feat(source-control): omit agent credits from PR merge messages (#16192).",
+      "reason": "Planned: implementation and focused scenario evidence exist for opt-in head-fenced GitHub merge and auto-merge message cleanup preserving human and quoted credits; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(source-control): omit agent credits from PR merge messages (#16192).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15j-pr-16192"],
         "targetModules": ["apps/server/src/prHub", "apps/web/src/components/prHub"]
-      }
+      },
+      "f5Shas": ["4c564ea5464d6e330eb771f3d724b4338e12e369"],
+      "evidence": [
+        "apps/server/src/git/mergeMessage.test.ts:1",
+        "apps/server/src/git/githubHttpOperations.test.ts:1",
+        "apps/server/src/prHub/githubForge.test.ts:1",
+        "packages/contracts/src/settings.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "21eb9a421aff7a8fbe044b1a34bb3e364fb94a68",
