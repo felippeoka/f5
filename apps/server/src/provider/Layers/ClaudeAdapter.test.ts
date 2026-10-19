@@ -13602,10 +13602,10 @@ for (const streamed of [false, true]) {
           h.query.emit({
             type: "stream_event",
             session_id: "sdk-session-skill",
-            uuid: "skill-event",
+            uuid: crypto.randomUUID(),
             parent_tool_use_id: null,
             event,
-          } as SDKMessage);
+          });
         emit({
           type: "content_block_start",
           index: 0,
