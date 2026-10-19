@@ -61,7 +61,7 @@ The artifact deliberately retains runtime changes whose source/scenario review i
 | `not-applicable:relay-cloud`                                    |      46 |
 | `not-applicable:release-ci`                                     |       4 |
 | `not-applicable:upstream-only-subsystem:context-handoff`        |       3 |
-| `not-applicable:upstream-only-subsystem:lineage-delegation`     |       8 |
+| `not-applicable:upstream-only-subsystem:lineage-delegation`     |      10 |
 | `not-applicable:upstream-only-subsystem:source-control-gitcafe` |       2 |
 | `planned:10`                                                    |      49 |
 | `planned:11a`                                                   |      46 |
@@ -84,7 +84,7 @@ The artifact deliberately retains runtime changes whose source/scenario review i
 | `planned:15o`                                                   |      21 |
 | `planned:15p`                                                   |      12 |
 | `planned:15q`                                                   |      10 |
-| `planned:15r`                                                   |      33 |
+| `planned:15r`                                                   |      31 |
 | `planned:15s`                                                   |      10 |
 | `planned:15t`                                                   |     158 |
 | `planned:15u`                                                   |      45 |

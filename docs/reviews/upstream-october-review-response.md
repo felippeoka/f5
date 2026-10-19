@@ -1149,7 +1149,7 @@ present column and bounds the stored value.
 Focused validation passes 315 server cases in six files, 13 web unit cases and all
 11 Agents panel Chromium cases, including the visible effort metadata. Broader
 validation and the remaining per-SHA audit follow; these checks do not close the
-remaining 33-item Agents audit, the mandatory verify-first cut line or the catch-up plan.
+remaining Agents audit, the mandatory verify-first cut line or the catch-up plan.
 
 Source inspection closes two 15r scope exclusions: #15334 changes only the
 upstream Lineage relationship view and its child-thread activity model; #15016
@@ -1189,3 +1189,78 @@ lost the native input cannot recover an unknown skill name. Validation passes al
 288 Claude adapter cases, 47 shared cases, 111 web session-logic cases and a new
 Chromium timeline case using persisted generic tool history. The broader verify-first
 audit and full release gates remain open.
+
+The #19750 reproduction fails before the restart change: an idle parent with owned
+live work receives no marker. Graceful shutdown now records it before stopping the
+provider. Two further crash-startup reproductions fail before reconciliation:
+restart resume enabled loses the continuation, and disabled resume leaves phantom
+Running work. Startup now captures an opt-in marker before retiring unavailable
+work as Interrupted; an actually live provider remains untouched. Session identities
+include the persisted generation, so the same launch configuration cannot authorize
+an older generation's rows. The captured work query is capped at 201 rows and its
+count is stored in bounded migration 130 metadata. No private output enters the
+continuation. The continuation states that completion was not confirmed and asks
+for a current-state check; existing opt-out, pending-input, queued-human-work,
+newer-turn, expiry and exactly-once guards remain in force. Workflow-owned and inert
+rows do not trigger a second recovery path. Focused validation passes 283 cases;
+the overflow fixture and migration bound additionally pass all 86 cases in their
+two files. Typecheck, formatter and lint pass.
+
+Two more source-inspected exclusions close #20061 and #19631: the former solely
+adopts and orders events for resumed native child threads, and the latter solely
+optimizes delegated-completion delivery recovery. Neither subsystem exists in F5.
+The renamed-worktree patch stays under review because it also introduces a branch
+compare-and-swap condition and shared-checkout behavior.
+
+The required full run passes web (2,346), shared (734; one skip), desktop (570),
+contracts (227), effect-acp (21) and marketing (12). It fails the same two scripts
+process-identity cases (331 pass), stopping Turbo before server completion or the
+exhaustive Git stage. Independent complete server validation reports 5,412 passing cases, 12 skips and
+only the same three launcher identity failures. The full gate has not passed
+and no waiver is recorded.
+
+The #16151 typography reproduction fails in Chromium: the agent duration uses
+JetBrains Mono while its panel uses Inter. Duration now inherits the panel's
+text font and retains tabular numbers. All 12 Agents panel Chromium cases pass,
+including a computed-font assertion, without changing the panel layout or its
+native action ownership.
+
+The #19338 scenario reproduces in F5: after the parent changes model and starts a
+later turn, older task progress uses that later turn's ID. Native task events now
+retain the launch turn, and bounded resume metadata preserves it across process
+replacement. The same fixture verifies that parent model/effort changes and
+steering keep the background task and its own model/effort alive in one SDK query.
+A second failing-before reproduction shows that session-stop events omit the
+stored native run ID; durable run-scoped rows consequently cannot be addressed.
+A shared native run-reference helper now carries that identity through progress,
+model refinements, both terminal paths and session shutdown, including messages
+whose SDK omits a repeated run identifier. Confirmed-stop acknowledgement guards
+remain unchanged. All 315 focused adapter/resume/background-work cases, all eight
+typechecks, formatter and lint pass at this checkpoint.
+
+The five-task production build also passes after migration 130. The built
+Node/SQLite/Chromium Pi regression reports one live child, three intentional
+prompts, no extra prompt or native fork, exact native rewind reconciliation,
+an empty paused queue and zero browser errors. This checkpoint predates the
+subsequent Claude turn/run-ownership fix. It remains fixture-based evidence rather
+than installed-Pi account validation. A fresh origin/main fetch confirms that the
+review branch is zero commits behind main.
+
+For #19751, source inspection finds that F5's scoped thread MCP transport and
+runtime handler have no parent-turn lifetime check. Baseline provenance is
+`42d9a5862ed8`. A new native MCP Client/InMemoryTransport/McpServer integration
+fixture confirms that access persists on the parent-idle transition, requests
+cannot select a different transport thread, and closing the runtime owner revokes
+access. All four MCP transport tests pass with all eight typechecks. This transport
+fixture does not replace installed-Claude workflow validation.
+
+For #17329, both Muse reproductions fail before the fix: a workflow child's
+approval is attributed to the native child-run ID. Such IDs are not F5 parent
+turns. The approval now remains on the parent thread without a turn association,
+including stage changes, parent completion, response and resolution. Native
+requirements and decisions retain their original Muse identifiers. Bounded origin
+metadata is validated before use, and malformed stage updates take the existing
+fail-closed path. Parent approvals retain their own turn. All 38 Muse adapter,
+provider and event-mapping cases, all eight typechecks, formatter and lint pass.
+The exhaustive Git matrix also passes all 165 cases at the preceding Claude
+lifecycle checkpoint. Per-SHA proofs remain deferred until the full 15r audit closes.

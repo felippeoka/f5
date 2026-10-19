@@ -150,6 +150,8 @@ describe("October 2026 classification artifact", () => {
     for (const sha of [
       "d3071275d576bb289a6cb177c6cc28fff8e95015",
       "d668ffcd64d74daba16520cbbfb0fdb431983eac",
+      "1550058056ba660b8581c8eda990c9d40c493a4b",
+      "22af947e0d353c9e89c6db2a268836baa71bece5",
     ])
       expect(bySha.get(sha)?.disposition).toBe("not-applicable");
   });

@@ -3577,22 +3577,38 @@
     {
       "upstreamSha": "7111501be3e25f4a4fc18ab579377cb0d0c397b1",
       "classification": "planned:15r",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(server): wake threads whose subagents' background work a restart cut (#19750).",
+      "reason": "Planned: implementation and focused evidence exist for opt-in graceful and unplanned restart recovery for an idle parent's owned background work; exact session-generation fences, a bounded persisted interruption note and terminal unavailable-work status; reproductions fail before the change. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(server): wake threads whose subagents' background work a restart cut (#19750).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15r-pr-19750"],
         "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      },
+      "f5Shas": ["17ae03011e8431f201eb3220699cded2f2933f36"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ProviderService.test.ts:4108",
+        "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts:1234",
+        "apps/server/src/orchestration/Layers/TurnLifecycle.test.ts:364",
+        "apps/server/src/persistence/Migrations/130_RestartBackgroundWork.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "11ce406d2cf1581748a3eb150716071f6674ec8e",
       "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): background subagents keep T3 tools after the parent turn ends (#19751).",
+      "reason": "Planned: implementation and focused evidence exist for baseline F5 thread-tool transports and runtime handlers are independent of the current parent turn; a native MCP client/server fixture preserves access on parent-idle transition, fixes transport thread ownership and verifies runtime-owner revocation. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(server): background subagents keep T3 tools after the parent turn ends (#19751).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15r-pr-19751"],
         "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      },
+      "f5Shas": [
+        "42d9a5862ed8c86c61bb4f953cfa616303301162",
+        "8cdb0e714830ec326bdf3cc83ec0fe23eadcfede"
+      ],
+      "evidence": [
+        "apps/server/src/provider/Layers/claudeThreadTools.ts:1",
+        "apps/server/src/mcp/threadToolRuntime.ts:16",
+        "apps/server/src/provider/Layers/claudeThreadTools.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "1da2d60b43e7523ce0eb24768710dfa23d586f61",
@@ -5244,13 +5260,10 @@
     },
     {
       "upstreamSha": "1550058056ba660b8581c8eda990c9d40c493a4b",
-      "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): resumed Claude subagents keep updating their own thread (#20061).",
+      "classification": "not-applicable:upstream-only-subsystem:lineage-delegation",
+      "reason": "Not-applicable: the runtime patch reorders subagent.updated before child-thread events and adopts a resumed provider-native child thread into RunExecutionService. F5 has no native subagent child threads or ownedThreadIds routing, and keeps task metadata in the parent Agents panel. Upstream change: fix(server): resumed Claude subagents keep updating their own thread (#20061).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-20061"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:123"]
     },
     {
       "upstreamSha": "83d65833006fa88ec73d3475fcf97ada90df4c53",
@@ -6103,13 +6116,10 @@
     },
     {
       "upstreamSha": "22af947e0d353c9e89c6db2a268836baa71bece5",
-      "classification": "planned:15r",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(server): restarts no longer stall on old subagent result deliveries (#19631).",
+      "classification": "not-applicable:upstream-only-subsystem:lineage-delegation",
+      "reason": "Not-applicable: the only runtime change narrows the v2 recoverDelegatedTasks scan to open delegated-completion delivery message IDs and adds recovery span counts. F5 has no delegated-completion cohorts, child-thread result delivery records or that recovery scan. Upstream change: fix(server): restarts no longer stall on old subagent result deliveries (#19631).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-19631"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:123"]
     },
     {
       "upstreamSha": "f87dd14dafdeecd962f7da24da79324842983e00",
@@ -6602,12 +6612,17 @@
     {
       "upstreamSha": "9a01524f3faca628699cdf65b43ad020b40b86d8",
       "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(clients): a resumed subagent no longer moves the later turn's Worked for row (#19338).",
+      "reason": "Planned: implementation and focused evidence exist for a background task retains its original turn through newer parent model/effort changes, steering, progress, native completion and resume metadata; the later-turn attribution reproduction fails before the fix. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(clients): a resumed subagent no longer moves the later turn's Worked for row (#19338).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15r-pr-19338"],
         "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      },
+      "f5Shas": ["9c6934ecdb66243b8b7553f1f0c9738661316dbe"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13645",
+        "apps/server/src/provider/claudeResumeState.test.ts:18"
+      ]
     },
     {
       "upstreamSha": "4cf8243f855da1abc79f5b09c58065c0fb328c0e",
@@ -9338,12 +9353,17 @@
     {
       "upstreamSha": "afd98d7d1840ed76f57d3ece556257aebc00f1bc",
       "classification": "planned:15r",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(server): stopped native subagents no longer read as Running (#17223).",
+      "reason": "Planned: implementation and focused evidence exist for native stop acknowledgements still await confirmed terminal outcomes; session-stop and progress events retain the exact persisted run identity, with failing-before reproductions for previously unaddressable task rows. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(server): stopped native subagents no longer read as Running (#17223).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15r-pr-17223"],
         "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      },
+      "f5Shas": ["9c6934ecdb66243b8b7553f1f0c9738661316dbe"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13799",
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:12998"
+      ]
     },
     {
       "upstreamSha": "8c777fbfade340f2092c011483c7fb0cde44c675",
@@ -10899,12 +10919,17 @@
     {
       "upstreamSha": "d81afa0a6f403bd6e5562ffcee2484089a1fdc3f",
       "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(muse): workflow subagents no longer stall on hidden approvals (#17329).",
+      "reason": "Planned: implementation and focused evidence exist for workflow child approvals are addressed to the parent thread without borrowing a native child-run ID as an F5 turn; active/idle parent reproductions fail before the fix, parent completion preserves the request, and malformed bounded origin metadata fails closed. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(muse): workflow subagents no longer stall on hidden approvals (#17329).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15r-pr-17329"],
         "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      },
+      "f5Shas": ["3f49f7e09a5fae7ee0942c9a25fffa8382ffc069"],
+      "evidence": [
+        "apps/server/src/provider/Layers/MuseAdapter.test.ts:338",
+        "apps/server/src/provider/msp/MuseEventMapping.test.ts:54"
+      ]
     },
     {
       "upstreamSha": "48b71f0eb323d08c8fcadfe54adf34becb2984da",
@@ -13381,12 +13406,17 @@
     {
       "upstreamSha": "039ddf1143d7dba0e25d0b1b7c8ed0cd3e19f588",
       "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): match subagent timestamp fonts to chat (#16151).",
+      "reason": "Planned: implementation and focused evidence exist for the agent duration inherits the panel text font and retains tabular numbers; a Chromium computed-font reproduction fails before the change and all twelve panel cases pass after it. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(web): match subagent timestamp fonts to chat (#16151).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15r-pr-16151"],
         "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      },
+      "f5Shas": ["cba5d87c4f6ca7faebfb654c9fde6040da13500d"],
+      "evidence": [
+        "apps/web/src/components/AgentsPanel.browser.tsx:149",
+        "apps/web/src/components/AgentsPanelRow.tsx:404"
+      ]
     },
     {
       "upstreamSha": "6f9cea00ae967f38fa3cdc9c07f92031806f4264",
