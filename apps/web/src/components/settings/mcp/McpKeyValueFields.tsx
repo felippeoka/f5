@@ -1,42 +1,20 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useId } from "react";
 import { mcpSecretId } from "@t3tools/shared/mcpSecrets";
 import { ensureNativeApi } from "../../../nativeApi";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { Textarea } from "../../ui/textarea";
 
-type Row = {
-  key: string;
-  value: string;
-  secret?: boolean;
-  replacing?: boolean;
-  previousValue?: string;
-};
-function readRows(text: string): Row[] {
-  if (!text) return [];
-  if (text.trim().startsWith("[")) return JSON.parse(text) as Row[];
-  if (text.trim().startsWith("{"))
-    return Object.entries(JSON.parse(text) as Record<string, string>).map(([key, value]) => ({
-      key,
-      value,
-    }));
-  return text
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => {
-      const index = line.indexOf("=");
-      return index < 0
-        ? { key: line, value: "" }
-        : { key: line.slice(0, index), value: line.slice(index + 1) };
-    });
-}
+import { readMcpKeyValueRows, mcpDuplicateKeys, type McpKeyValueRow } from "./mcpEditorValues";
 
 export function McpKeyValueFields(props: {
   label: string;
   value: string;
   onChange: (value: string) => void;
 }) {
-  const rows = readRows(props.value);
+  const rowId = useId();
+  const rows = readMcpKeyValueRows(props.value);
+  const duplicates = mcpDuplicateKeys(rows);
   const mounted = useRef(true);
   const current = useRef({ value: props.value, onChange: props.onChange });
   useEffect(() => {
@@ -50,7 +28,7 @@ export function McpKeyValueFields(props: {
   }, []);
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const update = (next: Row[]) => {
+  const update = (next: McpKeyValueRow[]) => {
     props.onChange(next.length ? JSON.stringify(next) : "");
   };
   return (
@@ -58,15 +36,15 @@ export function McpKeyValueFields(props: {
       <p className="text-xs font-medium">{props.label}</p>
       {rows.map((row, index) => {
         const stored = !!mcpSecretId(row.value) && !row.replacing;
-        const patch = (value: Partial<Row>) =>
+        const patch = (value: Partial<McpKeyValueRow>) =>
           update(rows.map((entry, i) => (i === index ? { ...entry, ...value } : entry)));
-        const duplicate = rows.some(
-          (entry, i) => i !== index && entry.key.trim() === row.key.trim(),
-        );
+        const duplicate = duplicates.has(row.key.trim());
         return (
           <div key={index} className="space-y-1 rounded border p-2 text-xs">
             <Input
               aria-label={`${props.label} key ${index + 1}`}
+              aria-invalid={duplicate}
+              aria-describedby={duplicate ? `${rowId}-duplicate-${index}` : undefined}
               value={row.key}
               onChange={(event) => patch({ key: event.target.value })}
             />
@@ -79,7 +57,11 @@ export function McpKeyValueFields(props: {
                 onChange={(event) => patch({ value: event.target.value })}
               />
             )}
-            {duplicate ? <p className="text-destructive">Duplicate key.</p> : null}
+            {duplicate ? (
+              <p id={`${rowId}-duplicate-${index}`} role="alert" className="text-destructive">
+                Duplicate key: {row.key.trim()}.
+              </p>
+            ) : null}
             {stored ? (
               <Button
                 size="xs"
@@ -104,7 +86,7 @@ export function McpKeyValueFields(props: {
                   <Button
                     size="xs"
                     variant="outline"
-                    disabled={busy !== null}
+                    disabled={busy !== null || duplicate || !row.key.trim()}
                     onClick={() => {
                       setBusy(index);
                       setError(null);
@@ -112,7 +94,7 @@ export function McpKeyValueFields(props: {
                         .mcp.storeSecret({ value: row.value })
                         .then(({ placeholder }) => {
                           if (!mounted.current) return;
-                          const latest = readRows(current.current.value);
+                          const latest = readMcpKeyValueRows(current.current.value);
                           const matches = latest.filter(
                             (entry) =>
                               entry.key === row.key && entry.value === row.value && entry.secret,

@@ -44,7 +44,20 @@ export function WorkspaceTransitionBanner({ threadId }: { threadId: ThreadId }) 
     pushed && (!transition.data || pushed.updatedAt >= transition.data.updatedAt)
       ? pushed
       : transition.data;
-  if (!record || ["completed", "cancelled"].includes(record.phase)) return null;
+  if (!record) return null;
+  if (["completed", "cancelled"].includes(record.phase)) {
+    if (record.intent !== "move_to_new_worktree" || !record.error?.includes("Retained"))
+      return null;
+    return (
+      <div role="status" className="space-y-2 rounded border p-3 text-sm">
+        <p>
+          The move retained a checkout for manual review. The retained checkout does not block
+          sending.
+        </p>
+        <WorkspaceTransitionSummary transition={record} />
+      </div>
+    );
+  }
   const active = !["needs_recovery", "failed"].includes(record.phase);
   const inspect = async () => {
     setBusy(true);

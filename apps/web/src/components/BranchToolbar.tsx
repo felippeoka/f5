@@ -55,6 +55,11 @@ export default function BranchToolbar({
             branch: thread.branch,
             worktreePath: thread.worktreePath,
             hasSession: thread.session !== null,
+            moveDisabled:
+              Boolean(thread.session?.activeTurnId) ||
+              thread.session?.status === "running" ||
+              thread.session?.status === "connecting" ||
+              thread.latestTurn?.state === "running",
             sessionVersion: JSON.stringify(thread.session ?? null),
           }
         : undefined;
@@ -157,6 +162,8 @@ export default function BranchToolbar({
           branch={activeThreadBranch}
           path={activeWorktreePath ?? activeProject.cwd}
           isWorktree={Boolean(activeWorktreePath)}
+          canMove={hasServerThread && !activeWorktreePath}
+          moveDisabled={serverThread?.moveDisabled ?? false}
           {...(!envLocked && !activeWorktreePath
             ? { onNewWorktree: () => onEnvModeChange("worktree") }
             : {})}

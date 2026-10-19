@@ -97,3 +97,15 @@ Storage operation contract uses version 28: cleanup accepts a backend epoch and 
 an accepted operation; results survive socket disconnects, and `storage.getOperation`
 and `storage.getTargets` page retained details. Versions 25 through 27 are rejected by
 the version 28 server before any queued mutation can execute.
+
+Worktree move Release 5 uses version 29. It adds `worktrees.moveThread` and
+`worktrees.discardMovedChanges`, the `move_to_new_worktree` transition intent, and
+optional move summaries on transition snapshots. Private move snapshots and cleanup
+progress extend the existing transition JSON record with optional fields, so older
+persisted transitions remain readable. An additive partial index bounds startup recovery
+to unfinished moves and pending private-ref cleanup.
+
+The October catch-up integrated with worktree move Release 5 uses version 30.
+It retains version 29's move methods alongside the October provider/settings
+contracts. Clients from either earlier branch must reload against this combined
+server before issuing mutations.

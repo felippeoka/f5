@@ -12,7 +12,7 @@ git diff 9355a57a5958b88bfcf639c071222c16b43d57e6
 All 17 main commits since the October branch's last merge are retained. The
 integration preserves main's atomic checkpoint-ref deletion, storage cleanup's
 cancellation and directory-replacement checks, and its MCP/storage contracts.
-The bundled protocol version is 29, after main's version 28. No history was
+The bundled protocol version is now 30, integrating main's released version 29. No history was
 rewritten: the recommendation to rebase conflicts with AGENTS.md's explicit
 prohibition, so integration used a squash merge onto a new branch from main.
 
@@ -310,3 +310,17 @@ budget at 1,495,371 bytes (40.5% below the fixed baseline); this is a bundle-siz
 check, not an interactive performance comparison. A new `env -i` full-gate run
 again passes 330 scripts tests and fails the two process-identity recovery cases
 before the exhaustive matrix. The host still denies `/bin/ps` with EPERM.
+
+The isolated branch subsequently integrates main `f711d43051` through an additive
+merge. It retains main's workspace-move snapshots and recovery proofs, its MCP
+settings/runtime UI, and migration 123. Cleanup keeps both the active-thread
+maintenance exclusion and verified owned-copy rollback checks; only automatic
+cleanup gets the environment-file exception. Protocol 30 combines both branches'
+contracts. No history was rewritten and the shared main checkout was untouched.
+
+On this combined source, formatting, lint, all eight typecheck packages, the
+required-upstream ledger and whitespace checks pass. The complete web unit suite
+passes 2,280 tests, the exhaustive Git matrix passes all 162 cases, and the
+selected Markdown/Mermaid/MCP runtime browser suites pass 13. The earlier full-app
+shell execution case also passes, checking the exact sent command, fresh terminal,
+worktree directory and absence of a model turn.

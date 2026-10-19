@@ -1,3 +1,4 @@
+import { McpErrorDetails } from "./McpErrorDetails";
 import { McpTestConnection } from "./McpTestConnection";
 import { reconnectMcpServer } from "./mcpActions";
 import { LazyMcpServerInspector as McpServerInspector } from "./LazyMcpServerInspector";
@@ -165,6 +166,18 @@ export function McpServerRow(props: {
           <p className="truncate text-xs text-muted-foreground">
             {props.server.type === "stdio" ? props.server.command : props.server.url}
           </p>
+          {!props.isOverridden &&
+          props.serverStatus &&
+          (props.serverStatus.state === "ready" ||
+            props.serverStatus.toolCount > 0 ||
+            props.serverStatus.resourceCount > 0) ? (
+            <p className="text-xs text-muted-foreground">
+              {props.serverStatus.toolCount} tools
+              {props.selectedProvider !== "claudeAgent"
+                ? ` · ${props.serverStatus.resourceCount} resources`
+                : ""}
+            </p>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -287,8 +300,17 @@ export function McpServerRow(props: {
           outcomeAction={reconnectOutcomes ? "reconnect" : "apply"}
         />
       ) : null}
-      {props.serverStatus?.message ? (
-        <p className="text-xs text-muted-foreground">{props.serverStatus.message}</p>
+      {props.serverStatus?.message && !props.isOverridden ? (
+        ["failed", "needs-auth", "login-required", "unknown"].includes(props.serverStatus.state) ? (
+          <McpErrorDetails
+            message={props.serverStatus.message}
+            servers={{ [props.name]: props.server }}
+          />
+        ) : (
+          <p className="whitespace-pre-wrap break-words text-xs text-muted-foreground">
+            {props.serverStatus.message}
+          </p>
+        )
       ) : null}
       {props.codexCallbackSummary ? (
         <p className="text-xs text-muted-foreground">{props.codexCallbackSummary}</p>

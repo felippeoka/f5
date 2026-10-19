@@ -1,4 +1,8 @@
 import type {
+  WorktreesMoveThreadInput,
+  WorktreesMoveThreadResult,
+  WorktreesDiscardMovedChangesInput,
+  WorktreesDiscardMovedChangesResult,
   ThreadId,
   WorkspaceTransitionSnapshot,
   WorktreesSwitchWorkspaceInput,
@@ -8,6 +12,12 @@ import type {
 import { ServiceMap } from "effect";
 import type { Effect } from "effect";
 export interface WorkspaceTransitionShape {
+  readonly moveThread: (
+    input: WorktreesMoveThreadInput,
+  ) => Effect.Effect<WorktreesMoveThreadResult, Error>;
+  readonly discardMovedChanges: (
+    input: WorktreesDiscardMovedChangesInput,
+  ) => Effect.Effect<WorktreesDiscardMovedChangesResult, Error>;
   readonly switchWorkspace: (
     input: WorktreesSwitchWorkspaceInput,
     setupOwnerToken?: string,

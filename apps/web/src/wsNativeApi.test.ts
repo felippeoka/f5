@@ -823,3 +823,14 @@ describe("PR Hub revision protocol", () => {
     );
   });
 });
+
+it("keeps move RPCs pending without the default transport timeout", async () => {
+  const { createWsNativeApi } = await import("./wsNativeApi");
+  const api = createWsNativeApi();
+  requestMock.mockResolvedValue({});
+  const input = { threadId: ThreadId.makeUnsafe("slow-move") };
+  await api.worktrees.moveThread(input);
+  expect(requestMock).toHaveBeenLastCalledWith(WS_METHODS.worktreesMoveThread, input, {
+    timeoutMs: null,
+  });
+});

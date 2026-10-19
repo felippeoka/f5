@@ -1,4 +1,5 @@
 import { gitConfigArgs, literalGitPathspec } from "@t3tools/shared/git";
+import { makeMoveSnapshotOperations } from "../moveSnapshot.ts";
 import { checkoutFingerprint } from "../checkoutFingerprint.ts";
 
 import { createHash } from "node:crypto";
@@ -3261,6 +3262,7 @@ const makeGitCore = Effect.gen(function* () {
     );
 
   return {
+    ...makeMoveSnapshotOperations((cwd, args) => runGitStdout("GitCore.move", cwd, args)),
     status,
     ensureWorktree,
     readWorktreePreparation: (path) =>
