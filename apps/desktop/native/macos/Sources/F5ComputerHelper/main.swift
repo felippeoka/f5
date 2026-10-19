@@ -87,6 +87,17 @@ func axRect(_ element: AXUIElement) -> CGRect? {
   else { return nil }
   return CGRect(origin: point, size: dimensions)
 }
+/// Reads one element for the secure-field audit in a single AX round trip.
+func secureAuditNode(_ element: AXUIElement) -> ComputerSecureAuditNode<AXUIElement>? {
+  var values: CFArray?
+  guard
+    AXUIElementCopyMultipleAttributeValues(
+      element, computerSecureAuditAttributes, AXCopyMultipleAttributeOptions(rawValue: 0), &values)
+      == .success,
+    let list = values as [AnyObject]?
+  else { return nil }
+  return computerSecureAuditNode(list)
+}
 func tier(_ id: String) -> String { computerAppTier(id) }
 func browser(_ id: String) -> Bool { computerAppIsBrowser(id) }
 struct Display {
@@ -1343,7 +1354,7 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
     captureApps.contains { $0.processID == window.owningApplication?.processID }
       && computerCaptureWindowIntersectsDisplay(window: window.frame, display: target.bounds)
   }
-  let maskDeadline = ProcessInfo.processInfo.systemUptime + 1
+  let maskDeadline = ProcessInfo.processInfo.systemUptime + 2
   var appWindows: [pid_t: [AXUIElement]] = [:]
   let masks = computerSecureCaptureMasks(windows: capturedWindows.map(\.frame)) { index in
     let captured = capturedWindows[index]
@@ -1362,35 +1373,14 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
         && abs(rect.height - captured.frame.height) < 1
     }
     guard matches.count == 1 else { return nil }
-    var secureRects: [CGRect] = []
-    var complete = true
-    var visited = 0
-    func mask(_ element: AXUIElement, depth: Int) {
-      if depth > 30 || visited >= 4000 || ProcessInfo.processInfo.systemUptime >= maskDeadline {
-        complete = false
-        return
-      }
-      visited += 1
-      guard let role = attribute(element, kAXRoleAttribute) as? String else {
-        complete = false
-        return
-      }
-      if role == "AXSecureTextField"
-        || (attribute(element, kAXSubroleAttribute) as? String) == "AXSecureTextField" {
-        if let rect = axRect(element) { secureRects.append(rect) } else { complete = false }
-      }
-      var children: CFTypeRef?
-      let status = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
-      if status != .success && status != .attributeUnsupported && status != .noValue {
-        complete = false
-      }
-      for child in children as? [AXUIElement] ?? [] {
-        mask(child, depth: depth + 1)
-        if !complete { break }
-      }
-    }
-    mask(matches[0], depth: 0)
-    return complete ? secureRects : nil
+    // The node budget bounds the walk; the depth limit only guards pathological trees, since
+    // a cutoff masks the whole enclosing web or scroll area.
+    let windowDeadline = computerSecureAuditDeadline(
+      now: ProcessInfo.processInfo.systemUptime, end: maskDeadline,
+      windowsLeft: capturedWindows.count - index)
+    return computerSecureAudit(
+      root: matches[0], read: secureAuditNode, maxDepth: 256, maxNodes: 20000,
+      expired: { ProcessInfo.processInfo.systemUptime >= windowDeadline })
   }
   maskIncomplete = masks.incomplete
   for rect in masks.rects { fillMask(rect) }
