@@ -24,7 +24,7 @@ export const GitActionProgressKind = /* @__PURE__ */ Schema.Literals([
 export type GitActionProgressKind = typeof GitActionProgressKind.Type;
 export const GitActionProgressStream = Schema.Literals(["stdout", "stderr"]);
 export type GitActionProgressStream = typeof GitActionProgressStream.Type;
-const GitCommitStepStatus = Schema.Literals(["created", "skipped_no_changes"]);
+const GitCommitStepStatus = Schema.Literals(["created", "skipped_no_changes", "context_changed"]);
 const GitPushStepStatus = Schema.Literals([
   "pushed",
   "skipped_not_requested",
@@ -146,6 +146,7 @@ export const GitRunStackedActionResult = Schema.Struct({
     status: GitCommitStepStatus,
     commitSha: Schema.optional(TrimmedNonEmptyStringSchema),
     subject: Schema.optional(TrimmedNonEmptyStringSchema),
+    suggestedMessage: Schema.optional(Schema.String),
   }),
   push: Schema.Struct({
     status: GitPushStepStatus,

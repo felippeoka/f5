@@ -83,6 +83,7 @@ export function metadata(root: string) {
         [
           "scripts/lib/performance/report.ts",
           "apps/server/scripts/performance/server.perf.ts",
+          "apps/server/scripts/performance/sqliteCheckpoint.perf.ts",
           "apps/server/scripts/performance/assistantStream.ts",
           "apps/server/scripts/performance/readModelMemory.perf.ts",
           "apps/server/scripts/performance/sqlite-writer.mjs",

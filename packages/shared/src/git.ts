@@ -59,3 +59,27 @@ export function resolveAutoFeatureBranchName(
 
   return `${resolvedBase}-${suffix}`;
 }
+
+/** Treat filenames containing glob or pathspec magic as literal filenames. */
+export const literalGitPathspec = (path: string): string => `:(literal)${path}`;
+
+const GIT_CONFIG_OVERRIDE_KEYS = new Set([
+  "core.splitindex",
+  "splitindex.sharedindexexpire",
+  "core.fsync",
+  "core.fsyncmethod",
+  "core.fsmonitor",
+  "index.sparse",
+  "sparse.expectfilesoutsideofpatterns",
+  "protocol.file.allow",
+  "status.showuntrackedfiles",
+]);
+
+/** Only app-owned configuration overrides may be placed in Git's argument vector. */
+export function gitConfigArgs(pairs: ReadonlyArray<readonly [string, string]>): string[] {
+  return pairs.flatMap(([key, value]) => {
+    if (!GIT_CONFIG_OVERRIDE_KEYS.has(key.toLowerCase()) || /[\0\r\n]/.test(value))
+      throw new Error(`Unsupported Git configuration override: ${key}`);
+    return ["-c", `${key}=${value}`];
+  });
+}

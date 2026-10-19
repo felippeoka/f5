@@ -70,8 +70,8 @@ import { StorageMaintenance } from "./StorageMaintenance.ts";
  *
  * A worktree is removed only when it lives under this profile's managed
  * worktrees directory, contains no project root, is a linked worktree, has a
- * clean tree (ignored `node_modules/` excepted; any other ignored file such as
- * `.env` blocks removal, because `git worktree remove` would delete it), and
+ * clean tree (ignored environment files block removal; other ignored paths
+ * are recorded in the audit entry), and
  * nothing else claims it: no other thread, queued turn, live terminal or
  * agent session. Every check is repeated under the worktree lifecycle lock
  * right before `git worktree remove` (never `--force`). The branch and the
@@ -101,6 +101,21 @@ const INCREMENTAL_VACUUM_BUDGET_MS = 15_000;
 const PURGE_THREADS_PER_PASS = 10;
 
 export { blockingIgnoredEntries } from "../project/worktreeClaims.ts";
+
+/** Keep path previews small and unambiguous even for unusual filesystem names. */
+export function summarizeIgnoredCleanupPaths(entries: ReadonlyArray<string>): string {
+  const paths: string[] = [];
+  let bytes = 0;
+  for (const entry of entries) {
+    const label = JSON.stringify(entry);
+    const size = Buffer.byteLength(label) + 2;
+    if (paths.length === 32 || bytes + size > 4096) break;
+    paths.push(label);
+    bytes += size;
+  }
+  const omitted = entries.length - paths.length;
+  return `${entries.length} path(s): ${paths.join(", ")}${omitted ? ` (${omitted} more paths)` : ""}`;
+}
 
 /** Audit and dry-run label for a path: `~`-relative when under the user's home. */
 export function redactHomePath(value: string, home: string = OS.homedir()): string {
@@ -414,7 +429,9 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
               beforeRef: head,
               afterRef: null,
               result: "removed",
-              reason: evaluation.target.reason,
+              reason: removed.ignoredEntries.length
+                ? `${evaluation.target.reason}; removed ignored paths: ${summarizeIgnoredCleanupPaths(removed.ignoredEntries)}`
+                : evaluation.target.reason,
             });
             yield* storageMaintenance.noteStorageMutated;
             return evaluation.target;

@@ -1,6 +1,7 @@
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { WorkspaceTransitionError } from "../persistence/Services/WorkspaceTransitions.ts";
 import * as FS from "node:fs/promises";
+import { isManualRemovalIgnoredBlocker, isProtectedIgnoredPath } from "../git/cleanupSafety.ts";
 import * as Path from "node:path";
 import { legacyT3BaseDir } from "@t3tools/shared/appStatePaths";
 import { ServerConfig } from "../config.ts";
@@ -242,28 +243,41 @@ export const readWorktreeClaims = Effect.fn("readWorktreeClaims")(function* (pat
   } satisfies WorktreeClaims;
 });
 
-/** `node_modules/` (at any depth) is reproducible; every other ignored entry is not. */
+/** Automatic cleanup audits reproducible output and protects environment files. */
 export function blockingIgnoredEntries(entries: ReadonlyArray<string>): ReadonlyArray<string> {
-  return entries.filter((entry) => !/(^|\/)node_modules\/?$/.test(entry));
+  return entries.filter(isProtectedIgnoredPath);
 }
 
 /**
  * Why ignored files make removing `worktreePath` unsafe, or null when they do
  * not. `git worktree remove` refuses on tracked changes and untracked files but
- * silently deletes ignored ones (a `.env`, a local database), so every removal
- * path checks this as well as `git status`.
+ * silently deletes ignored ones. Manual removal preserves everything except
+ * dependency directories; automatic cleanup protects environment files and
+ * audits the remaining ignored paths.
  */
 export const ignoredFilesBlockRemoval = (
   git: GitCoreShape,
   worktreePath: string,
   inspected?: { readonly entries: ReadonlyArray<string>; readonly truncated: boolean },
+  policy: "manual" | "automatic" = "manual",
 ) =>
-  (inspected ? Effect.succeed(inspected) : git.listIgnoredEntries(worktreePath)).pipe(
+  (inspected
+    ? Effect.succeed(inspected)
+    : git.cleanupSafetyProbe(worktreePath).pipe(
+        Effect.map((probe) => ({
+          entries: probe.ignoredEntries,
+          truncated: probe.ignoredTruncated,
+        })),
+      )
+  ).pipe(
     Effect.map(({ entries, truncated }) => {
       if (truncated) return "too many ignored files to check";
-      const blocking = blockingIgnoredEntries(entries);
+      const blocking =
+        policy === "automatic"
+          ? blockingIgnoredEntries(entries)
+          : entries.filter(isManualRemovalIgnoredBlocker);
       return blocking.length > 0
-        ? `ignored files other than node_modules/ (${blocking.slice(0, 3).join(", ")})`
+        ? `${policy === "automatic" ? "protected ignored environment files" : "ignored files other than node_modules/"} (${blocking.slice(0, 3).join(", ")})`
         : null;
     }),
     Effect.orElseSucceed(() => "ignored files could not be listed"),
@@ -323,6 +337,7 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
   const engine = yield* OrchestrationEngineService;
   const config = yield* ServerConfig;
   const blockedReasons: string[] = [];
+  let ignoredEntries: ReadonlyArray<string> = [];
   const target = yield* canonical(input.path);
   const root = yield* canonical(
     input.policy.kind === "legacyCleanup"
@@ -340,6 +355,7 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
       blockedReasons,
       linkedThreads: [] as ThreadId[],
       deletedThreadClaims: [] as ThreadId[],
+      ignoredEntries,
     };
   const exists = yield* Effect.tryPromise(() => FS.lstat(input.path)).pipe(
     Effect.map(() => true),
@@ -434,6 +450,7 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
       : null;
     if (!inspected && matches) blockedReasons.push("checkout status could not be read");
     if (inspected) {
+      ignoredEntries = inspected.ignoredEntries;
       if (inspected.hasInitializedSubmodules)
         blockedReasons.push(
           "initialized submodules prevent safe removal; preserve their local work and deinitialize them before retrying",
@@ -442,10 +459,15 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
       if (inspected.operation) blockedReasons.push(`a ${inspected.operation} is in progress`);
       if (inspected.hasTrackedChanges || inspected.hasUntrackedChanges)
         blockedReasons.push("it has uncommitted changes (including untracked files)");
-      const ignoredReason = yield* ignoredFilesBlockRemoval(git, input.path, {
-        entries: inspected.ignoredEntries,
-        truncated: inspected.ignoredTruncated,
-      });
+      const ignoredReason = yield* ignoredFilesBlockRemoval(
+        git,
+        input.path,
+        {
+          entries: inspected.ignoredEntries,
+          truncated: inspected.ignoredTruncated,
+        },
+        input.policy.kind === "autoCleanup" ? "automatic" : "manual",
+      );
       if (ignoredReason) blockedReasons.push(ignoredReason);
       if (input.policy.kind === "storageMaintenance") {
         let aheadCount = inspected.aheadCount;
@@ -488,6 +510,7 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
     blockedReasons: [...new Set(blockedReasons)],
     linkedThreads: claims.threadIds,
     deletedThreadClaims: claims.deletedThreadIds,
+    ignoredEntries,
   };
 });
 
@@ -512,6 +535,7 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
       linkedThreads: [] as ThreadId[],
       deletedThreadClaims: [] as ThreadId[],
       blockedReasons: ["Cleanup was cancelled."],
+      ignoredEntries: [] as string[],
     };
   const preview = yield* evaluateWorktreeRemoval(input);
   if (preview.blockedReasons.length) return preview;
@@ -568,7 +592,11 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
             checked.blockedReasons.push("Cleanup was cancelled.");
             return checked;
           }
-          yield* git.removeWorktree({ cwd: input.projectCwd, path: input.path });
+          yield* git.removeWorktree({
+            cwd: input.projectCwd,
+            path: input.path,
+            ...(input.policy.kind === "autoCleanup" ? { ignoredPolicy: "automatic" as const } : {}),
+          });
           if (input.afterRemoval) yield* input.afterRemoval(checked.registration);
         }
         return checked;

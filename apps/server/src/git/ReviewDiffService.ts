@@ -1,3 +1,4 @@
+import { literalGitPathspec } from "@t3tools/shared/git";
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -63,6 +64,7 @@ function runGit(
         GIT_TERMINAL_PROMPT: "0",
         GIT_CONFIG_NOSYSTEM: "1",
         ...options?.env,
+        GIT_OPTIONAL_LOCKS: "0",
       },
     }).then(
       (result) => resume(Effect.succeed(result)),
@@ -231,7 +233,7 @@ function makeWorkingTreePatch(
         for (let offset = 0; offset < paths.length; offset += 64) {
           const add = yield* runGit(
             cwd,
-            ["add", "-N", "--", ...paths.slice(offset, offset + 64)],
+            ["add", "-N", "--", ...paths.slice(offset, offset + 64).map(literalGitPathspec)],
             {
               env,
             },

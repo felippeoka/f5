@@ -1,4 +1,5 @@
 import type { ProviderAdapterSessionStartInput } from "../Services/ProviderAdapter.ts";
+import { createClaudeQueryWithPrivateMcp } from "../claudeMcpStartup.ts";
 import { classifyMcpOwnership } from "../mcpObservation.ts";
 import { mcpProviderReads, mcpContextKey } from "../../mcp/McpReadCoordinator.ts";
 import {
@@ -253,6 +254,8 @@ import {
   readClaudeResumeState,
 } from "../claudeResumeState.ts";
 
+import { nextClaudeGoal, readClaudeGoal, type ClaudeNativeGoal } from "../claudeGoal.ts";
+
 const PROVIDER = "claudeAgent" as const;
 const COMPACTION_QUERY_TIMEOUT = Duration.minutes(3);
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, "assistant_text" | "reasoning_text">;
@@ -278,6 +281,7 @@ type PromptQueueItem =
     };
 
 interface ClaudeTurnState {
+  goalChecked?: boolean;
   userMessageUuids?: Set<string>;
   readonly synthetic?: boolean;
   readonly turnId: TurnId;
@@ -387,6 +391,7 @@ interface ClaudeRuntimeWarningOptions {
 }
 
 interface ClaudeSessionContext {
+  nativeGoal: ClaudeNativeGoal | null;
   chromeRuntime?: ChromeSessionRuntime | undefined;
   chromeGeneration?: string | undefined;
   replyOwned?: boolean | undefined;
@@ -2320,12 +2325,14 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         }
         return undefined;
       });
-    const createQuery =
+    const createRawQuery =
       options?.createQuery ??
       ((input: {
         readonly prompt: AsyncIterable<SDKUserMessage>;
         readonly options: ClaudeQueryOptions;
       }) => query(input));
+    const createQuery = (input: Parameters<typeof createRawQuery>[0], signal: AbortSignal) =>
+      createClaudeQueryWithPrivateMcp(input, createRawQuery, { signal });
     const transcriptRetention = (environment: NodeJS.ProcessEnv, cwd?: string) =>
       instanceSettings(environment, cwd).pipe(Effect.map((settings) => settings.cleanupPeriodDays));
     const instanceSettings = (environment: NodeJS.ProcessEnv, cwd?: string) =>
@@ -2927,6 +2934,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           ...(context.resumeSessionId ? { resume: context.resumeSessionId } : {}),
           ...(context.lastAssistantUuid ? { resumeSessionAt: context.lastAssistantUuid } : {}),
           ...(context.resumeLatest ? { resumeLatest: true } : {}),
+          nativeGoal: context.nativeGoal,
           turnCount: context.turns.length,
           turnBoundaries: context.turnBoundaries.slice(-200),
           ...(context.taskStates.size
@@ -2970,6 +2978,19 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           resumeCursor,
           updatedAt: yield* nowIso,
         };
+      });
+
+    const emitNativeGoal = (context: ClaudeSessionContext): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        yield* updateResumeCursor(context);
+        yield* offerRuntimeEvent({
+          ...(yield* makeEventStamp(context.session.threadId)),
+          type: "thread.metadata.updated",
+          provider: PROVIDER,
+          threadId: context.session.threadId,
+          resumeCursor: context.session.resumeCursor,
+          payload: { metadata: { nativeGoal: context.nativeGoal } },
+        });
       });
 
     // The first settlement wins; later calls are no-ops.
@@ -3781,6 +3802,26 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         if (!turnState) {
           // A result without an owned turn is a trailer, not a new completion.
           return;
+        }
+
+        // SDK mode has no goal-completed event. A successful root model turn
+        // whose Stop hook allowed completion is the native completion receipt.
+        // Commands alone, interrupted hooks and live children never satisfy it.
+        if (
+          context.nativeGoal?.status === "active" &&
+          turnState.goalChecked &&
+          status === "completed" &&
+          result &&
+          (result.terminal_reason === undefined || result.terminal_reason === "completed") &&
+          context.taskStates.size === 0 &&
+          context.lifecycle.backgroundTasks.size === 0
+        ) {
+          context.nativeGoal = {
+            objective: context.nativeGoal.objective,
+            status: "complete",
+            checks: context.nativeGoal.checks,
+          };
+          yield* emitNativeGoal(context);
         }
 
         const lastSegmentResult = context.lifecycle.latestResult;
@@ -5435,6 +5476,20 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           return;
         }
 
+        const goal = nextClaudeGoal(context.nativeGoal, message);
+        if (goal !== undefined && JSON.stringify(goal) !== JSON.stringify(context.nativeGoal)) {
+          context.nativeGoal = goal;
+          yield* emitNativeGoal(context);
+        }
+        if (
+          context.nativeGoal?.status === "active" &&
+          message.type === "assistant" &&
+          message.parent_tool_use_id === null &&
+          message.message.model !== "<synthetic>" &&
+          context.turnState
+        )
+          context.turnState.goalChecked = true;
+
         switch (message.type) {
           case "stream_event":
             yield* handleStreamEvent(context, message);
@@ -5458,6 +5513,10 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             yield* handleSdkTelemetryMessage(context, message);
             return;
           case "conversation_reset":
+            if (message.trigger === "clear" && context.nativeGoal !== null) {
+              context.nativeGoal = null;
+              yield* emitNativeGoal(context);
+            }
             if (message.trigger === "clear") context.lastTotalCostUsd = 0;
             context.replyOwned = undefined;
             context.turnBoundaries.length = 0;
@@ -5657,12 +5716,15 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               context.lastAssistantUuid = selected;
               yield* updateResumeCursor(context);
               const recoveryOptions = { ...context.queryOptions, resumeSessionAt: selected };
-              context.query = yield* Effect.try({
-                try: () =>
-                  createQuery({
-                    prompt: makeClaudePromptInput(context.promptQueue),
-                    options: recoveryOptions,
-                  }),
+              context.query = yield* Effect.tryPromise({
+                try: (signal) =>
+                  createQuery(
+                    {
+                      prompt: makeClaudePromptInput(context.promptQueue),
+                      options: recoveryOptions,
+                    },
+                    signal,
+                  ),
                 catch: (cause) =>
                   new ProviderAdapterProcessError({
                     provider: PROVIDER,
@@ -6075,46 +6137,49 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         // deterministic and tool-free. Even when the saved session config uses
         // bypass permissions, we keep the explicit tool-deny gate active here.
 
-        const queryRuntime = yield* Effect.try({
-          try: () =>
-            createQuery({
-              prompt,
-              options: {
-                ...(input.cwd ? { cwd: input.cwd } : {}),
-                ...(selection?.apiModel
-                  ? { model: selection.apiModel }
-                  : input.model
-                    ? { model: input.model }
-                    : {}),
-                ...(traits?.effectiveEffort ? { effort: traits.effectiveEffort } : {}),
-                ...(Object.keys(settings).length > 0 ? { settings } : {}),
-                ...resolveClaudeSdkExecutableOptions(
-                  providerOptions?.binaryPath,
-                  queryEnvironment,
-                  process.platform,
-                  input.cwd,
-                ),
-                settingSources: [...CLAUDE_SETTING_SOURCES],
-                ...(permissionMode ? { permissionMode } : {}),
-                ...(thinkingResolution.thinking ? { thinking: thinkingResolution.thinking } : {}),
-                ...(() => {
-                  const filtered = filterReservedClaudeLaunchArgs(
-                    providerOptions?.launchArgs,
-                    input.modelSelection ? CLAUDE_ONE_OFF_SELECTION_FLAGS : undefined,
-                  );
-                  return filtered ? { extraArgs: filtered } : {};
-                })(),
-                includePartialMessages: true,
-                ...claudeMandatoryPolicyOptions({ noTools: true }),
-                canUseTool: async () =>
-                  ({
-                    behavior: "deny",
-                    message:
-                      "This one-off prompt requires plain-text output only. Tool calls are not allowed.",
-                  }) satisfies PermissionResult,
-                env: queryEnvironment,
-              } satisfies ClaudeQueryOptions,
-            }),
+        const queryRuntime = yield* Effect.tryPromise({
+          try: (signal) =>
+            createQuery(
+              {
+                prompt,
+                options: {
+                  ...(input.cwd ? { cwd: input.cwd } : {}),
+                  ...(selection?.apiModel
+                    ? { model: selection.apiModel }
+                    : input.model
+                      ? { model: input.model }
+                      : {}),
+                  ...(traits?.effectiveEffort ? { effort: traits.effectiveEffort } : {}),
+                  ...(Object.keys(settings).length > 0 ? { settings } : {}),
+                  ...resolveClaudeSdkExecutableOptions(
+                    providerOptions?.binaryPath,
+                    queryEnvironment,
+                    process.platform,
+                    input.cwd,
+                  ),
+                  settingSources: [...CLAUDE_SETTING_SOURCES],
+                  ...(permissionMode ? { permissionMode } : {}),
+                  ...(thinkingResolution.thinking ? { thinking: thinkingResolution.thinking } : {}),
+                  ...(() => {
+                    const filtered = filterReservedClaudeLaunchArgs(
+                      providerOptions?.launchArgs,
+                      input.modelSelection ? CLAUDE_ONE_OFF_SELECTION_FLAGS : undefined,
+                    );
+                    return filtered ? { extraArgs: filtered } : {};
+                  })(),
+                  includePartialMessages: true,
+                  ...claudeMandatoryPolicyOptions({ noTools: true }),
+                  canUseTool: async () =>
+                    ({
+                      behavior: "deny",
+                      message:
+                        "This one-off prompt requires plain-text output only. Tool calls are not allowed.",
+                    }) satisfies PermissionResult,
+                  env: queryEnvironment,
+                } satisfies ClaudeQueryOptions,
+              },
+              signal,
+            ),
           catch: (cause) =>
             new ProviderAdapterProcessError({
               provider: PROVIDER,
@@ -7471,12 +7536,15 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           }
         }
 
-        const queryRuntime = yield* Effect.try({
-          try: () =>
-            createQuery({
-              prompt,
-              options: queryOptions,
-            }),
+        const queryRuntime = yield* Effect.tryPromise({
+          try: (signal) =>
+            createQuery(
+              {
+                prompt,
+                options: queryOptions,
+              },
+              signal,
+            ),
           catch: (cause) => {
             if (chromeGeneration) {
               releaseChromeSession(threadId, chromeGeneration);
@@ -7549,7 +7617,11 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           updatedAt: startedAt,
         };
 
+        const nativeGoal = existingResumeSessionId
+          ? readClaudeGoal(asUnknownRecord(input.resumeCursor)?.nativeGoal)
+          : null;
         const context: ClaudeSessionContext = {
+          nativeGoal,
           ...(chromeRuntime ? { chromeRuntime } : {}),
           ...(chromeGeneration ? { chromeGeneration } : {}),
           ...(computerServer?.dispose ? { computerDispose: computerServer.dispose } : {}),
@@ -7706,6 +7778,12 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             ),
           );
         yield* emitSessionConfigured(context, configuredBase);
+        if (
+          nativeGoal !== null ||
+          existingContext?.nativeGoal ||
+          asUnknownRecord(input.resumeCursor)?.nativeGoal !== undefined
+        )
+          yield* emitNativeGoal(context);
 
         const readyStamp = yield* makeEventStamp(threadId);
         yield* offerRuntimeEvent({

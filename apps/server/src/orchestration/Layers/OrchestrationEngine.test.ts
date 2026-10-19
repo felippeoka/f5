@@ -55,6 +55,7 @@ import { ServerConfig } from "../../config.ts";
 import { DiskSpaceMonitor } from "../../storage/DiskSpaceMonitor.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { makeLocalFileTracer } from "../../observability/LocalFileTracer.ts";
+import { makeTraceSink } from "../../observability/TraceSink.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
 const asMessageId = (value: string): MessageId => MessageId.makeUnsafe(value);
@@ -109,14 +110,22 @@ async function createOrchestrationSystem(input?: {
   if (input?.tracePath) {
     fs.mkdirSync(path.dirname(input.tracePath), { recursive: true });
   }
-  const tracerLayer = input?.tracePath
+  let flushTraces = Effect.void;
+  const traceOptions = input?.tracePath
+    ? {
+        filePath: input.tracePath,
+        maxBytes: 1024 * 1024,
+        maxFiles: 2,
+        batchWindowMs: 1,
+      }
+    : null;
+  const tracerLayer = traceOptions
     ? Layer.effect(
         Tracer.Tracer,
-        makeLocalFileTracer({
-          filePath: input.tracePath,
-          maxBytes: 1024 * 1024,
-          maxFiles: 2,
-          batchWindowMs: 1,
+        Effect.gen(function* () {
+          const sink = yield* makeTraceSink(traceOptions);
+          flushTraces = sink.flush;
+          return yield* makeLocalFileTracer({ ...traceOptions, sink });
         }),
       )
     : Layer.empty;
@@ -141,6 +150,7 @@ async function createOrchestrationSystem(input?: {
     engine,
     sql,
     transitions: await runtime.runPromise(Effect.service(WorkspaceTransitions)),
+    flushTraces: () => runtime.runPromise(flushTraces),
     run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
     dispose: () => runtime.dispose(),
   };
@@ -1053,7 +1063,6 @@ describe("OrchestrationEngine", () => {
         createdAt,
       }),
     );
-    await system.run(Effect.sleep("25 millis"));
 
     const after = await system.run(Metric.snapshot);
     expect(
@@ -1091,6 +1100,7 @@ describe("OrchestrationEngine", () => {
         }),
     ).toBe(1);
 
+    await system.flushTraces();
     const traces = fs
       .readFileSync(tracePath, "utf8")
       .trim()

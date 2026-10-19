@@ -37,7 +37,7 @@ import {
   PubSub,
   Ref,
   Schema,
-  SchemaIssue,
+  Option,
   Scope,
   ServiceMap,
   Stream,
@@ -46,6 +46,8 @@ import {
 import * as Semaphore from "effect/Semaphore";
 import { writeFileStringAtomically } from "./atomicWrite.ts";
 import { ServerConfig } from "./config.ts";
+import { summarizeSettingsIssue } from "./serverSettingsDiagnostics.ts";
+import { watchSettingsFile } from "./watchSettingsFile.ts";
 import { type DeepPartial, deepMerge } from "@t3tools/shared/Struct";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import {
@@ -190,8 +192,8 @@ export class ServerSettingsService extends ServiceMap.Service<
                     (cause) =>
                       new ServerSettingsError({
                         settingsPath: "<memory>",
-                        detail: `failed to normalize server settings: ${SchemaIssue.makeFormatterDefault()(cause.issue)}`,
-                        cause,
+                        detail: `failed to normalize server settings: ${summarizeSettingsIssue(cause.issue)}`,
+                        cause: summarizeSettingsIssue(cause.issue),
                       }),
                   ),
                 ),
@@ -300,7 +302,10 @@ const makeServerSettings = Effect.gen(function* () {
     const raw = yield* readRawConfig;
     const decoded = Schema.decodeUnknownExit(ServerSettingsJson)(raw);
     if (decoded._tag === "Failure") {
-      const issues = Cause.pretty(decoded.cause);
+      const failure = Cause.findErrorOption(decoded.cause);
+      const issues = summarizeSettingsIssue(
+        Option.isSome(failure) ? failure.value.issue : undefined,
+      );
       yield* Ref.set(decodeFailureRef, issues);
       yield* Effect.logWarning("failed to parse settings.json; writes blocked until repaired", {
         path: settingsPath,
@@ -500,6 +505,7 @@ const makeServerSettings = Effect.gen(function* () {
 
       return yield* writeFileStringAtomically({
         filePath: settingsPath,
+        followSymlinks: true,
         contents: `${JSON.stringify({ ...unknownFields, ...sparseSettings }, null, 2)}\n`,
       }).pipe(
         Effect.provideService(FileSystem.FileSystem, fs),
@@ -525,8 +531,6 @@ const makeServerSettings = Effect.gen(function* () {
 
   const startWatcher = Effect.gen(function* () {
     const settingsDir = pathService.dirname(settingsPath);
-    const settingsFile = pathService.basename(settingsPath);
-    const settingsPathResolved = pathService.resolve(settingsPath);
 
     yield* fs.makeDirectory(settingsDir, { recursive: true }).pipe(
       Effect.mapError(
@@ -541,19 +545,20 @@ const makeServerSettings = Effect.gen(function* () {
 
     const revalidateAndEmitSafely = revalidateAndEmit.pipe(Effect.ignoreCause({ log: true }));
 
-    // Debounce watch events so the file is fully written before we read it.
-    // Editors emit multiple events per save (truncate, write, rename) and
-    // `fs.watch` can fire before the content has been flushed to disk.
-    const debouncedSettingsEvents = fs.watch(settingsDir).pipe(
-      Stream.filter((event) => {
-        return (
-          event.path === settingsFile ||
-          event.path === settingsPath ||
-          pathService.resolve(settingsDir, event.path) === settingsPathResolved
-        );
-      }),
-      Stream.debounce(Duration.millis(100)),
+    const events = yield* watchSettingsFile(settingsPath).pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, pathService),
+      Scope.provide(watcherScope),
+      Effect.mapError(
+        (cause) =>
+          new ServerSettingsError({
+            settingsPath,
+            detail: "failed to watch settings file",
+            cause,
+          }),
+      ),
     );
+    const debouncedSettingsEvents = events.pipe(Stream.debounce(Duration.millis(100)));
 
     yield* Stream.runForEach(debouncedSettingsEvents, () => revalidateAndEmitSafely).pipe(
       Effect.ignoreCause({ log: true }),
@@ -679,8 +684,8 @@ const makeServerSettings = Effect.gen(function* () {
               (cause) =>
                 new ServerSettingsError({
                   settingsPath: "<memory>",
-                  detail: `failed to normalize server settings: ${SchemaIssue.makeFormatterDefault()(cause.issue)}`,
-                  cause,
+                  detail: `failed to normalize server settings: ${summarizeSettingsIssue(cause.issue)}`,
+                  cause: summarizeSettingsIssue(cause.issue),
                 }),
             ),
           );

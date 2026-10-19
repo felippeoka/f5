@@ -31,8 +31,10 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
     [
       "status",
       "statusDetails",
+      "cleanupSafetyProbe",
       "prepareCommitContext",
       "commit",
+      "commitPrepared",
       "pushCurrentBranch",
       "branchExists",
       "ensureWorktree",
@@ -81,6 +83,13 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
 
   const implementations: GitCoreShape = {
     isDirty: () => Effect.succeed(false),
+    cleanupSafetyProbe: () =>
+      Effect.succeed({
+        hasTrackedChanges: false,
+        hasUntrackedChanges: false,
+        ignoredEntries: [],
+        ignoredTruncated: false,
+      }),
     readWorktreePreparation: () => Effect.succeed(null),
     allocateWorktreePath: ({ cwd, branch }) =>
       Effect.succeed(`${cwd}/worktrees/${branch.replaceAll("/", "-")}`),
@@ -128,6 +137,7 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
     statusDetails: () => Effect.succeed(DEFAULT_STATUS_DETAILS),
     prepareCommitContext: () => Effect.succeed(null),
     commit: () => Effect.succeed({ commitSha: "abc123" }),
+    commitPrepared: () => Effect.succeed({ status: "created", commitSha: "abc123" }),
     pushCurrentBranch: (_cwd, fallbackBranch) =>
       Effect.succeed({
         status: "pushed",
@@ -192,6 +202,10 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
     isDirty: (cwd) => {
       record("isDirty", [cwd]);
       return implementations.isDirty(cwd);
+    },
+    cleanupSafetyProbe: (cwd) => {
+      record("cleanupSafetyProbe", [cwd]);
+      return implementations.cleanupSafetyProbe(cwd);
     },
     fastForwardTo: (cwd, sha) => {
       record("fastForwardTo", [cwd, sha]);
@@ -260,6 +274,10 @@ export function makeFakeGitCore(overrides: Partial<GitCoreShape> = {}): {
     prepareCommitContext: (cwd, filePaths) => {
       record("prepareCommitContext", [cwd, filePaths]);
       return implementations.prepareCommitContext(cwd, filePaths);
+    },
+    commitPrepared: (cwd, subject, body, context, options) => {
+      record("commitPrepared", [cwd, subject, body, context, options]);
+      return implementations.commitPrepared(cwd, subject, body, context, options);
     },
     commit: (cwd, subject, body) => {
       record("commit", [cwd, subject, body]);

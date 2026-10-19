@@ -849,11 +849,20 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect((yield* runGit(cwd, ["rev-parse", "--abbrev-ref", "@{upstream}"])).stdout.trim()).toBe(
         "fork/statemachine",
       );
-      expect((yield* runGit(fork, ["rev-parse", "refs/heads/statemachine"])).stdout.trim()).toBe(
-        (yield* runGit(cwd, ["rev-parse", "HEAD"])).stdout.trim(),
-      );
       expect(
-        (yield* runGit(fork, ["branch", "--list", "t3code/pr-142/statemachine"])).stdout.trim(),
+        (yield* runGit(fork, [
+          "--git-dir=.",
+          "rev-parse",
+          "refs/heads/statemachine",
+        ])).stdout.trim(),
+      ).toBe((yield* runGit(cwd, ["rev-parse", "HEAD"])).stdout.trim());
+      expect(
+        (yield* runGit(fork, [
+          "--git-dir=.",
+          "branch",
+          "--list",
+          "t3code/pr-142/statemachine",
+        ])).stdout.trim(),
       ).toBe("");
       expect(
         (yield* runGit(cwd, [

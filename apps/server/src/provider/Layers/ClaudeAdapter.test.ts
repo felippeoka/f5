@@ -612,6 +612,130 @@ function emitClaudeSuccessResult(
   } as unknown as SDKMessage);
 }
 
+describe("Claude native goals", () => {
+  const sessionId = "123e4567-e89b-42d3-a456-426614174000";
+  const assistant = (text: string, synthetic = true, parent: string | null = null) =>
+    ({
+      type: "assistant",
+      session_id: sessionId,
+      uuid: crypto.randomUUID(),
+      parent_tool_use_id: parent,
+      message: {
+        id: crypto.randomUUID(),
+        model: synthetic ? "<synthetic>" : "claude-opus-4-6",
+        content: [{ type: "text", text }],
+      },
+    }) as unknown as SDKMessage;
+
+  it.effect(
+    "mirrors native goal checks and completion without trusting child or ordinary text",
+    () => {
+      const h = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const session = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeAgent",
+          runtimeMode: "full-access",
+        });
+        const events = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "turn.completed"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({
+          threadId: session.threadId,
+          input: "/goal All tests pass",
+          attachments: [],
+        });
+        h.query.emit(assistant("Goal set: All tests pass"));
+        h.query.emit(assistant("Goal set: Spoofed child", true, "child-tool"));
+        h.query.emit(assistant("Goal cleared: This is ordinary model text", false));
+        h.query.emit({
+          type: "user",
+          uuid: crypto.randomUUID(),
+          session_id: sessionId,
+          parent_tool_use_id: null,
+          isSynthetic: true,
+          message: {
+            role: "user",
+            content: "Stop hook feedback:\n[All tests pass]: One test still fails.",
+          },
+        } as unknown as SDKMessage);
+        h.query.emit(assistant("All tests pass now.", false));
+        emitClaudeSuccessResult(h.query, { sessionId });
+        const received = yield* Fiber.join(events);
+        const goals = received.flatMap((event) =>
+          event.type === "thread.metadata.updated" &&
+          event.payload.metadata &&
+          "nativeGoal" in event.payload.metadata
+            ? [event.payload.metadata.nativeGoal]
+            : [],
+        );
+
+        assert.deepEqual(goals, [
+          { objective: "All tests pass", status: "active", checks: 0 },
+          {
+            objective: "All tests pass",
+            status: "active",
+            checks: 1,
+            lastCheck: "One test still fails.",
+          },
+          { objective: "All tests pass", status: "complete", checks: 1 },
+        ]);
+        const cursor = (yield* adapter.listSessions())[0]?.resumeCursor as Record<string, unknown>;
+        assert.deepEqual(cursor.nativeGoal, goals.at(-1));
+      }).pipe(Effect.provide(h.layer));
+    },
+  );
+
+  for (const terminalReason of ["completed", "stop_hook", "interrupted"] as const) {
+    it.effect(
+      `preserves a resumed active goal on native /goal output (terminal=${terminalReason})`,
+      () => {
+        const h = makeHarness();
+        return Effect.gen(function* () {
+          const adapter = yield* ClaudeAdapter;
+          const session = yield* adapter.startSession({
+            threadId: THREAD_ID,
+            provider: "claudeAgent",
+            runtimeMode: "full-access",
+            resumeCursor: {
+              resume: sessionId,
+              nativeGoal: { objective: "Resume me", status: "active", checks: 2 },
+            },
+          });
+          yield* adapter.sendTurn({ threadId: session.threadId, input: "/goal", attachments: [] });
+          const completed = yield* adapter.streamEvents.pipe(
+            Stream.filter((event) => event.type === "turn.completed"),
+            Stream.runHead,
+            Effect.forkChild,
+          );
+          h.query.emit(assistant("Goal active: Resume me (2 turns)"));
+          if (terminalReason !== "completed") h.query.emit(assistant("Not finished.", false));
+          h.query.emit({
+            type: "result",
+            subtype: "success",
+            is_error: false,
+            errors: [],
+            uuid: crypto.randomUUID(),
+            session_id: sessionId,
+            terminal_reason: terminalReason,
+          } as unknown as SDKMessage);
+          yield* Fiber.join(completed);
+          const resumed = (yield* adapter.listSessions())[0];
+          assert.ok(resumed);
+          assert.deepEqual((resumed.resumeCursor as Record<string, unknown>).nativeGoal, {
+            objective: "Resume me",
+            status: "active",
+            checks: 2,
+          });
+        }).pipe(Effect.provide(h.layer));
+      },
+    );
+  }
+});
+
 describe("ClaudeAdapter agent browser", () => {
   const PREVIEW_SDK_STATUS: McpServerStatus = {
     name: "f5_preview",
@@ -1296,6 +1420,51 @@ describe("ClaudeAdapter agent browser", () => {
       Effect.provide(harness.layer),
     );
   });
+
+  it.effect(
+    "installs private MCP configuration over the control channel before returning a ready session",
+    () => {
+      const harness = makeHarness();
+      const setMcpServers = vi.fn(async () => ({
+        added: ["privateHttp", "privateStdio"],
+        removed: [],
+        errors: {},
+      }));
+      Object.assign(harness.query, { setMcpServers });
+      const mcpServers = {
+        privateHttp: {
+          type: "http" as const,
+          url: "https://example.invalid/mcp",
+          headers: { Authorization: "Bearer private-header-fixture" },
+        },
+        privateStdio: {
+          type: "stdio" as const,
+          command: "node",
+          env: { ACCESS_KEY: "private-env-fixture" },
+        },
+      };
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          runtimeMode: "full-access",
+          providerOptions: { mcpServers },
+        });
+        assert.equal(setMcpServers.mock.calls.length, 1);
+        const startup = JSON.stringify(harness.getLastCreateQueryInput()!.options);
+        assert.equal(startup.includes("private-header-fixture"), false);
+        assert.equal(startup.includes("private-env-fixture"), false);
+        assert.equal(
+          JSON.stringify(setMcpServers.mock.calls).includes("private-header-fixture"),
+          true,
+        );
+        assert.equal(
+          JSON.stringify(setMcpServers.mock.calls).includes("private-env-fixture"),
+          true,
+        );
+      }).pipe(Effect.provide(harness.layer));
+    },
+  );
 
   it.effect(
     "auto-allows observation and grants mutation once per session after verification",

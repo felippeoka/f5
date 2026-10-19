@@ -56,6 +56,8 @@ export interface InternalRemoveWorktreeInput {
   readonly cwd: string;
   readonly path: string;
   readonly force?: boolean;
+  /** Explicitly selected only by automatic cleanup; manual removal remains conservative. */
+  readonly ignoredPolicy?: "automatic";
 }
 
 import type { GitCommandError } from "../Errors.ts";
@@ -202,14 +204,30 @@ export interface GitCoreShape {
   readonly branchExists: (cwd: string, branch: string) => Effect.Effect<boolean, GitCommandError>;
   /** Read detailed status without the polling cache, for mutation decisions. */
   readonly statusDetails: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;
+  /** Uncached removal check; repository config cannot hide untracked or ignored files. */
+  readonly cleanupSafetyProbe: (
+    cwd: string,
+  ) => Effect.Effect<import("../cleanupSafety.ts").CleanupSafetyProbe, GitCommandError>;
 
   /**
-   * Build staged change context for commit generation.
+   * Build commit-generation context in a temporary index; never stage the real index.
    */
   readonly prepareCommitContext: (
     cwd: string,
     filePaths?: readonly string[],
   ) => Effect.Effect<GitPreparedCommitContext | null, GitCommandError>;
+
+  /** Revalidate a prepared context under the repository lock, then stage and commit. */
+  readonly commitPrepared: (
+    cwd: string,
+    subject: string,
+    body: string,
+    context: GitPreparedCommitContext,
+    options?: { newBranch?: string },
+  ) => Effect.Effect<
+    { status: "created"; commitSha: string } | { status: "context_changed" },
+    GitCommandError
+  >;
 
   /**
    * Create a commit with provided subject/body.

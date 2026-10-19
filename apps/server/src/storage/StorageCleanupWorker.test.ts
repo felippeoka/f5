@@ -8,11 +8,14 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ServerConfig } from "../config.ts";
+import { createLargeIgnoredDependencyTree } from "../git/ignoredPaths.testUtils.ts";
+import { GitCore } from "../git/Services/GitCore.ts";
 import { withWorktreeLifecycleLock } from "../project/Layers/WorktreeLifecycleCoordinator.ts";
 import {
   blockingIgnoredEntries,
   matchWorktreeCleanupRule,
   redactHomePath,
+  summarizeIgnoredCleanupPaths,
   StorageCleanupWorker,
   StorageCleanupWorkerLive,
 } from "./StorageCleanupWorker.ts";
@@ -67,10 +70,20 @@ describe("worktree cleanup rules", () => {
     ).toBeNull();
   });
 
-  it("treats only node_modules as reproducible ignored content", () => {
+  it("protects environment-file path segments while allowing other ignored content", () => {
     expect(
       blockingIgnoredEntries(["node_modules/", "packages/web/node_modules/", ".env", "dist/"]),
-    ).toEqual([".env", "dist/"]);
+    ).toEqual([".env"]);
+  });
+
+  it("bounds ignored-path audit previews in UTF-8 bytes and reports omitted paths", () => {
+    const entries = Array.from({ length: 1000 }, (_, i) => `dist/${i}-${"界".repeat(200)}\n.js`);
+    const summary = summarizeIgnoredCleanupPaths(entries);
+    expect(Buffer.byteLength(summary)).toBeLessThan(4200);
+    expect(summary).toContain("1000 path(s):");
+    expect(summary).toContain("more paths");
+    expect(summary).toContain("\\n.js");
+    expect(summary).not.toContain("\n");
   });
 });
 
@@ -89,6 +102,7 @@ describe("StorageCleanupWorker", { timeout: 60_000 }, () => {
       root: string;
       worktreePath: string;
       worker: typeof StorageCleanupWorker.Service;
+      core: typeof GitCore.Service;
     }) => Effect.Effect<A, E, SqlClient.SqlClient>,
   ) =>
     Effect.gen(function* () {
@@ -108,7 +122,8 @@ describe("StorageCleanupWorker", { timeout: 60_000 }, () => {
           thread({ id: "thread-1", projectId: "project-1", worktreePath, branch: "feature" }),
         );
         const worker = yield* StorageCleanupWorker;
-        return yield* body({ world, root: repo.root, worktreePath, worker });
+        const core = yield* GitCore;
+        return yield* body({ world, root: repo.root, worktreePath, worker, core });
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped);
 
@@ -188,7 +203,7 @@ describe("StorageCleanupWorker", { timeout: 60_000 }, () => {
             target: path.join("project", "feature"),
             result: "removed",
             threadId: "thread-1",
-            policyVersion: 1,
+            policyVersion: 2,
           });
           expect(audit[0]!.target).not.toContain(worktreePath);
         }),
@@ -203,12 +218,127 @@ describe("StorageCleanupWorker", { timeout: 60_000 }, () => {
           yield* Effect.promise(() => fs.writeFile(path.join(worktreePath, ".env"), "SECRET=1\n"));
           const ignored = yield* worker.runOnce;
           expect(ignored[0]).toMatchObject({ action: "skip" });
-          expect(ignored[0]!.reason).toContain("ignored files other than node_modules/ (.env)");
+          expect(ignored[0]!.reason).toContain("protected ignored environment files (.env)");
 
           yield* Effect.promise(() => fs.rm(path.join(worktreePath, ".env")));
           yield* Effect.promise(() => fs.writeFile(path.join(worktreePath, "new.txt"), "x\n"));
           const untracked = yield* worker.dryRun;
           expect(untracked.targets[0]!.reason).toContain("it has uncommitted changes");
+          expect(yield* Effect.promise(() => exists(worktreePath))).toBe(true);
+        }),
+      ),
+    );
+  });
+
+  it("preserves hidden untracked files even when repository status hides them", async () => {
+    await Effect.runPromise(
+      withWorktree(unchangedRule, ({ worker, worktreePath }) =>
+        Effect.gen(function* () {
+          git(worktreePath, "config", "status.showUntrackedFiles", "no");
+          yield* Effect.promise(() =>
+            fs.writeFile(path.join(worktreePath, "hidden.txt"), "keep me"),
+          );
+          const result = yield* worker.runOnce;
+          expect(result[0]).toMatchObject({ action: "skip" });
+          expect(result[0]!.reason).toContain("uncommitted changes");
+          expect(
+            yield* Effect.promise(() => fs.readFile(path.join(worktreePath, "hidden.txt"), "utf8")),
+          ).toBe("keep me");
+        }),
+      ),
+    );
+  });
+
+  it("protects ignored environment files inside an ignored output directory", async () => {
+    await Effect.runPromise(
+      withWorktree(unchangedRule, ({ worker, worktreePath, root }) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            fs.appendFile(path.join(root, ".git", "info", "exclude"), "\ndist/\n"),
+          );
+          yield* Effect.promise(() => fs.mkdir(path.join(worktreePath, "dist")));
+          yield* Effect.promise(() =>
+            fs.writeFile(path.join(worktreePath, "dist", ".env.local"), "keep me"),
+          );
+          const result = yield* worker.runOnce;
+          expect(result[0]).toMatchObject({ action: "skip" });
+          expect(result[0]!.reason).toContain("dist/.env.local");
+          expect(yield* Effect.promise(() => exists(worktreePath))).toBe(true);
+        }),
+      ),
+    );
+  });
+
+  it("allows ignored build output and lists it in the removal audit", async () => {
+    await Effect.runPromise(
+      withWorktree(unchangedRule, ({ worker, worktreePath, root }) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            fs.appendFile(path.join(root, ".git", "info", "exclude"), "\ndist/\n"),
+          );
+          yield* Effect.promise(() => fs.mkdir(path.join(worktreePath, "dist")));
+          yield* Effect.promise(() =>
+            fs.writeFile(path.join(worktreePath, "dist", "index.js"), "built"),
+          );
+          const result = yield* worker.runOnce;
+          expect(result[0]).toMatchObject({ action: "remove" });
+          expect(yield* Effect.promise(() => exists(worktreePath))).toBe(false);
+          expect((yield* listStorageAutomationAudit(10))[0]!.reason).toContain('"dist/"');
+        }),
+      ),
+    );
+  });
+
+  it("handles over a megabyte of ignored dependency paths and still protects nested secrets", async () => {
+    await Effect.runPromise(
+      withWorktree(unchangedRule, ({ worker, worktreePath }) =>
+        Effect.gen(function* () {
+          const directory = yield* Effect.promise(() =>
+            createLargeIgnoredDependencyTree(worktreePath),
+          );
+          yield* Effect.promise(() =>
+            fs.writeFile(path.join(directory, ".env.local"), "keep this credential"),
+          );
+          const protectedResult = yield* worker.runOnce;
+          expect(protectedResult[0]!.reason).toContain("protected ignored environment files");
+          expect(
+            yield* Effect.promise(() => fs.readFile(path.join(directory, ".env.local"), "utf8")),
+          ).toBe("keep this credential");
+          yield* Effect.promise(() => fs.rm(path.join(directory, ".env.local")));
+          expect((yield* worker.runOnce)[0]).toMatchObject({ action: "remove" });
+          const audit = (yield* listStorageAutomationAudit(10)).find(
+            (entry) => entry.result === "removed",
+          );
+          expect(audit?.reason).toContain("node_modules/");
+          expect(Buffer.byteLength(audit!.reason!)).toBeLessThan(8192);
+        }),
+      ),
+    );
+  });
+
+  it("reports truncation and refuses cleanup when even collapsed ignored paths exceed the bound", async () => {
+    await Effect.runPromise(
+      withWorktree(unchangedRule, ({ worker, worktreePath, root, core }) =>
+        Effect.gen(function* () {
+          git(worktreePath, "config", "status.showUntrackedFiles", "no");
+          yield* Effect.promise(async () => {
+            await fs.appendFile(path.join(root, ".git", "info", "exclude"), "\n.cache-*\n");
+          });
+          yield* Effect.promise(async () => {
+            for (let start = 0; start < 400; start += 50)
+              await Promise.all(
+                Array.from({ length: 50 }, (_, offset) =>
+                  fs.writeFile(
+                    path.join(worktreePath, `.cache-${"x".repeat(200)}-${start + offset}`),
+                    "keep",
+                  ),
+                ),
+              );
+          });
+          const inspected = yield* core.inspectCheckout(worktreePath);
+          expect(inspected.ignoredTruncated).toBe(true);
+          expect(inspected.hasUntrackedChanges).toBe(false);
+          expect((yield* worker.dryRun).targets[0]!.reason).toContain("too many ignored files");
           expect(yield* Effect.promise(() => exists(worktreePath))).toBe(true);
         }),
       ),

@@ -132,6 +132,19 @@ heap. The separate soak measures retained heap.
 
 ## Reproducing the pinned baseline
 
+The SQLite checkpoint gate can also run independently:
+
+```sh
+bun run perf:server sqlite-checkpoint --output=/tmp/f5-checkpoint-report.json
+```
+
+It uses five warmups and thirty measured repetitions. Each repetition prepares a
+40 MiB WAL before timing, then measures event-loop delay while the production
+Node checkpoint worker drains it. Every measured p99 must be below 50 ms. The
+report records fixture, harness, dependency and machine metadata. This is an
+absolute checkpoint-latency gate; it does not establish comparative CPU gains or
+replace the other server, browser or retained-memory gates.
+
 Create a detached disposable checkout without changing its production source:
 
 ```sh

@@ -12,6 +12,7 @@ import { isolatedBackendCommand } from "./backendComputerIsolation";
 import { profilePreviewPartition } from "./profileRuntime";
 import { CaptureShortcut } from "./snapShot/CaptureShortcut";
 import { captureBoundedPage } from "./preview/capture";
+import { capturePreviewSnapshotPage } from "./preview/snapshotScript";
 import {
   PreviewAutomationControl,
   PreviewDiagnostics,
@@ -203,8 +204,6 @@ const PREVIEW_WEBVIEW_PREFERENCES = "contextIsolation=true,sandbox=true,nodeInte
 const PREVIEW_DEFAULT_ZOOM_FACTOR = 1;
 const PREVIEW_CAPTURE_MAX_EDGE_PX = 1600;
 const PREVIEW_CAPTURE_MAX_PIXELS = 2_000_000;
-const PREVIEW_AUTOMATION_MAX_TEXT_LENGTH = 20_000;
-const PREVIEW_AUTOMATION_MAX_ELEMENTS = 80;
 const PREVIEW_AUTOMATION_MAX_EVALUATION_BYTES = 64_000;
 const PREVIEW_AUTOMATION_EVALUATE_DEFAULT_TIMEOUT_MS = 15_000;
 const PREVIEW_AUTOMATION_WAIT_INTERVAL_MS = 100;
@@ -1664,78 +1663,16 @@ function waitPreviewAutomationPoll(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, PREVIEW_AUTOMATION_WAIT_INTERVAL_MS));
 }
 
-function buildPreviewAutomationSnapshotScript(): string {
-  return String.raw`
-(() => {
-  const selectorFor = (element) => {
-    if (!element || element.nodeType !== Node.ELEMENT_NODE) return "";
-    if (element.id) return "#" + CSS.escape(element.id);
-    for (const attribute of ["data-testid", "name", "aria-label"]) {
-      const value = element.getAttribute(attribute);
-      if (value) return element.tagName.toLowerCase() + "[" + attribute + "=" + JSON.stringify(value) + "]";
-    }
-    const parts = [];
-    let current = element;
-    while (current && current.nodeType === Node.ELEMENT_NODE && parts.length < 8) {
-      const parent = current.parentElement;
-      const siblings = parent
-        ? Array.from(parent.children).filter((child) => child.tagName === current.tagName)
-        : [];
-      const base = current.tagName.toLowerCase();
-      parts.unshift(siblings.length > 1 ? base + ":nth-of-type(" + (siblings.indexOf(current) + 1) + ")" : base);
-      current = parent;
-    }
-    return parts.join(" > ");
-  };
-  const visible = (element) => {
-    const style = getComputedStyle(element);
-    const rect = element.getBoundingClientRect();
-    return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
-  };
-  const elements = Array.from(document.querySelectorAll("a[href],button,input,textarea,select,[role],[tabindex],[contenteditable='true']"))
-    .filter(visible)
-    .slice(0, ${PREVIEW_AUTOMATION_MAX_ELEMENTS})
-    .map((element) => {
-      const rect = element.getBoundingClientRect();
-      return {
-        tag: element.tagName.toLowerCase(),
-        role: element.getAttribute("role"),
-        name: element.getAttribute("aria-label") || element.getAttribute("name") || element.innerText || element.textContent || element.value || "",
-        selector: selectorFor(element),
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height
-      };
-    });
-  return {
-    url: location.href,
-    title: document.title,
-    loading: document.readyState !== "complete",
-    visibleText: (document.body?.innerText || "").slice(0, ${PREVIEW_AUTOMATION_MAX_TEXT_LENGTH}),
-    interactiveElements: elements,
-    accessibilityTree: null,
-    consoleEntries: [],
-    networkEntries: [],
-    actionTimeline: []
-  };
-})()
-`;
-}
-
 async function previewAutomationSnapshot(
   tabId: string,
   save = false,
 ): Promise<PreviewAutomationSnapshot> {
   const guest = requirePreviewWebContents(tabId);
   requireAllowedPreviewPage(tabId, guest);
-  const scriptedPage = await executePreviewJavaScript<
-    Omit<PreviewAutomationSnapshot, "screenshot">
-  >(guest, buildPreviewAutomationSnapshotScript());
+  const scriptedPage = await capturePreviewSnapshotPage(guest, previewDiagnostics.read(tabId));
   const popupOpen = (lookupPreviewTabEntry(tabId)?.popupCount ?? 0) > 0;
   const page = boundSnapshotPageData({
     ...scriptedPage,
-    ...previewDiagnostics.read(tabId),
     ...(popupOpen ? { popupOpen } : {}),
   });
   const viewport = normalizePickViewport(

@@ -578,12 +578,13 @@ const makeServerProgram = (input: CliInput) =>
     const { authToken, devUrl, ...safeConfig } = config;
     yield* Effect.logInfo("F5 running", {
       ...safeConfig,
-      devUrl: devUrl?.toString(),
+      devUrl: devUrl?.origin,
       authEnabled: Boolean(authToken),
     });
 
     if (!config.noBrowser) {
       const baseTarget = config.devUrl?.toString() ?? bindUrl;
+      const publicTarget = config.devUrl?.origin ?? bindUrl;
       const target =
         config.authToken && !config.devUrl
           ? `${baseTarget.replace(/#.*$/u, "")}#token=${encodeURIComponent(config.authToken)}`
@@ -591,11 +592,14 @@ const makeServerProgram = (input: CliInput) =>
       yield* withStartupPhaseTiming(
         "browser.open",
         openDeps.openBrowser(target).pipe(
+          // The target can contain a launch token. Neither a failed subprocess
+          // nor its arguments may be exported in a trace.
+          Effect.withTracerEnabled(false),
           Effect.catch(() =>
             Effect.logInfo("browser auto-open unavailable", {
               hint: config.authToken
-                ? `Open ${baseTarget} and supply the configured launch token in the URL fragment.`
-                : `Open ${baseTarget} in your browser.`,
+                ? `Open ${publicTarget} and supply the configured launch token in the URL fragment.`
+                : `Open ${publicTarget} in your browser.`,
             }),
           ),
         ),

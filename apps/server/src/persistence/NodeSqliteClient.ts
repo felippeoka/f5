@@ -27,6 +27,8 @@ import * as Statement from "effect/unstable/sql/Statement";
 
 import { sqlConnectionWaitDuration, sqlExecutionDuration } from "../observability/Metrics.ts";
 
+import { startCheckpointWorker } from "./sqliteCheckpointWorker.ts";
+
 const ATTR_DB_SYSTEM_NAME = "db.system.name";
 
 const recordDuration = (
@@ -49,6 +51,7 @@ export const SqliteClient = ServiceMap.Service<Client.SqlClient>("t3/persistence
 export interface SqliteClientConfig {
   readonly filename: string;
   readonly readonly?: boolean | undefined;
+  readonly checkpointWorker?: boolean | undefined;
   readonly allowExtension?: boolean | undefined;
   readonly prepareCacheSize?: number | undefined;
   readonly prepareCacheTTL?: Duration.Input | undefined;
@@ -104,7 +107,14 @@ const makeWithDatabase = (
         Effect.sync(() => db.close()),
       );
 
-      db.exec("PRAGMA busy_timeout = 5000");
+      db.exec("PRAGMA busy_timeout = 5000; PRAGMA checkpoint_fullfsync = ON;");
+      const checkpoint =
+        options.checkpointWorker &&
+        !options.readonly &&
+        options.filename !== ":memory:" &&
+        options.filename !== ""
+          ? yield* startCheckpointWorker(options.filename, db)
+          : undefined;
 
       const statementReaderCache = new WeakMap<StatementSync, boolean>();
       const hasRows = (statement: StatementSync): boolean => {
@@ -117,14 +127,28 @@ const makeWithDatabase = (
         return value;
       };
 
-      const prepareCache = yield* Cache.make({
+      const sqlError = (cause: unknown, message: string) => {
+        if (
+          typeof cause === "object" &&
+          cause !== null &&
+          "errcode" in cause &&
+          typeof cause.errcode === "number" &&
+          !("errno" in cause)
+        ) {
+          Object.assign(cause, { errno: cause.errcode });
+        }
+        return new SqlError({ cause, message });
+      };
+      const prepare = (sql: string) =>
+        Effect.try({
+          try: () => db.prepare(sql),
+          catch: (cause) => sqlError(cause, "Failed to prepare statement"),
+        });
+      const prepareCache = yield* Cache.makeWith({
         capacity: options.prepareCacheSize ?? 200,
-        timeToLive: options.prepareCacheTTL ?? Duration.minutes(10),
-        lookup: (sql: string) =>
-          Effect.try({
-            try: () => db.prepare(sql),
-            catch: (cause) => new SqlError({ cause, message: "Failed to prepare statement" }),
-          }),
+        timeToLive: (exit) =>
+          Exit.isSuccess(exit) ? (options.prepareCacheTTL ?? Duration.minutes(10)) : Duration.zero,
+        lookup: prepare,
       });
 
       const runStatement = (
@@ -154,13 +178,15 @@ const makeWithDatabase = (
             // Failures are timed too: a busy-timeout stall ends in SQLITE_BUSY.
             return Effect.andThen(
               recordExecution(startedAt, "failure"),
-              Effect.fail(new SqlError({ cause, message: "Failed to execute statement" })),
+              Effect.fail(sqlError(cause, "Failed to execute statement")),
             );
           }
         });
 
       const run = (sql: string, params: ReadonlyArray<unknown>, raw = false) =>
-        Effect.flatMap(Cache.get(prepareCache, sql), (s) => runStatement(s, params, raw));
+        Effect.flatMap(Cache.get(prepareCache, sql), (s) => runStatement(s, params, raw)).pipe(
+          Effect.ensuring(Effect.sync(() => checkpoint?.())),
+        );
 
       const runValues = (sql: string, params: ReadonlyArray<unknown>) =>
         Effect.acquireUseRelease(
@@ -180,7 +206,7 @@ const makeWithDatabase = (
                   statement.all(...(params as any));
                   return [];
                 },
-                catch: (cause) => new SqlError({ cause, message: "Failed to execute statement" }),
+                catch: (cause) => sqlError(cause, "Failed to execute statement"),
               }).pipe(
                 Effect.onExit((exit) =>
                   recordExecution(startedAt, Exit.isSuccess(exit) ? "success" : "failure"),
@@ -193,7 +219,7 @@ const makeWithDatabase = (
                 statement.setReturnArrays(false);
               }
             }),
-        );
+        ).pipe(Effect.ensuring(Effect.sync(() => checkpoint?.())));
 
       return identity<Connection>({
         execute(sql, params, rowTransform) {
@@ -206,7 +232,9 @@ const makeWithDatabase = (
           return runValues(sql, params);
         },
         executeUnprepared(sql, params, rowTransform) {
-          const effect = runStatement(db.prepare(sql), params ?? [], false);
+          const effect = Effect.flatMap(prepare(sql), (statement) =>
+            runStatement(statement, params ?? [], false),
+          ).pipe(Effect.ensuring(Effect.sync(() => checkpoint?.())));
           return rowTransform ? Effect.map(effect, rowTransform) : effect;
         },
         executeStream(_sql, _params) {
@@ -242,6 +270,7 @@ const makeWithDatabase = (
       acquirer,
       compiler,
       transactionAcquirer,
+      beginTransaction: options.readonly ? "BEGIN" : "BEGIN IMMEDIATE",
       spanAttributes: [
         ...(options.spanAttributes ? Object.entries(options.spanAttributes) : []),
         [ATTR_DB_SYSTEM_NAME, "sqlite"],

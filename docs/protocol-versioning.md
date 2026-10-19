@@ -49,6 +49,12 @@ transitions. Recovery can also accept the inspected project checkout when recrea
 checkout to adopt. Workspace isolation failures have a stable error code. An active transition
 is independent of queue pauses and cannot be cleared by resume.
 
+October upstream ports use version 29 (main already includes protocol versions
+26–28 for worktree management, MCP and storage). Git commit results gain `context_changed`
+and retain a suggested message for inspection when HEAD, staging, or included
+content changes during generation. No commit, push or PR creation follows that result.
+This is the single protocol bump for this bundled catch-up release.
+
 The authenticated `GET /api/bootstrap` response and WebSocket welcome advertise
 current capabilities, upload support, and global send limits. Today
 image attachments retain the existing eight-image, 10 MiB/image and 120,000-character

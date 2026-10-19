@@ -76,6 +76,8 @@ it("places generated worktrees under the configured server worktree root", async
       expect(scripted.calls.find((call) => call.args[0] === "worktree")?.args).toContain(
         result.worktree.path,
       );
+      const addArgs = scripted.calls.find((call) => call.args[0] === "worktree")!.args;
+      expect(addArgs[addArgs.indexOf(result.worktree.path) - 1]).toBe("--");
     }).pipe(
       Effect.provide(
         GitCoreLive.pipe(
@@ -88,6 +90,39 @@ it("places generated worktrees under the configured server worktree root", async
       ),
     ),
   );
+});
+
+it("rejects option-shaped worktree refs before Git calls or ownership allocation", async () => {
+  const scripted = makeScriptedGitService((input) => ({
+    stdout: input.args[0] === "rev-parse" ? "a".repeat(40) : "",
+  }));
+  const core = await makeCore(scripted.service);
+  for (const fields of [
+    { newBranch: "--delete" },
+    { branch: "--orphan" },
+    { newBranch: "safe", baseRefName: "--orphan" },
+    { newBranch: "invalid\0branch" },
+    { newBranch: "" },
+  ]) {
+    await expect(
+      Effect.runPromise(
+        core.createWorktree({
+          cwd: process.cwd(),
+          branch: "main",
+          path: null,
+          ...fields,
+        }),
+      ),
+    ).rejects.toThrow("Invalid worktree ref name");
+  }
+  for (const branch of ["--orphan", "invalid\0branch", ""]) {
+    await expect(
+      Effect.runPromise(
+        core.ensureWorktree({ cwd: process.cwd(), path: "/unused-worktree", branch }),
+      ),
+    ).rejects.toThrow("Invalid worktree ref name");
+  }
+  expect(scripted.calls).toEqual([]);
 });
 
 function counterValue(
@@ -230,13 +265,13 @@ describe("GitCore unit", () => {
             "# branch.head feature/parser\x00# branch.upstream origin/feature/parser\x00# branch.ab +2 -3\x001 .M N... 100644 100644 100644 a b src/a.ts\x00? notes.txt\x00",
         };
       }
-      if (argsEqual(input, ["diff", "--numstat", "-z"])) {
+      if (argsEqual(input, ["diff-files", "-M", "--numstat", "-z"])) {
         return { stdout: "4\t1\tsrc/a.ts\x002\t0\tnotes.txt\x00" };
       }
       if (argsEqual(input, ["diff", "--cached", "--numstat", "-z"])) {
         return { stdout: "3\t2\tsrc/a.ts\x00" };
       }
-      if (argsEqual(input, ["diff", "--numstat", "-z", "HEAD", "--"])) {
+      if (argsEqual(input, ["diff-index", "-M", "--numstat", "-z", "HEAD", "--"])) {
         return { stdout: "3\t1\tsrc/a.ts\x002\t0\tnotes.txt\x00" };
       }
       return {};
@@ -272,8 +307,39 @@ describe("GitCore unit", () => {
     });
   });
 
-  it("limits generated commit context to the selected paths", async () => {
+  it("lists worktrees when older Git rejects the NUL option", async () => {
     const scripted = makeScriptedGitService((input) => {
+      if (argsEqual(input, ["worktree", "list", "--porcelain", "-z"]))
+        return { code: 129, stderr: "error: unknown switch `z'" };
+      if (argsEqual(input, ["worktree", "list", "--porcelain"]))
+        return {
+          stdout: `worktree ${process.cwd()}\nHEAD ${"a".repeat(40)}\nbranch refs/heads/main\n\n`,
+        };
+      return {};
+    });
+    const core = await makeCore(scripted.service);
+    await expect(Effect.runPromise(core.listWorktrees(process.cwd()))).resolves.toMatchObject([
+      { path: process.cwd(), branch: "main", headSha: "a".repeat(40), isMain: true },
+    ]);
+    expect(scripted.calls.filter((call) => call.args[0] === "worktree")).toHaveLength(2);
+  });
+
+  it("keeps unrelated worktree-list failures visible without a compatibility retry", async () => {
+    const scripted = makeScriptedGitService(() => ({
+      code: 128,
+      stderr: "fatal: not a git repository",
+    }));
+    const core = await makeCore(scripted.service);
+    await expect(Effect.runPromise(core.listWorktrees(process.cwd()))).rejects.toThrow(
+      "not a git repository",
+    );
+    expect(scripted.calls.filter((call) => call.args[0] === "worktree")).toHaveLength(1);
+  });
+
+  it("limits generated commit context to the selected paths", async () => {
+    const indexPath = join(tmpdir(), `f5-fake-index-${crypto.randomUUID()}`);
+    const scripted = makeScriptedGitService((input) => {
+      if (argsEqual(input, ["rev-parse", "--git-path", "index"])) return { stdout: indexPath };
       if (input.args.includes("--name-status")) return { stdout: "M\tsrc/selected.ts\n" };
       if (input.args.includes("--patch")) return { stdout: "+selected\n" };
       return {};
@@ -286,12 +352,17 @@ describe("GitCore unit", () => {
       stagedSummary: "M\tsrc/selected.ts",
       stagedPatch: "+selected\n",
     });
+    expect(
+      scripted.calls
+        .filter((call) => call.args.includes("add"))
+        .every((call) => call.env?.GIT_INDEX_FILE?.startsWith(`${indexPath}.f5-`)),
+    ).toBe(true);
     expect(scripted.calls.map((call) => call.args)).toContainEqual([
       "diff",
       "--cached",
       "--name-status",
       "--",
-      "src/selected.ts",
+      ":(literal)src/selected.ts",
     ]);
     expect(scripted.calls.map((call) => call.args)).toContainEqual([
       "diff",
@@ -302,7 +373,7 @@ describe("GitCore unit", () => {
       "--dst-prefix=b/",
       "--minimal",
       "--",
-      "src/selected.ts",
+      ":(literal)src/selected.ts",
     ]);
   });
 
@@ -364,6 +435,8 @@ describe("GitCore unit", () => {
       "fetch",
       "--quiet",
       "--no-tags",
+      "--no-auto-gc",
+      "--",
       "origin",
       "+refs/heads/feature/cache:refs/remotes/origin/feature/cache",
     ]);
@@ -385,7 +458,7 @@ describe("GitCore unit", () => {
           stdout: "# branch.oid (initial)\x00# branch.head main\x00? README.md\x00",
         };
       }
-      if (argsEqual(input, ["diff", "--numstat", "-z", "HEAD", "--"])) {
+      if (argsEqual(input, ["diff-index", "-M", "--numstat", "-z", "HEAD", "--"])) {
         return { code: 128, stderr: "fatal: ambiguous argument 'HEAD'" };
       }
       return {};
@@ -413,10 +486,10 @@ describe("GitCore unit", () => {
       if (argsEqual(input, ["diff", "--cached", "--numstat", "-z"])) {
         return { stdout: "0\t0\t\x00dir/old name.txt\x00dir/new name.txt\x00" };
       }
-      if (argsEqual(input, ["diff", "--numstat", "-z"])) {
+      if (argsEqual(input, ["diff-files", "-M", "--numstat", "-z"])) {
         return { stdout: "1\t0\tcafé.txt\x00" };
       }
-      if (argsEqual(input, ["diff", "--numstat", "-z", "HEAD", "--"])) {
+      if (argsEqual(input, ["diff-index", "-M", "--numstat", "-z", "HEAD", "--"])) {
         return {
           stdout: "0\t0\t\x00dir/old name.txt\x00dir/new name.txt\x001\t0\tcafé.txt\x00",
         };
@@ -556,6 +629,7 @@ describe("GitCore unit", () => {
     expect(scripted.calls.at(-1)?.args).toEqual([
       "remote",
       "add",
+      "--",
       "Octo-Cat-1",
       "https://github.com/octocat/f5.git",
     ]);
@@ -636,6 +710,7 @@ describe("GitCore unit", () => {
       "fetch",
       "--quiet",
       "--no-tags",
+      "--",
       "origin",
       "+refs/pull/77/head:refs/heads/pr/77-safe",
     ]);
@@ -855,8 +930,27 @@ it("preserves existing branches during forge head materialization, including rac
   );
   expect(scripted.calls.find((call) => call.args[0] === "branch")?.args).toEqual([
     "branch",
+    "--",
     "existing",
     "origin/feature",
   ]);
   expect(scripted.calls.flatMap((call) => call.args)).not.toContain("--force");
+});
+
+it("rejects option-shaped checkout targets without running a checkout", async () => {
+  const scripted = makeScriptedGitService();
+  const core = await makeCore(scripted.service);
+  await expect(
+    Effect.runPromise(
+      core.checkoutBranch({ cwd: process.cwd(), branch: "--orphan=intruder" }).pipe(Effect.scoped),
+    ),
+  ).rejects.toThrow("Invalid branch name");
+  expect(scripted.calls.some((call) => call.args[0] === "checkout")).toBe(false);
+});
+
+it("terminates option parsing before configuration keys", async () => {
+  const scripted = makeScriptedGitService();
+  const core = await makeCore(scripted.service);
+  await Effect.runPromise(core.readConfigValue(process.cwd(), "--list"));
+  expect(scripted.calls.at(-1)?.args).toEqual(["config", "--get", "--", "--list"]);
 });

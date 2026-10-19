@@ -27,7 +27,7 @@ import {
 import { GitManagerError } from "../Errors.ts";
 import { isPullRequestTrackingAlias, extractBranchNameFromRemoteRef } from "../remoteRefs.ts";
 import { GitManager, type GitManagerShape } from "../Services/GitManager.ts";
-import { GitCore } from "../Services/GitCore.ts";
+import { GitCore, type GitPreparedCommitContext } from "../Services/GitCore.ts";
 import { GitHubCli } from "../Services/GitHubCli.ts";
 import { makeGitHubCli } from "./GitHubCli.ts";
 import { GitHubCredentialScope } from "../githubApi.ts";
@@ -254,6 +254,7 @@ function sanitizeCommitMessage(generated: {
 }
 
 interface CommitAndBranchSuggestion {
+  context: GitPreparedCommitContext;
   subject: string;
   body: string;
   branch?: string | undefined;
@@ -1049,6 +1050,7 @@ export const makeGitManager = Effect.gen(function* () {
       const customCommit = parseCustomCommitMessage(input.commitMessage ?? "");
       if (customCommit) {
         return {
+          context,
           subject: customCommit.subject,
           body: customCommit.body,
           ...(input.includeBranch
@@ -1065,6 +1067,7 @@ export const makeGitManager = Effect.gen(function* () {
           writingPreferences,
         );
         return {
+          context,
           subject: deterministic.subject,
           body: deterministic.body,
           ...(input.includeBranch
@@ -1088,6 +1091,7 @@ export const makeGitManager = Effect.gen(function* () {
         .pipe(Effect.map((result) => sanitizeCommitMessage(result)));
 
       return {
+        context,
         subject: generated.subject,
         body: writingPreferences.commitMessageIncludeBody ? generated.body : "",
         ...(generated.branch !== undefined ? { branch: generated.branch } : {}),
@@ -1106,6 +1110,7 @@ export const makeGitManager = Effect.gen(function* () {
     preResolvedSuggestion?: CommitAndBranchSuggestion,
     filePaths?: readonly string[],
     model?: string,
+    newBranch?: string,
   ) =>
     Effect.gen(function* () {
       const suggestion =
@@ -1122,15 +1127,22 @@ export const makeGitManager = Effect.gen(function* () {
         return { status: "skipped_no_changes" as const };
       }
 
-      const { commitSha } = yield* gitCore.commit(
+      const result = yield* gitCore.commitPrepared(
         cwd,
         suggestion.subject,
         suggestion.body,
-        filePaths,
+        suggestion.context,
+        newBranch ? { newBranch } : undefined,
       );
+      if (result.status === "context_changed")
+        return {
+          status: "context_changed" as const,
+          subject: suggestion.subject,
+          suggestedMessage: suggestion.commitMessage,
+        };
       return {
         status: "created" as const,
-        commitSha,
+        commitSha: result.commitSha,
         subject: suggestion.subject,
       };
     });
@@ -1563,13 +1575,10 @@ export const makeGitManager = Effect.gen(function* () {
               new GitManagerError({ operation: "runFeatureBranchStep", detail: error.message }),
           ),
         );
-      else {
-        yield* gitCore.createBranch({ cwd, branch: resolvedBranch });
-        yield* Effect.scoped(gitCore.checkoutBranch({ cwd, branch: resolvedBranch }));
-      }
 
       return {
         branchStep: { status: "created" as const, name: resolvedBranch },
+        workspaceSwitched: switchWorkspace !== null,
         resolvedCommitMessage: suggestion.commitMessage,
         resolvedCommitSuggestion: suggestion,
       };
@@ -1593,6 +1602,7 @@ export const makeGitManager = Effect.gen(function* () {
       }
 
       let branchStep: { status: "created" | "skipped_not_requested"; name?: string };
+      let workspaceSwitched = false;
       let commitMessageForStep = input.commitMessage;
       let preResolvedCommitSuggestion: CommitAndBranchSuggestion | undefined = undefined;
 
@@ -1606,6 +1616,7 @@ export const makeGitManager = Effect.gen(function* () {
           input.textGenerationModel,
         );
         branchStep = result.branchStep;
+        workspaceSwitched = result.workspaceSwitched;
         commitMessageForStep = result.resolvedCommitMessage;
         preResolvedCommitSuggestion = result.resolvedCommitSuggestion;
       } else {
@@ -1622,7 +1633,16 @@ export const makeGitManager = Effect.gen(function* () {
         preResolvedCommitSuggestion,
         input.filePaths,
         input.textGenerationModel,
+        input.featureBranch && !workspaceSwitched ? branchStep.name : undefined,
       );
+      if (commit.status === "context_changed")
+        return {
+          action: input.action,
+          branch: workspaceSwitched ? branchStep : { status: "skipped_not_requested" as const },
+          commit,
+          push: { status: "skipped_not_requested" as const },
+          pr: { status: "skipped_not_requested" as const },
+        };
 
       const push = wantsPush
         ? yield* gitCore.pushCurrentBranch(input.cwd, currentBranch)

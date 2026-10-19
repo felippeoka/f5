@@ -1,3 +1,4 @@
+import { gitConfigArgs } from "@t3tools/shared/git";
 /**
  * CheckpointStoreLive - Filesystem checkpoint store adapter layer.
  *
@@ -34,7 +35,10 @@ const makeCheckpointStore = Effect.gen(function* () {
   const path = yield* Path.Path;
   const git = yield* GitService;
 
-  const durableWrite = ["-c", "core.fsync=objects,reference", "-c", "core.fsyncMethod=batch"];
+  const durableWrite = gitConfigArgs([
+    ["core.fsync", "objects,reference"],
+    ["core.fsyncMethod", "batch"],
+  ]);
   // Retry only capture commands with recognizable lock/file disappearance races.
   const executeCapture = (input: ExecuteGitInput) =>
     git.execute({ ...input, env: { ...input.env, LC_ALL: "C", LANGUAGE: "C" } }).pipe(
@@ -85,7 +89,7 @@ const makeCheckpointStore = Effect.gen(function* () {
       .execute({
         operation: "CheckpointStore.resolveCheckpointCommit",
         cwd,
-        args: ["rev-parse", "--verify", "--quiet", `${checkpointRef}^{commit}`],
+        args: ["rev-parse", "--verify", "--quiet", "--end-of-options", `${checkpointRef}^{commit}`],
         allowNonZeroExit: true,
       })
       .pipe(
@@ -114,12 +118,10 @@ const makeCheckpointStore = Effect.gen(function* () {
   const captureCheckpoint: CheckpointStoreShape["captureCheckpoint"] = (input) =>
     Effect.gen(function* () {
       const operation = "CheckpointStore.captureCheckpoint";
-      const indexConfig = [
-        "-c",
-        "core.fsmonitor=false",
-        "-c",
-        "sparse.expectFilesOutsideOfPatterns=false",
-      ];
+      const indexConfig = gitConfigArgs([
+        ["core.fsmonitor", "false"],
+        ["sparse.expectFilesOutsideOfPatterns", "false"],
+      ]);
 
       yield* Effect.acquireUseRelease(
         fs.makeTempDirectory({ prefix: "t3-fs-checkpoint-" }),
@@ -139,7 +141,7 @@ const makeCheckpointStore = Effect.gen(function* () {
             const sparseResult = yield* executeCapture({
               operation,
               cwd: input.cwd,
-              args: ["config", "--bool", "core.sparseCheckout"],
+              args: ["config", "--bool", "--", "core.sparseCheckout"],
               allowNonZeroExit: true,
             });
             const sparse = sparseResult.stdout.trim() === "true";
@@ -227,7 +229,7 @@ const makeCheckpointStore = Effect.gen(function* () {
                   const cone = yield* executeCapture({
                     operation,
                     cwd: input.cwd,
-                    args: ["config", "--bool", "core.sparseCheckoutCone"],
+                    args: ["config", "--bool", "--", "core.sparseCheckoutCone"],
                     allowNonZeroExit: true,
                   });
                   if (cone.stdout.trim() !== "true")
@@ -242,7 +244,13 @@ const makeCheckpointStore = Effect.gen(function* () {
                   operation,
                   cwd: input.cwd,
                   args: sparse
-                    ? [...indexConfig, "-c", "index.sparse=true", "read-tree", "--reset", "HEAD"]
+                    ? [
+                        ...indexConfig,
+                        ...gitConfigArgs([["index.sparse", "true"]]),
+                        "read-tree",
+                        "--reset",
+                        "HEAD",
+                      ]
                     : [...indexConfig, "read-tree", "HEAD"],
                   env: commitEnv,
                 });
@@ -374,7 +382,7 @@ const makeCheckpointStore = Effect.gen(function* () {
             yield* executeCapture({
               operation,
               cwd: input.cwd,
-              args: [...durableWrite, "update-ref", input.checkpointRef, commitOid],
+              args: [...durableWrite, "update-ref", "--", input.checkpointRef, commitOid],
             });
           }),
         (tempDir) => fs.remove(tempDir, { recursive: true }),
