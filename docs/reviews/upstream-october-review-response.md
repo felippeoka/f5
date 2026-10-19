@@ -1006,3 +1006,12 @@ Remaining Pi obligations include owned extension continuations, corresponding qu
 admission and automatic native-history projection reconciliation, plus real installed
 Pi/account evidence. The broader catch-up and mandatory verify-first cut line also
 remain incomplete. All Pi dispositions stay deferred.
+
+The independent server workspace run subsequently completed: 5,355 cases pass,
+12 skip and only the three known launcher-identity cases fail with `/bin/ps`
+EPERM (532 files pass, one fails). This also exercises the registered Pi driver
+against the remaining provider, orchestration, queue and WebSocket suites. A fresh
+`origin/main` fetch confirms the branch has no commits behind main; its history
+remains integrated additively. The strict ledger and all ten October/September
+plan tests pass after attaching per-SHA Pi evidence to sixteen still-deferred
+records. No delivery counts changed.
