@@ -95,6 +95,7 @@ const SHORTCUT_SECTION_DEFINITIONS: ReadonlyArray<{
       "chat.new",
       "chat.newLocal",
       "chat.newBackground",
+      "chat.sendAndNew",
       "workflow.new",
       "thread.stop",
       "thread.togglePin",

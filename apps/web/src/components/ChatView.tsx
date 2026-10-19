@@ -105,7 +105,7 @@ import {
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { gitBranchesQueryOptions, gitStatusQueryOptions } from "~/lib/gitReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { providerQueryKeys } from "~/lib/providerReactQuery";
@@ -695,6 +695,7 @@ export default function ChatView({
   const wsInteractionBlocked =
     wsConnectionState.phase !== "connected" || !wsConnectionState.synchronized;
   const navigate = useNavigate();
+  const router = useRouter();
   const threadActionController = useThreadActionController({ activeThreadId: threadId });
   const { resolvedTheme } = useTheme();
   const { revision: themePaletteRevision } = useResolvedThemePalette(resolvedTheme);
@@ -4212,6 +4213,37 @@ export default function ChatView({
         return;
       }
       if (wsInteractionBlocked) return;
+      if (command === "chat.sendAndNew") {
+        if (
+          event.repeat ||
+          !composerFocused ||
+          dialogFocus ||
+          isTerminalFocused() ||
+          !isServerThread ||
+          !activeProject ||
+          isComposerApprovalState ||
+          blockingUserInputs.length > 0
+        )
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        const originalPath = router.state.location.pathname;
+        const canNavigate = () => router.state.location.pathname === originalPath;
+        void onSendRef.current?.(undefined, "auto", () => {
+          if (!canNavigate()) return;
+          void createProjectDraftThread(activeProject.id, {
+            branch: activeThread?.branch ?? null,
+            worktreePath: activeThread?.worktreePath ?? null,
+            canNavigate,
+          }).catch(() =>
+            toastManager.add({
+              type: "error",
+              title: "Message accepted; could not open a new draft",
+            }),
+          );
+        });
+        return;
+      }
       if (command === "chat.newBackground" && !isServerThread && composerFocused) {
         // Let the editor resolve mention/slash menus and the configured send key.
         // Background send owns mod+Enter only with the ordinary Enter preference.
@@ -4278,6 +4310,11 @@ export default function ChatView({
     gitCwd,
     activeThread?.pinnedAt,
     isServerThread,
+    activeProject,
+    activeThread?.branch,
+    activeThread?.worktreePath,
+    createProjectDraftThread,
+    router,
     navigate,
     phase,
     toggleInteractionMode,

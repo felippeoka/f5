@@ -5993,6 +5993,94 @@ describe("ChatView timeline (full app)", () => {
     }
   });
 
+  it.each(["accepted", "rejected", "left"])(
+    "send and new waits for durable admission (%s)",
+    async (outcome) => {
+      useComposerDraftStore.getState().setPrompt(THREAD_ID, "Continue the work");
+      let admit!: (result: WsRequestResolution) => void;
+      const mounted = await mountChatView({
+        viewport: DEFAULT_VIEWPORT,
+        snapshot: createSnapshotForTargetUser({
+          targetMessageId: "send-new-user" as MessageId,
+          targetText: "Previous request",
+          fillerPairCount: 1,
+          targetPairIndex: 0,
+        }),
+        configureFixture: (next) => {
+          const binding = createModKeybinding("chat.sendAndNew", "enter");
+          next.serverConfig = {
+            ...next.serverConfig,
+            keybindings: [{ ...binding, shortcut: { ...binding.shortcut, altKey: true } }],
+          };
+          next.resolveWsRequest = (body) =>
+            body._tag === WS_METHODS.nextTurnQueueSubmit
+              ? new Promise((resolve) => {
+                  admit = resolve;
+                })
+              : null;
+        },
+      });
+      try {
+        const editor = await waitForComposerEditor();
+        editor.focus();
+        editor.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Enter",
+            metaKey: /Mac/.test(navigator.platform),
+            ctrlKey: !/Mac/.test(navigator.platform),
+            altKey: true,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        await vi.waitFor(() =>
+          expect(getDispatchCommandRequests("thread.turn.start")).toHaveLength(1),
+        );
+        expect(mounted.router.state.location.pathname).toBe(`/${THREAD_ID}`);
+        const submission = getDispatchCommandRequests("thread.turn.start")[0]!;
+        expect(getSubmittedTurnCommand(submission)?.message?.text).toBe("Continue the work");
+        if (outcome === "left") {
+          await mounted.router.navigate({ to: "/" });
+          admit({
+            type: "result",
+            result: { disposition: "started", submissionId: submission.submissionId, sequence: 1 },
+          });
+          await vi.waitFor(() =>
+            expect(
+              usePendingTurnDispatchStore.getState().pendingByThreadId[THREAD_ID]?.acceptedSequence,
+            ).toBe(1),
+          );
+          expect(mounted.router.state.location.pathname).toBe("/");
+        } else if (outcome === "accepted") {
+          admit({
+            type: "result",
+            result: { disposition: "started", submissionId: submission.submissionId, sequence: 1 },
+          });
+          await vi.waitFor(() =>
+            expect(mounted.router.state.location.pathname).toMatch(UUID_ROUTE_RE),
+          );
+          const draftId = mounted.router.state.location.pathname.slice(1) as ThreadId;
+          expect(draftId).not.toBe(THREAD_ID);
+          expect(useComposerDraftStore.getState().getDraftThread(draftId)?.projectId).toBe(
+            PROJECT_ID,
+          );
+          expect(useComposerDraftStore.getState().draftsByThreadId[draftId]?.prompt ?? "").toBe("");
+        } else {
+          admit({ type: "error", message: "Submission refused" });
+          await vi.waitFor(() =>
+            expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt).toBe(
+              "Continue the work",
+            ),
+          );
+          expect(mounted.router.state.location.pathname).toBe(`/${THREAD_ID}`);
+        }
+        expect(getDispatchCommandRequests("thread.turn.start")).toHaveLength(1);
+      } finally {
+        await mounted.cleanup();
+      }
+    },
+  );
+
   it("starts a new draft in the background only after admission", async () => {
     useComposerDraftStore.setState({
       draftThreadsByThreadId: {

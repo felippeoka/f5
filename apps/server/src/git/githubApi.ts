@@ -4,9 +4,13 @@ import {
   makeGitHubConditionalCache,
   type GitHubConditionalRead,
 } from "./githubConditionalCache.ts";
-import { githubRequestScheduler, type GitHubResource } from "./githubRequestScheduler.ts";
+import {
+  githubRequestScheduler,
+  GitHubSyncWait,
+  type GitHubResource,
+} from "./githubRequestScheduler.ts";
 import { createHash, randomUUID } from "node:crypto";
-import { Effect, Semaphore, ServiceMap } from "effect";
+import { Effect, Option, Semaphore, ServiceMap } from "effect";
 import type { SourceControlRateLimit } from "@t3tools/contracts";
 
 import { GitHubCliError } from "./Errors.ts";
@@ -418,10 +422,24 @@ export function makeGitHubApi(
             }),
           ),
         );
-        return yield* scheduler.run(input.host, resource, recorded, {
+        const run = scheduler.run(input.host, resource, recorded, {
           searchPages,
           graphql: isGraphql,
         });
+        const response = yield* run;
+        const sync = Option.getOrElse(yield* Effect.serviceOption(GitHubSyncWait), () => false);
+        if (
+          sync &&
+          resource !== "write" &&
+          (response.status === 429 ||
+            (response.status === 403 &&
+              (response.rateLimit.remaining === 0 || response.rateLimit.retryAfterSeconds != null)))
+        ) {
+          // Re-admission waits for the recorded reset. Retry a read at most once;
+          // dispatched writes retain their original durable outcome.
+          return yield* run;
+        }
+        return response;
       }).pipe(
         Effect.mapError(
           (error) =>

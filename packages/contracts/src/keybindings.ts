@@ -37,6 +37,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "chat.pageUp",
   "chat.pageDown",
   "chat.newBackground",
+  "chat.sendAndNew",
   "rightPanel.closeTab",
   "rightPanel.tabMenu",
   "rightPanel.reopenClosed",

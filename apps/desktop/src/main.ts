@@ -1,3 +1,4 @@
+import { registerHtmlPreviewIpc } from "./htmlPreview";
 import { createDesktopCliInstaller } from "./cliCommand";
 import { offerApplicationsMove, createBootstrapGate } from "./startupInstallation";
 import { createUpdatePoller } from "./updatePoller";
@@ -3171,6 +3172,19 @@ function reopenApplication(): void {
 }
 
 function registerIpcHandlers(): void {
+  registerHtmlPreviewIpc(ipcMain, (event) => {
+    if (
+      !appRendererWebContentsIds.has(event.sender.id) ||
+      event.senderFrame !== event.sender.mainFrame
+    )
+      throw new Error("HTML previews require an F5 app main frame.");
+    const expectedOrigin = isDevelopment
+      ? new URL(mainRendererUrl()).origin
+      : `${DESKTOP_SCHEME}://app`;
+    if (event.senderFrame.origin !== expectedOrigin)
+      throw new Error("Untrusted HTML preview origin.");
+    runtimeForRenderer(event.sender.id);
+  });
   ipcMain.on("desktop:get-ws-url", (event) => {
     try {
       if (event.senderFrame !== event.sender.mainFrame)

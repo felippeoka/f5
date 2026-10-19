@@ -1,3 +1,10 @@
+import { HTML_RENDER_WS_METHODS } from "@t3tools/contracts";
+import { makeHtmlPreviewBroker } from "./htmlRender/HtmlPreviewBroker.ts";
+import { makeHtmlRenderRuntime } from "./htmlRender/HtmlRenderRuntime.ts";
+import { ThreadMcpBroker } from "./mcp/threadMcpTools.ts";
+import { makeThreadToolHandler } from "./mcp/threadToolRuntime.ts";
+import { PrHubFederation } from "./prHub/Layers/PrHubFederation.ts";
+import { PrHubReviewGuideService } from "./prHub/Layers/PrHubReviewGuideService.ts";
 import { publicOtlpConfiguration, resolveOtlpConfiguration } from "@t3tools/shared/observability";
 import { withProviderThreadAccess } from "./provider/providerThreadAccess.ts";
 import { makeMcpSecretWriter } from "./mcp/McpSecretWriter.ts";
@@ -778,6 +785,7 @@ export type ServerCoreRuntimeServices =
   | ProjectMcpConfigService
   | PreviewAutomationBroker
   | PrHubAdvisoryService
+  | PrHubReviewGuideService
   | PrHubService;
 
 export type ServerRuntimeServices =
@@ -973,10 +981,15 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const previewAutomationBroker = yield* PreviewAutomationBroker;
   const computerAutomationBroker = yield* Effect.serviceOption(ComputerAutomationBroker);
   const forgeAccounts = yield* Effect.serviceOption(ForgeAccounts);
+  const htmlPreviewBroker = makeHtmlPreviewBroker();
+  yield* Effect.addFinalizer(() => Effect.sync(() => htmlPreviewBroker.close()));
+  const threadMcpBroker = yield* Effect.serviceOption(ThreadMcpBroker);
+  const threadMcpFederation = yield* Effect.serviceOption(PrHubFederation);
   const prHubExtensions = yield* Effect.serviceOption(PrHubExtensions);
   const diskSpaceMonitor = yield* Effect.serviceOption(DiskSpaceMonitor);
   const prHub = yield* PrHubService;
   const prHubAdvisory = yield* PrHubAdvisoryService;
+  const prHubReviewGuide = yield* PrHubReviewGuideService;
   const git = yield* GitCore;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -2055,6 +2068,22 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           );
           return;
         }
+        if (url.pathname.startsWith("/api/html-renders/preview/")) {
+          const id = url.pathname.slice("/api/html-renders/preview/".length);
+          const html = /^[a-f0-9-]{36}$/.test(id) ? htmlPreviewBroker.readInput(id) : null;
+          const allowed = req.method === "GET" || req.method === "HEAD";
+          respond(
+            allowed ? (html === null ? 410 : 200) : 405,
+            {
+              "Cache-Control": "no-store",
+              "Content-Type": "text/plain; charset=utf-8",
+              "X-Content-Type-Options": "nosniff",
+              "Content-Security-Policy": "sandbox; default-src 'none'",
+            },
+            req.method === "HEAD" ? undefined : (html ?? "Preview expired."),
+          );
+          return;
+        }
         if (url.pathname === "/api/prhub/media") {
           const accounts = Option.isSome(forgeAccounts)
             ? yield* forgeAccounts.value.listAccounts()
@@ -2733,6 +2762,29 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         orchestrationRuntimeServices,
         DefaultBranchAutoPull,
       );
+
+      if (
+        Option.isSome(threadMcpBroker) &&
+        Option.isSome(threadMcpFederation) &&
+        Option.isSome(prHubExtensions)
+      ) {
+        const html = yield* makeHtmlRenderRuntime({
+          engine: orchestrationEngine,
+          attachmentsDir: serverConfig.attachmentsDir,
+          preview: htmlPreviewBroker,
+        });
+        yield* threadMcpBroker.value
+          .register(
+            makeThreadToolHandler({
+              engine: orchestrationEngine,
+              federation: threadMcpFederation.value,
+              guides: prHubReviewGuide,
+              links: prHubExtensions.value,
+              html,
+            }),
+          )
+          .pipe(Effect.provideService(Scope.Scope, subscriptionsScope), Effect.orDie);
+      }
 
       yield* Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) =>
         Effect.gen(function* () {
@@ -5422,6 +5474,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return yield* prHubAdvisory.analyzeAdvisories(body);
       }
 
+      case PR_HUB_WS_METHODS.getReviewGuide:
+        return yield* prHubReviewGuide.get(stripRequestTag(request.body));
+      case PR_HUB_WS_METHODS.generateReviewGuide:
+        return yield* prHubReviewGuide.generate(stripRequestTag(request.body));
+
       case PR_HUB_WS_METHODS.getAdvisories: {
         const body = stripRequestTag(request.body);
         return yield* prHubAdvisory.getAdvisories(body);
@@ -5693,6 +5750,20 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return undefined;
       }
 
+      case HTML_RENDER_WS_METHODS.host: {
+        const body = stripRequestTag(request.body);
+        if (body.available)
+          htmlPreviewBroker.register(getPreviewAutomationHostId(ws), {
+            push: (request) => pushBus.publishClient(ws, WS_CHANNELS.htmlRenderRequest, request),
+          });
+        else htmlPreviewBroker.unregister(getPreviewAutomationHostId(ws));
+        return undefined;
+      }
+      case HTML_RENDER_WS_METHODS.respond: {
+        const body = stripRequestTag(request.body);
+        htmlPreviewBroker.respond(getPreviewAutomationHostId(ws), body);
+        return undefined;
+      }
       case WS_METHODS.previewAutomationRespond: {
         const body = stripRequestTag(request.body);
         yield* previewAutomationBroker.respond(
@@ -7253,7 +7324,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           Effect.andThen(
             Effect.gen(function* () {
               const hostId = previewAutomationHostIdByWs.get(ws);
-              if (hostId) yield* previewAutomationBroker.unregisterHost(hostId);
+              if (hostId) {
+                htmlPreviewBroker.unregister(hostId);
+                yield* previewAutomationBroker.unregisterHost(hostId);
+              }
               const clientIds = previewAutomationClientIdsByWs.get(ws);
               if (!clientIds) return;
               previewAutomationClientIdsByWs.delete(ws);

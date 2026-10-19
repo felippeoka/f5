@@ -22,7 +22,7 @@ The existing GitHub setup stays the default as the legacy profile account.
 The **Inbox** and **Focus** views list tracked pull requests. Attention filters such as **Needs
 you**, **Needs my review**, **CI failing** and **Ready** narrow the list, and you can also filter by
 repository, CI or lifecycle. Each pull request has **Summary**, **Timeline**, **Review threads**
-and **Files** tabs.
+**Files**, and **Guide · Beta** tabs.
 
 ## Safe actions
 
@@ -38,6 +38,16 @@ Inline comments are tied to the exact head and base you compared. If either chan
 before commenting. **Viewed** marks also belong to that revision, so a new push clears them.
 Hover a PR link to preview it, copy it, or open it in the hub. **Send to agent** puts a diff
 comment into the linked thread's composer without sending it.
+
+Open **Guide · Beta** and select **Generate guide** for an ordered tour of the change.
+Move between stops to read the excerpts, notes and review questions. A guide belongs to
+the selected account and PR head. After a new push, F5 warns that the guide is stale and
+hides its excerpts until you regenerate it. A failed regeneration keeps the previous tour.
+
+In **Settings → Git → Guided PR reviews**, guides use your git text generation model
+by default. Turn off **Use git text generation model** to select another provider,
+model and reasoning options. Generating a guide sends the PR description, diff and
+a bounded summary of settled review comments to that provider's account.
 
 ## What each forge supports
 

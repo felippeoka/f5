@@ -27,6 +27,8 @@ import { getModelPreferences } from "../modelPreferencesStore";
 import { useStore } from "../store";
 
 export interface CreateProjectBackedDraftThreadOptions {
+  /** Rechecked after async settings resolution, immediately before navigation. */
+  canNavigate?: () => boolean;
   branch?: string | null;
   worktreePath?: string | null;
   envMode?: DraftThreadEnvMode;
@@ -170,7 +172,7 @@ export async function createProjectBackedDraftThread({
       onboardingLiteStatus,
       updateSettings,
     );
-    if (routeThreadId !== storedDraftThread.threadId) {
+    if (routeThreadId !== storedDraftThread.threadId && options?.canNavigate?.() !== false) {
       await navigate({
         to: "/$threadId",
         params: { threadId: storedDraftThread.threadId },
@@ -218,10 +220,12 @@ export async function createProjectBackedDraftThread({
   seedDraftThreadFromModelPreferences(threadId, projectId, resolvedSettings);
   maybeMarkOnboardingLiteCompleted(projectId, threadId, onboardingLiteStatus, updateSettings);
 
-  await navigate({
-    to: "/$threadId",
-    params: { threadId },
-  });
+  if (options?.canNavigate?.() !== false) {
+    await navigate({
+      to: "/$threadId",
+      params: { threadId },
+    });
+  }
 
   return {
     projectId,

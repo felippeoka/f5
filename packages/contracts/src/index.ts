@@ -1,4 +1,5 @@
 export * from "./nativeOperation";
+export * from "./threadTools";
 export * from "./baseSchemas";
 export { PendingUserInput } from "./userInput";
 export * from "./elicitation";

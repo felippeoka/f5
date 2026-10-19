@@ -1,3 +1,4 @@
+import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { computerToolHeading } from "@t3tools/shared/computerAction";
 import { NativeFilePreview } from "./NativeFilePreview";
 import { AttachmentFileChip } from "./AttachmentFileChip";
@@ -1400,7 +1401,9 @@ function shouldRenderWorkEntryAsStandaloneRow(
   entry: TimelineWorkEntry,
   options: { settingsExpandMcpToolCalls: boolean },
 ): boolean {
-  return entry.itemType === "mcp_tool_call" && options.settingsExpandMcpToolCalls;
+  return (
+    !!entry.htmlRender || (entry.itemType === "mcp_tool_call" && options.settingsExpandMcpToolCalls)
+  );
 }
 
 function resolveStandaloneExpandedMcpWorkEntry(
@@ -3226,7 +3229,9 @@ const WorkEntryRow = memo(function WorkEntryRow(props: {
   // in the shared right gutter overlapped the card's corner whenever it was wider.
   const mcpCard =
     !workEntry.diagnostic && workEntry.itemType === "mcp_tool_call" && props.expandMcpToolCalls;
-  const row = workEntry.diagnostic ? (
+  const row = workEntry.htmlRender ? (
+    <HtmlRenderFrame reference={workEntry.htmlRender} onImageExpand={props.onImageExpand} />
+  ) : workEntry.diagnostic ? (
     <DiagnosticWorkEntryRow workEntry={workEntry} />
   ) : workEntry.itemType === "collab_agent_tool_call" ? (
     <SubagentWorkEntryRow
@@ -3472,9 +3477,12 @@ function WorkGroupRowContent(props: {
   } = useTimelineRowContext();
   const groupId = row.id;
   const groupState = resolveWorkGroupRenderState(row.groupedEntries, externals.expandedCount);
-  const standaloneExpandedMcpEntry = resolveStandaloneExpandedMcpWorkEntry(row.groupedEntries, {
-    settingsExpandMcpToolCalls: expandMcpToolCalls,
-  });
+  const standaloneExpandedMcpEntry =
+    row.groupedEntries.length === 1 && row.groupedEntries[0]?.htmlRender
+      ? row.groupedEntries[0]
+      : resolveStandaloneExpandedMcpWorkEntry(row.groupedEntries, {
+          settingsExpandMcpToolCalls: expandMcpToolCalls,
+        });
 
   if (standaloneExpandedMcpEntry) {
     return (

@@ -12,7 +12,8 @@ git diff 9355a57a5958b88bfcf639c071222c16b43d57e6
 All 17 main commits since the October branch's last merge are retained. The
 integration preserves main's atomic checkpoint-ref deletion, storage cleanup's
 cancellation and directory-replacement checks, and its MCP/storage contracts.
-The bundled protocol version is now 30, integrating main's released version 29. No history was
+The bundled protocol version is now 31, integrating main's released version 29 and
+adding the guided-review RPCs. No history was
 rewritten: the recommendation to rebase conflicts with AGENTS.md's explicit
 prohibition, so integration used a squash merge onto a new branch from main.
 
@@ -65,8 +66,11 @@ adds the following behavior, with delivery decisions still requiring per-SHA pro
   captured HTTP path. PR Hub diff reads request bounded text through the same
   boundary. Concurrent head lookups batch up to 50 per repository/account/priority,
   and the five-second shared remote-routing cache avoids Git work for repeated
-  reads. The remaining 15g verify-first scenarios, merge-read policy and sync
-  reset-wait behavior are still obligations.
+  reads. Explicit manual sync now waits for read admission after rate-limit reset,
+  releases scheduler queue capacity while sleeping, and cancels on account changes.
+  It never replays mutations or an already-admitted failing operation. Manual sync
+  following an in-flight background sync retains its interactive scheduling scope.
+  The remaining 15g verify-first scenarios and merge-read policy are still obligations.
 - Desktop login-shell hydration imports missing CA trust variables without
   replacing inherited values. A packaged boot entry enables the V8 compile cache
   before main and preloads it inside the isolated backend. Development and
@@ -324,3 +328,92 @@ passes 2,280 tests, the exhaustive Git matrix passes all 162 cases, and the
 selected Markdown/Mermaid/MCP runtime browser suites pass 13. The earlier full-app
 shell execution case also passes, checking the exact sent command, fresh terminal,
 worktree directory and absence of a model turn.
+
+The complete post-merge server unit run passes 4,851 cases and fails only the
+three launcher process-identity cases (12 existing skips). All workflow-storage
+retention checks now pass on the preserved concurrent workflow changes. The full
+repository gate was rerun after integration and again stops at the same two
+scripts creation-identity cases. These failures remain required gates, not waivers.
+
+The continuation adds `chat.sendAndNew` for existing-thread composers. It waits
+for durable submission admission, preserves the draft on failure, and checks the
+live router before navigation, including after asynchronous draft settings reads.
+Mod+Alt+Enter follows the plan; the previous default for steering is removed to
+avoid two actions on the same key. User steering bindings remain supported. The
+focused web keyboard suites pass 68 cases and shared defaults pass 11.
+
+The final send-and-new Chromium run passes all three acceptance, rejection and
+navigate-away cases. All eight typecheck packages pass, followed by a separate
+web typecheck after the final router guard. Formatting, lint, upstream coverage
+and whitespace checks also pass. The combined server build succeeds. These UI
+additions do not change the recorded failure of the full test gate or complete
+the remaining workstreams listed above.
+
+## Guided reviews, sync admission and scoped thread tools
+
+The continuation implements manual reset waits, guided-review storage and UI, and the
+initial thread tool catalog. These are implementation additions; no ledger entry has
+been promoted while the full catch-up gate and remaining workstreams are unfinished.
+
+- Manual sync waits only for read admission, frees its queue slot while waiting,
+  cancels on account replacement and retries a rate-limited HTTP read once. Mutations
+  and failures of an admitted operation are never replayed. Interactive sync retains
+  its priority when queued behind a background sync. Scheduler/API/coordinator and
+  discovery checks pass (118 targeted cases plus the 13-case discovery suite).
+- Migration 124 stores review guides by account and PR, including run state and head.
+  Generation is service-owned, coalesced, bounded to two workers/eight admitted PRs,
+  and limited to three minutes. Publication checks account generation and the fresh
+  head. Failed regeneration retains the previous guide; restart clears obsolete runs.
+  The normalizer clamps excerpts and notes and adds omitted files to a skim stop.
+  The model override is nullable and falls back to git text generation settings.
+  The service and normalization checks pass 15 cases including account replacement,
+  default-model fallback, failed regeneration, quoted UTF-8 paths and stale heads.
+- The beta Guide tab supports generation, polling, stops, excerpts, notes, settings
+  and retry. Both PR-head and loaded-diff-head changes hide excerpts. Its browser
+  checks and the PR details/thread-summary/model-settings regressions pass 19 cases.
+  GitLab's blank native head is now unavailable; native GitLab, Forgejo and both
+  short/full Bitbucket head metadata have seven regression cases. This generator
+  reads the bounded forge diff; it does not need upstream's temporary Git checkout
+  or fetch-by-abbreviated-hash path.
+- The `f5_thread` catalog contains thread status, guide read/generation, HTML publish
+  and HTML screenshot tools. HTTP credentials are scoped to the thread and catalog,
+  and disposed with sessions. Claude uses an in-process SDK server. ACP checks HTTP
+  capability and excludes synthetic/read-only sessions; thread tools work on web
+  servers as well as desktop. OpenCode and Muse receive no new catalog. Watch and
+  settle tools remain obligations of their respective workstreams.
+- Generated pages reuse the screenshot attachment ingress, recovery, ownership and
+  200-item/64-MiB thread budget. Local images pass the existing inode/containment
+  checks, including symlink/traversal rejection, before inlining. Source is limited
+  to 512 KiB, individual images to 10 MiB and prepared pages to 25 MiB. Preview
+  requests use expiring authenticated HTTP document reads rather than large socket
+  pushes, with two admitted requests and a 15-second deadline.
+- The desktop screenshot implementation uses offscreen sandboxed BrowserWindows,
+  no Node integration, isolated ephemeral sessions, blocked navigation/popups and
+  an eight-MiB PNG limit. Three desktop unit cases verify configuration, ownership
+  authorization, deadline teardown and admission bounds. Actual native Electron
+  execution remains subject to the previously recorded host smoke failure; these
+  mocked checks are not a native certification claim.
+- HTML rows use opaque `allow-scripts` frames with first-policy CSP, bounded fetches,
+  fullscreen/zoom, external links and the existing image viewer/copy path. A private
+  MessageChannel is established by the first bootstrap script before page code;
+  raw window messages cannot invoke app actions. Native key getters are captured
+  before page code so configured trusted shortcuts still work after prototype
+  replacement. Six Chromium cases cover isolation, links/images, fullscreen Escape,
+  forged messages/handshakes and shortcut forwarding. The source, preview broker,
+  catalog and shared attachment regressions pass 20 server cases.
+
+All eight typecheck packages and the 570-case desktop unit suite pass at this point.
+Formatting, lint (warnings only) and whitespace checks pass. The overlapping broad
+web runs hit two five-second import/render timeouts under load; the serialized rerun
+and current complete server results are recorded below when finished. The mandatory
+full gate remains outstanding, with the existing process-identity failures unchanged.
+
+The serialized complete web unit rerun passes all 2,280 cases. The broad server run
+identified an additional regression: sync was waiting through the scheduler's
+network-failure circuit as though it were a rate-limit reset. Separate network and
+rate-limit deadlines now preserve both cooldowns, and only rate-limit reset waits
+are admitted. A failing-before recovery scenario now passes in the 49-case PR Hub
+suite; together with scheduler and wait tests, all 62 targeted cases pass. The broad
+run before this correction passed 4,890 server cases, failed that scenario and the
+three existing launcher creation-identity cases, and skipped 12. Those launcher
+failures still reproduce the host's denial of `/bin/ps`; they are not waived.

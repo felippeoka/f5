@@ -2,6 +2,14 @@ import type { SettingsItemDescriptor } from "../settingsSearch";
 
 export const GIT_SETTINGS_DESCRIPTORS = [
   {
+    id: "git.review-guide-model",
+    category: "git",
+    label: "Review guide model",
+    description: "Choose a separate model for guided pull request reviews.",
+    keywords: ["guide", "review", "pull request", "model", "tour"],
+    targetSelector: '[data-settings-search-target="git.review-guide-model"]',
+  },
+  {
     id: "git.submodules",
     category: "git",
     label: "Worktree submodules",

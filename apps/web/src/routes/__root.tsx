@@ -1,3 +1,4 @@
+import { HtmlPreviewHost } from "../components/HtmlPreviewHost";
 import { invalidateWorkflowQueries } from "../lib/workflowQueries";
 import { noteWsSynchronized, noteWsResynchronizing } from "../wsConnectionState";
 import { useComposerMentionHistoryStore } from "../composerMentionHistoryStore";
@@ -155,6 +156,7 @@ function RootRouteView() {
       <AnchoredToastProvider>
         <EventRouter />
         <DesktopProjectBootstrap />
+        <HtmlPreviewHost />
         <SlowRpcWarningToastCoordinator />
         <WebSocketConnectionSurface>
           <Outlet />

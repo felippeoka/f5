@@ -1,4 +1,10 @@
 import type {
+  HtmlPreviewRequest,
+  HtmlPreviewHostRequest,
+  HtmlPreviewResult,
+  HtmlPreviewResponse,
+} from "./threadTools";
+import type {
   WorktreesMoveThreadInput,
   WorktreesMoveThreadResult,
   WorktreesDiscardMovedChangesInput,
@@ -359,6 +365,8 @@ import type {
   PrHubReviewDraftResult,
   PrHubUnresolvedThreadsResult,
   PrHubGetAdvisoriesInput,
+  PrHubReviewGuideInput,
+  PullRequestReviewGuideResult,
   PrHubIgnoreInput,
   PrHubLocalCandidatesInput,
   PrHubResolveCheckoutInput,
@@ -584,6 +592,7 @@ export interface DesktopCliCommandState {
 }
 
 export interface DesktopBridge {
+  htmlPreview?: (input: HtmlPreviewRequest) => Promise<HtmlPreviewResult>;
   cliCommand?: {
     state: () => Promise<DesktopCliCommandState>;
     install: () => Promise<DesktopCliCommandState>;
@@ -702,6 +711,11 @@ export interface DesktopPreviewBridge {
 }
 
 export interface NativeApi {
+  htmlRender: {
+    setHost: (input: { available: boolean }) => Promise<void>;
+    respond: (input: HtmlPreviewResponse) => Promise<void>;
+    onRequest: (callback: (input: HtmlPreviewHostRequest) => void) => () => void;
+  };
   chrome?: {
     listTransactions: (
       provider: "claude" | "codex",
@@ -1103,6 +1117,8 @@ export interface NativeApi {
     markNotified: (input: PrHubMarkNotifiedInput) => Promise<PrHubOverview>;
     analyzeAdvisories: (input?: PrHubAnalyzeAdvisoriesInput) => Promise<PrHubAdvisorySnapshot>;
     getAdvisories: (input?: PrHubGetAdvisoriesInput) => Promise<PrHubAdvisorySnapshot>;
+    getReviewGuide: (input: PrHubReviewGuideInput) => Promise<PullRequestReviewGuideResult>;
+    generateReviewGuide: (input: PrHubReviewGuideInput) => Promise<PullRequestReviewGuideResult>;
     resolveLocalCheckout: (input: PrHubResolveCheckoutInput) => Promise<PrHubResolvedCheckout[]>;
     listLocalCheckoutCandidates: (
       input: PrHubLocalCandidatesInput,

@@ -69,6 +69,7 @@ for (const eventName of ["click", "keydown"] as const) {
   );
 }
 contextBridge.exposeInMainWorld("desktopBridge", {
+  htmlPreview: (input) => ipcRenderer.invoke("desktop:html-preview", input),
   cliCommand: {
     state: () => ipcRenderer.invoke("desktop:cli-command-state"),
     install: () => ipcRenderer.invoke("desktop:cli-command-install"),

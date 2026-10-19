@@ -2476,6 +2476,7 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
     };
     const computerMcpSessions = new Map<ThreadId, PreviewMcpSessionConfig>();
     const previewMcpSessions = new Map<ThreadId, PreviewMcpSessionConfig>();
+    const threadMcpSessions = new Map<ThreadId, PreviewMcpSessionConfig>();
     // Sessions pin F5's MCP servers with `-c mcp_servers=...` at launch, so a
     // reload cannot change that set; a different desired set needs a restart.
     const launchedMcpConfigKeys = new Map<ThreadId, string>();
@@ -2485,6 +2486,8 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           session.dispose();
         }
         previewMcpSessions.clear();
+        for (const session of threadMcpSessions.values()) session.dispose();
+        threadMcpSessions.clear();
         for (const session of computerMcpSessions.values()) session.dispose();
         computerMcpSessions.clear();
         computerDecisions.clear();
@@ -2504,10 +2507,13 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
 
       let computerMcpSession: PreviewMcpSessionConfig | undefined;
       let previewMcpSession: PreviewMcpSessionConfig | undefined;
+      let threadMcpSession: PreviewMcpSessionConfig | undefined;
       const disposePreviewMcpSession = () => {
         computerMcpSession?.dispose();
         computerMcpSessions.delete(input.threadId);
         computerDecisions.delete(input.threadId);
+        threadMcpSession?.dispose();
+        threadMcpSessions.delete(input.threadId);
         previewMcpSession?.dispose();
         previewMcpSessions.delete(input.threadId);
       };
@@ -2584,10 +2590,33 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
             kind: "f5-computer",
           });
         }
+        threadMcpSessions.get(input.threadId)?.dispose();
+        threadMcpSessions.delete(input.threadId);
+        threadMcpSession =
+          options?.previewMcpHttpServer?.supportsThreadCatalog &&
+          !input.workflowExecutionProfile &&
+          !isSyntheticOneOffThreadId(input.threadId)
+            ? options.previewMcpHttpServer.createSessionConfig({
+                threadId: input.threadId,
+                catalog: "thread",
+                ...(input.providerInstanceId
+                  ? { providerInstanceId: input.providerInstanceId }
+                  : {}),
+                existingServerNames: new Set([
+                  ...Object.keys(baseProviderMcpServers ?? {}),
+                  ...(previewMcpSession ? [previewMcpSession.serverName] : []),
+                  ...(computerMcpSession ? [computerMcpSession.serverName] : []),
+                ]),
+              })
+            : undefined;
+        if (threadMcpSession) threadMcpSessions.set(input.threadId, threadMcpSession);
         const providerMcpServers =
-          previewMcpSession || computerMcpSession
+          previewMcpSession || computerMcpSession || threadMcpSession
             ? {
                 ...baseProviderMcpServers,
+                ...(threadMcpSession
+                  ? { [threadMcpSession.serverName]: threadMcpSession.serverDefinition }
+                  : {}),
                 ...(previewMcpSession
                   ? { [previewMcpSession.serverName]: previewMcpSession.serverDefinition }
                   : {}),
@@ -2669,8 +2698,14 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           ...(providerMcpServers
             ? { mcpServers: translateMcpForCodex(providerMcpServers) ?? {} }
             : {}),
-          ...(previewMcpSession || computerMcpSession
-            ? { mcpEnvironment: { ...previewMcpSession?.env, ...computerMcpSession?.env } }
+          ...(previewMcpSession || computerMcpSession || threadMcpSession
+            ? {
+                mcpEnvironment: {
+                  ...previewMcpSession?.env,
+                  ...computerMcpSession?.env,
+                  ...threadMcpSession?.env,
+                },
+              }
             : {}),
           ...(mcpOAuthCallbackConfig.port
             ? { mcpOAuthCallbackPort: mcpOAuthCallbackConfig.port }
@@ -2918,6 +2953,8 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
 
     const stopSession: CodexAdapterShape["stopSession"] = (threadId) =>
       Effect.sync(() => {
+        threadMcpSessions.get(threadId)?.dispose();
+        threadMcpSessions.delete(threadId);
         previewMcpSessions.get(threadId)?.dispose();
         previewMcpSessions.delete(threadId);
         computerMcpSessions.get(threadId)?.dispose();
@@ -3027,6 +3064,8 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           session.dispose();
         }
         previewMcpSessions.clear();
+        for (const session of threadMcpSessions.values()) session.dispose();
+        threadMcpSessions.clear();
         for (const session of computerMcpSessions.values()) session.dispose();
         computerMcpSessions.clear();
         computerDecisions.clear();

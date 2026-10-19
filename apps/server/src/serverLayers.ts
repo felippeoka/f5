@@ -1,3 +1,5 @@
+import { ThreadMcpBroker, ThreadMcpBrokerLive } from "./mcp/threadMcpTools.ts";
+import { PrHubReviewGuideServiceLive } from "./prHub/Layers/PrHubReviewGuideService.ts";
 import { WorkspaceTransitionsLive } from "./persistence/Layers/WorkspaceTransitions.ts";
 import { WorkspaceTransitionLive } from "./project/Layers/WorkspaceTransition.ts";
 import { WorktreePreparationsLive } from "./persistence/Layers/WorktreePreparations.ts";
@@ -157,6 +159,7 @@ export function makeServerProviderLayer(): Layer.Layer<
   | PreviewAutomationBroker
   | ComputerAutomationBroker
   | PreviewMcpHttpServer
+  | ThreadMcpBroker
   | ProviderRegistry
   | ProviderUpdateAdvisor
   | ProviderAdvisoryProjection
@@ -207,10 +210,12 @@ export function makeServerProviderLayer(): Layer.Layer<
       Layer.provide(AgentControlPauseLive),
     );
     const previewMcpHttpServerLayer = PreviewMcpHttpServerLive.pipe(
+      Layer.provide(ThreadMcpBrokerLive),
       Layer.provide(computerAutomationBrokerLayer),
       Layer.provide(previewAutomationBrokerLayer),
     );
     const providerInstanceRegistryLayer = ProviderInstanceRegistryHydrationLive.pipe(
+      Layer.provide(ThreadMcpBrokerLive),
       Layer.provide(serverSettingsLayer),
       Layer.provide(providerEventLoggersLayer),
       Layer.provide(OpenCodeRuntimeLive),
@@ -298,6 +303,7 @@ export function makeServerProviderLayer(): Layer.Layer<
       previewAutomationBrokerLayer,
       computerAutomationBrokerLayer,
       previewMcpHttpServerLayer,
+      ThreadMcpBrokerLive,
     );
   }).pipe(Effect.provide(ProviderTerminalEventRepositoryLive), Layer.unwrap);
 }
@@ -337,6 +343,10 @@ export function makeServerRuntimeServicesLayer() {
     Layer.provideMerge(ProjectionProjectRepositoryLive),
   );
   const prHubLayer = PrHubFederatedServiceLive.pipe(Layer.provideMerge(federationLayer));
+  const prHubReviewGuideLayer = PrHubReviewGuideServiceLive.pipe(
+    Layer.provideMerge(federationLayer),
+    Layer.provideMerge(textGenerationLayer),
+  );
   const prHubExtensionsLayer = PrHubExtensionsLive.pipe(Layer.provideMerge(prHubLayer));
   const prHubAdvisoryLayer = PrHubAdvisoryServiceLive.pipe(
     Layer.provideMerge(prHubLayer),
@@ -355,6 +365,7 @@ export function makeServerRuntimeServicesLayer() {
     prHubLayer,
     prHubExtensionsLayer,
     prHubAdvisoryLayer,
+    prHubReviewGuideLayer,
     terminalLayer,
     KeybindingsLive,
     ObservabilityLive.pipe(Layer.provide(ServerSettingsLive)),

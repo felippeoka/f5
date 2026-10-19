@@ -517,7 +517,7 @@ export function makeForgeSourceControlProvider(options: {
             head.sha ??
             object(source.commit).hash ??
             object(v.lastMergeSourceCommit).commitId,
-        ) || null,
+        ).trim() || null,
       state:
         status === "merged" || status === "completed" || v.merged === true
           ? "merged"

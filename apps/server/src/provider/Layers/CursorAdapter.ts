@@ -663,6 +663,8 @@ export function makeCursorAdapter(
               ? { verification: options.automationCatalogVerification }
               : {}),
             readOnlyWorkflow: !!input.workflowExecutionProfile,
+            threadSession:
+              !isSyntheticOneOffThreadId(input.threadId) && !input.workflowExecutionProfile,
             ordinarySession:
               serverConfig.mode === "desktop" &&
               !isSyntheticOneOffThreadId(input.threadId) &&

@@ -383,6 +383,9 @@ export const ServerSettings = Schema.Struct({
       model: DEFAULT_GIT_TEXT_GENERATION_MODEL,
     })),
   ),
+  reviewGuideModelSelection: Schema.NullOr(ModelSelection).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   sessionNotesModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(() => ({
       instanceId: ProviderInstanceId.make("codex"),
@@ -552,6 +555,7 @@ export const ServerSettingsPatch = Schema.Struct({
   addProjectBaseDirectory: Schema.optionalKey(Schema.String),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   sessionNotesModelSelection: Schema.optionalKey(ModelSelectionPatch),
+  reviewGuideModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   prHubDefaultMergeMethod: Schema.optionalKey(
     Schema.NullOr(Schema.Literals(["squash", "merge", "rebase"])),
   ),

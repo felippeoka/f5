@@ -1,6 +1,14 @@
 import { FILESYSTEM_PATH_MAX_LENGTH } from "./filesystem";
 import { Schema, Struct } from "effect";
-import { IsoDateTime, makeEntityId, NonNegativeInt, ProjectId } from "./baseSchemas";
+import { ModelSelection } from "./orchestration";
+import {
+  IsoDateTime,
+  makeEntityId,
+  NonNegativeInt,
+  PositiveInt,
+  ProjectId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas";
 import {
   ForgeCapabilities,
   SourceControlCapability,
@@ -219,6 +227,7 @@ export const PrHubCoverage = Schema.Struct({
   limits: Schema.optional(Schema.Array(Schema.String)),
 });
 export const PrHubSchedulerState = Schema.Struct({
+  cooldownReason: Schema.optional(Schema.NullOr(Schema.Literals(["network", "rate-limit"]))),
   retryAt: Schema.NullOr(IsoDateTime),
   activeOrQueuedRequests: NonNegativeInt,
   resources: Schema.Array(
@@ -1100,6 +1109,8 @@ export const PR_HUB_WS_METHODS = {
   markNotified: "prHub.markNotified",
   analyzeAdvisories: "prHub.analyzeAdvisories",
   getAdvisories: "prHub.getAdvisories",
+  getReviewGuide: "prHub.getReviewGuide",
+  generateReviewGuide: "prHub.generateReviewGuide",
   // Legacy wire compatibility for older clients; new actions use resolveLocalCheckout.
   listLocalCheckoutCandidates: "prHub.listLocalCheckoutCandidates",
   resolveLocalCheckout: "prHub.resolveLocalCheckout",
@@ -1187,3 +1198,75 @@ export const PrHubCommentReadInput = Schema.Struct({
   key: PullRequestKey,
 });
 export type PrHubCommentReadInput = typeof PrHubCommentReadInput.Type;
+
+export const PullRequestReviewGuideAttention = Schema.Struct({
+  kind: Schema.Literals(["tradeoff", "contract", "product", "risk", "accessibility"]),
+  note: TrimmedNonEmptyString,
+});
+export type PullRequestReviewGuideAttention = typeof PullRequestReviewGuideAttention.Type;
+
+export const PullRequestReviewGuideExcerpt = Schema.Struct({
+  path: TrimmedNonEmptyString,
+  side: Schema.Literals(["new", "old"]),
+  start: PositiveInt,
+  end: PositiveInt,
+  caption: Schema.String,
+});
+export type PullRequestReviewGuideExcerpt = typeof PullRequestReviewGuideExcerpt.Type;
+
+export const PullRequestReviewGuideNote = Schema.Struct({
+  path: TrimmedNonEmptyString,
+  line: PositiveInt,
+  title: TrimmedNonEmptyString,
+  body: Schema.String,
+});
+export type PullRequestReviewGuideNote = typeof PullRequestReviewGuideNote.Type;
+
+export const PullRequestReviewGuideStop = Schema.Struct({
+  title: TrimmedNonEmptyString,
+  summary: Schema.String,
+  attention: Schema.NullOr(PullRequestReviewGuideAttention),
+  excerpts: Schema.Array(PullRequestReviewGuideExcerpt),
+  files: Schema.Array(
+    Schema.Struct({
+      path: TrimmedNonEmptyString,
+      note: Schema.optionalKey(Schema.String),
+    }),
+  ),
+  notes: Schema.Array(PullRequestReviewGuideNote),
+  questions: Schema.Array(TrimmedNonEmptyString),
+});
+export type PullRequestReviewGuideStop = typeof PullRequestReviewGuideStop.Type;
+
+export const PullRequestReviewGuide = Schema.Struct({
+  headSha: TrimmedNonEmptyString,
+  generatedAt: IsoDateTime,
+  modelSelection: ModelSelection,
+  stops: Schema.Array(PullRequestReviewGuideStop),
+});
+export type PullRequestReviewGuide = typeof PullRequestReviewGuide.Type;
+
+export const PullRequestReviewGuideRun = Schema.Union([
+  Schema.TaggedStruct("Running", {
+    headSha: TrimmedNonEmptyString,
+    startedAt: IsoDateTime,
+  }),
+  Schema.TaggedStruct("Failed", {
+    headSha: TrimmedNonEmptyString,
+    failedAt: IsoDateTime,
+    detail: TrimmedNonEmptyString,
+  }),
+]);
+export type PullRequestReviewGuideRun = typeof PullRequestReviewGuideRun.Type;
+
+export const PullRequestReviewGuideResult = Schema.Struct({
+  guide: Schema.NullOr(PullRequestReviewGuide),
+  run: Schema.NullOr(PullRequestReviewGuideRun),
+  currentHeadSha: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type PullRequestReviewGuideResult = typeof PullRequestReviewGuideResult.Type;
+
+export const PrHubReviewGuideInput = Schema.Struct({
+  ...PrHubDetailInput.fields,
+});
+export type PrHubReviewGuideInput = typeof PrHubReviewGuideInput.Type;

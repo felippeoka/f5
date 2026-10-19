@@ -9,6 +9,9 @@ import { makePreviewAutomationBroker } from "../../mcp/PreviewAutomationBroker.t
 import { forceClaudeChromeFlag, makeClaudePreviewMcpServer } from "./claudeAgentBrowser.ts";
 import { FakeClaudeCodeProcess, respondToInitializeRequest } from "./ClaudeSdk.testUtils.ts";
 import { createClaudeQueryWithPrivateMcp } from "../claudeMcpStartup.ts";
+import { makeClaudeThreadMcpServer } from "./claudeThreadTools.ts";
+import { makeThreadMcpBroker } from "../../mcp/threadMcpTools.ts";
+import { Effect } from "effect";
 
 async function* emptyPrompt(): AsyncGenerator<never> {}
 
@@ -31,6 +34,38 @@ beforeAll(() => {
 });
 
 describe("Claude SDK host contract transport", () => {
+  it("declares F5 thread tools in-process without credentials in CLI arguments", async () => {
+    const broker = await Effect.runPromise(makeThreadMcpBroker);
+    const server = makeClaudeThreadMcpServer({
+      broker,
+      threadId: ThreadId.makeUnsafe("thread-probe"),
+      existingServerNames: new Set(["f5_thread"]),
+    });
+    let initialize: Record<string, unknown> | undefined;
+    let spawn: SpawnOptions | undefined;
+    const runtime = query({
+      prompt: emptyPrompt(),
+      options: {
+        persistSession: false,
+        mcpServers: { [server.serverName]: server.config },
+        spawnClaudeCodeProcess: (args) => {
+          spawn = args;
+          return new FakeClaudeCodeProcess((message, child) => {
+            if (respondToInitializeRequest(message, child))
+              initialize = message.request as Record<string, unknown>;
+          });
+        },
+      },
+    });
+    try {
+      await runtime.initializationResult();
+      expect(initialize?.sdkMcpServers).toEqual([server.serverName]);
+      expect(server.serverName).not.toBe("f5_thread");
+      expect(JSON.stringify(spawn?.args)).not.toContain("F5_THREAD_MCP_TOKEN");
+    } finally {
+      runtime.close();
+    }
+  });
   it("transmits configured MCP headers and env over stdin while keeping actual CLI argv private", async () => {
     const servers = {
       remote: {

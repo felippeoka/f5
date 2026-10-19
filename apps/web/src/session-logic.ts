@@ -1,3 +1,4 @@
+import { HtmlRenderReference } from "@t3tools/contracts";
 import { Schema } from "effect";
 import {
   AGENT_BRIDGE_TURN_SUBMITTED_ACTIVITY_KIND,
@@ -87,6 +88,7 @@ export const PROVIDER_OPTIONS: Array<{
 ];
 
 export interface WorkLogEntry {
+  htmlRender?: HtmlRenderReference;
   imagePath?: string;
   id: string;
   createdAt: string;
@@ -722,7 +724,7 @@ function shouldKeepHistoricalWorkEntry(
   latestTurnId: TurnId | undefined,
   terminalCodexProviderItemIds: ReadonlySet<ProviderItemId>,
 ): boolean {
-  if (!latestTurnId) {
+  if (!latestTurnId || activity.kind === "htmlRender") {
     return true;
   }
   if (
@@ -760,6 +762,7 @@ function shouldKeepHistoricalWorkEntry(
 
 function workEntryVisibleSignature(entry: WorkLogEntry): string {
   return JSON.stringify({
+    htmlRender: entry.htmlRender,
     label: entry.label,
     toolTitle: entry.toolTitle,
     itemType: entry.itemType,
@@ -1504,6 +1507,10 @@ export function deriveWorkLogEntries(
         tone: usageLimit || activity.tone === "approval" ? "info" : activity.tone,
         activityKind: activity.kind,
       };
+      if (activity.kind === "htmlRender") {
+        const parsed = Schema.decodeUnknownOption(HtmlRenderReference)(payload?.htmlRender);
+        if (parsed._tag === "Some") entry.htmlRender = parsed.value;
+      }
       if (activity.turnId) {
         entry.turnId = activity.turnId;
       }

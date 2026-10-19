@@ -1,3 +1,4 @@
+import { HTML_RENDER_WS_METHODS, HtmlPreviewHostRequest } from "@t3tools/contracts";
 import { useAgentComputerActivityStore } from "./agentComputerActivityStore";
 import { NATIVE_OPERATION_WS_METHODS } from "@t3tools/contracts";
 import type {
@@ -545,6 +546,14 @@ export function createWsNativeApi(): NativeApi {
           listener(message.data),
         ),
     },
+    htmlRender: {
+      setHost: requestMethod(HTML_RENDER_WS_METHODS.host),
+      respond: requestMethod(HTML_RENDER_WS_METHODS.respond),
+      onRequest: (callback) =>
+        transport.subscribe(WS_CHANNELS.htmlRenderRequest, (message) =>
+          callback(Schema.decodeUnknownSync(HtmlPreviewHostRequest)(message.data)),
+        ),
+    },
     preview: {
       open: requestMethod(WS_METHODS.previewOpen),
       navigate: requestMethod(WS_METHODS.previewNavigate),
@@ -946,6 +955,8 @@ export function createWsNativeApi(): NativeApi {
       analyzeAdvisories: (input = {}) =>
         requestPrHub(PR_HUB_WS_METHODS.analyzeAdvisories, input, { timeoutMs: null }),
       getAdvisories: (input = {}) => requestPrHub(PR_HUB_WS_METHODS.getAdvisories, input),
+      getReviewGuide: (input) => requestPrHub(PR_HUB_WS_METHODS.getReviewGuide, input),
+      generateReviewGuide: (input) => requestPrHub(PR_HUB_WS_METHODS.generateReviewGuide, input),
       resolveLocalCheckout: (input) => requestPrHub(PR_HUB_WS_METHODS.resolveLocalCheckout, input),
       listLocalCheckoutCandidates: (input) =>
         requestPrHub(PR_HUB_WS_METHODS.listLocalCheckoutCandidates, input),

@@ -1,3 +1,5 @@
+import type { ThreadMcpBroker } from "../../mcp/threadMcpTools.ts";
+import { makeClaudeThreadMcpServer } from "./claudeThreadTools.ts";
 import type { ProviderAdapterSessionStartInput } from "../Services/ProviderAdapter.ts";
 import { createClaudeQueryWithPrivateMcp } from "../claudeMcpStartup.ts";
 import { classifyMcpOwnership } from "../mcpObservation.ts";
@@ -592,6 +594,7 @@ export interface ClaudeAdapterLiveOptions {
    * supplies live agent browser policy. Absent outside desktop mode.
    */
   readonly previewAutomationBroker?: PreviewAutomationBrokerShape;
+  readonly threadMcpBroker?: ThreadMcpBroker["Service"];
   readonly computerAutomationBroker?: ComputerAutomationBrokerRuntime;
   readonly chromeRuntime?: ChromeSessionRuntime;
   /** Executable-reported model capabilities for this instance (SDK initialization). */
@@ -7437,7 +7440,20 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             ...claudeDisallowedMcpToolNames(mcpToolFilters),
           ]),
         ];
+        const threadServer =
+          options?.threadMcpBroker && !input.workflowExecutionProfile
+            ? makeClaudeThreadMcpServer({
+                broker: options.threadMcpBroker,
+                threadId,
+                existingServerNames: new Set([
+                  ...Object.keys(translatedMcpServers ?? {}),
+                  ...(previewServer ? [previewServer.serverName] : []),
+                  ...(computerServer ? [computerServer.serverName] : []),
+                ]),
+              })
+            : undefined;
         const internalMcpServers: NonNullable<ClaudeQueryOptions["mcpServers"]> = {
+          ...(threadServer ? { [threadServer.serverName]: threadServer.config } : {}),
           ...(previewServer ? { [previewServer.serverName]: previewServer.config } : {}),
           ...(computerServer ? { [computerServer.serverName]: computerServer.config } : {}),
         };

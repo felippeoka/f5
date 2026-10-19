@@ -1,3 +1,4 @@
+import { ThreadMcpBroker } from "../../mcp/threadMcpTools.ts";
 import { ComputerAutomationBroker } from "../../computer/ComputerAutomationBroker";
 import * as NodeOS from "node:os";
 import {
@@ -167,6 +168,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         instanceId,
       );
       const previewAutomationBroker = yield* PreviewAutomationBroker;
+      const threadMcpBroker = yield* Effect.serviceOption(ThreadMcpBroker);
       const computerAutomationBroker = yield* Effect.serviceOption(ComputerAutomationBroker);
       // Latest probed models, so launches use the capabilities the CLI reported
       // (the same ones the composer shows) instead of only F5's static table.
@@ -184,6 +186,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
           ),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         previewAutomationBroker,
+        ...(threadMcpBroker._tag === "Some" ? { threadMcpBroker: threadMcpBroker.value } : {}),
         ...(computerAutomationBroker._tag === "Some"
           ? { computerAutomationBroker: computerAutomationBroker.value }
           : {}),

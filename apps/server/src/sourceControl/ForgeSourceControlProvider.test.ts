@@ -36,6 +36,27 @@ function fixture(kind: ForgeKind, responses: unknown[] = [], login = `viewer-${+
 }
 
 describe("forge adapters", () => {
+  it.each([
+    ["gitlab", { sha: "abc1234", diff_refs: null, merge_commit_sha: "wrong" }, "abc1234"],
+    ["gitlab", { sha: "  " }, null],
+    ["gitlab", { sha: null }, null],
+    ["forgejo", { head: { sha: "head-commit" } }, "head-commit"],
+    ["bitbucket", { source: { commit: { hash: "9f3a7c2d8b1e" } } }, "9f3a7c2d8b1e"],
+    [
+      "bitbucket",
+      { source: { commit: { hash: "9f3a7c2d8b1e6f045a9c3d7e2b8f1a6c0d4e5f93" } } },
+      "9f3a7c2d8b1e6f045a9c3d7e2b8f1a6c0d4e5f93",
+    ],
+    ["bitbucket", { source: { commit: null } }, null],
+  ] as const)(
+    "preserves %s native PR head commits without inventing absent heads",
+    async (kind, metadata, head) => {
+      const { provider, ref } = fixture(kind, [
+        { id: 7, iid: 7, number: 7, title: "Change", ...metadata },
+      ]);
+      expect((await Effect.runPromise(provider.getDetail(ref))).headRefOid).toBe(head);
+    },
+  );
   it("posts GitLab context discussions with both native coordinates and rename paths", async () => {
     const { provider, ref, calls } = fixture("gitlab");
     await Effect.runPromise(

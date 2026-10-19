@@ -22,6 +22,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../../ui/switch";
 import { Textarea } from "../../ui/textarea";
 import { toastManager } from "../../ui/toast";
+import { ReviewGuideSettings } from "../ReviewGuideSettings";
 
 export { GIT_SETTINGS_DESCRIPTORS } from "./GitSettings.descriptors";
 
@@ -65,6 +66,7 @@ export function GitSettings() {
       <SyncSettings />
       <WritingSettings />
       <PullRequestSettings />
+      <ReviewGuideSettings />
     </>
   );
 }

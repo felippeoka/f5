@@ -178,6 +178,8 @@ export function formatKeybindingCommandLabel(
       return "Page chat down";
     case "chat.newBackground":
       return "Send new thread in background";
+    case "chat.sendAndNew":
+      return "Send and open a new thread";
     case "rightPanel.tabMenu":
       return "Switch right panel tab";
     case "rightPanel.reopenClosed":

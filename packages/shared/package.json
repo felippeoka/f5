@@ -354,7 +354,11 @@
     },
     "./mcpTools": "./src/mcpTools.ts",
     "./mcpSecrets": "./src/mcpSecrets.ts",
-    "./observability": "./src/observability.ts"
+    "./observability": "./src/observability.ts",
+    "./htmlRender": {
+      "types": "./src/htmlRender.ts",
+      "import": "./src/htmlRender.ts"
+    }
   },
   "scripts": {
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",

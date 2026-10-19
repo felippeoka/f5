@@ -1,3 +1,4 @@
+import { HTML_RENDER_WS_METHODS, HtmlPreviewHostInput, HtmlPreviewResponse } from "./threadTools";
 import { Schema, Struct, Tuple } from "effect";
 import { AttachmentCloneToUploadInput, AttachmentUploadsInput } from "./attachmentUpload";
 import { ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
@@ -200,6 +201,7 @@ import {
   PrHubDetailInput,
   PrHubFilesInput,
   PrHubGetAdvisoriesInput,
+  PrHubReviewGuideInput,
   PrHubIgnoreInput,
   PrHubListInput,
   PrHubLocalCandidatesInput,
@@ -510,6 +512,8 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.previewClose, PreviewCloseInput),
   tagRequestBody(WS_METHODS.previewList, PreviewListInput),
   tagRequestBody(WS_METHODS.previewListLocalServers, PreviewListLocalServersInput),
+  tagRequestBody(HTML_RENDER_WS_METHODS.host, HtmlPreviewHostInput),
+  tagRequestBody(HTML_RENDER_WS_METHODS.respond, HtmlPreviewResponse),
   tagRequestBody(WS_METHODS.previewAutomationRespond, PreviewAutomationResponse),
   tagRequestBody(WS_METHODS.previewAutomationReportOwner, PreviewAutomationOwner),
   tagRequestBody(WS_METHODS.previewAutomationClearOwner, PreviewAutomationClearOwnerInput),
@@ -685,6 +689,8 @@ const WebSocketRequestBody = Schema.Union([
   tagPrHubRequestBody(PR_HUB_WS_METHODS.markNotified, PrHubMarkNotifiedInput),
   tagPrHubRequestBody(PR_HUB_WS_METHODS.analyzeAdvisories, PrHubAnalyzeAdvisoriesInput),
   tagPrHubRequestBody(PR_HUB_WS_METHODS.getAdvisories, PrHubGetAdvisoriesInput),
+  tagPrHubRequestBody(PR_HUB_WS_METHODS.getReviewGuide, PrHubReviewGuideInput),
+  tagPrHubRequestBody(PR_HUB_WS_METHODS.generateReviewGuide, PrHubReviewGuideInput),
   tagPrHubRequestBody(PR_HUB_WS_METHODS.listLocalCheckoutCandidates, PrHubLocalCandidatesInput),
   tagPrHubRequestBody(PR_HUB_WS_METHODS.resolveLocalCheckout, PrHubResolveCheckoutInput),
   tagPrHubRequestBody(PR_HUB_WS_METHODS.getDetail, PrHubDetailInput),

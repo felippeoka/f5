@@ -105,6 +105,12 @@ Reasoning effort can also be stepped with the **Increase reasoning effort** and
 They move through the selected model's supported levels, wrapping at either end,
 and keep the draft text, mode and other model options intact.
 
+In an existing thread's composer, **Mod+Alt+Enter** sends your message and opens
+a project draft after the server accepts it. A failed submission keeps you in the
+original thread with your text restored. A thread you leave while waiting for
+acceptance does not pull you back. **Steer active turn** remains available as a
+custom binding; it no longer shares that default shortcut.
+
 ## Diagrams and shell commands
 
 Settled `mermaid` code blocks render a diagram when they come into view. **Show
