@@ -22,6 +22,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../../ui/switch";
 import { Textarea } from "../../ui/textarea";
 import { toastManager } from "../../ui/toast";
+import { WorktreeDisposablePathsEditor } from "../WorktreeDisposablePathsEditor";
 
 export { GIT_SETTINGS_DESCRIPTORS } from "./GitSettings.descriptors";
 
@@ -124,6 +125,17 @@ function WorktreeSettings() {
           >
             Open cleanup rules
           </Button>
+        }
+      />
+      <SettingsRow
+        title="Disposable worktree changes"
+        searchTarget="git.worktree-disposable-paths"
+        description="Uncommitted changes Storage cleanup may discard, such as regenerated files. Projects can override this list."
+        control={
+          <WorktreeDisposablePathsEditor
+            value={settings.worktreeDisposablePaths}
+            onSave={(paths) => updateSettings({ worktreeDisposablePaths: paths })}
+          />
         }
       />
     </SettingsCard>

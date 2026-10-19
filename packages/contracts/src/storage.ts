@@ -93,6 +93,8 @@ export const StorageCleanupCategoryId = Schema.Literals([
   "codexMarketplaceStaging",
   "databaseVacuum",
   "inactiveF5Worktrees",
+  "externalWorktrees",
+  "staleWorktreeRegistrations",
   "legacyT3Userdata",
   "legacyT3Diverged",
   "legacyT3Worktrees",
@@ -302,6 +304,8 @@ export const StorageCleanupCategoryResult = Schema.Struct({
       status: Schema.optional(
         Schema.Literals(["Removed", "Skipped", "Deleted, cleanup incomplete", "Failed"]),
       ),
+      /** Worktree removals: whether the merged local branch was deleted or kept. */
+      branch: Schema.optional(Schema.Literals(["deleted", "kept"])),
     }),
   ),
   warnings: Schema.Array(StoragePathWarning),

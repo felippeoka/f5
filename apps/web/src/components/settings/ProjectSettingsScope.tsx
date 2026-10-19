@@ -3,6 +3,7 @@ import { useComputerStatus, computerSettingsCanEnable } from "../../hooks/useCom
 import { RememberedComputerApps } from "./RememberedComputerApps";
 import { serverConfigQueryOptions } from "../../lib/serverReactQuery";
 import { WorktreeCleanupRulesEditor } from "./WorktreeCleanupRulesEditor";
+import { WorktreeDisposablePathsEditor } from "./WorktreeDisposablePathsEditor";
 import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   isKnownProviderKind,
@@ -626,6 +627,19 @@ export function ProjectGitOverrides() {
             />
           ) : null}
         </ProjectSettingRow>
+        <ProjectSettingRow
+          title="Disposable worktree changes"
+          searchTarget="git.worktree-disposable-paths"
+          source={badge("worktreeDisposablePaths")}
+          description="Uncommitted changes Storage cleanup may discard, such as regenerated files."
+          control={
+            <WorktreeDisposablePathsEditor
+              value={settings.worktreeDisposablePaths}
+              disabled={saving}
+              onSave={(paths) => set("worktreeDisposablePaths", paths)}
+            />
+          }
+        />
       </SettingsCard>
       <SettingsCard title="Sync">
         <ProjectSettingRow

@@ -580,6 +580,91 @@ describe("StorageCleanupWorker Codex marketplace staging", () => {
     expect(await run({ deletedThreadsPurgeAfterDays: null })).toBeUndefined();
   });
 
+  it("cleans inactive worktrees hourly only when that cleanup is turned on", async () => {
+    const run = async (storageCleanup: Record<string, unknown>) => {
+      const world = makeWorld();
+      const layer = StorageCleanupWorkerLive.pipe(
+        Layer.provideMerge(automationLayer(world, { storageCleanup }, "f5-cleanup-worktrees-")),
+      );
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const config = yield* ServerConfig;
+          world.inactiveWorktreeResults = [
+            {
+              categoryId: "inactiveF5Worktrees",
+              status: "Cleaned",
+              reclaimedBytes: 4_096,
+              perTargetReclaimed: [
+                {
+                  id: "merged",
+                  path: path.join(config.worktreesDir, "repo", "merged"),
+                  reclaimedBytes: 4_096,
+                  status: "Removed",
+                  branch: "deleted",
+                },
+              ],
+              warnings: [
+                {
+                  path: path.join(config.worktreesDir, "repo", "dirty"),
+                  reason: "it has uncommitted changes (including untracked files)",
+                },
+              ],
+            },
+            {
+              categoryId: "staleWorktreeRegistrations",
+              status: "Cleaned",
+              reclaimedBytes: 0,
+              perTargetReclaimed: [
+                {
+                  id: "/tmp/gone",
+                  path: "/tmp/gone",
+                  reclaimedBytes: 0,
+                  status: "Removed",
+                },
+              ],
+              warnings: [],
+            },
+          ];
+          const worker = yield* StorageCleanupWorker;
+          yield* worker.runOnce;
+          const audit = yield* listStorageAutomationAudit(10);
+          return {
+            called: world.maintenanceCalls.some(
+              (entry) => entry.method === "cleanInactiveWorktreesAutomatically",
+            ),
+            audit: audit
+              .filter((entry) => entry.job === "worktree-cleanup")
+              .map((entry) => [entry.result, entry.target, entry.reason])
+              .toSorted(),
+          };
+        }).pipe(Effect.provide(layer), Effect.scoped),
+      );
+    };
+
+    const enabled = await run({ enabled: true, inactiveWorktrees: true });
+    expect(enabled.called).toBe(true);
+    expect(enabled.audit).toEqual(
+      [
+        [
+          "removed",
+          path.join("repo", "merged"),
+          "inactive worktree; its merged branch was deleted",
+        ],
+        ["removed", "/tmp/gone", "the worktree folder was missing; its registration was pruned"],
+        [
+          "skipped",
+          path.join("repo", "dirty"),
+          "it has uncommitted changes (including untracked files)",
+        ],
+      ].toSorted(),
+    );
+    for (const storageCleanup of [{ enabled: true }, { enabled: false, inactiveWorktrees: true }]) {
+      const off = await run(storageCleanup);
+      expect(off.called).toBe(false);
+      expect(off.audit).toEqual([]);
+    }
+  });
+
   it("labels paths under the user's home with ~", () => {
     expect(redactHomePath("/Users/me/.codex/.tmp", "/Users/me")).toBe(
       path.join("~", ".codex", ".tmp"),

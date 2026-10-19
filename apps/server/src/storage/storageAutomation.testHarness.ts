@@ -12,9 +12,10 @@ import type {
   QueueReasonCode,
   ProjectId,
   ServerSettings,
+  StorageCleanupCategoryResult,
   ThreadId,
 } from "@t3tools/contracts";
-import { Effect, Layer, Option, Stream } from "effect";
+import { Effect, Layer, Option, Scope, Stream } from "effect";
 
 import { ServerConfig } from "../config.ts";
 import { GitCoreTestLive as GitCoreLive, WorktreePreparationsTestLive } from "../git/testLayers.ts";
@@ -60,6 +61,8 @@ export interface AutomationWorld {
   purgeResult: AutomaticThreadPurgeResult;
   /** Result the stubbed `reclaimDatabaseSpace` returns. */
   spaceResult: DatabaseSpaceResult;
+  /** Result the stubbed `cleanInactiveWorktreesAutomatically` returns. */
+  inactiveWorktreeResults: ReadonlyArray<StorageCleanupCategoryResult> | null;
 }
 
 export const makeWorld = (): AutomationWorld => ({
@@ -74,6 +77,7 @@ export const makeWorld = (): AutomationWorld => ({
   maintenanceCalls: [],
   purgeResult: { purgedThreadIds: [], archivedThreadIds: [], reclaimedBytes: 0, warnings: [] },
   spaceResult: { action: "none", reclaimedBytes: 0 },
+  inactiveWorktreeResults: [],
 });
 
 export function git(cwd: string, ...args: string[]): string {
@@ -197,6 +201,7 @@ export function automationLayer(
         return { sequence: 1 };
       }),
     streamDomainEvents: Stream.empty,
+    acquireMaintenanceLock: () => Scope.make("sequential"),
   } as never);
   const terminals = Layer.succeed(TerminalManager, {
     listSessions: Effect.sync(() => world.terminals),
@@ -281,6 +286,8 @@ export function automationLayer(
         perTargetReclaimed: [],
         warnings: [],
       })),
+    cleanInactiveWorktreesAutomatically: (input: unknown) =>
+      call("cleanInactiveWorktreesAutomatically", input, () => world.inactiveWorktreeResults),
   } as never);
   return Layer.mergeAll(
     WorktreePreparationsTestLive,

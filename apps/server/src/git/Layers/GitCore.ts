@@ -98,6 +98,11 @@ interface ExecuteGitOptions {
   onStderrChunk?: ((chunk: Uint8Array) => void) | undefined;
 }
 
+function sameStringSet(left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean {
+  const expected = new Set(right);
+  return new Set(left).size === expected.size && left.every((value) => expected.has(value));
+}
+
 function parseBranchAb(value: string): { ahead: number; behind: number } {
   const match = value.match(/^\+(\d+)\s+-(\d+)$/);
   if (!match) return { ahead: 0, behind: 0 };
@@ -2323,6 +2328,14 @@ const makeGitCore = Effect.gen(function* () {
             }
           }
         }
+        // Only the changed paths: ignored build output can hold far more files than fit the budget.
+        const changesFingerprint = options?.changesFingerprint
+          ? yield* Effect.tryPromise({
+              try: () => checkoutFingerprint(cwd, changedPaths, new Uint8Array(), status),
+              catch: (cause) =>
+                createGitCommandError("GitCore.inspectCheckout", cwd, [], String(cause)),
+            })
+          : null;
         const ignored = yield* listIgnoredEntries(cwd);
         if (options?.recoveryFingerprint && ignored.truncated)
           return yield* createGitCommandError(
@@ -2377,6 +2390,8 @@ const makeGitCore = Effect.gen(function* () {
           hasInitializedSubmodules,
           hasTrackedChanges,
           hasUntrackedChanges,
+          changedPaths,
+          ...(changesFingerprint ? { changesFingerprint } : {}),
           ignoredEntries: ignored.entries,
           ignoredTruncated: ignored.truncated,
           upstreamRef,
@@ -2691,7 +2706,10 @@ const makeGitCore = Effect.gen(function* () {
           ["worktree", "remove", "--", input.path],
           `The target ${input.path} is not an unlocked linked worktree.`,
         );
-      const inspection = yield* inspectCheckout(target);
+      const inspection = yield* inspectCheckout(
+        target,
+        input.discardChanges ? { changesFingerprint: true } : undefined,
+      );
       if (inspection.hasInitializedSubmodules)
         return yield* createGitCommandError(
           "GitCore.removeWorktree",
@@ -2700,14 +2718,20 @@ const makeGitCore = Effect.gen(function* () {
           "Initialized submodules prevent safe removal. Deinitialize them after preserving their local work, then retry.",
         );
       const expectedCommon = yield* resolveCommonDir(input.cwd).pipe(Effect.flatMap(canonicalPath));
+      const hasChanges = inspection.hasTrackedChanges || inspection.hasUntrackedChanges;
+      // Discarding is allowed only for the exact reviewed change set, unchanged since review.
+      const discardsReviewedChanges =
+        hasChanges &&
+        input.discardChanges !== undefined &&
+        inspection.changesFingerprint === input.discardChanges.fingerprint &&
+        sameStringSet(inspection.changedPaths ?? [], input.discardChanges.paths);
       if (
         inspection.commonDir !== expectedCommon ||
         inspection.canonicalRoot !== target ||
         inspection.registration?.canonicalPath !== target ||
-        inspection.branch === null ||
+        (inspection.branch === null && input.allowDetachedHead !== true) ||
         inspection.operation !== null ||
-        inspection.hasTrackedChanges ||
-        inspection.hasUntrackedChanges ||
+        (hasChanges && !discardsReviewedChanges) ||
         inspection.ignoredTruncated ||
         blockingIgnoredEntries(inspection.ignoredEntries, input.ignoredFiles).length > 0
       ) {
@@ -2721,7 +2745,9 @@ const makeGitCore = Effect.gen(function* () {
       yield* executeGit(
         "GitCore.removeWorktree",
         input.cwd,
-        ["worktree", "remove", "--", entry.path],
+        discardsReviewedChanges
+          ? ["worktree", "remove", "--force", "--", entry.path]
+          : ["worktree", "remove", "--", entry.path],
         { timeoutMs: 300_000 },
       );
       yield* finishRemoval;

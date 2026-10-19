@@ -39,6 +39,7 @@ import {
   stopDeletedWorktreeClaims,
   removeWorktreeSafely,
 } from "../project/worktreeClaims.ts";
+import { resolveHeadInDefaultBranch } from "../project/worktreeMerge.ts";
 import { ProviderService } from "../provider/Services/ProviderService.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { TerminalManager } from "../terminal/Services/Manager.ts";
@@ -77,6 +78,12 @@ import { StorageMaintenance } from "./StorageMaintenance.ts";
  * agent session. Every check is repeated under the worktree lifecycle lock
  * right before `git worktree remove` (never `--force`). The branch and the
  * thread's worktree path are kept, so resuming the thread recreates it.
+ *
+ * With `storageCleanup.inactiveWorktrees`, each pass also runs the Storage
+ * settings cleanup of inactive F5 worktrees and missing registrations (see
+ * `StorageMaintenance.cleanInactiveWorktreesAutomatically`), which has its own
+ * rules: merged or pushed, rebuildable build output deleted, and the
+ * project's disposable paths discarded.
  */
 export interface StorageCleanupWorkerShape {
   readonly start: Effect.Effect<void, never, Scope.Scope>;
@@ -266,23 +273,7 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
       let headInDefaultBranch: boolean | null = null;
       let pullRequestMerged: boolean | null = null;
       if ((rules.unchanged || rules.onMerge) && headSha !== null && thread.deletedAt === null) {
-        const defaultBranch = yield* git
-          .readDefaultBranch(projectRoot)
-          .pipe(Effect.orElseSucceed(() => null));
-        if (defaultBranch !== null) {
-          const defaultSha =
-            (yield* git
-              .resolveCommit(projectRoot, `refs/remotes/origin/${defaultBranch}`)
-              .pipe(Effect.orElseSucceed(() => null))) ??
-            (yield* git
-              .resolveCommit(projectRoot, `refs/heads/${defaultBranch}`)
-              .pipe(Effect.orElseSucceed(() => null)));
-          if (defaultSha !== null) {
-            headInDefaultBranch = yield* git
-              .isAncestor(projectRoot, headSha, defaultSha)
-              .pipe(Effect.orElseSucceed(() => null));
-          }
-        }
+        headInDefaultBranch = (yield* resolveHeadInDefaultBranch(git, projectRoot, headSha)).merged;
         if (rules.onMerge && headInDefaultBranch === true && Option.isSome(gitManager)) {
           pullRequestMerged = yield* gitManager.value.status({ cwd: worktreePath }).pipe(
             Effect.map((status) => status.pr?.state === "merged"),
@@ -640,6 +631,56 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
       );
     }).pipe(Effect.provideServices(services), logJobFailure("terminal thread log cleanup"));
 
+  /** Audit label: relative to the managed worktrees directory, else `~`-relative. */
+  const worktreeAuditTarget = (path: string) => {
+    const relative = Path.relative(config.worktreesDir, path);
+    return relative.length > 0 && !relative.startsWith("..") && !Path.isAbsolute(relative)
+      ? relative
+      : redactHomePath(path);
+  };
+
+  /** Opt-in: the Storage settings "inactive F5 worktrees" and "missing entries" cleanup, hourly. */
+  const removeInactiveWorktrees = (operationId: string, settings: ServerSettings) =>
+    Effect.gen(function* () {
+      if (!settings.storageCleanup.enabled || !settings.storageCleanup.inactiveWorktrees) return;
+      const results = yield* storageMaintenance.cleanInactiveWorktreesAutomatically({
+        operationId,
+      });
+      if (results === null) return;
+      for (const result of results) {
+        const pruning = result.categoryId === "staleWorktreeRegistrations";
+        for (const target of result.perTargetReclaimed) {
+          yield* recordStorageAutomationAudit({
+            operationId,
+            job: "worktree-cleanup",
+            target: worktreeAuditTarget(target.path ?? target.id),
+            result: "removed",
+            reason: pruning
+              ? "the worktree folder was missing; its registration was pruned"
+              : `inactive worktree${
+                  target.branch === "deleted"
+                    ? "; its merged branch was deleted"
+                    : target.branch === "kept"
+                      ? "; its branch was kept"
+                      : ""
+                }`,
+          });
+        }
+        for (const warning of result.warnings) {
+          yield* recordStorageAutomationAudit(
+            {
+              operationId,
+              job: "worktree-cleanup",
+              target: worktreeAuditTarget(warning.path),
+              result: "skipped",
+              reason: warning.reason,
+            },
+            { skipIfRepeated: true },
+          );
+        }
+      }
+    }).pipe(Effect.provideServices(services), logJobFailure("inactive worktree cleanup"));
+
   const compactDatabase = (operationId: string) =>
     Effect.gen(function* () {
       const compaction = yield* compactThreadEvents({
@@ -781,6 +822,7 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
           : evaluation.target,
       );
     }
+    if (global !== null) yield* removeInactiveWorktrees(operationId, global);
     if (global?.storageCleanup.enabled) {
       const days = global.storageCleanup.providerLogsAfterDays;
       const logs = yield* providerLogTargets(days);

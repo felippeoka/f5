@@ -63,6 +63,8 @@ function isTargetLevelCategoryId(categoryId: StorageCleanupCategoryId): boolean 
   return [
     "legacyT3Worktrees",
     "inactiveF5Worktrees",
+    "externalWorktrees",
+    "staleWorktreeRegistrations",
     "purgeDeletedThreads",
     "purgeArchivedThreads",
     "orphanAttachments",
@@ -225,6 +227,7 @@ function TargetRow({
                     target.latestMtime
                       ? `changed ${Math.floor((Date.now() - Date.parse(target.latestMtime)) / 86_400_000)} days ago`
                       : null,
+                    target.detail,
                   ]
                     .filter(Boolean)
                     .join(" · ")
@@ -306,7 +309,10 @@ function ResultSummary({
                       ?.targets.find((candidate) => candidate.id === target.id)?.label ??
                       target.path ??
                       target.id}{" "}
-                    <span className="rounded border px-1">{target.status ?? "Removed"}</span>
+                    <span className="rounded border px-1">
+                      {target.status ?? "Removed"}
+                      {target.branch ? ` · branch ${target.branch}` : ""}
+                    </span>
                   </li>
                 ))}
               </ul>
