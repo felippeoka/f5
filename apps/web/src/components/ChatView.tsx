@@ -7279,7 +7279,7 @@ export default function ChatView({
               ) : null}
             </div>
             <NativeRuntimePanel
-              provider={sessionProvider ?? selectedProviderByThreadId ?? null}
+              provider={sessionProvider}
               sessionStatus={activeThread.session?.status}
               projectId={activeThread.projectId}
               threadId={activeThread.id}
@@ -7548,8 +7548,9 @@ export default function ChatView({
                         ))
                       : null}
                     <McpSignInTray
-                      provider={sessionProvider ?? selectedProviderByThreadId ?? null}
+                      provider={sessionProvider}
                       sessionStatus={activeThread.session?.status}
+                      sessionGeneration={activeThread.session?.capabilities?.generation}
                       projectId={activeThread.projectId}
                       threadId={activeThread.id}
                       activities={activeThread.activities}

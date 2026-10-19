@@ -95,6 +95,7 @@ describe("MCP sign-in in conversations", () => {
         <McpSignInTray
           provider="claudeAgent"
           sessionStatus="running"
+          sessionGeneration={2}
           projectId={projectId}
           threadId={threadId}
           activities={activities}
@@ -127,19 +128,35 @@ describe("MCP sign-in in conversations", () => {
   });
 
   it.each([
-    ["claudeAgent", "closed", false],
-    ["claudeAgent", "error", false],
-    ["claudeAgent", undefined, false],
-    ["codex", undefined, true],
-    ["cursor", "running", false],
-  ] as Array<[ProviderKind, "closed" | "error" | undefined | "running", boolean]>)(
-    "shows the tray for %s with session %s: %s",
-    async (provider, sessionStatus, shown) => {
+    ["claudeAgent", "closed", 2, false],
+    ["claudeAgent", "error", 2, false],
+    ["claudeAgent", undefined, 2, false],
+    ["codex", "ready", 2, true],
+    // A stopped Codex session keeps its last reports, which nothing clears after sign-in.
+    ["codex", "closed", 2, false],
+    ["codex", undefined, 2, false],
+    ["cursor", "running", 2, false],
+    // Unknown generation: fall back to the latest reported one.
+    ["claudeAgent", "running", undefined, true],
+    // A relaunched session that has not reported any MCP status yet.
+    ["claudeAgent", "running", 3, false],
+    ["codex", "ready", 3, false],
+  ] as Array<
+    [
+      ProviderKind,
+      "closed" | "error" | undefined | "running" | "ready",
+      number | undefined,
+      boolean,
+    ]
+  >)(
+    "shows the tray for %s with session %s generation %s: %s",
+    async (provider, sessionStatus, sessionGeneration, shown) => {
       const screen = await render(
         withQueryClient(
           <McpSignInTray
             provider={provider}
             sessionStatus={sessionStatus}
+            sessionGeneration={sessionGeneration}
             projectId={projectId}
             threadId={threadId}
             activities={activities}

@@ -7,7 +7,7 @@ import type {
 } from "@t3tools/contracts";
 import { latestMcpStatusActivities } from "@t3tools/shared/orchestrationActivityPayload";
 import { ChevronDownIcon, ChevronRightIcon, KeyRoundIcon } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { ThreadSession } from "../../types";
 import { Button } from "../ui/button";
@@ -16,26 +16,33 @@ import { COMPOSER_TRAY_PANEL_CLASS_NAME } from "./composer/ComposerTray";
 
 type NeedsAuthServer = CompactMcpStatusActivityPayload & { readonly name: string };
 
-/** Servers in the conversation's latest session generation that report needs-auth. */
+/**
+ * Servers that report needs-auth in the conversation's current session generation.
+ * When that generation is known, reports from older sessions are ignored, so a
+ * relaunched session that has not reported a server yet offers nothing to click.
+ */
 export function needsAuthMcpServers(
   activities: readonly Pick<OrchestrationThreadActivity, "kind" | "payload">[],
+  sessionGeneration?: number,
 ): NeedsAuthServer[] {
   return [...latestMcpStatusActivities(activities).values()].filter(
-    (server): server is NeedsAuthServer => server.status === "needs-auth" && !!server.name,
+    (server): server is NeedsAuthServer =>
+      server.status === "needs-auth" &&
+      !!server.name &&
+      (sessionGeneration === undefined || server.sessionGeneration === sessionGeneration),
   );
 }
 
 /**
- * Codex sign-in is account-scoped. Claude signs in through this conversation's live
- * session, so a stopped session's leftover needs-auth reports offer nothing to click.
+ * Sign-in is offered only while the session is live: stopped sessions keep their last
+ * reports, which no later status clears, and Claude signs in through the session itself.
  */
 export function supportsMcpSignIn(
   provider: ProviderKind | null | undefined,
   sessionStatus: ThreadSession["status"] | null | undefined,
-) {
-  if (provider === "codex") return true;
+): provider is "claudeAgent" | "codex" {
   return (
-    provider === "claudeAgent" &&
+    (provider === "claudeAgent" || provider === "codex") &&
     (sessionStatus === "ready" || sessionStatus === "running" || sessionStatus === "connecting")
   );
 }
@@ -73,16 +80,17 @@ export function McpSignInTray(props: {
   readonly provider: ProviderKind | null | undefined;
   readonly sessionStatus: ThreadSession["status"] | null | undefined;
   readonly projectId: ProjectId | undefined;
+  readonly sessionGeneration: number | undefined;
   readonly threadId: ThreadId;
   readonly activities: readonly OrchestrationThreadActivity[];
 }) {
   const [expanded, setExpanded] = useState(false);
-  const servers = needsAuthMcpServers(props.activities);
-  if (
-    !supportsMcpSignIn(props.provider, props.sessionStatus) ||
-    !props.projectId ||
-    servers.length === 0
-  )
+  const { provider, activities, sessionGeneration } = props;
+  const servers = useMemo(
+    () => needsAuthMcpServers(activities, sessionGeneration),
+    [activities, sessionGeneration],
+  );
+  if (!supportsMcpSignIn(provider, props.sessionStatus) || !props.projectId || servers.length === 0)
     return null;
   const names = servers.map((server) => server.name);
   const summary =
@@ -113,7 +121,7 @@ export function McpSignInTray(props: {
       {expanded ? (
         <McpSignInList
           servers={servers}
-          provider={props.provider as "claudeAgent" | "codex"}
+          provider={provider}
           projectId={props.projectId}
           threadId={props.threadId}
         />

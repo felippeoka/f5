@@ -271,6 +271,13 @@ describe("summarizeMcpReload", () => {
         error: "MCP server `slack` is not logged in. Run `codex mcp login slack`.",
       }),
     ).toBe("needs-auth");
+    // A wrapped CLI's own login error is a real failure that Codex OAuth cannot fix.
+    expect(codexObservedMcpStatus({ startupStatus: "failed", error: "gh is not logged in" })).toBe(
+      "failed",
+    );
+    expect(
+      codexObservedMcpStatus({ error: "User is not logged in to Jira; requires OAuth login" }),
+    ).toBe("failed");
     expect(codexObservedMcpStatus({})).toBe("unknown");
     // Live 0.160.1 lists servers without startupStatus; tools prove the connection.
     expect(codexObservedMcpStatus({ authStatus: "unsupported", hasTools: true })).toBe("connected");

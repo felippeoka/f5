@@ -31,13 +31,11 @@ export function claudeObservedMcpStatus(status: string): McpObservedServerStatus
 
 /**
  * Codex reports a server that needs (re)authentication as a failed startup whose error
- * asks for `codex mcp login`, e.g. "requires OAuth reauthentication" or "is not logged in".
+ * asks the user to run `codex mcp login <name>`. Other wording, such as a wrapped CLI's
+ * "is not logged in", stays a failure: Codex OAuth cannot fix it.
  */
 export function isCodexMcpLoginRequiredError(error: string | undefined): boolean {
-  return (
-    !!error &&
-    /codex mcp login|requires oauth (re)?authentication|\bis not logged in\b/i.test(error)
-  );
+  return !!error && /\brun `?codex mcp login\b/i.test(error);
 }
 
 export function codexObservedMcpStatus(input: {

@@ -153,9 +153,12 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
   const normalized = info?.runtimeInfo;
   const effective = normalized?.effective;
   const requested = normalized?.requested;
+  const signInProvider = supportsMcpSignIn(props.provider, props.sessionStatus)
+    ? props.provider
+    : null;
   const signInServers =
-    supportsMcpSignIn(props.provider, props.sessionStatus) && props.projectId
-      ? needsAuthMcpServers(activities)
+    signInProvider && props.projectId
+      ? needsAuthMcpServers(activities, props.capabilities?.generation)
       : [];
   // needs-auth servers get their own section with Sign in instead of read-only notices.
   const warnings = recentRuntimeNotices(
@@ -226,7 +229,7 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
               )}
             </dl>
             {normalized?.fallback && <p>{normalized.fallback}</p>}
-            {signInServers.length > 0 && props.projectId && (
+            {signInServers.length > 0 && signInProvider && props.projectId && (
               <section aria-label="MCP sign-in" className="space-y-2">
                 <h3 className="font-medium">MCP servers that need sign-in</h3>
                 <p className="text-muted-foreground">
@@ -235,7 +238,7 @@ function NativeRuntimePanelContent(props: NativeRuntimePanelProps) {
                 </p>
                 <McpSignInList
                   servers={signInServers}
-                  provider={props.provider as "claudeAgent" | "codex"}
+                  provider={signInProvider}
                   projectId={props.projectId}
                   threadId={threadId}
                 />
