@@ -10982,12 +10982,23 @@
     {
       "upstreamSha": "12069eefd707f78eafc27812027c994eea0613cf",
       "classification": "planned:15o",
-      "reason": "Planned: implement and verify the explicitly approved 15o scenario. Upstream change: feat(web): find messages and plans in the current thread (#10439).",
+      "reason": "Planned: implementation and focused evidence exist for persisted message/plan search on a dedicated read-only connection, unloaded-history navigation, exact occurrence highlighting, folded-plan expansion, Unicode offsets and retry/stale-response ownership. Delivery remains deferred pending the required full-workspace and comparative-performance gates. Upstream change: feat(web): find messages and plans in the current thread (#10439).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15o-pr-10439"],
         "targetModules": ["apps/web/src/components", "apps/server/src/globalSearch.ts"]
-      }
+      },
+      "f5Shas": ["d4b451cfcb53fb3cdd831f88a9cee9183c0fdbdc"],
+      "evidence": [
+        "apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.startup.test.ts:1",
+        "apps/server/src/persistence/Layers/Sqlite.test.ts:1",
+        "apps/web/src/components/ChatView.browser.tsx:2004",
+        "apps/web/src/components/chat/ThreadFindBar.browser.tsx:1",
+        "apps/web/src/components/chat/threadFindHighlights.browser.tsx:1",
+        "packages/shared/src/threadSearch.test.ts:1",
+        "packages/shared/src/threadFindText.test.ts:1",
+        "docs/reviews/upstream-october-review-response.md:1"
+      ]
     },
     {
       "upstreamSha": "a4c9494b0e3606775cc5fc929fc138399288bd43",
