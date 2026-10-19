@@ -160,6 +160,38 @@ it("searches paths and conversations, limits actions for inspect-only rows, and 
     { projectId, path: linked.path },
   ]);
 });
+it.each([["node_modules/"], ["dist/", ".env"]])(
+  "shows ignored paths and directs confirmation to Remove (%j)",
+  async (...entries) => {
+    mocks.inspect.mockResolvedValue({
+      blockedReasons: ["Ignored files require confirmation."],
+      ignoredFiles: {
+        entries,
+        truncated: false,
+        requiresApproval: true,
+        canRemoveAfterApproval: true,
+      },
+      branchDeletable: false,
+      branchBlockedReason: "Conversation still references this branch",
+      headSha: "base",
+    });
+    await mount();
+    await page.getByRole("textbox", { name: "Search worktrees" }).fill("topic");
+    await page.getByRole("button", { name: "Inspect", exact: true }).click();
+    for (const entry of entries)
+      await expect.element(page.getByText(entry, { exact: true })).toBeVisible();
+    await expect
+      .element(page.getByRole("status"))
+      .toHaveTextContent(
+        "Choose Remove… to review these paths and explicitly confirm their deletion.",
+      );
+    await page.getByRole("button", { name: "Remove…" }).click();
+    expect(useWorktreeRemovalDialogStore.getState().requests[0]?.rows).toEqual([
+      { projectId, path: linked.path },
+    ]);
+  },
+);
+
 it("requires shared-filesystem confirmation and uses a server transition for a persisted conversation", async () => {
   await mount();
   await page.getByRole("textbox", { name: "Search worktrees" }).fill("topic");

@@ -18,7 +18,10 @@ import { Effect, Exit, Option, Schema, Scope } from "effect";
 
 import { GitCore, type GitCoreShape, type RegisteredWorktree } from "../git/Services/GitCore.ts";
 import { canonicalWorktreePath } from "../git/worktreePaths.ts";
-import { blockingIgnoredEntries } from "../git/worktreeIgnoredFiles.ts";
+import {
+  blockingIgnoredEntries,
+  type IgnoredFilesRemovalPolicy,
+} from "../git/worktreeIgnoredFiles.ts";
 export { blockingIgnoredEntries } from "../git/worktreeIgnoredFiles.ts";
 import { NextTurnQueueStore } from "../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
@@ -256,16 +259,15 @@ export const ignoredFilesBlockRemoval = (
   git: GitCoreShape,
   worktreePath: string,
   inspected?: { readonly entries: ReadonlyArray<string>; readonly truncated: boolean },
-  approvedEntries?: ReadonlyArray<string>,
-  requireApproval = false,
+  policy: IgnoredFilesRemovalPolicy = { kind: "protect" },
 ) =>
   (inspected ? Effect.succeed(inspected) : git.listIgnoredEntries(worktreePath)).pipe(
     Effect.map(({ entries, truncated }) => {
       if (truncated) return "too many ignored files to check";
-      const blocking = blockingIgnoredEntries(entries, approvedEntries, requireApproval);
+      const blocking = blockingIgnoredEntries(entries, policy);
       return blocking.length > 0
-        ? requireApproval
-          ? approvedEntries === undefined
+        ? policy.kind === "manual"
+          ? policy.approvedEntries === undefined
             ? "Ignored files and folders require explicit deletion confirmation."
             : "Ignored files changed since review. Inspect this checkout again."
           : `ignored files other than node_modules/ (${blocking.slice(0, 3).join(", ")})`
@@ -302,16 +304,8 @@ export function foreignClaims(
   return reasons;
 }
 
-export interface WorktreeRemovalPolicy {
-  readonly kind:
-    | "manual"
-    | "autoCleanup"
-    | "storageMaintenance"
-    | "legacyCleanup"
-    | "ownedRollback";
+interface WorktreeRemovalContext {
   readonly ownThreadId: ThreadId | null;
-  /** Used only by manual removal; automated cleanup cannot opt in. */
-  readonly approvedIgnoredEntries?: ReadonlyArray<string> | undefined;
   readonly ownedCreation?: {
     readonly path: string;
     readonly commonDir: string;
@@ -321,6 +315,20 @@ export interface WorktreeRemovalPolicy {
     readonly transitionOperationId?: string;
   };
 }
+
+export type WorktreeRemovalPolicy = WorktreeRemovalContext &
+  (
+    | {
+        readonly kind: "manual";
+        readonly approvedIgnoredEntries?: ReadonlyArray<string> | undefined;
+      }
+    | { readonly kind: "autoCleanup" | "storageMaintenance" | "legacyCleanup" | "ownedRollback" }
+  );
+
+const ignoredRemovalPolicy = (policy: WorktreeRemovalPolicy): IgnoredFilesRemovalPolicy =>
+  policy.kind === "manual"
+    ? { kind: "manual", approvedEntries: policy.approvedIgnoredEntries }
+    : { kind: "protect" };
 
 /** Local-only, fail-closed evaluation. Call again under path then repository locks before mutation. */
 export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(function* (input: {
@@ -336,9 +344,10 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
     | {
         entries: ReadonlyArray<string>;
         truncated: boolean;
-        blockedReason: string | null;
+        requiresApproval: boolean;
       }
     | undefined;
+  let ignoredReason: string | null = null;
   const target = yield* canonical(input.path);
   const root = yield* canonical(
     input.policy.kind === "legacyCleanup"
@@ -504,19 +513,18 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
         if (!verifiedCopies)
           blockedReasons.push("it has uncommitted changes (including untracked files)");
       }
-      const ignoredReason = yield* ignoredFilesBlockRemoval(
+      ignoredReason = yield* ignoredFilesBlockRemoval(
         git,
         input.path,
         { entries: inspected.ignoredEntries, truncated: inspected.ignoredTruncated },
-        input.policy.kind === "manual" ? input.policy.approvedIgnoredEntries : undefined,
-        input.policy.kind === "manual",
+        ignoredRemovalPolicy(input.policy),
       );
       ignoredFiles = {
         entries: inspected.ignoredEntries,
         truncated: inspected.ignoredTruncated,
-        blockedReason: ignoredReason,
+        requiresApproval:
+          input.policy.kind === "manual" && !inspected.ignoredTruncated && ignoredReason !== null,
       };
-      if (ignoredReason) blockedReasons.push(ignoredReason);
       if (input.policy.kind === "storageMaintenance") {
         let aheadCount = inspected.aheadCount;
         if (inspected.upstreamRef === null) {
@@ -557,10 +565,17 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
   return {
     exists,
     registration,
-    blockedReasons: [...new Set(blockedReasons)],
+    blockedReasons: [...new Set([...blockedReasons, ...(ignoredReason ? [ignoredReason] : [])])],
     linkedThreads: claims.threadIds,
     deletedThreadClaims: claims.deletedThreadIds,
-    ...(ignoredFiles ? { ignoredFiles } : {}),
+    ...(ignoredFiles
+      ? {
+          ignoredFiles: {
+            ...ignoredFiles,
+            canRemoveAfterApproval: ignoredFiles.requiresApproval && blockedReasons.length === 0,
+          },
+        }
+      : {}),
   };
 });
 
@@ -699,9 +714,7 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
             yield* git.removeWorktree({
               cwd: input.projectCwd,
               path: input.path,
-              ...(input.policy.kind === "manual"
-                ? { approvedIgnoredEntries: input.policy.approvedIgnoredEntries ?? [] }
-                : {}),
+              ignoredFiles: ignoredRemovalPolicy(input.policy),
             });
             if (maintenanceGate) yield* Scope.close(maintenanceGate, Exit.void);
             if (input.afterRemoval) yield* input.afterRemoval(checked.registration);

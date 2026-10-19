@@ -42,9 +42,11 @@ Deleting conversations opens one removal dialog for their worktrees. Unsafe rows
 merged branches.
 
 Manual removal lists every ignored file and folder, including build outputs and local configuration.
+This deliberately includes `node_modules/`: manual removal requires confirmation even when that is
+the only ignored folder. Confirm each checkout separately, including in bulk conversation deletion.
 Check **Also delete the ignored files and folders listed above** to include them in removal.
-Deleting a listed folder deletes everything inside it. If another ignored path appears before
-removal, inspect the checkout again and confirm the new list. An incomplete list blocks removal.
+Deleting a listed folder deletes everything inside it. If a removal recheck finds another ignored
+path, the dialog refreshes the list and requires confirmation again. An incomplete list blocks removal.
 
 If a thread's worktree goes missing, F5 never quietly moves the thread into the project checkout.
 Use **Recreate now** (the branch still exists), **Recreate from the default branch** (it doesn't),

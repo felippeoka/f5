@@ -211,7 +211,7 @@ describe.concurrent("real Git smoke", () => {
         core.removeWorktree({
           cwd,
           path: worktreePath,
-          approvedIgnoredEntries: [".env"],
+          ignoredFiles: { kind: "manual", approvedEntries: [".env"] },
         }),
       ),
     ).rejects.toThrow("protected ignored files");
@@ -222,16 +222,22 @@ describe.concurrent("real Git smoke", () => {
         core.removeWorktree({
           cwd,
           path: worktreePath,
-          approvedIgnoredEntries,
+          ignoredFiles: { kind: "manual", approvedEntries: approvedIgnoredEntries },
         }),
       ),
     ).rejects.toThrow("local changes");
-    fs.writeFileSync(path.join(worktreePath, "README.md"), "hello\n");
     // Commit the tracked edit so the remaining removal is only of approved ignored files.
     await git(service, worktreePath, ["add", "README.md"]);
-    await git(service, worktreePath, ["commit", "--allow-empty", "-m", "Preserve edit"]);
+    await git(service, worktreePath, ["commit", "-m", "Preserve edit"]);
     await Effect.runPromise(
-      core.removeWorktree({ cwd, path: worktreePath, approvedIgnoredEntries }),
+      core.removeWorktree({
+        cwd,
+        path: worktreePath,
+        ignoredFiles: {
+          kind: "manual",
+          approvedEntries: approvedIgnoredEntries,
+        },
+      }),
     );
     expect(fs.existsSync(worktreePath)).toBe(false);
     expect(

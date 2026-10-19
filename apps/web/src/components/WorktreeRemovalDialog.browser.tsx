@@ -102,7 +102,12 @@ it("shows all ignored paths and requires explicit confirmation before sending th
     inspection("feature", {
       branchMerged: false,
       blockedReasons: [blockedReason],
-      ignoredFiles: { entries, truncated: false, blockedReason },
+      ignoredFiles: {
+        entries,
+        truncated: false,
+        requiresApproval: true,
+        canRemoveAfterApproval: true,
+      },
     }),
   );
   api.worktrees.remove.mockResolvedValue({
@@ -148,7 +153,12 @@ it.each(["local changes", "truncated"])(
     api.worktrees.inspect.mockResolvedValue(
       inspection("feature", {
         blockedReasons: truncated ? [ignoredReason] : [ignoredReason, "it has uncommitted changes"],
-        ignoredFiles: { entries: [".env"], truncated, blockedReason: ignoredReason },
+        ignoredFiles: {
+          entries: [".env"],
+          truncated,
+          requiresApproval: !truncated,
+          canRemoveAfterApproval: false,
+        },
       }),
     );
     const screen = await mount(
@@ -170,6 +180,98 @@ it.each(["local changes", "truncated"])(
     expect(api.worktrees.remove).not.toHaveBeenCalled();
   },
 );
+
+it("refreshes a rejected approval and requires confirmation of the new list", async () => {
+  const blockedReason = "Ignored files need review.";
+  const inspected = (entries: string[], headSha: string) =>
+    inspection("feature", {
+      headSha,
+      branchMerged: false,
+      blockedReasons: [blockedReason],
+      ignoredFiles: {
+        entries,
+        truncated: false,
+        requiresApproval: true,
+        canRemoveAfterApproval: true,
+      },
+    });
+  api.worktrees.inspect
+    .mockResolvedValueOnce(inspected([".env"], "old"))
+    .mockResolvedValue(inspected([".env", ".env.local"], "fresh"));
+  api.worktrees.remove
+    .mockResolvedValueOnce({
+      removed: false,
+      branchDeleted: false,
+      blockedReasons: ["Ignored files changed since review. Inspect this checkout again."],
+    })
+    .mockResolvedValue({ removed: true, branchDeleted: false, blockedReasons: [] });
+  const close = vi.fn();
+  const screen = await mount(
+    <WorktreeRemovalDialog rows={[{ projectId, path: "/stale" }]} onClose={close} />,
+  );
+  const approval = screen.getByRole("checkbox", {
+    name: /Also delete the ignored files and folders/,
+  });
+  await approval.click();
+  await expect
+    .element(screen.getByText("Ready to remove (ignored files will be deleted)", { exact: true }))
+    .toBeVisible();
+  await screen.getByRole("button", { name: "Remove selected" }).click();
+  await expect.poll(() => api.worktrees.inspect.mock.calls.length).toBe(2);
+  await expect.element(screen.getByText(".env.local", { exact: true })).toBeVisible();
+  await expect.element(approval).not.toBeChecked();
+  await expect
+    .element(screen.getByRole("checkbox", { name: "/stale", exact: true }))
+    .not.toBeChecked();
+  await expect.element(screen.getByRole("button", { name: "Remove selected" })).toBeDisabled();
+  await expect
+    .element(screen.getByText("Ready to remove (ignored files will be deleted)", { exact: true }))
+    .not.toBeInTheDocument();
+  expect(close).not.toHaveBeenCalled();
+  await approval.click();
+  await screen.getByRole("button", { name: "Remove selected" }).click();
+  await expect.poll(() => api.worktrees.remove.mock.calls.length).toBe(2);
+  expect(api.worktrees.remove.mock.calls[1]?.[0]).toMatchObject({
+    expectedHead: "fresh",
+    approvedIgnoredEntries: [".env", ".env.local"],
+    deleteBranch: false,
+  });
+  await expect.poll(() => close.mock.calls.length).toBe(1);
+});
+
+it("offers inspection retry after rejection recovery fails without retaining old approval", async () => {
+  const inspected = inspection("feature", {
+    blockedReasons: ["Review ignored files."],
+    ignoredFiles: {
+      entries: [".env"],
+      truncated: false,
+      requiresApproval: true,
+      canRemoveAfterApproval: true,
+    },
+  });
+  api.worktrees.inspect
+    .mockResolvedValueOnce(inspected)
+    .mockRejectedValueOnce(new Error("Inspection temporarily unavailable"))
+    .mockResolvedValue(inspected);
+  api.worktrees.remove.mockRejectedValue(new Error("Removal rejected"));
+  const screen = await mount(
+    <WorktreeRemovalDialog rows={[{ projectId, path: "/retry" }]} onClose={vi.fn()} />,
+  );
+  await screen.getByRole("checkbox", { name: /Also delete the ignored files and folders/ }).click();
+  await screen.getByRole("button", { name: "Remove selected" }).click();
+  await expect
+    .element(screen.getByRole("alert"))
+    .toHaveTextContent("Inspection temporarily unavailable");
+  await expect.element(screen.getByRole("button", { name: "Remove selected" })).toBeDisabled();
+  await expect
+    .element(screen.getByRole("checkbox", { name: "/retry", exact: true }))
+    .toBeDisabled();
+  await screen.getByRole("button", { name: "Inspect again" }).click();
+  await expect
+    .element(screen.getByRole("checkbox", { name: /Also delete the ignored files and folders/ }))
+    .not.toBeChecked();
+  await expect.element(screen.getByRole("button", { name: "Remove selected" })).toBeDisabled();
+});
 
 it("closes after every removal succeeds", async () => {
   api.worktrees.inspect.mockResolvedValue(inspection("feature"));

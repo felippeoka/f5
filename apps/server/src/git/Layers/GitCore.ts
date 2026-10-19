@@ -2709,7 +2709,7 @@ const makeGitCore = Effect.gen(function* () {
         inspection.hasTrackedChanges ||
         inspection.hasUntrackedChanges ||
         inspection.ignoredTruncated ||
-        blockingIgnoredEntries(inspection.ignoredEntries, input.approvedIgnoredEntries).length > 0
+        blockingIgnoredEntries(inspection.ignoredEntries, input.ignoredFiles).length > 0
       ) {
         return yield* createGitCommandError(
           "GitCore.removeWorktree",

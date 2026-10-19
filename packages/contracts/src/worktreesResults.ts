@@ -15,7 +15,8 @@ export const WorktreesInspectResult = Schema.Struct({
     Schema.Struct({
       entries: Schema.Array(Schema.String),
       truncated: Schema.Boolean,
-      blockedReason: Schema.NullOr(Schema.String),
+      requiresApproval: Schema.Boolean,
+      canRemoveAfterApproval: Schema.Boolean,
     }),
   ),
   linkedThreads: WorktreeLinkedThreads,

@@ -26,6 +26,7 @@ import {
 import { GitCore, type GitCoreShape } from "../../git/Services/GitCore.ts";
 import { WorktreeSetupGate, WorktreeSetupGateLive } from "../Services/WorktreeSetupGate.ts";
 import { makeWorktreeManager } from "./WorktreeManager.ts";
+import { holdsWorktreeLifecycleLock } from "./WorktreeLifecycleCoordinator.ts";
 
 describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
   const cleanups: Array<() => Promise<unknown>> = [];
@@ -376,7 +377,9 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
           "secret.txt",
         ]);
         expect(preview.ignoredFiles?.truncated).toBe(false);
-        expect(preview.blockedReasons).toEqual([preview.ignoredFiles?.blockedReason]);
+        expect(preview.ignoredFiles?.requiresApproval).toBe(true);
+        expect(preview.ignoredFiles?.canRemoveAfterApproval).toBe(true);
+        expect(preview.blockedReasons).toHaveLength(1);
         const input = {
           projectId,
           path: target,
@@ -436,7 +439,7 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
   it("retains new ignored paths that appear during locked revalidation", async () => {
     const { repo, projectId, run } = await fixture();
     let realCore: GitCoreShape;
-    let inspections = 0;
+    let injected = false;
     await run(
       (manager, root) =>
         Effect.gen(function* () {
@@ -466,10 +469,12 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
       {
         inspectCheckout: (cwd, options) =>
           Effect.gen(function* () {
-            if (++inspections === 4)
+            if (!injected && (yield* holdsWorktreeLifecycleLock(cwd).pipe(Effect.orDie))) {
+              injected = true;
               yield* Effect.promise(() =>
                 fs.writeFile(path.join(cwd, ".env.local"), "new local config"),
               );
+            }
             return yield* realCore.inspectCheckout(cwd, options);
           }),
       },

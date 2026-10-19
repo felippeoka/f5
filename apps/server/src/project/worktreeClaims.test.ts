@@ -21,6 +21,7 @@ import {
   evaluateWorktreeRemoval,
   readWorktreeClaims,
   removeWorktreeSafely,
+  type WorktreeRemovalPolicy,
 } from "./worktreeClaims.ts";
 
 describe("effective workspace claims and removal gate", () => {
@@ -28,6 +29,40 @@ describe("effective workspace claims and removal gate", () => {
   afterEach(async () => {
     for (const cleanup of cleanups.splice(0)) await cleanup();
   });
+  it.each(["autoCleanup", "storageMaintenance"] as const)(
+    "ignores manual approval fields injected into %s policy",
+    async (kind) => {
+      const repo = await makeClonedRepo("f5-ignored-automation-");
+      cleanups.push(repo.cleanup);
+      const world = makeWorld();
+      world.projects.push(project("p", repo.root));
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const target = path.join((yield* ServerConfig).worktreesDir, "protected");
+          git(repo.root, "worktree", "add", "-q", "-b", "protected", target, "main");
+          yield* Effect.promise(() => fs.writeFile(path.join(target, ".env"), "keep local config"));
+          const policy = {
+            kind,
+            ownThreadId: null,
+            approvedIgnoredEntries: [".env"],
+          } as WorktreeRemovalPolicy;
+          const result = yield* evaluateWorktreeRemoval({
+            projectCwd: repo.root,
+            path: target,
+            policy,
+          });
+          expect(result.blockedReasons.join(" ")).toContain(
+            "ignored files other than node_modules/",
+          );
+          expect(result.ignoredFiles?.requiresApproval).toBe(false);
+          expect(result.ignoredFiles?.canRemoveAfterApproval).toBe(false);
+        }).pipe(
+          Effect.provide(automationLayer(world, {}, "f5-ignored-automation-state-")),
+          Effect.scoped,
+        ),
+      );
+    },
+  );
   it("rechecks archive state after acquiring the maintenance gate", async () => {
     const repo = await makeClonedRepo("f5-archive-recheck-");
     cleanups.push(repo.cleanup);

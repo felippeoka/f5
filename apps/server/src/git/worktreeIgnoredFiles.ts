@@ -1,13 +1,18 @@
+export type IgnoredFilesRemovalPolicy =
+  | { readonly kind: "protect" }
+  | {
+      readonly kind: "manual";
+      readonly approvedEntries?: ReadonlyArray<string> | undefined;
+    };
+
 /** Approval covers exactly the listed file or directory, never other paths. */
 export function blockingIgnoredEntries(
   entries: ReadonlyArray<string>,
-  approvedEntries?: ReadonlyArray<string>,
-  requireApproval = false,
+  policy: IgnoredFilesRemovalPolicy = { kind: "protect" },
 ): ReadonlyArray<string> {
-  const approved = new Set(approvedEntries);
+  const approved = new Set(policy.kind === "manual" ? policy.approvedEntries : []);
   return entries.filter(
     (entry) =>
-      !approved.has(entry) &&
-      (requireApproval || approvedEntries !== undefined || !/(^|\/)node_modules\/?$/.test(entry)),
+      !approved.has(entry) && (policy.kind === "manual" || !/(^|\/)node_modules\/?$/.test(entry)),
   );
 }

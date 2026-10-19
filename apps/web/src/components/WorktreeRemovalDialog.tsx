@@ -12,6 +12,7 @@ import {
   DialogFooter,
 } from "./ui/dialog";
 import { Button } from "./ui/button";
+import { WorktreeIgnoredFilesList } from "./worktrees/WorktreeIgnoredFilesList";
 interface RowState {
   inspection?: WorktreesInspectResult;
   selected: boolean;
@@ -19,6 +20,7 @@ interface RowState {
   ignoredApproved: boolean;
   error?: string;
   removed?: boolean;
+  inspecting?: boolean;
 }
 export function WorktreeRemovalDialog({
   rows,
@@ -86,6 +88,38 @@ export function WorktreeRemovalDialog({
     setStates((current) =>
       current.map((state, i) => (i === index ? { ...state, ...patch } : state)),
     );
+  const refreshInspection = async (index: number, row: WorktreeRemovalRow, reason?: string) => {
+    const api = readNativeApi();
+    setStates((current) =>
+      current.map((state, i) =>
+        i === index
+          ? {
+              selected: false,
+              ignoredApproved: false,
+              deleteBranch: false,
+              inspecting: true,
+              ...(reason ? { error: reason } : {}),
+            }
+          : state,
+      ),
+    );
+    try {
+      if (!api) throw new Error("Server connection is unavailable.");
+      const inspection = await api.worktrees.inspect(row);
+      update(index, {
+        inspection,
+        inspecting: false,
+        ...(reason
+          ? { error: reason + " Review the refreshed inspection and confirm again." }
+          : {}),
+      });
+    } catch (error) {
+      update(index, {
+        inspecting: false,
+        error: error instanceof Error ? error.message : "Inspection failed.",
+      });
+    }
+  };
   const remove = async () => {
     const api = readNativeApi();
     if (!api) return;
@@ -105,14 +139,18 @@ export function WorktreeRemovalDialog({
         });
         const error = result.blockedReasons.join("; ");
         if (!result.removed || error) failed = true;
-        update(index, {
-          removed: result.removed,
-          selected: !result.removed,
-          ...(error ? { error } : {}),
-        });
+        if (result.removed) {
+          update(index, { removed: true, selected: false, error });
+        } else {
+          await refreshInspection(index, row, error || "Worktree removal was blocked.");
+        }
       } catch (error) {
         failed = true;
-        update(index, { error: error instanceof Error ? error.message : "Removal failed." });
+        await refreshInspection(
+          index,
+          row,
+          error instanceof Error ? error.message : "Removal failed.",
+        );
       }
     }
     await queryClient.invalidateQueries({ queryKey: ["git"] });
@@ -139,21 +177,14 @@ export function WorktreeRemovalDialog({
             const state = states[index]!;
             const inspection = state.inspection;
             const ignored = inspection?.ignoredFiles;
-            const canApproveIgnored = ignored && !ignored.truncated && ignored.entries.length > 0;
+            const canApproveIgnored = ignored?.canRemoveAfterApproval === true;
             const hardBlocked =
-              !inspection ||
-              inspection.blockedReasons.some(
-                (reason) => !canApproveIgnored || reason !== ignored.blockedReason,
-              );
-            const blocked = hardBlocked || (canApproveIgnored && !state.ignoredApproved);
-            const reasons = inspection?.blockedReasons.filter(
-              (reason) =>
-                !state.ignoredApproved || !canApproveIgnored || reason !== ignored.blockedReason,
-            );
+              !inspection || (inspection.blockedReasons.length > 0 && !canApproveIgnored);
+            const blocked = hardBlocked || (ignored?.requiresApproval && !state.ignoredApproved);
             return (
               <fieldset
                 key={`${row.projectId}:${row.path}`}
-                disabled={busy || state.removed}
+                disabled={busy || state.removed || state.inspecting}
                 className="space-y-2 rounded border p-3 text-sm"
               >
                 <label className="flex items-start gap-2">
@@ -168,33 +199,23 @@ export function WorktreeRemovalDialog({
                 <p>
                   {state.removed
                     ? "Worktree removed"
-                    : inspection
-                      ? blocked
-                        ? reasons?.join("; ") || "Confirm deletion of the ignored files below."
-                        : "Safe to remove"
-                      : state.error
-                        ? "Inspection failed"
-                        : "Inspecting…"}
+                    : state.inspecting
+                      ? "Inspecting…"
+                      : inspection
+                        ? blocked
+                          ? inspection.blockedReasons.join("; ") ||
+                            "Confirm deletion of the ignored files below."
+                          : state.ignoredApproved
+                            ? "Ready to remove (ignored files will be deleted)"
+                            : "Safe to remove"
+                        : state.error
+                          ? "Inspection failed"
+                          : "Inspecting…"}
                 </p>
                 {ignored && (ignored.entries.length > 0 || ignored.truncated) && (
                   <div className="space-y-2">
-                    <p>Ignored files and folders in this checkout:</p>
-                    <ul
-                      aria-label="Ignored files and folders"
-                      className="max-h-48 overflow-y-auto rounded border p-2"
-                    >
-                      {ignored.entries.map((entry) => (
-                        <li key={entry} className="break-all whitespace-pre-wrap">
-                          <code>{entry}</code>
-                        </li>
-                      ))}
-                    </ul>
-                    {ignored.truncated ? (
-                      <p className="text-destructive">
-                        The ignored-file list is incomplete. Removal is blocked until every path can
-                        be reviewed.
-                      </p>
-                    ) : (
+                    <WorktreeIgnoredFilesList files={ignored} />
+                    {!ignored.truncated && ignored.requiresApproval && (
                       <label className="flex items-start gap-2">
                         <input
                           type="checkbox"
@@ -244,9 +265,20 @@ export function WorktreeRemovalDialog({
                   </label>
                 )}
                 {state.error && (
-                  <p role="alert" className="text-destructive">
-                    {state.error}
-                  </p>
+                  <div className="space-y-2">
+                    <p role="alert" className="text-destructive">
+                      {state.error}
+                    </p>
+                    {!state.removed && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void refreshInspection(index, row)}
+                      >
+                        Inspect again
+                      </Button>
+                    )}
+                  </div>
                 )}
               </fieldset>
             );

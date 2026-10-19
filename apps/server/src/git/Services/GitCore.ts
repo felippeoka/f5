@@ -1,4 +1,5 @@
 import type { MoveSnapshotOperations } from "../moveSnapshot.ts";
+import type { IgnoredFilesRemovalPolicy } from "../worktreeIgnoredFiles.ts";
 /**
  * GitCore - Effect service contract for low-level Git operations.
  *
@@ -57,8 +58,8 @@ export interface InternalRemoveWorktreeInput {
   readonly cwd: string;
   readonly path: string;
   readonly force?: boolean;
-  /** Manual removal's exact, explicitly approved ignored paths; absent for automation. */
-  readonly approvedIgnoredEntries?: ReadonlyArray<string>;
+  /** Explicit ignored-file policy; omitted by automated callers to protect local files. */
+  readonly ignoredFiles?: IgnoredFilesRemovalPolicy;
 }
 
 import type { GitCommandError } from "../Errors.ts";
