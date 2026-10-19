@@ -12048,7 +12048,7 @@
       },
       "f5Shas": ["2dab633b1158538e98e083e1eefc0fbf392017f0"],
       "evidence": [
-        "apps/web/src/components/ThreadPrLinks.browser.tsx:1",
+        "apps/web/src/components/prHub/ThreadPrLinks.browser.tsx:1",
         "apps/web/src/components/prHub/PrNativeActions.browser.tsx:1"
       ]
     },
@@ -12104,7 +12104,7 @@
       "f5Shas": ["2dab633b1158538e98e083e1eefc0fbf392017f0"],
       "evidence": [
         "apps/web/src/components/prHub/PrSpineList.browser.tsx:1",
-        "apps/web/src/components/ThreadPrLinks.browser.tsx:1"
+        "apps/web/src/components/prHub/ThreadPrLinks.browser.tsx:1"
       ]
     },
     {
@@ -13712,7 +13712,7 @@
       },
       "f5Shas": ["2dab633b1158538e98e083e1eefc0fbf392017f0"],
       "evidence": [
-        "apps/web/src/components/ThreadPrLinks.browser.tsx:1",
+        "apps/web/src/components/prHub/ThreadPrLinks.browser.tsx:1",
         "apps/web/src/lib/prQuickActions.test.ts:1"
       ]
     },
