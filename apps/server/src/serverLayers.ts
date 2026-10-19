@@ -191,6 +191,7 @@ export function makeServerProviderLayer(): Layer.Layer<
     const projectMcpConfigRepositoryLayer = ProjectMcpConfigRepositoryLive;
     const projectMcpConfigServiceLayer = ProjectMcpConfigServiceLive.pipe(
       Layer.provide(projectMcpConfigRepositoryLayer),
+      Layer.provide(ServerSecretStoreLive),
     );
     const providerEventLoggersLayer = Layer.succeed(ProviderEventLoggers, {
       native: nativeEventLogger,

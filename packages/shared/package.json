@@ -343,7 +343,9 @@
     "./computerAction": {
       "types": "./src/computerAction.ts",
       "import": "./src/computerAction.ts"
-    }
+    },
+    "./mcpTools": "./src/mcpTools.ts",
+    "./mcpSecrets": "./src/mcpSecrets.ts"
   },
   "scripts": {
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",

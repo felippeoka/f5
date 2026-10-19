@@ -1,4 +1,6 @@
 import "../../index.css";
+import { StrictMode, useState } from "react";
+import { McpKeyValueFields } from "./mcp/McpKeyValueFields";
 
 import type {
   McpCommonConfigResult,
@@ -198,7 +200,14 @@ function createNativeApiMock() {
 
   const replaceProjectConfig = vi.fn(
     async (input: Parameters<NativeApi["mcp"]["replaceProjectConfig"]>[0]) => {
-      const result = { projectId: input.projectId, version: "project-v2", servers: input.servers };
+      const result = {
+        projectId: input.projectId,
+        version: "project-v2",
+        servers: input.servers,
+        ...(input.disabledCommonServers
+          ? { disabledCommonServers: input.disabledCommonServers }
+          : {}),
+      };
       getProjectConfig.mockResolvedValue(result);
       return result;
     },
@@ -250,7 +259,7 @@ function createNativeApiMock() {
   };
 }
 
-async function renderSettings() {
+async function renderSettings(withProject = true) {
   await page.viewport(1280, 900);
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -263,7 +272,7 @@ async function renderSettings() {
   const screen = await render(
     <QueryClientProvider client={queryClient}>
       <McpServersSettings
-        selectedProject={{ id: PROJECT_ID, name: "Project One" }}
+        selectedProject={withProject ? { id: PROJECT_ID, name: "Project One" } : null}
         hasProjects
         codexBinaryPath=""
         codexHomePath=""
@@ -273,7 +282,7 @@ async function renderSettings() {
   );
 
   await vi.waitFor(() => {
-    expect(document.body.textContent).toContain("project-server");
+    expect(document.body.textContent).toContain(withProject ? "project-server" : "common-server");
   });
 
   return { screen, queryClient };
@@ -672,15 +681,17 @@ describe("McpServersSettings", () => {
     try {
       clickButtonWithExactText("Common");
       await vi.waitFor(() => expect(document.body.textContent).toContain("Common servers (1/16)"));
-      const importInput = page.getByPlaceholder(
-        '{"mcpServers":{"filesystem":{"type":"stdio","command":"npx","args":["@modelcontextprotocol/server-filesystem"]}}}',
-      );
+      await page.getByRole("button", { name: "Import configuration", exact: true }).click();
+      const importInput = page.getByRole("textbox", {
+        name: "Configuration to import",
+        exact: true,
+      });
       await importInput.fill(pasted);
       mocks.replaceCommonConfig.mockRejectedValueOnce(new Error("Save failed"));
-      await page.getByRole("button", { name: "Import", exact: true }).click();
+      await page.getByRole("button", { name: /^Import \d+ into/ }).click();
       await vi.waitFor(() => expect(document.body.textContent).toContain("Save failed"));
       await expect.element(importInput).toHaveValue(pasted);
-      await page.getByRole("button", { name: "Import", exact: true }).click();
+      await page.getByRole("button", { name: /^Import \d+ into/ }).click();
       await vi.waitFor(() => {
         expect(mocks.replaceCommonConfig).toHaveBeenLastCalledWith({
           expectedVersion: "common-v1",
@@ -691,7 +702,7 @@ describe("McpServersSettings", () => {
         });
         expect(document.body.textContent).toContain("Common servers (2/16)");
       });
-      await expect.element(importInput).toHaveValue("");
+      await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
       expect(mocks.replaceProjectConfig).not.toHaveBeenCalled();
     } finally {
       queryClient.clear();
@@ -779,7 +790,7 @@ describe("McpServersSettings", () => {
     }
   });
 
-  it("resets the editor and errors on scope changes while retaining pasted import text", async () => {
+  it("resets the editor, errors, and import dialog on scope changes", async () => {
     const mocks = createNativeApiMock();
     const { screen, queryClient } = await renderSettings();
     const importText = '{"mcpServers":';
@@ -794,15 +805,18 @@ describe("McpServersSettings", () => {
           "OAuth callback port must be between 1 and 65535.",
         ),
       );
-      const importInput = page.getByPlaceholder(
-        '{"mcpServers":{"filesystem":{"type":"stdio","command":"npx","args":["@modelcontextprotocol/server-filesystem"]}}}',
-      );
+      await page.getByRole("button", { name: "Import configuration", exact: true }).click();
+      const importInput = page.getByRole("textbox", {
+        name: "Configuration to import",
+        exact: true,
+      });
       await importInput.fill(importText);
-      await page.getByRole("button", { name: "Import", exact: true }).click();
+      await expect.element(page.getByRole("button", { name: /^Import \d+ into/ })).toBeDisabled();
       const errorMessages = Array.from(document.querySelectorAll("p.text-destructive")).map(
         (element) => element.textContent,
       );
       expect(errorMessages).toHaveLength(2);
+      await page.getByRole("button", { name: "Close", exact: true }).click();
       clickButtonWithExactText("Common");
       await vi.waitFor(() => {
         expect(document.body.textContent).toContain("Common servers (1/16)");
@@ -821,7 +835,10 @@ describe("McpServersSettings", () => {
       await expect
         .element(page.getByRole("button", { name: /Advanced options/ }))
         .toHaveAttribute("aria-expanded", "false");
-      await expect.element(importInput).toHaveValue(importText);
+      await page.getByRole("button", { name: "Import configuration", exact: true }).click();
+      await expect
+        .element(page.getByRole("textbox", { name: "Configuration to import" }))
+        .toHaveValue("");
       expect(mocks.replaceCommonConfig).not.toHaveBeenCalled();
       expect(mocks.replaceProjectConfig).not.toHaveBeenCalled();
     } finally {
@@ -908,13 +925,16 @@ describe("McpServersSettings", () => {
           expect.objectContaining({ servers: remaining }),
         ),
       );
-      const importInput = page.getByPlaceholder(
-        '{"mcpServers":{"filesystem":{"type":"stdio","command":"npx","args":["@modelcontextprotocol/server-filesystem"]}}}',
-      );
+      await page.getByRole("button", { name: "Import configuration", exact: true }).click();
+      const importInput = page.getByRole("textbox", {
+        name: "Configuration to import",
+        exact: true,
+      });
       await importInput.fill(
         JSON.stringify({ mcpServers: { "legacy-16": { command: "imported", args: [] } } }),
       );
-      await page.getByRole("button", { name: "Import", exact: true }).click();
+      await page.getByRole("button", { name: "Replace all conflicts", exact: true }).click();
+      await page.getByRole("button", { name: /^Import \d+ into/ }).click();
       await vi.waitFor(() =>
         expect(mocks.replaceProjectConfig).toHaveBeenLastCalledWith(
           expect.objectContaining({
@@ -973,9 +993,11 @@ describe("McpServersSettings", () => {
     mocks.getProjectConfig.mockResolvedValue({ ...projectConfig, servers: existingServers });
     const { screen, queryClient } = await renderSettings();
     try {
-      const importInput = page.getByPlaceholder(
-        '{"mcpServers":{"filesystem":{"type":"stdio","command":"npx","args":["@modelcontextprotocol/server-filesystem"]}}}',
-      );
+      await page.getByRole("button", { name: "Import configuration", exact: true }).click();
+      const importInput = page.getByRole("textbox", {
+        name: "Configuration to import",
+        exact: true,
+      });
       await importInput.fill(
         JSON.stringify({
           mcpServers: {
@@ -985,7 +1007,7 @@ describe("McpServersSettings", () => {
           },
         }),
       );
-      await page.getByRole("button", { name: "Import", exact: true }).click();
+      await expect.element(page.getByRole("button", { name: /^Import \d+ into/ })).toBeDisabled();
       await vi.waitFor(() => {
         expect(mocks.replaceProjectConfig).not.toHaveBeenCalled();
         expect(document.body.textContent).toContain(
@@ -1297,5 +1319,418 @@ it("refreshes selected runtime after reconnect and offers reopening pending sign
   } finally {
     screen.unmount();
     queryClient.clear();
+  }
+});
+
+it("saves project opt-outs without creating a project override", async () => {
+  const mocks = createNativeApiMock();
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("switch", { name: "Use common-server in this project" }).click();
+    await vi.waitFor(() =>
+      expect(mocks.replaceProjectConfig).toHaveBeenLastCalledWith({
+        projectId: PROJECT_ID,
+        expectedVersion: "project-v1",
+        servers: projectConfig.servers,
+        disabledCommonServers: ["common-server"],
+      }),
+    );
+    await expect
+      .element(page.getByRole("switch", { name: "Use common-server in this project" }))
+      .not.toBeChecked();
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("previews import warnings and keeps conflicts until explicitly replaced", async () => {
+  const mocks = createNativeApiMock();
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("button", { name: "Import configuration" }).click();
+    await page.getByRole("textbox", { name: "Configuration to import" }).fill(
+      JSON.stringify({
+        mcpServers: {
+          "project-server": { command: "replacement" },
+          remote: { url: "https://example.test", env_http_headers: { Authorization: "TOKEN" } },
+        },
+      }),
+    );
+    await expect.element(page.getByRole("button", { name: "Import 1 into project" })).toBeEnabled();
+    expect(document.body.textContent).toContain("add values manually");
+    await captureSettingsScreenshot();
+    await page.getByRole("button", { name: "Replace all conflicts" }).click();
+    await page.getByRole("button", { name: "Import 2 into project" }).click();
+    await vi.waitFor(() =>
+      expect(mocks.replaceProjectConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          servers: {
+            "project-server": { type: "stdio", command: "replacement" },
+            remote: { type: "http", url: "https://example.test" },
+          },
+        }),
+      ),
+    );
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("retains an import draft after a version conflict and requires confirmation against the new base", async () => {
+  const mocks = createNativeApiMock();
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("button", { name: "Import configuration" }).click();
+    const input = page.getByRole("textbox", { name: "Configuration to import" });
+    const text = JSON.stringify({ mcpServers: { imported: { command: "node" } } });
+    await input.fill(text);
+    mocks.getProjectConfig.mockResolvedValue({
+      ...projectConfig,
+      version: "new-base",
+      servers: { ...projectConfig.servers, concurrent: { type: "stdio", command: "concurrent" } },
+    });
+    mocks.replaceProjectConfig.mockRejectedValueOnce(
+      new Error("MCP configuration changed since this page loaded."),
+    );
+    await page.getByRole("button", { name: "Import 1 into project" }).click();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("changed since"));
+    await expect.element(input).toHaveValue(text);
+    expect(mocks.replaceProjectConfig).toHaveBeenCalledTimes(1);
+    await page.getByRole("button", { name: "Import 1 into project" }).click();
+    await vi.waitFor(() =>
+      expect(mocks.replaceProjectConfig).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          expectedVersion: "new-base",
+          servers: expect.objectContaining({
+            concurrent: { type: "stdio", command: "concurrent" },
+            imported: { type: "stdio", command: "node" },
+          }),
+        }),
+      ),
+    );
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("masks stored secrets without putting placeholders or resolved values in editor inputs", async () => {
+  const mocks = createNativeApiMock();
+  const placeholder = "${f5-secret:00000000-0000-4000-8000-000000000000}";
+  mocks.getProjectConfig.mockResolvedValue({
+    ...projectConfig,
+    servers: { "project-server": { type: "stdio", command: "node", env: { TOKEN: placeholder } } },
+  });
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("•••••• (stored secret)"));
+    const values = [
+      ...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+        "input, textarea:not([readonly])",
+      ),
+    ].map((input) => input.value);
+    expect(values.join("\n")).not.toContain(placeholder);
+    await captureSettingsScreenshot();
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("tool switches respect allowlists and save only the denylist", async () => {
+  const mocks = createNativeApiMock();
+  mocks.getProjectConfig.mockResolvedValue({
+    ...projectConfig,
+    servers: {
+      "project-server": {
+        type: "stdio",
+        command: "node",
+        enabledTools: ["read"],
+        disabledTools: ["read"],
+      },
+    },
+  });
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("button", { name: "Inspect", exact: true }).click();
+    await page.getByRole("tab", { name: "Tools", exact: true }).click();
+    await page.getByRole("switch", { name: "Enable tool read" }).click();
+    await vi.waitFor(() =>
+      expect(mocks.replaceProjectConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          servers: {
+            "project-server": {
+              type: "stdio",
+              command: "node",
+              enabledTools: ["read"],
+              disabledTools: [],
+            },
+          },
+        }),
+      ),
+    );
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("reads detected configuration only after an explicit Detect click", async () => {
+  createNativeApiMock();
+  const detect = vi.fn(async () => ({
+    candidates: [
+      {
+        id: "detected",
+        name: "detected",
+        source: ".mcp.json",
+        selectedByDefault: false,
+        server: { type: "stdio" as const, command: "node" },
+        issues: [],
+      },
+    ],
+    issues: [],
+  }));
+  nativeApiRef.current!.mcp.listImportCandidates = detect;
+  const { screen, queryClient } = await renderSettings();
+  try {
+    expect(detect).not.toHaveBeenCalled();
+    await page.getByRole("button", { name: "Import configuration", exact: true }).click();
+    await page.getByRole("tab", { name: "Detected", exact: true }).click();
+    expect(detect).not.toHaveBeenCalled();
+    await page.getByRole("button", { name: "Detect configurations", exact: true }).click();
+    await vi.waitFor(() => expect(detect).toHaveBeenCalledTimes(1));
+    await expect
+      .element(page.getByRole("button", { name: "Import 0 into project" }))
+      .toBeDisabled();
+    await page.getByRole("checkbox", { name: "detected", exact: true }).click();
+    await expect.element(page.getByRole("button", { name: "Import 1 into project" })).toBeEnabled();
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("tests an unsaved draft only on click and opens its bounded tool summaries", async () => {
+  const mocks = createNativeApiMock();
+  const probe = vi.fn(async () => ({
+    ok: true,
+    durationMs: 12,
+    tools: [{ name: "draft-tool", description: "Tool from the unsaved draft" }],
+    toolsTruncated: false,
+    resourceCount: 0,
+    promptCount: 0,
+    authRequired: false,
+  }));
+  nativeApiRef.current!.mcp.probeServer = probe;
+  const { screen, queryClient } = await renderSettings();
+  try {
+    expect(probe).not.toHaveBeenCalled();
+    await page.getByRole("textbox", { name: "Name", exact: true }).fill("draft-test");
+    await page.getByRole("textbox", { name: "Command", exact: true }).fill("node");
+    await page.getByRole("button", { name: "Test", exact: true }).last().click();
+    await vi.waitFor(() =>
+      expect(probe).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: PROJECT_ID,
+          serverName: "draft-test",
+          server: expect.objectContaining({ type: "stdio", command: "node" }),
+        }),
+      ),
+    );
+    expect(mocks.replaceProjectConfig).not.toHaveBeenCalled();
+    await page.getByRole("button", { name: "1 tools", exact: true }).click();
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain("Tool from the unsaved draft"),
+    );
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+function SecretFieldsHarness({ initial }: { initial: string }) {
+  const [value, setValue] = useState(initial);
+  return <McpKeyValueFields label="Environment" value={value} onChange={setValue} />;
+}
+it.each([false, true])(
+  "stores under Strict Mode and preserves concurrent edits (same row: %s)",
+  async (editSameRow) => {
+    createNativeApiMock();
+    let finish!: (result: { placeholder: string }) => void;
+    const store = vi.fn(
+      () =>
+        new Promise<{ placeholder: string }>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    nativeApiRef.current!.mcp.storeSecret = store;
+    const screen = await render(
+      <StrictMode>
+        <SecretFieldsHarness
+          initial={JSON.stringify([
+            { key: "TOKEN", value: "private-value", secret: true },
+            { key: "OTHER", value: "original" },
+          ])}
+        />
+      </StrictMode>,
+    );
+    try {
+      await page.getByRole("button", { name: "Store secret", exact: true }).click();
+      await vi.waitFor(() => expect(store).toHaveBeenCalledTimes(1));
+      await page
+        .getByRole("textbox", { name: `Environment value ${editSameRow ? 1 : 2}` })
+        .fill("edited");
+      finish({ placeholder: "${f5-secret:00000000-0000-4000-8000-000000000000}" });
+      if (editSameRow) {
+        await expect
+          .element(page.getByText("This value changed while storing.", { exact: false }))
+          .toBeVisible();
+        await expect
+          .element(page.getByRole("textbox", { name: "Environment value 1" }))
+          .toHaveValue("edited");
+      } else {
+        await expect.element(page.getByText("•••••• (stored secret)")).toBeVisible();
+        await expect
+          .element(page.getByRole("textbox", { name: "Environment value 2" }))
+          .toHaveValue("edited");
+        await page.getByRole("button", { name: "Replace", exact: true }).click();
+        await page.getByRole("button", { name: "Cancel replacement", exact: true }).click();
+        await expect.element(page.getByText("•••••• (stored secret)")).toBeVisible();
+      }
+    } finally {
+      await screen.unmount();
+    }
+  },
+);
+it("keeps legacy key-only lines intact", async () => {
+  const screen = await render(<SecretFieldsHarness initial="TOKEN" />);
+  try {
+    await expect
+      .element(page.getByRole("textbox", { name: "Environment key 1" }))
+      .toHaveValue("TOKEN");
+    await expect
+      .element(page.getByRole("textbox", { name: "Environment value 1" }))
+      .toHaveValue("");
+  } finally {
+    await screen.unmount();
+  }
+});
+it("retains disabled tools in a single list when the live listing omits them", async () => {
+  const mocks = createNativeApiMock();
+  mocks.getProjectConfig.mockResolvedValue({
+    ...projectConfig,
+    servers: {
+      "project-server": { type: "stdio", command: "node", disabledTools: ["hidden"] },
+    },
+  });
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("button", { name: "Inspect", exact: true }).click();
+    await page.getByRole("tab", { name: "Tools", exact: true }).click();
+    await expect
+      .element(page.getByRole("switch", { name: "Enable tool hidden" }))
+      .not.toBeChecked();
+    await expect.element(page.getByText("read", { exact: true })).toBeVisible();
+    await page.getByRole("switch", { name: "Enable tool hidden" }).click();
+    await vi.waitFor(() =>
+      expect(mocks.replaceProjectConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          servers: {
+            "project-server": { type: "stdio", command: "node", disabledTools: [] },
+          },
+        }),
+      ),
+    );
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+it("opens probe tools and saves switches in common settings without a project", async () => {
+  const mocks = createNativeApiMock();
+  nativeApiRef.current!.mcp.probeServer = vi.fn(async () => ({
+    ok: true,
+    durationMs: 1,
+    tools: [{ name: "probe-tool" }],
+    toolsTruncated: false,
+    resourceCount: 0,
+    promptCount: 0,
+    authRequired: false,
+  }));
+  const { screen, queryClient } = await renderSettings(false);
+  try {
+    await page.getByRole("button", { name: "Test", exact: true }).first().click();
+    await page.getByRole("button", { name: "1 tools", exact: true }).click();
+    await page.getByRole("switch", { name: "Enable tool probe-tool" }).click();
+    await vi.waitFor(() =>
+      expect(mocks.replaceCommonConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          servers: {
+            "common-server": {
+              type: "stdio",
+              command: "common-command",
+              disabledTools: ["probe-tool"],
+            },
+          },
+        }),
+      ),
+    );
+    expect(mocks.inspectServer).not.toHaveBeenCalled();
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
+  }
+});
+
+it("marks cross-source duplicate selections on each affected candidate", async () => {
+  createNativeApiMock();
+  nativeApiRef.current!.mcp.listImportCandidates = vi.fn<NativeApi["mcp"]["listImportCandidates"]>(
+    async () => ({
+      candidates: [
+        {
+          id: "first",
+          name: "duplicate",
+          source: "user config",
+          server: { type: "stdio", command: "first" },
+          issues: [],
+        },
+        {
+          id: "second",
+          name: "duplicate",
+          source: "codex config",
+          selectedByDefault: false,
+          server: { type: "stdio", command: "second" },
+          issues: [
+            {
+              field: "name",
+              severity: "warning",
+              message:
+                "Duplicate name also found in user config. Select only one candidate with this name.",
+            },
+          ],
+        },
+      ],
+      issues: [],
+    }),
+  );
+  const { screen, queryClient } = await renderSettings();
+  try {
+    await page.getByRole("button", { name: "Import configuration", exact: true }).click();
+    await page.getByRole("tab", { name: "Detected", exact: true }).click();
+    await page.getByRole("button", { name: "Detect configurations", exact: true }).click();
+    const candidates = page.getByRole("checkbox", { name: "duplicate", exact: true });
+    await expect.element(candidates.first()).toBeChecked();
+    await expect.element(candidates.nth(1)).not.toBeChecked();
+    await candidates.nth(1).click();
+    await expect
+      .element(page.getByRole("button", { name: "Import 2 into project" }))
+      .toBeDisabled();
+    expect(document.body.textContent?.match(/Duplicate selected name/g)).toHaveLength(2);
+  } finally {
+    queryClient.clear();
+    await screen.unmount();
   }
 });

@@ -1,3 +1,5 @@
+import { mcpToolSwitchState, summarizeMcpTools } from "@t3tools/shared/mcpTools";
+import { Switch } from "../../ui/switch";
 import type {
   McpServerStatusesResult,
   McpSessionReloadOutcome,
@@ -17,21 +19,34 @@ import { readErrorMessage } from "./mcpSettingsHelpers";
 type InspectorTab = "Overview" | "Tools" | "Resources" | "Diagnostics";
 
 export function McpServerInspector(props: {
+  initialTab?: InspectorTab | undefined;
+  configuredServer?: import("@t3tools/contracts").McpServerDefinition | undefined;
+  fallbackTools?: ReadonlyArray<import("@t3tools/contracts").McpToolSummary> | undefined;
+  onToolToggle?: ((name: string, enabled: boolean) => Promise<void>) | undefined;
   provider: ProviderKind;
   instanceId: ProviderInstanceId;
-  projectId: ProjectId;
+  projectId: ProjectId | null;
   serverName: string;
   ownership?: "managed" | "external" | "built-in";
   observation?: McpServerStatusesResult | undefined;
   outcomes?: ReadonlyArray<McpSessionReloadOutcome> | undefined;
   outcomeAction?: "apply" | "reconnect";
 }) {
-  const [tab, setTab] = useState<InspectorTab>("Overview");
+  const [savingTool, setSavingTool] = useState<string | null>(null);
+  const [toolError, setToolError] = useState<string | null>(null);
+  const [tab, setTab] = useState<InspectorTab>(props.initialTab ?? "Overview");
   const [retryError, setRetryError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [retryOutcomes, setRetryOutcomes] = useState<ReadonlyArray<McpSessionReloadOutcome>>();
   const queryClient = useQueryClient();
-  const query = useQuery(mcpInspectServerQueryOptions({ ...props, serverName: props.serverName }));
+  const query = useQuery(
+    mcpInspectServerQueryOptions({
+      ...props,
+      projectId: props.projectId,
+      enabled: !!props.projectId,
+      serverName: props.serverName,
+    }),
+  );
   const { copyToClipboard, isCopied } = useCopyToClipboard();
   const data = query.data;
   const status = data?.statuses.find(
@@ -39,6 +54,16 @@ export function McpServerInspector(props: {
       entry.name === props.serverName &&
       (entry.ownership ?? "managed") === (props.ownership ?? "managed"),
   );
+  const reportedTools = new Map(data?.tools.map((tool) => [tool.name, tool]));
+  const toolSummaries = summarizeMcpTools([
+    ...new Map(
+      [
+        ...(props.configuredServer?.disabledTools ?? []).map((name) => ({ name })),
+        ...(props.fallbackTools ?? []),
+        ...(data?.tools ?? []),
+      ].map((tool) => [tool.name, tool]),
+    ).values(),
+  ]);
   return (
     <section
       className="space-y-3 rounded-md border border-border p-3"
@@ -60,17 +85,95 @@ export function McpServerInspector(props: {
         <Button
           size="xs"
           variant="outline"
-          disabled={query.isFetching}
+          disabled={!props.projectId || query.isFetching}
           onClick={() => void query.refetch()}
         >
           Refresh inspector
         </Button>
       </div>
-      {query.isPending ? <p className="text-xs text-muted-foreground">Loading inspector…</p> : null}
+      {props.projectId && query.isPending ? (
+        <p className="text-xs text-muted-foreground">Loading inspector…</p>
+      ) : null}
       {query.error ? (
         <p className="text-xs text-destructive">
           {readErrorMessage(query.error, "Could not inspect this server.")}
         </p>
+      ) : null}
+      {tab === "Tools" ? (
+        <div className="space-y-2 text-xs">
+          {" "}
+          {toolSummaries.length ? (
+            toolSummaries.map((tool) => {
+              const reported = reportedTools.get(tool.name);
+              const state = props.configuredServer
+                ? mcpToolSwitchState(props.configuredServer, tool.name)
+                : undefined;
+              return (
+                <div
+                  key={tool.name}
+                  className="flex items-center justify-between gap-3 rounded border p-2"
+                >
+                  <div>
+                    <p>
+                      {tool.name}
+                      {tool.readOnly ? " · read only" : ""}
+                      {tool.destructive ? " · destructive" : ""}
+                    </p>
+                    {tool.description ? <p>{tool.description}</p> : null}
+                    {reported ? (
+                      <details>
+                        <summary>Tool details</summary>
+                        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all">
+                          {JSON.stringify(reported.annotations ?? {}, null, 2)}
+                        </pre>
+                        {data?.capabilities.inputSchemas ? (
+                          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all">
+                            {JSON.stringify(reported.inputSchema ?? {}, null, 2)}
+                          </pre>
+                        ) : (
+                          <p>Input schemas are not available from this runtime.</p>
+                        )}
+                      </details>
+                    ) : null}
+                  </div>
+                  {state && props.onToolToggle ? (
+                    <span
+                      title={
+                        state.excluded
+                          ? "Excluded by this server's enabled-tools list. Edit it under Advanced."
+                          : undefined
+                      }
+                    >
+                      <Switch
+                        aria-label={`Enable tool ${tool.name}`}
+                        checked={state.checked}
+                        disabled={state.excluded || savingTool !== null}
+                        onCheckedChange={(enabled) => {
+                          setSavingTool(tool.name);
+                          setToolError(null);
+                          void props.onToolToggle!(tool.name, !!enabled)
+                            .catch((cause) =>
+                              setToolError(
+                                readErrorMessage(cause, "Could not save tool settings."),
+                              ),
+                            )
+                            .finally(() => setSavingTool(null));
+                        }}
+                      />
+                    </span>
+                  ) : null}
+                </div>
+              );
+            })
+          ) : (
+            <p>Tools appear once the server connects.</p>
+          )}
+          {toolError ? (
+            <p role="alert" className="text-destructive">
+              {toolError}
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {data ? (
         <div role="tabpanel" className="space-y-2 text-xs">
@@ -101,50 +204,6 @@ export function McpServerInspector(props: {
               ) : null}
               {status?.message ? (
                 <p className="whitespace-pre-wrap break-words">{status.message}</p>
-              ) : null}
-            </>
-          ) : null}
-          {tab === "Tools" ? (
-            <>
-              {!data.capabilities.tools ? (
-                <p>Tools are not available from this provider runtime.</p>
-              ) : data.tools.length === 0 ? (
-                <p>No tools were reported in this observation.</p>
-              ) : (
-                data.tools.map((tool, index) => (
-                  <details
-                    key={`${tool.name}:${index}`}
-                    className="rounded border border-border p-2"
-                  >
-                    <summary>{tool.name}</summary>
-                    {tool.description ? (
-                      <p className="whitespace-pre-wrap break-words">{tool.description}</p>
-                    ) : null}
-                    {tool.annotations !== undefined ? (
-                      <pre className="overflow-auto whitespace-pre-wrap break-all">
-                        {JSON.stringify(tool.annotations, null, 2)}
-                      </pre>
-                    ) : null}
-                    {data.capabilities.inputSchemas ? (
-                      <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all">
-                        {JSON.stringify(tool.inputSchema ?? {}, null, 2)}
-                      </pre>
-                    ) : (
-                      <p>
-                        {props.provider === "claudeAgent"
-                          ? "Input schemas are not available from Claude."
-                          : "Input schemas are not available from this runtime."}
-                      </p>
-                    )}
-                  </details>
-                ))
-              )}
-              {!data.capabilities.inputSchemas ? (
-                <p>
-                  {props.provider === "claudeAgent"
-                    ? "Input schemas are not available from Claude."
-                    : "Input schemas are not available from this runtime."}
-                </p>
               ) : null}
             </>
           ) : null}
@@ -239,6 +298,7 @@ export function McpServerInspector(props: {
               variant="outline"
               disabled={retrying}
               onClick={() => {
+                if (!props.projectId) return;
                 setRetrying(true);
                 setRetryError(null);
                 const retry =

@@ -693,6 +693,7 @@ describe("ProviderCommandReactor", () => {
           servers: {},
         }),
       readEffectiveStoredConfig,
+      readEffectiveRuntimeConfig: readEffectiveStoredConfig,
       readCommonConfig: () =>
         Effect.succeed({
           version: "mcp-version-test",
@@ -878,6 +879,7 @@ describe("ProviderCommandReactor", () => {
       runtimeSessions,
       mcpReload,
       readEffectiveStoredConfig,
+      readEffectiveRuntimeConfig: readEffectiveStoredConfig,
       reloadMcpConfigForProject,
       stateDir,
       workspaceRoot,

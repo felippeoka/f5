@@ -749,3 +749,36 @@ it("round-trips provider update progress and visible failure metadata", () => {
     result,
   );
 });
+
+it("wires MCP feature requests and rejects executable or home overrides", () => {
+  const requests = [
+    { _tag: WS_METHODS.mcpListImportCandidates, projectId: "project", instanceId: "codex" },
+    {
+      _tag: WS_METHODS.mcpProbeServer,
+      serverName: "draft",
+      server: { type: "http", url: "http://localhost/mcp" },
+    },
+  ];
+  for (const body of requests) {
+    assert.doesNotThrow(() => Schema.decodeUnknownSync(WebSocketRequest)({ id: "feature", body }));
+    for (const field of ["binaryPath", "homePath"])
+      assert.throws(() =>
+        Schema.decodeUnknownSync(WebSocketRequest)({
+          id: "feature",
+          body: { ...body, [field]: "/other-account" },
+        }),
+      );
+  }
+  assert.doesNotThrow(() =>
+    Schema.decodeUnknownSync(WebSocketRequest)({
+      id: "secret",
+      body: { _tag: WS_METHODS.mcpStoreSecret, value: "private" },
+    }),
+  );
+  assert.throws(() =>
+    Schema.decodeUnknownSync(WebSocketRequest)({
+      id: "secret",
+      body: { _tag: WS_METHODS.mcpStoreSecret, value: "x".repeat(16385) },
+    }),
+  );
+});

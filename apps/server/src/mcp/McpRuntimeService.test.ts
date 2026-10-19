@@ -136,6 +136,12 @@ function makeProjectMcpConfigServiceLayer(
         effectiveVersion,
         servers,
       }),
+    readEffectiveRuntimeConfig: (requestedProjectId: ProjectId) =>
+      Effect.succeed({
+        projectId: requestedProjectId,
+        effectiveVersion,
+        servers,
+      }),
     readCommonConfig: () => Effect.die(new Error("unused in McpRuntimeService tests")),
     replaceCommonConfig: (_input) => Effect.die(new Error("unused in McpRuntimeService tests")),
     readProjectConfig: (_projectId) => Effect.die(new Error("unused in McpRuntimeService tests")),

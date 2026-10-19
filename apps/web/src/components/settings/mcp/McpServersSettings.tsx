@@ -1,3 +1,5 @@
+import { setMcpToolEnabled } from "@t3tools/shared/mcpTools";
+import { Switch } from "../../ui/switch";
 import { onServerWelcome } from "../../../wsNativeApi";
 import { useWsConnectionState } from "../../../wsConnectionState";
 import { useThreadSummaries } from "../../../threadSelectors";
@@ -16,7 +18,6 @@ import {
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import { formatMcpServersAsJson } from "@t3tools/shared/mcpConfig";
-import { parseImportedServers } from "@t3tools/shared/mcpImport";
 import {
   MAX_SERVER_COUNT,
   normalizeMcpServersRecord,
@@ -40,7 +41,7 @@ import { Button } from "../../ui/button";
 import { Toggle, ToggleGroup } from "../../ui/toggle-group";
 import { McpServerList } from "./McpServerList";
 import { McpServerEditor } from "./McpServerEditor";
-import { McpImport } from "./McpImport";
+import { LazyMcpImportDialog as McpImportDialog } from "./LazyMcpImportDialog";
 import { McpExport } from "./McpExport";
 import { McpProviderStatusBadge } from "./McpStatus";
 import {
@@ -88,10 +89,9 @@ export function McpServersSettings(props: {
   const [editingServerName, setEditingServerName] = useState<string | null>(null);
   const [draft, setDraft] = useState<ServerDraft>(createEmptyDraft());
   const [formError, setFormError] = useState<string | null>(null);
-  const [importText, setImportText] = useState("");
-  const [importError, setImportError] = useState<string | null>(null);
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [projectActionError, setProjectActionError] = useState<string | null>(null);
+  const [savedContext, setSavedContext] = useState<string | null>(null);
   const [isApplying, setIsApplying] = useState(false);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
@@ -169,6 +169,8 @@ export function McpServersSettings(props: {
     isPending: serverStatusesQuery.isPending,
     error: serverStatusesQuery.error,
   };
+  useEffect(() => setSavedContext(null), [selectedScope, selectedProjectId]);
+
   useEffect(() => {
     if (!selectedThreadId) return;
     const error = serverStatusesQuery.error;
@@ -191,7 +193,6 @@ export function McpServersSettings(props: {
     setEditingServerName(null);
     setDraft(createEmptyDraft());
     setFormError(null);
-    setImportError(null);
     setProjectActionError(null);
     setIsAdvancedOpen(false);
   }, [selectedProjectId]);
@@ -282,15 +283,19 @@ export function McpServersSettings(props: {
 
   const persistScopeServers = async (
     nextServers: McpProjectServersConfig,
+    expectedVersion = selectedScope === "common"
+      ? commonConfigQuery.data?.version
+      : projectConfigQuery.data?.version,
   ): Promise<McpCommonConfigResult | McpProjectConfigResult> => {
     setProjectActionError(null);
     setIsSavingConfig(true);
     try {
       if (selectedScope === "common") {
         const result = await ensureNativeApi().mcp.replaceCommonConfig({
-          expectedVersion: commonConfigQuery.data?.version,
+          expectedVersion,
           servers: nextServers,
         });
+        setSavedContext(`${selectedScope}:${selectedProjectId}`);
         queryClient.setQueryData(mcpQueryKeys.commonConfig(), result);
         await queryClient.invalidateQueries({ queryKey: mcpQueryKeys.all });
         return result;
@@ -302,9 +307,10 @@ export function McpServersSettings(props: {
 
       const result = await ensureNativeApi().mcp.replaceProjectConfig({
         projectId: selectedProject.id,
-        expectedVersion: projectConfigQuery.data?.version,
+        expectedVersion,
         servers: nextServers,
       });
+      setSavedContext(`${selectedScope}:${selectedProjectId}`);
       queryClient.setQueryData(mcpQueryKeys.projectConfig(selectedProject.id), result);
       await queryClient.invalidateQueries({ queryKey: mcpQueryKeys.all });
       return result;
@@ -321,11 +327,6 @@ export function McpServersSettings(props: {
   const changeDraft = (patch: Partial<ServerDraft>) => {
     changeAdvancedDraft(patch);
     setFormError(null);
-  };
-
-  const changeImportText = (text: string) => {
-    setImportText(text);
-    setImportError(null);
   };
 
   const beginCreate = () => {
@@ -403,35 +404,6 @@ export function McpServersSettings(props: {
     }
   };
 
-  const importServers = () => {
-    try {
-      if (selectedScope === "project" && !selectedProject) {
-        throw new Error("Select a project before importing project-scoped MCP servers.");
-      }
-      const imported = parseImportedServers(importText);
-      if (Object.keys(imported).length === 0) {
-        throw new Error("No importable MCP servers were found.");
-      }
-
-      const merged = normalizeMcpServersRecord({
-        ...toWritableProjectServers(activeServers),
-        ...imported,
-      });
-      validateMcpLayerWrite(activeServers, merged);
-
-      setImportError(null);
-      void persistScopeServers(merged)
-        .then(() => {
-          setImportText("");
-        })
-        .catch((error) => {
-          setImportError(readErrorMessage(error, "Failed to import MCP servers."));
-        });
-    } catch (error) {
-      setImportError(readErrorMessage(error, "Failed to import MCP servers."));
-    }
-  };
-
   const toggleServerEnabled = (name: string, checked: boolean) => {
     const nextServers = toWritableProjectServers(activeServers);
     const currentServer = nextServers[name];
@@ -470,6 +442,36 @@ export function McpServersSettings(props: {
     window.setTimeout(() => {
       URL.revokeObjectURL(url);
     }, 0);
+  };
+
+  const applyToLiveSessions = () => {
+    if (selectedScope === "project" && !selectedProject) {
+      return;
+    }
+    setProjectActionError(null);
+    setIsApplying(true);
+    void ensureNativeApi()
+      .mcp.applyToLiveSessions({
+        scope: selectedScope,
+        ...(selectedScope === "project" && selectedProject?.id
+          ? { projectId: selectedProject.id }
+          : {}),
+      })
+      .then(async (result) => {
+        setSavedContext(null);
+        setApplyOutcomes(result.sessions);
+        const notice = describeMcpApplyProblems(result);
+        if (notice) setProjectActionError(notice);
+        await queryClient.invalidateQueries({ queryKey: mcpQueryKeys.all });
+      })
+      .catch((error) => {
+        setProjectActionError(
+          readErrorMessage(error, "Failed to apply MCP configuration to live sessions."),
+        );
+      })
+      .finally(() => {
+        setIsApplying(false);
+      });
   };
 
   return (
@@ -512,34 +514,7 @@ export function McpServersSettings(props: {
                 : `Apply MCP configuration to all live sessions in ${selectedProject?.name ?? "this project"}`
             }
             disabled={(selectedScope === "project" && !selectedProject) || isApplying}
-            onClick={() => {
-              if (selectedScope === "project" && !selectedProject) {
-                return;
-              }
-              setProjectActionError(null);
-              setIsApplying(true);
-              void ensureNativeApi()
-                .mcp.applyToLiveSessions({
-                  scope: selectedScope,
-                  ...(selectedScope === "project" && selectedProject?.id
-                    ? { projectId: selectedProject.id }
-                    : {}),
-                })
-                .then(async (result) => {
-                  setApplyOutcomes(result.sessions);
-                  const notice = describeMcpApplyProblems(result);
-                  if (notice) setProjectActionError(notice);
-                  await queryClient.invalidateQueries({ queryKey: mcpQueryKeys.all });
-                })
-                .catch((error) => {
-                  setProjectActionError(
-                    readErrorMessage(error, "Failed to apply MCP configuration to live sessions."),
-                  );
-                })
-                .finally(() => {
-                  setIsApplying(false);
-                });
-            }}
+            onClick={applyToLiveSessions}
           >
             Apply to all live sessions
           </Button>
@@ -566,7 +541,6 @@ export function McpServersSettings(props: {
                 setEditingServerName(null);
                 setDraft(createEmptyDraft());
                 setFormError(null);
-                setImportError(null);
                 setProjectActionError(null);
                 setIsAdvancedOpen(false);
               }}
@@ -741,6 +715,91 @@ export function McpServersSettings(props: {
 
         {selectedScope === "common" || selectedProject ? (
           <>
+            {savedContext === `${selectedScope}:${selectedProjectId}` ? (
+              <p role="status" className="rounded border p-3 text-xs">
+                Saved. Running sessions pick up MCP changes on their next message, restarting if
+                needed.{" "}
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={isApplying}
+                  onClick={applyToLiveSessions}
+                >
+                  Apply to all live sessions
+                </Button>
+              </p>
+            ) : null}
+            {selectedScope === "project" ? (
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Inherited from common</p>
+                {Object.entries(commonConfigQuery.data?.servers ?? {})
+                  .filter(([name]) => !Object.hasOwn(activeServers, name))
+                  .map(([name, server]) => (
+                    <div
+                      key={name}
+                      className="flex items-center justify-between gap-3 rounded border p-3 text-xs"
+                    >
+                      <span>{name}</span>
+                      <label className="flex items-center gap-2">
+                        Use in this project
+                        <Switch
+                          aria-label={`Use ${name} in this project`}
+                          disabled={isSavingConfig}
+                          checked={
+                            !projectConfigQuery.data?.disabledCommonServers?.some(
+                              (disabled) => mcpServerNameKey(disabled) === mcpServerNameKey(name),
+                            )
+                          }
+                          onCheckedChange={(enabled) => {
+                            if (!selectedProjectId) return;
+                            const disabled = new Set(
+                              (projectConfigQuery.data?.disabledCommonServers ?? []).filter(
+                                (disabled) => mcpServerNameKey(disabled) !== mcpServerNameKey(name),
+                              ),
+                            );
+                            if (enabled) disabled.delete(name);
+                            else disabled.add(name);
+                            setIsSavingConfig(true);
+                            void ensureNativeApi()
+                              .mcp.replaceProjectConfig({
+                                projectId: selectedProjectId,
+                                expectedVersion: projectConfigQuery.data?.version,
+                                servers: activeServers,
+                                disabledCommonServers: [...disabled],
+                              })
+                              .then((result) => {
+                                setSavedContext(`${selectedScope}:${selectedProjectId}`);
+                                queryClient.setQueryData(
+                                  mcpQueryKeys.projectConfig(selectedProjectId),
+                                  result,
+                                );
+                                return queryClient.invalidateQueries({
+                                  queryKey: mcpQueryKeys.all,
+                                });
+                              })
+                              .catch((cause) =>
+                                setProjectActionError(
+                                  readErrorMessage(cause, "Could not update inherited server."),
+                                ),
+                              )
+                              .finally(() => setIsSavingConfig(false));
+                          }}
+                        />
+                      </label>
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() => {
+                          setEditingServerName(null);
+                          setDraft(draftFromServer(name, server));
+                        }}
+                      >
+                        Override
+                      </Button>
+                    </div>
+                  ))}
+              </div>
+            ) : null}
             <McpServerList
               selectedScope={selectedScope}
               observation={serverStatusesQuery.data}
@@ -770,6 +829,14 @@ export function McpServersSettings(props: {
               onToggleEnabled={toggleServerEnabled}
               beginEdit={beginEdit}
               removeServer={removeServer}
+              onToolToggle={async (name, tool, enabled) => {
+                const server = activeServers[name];
+                if (!server) throw new Error("Server no longer exists.");
+                await persistScopeServers({
+                  ...activeServers,
+                  [name]: setMcpToolEnabled(server, tool, enabled),
+                });
+              }}
             />
             <McpObservedGroup
               group="managed"
@@ -804,6 +871,9 @@ export function McpServersSettings(props: {
               instanceId={selectedInstanceId}
             />
             <McpServerEditor
+              key={`${selectedProjectId}:${selectedScope}:${selectedInstanceId}:${editingServerName}`}
+              projectId={selectedProjectId}
+              instanceId={selectedInstanceId}
               editingServerName={editingServerName}
               draft={draft}
               onDraftChange={changeDraft}
@@ -822,12 +892,23 @@ export function McpServersSettings(props: {
               onCopy={() => copyToClipboard(effectiveJson, undefined)}
               handleExportJson={handleExportJson}
             />
-            <McpImport
-              importText={importText}
-              onTextChange={changeImportText}
-              importError={importError}
-              isSavingConfig={isSavingConfig}
-              importServers={importServers}
+            <McpImportDialog
+              key={`${selectedScope}:${selectedProjectId}:${selectedInstanceId}`}
+              scope={selectedScope}
+              projectId={selectedProjectId}
+              instanceId={selectedInstanceId}
+              servers={
+                selectedScope === "common"
+                  ? (commonConfigQuery.data?.servers ?? {})
+                  : (projectConfigQuery.data?.servers ?? {})
+              }
+              version={
+                selectedScope === "common"
+                  ? commonConfigQuery.data?.version
+                  : projectConfigQuery.data?.version
+              }
+              onImport={persistScopeServers}
+              onRefreshBase={() => queryClient.invalidateQueries({ queryKey: mcpQueryKeys.all })}
             />
           </>
         ) : (

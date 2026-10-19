@@ -111,6 +111,7 @@ async function setup(tokens: Record<string, string> = {}) {
       get: (key) => Effect.succeed(secrets.get(key) ?? null),
       set: (key, value) => Effect.sync(() => void secrets.set(key, value)),
       remove: (key) => Effect.sync(() => void secrets.delete(key)),
+      list: () => Effect.succeed([]),
       getOrCreateRandom: () => Effect.die("unused"),
     },
     async (_url, init) => {

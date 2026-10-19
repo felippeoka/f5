@@ -32,7 +32,9 @@ export function McpServerList({
   onToggleEnabled,
   beginEdit,
   removeServer,
+  onToolToggle,
 }: {
+  readonly onToolToggle: (serverName: string, toolName: string, enabled: boolean) => Promise<void>;
   readonly selectedScope: McpConfigScope;
   readonly observation?: McpServerStatusesResult | undefined;
   readonly outcomes?: ReadonlyArray<McpSessionReloadOutcome> | undefined;
@@ -90,6 +92,7 @@ export function McpServerList({
               onToggleEnabled={(checked) => onToggleEnabled(name, checked)}
               onEdit={() => beginEdit(name, server)}
               onRemove={() => removeServer(name)}
+              onToolToggle={(toolName, enabled) => onToolToggle(name, toolName, enabled)}
             />
           ))}
         </div>
