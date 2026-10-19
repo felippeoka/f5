@@ -1,3 +1,10 @@
+import type { ProviderAdapterSessionStartInput } from "./provider/Services/ProviderAdapter.ts";
+import { readBoundedPages } from "./codex/readBoundedPages.ts";
+import {
+  mergeCodexMcpStartupStatuses,
+  decodeCodexMcpServerStatus,
+} from "./codex/codexMcpServerStatus.ts";
+import type { CodexControlMcpServerStatus } from "./codex/CodexControlClient.ts";
 import { supportsCodexNativeOperations } from "@t3tools/shared/providerRuntimeCapabilities";
 import { normalizeProviderRuntimeInfo } from "@t3tools/shared/runtimeInfo";
 import type {
@@ -142,7 +149,10 @@ interface CodexUserInputAnswer {
 }
 
 interface CodexSessionContext {
+  mcpEventIdentity?: ProviderAdapterSessionStartInput["mcpEventIdentity"];
   session: ProviderSession;
+  mcpStartupStatuses?: Map<string, CodexControlMcpServerStatus>;
+  mcpObservationContext?: object;
   account: CodexAccountSnapshot;
   child: ChildProcessWithoutNullStreams;
   output: readline.Interface;
@@ -274,6 +284,7 @@ export interface CodexAppServerSendTurnInput {
 }
 
 export interface CodexAppServerStartSessionInput {
+  readonly mcpEventIdentity?: ProviderAdapterSessionStartInput["mcpEventIdentity"];
   readonly effectiveModelCapabilities?: ReadonlyMap<string, ModelCapabilities>;
   readonly threadId: ThreadId;
   readonly provider?: "codex";
@@ -1182,6 +1193,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
       context = {
         session,
+        ...(input.mcpEventIdentity ? { mcpEventIdentity: input.mcpEventIdentity } : {}),
         account: {
           type: "unknown",
           planType: null,
@@ -2776,29 +2788,55 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     threadId: ThreadId,
   ): Promise<ReadonlyArray<Record<string, unknown>> | undefined> {
     const context = this.requireSession(threadId);
+    context.mcpStartupStatuses?.clear();
+    context.mcpObservationContext = {};
     await this.sendRequest<Record<string, never>>(context, "config/mcpServer/reload", undefined);
     try {
-      const statuses: Record<string, unknown>[] = [];
-      let cursor: string | undefined;
-      for (let page = 0; page < 10; page += 1) {
-        const result = asObject(
-          await this.sendRequest<unknown>(context, "mcpServerStatus/list", {
-            limit: 100,
-            ...(cursor ? { cursor } : {}),
-          }),
-        );
-        const data = Array.isArray(result?.data) ? result.data : [];
-        for (const entry of data) {
-          const status = asObject(entry);
-          if (status) statuses.push(status);
-        }
-        cursor = asString(result?.nextCursor);
-        if (!cursor) break;
-      }
-      return statuses;
+      const listing = await this.getMcpServerStatuses(threadId);
+      return listing.complete ? listing.entries.map((entry) => ({ ...entry })) : undefined;
     } catch {
       return undefined;
     }
+  }
+
+  getMcpObservationContext(threadId: ThreadId): object {
+    const context = this.requireSession(threadId);
+    return (context.mcpObservationContext ??= {});
+  }
+
+  async getMcpServerStatuses(
+    threadId: ThreadId,
+    options: { signal?: AbortSignal; deadline?: number } = {},
+  ) {
+    const context = this.requireSession(threadId);
+    const observationContext = this.getMcpObservationContext(threadId);
+    const result = await readBoundedPages<CodexControlMcpServerStatus>({
+      label: "mcpServerStatus/list",
+      allowMissingCursor: true,
+      maxItems: 1000,
+      maxPageItems: 100,
+      initialFailureIsPartial: true,
+      ...options,
+      request: (cursor, remaining) =>
+        this.sendRequest(
+          context,
+          "mcpServerStatus/list",
+          { limit: 100, ...(cursor ? { cursor } : {}) },
+          Math.min(10_000, remaining),
+        ),
+      decode: decodeCodexMcpServerStatus,
+    });
+    if (
+      !this.isLiveContext(context) ||
+      observationContext !== this.getMcpObservationContext(threadId)
+    )
+      throw new Error("The MCP observation was superseded.");
+    return {
+      ...result,
+      entries: mergeCodexMcpStartupStatuses(result.entries, [
+        ...(context.mcpStartupStatuses?.values() ?? []),
+      ]),
+    };
   }
 
   stopSession(threadId: ThreadId): void {
@@ -2991,6 +3029,26 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     context: CodexSessionContext,
     notification: JsonRpcNotification,
   ): void {
+    if (notification.method === "mcpServer/startupStatus/updated") {
+      const params = asObject(notification.params);
+      const name = asString(params?.name) ?? asString(params?.server);
+      const status = asString(params?.status);
+      if (
+        name &&
+        (status === "starting" ||
+          status === "ready" ||
+          status === "failed" ||
+          status === "cancelled" ||
+          status === "needs-auth")
+      ) {
+        context.mcpStartupStatuses ??= new Map();
+        context.mcpStartupStatuses.set(name, {
+          name,
+          startupStatus: status,
+          ...(asString(params?.error) ? { error: asString(params?.error)! } : {}),
+        });
+      }
+    }
     if (notification.method === "serverRequest/resolved") {
       const params = asObject(notification.params);
       const nativeRequestIdValue = params?.requestId;
@@ -3191,7 +3249,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
                 id: context.nativeReviewTurnId,
               },
             }
-          : notification.params,
+          : notification.method === "mcpServer/startupStatus/updated"
+            ? { ...asObject(notification.params), ...context.mcpEventIdentity }
+            : notification.params,
     });
 
     if (notification.method === "thread/started") {

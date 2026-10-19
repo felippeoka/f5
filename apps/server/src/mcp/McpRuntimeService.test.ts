@@ -14,6 +14,7 @@ import {
   ServerSettings,
   ProviderDriverKind,
   ProjectId,
+  ThreadId,
   ProviderInstanceId,
   type McpProjectServersConfig,
   type ProviderSession,
@@ -34,6 +35,7 @@ import {
 import { McpRuntimeDiagnostics } from "./McpRuntimeDiagnostics.ts";
 import { McpRuntimeService, McpRuntimeServiceLive } from "./McpRuntimeService.ts";
 import { ProjectMcpConfigService } from "./ProjectMcpConfigService.ts";
+import { ProviderAdapterRequestError } from "../provider/Errors.ts";
 
 // The spawner is simulated, so command discovery must not depend on installed CLIs.
 vi.mock("../spawn/resolveCommand.ts", async (importOriginal) => ({
@@ -134,6 +136,12 @@ function makeProjectMcpConfigServiceLayer(
         effectiveVersion,
         servers,
       }),
+    readEffectiveRuntimeConfig: (requestedProjectId: ProjectId) =>
+      Effect.succeed({
+        projectId: requestedProjectId,
+        effectiveVersion,
+        servers,
+      }),
     readCommonConfig: () => Effect.die(new Error("unused in McpRuntimeService tests")),
     replaceCommonConfig: (_input) => Effect.die(new Error("unused in McpRuntimeService tests")),
     readProjectConfig: (_projectId) => Effect.die(new Error("unused in McpRuntimeService tests")),
@@ -155,6 +163,9 @@ function makeProjectMcpConfigServiceLayer(
 
 function makeRuntimeLayer(input?: {
   readonly servers?: McpProjectServersConfig;
+  readonly providerService?: Partial<ProviderServiceShape>;
+  readonly onControlClient?: () => void;
+  readonly onControlReload?: () => void;
   readonly spawnerLayer?: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>;
   readonly oauthStartStatus?: {
     readonly status: "idle" | "pending" | "completed" | "failed";
@@ -204,9 +215,13 @@ function makeRuntimeLayer(input?: {
             }),
         }),
         Layer.succeed(CodexControlClientRegistry, {
-          getAdminClient: (_input) =>
-            controlStatuses
+          getAdminClient: (_input) => {
+            input?.onControlClient?.();
+            return controlStatuses
               ? Effect.succeed({
+                  reloadMcpServer: async () => {
+                    input?.onControlReload?.();
+                  },
                   listMcpServerStatus: async () => ({
                     data: controlStatuses.map((status) => ({
                       name: status.name,
@@ -225,7 +240,8 @@ function makeRuntimeLayer(input?: {
                     nextCursor: null,
                   }),
                 } as unknown as CodexControlClient)
-              : Effect.die(new Error("unused in McpRuntimeService tests")),
+              : Effect.die(new Error("unused in McpRuntimeService tests"));
+          },
           hasOauthLease: (_input) => Effect.succeed(false),
           acquireOauthClient: (_input) =>
             Effect.die(new Error("unused in McpRuntimeService tests")),
@@ -247,7 +263,7 @@ function makeRuntimeLayer(input?: {
               ...oauthStatus,
             }),
         }),
-        Layer.succeed(ProviderService, makeProviderServiceStub()),
+        Layer.succeed(ProviderService, { ...makeProviderServiceStub(), ...input?.providerService }),
         Layer.succeed(CodexMcpEventBus, {
           publishStatusUpdated: () => Effect.void,
           streamStatusUpdates: Stream.empty,
@@ -276,55 +292,50 @@ describe("McpRuntimeService", () => {
     "disabled",
     "login-required",
   ] as const) {
-    it.effect(
-      `adds the SSE transport hint only to failure, unknown or auth states (${state})`,
-      () =>
-        Effect.gen(function* () {
-          const service = yield* McpRuntimeService;
-          const result = yield* service.getServerStatuses({ provider: "codex", projectId });
-          const sse = result.statuses.find((server) => server.name === "sse");
-          const http = result.statuses.find((server) => server.name === "http");
-          assert.equal(
-            sse?.message?.includes(CODEX_SSE_TRANSPORT_HINT) ?? false,
-            ["failed", "cancelled", "missing", "login-required"].includes(state),
-          );
-          assert.equal(http?.message?.includes(CODEX_SSE_TRANSPORT_HINT) ?? false, false);
-          if (state === "failed") assert.include(sse?.message, "fixture startup failure");
-        }).pipe(
-          Effect.provide(
-            makeRuntimeLayer({
-              servers: {
-                sse: {
-                  type: "sse",
-                  url: "https://example.test/sse",
-                  enabled: state !== "disabled",
-                },
-                http: { type: "http", url: "https://example.test/mcp" },
+    it.effect(`adds the SSE transport hint to every non-ready state (${state})`, () =>
+      Effect.gen(function* () {
+        const service = yield* McpRuntimeService;
+        const result = yield* service.getServerStatuses({ provider: "codex", projectId });
+        const sse = result.statuses.find((server) => server.name === "sse");
+        const http = result.statuses.find((server) => server.name === "http");
+        assert.equal(sse?.message?.includes(CODEX_SSE_TRANSPORT_HINT) ?? false, state !== "ready");
+        assert.equal(http?.message?.includes(CODEX_SSE_TRANSPORT_HINT) ?? false, false);
+        if (state === "failed") assert.include(sse?.message, "fixture startup failure");
+      }).pipe(
+        Effect.provide(
+          makeRuntimeLayer({
+            servers: {
+              sse: {
+                type: "sse",
+                url: "https://example.test/sse",
+                enabled: state !== "disabled",
               },
-              controlStatuses:
-                state === "missing" || state === "disabled"
-                  ? []
-                  : [
-                      {
-                        name: "sse",
-                        ...(state === "login-required" ? {} : { startupStatus: state }),
-                        authStatus: state === "login-required" ? "notLoggedIn" : "oAuth",
-                        ...(state === "failed" ? { error: "fixture startup failure" } : {}),
-                      },
-                      {
-                        name: "http",
-                        ...(state === "login-required" ? {} : { startupStatus: state }),
-                        authStatus: state === "login-required" ? "notLoggedIn" : "oAuth",
-                      },
-                    ],
-              spawnerLayer: mockSpawnerLayer((args) =>
-                args.join(" ").endsWith("--version")
-                  ? { stdout: "codex 1.2.3\n", stderr: "", code: 0 }
-                  : { stdout: '{"loggedIn":true}\n', stderr: "", code: 0 },
-              ),
-            }),
-          ),
+              http: { type: "http", url: "https://example.test/mcp" },
+            },
+            controlStatuses:
+              state === "missing" || state === "disabled"
+                ? []
+                : [
+                    {
+                      name: "sse",
+                      ...(state === "login-required" ? {} : { startupStatus: state }),
+                      authStatus: state === "login-required" ? "notLoggedIn" : "oAuth",
+                      ...(state === "failed" ? { error: "fixture startup failure" } : {}),
+                    },
+                    {
+                      name: "http",
+                      ...(state === "login-required" ? {} : { startupStatus: state }),
+                      authStatus: state === "login-required" ? "notLoggedIn" : "oAuth",
+                    },
+                  ],
+            spawnerLayer: mockSpawnerLayer((args) =>
+              args.join(" ").endsWith("--version")
+                ? { stdout: "codex 1.2.3\n", stderr: "", code: 0 }
+                : { stdout: '{"loggedIn":true}\n', stderr: "", code: 0 },
+            ),
+          }),
         ),
+      ),
     );
   }
 
@@ -578,8 +589,8 @@ describe("McpRuntimeService", () => {
 
       assert.strictEqual(statuses.statuses.length, 1);
       assert.strictEqual(statuses.statuses[0]?.name, "Observability");
-      assert.strictEqual(statuses.statuses[0]?.state, "failed");
-      assert.match(statuses.statuses[0]?.message ?? "", /did not report any tools or resources/u);
+      assert.strictEqual(statuses.statuses[0]?.state, "unknown");
+      assert.match(statuses.statuses[0]?.message ?? "", /zero reported tools/u);
     }).pipe(
       Effect.provide(
         makeRuntimeLayer({
@@ -610,59 +621,54 @@ describe("McpRuntimeService", () => {
     ),
   );
 
-  it.effect(
-    "uses latest runtime MCP failure details for authenticated zero-capability status",
-    () =>
-      Effect.gen(function* () {
-        const service = yield* McpRuntimeService;
-        const statuses = yield* service.getServerStatuses({
-          provider: "codex",
-          projectId,
-        });
+  it.effect("does not use historical runtime failures as authoritative configuration status", () =>
+    Effect.gen(function* () {
+      const service = yield* McpRuntimeService;
+      const statuses = yield* service.getServerStatuses({
+        provider: "codex",
+        projectId,
+      });
 
-        assert.strictEqual(statuses.statuses.length, 1);
-        assert.strictEqual(statuses.statuses[0]?.name, "Observability");
-        assert.strictEqual(statuses.statuses[0]?.state, "failed");
-        assert.strictEqual(
-          statuses.statuses[0]?.message,
-          "OAuth token refresh failed: Failed to parse server response",
-        );
-      }).pipe(
-        Effect.provide(
-          makeRuntimeLayer({
-            servers: {
-              Observability: {
-                type: "http",
-                url: "https://example.test/mcp",
-              },
+      assert.strictEqual(statuses.statuses.length, 1);
+      assert.strictEqual(statuses.statuses[0]?.name, "Observability");
+      assert.strictEqual(statuses.statuses[0]?.state, "unknown");
+      assert.notInclude(statuses.statuses[0]?.message, "OAuth token refresh failed");
+    }).pipe(
+      Effect.provide(
+        makeRuntimeLayer({
+          servers: {
+            Observability: {
+              type: "http",
+              url: "https://example.test/mcp",
             },
-            controlStatuses: [
-              {
-                name: "Observability",
-                authStatus: "oAuth",
-              },
-            ],
-            runtimeDiagnostics: [
-              {
-                name: "Observability",
-                status: "failed",
-                message: "OAuth token refresh failed: Failed to parse server response",
-                createdAt: "2026-05-18T20:05:24.138Z",
-              },
-            ],
-            spawnerLayer: mockSpawnerLayer((args) => {
-              const joined = args.join(" ");
-              if (joined.endsWith("--version")) {
-                return { stdout: "codex 1.2.3\n", stderr: "", code: 0 };
-              }
-              if (joined.endsWith("login status")) {
-                return { stdout: '{"loggedIn":true}\n', stderr: "", code: 0 };
-              }
-              throw new Error(`Unexpected CLI args: ${joined}`);
-            }),
+          },
+          controlStatuses: [
+            {
+              name: "Observability",
+              authStatus: "oAuth",
+            },
+          ],
+          runtimeDiagnostics: [
+            {
+              name: "Observability",
+              status: "failed",
+              message: "OAuth token refresh failed: Failed to parse server response",
+              createdAt: "2026-05-18T20:05:24.138Z",
+            },
+          ],
+          spawnerLayer: mockSpawnerLayer((args) => {
+            const joined = args.join(" ");
+            if (joined.endsWith("--version")) {
+              return { stdout: "codex 1.2.3\n", stderr: "", code: 0 };
+            }
+            if (joined.endsWith("login status")) {
+              return { stdout: '{"loggedIn":true}\n', stderr: "", code: 0 };
+            }
+            throw new Error(`Unexpected CLI args: ${joined}`);
           }),
-        ),
+        }),
       ),
+    ),
   );
 
   it.effect("directs Claude account login to the profile account panel", () =>
@@ -897,3 +903,186 @@ describe("McpRuntimeService", () => {
     ),
   );
 });
+
+it.effect(
+  "reads only the selected conversation without creating a control client or running preflight",
+  () => {
+    let controlCalls = 0;
+    const threadId = ThreadId.make("live-conversation");
+    const selected = {
+      threadId,
+      instanceId: ProviderInstanceId.make("codex"),
+      generation: 3,
+      lastSeenAt: "2026-10-18T10:00:00.000Z",
+      busy: true,
+      appliedVersion: "older",
+    };
+    return Effect.gen(function* () {
+      const runtime = yield* McpRuntimeService;
+      const result = yield* runtime.getServerStatuses({ provider: "codex", projectId, threadId });
+      assert.equal(result.source, "conversation");
+      assert.equal(result.threadId, threadId);
+      assert.equal(result.generation, 3);
+      assert.equal(result.appliedVersion, "older");
+      assert.equal(result.desiredVersion, "mcp-effective-v1");
+      assert.equal(result.statuses[0]?.state, "ready");
+      assert.equal(controlCalls, 0);
+    }).pipe(
+      Effect.provide(
+        makeRuntimeLayer({
+          servers: { docs: { type: "stdio", command: "node" } },
+          onControlClient: () => controlCalls++,
+          providerService: {
+            readMcpSessionStatuses: (input) => {
+              assert.equal(input.threadId, threadId);
+              return Effect.succeed({
+                sessions: [selected],
+                selected,
+                observation: {
+                  servers: [
+                    { name: "docs", status: "connected", ownership: "managed", toolCount: 2 },
+                  ],
+                  complete: true,
+                  capabilities: { tools: true, inputSchemas: true, resources: true },
+                },
+              });
+            },
+          },
+        }),
+      ),
+    );
+  },
+);
+it.effect("shows configured Claude servers without launching a query or running preflight", () =>
+  Effect.gen(function* () {
+    const runtime = yield* McpRuntimeService;
+    const result = yield* runtime.getServerStatuses({ provider: "claudeAgent", projectId });
+    assert.equal(result.source, "configurationCheck");
+    assert.equal(result.statuses[0]?.state, "unknown");
+    assert.include(result.statuses[0]?.message, "Live status appears while a Claude session");
+  }).pipe(
+    Effect.provide(makeRuntimeLayer({ servers: { docs: { type: "stdio", command: "node" } } })),
+  ),
+);
+it.effect("reloads the Codex settings connection even without live sessions", () => {
+  let reloads = 0;
+  return Effect.gen(function* () {
+    const runtime = yield* McpRuntimeService;
+    const result = yield* runtime.reconnectServer({
+      provider: "codex",
+      projectId,
+      serverName: "docs",
+    });
+    assert.equal(reloads, 1);
+    assert.deepEqual(result, {
+      settingsConnectionReloaded: true,
+      sessionsMatched: 0,
+      sessionsReconnected: 0,
+      failures: [],
+    });
+  }).pipe(
+    Effect.provide(makeRuntimeLayer({ controlStatuses: [], onControlReload: () => reloads++ })),
+  );
+});
+
+it.effect("keeps external same-name tool metadata out of the managed inspector", () => {
+  const threadId = ThreadId.make("same-name-thread");
+  const selected = {
+    threadId,
+    instanceId: ProviderInstanceId.make("claudeAgent"),
+    generation: 1,
+    lastSeenAt: "2026-10-18T10:00:00.000Z",
+    busy: false,
+    appliedVersion: "saved",
+  };
+  return Effect.gen(function* () {
+    const runtime = yield* McpRuntimeService;
+    const managed = yield* runtime.inspectServer({
+      projectId,
+      provider: "claudeAgent",
+      threadId,
+      serverName: "docs",
+    });
+    assert.equal(managed.tools.length, 0);
+    const external = yield* runtime.inspectServer({
+      projectId,
+      provider: "claudeAgent",
+      threadId,
+      serverName: "docs",
+      ownership: "external",
+    });
+    assert.equal(external.tools[0]?.name, "plugin_tool");
+  }).pipe(
+    Effect.provide(
+      makeRuntimeLayer({
+        servers: { docs: { type: "stdio", command: "node" } },
+        providerService: {
+          readMcpSessionStatuses: () =>
+            Effect.succeed({
+              sessions: [selected],
+              selected,
+              observation: {
+                servers: [
+                  {
+                    name: "docs",
+                    status: "connected",
+                    ownership: "external",
+                    origin: "plugin",
+                    tools: [{ name: "plugin_tool" }],
+                  },
+                ],
+                complete: true,
+                capabilities: { tools: true, inputSchemas: false, resources: false },
+              },
+            }),
+        },
+      }),
+    ),
+  );
+});
+
+it.effect(
+  "scrubs account bearer environment values from observation errors and reconnect results",
+  () => {
+    vi.stubEnv("F5_MCP_REVIEW_BEARER", "account-bearer-review-value");
+    return Effect.gen(function* () {
+      const runtime = yield* McpRuntimeService;
+      const input = { projectId, provider: "claudeAgent" as const };
+      const error = yield* runtime.getServerStatuses(input).pipe(Effect.flip);
+      assert.notInclude(error.message, "account-bearer-review-value");
+      assert.include(error.message, "[redacted]");
+      const result = yield* runtime.reconnectServer({ ...input, serverName: "docs" });
+      assert.notInclude(JSON.stringify(result), "account-bearer-review-value");
+    }).pipe(
+      Effect.provide(
+        makeRuntimeLayer({
+          servers: {
+            docs: {
+              type: "http",
+              url: "https://example.test",
+              bearerTokenEnvVar: "F5_MCP_REVIEW_BEARER",
+            },
+          },
+          providerService: {
+            readMcpSessionStatuses: () =>
+              Effect.fail(
+                new ProviderAdapterRequestError({
+                  provider: "claudeAgent",
+                  method: "mcpServerStatus",
+                  detail: "failed using account-bearer-review-value",
+                }),
+              ),
+            reconnectMcpServerForProject: () =>
+              Effect.succeed({
+                settingsConnectionReloaded: false,
+                sessionsMatched: 1,
+                sessionsReconnected: 0,
+                failures: [{ message: "failed using account-bearer-review-value" }],
+              }),
+          },
+        }),
+      ),
+      Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
+    );
+  },
+);

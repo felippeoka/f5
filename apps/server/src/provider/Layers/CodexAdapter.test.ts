@@ -2198,6 +2198,8 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         payload: {
           name: "filesystem",
           status: "failed",
+          providerInstanceId: "codex-review",
+          sessionGeneration: 7,
           error: "connection refused",
         },
       } satisfies ProviderEvent);
@@ -2215,6 +2217,8 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       assert.deepEqual(firstEvent.value.payload.status, {
         name: "filesystem",
         status: "failed",
+        providerInstanceId: "codex-review",
+        sessionGeneration: 7,
         error: "connection refused",
       });
     }),

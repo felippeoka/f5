@@ -108,6 +108,14 @@ function makeProjectMcpConfigServiceTestLayer(
         effectiveVersion: "mcp-version-test",
         servers,
       }),
+    readEffectiveRuntimeConfig: (projectId) =>
+      Effect.succeed({
+        projectId,
+        commonVersion: "mcp-version-test",
+        projectVersion: "mcp-version-test",
+        effectiveVersion: "mcp-version-test",
+        servers,
+      }),
     readCommonConfig: () =>
       Effect.succeed({
         version: "mcp-version-test",
@@ -3338,7 +3346,7 @@ it.effect(
         const service = yield* ProjectMcpConfigService;
         return {
           ...service,
-          readEffectiveStoredConfig: (projectId: ProjectId) =>
+          readEffectiveRuntimeConfig: (projectId: ProjectId) =>
             Effect.sync(() => {
               reads++;
               return { projectId, effectiveVersion: version, servers };
@@ -3517,3 +3525,360 @@ it.effect("preserves a newer applied version when a reload requires restart", ()
     );
   }).pipe(Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]))));
 });
+
+it.effect(
+  "selects the newest current-version conversation using metadata and reads only that session",
+  () => {
+    const fake = makeFakeCodexAdapter();
+    fake.hasSession.mockImplementation(() => Effect.succeed(true));
+    const reads: ThreadId[] = [];
+    const adapter = {
+      ...fake.adapter,
+      getMcpServerStatuses: (threadId: ThreadId) =>
+        Effect.sync(() => {
+          reads.push(threadId);
+          return {
+            servers: [],
+            complete: true,
+            capabilities: { tools: true, inputSchemas: true, resources: true },
+          };
+        }),
+    };
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const directory = yield* ProviderSessionDirectory;
+      const projectId = ProjectId.make("observation-project");
+      for (const [name, version] of [
+        ["current", "desired"],
+        ["newer-stale", "stale"],
+      ])
+        yield* directory.upsert({
+          threadId: asThreadId(name!),
+          provider: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          projectId,
+          status: "running",
+          mcpEffectiveConfigVersion: version!,
+          runtimePayload: { sessionGeneration: 1 },
+        });
+      const result = yield* service.readMcpSessionStatuses!({
+        provider: "codex",
+        instanceId: ProviderInstanceId.make("codex"),
+        projectId,
+        desiredVersion: "desired",
+      });
+      assert.equal(result.selected?.threadId, "current");
+      assert.deepEqual(reads, [asThreadId("current")]);
+      assert.equal(result.sessions.length, 2);
+      const failure = yield* service.readMcpSessionStatuses!({
+        provider: "codex",
+        projectId,
+        threadId: asThreadId("not-in-scope"),
+        desiredVersion: "desired",
+      }).pipe(Effect.flip);
+      assert.include(failure.message, "not running");
+      assert.equal(reads.length, 1);
+    }).pipe(Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", adapter]]))));
+  },
+);
+it.effect(
+  "fences an MCP read when the session is replaced while the provider is responding",
+  () => {
+    const fake = makeFakeCodexAdapter();
+    fake.hasSession.mockImplementation(() => Effect.succeed(true));
+    let reader!: NonNullable<ProviderAdapterShape<ProviderAdapterError>["getMcpServerStatuses"]>;
+    const adapter = {
+      ...fake.adapter,
+      getMcpServerStatuses: (threadId: ThreadId) => reader(threadId),
+    };
+    return Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const service = yield* ProviderService;
+      const directory = yield* ProviderSessionDirectory;
+      const threadId = asThreadId("fenced-read"),
+        projectId = ProjectId.make("fenced-project");
+      reader = () =>
+        Deferred.succeed(entered, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+          Effect.as({
+            servers: [],
+            complete: true,
+            capabilities: { tools: true, inputSchemas: true, resources: true },
+          }),
+        );
+      yield* directory.upsert({
+        threadId,
+        projectId,
+        provider: "codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        status: "running",
+        runtimePayload: { sessionGeneration: 1 },
+      });
+      const pending = yield* service.readMcpSessionStatuses!({
+        provider: "codex",
+        projectId,
+        threadId,
+        desiredVersion: "desired",
+      }).pipe(Effect.forkChild);
+      yield* Deferred.await(entered);
+      yield* directory.upsert({
+        threadId,
+        provider: "codex",
+        runtimePayload: { sessionGeneration: 2 },
+      });
+      yield* Deferred.succeed(release, undefined);
+      const result = yield* Fiber.join(pending).pipe(Effect.flip);
+      assert.include(result.message, "superseded");
+    }).pipe(Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", adapter]]))));
+  },
+);
+
+it.effect(
+  "validates every reconnect target before touching any session and reports success, skips, and failures",
+  () => {
+    const fake = makeFakeCodexAdapter("claudeAgent");
+    fake.hasSession.mockImplementation(() => Effect.succeed(true));
+    const reconnect = vi.fn(({ threadId }: { threadId: ThreadId }) =>
+      threadId === "broken"
+        ? Effect.fail(
+            new ProviderAdapterRequestError({
+              provider: "claudeAgent",
+              method: "reconnectMcpServer",
+              detail: "fixture connection failed",
+            }),
+          )
+        : Effect.succeed(threadId === "owned"),
+    );
+    const adapter = {
+      ...fake.adapter,
+      reconnectMcpServer: reconnect,
+      getOwnedMcpServerNames: (threadId: ThreadId) =>
+        Effect.succeed(threadId === "unowned" ? [] : ["docs"]),
+    };
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const directory = yield* ProviderSessionDirectory;
+      const projectId = ProjectId.make("reconnect-project"),
+        instanceId = ProviderInstanceId.make("claudeAgent");
+      for (const id of ["owned", "unowned", "broken"])
+        yield* directory.upsert({
+          threadId: asThreadId(id),
+          projectId,
+          provider: "claudeAgent",
+          providerInstanceId: instanceId,
+          status: "running",
+          mcpEffectiveConfigVersion: "saved",
+          runtimePayload: { sessionGeneration: 1 },
+        });
+      yield* service.reconnectMcpServerForProject!({
+        provider: "claudeAgent",
+        projectId,
+        instanceId,
+        serverName: "docs",
+        threadIds: [asThreadId("owned"), asThreadId("missing")],
+      }).pipe(Effect.flip);
+      assert.equal(reconnect.mock.calls.length, 0);
+      assert.deepEqual(
+        (yield* service.getMcpReconnectTargets!({
+          provider: "claudeAgent",
+          projectId,
+          instanceId,
+          serverName: "docs",
+        })).threadIds.toSorted(),
+        [asThreadId("broken"), asThreadId("owned")],
+      );
+      const result = yield* service.reconnectMcpServerForProject!({
+        provider: "claudeAgent",
+        projectId,
+        instanceId,
+        serverName: "docs",
+      });
+      assert.equal(result.settingsConnectionReloaded, false);
+      assert.equal(result.sessionsMatched, 2);
+      assert.equal(result.sessionsReconnected, 1);
+      assert.equal(result.failures.length, 1);
+      assert.deepEqual(result.sessions?.map((session) => session.disposition).toSorted(), [
+        "applied",
+        "failed",
+      ]);
+    }).pipe(
+      Effect.provide(makeProviderServiceLayerForAdapters(new Map([["claudeAgent", adapter]]))),
+    );
+  },
+);
+it.effect("stamps MCP runtime activity with the live binding's account and generation", () => {
+  const fake = makeFakeCodexAdapter();
+  return Effect.gen(function* () {
+    const service = yield* ProviderService;
+    const threadId = asThreadId("stamped-mcp");
+    yield* service.startSession(threadId, {
+      threadId,
+      provider: "codex",
+      runtimeMode: "full-access",
+    });
+    const observed = yield* Stream.runHead(
+      Stream.filter(service.streamEvents, (event) => event.type === "mcp.status.updated"),
+    ).pipe(Effect.forkChild);
+    yield* sleep(20);
+    fake.emit({
+      type: "mcp.status.updated",
+      eventId: asEventId("mcp-stamp"),
+      provider: "codex",
+      threadId,
+      createdAt: new Date().toISOString(),
+      payload: { status: { name: "docs", status: "ready", toolCount: 4 } },
+    } as unknown as LegacyProviderRuntimeEvent);
+    const event = Option.getOrThrow(yield* Fiber.join(observed));
+    assert.equal(event.type, "mcp.status.updated");
+    if (event.type === "mcp.status.updated")
+      assert.deepEqual(event.payload.status, {
+        name: "docs",
+        status: "ready",
+        toolCount: 4,
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        sessionGeneration: 1,
+      });
+  }).pipe(Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]))));
+});
+
+it.effect(
+  "excludes dead running rows from observation and reports them without blocking live reconnects",
+  () => {
+    const fake = makeFakeCodexAdapter();
+    fake.hasSession.mockImplementation((threadId) => Effect.succeed(threadId === "live-mcp"));
+    const read = vi.fn(() =>
+      Effect.succeed({
+        servers: [],
+        complete: true,
+        capabilities: { tools: true, inputSchemas: true, resources: true },
+      }),
+    );
+    const reconnect = vi.fn(() => Effect.succeed(true));
+    const adapter = {
+      ...fake.adapter,
+      getMcpServerStatuses: read,
+      getOwnedMcpServerNames: () => Effect.succeed(["GitHub"]),
+      reconnectMcpServer: reconnect,
+    };
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const directory = yield* ProviderSessionDirectory;
+      const projectId = ProjectId.make("dead-mcp-project");
+      for (const id of ["live-mcp", "dead-mcp"])
+        yield* directory.upsert({
+          threadId: asThreadId(id),
+          provider: "codex",
+          projectId,
+          status: "running",
+          mcpEffectiveConfigVersion: "desired",
+          runtimePayload: { sessionGeneration: 1 },
+        });
+      const input = { projectId, provider: "codex" as const, serverName: "github" };
+      const observed = yield* service.readMcpSessionStatuses!({
+        ...input,
+        desiredVersion: "desired",
+      });
+      assert.deepEqual(
+        observed.sessions.map((session) => session.threadId),
+        [asThreadId("live-mcp")],
+      );
+      assert.equal(observed.selected?.threadId, "live-mcp");
+      assert.equal(read.mock.calls.length, 1);
+      const targets = yield* service.getMcpReconnectTargets!(input);
+      assert.deepEqual(targets.threadIds, [asThreadId("live-mcp")]);
+      assert.equal(targets.failures[0]?.threadId, "dead-mcp");
+      const result = yield* service.reconnectMcpServerForProject!(input);
+      assert.equal(result.sessionsReconnected, 1);
+      assert.equal(result.failures[0]?.threadId, "dead-mcp");
+      assert.equal(reconnect.mock.calls.length, 1);
+      fake.hasSession.mockImplementation(() => Effect.succeed(false));
+      const empty = yield* service.readMcpSessionStatuses!({ ...input, desiredVersion: "desired" });
+      assert.equal(empty.sessions.length, 0);
+      assert.isUndefined(empty.selected);
+    }).pipe(Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", adapter]]))));
+  },
+);
+
+it.effect("times out a reconnect and releases the conversation gate for stopping", () => {
+  const fake = makeFakeCodexAdapter("claudeAgent");
+  fake.hasSession.mockImplementation(() => Effect.succeed(true));
+  return Effect.gen(function* () {
+    const entered = yield* Deferred.make<void>();
+    const adapter = {
+      ...fake.adapter,
+      getOwnedMcpServerNames: () => Effect.succeed(["docs"]),
+      reconnectMcpServer: () =>
+        Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
+    };
+    yield* Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const directory = yield* ProviderSessionDirectory;
+      const threadId = asThreadId("hung-reconnect"),
+        projectId = ProjectId.make("hung-reconnect-project");
+      yield* directory.upsert({
+        threadId,
+        projectId,
+        provider: "claudeAgent",
+        status: "running",
+        runtimePayload: { sessionGeneration: 1 },
+      });
+      const pending = yield* service.reconnectMcpServerForProject!({
+        provider: "claudeAgent",
+        projectId,
+        serverName: "docs",
+      }).pipe(Effect.forkChild);
+      yield* Deferred.await(entered);
+      yield* TestClock.adjust("11 seconds");
+      const result = yield* Fiber.join(pending);
+      assert.include(result.failures[0]?.message ?? "", "timed out");
+      yield* service.stopSession({ threadId });
+      assert.equal(fake.stopSession.mock.calls.length, 1);
+    }).pipe(
+      Effect.provide(makeProviderServiceLayerForAdapters(new Map([["claudeAgent", adapter]]))),
+    );
+  });
+});
+
+it.effect(
+  "drops an MCP event emitted by a superseded session instead of stamping it as current",
+  () => {
+    const fake = makeFakeCodexAdapter();
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const threadId = asThreadId("late-mcp");
+      const input = { threadId, provider: "codex" as const, runtimeMode: "full-access" as const };
+      yield* service.startSession(threadId, input);
+      yield* service.stopSession({ threadId });
+      yield* service.startSession(threadId, input);
+      const observed = yield* Stream.runHead(
+        Stream.filter(service.streamEvents, (event) => event.type === "mcp.status.updated"),
+      ).pipe(Effect.forkChild);
+      yield* sleep(20);
+      for (const generation of [1, 2])
+        fake.emit({
+          type: "mcp.status.updated",
+          eventId: asEventId(`late-mcp-${generation}`),
+          provider: "codex",
+          threadId,
+          createdAt: new Date().toISOString(),
+          payload: {
+            status: {
+              name: "docs",
+              status: "ready",
+              toolCount: generation,
+              providerInstanceId: ProviderInstanceId.make("codex"),
+              sessionGeneration: generation,
+            },
+          },
+        } as unknown as LegacyProviderRuntimeEvent);
+      const event = Option.getOrThrow(yield* Fiber.join(observed));
+      assert.equal(event.eventId, "late-mcp-2");
+      assert.equal(event.type, "mcp.status.updated");
+      if (event.type === "mcp.status.updated")
+        assert.equal(event.payload.status.sessionGeneration, 2);
+    }).pipe(
+      Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]))),
+    );
+  },
+);

@@ -765,7 +765,7 @@ const make = Effect.gen(function* () {
       );
 
       const currentProjectMcpSnapshot = project
-        ? yield* projectMcpConfigService.readEffectiveStoredConfig(project.id).pipe(
+        ? yield* projectMcpConfigService.readEffectiveRuntimeConfig(project.id).pipe(
             Effect.catch((error) =>
               Effect.logWarning("Could not read project MCP config", {
                 projectId: project.id,
@@ -2286,7 +2286,7 @@ const make = Effect.gen(function* () {
           if (cached) {
             return Effect.succeed(cached);
           }
-          return projectMcpConfigService.readEffectiveStoredConfig(projectId).pipe(
+          return projectMcpConfigService.readEffectiveRuntimeConfig(projectId).pipe(
             Effect.tap((resolved) =>
               Effect.sync(() => {
                 effectiveConfigCache.set(projectId, resolved);
@@ -2585,7 +2585,7 @@ const make = Effect.gen(function* () {
         const responseConfig =
           responseProjectId !== undefined
             ? yield* projectMcpConfigService
-                .readEffectiveStoredConfig(responseProjectId)
+                .readEffectiveRuntimeConfig(responseProjectId)
                 .pipe(Effect.catch(() => Effect.succeed(undefined)))
             : undefined;
 

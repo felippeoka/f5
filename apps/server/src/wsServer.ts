@@ -2,6 +2,12 @@ import {
   withProviderThreadAccess,
   tryWithProviderThreadAccess,
 } from "./provider/providerThreadAccess.ts";
+import { makeMcpSecretWriter } from "./mcp/McpSecretWriter.ts";
+import { McpServerWriteDefinition } from "@t3tools/contracts";
+import { makeMcpAccountExecutionResolver } from "./mcp/accountExecution.ts";
+import { detectMcpImports } from "./mcp/McpImportDetection.ts";
+import { probeMcpServer } from "./mcp/McpProbe.ts";
+import { resolveMcpSecrets } from "./mcp/McpSecretResolver.ts";
 import { OrchestrationCommandInvariantError } from "./orchestration/Errors.ts";
 import {
   WorkspaceRequiresNewWorktreeError,
@@ -1069,6 +1075,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   );
   const profileSecrets = yield* makeServerSecretStore.pipe(
     Effect.mapError((cause) => new ServerLifecycleError({ operation: "profiles.secrets", cause })),
+  );
+  const storeMcpSecret = yield* makeMcpSecretWriter(profileSecrets);
+  const resolveMcpFeatureExecution = yield* makeMcpAccountExecutionResolver.pipe(
+    Effect.provideService(ProjectionProjectRepository, projectionProjects),
   );
   const githubAccount = new ProfileGithubAccount(profileSecrets, fetch, serverConfig);
   const githubLogin = new GithubDeviceLogin(githubAccount, resolveGithubOAuthClientId(process.env));
@@ -3532,12 +3542,17 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     },
   >(
     body: T,
-  ): Promise<T> => {
+  ): Promise<
+    T & {
+      provider: import("@t3tools/contracts").ProviderKind;
+      instanceId: import("@t3tools/contracts").ProviderInstanceId;
+    }
+  > => {
     if (body.binaryPath !== undefined || body.homePath !== undefined)
       throw new Error(
         "Client-supplied provider executable and home paths are not accepted. Select a provider instance.",
       );
-    const { ProviderInstanceId } = await import("@t3tools/contracts");
+    const { ProviderInstanceId, isKnownProviderKind } = await import("@t3tools/contracts");
     const configured = deriveProviderInstanceConfigMap(
       await Effect.runPromise(serverSettings.getSettings),
     );
@@ -3556,8 +3571,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     const account = await accountService.resolve(ProviderInstanceId.make(selected));
     if (body.provider && body.provider !== account.instance.driver)
       throw new Error("Provider instance does not match the requested provider.");
+    const provider = account.instance.driver;
+    if (!isKnownProviderKind(provider))
+      throw new Error("This provider does not support MCP account operations.");
     return {
       ...body,
+      provider,
       instanceId: ProviderInstanceId.make(selected),
       ...(account.config.binaryPath ? { binaryPath: account.config.binaryPath } : {}),
       ...(account.config.homePath ? { homePath: account.config.homePath } : {}),
@@ -6741,6 +6760,125 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
               }),
           ),
         );
+      }
+
+      case WS_METHODS.mcpListImportCandidates: {
+        const requestBody = stripRequestTag(request.body);
+        const body = yield* profileCall(() => resolveMcpAccount(requestBody));
+        const execution = yield* resolveMcpFeatureExecution(body).pipe(
+          Effect.mapError((error) => new RouteRequestError({ message: error.message })),
+        );
+        return yield* profileCall(() =>
+          detectMcpImports({
+            environment: execution.environment,
+            ...(body.projectId ? { cwd: execution.cwd } : {}),
+          }),
+        );
+      }
+
+      case WS_METHODS.mcpProbeServer: {
+        const requestBody = stripRequestTag(request.body);
+        if (!Schema.is(McpServerWriteDefinition)(requestBody.server))
+          return yield* new RouteRequestError({
+            message: "Invalid MCP draft. Check the command, HTTP URL, and options.",
+          });
+        const body = yield* profileCall(() => resolveMcpAccount(requestBody));
+        const execution = yield* resolveMcpFeatureExecution(body).pipe(
+          Effect.mapError((error) => new RouteRequestError({ message: error.message })),
+        );
+        const resolved = yield* resolveMcpSecrets(
+          { [body.serverName]: body.server },
+          profileSecrets,
+        );
+        const server = resolved.servers[body.serverName];
+        if (!server)
+          return {
+            ok: false,
+            durationMs: 0,
+            tools: [],
+            toolsTruncated: false,
+            resourceCount: 0,
+            promptCount: 0,
+            authRequired: false,
+            error: resolved.issues[0]?.message ?? "Stored secret is unavailable.",
+          };
+        return yield* probeMcpServer({ ...body, server }, execution);
+      }
+
+      case WS_METHODS.mcpStoreSecret: {
+        const { value } = stripRequestTag(request.body);
+        return yield* storeMcpSecret(value).pipe(
+          Effect.mapError((error) => new RouteRequestError({ message: error.message })),
+        );
+      }
+
+      case WS_METHODS.mcpInspectServer: {
+        const requestBody = stripRequestTag(request.body);
+        const body = yield* profileCall(() => resolveMcpAccount(requestBody));
+        return yield* mcpRuntimeService
+          .inspectServer(body)
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+      }
+
+      case WS_METHODS.mcpReconnectServer: {
+        const requestBody = stripRequestTag(request.body);
+        const body = yield* profileCall(() => resolveMcpAccount(requestBody));
+        const targetResult =
+          body.provider === "codex" && providerService.getMcpReconnectTargets
+            ? yield* providerService
+                .getMcpReconnectTargets(body)
+                .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })))
+            : { threadIds: [], failures: [] };
+        const targets = targetResult.threadIds;
+        const result = yield* mcpRuntimeService
+          .reconnectServer(body)
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+        if (body.provider === "claudeAgent") return result;
+        if (targets.length === 0)
+          return yield* mcpRuntimeService
+            .sanitizeReconnectResult(body, {
+              ...result,
+              failures: [...result.failures, ...targetResult.failures],
+            })
+            .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+        const { providerCommandReactor } = yield* awaitOrchestrationRuntimeForRoute;
+        const applied = yield* providerCommandReactor
+          .applyMcpConfigToLiveSessions({
+            scope: "project",
+            projectId: body.projectId,
+            instanceId: body.instanceId,
+            threadIds: targets,
+            retryUnchanged: true,
+          })
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+        yield* codexMcpEventBus.publishStatusUpdated({
+          scope: "project",
+          projectId: body.projectId,
+          ...(body.instanceId ? { instanceId: body.instanceId } : {}),
+          reason: "reloaded",
+        });
+        const sessions = applied.sessions ?? [];
+        return yield* mcpRuntimeService
+          .sanitizeReconnectResult(body, {
+            ...result,
+            sessionsMatched: targets.length,
+            sessionsReconnected: sessions.filter((session) => session.disposition === "applied")
+              .length,
+            sessions,
+            failures: [
+              ...result.failures,
+              ...targetResult.failures,
+              ...sessions
+                .filter((session) => session.disposition !== "applied")
+                .map((session) => ({
+                  threadId: session.threadId,
+                  message:
+                    session.result.errors.map((error) => error.message).join("; ") ||
+                    session.disposition,
+                })),
+            ],
+          })
+          .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
       }
 
       case WS_METHODS.mcpStartLogin: {

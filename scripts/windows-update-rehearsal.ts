@@ -11,6 +11,7 @@
  */
 import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
+  cpSync,
   createWriteStream,
   existsSync,
   mkdirSync,
@@ -56,7 +57,9 @@ const localAppData = process.env.LOCALAPPDATA!;
 const userData = join(appData, "f5");
 const stateDir = join(homedir(), ".f5");
 const startMenuShortcut = join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "F5.lnk");
-const debugPort = 9333;
+// Each launch gets its own port: a socket inherited by the update installer can keep
+// the previous launch's port bound, and Chromium then starts without DevTools.
+let debugPort = 9332;
 const runtimes = ["node.exe", "bun.exe", "node.cmd", "bun.cmd"];
 const step = (message: string) => console.log(`[rehearsal] ${message}`);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -82,10 +85,17 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
+/**
+ * Any error fails loudly. Even a silenced non-terminating error (such as
+ * `Get-Process -Name x` finding nothing) makes powershell.exe exit 1, so
+ * queries must express "none found" without raising one.
+ */
 function powershell(script: string): string {
-  return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
-    encoding: "utf8",
-  }).trim();
+  return execFileSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", `$ErrorActionPreference = 'Stop'; ${script}`],
+    { encoding: "utf8" },
+  ).trim();
 }
 
 interface UninstallEntry {
@@ -96,7 +106,8 @@ interface UninstallEntry {
 }
 function uninstallEntry(): UninstallEntry | null {
   const json = powershell(
-    "Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match '^F5( \\d|$)' } | Select-Object DisplayName,DisplayVersion,UninstallString,PSPath | ConvertTo-Json -Compress",
+    // A fresh runner may have no per-user Uninstall key at all.
+    "$key = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall'; if (Test-Path $key) { Get-ChildItem $key | Get-ItemProperty | Where-Object { $_.DisplayName -match '^F5( \\d|$)' } | Select-Object DisplayName,DisplayVersion,UninstallString,PSPath | ConvertTo-Json -Compress }",
   );
   if (!json) return null;
   const parsed = JSON.parse(json) as UninstallEntry | UninstallEntry[];
@@ -177,7 +188,7 @@ async function hideRuntimes(): Promise<() => void> {
 /** No node.exe/bun.exe other than this script may run while F5 is under test. */
 function assertNoForeignRuntime(): void {
   const json = powershell(
-    `@(Get-Process -Name node,bun -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne ${process.pid} } | ForEach-Object { $_.Path }) | ConvertTo-Json -Compress`,
+    `@(Get-Process | Where-Object { $_.ProcessName -in 'node','bun' -and $_.Id -ne ${process.pid} } | ForEach-Object { $_.Path }) | ConvertTo-Json -Compress`,
   );
   const paths = json ? (JSON.parse(json) as string[] | string) : [];
   const list = (Array.isArray(paths) ? paths : [paths]).filter(Boolean);
@@ -187,6 +198,7 @@ function assertNoForeignRuntime(): void {
 let app: ChildProcess | null = null;
 function launch(exe: string, name: string): void {
   const log = createWriteStream(join(logDir, `${name}.log`));
+  debugPort += 1;
   app = spawn(exe, [`--remote-debugging-port=${debugPort}`], {
     env: applicationEnvironment(),
     stdio: ["ignore", "pipe", "pipe"],
@@ -200,7 +212,7 @@ function stopApplication(): void {
 }
 function f5ProcessIds(): number[] {
   const json = powershell(
-    "@(Get-Process -Name F5 -ErrorAction SilentlyContinue | ForEach-Object { $_.Id }) | ConvertTo-Json -Compress",
+    "@(Get-Process | Where-Object { $_.ProcessName -eq 'F5' } | ForEach-Object { $_.Id }) | ConvertTo-Json -Compress",
   );
   if (!json) return [];
   const ids = JSON.parse(json) as number[] | number;
@@ -287,7 +299,13 @@ async function download(mode: FeedMode): Promise<DesktopUpdateState> {
   await evaluate("window.desktopBridge.downloadUpdate().catch(() => null)");
   return settled(`${mode} download`, ["downloading"]);
 }
-/** Invokes a button in a native dialog owned by an F5 process via UI Automation. */
+/**
+ * Invokes a button in a native dialog owned by an F5 process via UI Automation.
+ * Only message boxes (window class #32770) are searched, so a same-named button
+ * in the renderer's accessibility tree can never be pressed instead. An owned
+ * message box appears under its owner window rather than at the top level, so
+ * each F5 window is searched as well. On timeout the window tree is printed.
+ */
 function pressDialogButton(name: string, timeoutSeconds: number): boolean {
   const result = spawnSync(
     "powershell.exe",
@@ -297,27 +315,79 @@ function pressDialogButton(name: string, timeoutSeconds: number): boolean {
       "-Command",
       `
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+$A = [System.Windows.Automation.AutomationElement]
+$Scope = [System.Windows.Automation.TreeScope]
+$messageBox = New-Object System.Windows.Automation.PropertyCondition($A::ClassNameProperty, '#32770')
+# Task dialog buttons are exposed as Pane elements of these classes, not as Buttons.
+$buttonClasses = @('CCPushButton', 'CCCommandLink', 'Button')
+Add-Type -Namespace F5Rehearsal -Name Input -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+[DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
+'@
+function Press($dialog, $target) {
+  $invoke = $null
+  if ($target.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke)) {
+    $invoke.Invoke()
+    'pressed via Invoke'
+    return
+  }
+  'pressed via mouse click'
+  [F5Rehearsal.Input]::SetForegroundWindow([IntPtr]$dialog.Current.NativeWindowHandle) | Out-Null
+  Start-Sleep -Milliseconds 200
+  $r = $target.Current.BoundingRectangle
+  [F5Rehearsal.Input]::SetCursorPos([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2)) | Out-Null
+  [F5Rehearsal.Input]::mouse_event(0x2, 0, 0, 0, [UIntPtr]::Zero)
+  [F5Rehearsal.Input]::mouse_event(0x4, 0, 0, 0, [UIntPtr]::Zero)
+}
+function F5Windows {
+  $ids = @(Get-Process | Where-Object { $_.ProcessName -eq 'F5' } | ForEach-Object { $_.Id })
+  @($A::RootElement.FindAll($Scope::Children, [System.Windows.Automation.Condition]::TrueCondition) | Where-Object { $ids -contains $_.Current.ProcessId })
+}
 $deadline = (Get-Date).AddSeconds(${timeoutSeconds})
 while ((Get-Date) -lt $deadline) {
-  $ids = @(Get-Process -Name F5 -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
-  foreach ($window in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
-    if ($ids -notcontains $window.Current.ProcessId) { continue }
-    foreach ($button in $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)))) {
-      if ($button.Current.Name -like '${name}*') {
-        $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-        exit 0
+  foreach ($window in F5Windows) {
+    $dialogs = if ($window.Current.ClassName -eq '#32770') { @($window) } else { @($window.FindAll($Scope::Descendants, $messageBox)) }
+    foreach ($dialog in $dialogs) {
+      foreach ($candidate in $dialog.FindAll($Scope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+        if ($buttonClasses -contains $candidate.Current.ClassName -and $candidate.Current.Name -like '${name}*') {
+          Press $dialog $candidate
+          $handle = $dialog.Current.NativeWindowHandle
+          $closeBy = (Get-Date).AddSeconds(10)
+          while ((Get-Date) -lt $closeBy) {
+            $open = $A::RootElement.FindAll($Scope::Descendants, $messageBox) | Where-Object { $_.Current.NativeWindowHandle -eq $handle }
+            if (-not $open) { exit 0 }
+            Start-Sleep -Milliseconds 250
+          }
+          [Console]::Error.WriteLine("Pressed '${name}' but the message box stayed open")
+          exit 4
+        }
       }
     }
   }
   Start-Sleep -Milliseconds 500
+}
+foreach ($window in F5Windows) {
+  [Console]::Error.WriteLine("window pid=$($window.Current.ProcessId) class=$($window.Current.ClassName) name=$($window.Current.Name)")
+  foreach ($child in $window.FindAll($Scope::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+    [Console]::Error.WriteLine("  child class=$($child.Current.ClassName) type=$($child.Current.ControlType.ProgrammaticName) name=$($child.Current.Name)")
+  }
 }
 exit 3
 `,
     ],
     { encoding: "utf8" },
   );
-  if (result.status === 0) return true;
-  if (result.status === 3) return false;
+  if (result.status === 0) {
+    step(`"${name}" ${result.stdout.trim()}`);
+    return true;
+  }
+  if (result.status === 3) {
+    step(
+      `No "${name}" button in an F5 message box. F5 windows:\n${result.stderr.trim() || "(none)"}`,
+    );
+    return false;
+  }
   throw new Error(`UI Automation failed: ${result.stderr || result.error}`);
 }
 /**
@@ -332,6 +402,42 @@ async function answerInstall(button: "Cancel" | "Restart to update"): Promise<vo
     step(`No restart confirmation appeared (attempt ${attempt}); retrying`);
   }
   throw new Error(`Dialog button not found: ${button}`);
+}
+
+/** Records why F5 stopped responding: live processes, the debug port, crash reports. */
+function writeDiagnostics(): void {
+  const crashpad = join(appData, "f5", "Crashpad").replace(/'/g, "''");
+  const script = `
+$ErrorActionPreference = 'Continue'
+'== F5 processes'
+Get-CimInstance Win32_Process -Filter "Name = 'F5.exe'" | ForEach-Object { "$($_.ProcessId) parent=$($_.ParentProcessId) $($_.CommandLine)" }
+'== F5 windows'
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+$f5 = @(Get-Process | Where-Object { $_.ProcessName -eq 'F5' } | ForEach-Object { $_.Id })
+foreach ($window in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+  if ($f5 -notcontains $window.Current.ProcessId) { continue }
+  "pid=$($window.Current.ProcessId) class=$($window.Current.ClassName) name=$($window.Current.Name)"
+  if ($window.Current.ClassName -eq '#32770') {
+    foreach ($child in $window.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) { "  $($child.Current.Name)" }
+  }
+}
+'== Port ${debugPort}'
+Get-NetTCPConnection -LocalPort ${debugPort} -ErrorAction SilentlyContinue | ForEach-Object { "$($_.State) pid=$($_.OwningProcess)" }
+'== Application errors (last 30 minutes)'
+Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = (Get-Date).AddMinutes(-30) } -ErrorAction SilentlyContinue | Where-Object { $_.ProviderName -in 'Application Error', 'Windows Error Reporting', '.NET Runtime' } | ForEach-Object { "[$($_.TimeCreated)] $($_.ProviderName): $($_.Message)" }
+'== Crashpad'
+if (Test-Path '${crashpad}') { Get-ChildItem -Recurse '${crashpad}' | ForEach-Object { "$($_.LastWriteTime) $($_.Length) $($_.FullName)" } }
+`;
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", script],
+    {
+      encoding: "utf8",
+    },
+  );
+  const report = `${result.stdout}\n${result.stderr}`;
+  writeFileSync(join(logDir, "diagnostics.log"), report);
+  console.log(report);
 }
 
 function listFiles(root: string, prefix = ""): string[] {
@@ -383,7 +489,10 @@ try {
     join(stateDir, "userdata", "settings.json"),
     JSON.stringify({
       providers: Object.fromEntries(
-        ["codex", "claude", "cursor", "opencode", "grok"].map((id) => [id, { enabled: false }]),
+        ["codex", "claudeAgent", "cursor", "opencode", "grok", "antigravity", "muse"].map((id) => [
+          id,
+          { enabled: false },
+        ]),
       ),
       prHub: { pollIntervalSeconds: 0, discoverNotifications: false },
     }),
@@ -547,9 +656,16 @@ try {
   for (const marker of [join(stateDir, "rehearsal-marker"), join(userData, "rehearsal-marker")])
     assert(existsSync(marker), `Uninstall removed user data: ${marker}`);
   step("Windows update rehearsal passed");
+} catch (error) {
+  step(`Failed: ${String(error)}`);
+  writeDiagnostics();
+  throw error;
 } finally {
   if (app) stopApplication();
   restoreRuntimes?.();
+  // Packaged builds log to files rather than stdout.
+  const appLogs = join(stateDir, "userdata", "logs");
+  if (existsSync(appLogs)) cpSync(appLogs, join(logDir, "app"), { recursive: true });
   writeFileSync(join(logDir, "feed-requests.log"), feed.requests.join("\n") + "\n");
   await feed.close();
 }

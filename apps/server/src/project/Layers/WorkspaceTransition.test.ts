@@ -10,6 +10,7 @@ import { makeWorktreeManager } from "./WorktreeManager.ts";
 import { ProfileRegistryStore } from "../../profiles/ProfileRegistryStore.ts";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { canonicalWorktreePath } from "../../git/worktreePaths.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CommandId,
@@ -362,9 +363,13 @@ describe("workspace transition execution", { timeout: 60_000 }, () => {
   it("recovers a partial Git outcome only after preview and rejects stale acceptance tokens", async () => {
     const f = await fixture();
     const request = await f.request("checkout_branch", { branch: "topic" });
-    const repository = git(f.repo.root, "rev-parse", "--path-format=absolute", "--git-common-dir");
+    // Canonicalize exactly as the transition does; raw Git output differs on Windows
+    // (forward slashes, 8.3 short names), which would read as a repository change.
+    const repository = await canonicalWorktreePath(
+      git(f.repo.root, "rev-parse", "--path-format=absolute", "--git-common-dir"),
+    );
     const source = {
-      path: await fs.realpath(f.repo.root),
+      path: await canonicalWorktreePath(f.repo.root),
       repository,
       branch: "main",
       headSha: git(f.repo.root, "rev-parse", "HEAD"),

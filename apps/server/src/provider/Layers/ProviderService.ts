@@ -1,3 +1,4 @@
+import { resolveOwnedMcpServerName } from "../mcpObservation.ts";
 import { carryPreparedComputerEvidence } from "../prepareAutomationRuntimeEvent";
 import { resolveBindingInstanceId } from "../bindingIdentity.ts";
 import { makeOperationGate } from "../operationGate.ts";
@@ -67,6 +68,7 @@ import {
   type ProviderSession,
   type McpReloadResult,
   type McpSessionReloadOutcome,
+  type McpSessionSummary,
   PROVIDER_DISPLAY_NAMES,
   TrimmedNonEmptyString,
 } from "@t3tools/contracts";
@@ -135,6 +137,7 @@ import {
   readPersistedCwd,
   readPersistedInstructionContext,
   readPersistedProviderOptions,
+  readPersistedUnconvergedMcpConfigVersion,
   readPersistedRuntimePayloadRecord,
   readPersistedStartConfig,
   sanitizeProviderOptionsForPersistence,
@@ -483,19 +486,55 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       );
     };
 
+    const sessionEventIdentities = new Map<
+      ThreadId,
+      { instanceId: ProviderInstanceId; generation: number }
+    >();
+    const currentMcpIdentity = (threadId: ThreadId) => {
+      const starting = startingSessions.get(threadId);
+      return starting?.session.providerInstanceId
+        ? { instanceId: starting.session.providerInstanceId, generation: starting.generation }
+        : sessionEventIdentities.get(threadId);
+    };
+    // Legacy adapters are stamped at admission, never after waiting in the service queue.
+    const stampMcpEventAtAdmission = (
+      event: ProviderRuntimeEvent,
+      source: ProviderInstanceId,
+    ): ProviderRuntimeEvent => {
+      if (event.type !== "mcp.status.updated") return event;
+      const identity = currentMcpIdentity(event.threadId);
+      if (!identity || identity.instanceId !== source) return event;
+      return {
+        ...event,
+        payload: {
+          status: {
+            ...event.payload.status,
+            providerInstanceId: event.payload.status.providerInstanceId ?? source,
+            sessionGeneration: event.payload.status.sessionGeneration ?? identity.generation,
+          },
+        },
+      };
+    };
     const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-      Effect.succeed(event).pipe(
-        Effect.tap((canonicalEvent) =>
-          canonicalEventLogger
-            ? canonicalEventLogger.write(
-                automationEventSanitizer.sanitize(canonicalEvent.threadId, canonicalEvent),
-                null,
-              )
-            : Effect.void,
-        ),
-        Effect.flatMap((canonicalEvent) => PubSub.publish(runtimeEventPubSub, canonicalEvent)),
-        Effect.asVoid,
-      );
+      Effect.gen(function* () {
+        if (event.type === "mcp.status.updated") {
+          const identity = currentMcpIdentity(event.threadId);
+          const stamp = event.payload.status;
+          if (
+            stamp.sessionGeneration !== undefined &&
+            (!identity ||
+              stamp.sessionGeneration !== identity.generation ||
+              stamp.providerInstanceId !== identity.instanceId)
+          )
+            return;
+        }
+        if (canonicalEventLogger)
+          yield* canonicalEventLogger.write(
+            automationEventSanitizer.sanitize(event.threadId, event),
+            null,
+          );
+        yield* PubSub.publish(runtimeEventPubSub, event);
+      });
 
     const upsertSessionBinding = (
       session: ProviderSession,
@@ -510,28 +549,43 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         readonly sessionGeneration?: number;
       },
     ) =>
-      directory.upsert({
-        threadId,
-        ...(extra?.projectId !== undefined ? { projectId: extra.projectId } : {}),
-        provider: session.provider,
-        providerInstanceId:
-          session.providerInstanceId ??
-          defaultInstanceIdForDriver(ProviderDriverKind.make(session.provider)),
-        runtimeMode: session.runtimeMode,
-        status: toRuntimeStatus(session),
-        ...(extra?.mcpEffectiveConfigVersion !== undefined
-          ? { mcpEffectiveConfigVersion: extra.mcpEffectiveConfigVersion }
-          : {}),
-        ...(extra?.launchFingerprint !== undefined
-          ? { launchFingerprint: extra.launchFingerprint }
-          : {}),
-        ...(session.resumeCursor !== undefined
-          ? { resumeCursor: session.resumeCursor }
-          : extra?.clearMissingResumeCursor
-            ? { resumeCursor: null }
+      directory
+        .upsert({
+          threadId,
+          ...(extra?.projectId !== undefined ? { projectId: extra.projectId } : {}),
+          provider: session.provider,
+          providerInstanceId:
+            session.providerInstanceId ??
+            defaultInstanceIdForDriver(ProviderDriverKind.make(session.provider)),
+          runtimeMode: session.runtimeMode,
+          status: toRuntimeStatus(session),
+          ...(extra?.mcpEffectiveConfigVersion !== undefined
+            ? { mcpEffectiveConfigVersion: extra.mcpEffectiveConfigVersion }
             : {}),
-        runtimePayload: toRuntimePayloadFromSession(session, extra),
-      });
+          ...(extra?.launchFingerprint !== undefined
+            ? { launchFingerprint: extra.launchFingerprint }
+            : {}),
+          ...(session.resumeCursor !== undefined
+            ? { resumeCursor: session.resumeCursor }
+            : extra?.clearMissingResumeCursor
+              ? { resumeCursor: null }
+              : {}),
+          runtimePayload: toRuntimePayloadFromSession(session, extra),
+        })
+        .pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              if (extra?.sessionGeneration !== undefined)
+                sessionEventIdentities.set(threadId, {
+                  instanceId:
+                    session.providerInstanceId ??
+                    defaultInstanceIdForDriver(ProviderDriverKind.make(session.provider)),
+                  generation: extra.sessionGeneration,
+                });
+              if (session.status === "closed") sessionEventIdentities.delete(threadId);
+            }),
+          ),
+        );
 
     const readExecutableVersion = (instanceId: ProviderInstanceId) =>
       Option.match(providerRegistry, {
@@ -823,7 +877,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           yield* Stream.runForEach(adapter.streamEvents, (event) =>
             Queue.offer(runtimeEventQueue, {
               source: { instanceId, provider: adapter.provider },
-              event,
+              event: stampMcpEventAtAdmission(event, instanceId),
             }).pipe(Effect.asVoid),
           ).pipe(Effect.forkScoped);
         }
@@ -892,7 +946,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         const resolvedProjectMcp =
           input.binding.projectId !== undefined && input.binding.projectId !== null
             ? yield* projectMcpConfigService
-                .readEffectiveStoredConfig(input.binding.projectId)
+                .readEffectiveRuntimeConfig(input.binding.projectId)
                 .pipe(
                   Effect.mapError(
                     toProjectMcpProviderError(
@@ -1042,6 +1096,10 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 "A native operation is pending; session recovery is unavailable.",
               );
             const resumed = yield* adapter.startSession({
+              mcpEventIdentity: {
+                providerInstanceId: bindingInstanceId,
+                sessionGeneration: resumedGeneration,
+              },
               threadId: input.binding.threadId,
               ...(input.binding.projectId ? { projectId: input.binding.projectId } : {}),
               provider: input.binding.provider,
@@ -1390,7 +1448,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           const resolvedProjectMcp =
             input.projectId !== undefined
               ? yield* projectMcpConfigService
-                  .readEffectiveStoredConfig(input.projectId)
+                  .readEffectiveRuntimeConfig(input.projectId)
                   .pipe(
                     Effect.mapError(
                       toProjectMcpProviderError("ProviderService.startSession", input.projectId),
@@ -1451,7 +1509,10 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               providerInstanceId: requestedInstanceId,
             },
             Effect.gen(function* () {
-              const session = yield* adapter.startSession(adapterInput);
+              const session = yield* adapter.startSession({
+                ...adapterInput,
+                mcpEventIdentity: { providerInstanceId: requestedInstanceId, sessionGeneration },
+              });
               if (session.provider !== adapter.provider) {
                 return yield* toValidationError(
                   "ProviderService.startSession",
@@ -2360,6 +2421,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               yield* Deferred.succeed(completion.done, undefined);
               submissionCompletions.delete(id);
             }
+          sessionEventIdentities.delete(input.threadId);
           yield* analytics.record("provider.session.stopped", {
             provider: routed.adapter.provider,
           });
@@ -2705,6 +2767,269 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         })),
       );
 
+    const hasLiveMcpSession = (binding: ProviderRuntimeBinding) =>
+      registry.getByInstance(resolveBindingInstanceId(binding)).pipe(
+        Effect.flatMap((adapter) => adapter.hasSession(binding.threadId)),
+        Effect.orElseSucceed(() => false),
+      );
+    const readMcpScopeBindings = (input: {
+      projectId: ProjectId;
+      provider: ProviderKind;
+      instanceId?: ProviderInstanceId | undefined;
+    }) =>
+      directory
+        .listBindingsByProject(input.projectId)
+        .pipe(
+          Effect.map((bindings) =>
+            bindings.filter(
+              (binding) =>
+                binding.provider === input.provider &&
+                binding.status === "running" &&
+                (!input.instanceId || resolveBindingInstanceId(binding) === input.instanceId),
+            ),
+          ),
+        );
+
+    const readMcpSessionStatuses: NonNullable<ProviderServiceShape["readMcpSessionStatuses"]> = (
+      input,
+    ) =>
+      Effect.gen(function* () {
+        const bindings = yield* readMcpScopeBindings(input).pipe(
+          Effect.flatMap((bindings) => Effect.filter(bindings, hasLiveMcpSession)),
+        );
+        const sessions: McpSessionSummary[] = bindings
+          .map((binding) => ({
+            threadId: binding.threadId,
+            instanceId: resolveBindingInstanceId(binding),
+            generation: readPersistedSessionGeneration(binding.runtimePayload),
+            lastSeenAt: binding.lastSeenAt,
+            busy: Boolean(
+              binding.runtimePayload &&
+              typeof binding.runtimePayload === "object" &&
+              "activeTurnId" in binding.runtimePayload &&
+              binding.runtimePayload.activeTurnId,
+            ),
+            ...(binding.mcpEffectiveConfigVersion
+              ? { appliedVersion: binding.mcpEffectiveConfigVersion }
+              : {}),
+            ...(readPersistedUnconvergedMcpConfigVersion(binding.runtimePayload)
+              ? {
+                  unconvergedVersion: readPersistedUnconvergedMcpConfigVersion(
+                    binding.runtimePayload,
+                  )!,
+                }
+              : {}),
+          }))
+          .toSorted(
+            (a, b) =>
+              Number(b.appliedVersion === input.desiredVersion) -
+                Number(a.appliedVersion === input.desiredVersion) ||
+              b.lastSeenAt.localeCompare(a.lastSeenAt),
+          );
+        const selected = input.threadId
+          ? sessions.find((session) => session.threadId === input.threadId)
+          : sessions[0];
+        if (input.threadId && !selected)
+          return yield* toValidationError(
+            "mcp.status",
+            "The conversation is not running in this project and account.",
+          );
+        if (!selected) return { sessions };
+        const matches = (binding: ProviderRuntimeBinding | undefined) =>
+          binding?.projectId === input.projectId &&
+          binding.provider === input.provider &&
+          binding.status === "running" &&
+          resolveBindingInstanceId(binding) === selected.instanceId &&
+          readPersistedSessionGeneration(binding.runtimePayload) === selected.generation;
+        const adapter = yield* withSessionOperation(
+          selected.threadId,
+          Effect.gen(function* () {
+            const binding = Option.getOrUndefined(yield* directory.getBinding(selected.threadId));
+            if (!matches(binding))
+              return yield* toValidationError(
+                "mcp.status",
+                "The MCP observation was superseded. Refresh to observe the current session.",
+              );
+            return yield* registry.getByInstance(selected.instanceId);
+          }),
+        );
+        if (!adapter.getMcpServerStatuses)
+          return {
+            sessions,
+            selected,
+            observation: {
+              servers: [],
+              complete: false,
+              omissions: ["This provider runtime cannot report MCP status."],
+              capabilities: { tools: false, inputSchemas: false, resources: false },
+            },
+          };
+        // Never hold the lifecycle gate across read I/O; replacement must remain possible.
+        const observation = yield* adapter.getMcpServerStatuses(selected.threadId);
+        yield* withSessionOperation(
+          selected.threadId,
+          Effect.gen(function* () {
+            const binding = Option.getOrUndefined(yield* directory.getBinding(selected.threadId));
+            if (
+              !matches(binding) ||
+              (binding?.mcpEffectiveConfigVersion ?? undefined) !== selected.appliedVersion
+            )
+              return yield* toValidationError(
+                "mcp.status",
+                "The MCP observation was superseded. Refresh to observe the current session.",
+              );
+          }),
+        );
+        return { sessions, selected, observation };
+      });
+
+    const getMcpReconnectTargets: NonNullable<ProviderServiceShape["getMcpReconnectTargets"]> = (
+      input,
+    ) =>
+      Effect.gen(function* () {
+        const bindings = yield* readMcpScopeBindings(input);
+        if (
+          input.threadIds?.some(
+            (threadId) => !bindings.some((binding) => binding.threadId === threadId),
+          )
+        )
+          return yield* toValidationError(
+            "mcp.reconnect",
+            "Every conversation must be running in the selected project and account.",
+          );
+        const targets: ThreadId[] = [];
+        const failures: Array<{ threadId: ThreadId; message: string }> = [];
+        for (const binding of bindings) {
+          if (input.threadIds && !input.threadIds.includes(binding.threadId)) continue;
+          const result = yield* Effect.gen(function* () {
+            const adapter = yield* registry.getByInstance(resolveBindingInstanceId(binding));
+            if (!(yield* adapter.hasSession(binding.threadId)))
+              return yield* toValidationError(
+                "mcp.reconnect",
+                "This conversation no longer has a running provider session; it will connect when a session starts.",
+              );
+            const owned = adapter.getOwnedMcpServerNames
+              ? yield* adapter.getOwnedMcpServerNames(binding.threadId)
+              : [];
+            return resolveOwnedMcpServerName(owned, input.serverName, input.provider);
+          }).pipe(Effect.result);
+          if (result._tag === "Failure")
+            failures.push({ threadId: binding.threadId, message: result.failure.message });
+          else if (result.success) targets.push(binding.threadId);
+        }
+        return { threadIds: targets, failures };
+      });
+
+    const reconnectMcpServerForProject: NonNullable<
+      ProviderServiceShape["reconnectMcpServerForProject"]
+    > = (input) =>
+      Effect.gen(function* () {
+        const bindings = yield* readMcpScopeBindings(input);
+        if (
+          input.threadIds?.some(
+            (threadId) => !bindings.some((binding) => binding.threadId === threadId),
+          )
+        )
+          return yield* toValidationError(
+            "mcp.reconnect",
+            "Every conversation must be running in the selected project and account.",
+          );
+        const targets = bindings.filter(
+          (binding) => !input.threadIds || input.threadIds.includes(binding.threadId),
+        );
+        const failures: Array<{ threadId: ThreadId; message: string }> = [];
+        let matched = 0;
+        let reconnected = 0;
+        const sessions: McpSessionReloadOutcome[] = [];
+        yield* Effect.forEach(
+          targets,
+          (target) =>
+            Effect.gen(function* () {
+              const result = yield* withSessionOperation(
+                target.threadId,
+                Effect.gen(function* () {
+                  const current = Option.getOrUndefined(
+                    yield* directory.getBinding(target.threadId),
+                  );
+                  if (
+                    !current ||
+                    current.status !== "running" ||
+                    current.projectId !== input.projectId ||
+                    current.provider !== input.provider ||
+                    resolveBindingInstanceId(current) !== resolveBindingInstanceId(target) ||
+                    readPersistedSessionGeneration(current.runtimePayload) !==
+                      readPersistedSessionGeneration(target.runtimePayload)
+                  )
+                    return yield* toValidationError(
+                      "mcp.reconnect",
+                      "The session was replaced before reconnect.",
+                    );
+                  const adapter = yield* registry.getByInstance(resolveBindingInstanceId(target));
+                  if (!(yield* adapter.hasSession(target.threadId)))
+                    return yield* toValidationError(
+                      "mcp.reconnect",
+                      "This conversation no longer has a running provider session; it will connect when a session starts.",
+                    );
+                  const owned = adapter.getOwnedMcpServerNames
+                    ? yield* adapter.getOwnedMcpServerNames(target.threadId)
+                    : [];
+                  const serverName = resolveOwnedMcpServerName(
+                    owned,
+                    input.serverName,
+                    input.provider,
+                  );
+                  if (!adapter.reconnectMcpServer || !serverName) return false;
+                  const result = yield* adapter
+                    .reconnectMcpServer({
+                      threadId: target.threadId,
+                      serverName,
+                    })
+                    .pipe(Effect.timeoutOption("10 seconds"));
+                  if (Option.isNone(result))
+                    return yield* toValidationError(
+                      "mcp.reconnect",
+                      "MCP reconnect timed out. Try Reconnect again or stop the conversation.",
+                    );
+                  return result.value;
+                }),
+              ).pipe(Effect.result);
+              if (result._tag === "Failure" || result.success)
+                sessions.push({
+                  threadId: target.threadId,
+                  instanceId: resolveBindingInstanceId(target),
+                  generation: readPersistedSessionGeneration(target.runtimePayload),
+                  requestedVersion: target.mcpEffectiveConfigVersion ?? "",
+                  attemptedVersion: target.mcpEffectiveConfigVersion ?? "",
+                  disposition: result._tag === "Failure" ? "failed" : "applied",
+                  result: {
+                    converged: result._tag === "Success",
+                    restartRequired: false,
+                    servers: [],
+                    errors:
+                      result._tag === "Failure"
+                        ? [{ server: input.serverName, message: result.failure.message }]
+                        : [],
+                  },
+                });
+              if (result._tag === "Failure") {
+                matched++;
+                failures.push({ threadId: target.threadId, message: result.failure.message });
+              } else if (result.success) {
+                matched++;
+                reconnected++;
+              }
+            }),
+          { concurrency: 4 },
+        );
+        return {
+          settingsConnectionReloaded: false,
+          sessionsMatched: matched,
+          sessionsReconnected: reconnected,
+          failures,
+          sessions,
+        };
+      });
+
     // A newer reconciliation supersedes sleeping retries even within the same generation.
     const mcpReloadAttempts = new Map<ThreadId, symbol>();
     const reloadMcpConfigForProject: ProviderServiceShape["reloadMcpConfigForProject"] = (input) =>
@@ -2767,7 +3092,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 );
                 if (!adapter?.reloadMcpConfig) return { sessions: [] };
                 const config = yield* projectMcpConfigService
-                  .readEffectiveStoredConfig(input.projectId)
+                  .readEffectiveRuntimeConfig(input.projectId)
                   .pipe(Effect.result);
                 if (config._tag === "Failure")
                   return {
@@ -2979,6 +3304,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           ),
         ).pipe(Effect.asVoid);
         submissionTokens.clear();
+        sessionEventIdentities.clear();
         for (const completion of submissionCompletions.values())
           yield* Deferred.succeed(completion.done, undefined);
         submissionCompletions.clear();
@@ -3022,6 +3348,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         Effect.ensuring(
           Effect.gen(function* () {
             submissionTokens.clear();
+            sessionEventIdentities.clear();
             for (const completion of submissionCompletions.values())
               yield* Deferred.fail(
                 completion.done,
@@ -3119,6 +3446,9 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       runOneOffPrompt,
       compactConversation,
       reloadMcpConfigForProject,
+      readMcpSessionStatuses,
+      getMcpReconnectTargets,
+      reconnectMcpServerForProject,
       // Each access creates a fresh PubSub subscription so that multiple
       // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
       // independently receive all runtime events.
