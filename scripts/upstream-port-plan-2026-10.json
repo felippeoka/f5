@@ -7230,12 +7230,20 @@
     {
       "upstreamSha": "4d7683557ad4a2411d6de405e500e4a56b43d0e1",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(pi): load T3 tool schemas for completion gateways (#18643).",
+      "reason": "Planned: partial implementation and focused evidence exist for completion-gateway schemas and active-tool exclusions in the executable MCP extension fixture; full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): load T3 tool schemas for completion gateways (#18643).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-18643"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": [
+        "165260f3602ea67865002372c2c579bca63e52e6",
+        "afc90b20382bc63045665a054a3159710e1862fc"
+      ],
+      "evidence": [
+        "docs/reviews/upstream-october-review-response.md:941",
+        "apps/server/src/provider/pi/mcpExtensionSource.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "9a9fd2e3ed613275b0c1fdf356def2230480c47e",
@@ -7588,7 +7596,7 @@
     {
       "upstreamSha": "5753207d53362608f281738eda3a9faf4e13b6be",
       "classification": "deferred",
-      "reason": "Deferred: retain for individual source and scenario review in apps/desktop/src/app/DesktopEarlyElectronStartup.test.ts, apps/desktop/src/app/DesktopEarlyElectronStartup.ts; no implementation or maintenance equivalence is claimed. Upstream change: fix(desktop): avoid Hyprland 0.48–0.50 Wayland color-manager startup crashes (#18566).",
+      "reason": "Deferred: retain for individual source and scenario review in apps/desktop/src/app/DesktopEarlyElectronStartup.test.ts, apps/desktop/src/app/DesktopEarlyElectronStartup.ts; no implementation or maintenance equivalence is claimed. Upstream change: fix(desktop): avoid Hyprland 0.48\u20130.50 Wayland color-manager startup crashes (#18566).",
       "reviewStatus": "reviewed"
     },
     {
@@ -8980,12 +8988,20 @@
     {
       "upstreamSha": "5f7294d452a5c6d6e0b7bd2c992478f830fbe212",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(pi): allow known read-only T3 tools without approval (#17852).",
+      "reason": "Planned: partial implementation and focused evidence exist for verified read-only tool exemptions and mutation blocking in read-only workflows; full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): allow known read-only T3 tools without approval (#17852).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-17852"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": [
+        "165260f3602ea67865002372c2c579bca63e52e6",
+        "afc90b20382bc63045665a054a3159710e1862fc"
+      ],
+      "evidence": [
+        "docs/reviews/upstream-october-review-response.md:941",
+        "apps/server/src/provider/pi/mcpExtensionSource.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "953edeec9dcddd7afc582926eb1b65cfd82dc784",
@@ -9030,52 +9046,91 @@
     {
       "upstreamSha": "6e9c5a851c92c52e2f4a8a80c655e60db133f9ac",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(pi): expire and cancel extension approvals (#17840).",
+      "reason": "Planned: partial implementation and focused evidence exist for one-shot, generation-fenced approvals with native expiry and cancellation; full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): expire and cancel extension approvals (#17840).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-17840"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": [
+        "165260f3602ea67865002372c2c579bca63e52e6",
+        "afc90b20382bc63045665a054a3159710e1862fc"
+      ],
+      "evidence": [
+        "docs/reviews/upstream-october-review-response.md:941",
+        "apps/server/src/provider/pi/PiUiRequests.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "62da1cd48bb43def11a79cd6aa033dbc478e4dfd",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(pi): preserve shell command exit codes (#17834).",
+      "reason": "Planned: partial implementation and focused evidence exist for original shell exit codes and separate transport and semantic outcomes; full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): preserve shell command exit codes (#17834).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-17834"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": [
+        "165260f3602ea67865002372c2c579bca63e52e6",
+        "afc90b20382bc63045665a054a3159710e1862fc"
+      ],
+      "evidence": [
+        "docs/reviews/upstream-october-review-response.md:941",
+        "apps/server/src/provider/pi/PiToolOutput.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "160b18c8667f8370f46708d273d368648316b200",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(pi): keep thinking defaults specific to each model (#17835).",
+      "reason": "Planned: partial implementation and focused evidence exist for qualified model discovery, model-specific thinking defaults and native selection read-back; full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): keep thinking defaults specific to each model (#17835).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-17835"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": [
+        "165260f3602ea67865002372c2c579bca63e52e6",
+        "afc90b20382bc63045665a054a3159710e1862fc"
+      ],
+      "evidence": [
+        "docs/reviews/upstream-october-review-response.md:941",
+        "apps/server/src/provider/pi/thinkingCapabilities.test.ts:1",
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "7e8071f1f1566220fb52cbfaaf97a2bc4e93a193",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(pi): preserve native abort outcomes (#17853).",
+      "reason": "Planned: partial implementation and focused evidence exist for native abort, failed prompt acknowledgement and owned settlement outcomes; full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): preserve native abort outcomes (#17853).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-17853"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": [
+        "165260f3602ea67865002372c2c579bca63e52e6",
+        "afc90b20382bc63045665a054a3159710e1862fc"
+      ],
+      "evidence": [
+        "docs/reviews/upstream-october-review-response.md:941",
+        "apps/server/src/provider/pi/PiTurnState.test.ts:1",
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "e408cac0d7d903ccfcecfb906d4e48292294ab55",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: docs(pi): update installation and remote login guidance (#17836).",
+      "reason": "Planned: partial implementation and focused evidence exist for explicit-instance Pi installation, terminal login and remote authorization documentation; full 15l delivery and required release gates remain deferred. Upstream change: docs(pi): update installation and remote login guidance (#17836).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-17836"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": [
+        "165260f3602ea67865002372c2c579bca63e52e6",
+        "afc90b20382bc63045665a054a3159710e1862fc"
+      ],
+      "evidence": ["docs/reviews/upstream-october-review-response.md:941", "docs/providers/pi.md:1"]
     },
     {
       "upstreamSha": "c8b89a01d70fd54cbc6b6a70ba0fdff702b821aa",
@@ -9112,12 +9167,21 @@
     {
       "upstreamSha": "38c187bfb7a0020db36ccc1479e7c3501b205fb8",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(pi): preserve tool images and structured results (#17851).",
+      "reason": "Planned: partial implementation and focused evidence exist for bounded structured tool completions and authenticated tool-image storage without inline queued bytes; full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): preserve tool images and structured results (#17851).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-17851"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": [
+        "165260f3602ea67865002372c2c579bca63e52e6",
+        "afc90b20382bc63045665a054a3159710e1862fc"
+      ],
+      "evidence": [
+        "docs/reviews/upstream-october-review-response.md:941",
+        "apps/server/src/provider/pi/PiToolOutput.test.ts:1",
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "4f63275ac7885281d245022e65f1e9e8816b1382",
@@ -10401,12 +10465,21 @@
     {
       "upstreamSha": "31b04e2ee929660d80d5931ed53fd17bf1d33ce6",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: refactor(provider): bring opencode, muse, pi, core and testing in line with Effect conventions (#17542).",
+      "reason": "Planned: partial implementation and focused evidence exist for Effect-owned RPC, session, metadata and cancellation lifetimes within F5 provider layers; full 15l delivery and required release gates remain deferred. Upstream change: refactor(provider): bring opencode, muse, pi, core and testing in line with Effect conventions (#17542).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-17542"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": [
+        "165260f3602ea67865002372c2c579bca63e52e6",
+        "afc90b20382bc63045665a054a3159710e1862fc"
+      ],
+      "evidence": [
+        "docs/reviews/upstream-october-review-response.md:941",
+        "apps/server/src/provider/ownedOperation.ts:1",
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "784b5625f9e228cca8dd67e6e24e402325672544",
@@ -10522,12 +10595,21 @@
     {
       "upstreamSha": "7a2b1c72beed4f560aebb41aa7b26e0792eeb938",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(server): reconcile Pi native session rewinds (#13839).",
+      "reason": "Planned: partial implementation and focused evidence exist for verified host rollback and cursor adoption; native extension rewinds remain blocked pending projection reconciliation; full 15l delivery and required release gates remain deferred. Upstream change: fix(server): reconcile Pi native session rewinds (#13839).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-13839"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": [
+        "165260f3602ea67865002372c2c579bca63e52e6",
+        "afc90b20382bc63045665a054a3159710e1862fc"
+      ],
+      "evidence": [
+        "docs/reviews/upstream-october-review-response.md:941",
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:1",
+        "apps/server/src/orchestration/rewind.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "c908cea52510ed29199c3cc477204da425601301",
@@ -10546,12 +10628,20 @@
     {
       "upstreamSha": "3b6af0bd1600f034b0466e1b8ff017fbabeba910",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(server): Pi loads every selected skill without losing prompt text (#17194).",
+      "reason": "Planned: partial implementation and focused evidence exist for bounded expansion of all selected workspace skill blocks; full 15l delivery and required release gates remain deferred. Upstream change: fix(server): Pi loads every selected skill without losing prompt text (#17194).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-17194"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": [
+        "165260f3602ea67865002372c2c579bca63e52e6",
+        "afc90b20382bc63045665a054a3159710e1862fc"
+      ],
+      "evidence": [
+        "docs/reviews/upstream-october-review-response.md:941",
+        "apps/server/src/provider/pi/mcpExtensionSource.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "563645cf6e104ad930f4c9b209678a77eef07e65",
@@ -10630,12 +10720,20 @@
     {
       "upstreamSha": "2c7a446e657e705c257db28540819f4c0115b2fc",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: refactor(providers): namespace-import service modules in core, Muse, Pi, and testing (#17375).",
+      "reason": "Planned: partial implementation and focused evidence exist for a single mcp__f5__ namespace and owned bridge-source approval checks; full 15l delivery and required release gates remain deferred. Upstream change: refactor(providers): namespace-import service modules in core, Muse, Pi, and testing (#17375).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-17375"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": [
+        "165260f3602ea67865002372c2c579bca63e52e6",
+        "afc90b20382bc63045665a054a3159710e1862fc"
+      ],
+      "evidence": [
+        "docs/reviews/upstream-october-review-response.md:941",
+        "apps/server/src/provider/pi/mcpExtensionSource.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "b0ee7dd48f868c5c02884345f723bebaf616b13d",
@@ -10884,12 +10982,20 @@
     {
       "upstreamSha": "0b6ec43c54165a87941b7a070849be8979646040",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(server): Pi discovers workspace skills and commands (#17190).",
+      "reason": "Planned: partial implementation and focused evidence exist for workspace command and skill discovery with bounded selected-skill expansion; full 15l delivery and required release gates remain deferred. Upstream change: fix(server): Pi discovers workspace skills and commands (#17190).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-17190"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": [
+        "165260f3602ea67865002372c2c579bca63e52e6",
+        "afc90b20382bc63045665a054a3159710e1862fc"
+      ],
+      "evidence": [
+        "docs/reviews/upstream-october-review-response.md:941",
+        "apps/server/src/provider/pi/commands.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "a0066d5cb7d18abd786c1c23bf835f898490fd37",
@@ -10900,12 +11006,22 @@
     {
       "upstreamSha": "e8f5850b824572bab76bf810696f875eb648eff9",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(server): Pi editor dialogs prefill the answer composer (#17206).",
+      "reason": "Planned: partial implementation and focused evidence exist for editor prefills through persisted activity parsing, both question panels and explicit empty answers; full 15l delivery and required release gates remain deferred. Upstream change: fix(server): Pi editor dialogs prefill the answer composer (#17206).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-17206"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": [
+        "165260f3602ea67865002372c2c579bca63e52e6",
+        "afc90b20382bc63045665a054a3159710e1862fc"
+      ],
+      "evidence": [
+        "docs/reviews/upstream-october-review-response.md:941",
+        "apps/web/src/components/ChatView.browser.tsx:1",
+        "apps/web/src/components/chat/AsyncUserInputPanel.browser.tsx:1",
+        "apps/server/src/provider/pi/PiUiRequests.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "eb1cf7bd0efba7364d53907036f5b7eefb379c39",
@@ -10916,12 +11032,20 @@
     {
       "upstreamSha": "de72286ee5777319fde054e7a82023916ce6f481",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(server): Pi discovers optional T3 tools on demand (#17220).",
+      "reason": "Planned: partial implementation and focused evidence exist for optional tool discovery and completion-gateway schema availability; full 15l delivery and required release gates remain deferred. Upstream change: fix(server): Pi discovers optional T3 tools on demand (#17220).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-17220"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": [
+        "165260f3602ea67865002372c2c579bca63e52e6",
+        "afc90b20382bc63045665a054a3159710e1862fc"
+      ],
+      "evidence": [
+        "docs/reviews/upstream-october-review-response.md:941",
+        "apps/server/src/provider/pi/mcpExtensionSource.test.ts:1"
+      ]
     },
     {
       "upstreamSha": "f999eb2a8e7d8db74d4f4ab7dd66f86163e1a226",
@@ -11965,12 +12089,21 @@
     {
       "upstreamSha": "bfec2387b8102975c84690f99be0f5f834fd0cbe",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(pi): preserve provider identity in discovered models (#16661).",
+      "reason": "Planned: partial implementation and focused evidence exist for provider-qualified model identity across discovery, UI selection and native read-back; full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): preserve provider identity in discovered models (#16661).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-16661"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": [
+        "165260f3602ea67865002372c2c579bca63e52e6",
+        "afc90b20382bc63045665a054a3159710e1862fc"
+      ],
+      "evidence": [
+        "docs/reviews/upstream-october-review-response.md:941",
+        "apps/server/src/provider/pi/discovery.test.ts:1",
+        "apps/web/src/components/chat/ProviderInstanceModelPicker.browser.tsx:1"
+      ]
     },
     {
       "upstreamSha": "5886bd8f19c8d4b01d7a0b36ad62a9d35f02552d",
