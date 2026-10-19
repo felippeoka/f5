@@ -37,6 +37,7 @@ const cursor: PiResumeCursor = {
 const threadId = ThreadId.makeUnsafe("pi-history");
 const request = (overrides?: {
   entriesAfter?: unknown;
+  initialEntries?: unknown;
   finalState?: unknown;
   messages?: unknown;
 }): PiHistoryRequest => {
@@ -49,7 +50,9 @@ const request = (overrides?: {
           ? overrides.finalState
           : { sessionFile: cursor.sessionFile, isStreaming: false };
       if (record.type === "get_entries")
-        return ++entries > 1 && overrides?.entriesAfter ? overrides.entriesAfter : tree;
+        return ++entries > 1 && overrides?.entriesAfter
+          ? overrides.entriesAfter
+          : (overrides?.initialEntries ?? tree);
       if (record.type === "get_messages") return { messages: overrides?.messages ?? messages };
       throw new Error("Unexpected Pi history request.");
     });
@@ -88,3 +91,79 @@ it.each([
     expect(result._tag).toBe("Failure");
   },
 );
+
+it("preserves assistant-only F5 continuation turns and later user-turn boundaries", async () => {
+  const wake = entry("wake", "a1", "assistant");
+  const withWake = {
+    ...tree,
+    entries: tree.entries
+      .map((node) => (node.id === "u2" ? { ...node, parentId: "wake" } : node))
+      .concat(wake),
+  };
+  const withCursor: PiResumeCursor = {
+    ...cursor,
+    boundaries: [
+      cursor.boundaries[0]!,
+      { turnId: "host-wake", entryId: "wake", kind: "continuation" },
+      cursor.boundaries[1]!,
+    ],
+  };
+  const active = [
+    ...messages.slice(0, 2),
+    { content: wake.message.content, role: wake.message.role },
+    ...messages.slice(2),
+  ];
+  const result = await Effect.runPromise(
+    readPiHistory({
+      threadId,
+      cursor: withCursor,
+      request: request({ initialEntries: withWake, messages: active }),
+    }),
+  );
+  expect(result.snapshot.turns.map((turn) => [turn.id, turn.items.length])).toEqual([
+    ["host-1", 2],
+    ["host-wake", 1],
+    ["host-2", 2],
+  ]);
+  expect(result.turnEntryIds).toEqual(["u1", "wake", "u2"]);
+  expect(result.userEntryIds).toEqual(["u1", "u2"]);
+  const compacted = await Effect.runPromise(
+    readPiHistory({
+      threadId,
+      cursor: withCursor,
+      request: request({ initialEntries: withWake, messages: messages.slice(2) }),
+    }),
+  );
+  expect(compacted.snapshot.turns.map((turn) => [turn.id, turn.items.length])).toEqual([
+    ["host-1", 0],
+    ["host-wake", 0],
+    ["host-2", 2],
+  ]);
+});
+it("refuses assistant-only continuation correlation when native messages have duplicate identities", async () => {
+  const wake = {
+    ...entry("wake", "a1", "assistant"),
+    message: entry("a1", "u1", "assistant").message,
+  };
+  const withWake = {
+    ...tree,
+    entries: tree.entries
+      .map((node) => (node.id === "u2" ? { ...node, parentId: "wake" } : node))
+      .concat(wake),
+  };
+  const withCursor: PiResumeCursor = {
+    ...cursor,
+    boundaries: [
+      ...cursor.boundaries,
+      { turnId: "host-wake", entryId: "wake", kind: "continuation" },
+    ],
+  };
+  const result = await Effect.runPromise(
+    readPiHistory({
+      threadId,
+      cursor: withCursor,
+      request: request({ initialEntries: withWake }),
+    }).pipe(Effect.result),
+  );
+  expect(result._tag).toBe("Failure");
+});

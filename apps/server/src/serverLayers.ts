@@ -1,3 +1,8 @@
+import {
+  ProviderContinuationRequests,
+  ProviderContinuationRequestsLive,
+} from "./provider/ProviderContinuationRequests.ts";
+import { ProviderContinuationWorkerLive } from "./provider/ProviderContinuationWorker.ts";
 import { McpAppServiceLive } from "./mcpApps/McpAppService.ts";
 import { ThreadSettlementServiceLive } from "./orchestration/Layers/ThreadSettlementService.ts";
 import { PullRequestWatchServiceLive } from "./orchestration/Layers/PullRequestWatchService.ts";
@@ -12,7 +17,7 @@ import {
   ComputerAutomationBroker,
   ComputerAutomationBrokerLive,
 } from "./computer/ComputerAutomationBroker";
-import { AgentControlPauseLive } from "./mcp/agentControlPause";
+import { AgentControlPauseLive, AgentControlPauseService } from "./mcp/agentControlPause";
 import { WorktreeSetupLive } from "./project/Layers/WorktreeSetup.ts";
 import { DefaultBranchAutoPullLive } from "./git/DefaultBranchAutoPull.ts";
 import { StorageCleanupWorkerLive } from "./storage/StorageCleanupWorker.ts";
@@ -167,6 +172,8 @@ export function makeServerProviderLayer(): Layer.Layer<
   | ProviderUpdateAdvisor
   | ProviderAdvisoryProjection
   | ProviderInstanceRegistry
+  | ProviderContinuationRequests
+  | AgentControlPauseService
   | ProviderAdapterRegistry
   | ServerSettingsService
   | DiskSpaceMonitor,
@@ -218,6 +225,7 @@ export function makeServerProviderLayer(): Layer.Layer<
       Layer.provide(previewAutomationBrokerLayer),
     );
     const providerInstanceRegistryLayer = ProviderInstanceRegistryHydrationLive.pipe(
+      Layer.provide(ProviderContinuationRequestsLive),
       Layer.provide(ThreadMcpBrokerLive),
       Layer.provide(serverSettingsLayer),
       Layer.provide(providerEventLoggersLayer),
@@ -289,6 +297,8 @@ export function makeServerProviderLayer(): Layer.Layer<
       Layer.provide(projectMcpConfigServiceLayer),
     );
     return Layer.mergeAll(
+      ProviderContinuationRequestsLive,
+      AgentControlPauseLive,
       serverSettingsLayer,
       DiskSpaceMonitorLive.pipe(Layer.provide(serverSettingsLayer)),
       providerServiceLayer,
@@ -489,7 +499,13 @@ export function makeServerOrchestrationRuntimeLayer() {
   const sessionNotesServiceLayer = SessionNotesServiceLive.pipe(
     Layer.provideMerge(runtimeServicesLayer),
   );
+  const continuationWorkerLayer = ProviderContinuationWorkerLive.pipe(
+    Layer.provideMerge(runtimeServicesLayer),
+    Layer.provideMerge(NextTurnQueueStoreLive),
+    Layer.provideMerge(nextTurnQueueDispatcherLayer),
+  );
   const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
+    Layer.provideMerge(continuationWorkerLayer),
     Layer.provideMerge(orchestrationLayer),
     Layer.provideMerge(runtimeIngestionLayer),
     Layer.provideMerge(providerCommandReactorLayer),

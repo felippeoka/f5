@@ -997,9 +997,10 @@ const make = Effect.gen(function* () {
           activeInstanceId !== undefined &&
           preferredInstanceId !== activeInstanceId;
         const sessionModelSwitch =
-          currentProvider === undefined
+          activeProvider === undefined
             ? "in-session"
-            : (yield* providerService.getCapabilities(currentProvider)).sessionModelSwitch;
+            : (yield* providerService.getCapabilities(activeProvider, activeInstanceId))
+                .sessionModelSwitch;
         const requestedModel = commandModel;
         const modelChanged =
           requestedModel !== undefined && requestedModel !== activeSession?.model;
@@ -1229,6 +1230,7 @@ const make = Effect.gen(function* () {
   const sendTurnForThread = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
     readonly deliveryId?: CommandId;
+    readonly continuationRequestId?: string;
     readonly messageText: string;
     readonly submissionSource?: "human" | "automation";
     readonly attachments?: ReadonlyArray<ChatAttachment>;
@@ -1244,6 +1246,37 @@ const make = Effect.gen(function* () {
     const thread = yield* resolveThread(input.threadId);
     if (!thread) {
       return;
+    }
+    if (input.continuationRequestId) {
+      yield* requireDeliverableThread(input.threadId);
+      const live = (yield* providerService.listSessions()).find(
+        (session) => session.threadId === input.threadId && session.status !== "closed",
+      );
+      if (
+        !live ||
+        live.runtimeMode !== thread.runtimeMode ||
+        (live.model !== undefined &&
+          live.model !== (thread.modelSelection?.model ?? thread.model)) ||
+        (thread.modelSelection && thread.modelSelection.instanceId !== live.providerInstanceId)
+      )
+        return yield* new ProviderTurnDeliveryError({
+          certainty: "not_sent",
+          retryable: false,
+          detail: "The native continuation's session or settings changed; it was not restarted.",
+        });
+      return yield* providerService.sendTurn({
+        threadId: input.threadId,
+        continuationRequestId: input.continuationRequestId,
+        input: input.messageText,
+        ...(input.deliveryId ? { deliveryId: input.deliveryId } : {}),
+        submissionSource: "automation",
+        ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
+        ...(input.model ? { model: input.model } : {}),
+        ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
+        ...(input.workflowExecutionProfile
+          ? { workflowExecutionProfile: input.workflowExecutionProfile }
+          : {}),
+      });
     }
     if (thread.worktreePath && thread.branch) {
       const model = yield* orchestrationEngine.getReadModel();
@@ -1321,7 +1354,10 @@ const make = Effect.gen(function* () {
     const sessionModelSwitch =
       activeSession === undefined
         ? "in-session"
-        : (yield* providerService.getCapabilities(activeSession.provider)).sessionModelSwitch;
+        : (yield* providerService.getCapabilities(
+            activeSession.provider,
+            activeSession.providerInstanceId,
+          )).sessionModelSwitch;
     const modelForTurn =
       sessionModelSwitch === "unsupported"
         ? activeSession?.model
@@ -1354,6 +1390,9 @@ const make = Effect.gen(function* () {
 
     yield* requireDeliverableThread(input.threadId);
     return yield* providerService.sendTurn({
+      ...(input.continuationRequestId
+        ? { continuationRequestId: input.continuationRequestId }
+        : {}),
       threadId: input.threadId,
       ...(mcpAppContext ? { mcpAppContext } : {}),
       ...(input.submissionSource ? { submissionSource: input.submissionSource } : {}),
@@ -1792,6 +1831,9 @@ const make = Effect.gen(function* () {
     );
 
     return yield* sendTurnForThread({
+      ...(event.payload.continuationRequestId
+        ? { continuationRequestId: event.payload.continuationRequestId }
+        : {}),
       threadId: event.payload.threadId,
       ...(event.commandId !== null ? { deliveryId: event.commandId } : {}),
       messageText: message.text,

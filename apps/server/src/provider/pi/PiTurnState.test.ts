@@ -135,3 +135,13 @@ it("retains an explicit stop through idle verification and rejects uncorrelated 
     { type: "stop-session", reason: "native-protocol-error" },
   ]);
 });
+
+it("owns a queued native continuation without waiting for or manufacturing a prompt acknowledgement", () => {
+  const state = new PiTurnState();
+  state.admitContinuation("native-1");
+  state.observe({ type: "agent_start" });
+  const barrier = probe(state.observe({ type: "agent_settled" }));
+  expect(state.observe(idle(barrier))).toEqual([
+    { type: "terminal", turnId: "native-1", state: "completed" },
+  ]);
+});

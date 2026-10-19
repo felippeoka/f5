@@ -71,6 +71,12 @@ export class PiTurnState {
     return requestId;
   }
 
+  /** Called only after F5 admits an exact buffered continuation identity. No prompt is sent. */
+  admitContinuation(turnId: string): void {
+    this.admit({ turnId, command: "prompt", commandOnly: false });
+    this.#active!.acknowledged = true;
+  }
+
   /** A send failure is ambiguous: the caller must stop the owned process before reporting failure. */
   close(): void {
     this.#closed = true;

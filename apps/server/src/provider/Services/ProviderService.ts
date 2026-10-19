@@ -159,10 +159,12 @@ export interface ProviderServiceShape {
   readonly listSessions: () => Effect.Effect<ReadonlyArray<ProviderSession>>;
 
   /**
-   * Read static capabilities for a provider adapter.
+   * Read static capabilities from the exact instance when supplied. The legacy
+   * kind-only form resolves the default instance.
    */
   readonly getCapabilities: (
     provider: ProviderKind,
+    instanceId?: ProviderInstanceId,
   ) => Effect.Effect<ProviderAdapterCapabilities, ProviderServiceError>;
 
   /**

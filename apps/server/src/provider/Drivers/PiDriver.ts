@@ -14,6 +14,7 @@ import {
   piModelsFromSettings,
 } from "../Layers/PiProvider.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
+import { ProviderContinuationRequests } from "../ProviderContinuationRequests.ts";
 import { makeOwnedOperation } from "../ownedOperation.ts";
 import type { PiCatalog } from "../pi/PiMetadata.ts";
 import { PiRpcError } from "../pi/PiRpc.ts";
@@ -73,6 +74,9 @@ export const PiDriver: ProviderDriver<PiSettings, PiDriverEnv> = {
         ...(accentColor ? { accentColor } : {}),
         continuation: { groupKey: continuationIdentity.continuationKey },
       });
+      const continuations = Option.getOrUndefined(
+        yield* Effect.serviceOption(ProviderContinuationRequests),
+      );
       const preview = Option.getOrUndefined(yield* Effect.serviceOption(PreviewMcpHttpServer));
       let liveCatalog: PiCatalog | undefined;
       let baseSnapshot = buildInitialPiProviderSnapshot(settings);
@@ -82,6 +86,7 @@ export const PiDriver: ProviderDriver<PiSettings, PiDriverEnv> = {
         environment: processEnv,
         cacheDir: path.join(server.stateDir, "provider-extensions", "pi"),
         beforeLaunch,
+        ...(continuations ? { offerContinuation: continuations.offer } : {}),
         onCatalog: (catalog) =>
           Effect.gen(function* () {
             liveCatalog = catalog;

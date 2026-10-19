@@ -4803,6 +4803,68 @@ describe("ProviderCommandReactor", () => {
     expect(model.threads[0]?.session?.status).toBe("stopped");
   });
 
+  it.each([false, true])(
+    "delivers buffered native output only to its existing session and never recreates a lost owner: %s",
+    async (live) => {
+      const harness = await createHarness({
+        bridgeTurnDelivery: false,
+        threadModel: "default",
+        threadTitle: "Native continuation fixture",
+      });
+      const threadId = ThreadId.make("thread-1");
+      const createdAt = new Date().toISOString();
+      if (live)
+        harness.runtimeSessions.push({
+          provider: "pi",
+          threadId,
+          status: "ready",
+          runtimeMode: "approval-required",
+          model: "default",
+          createdAt,
+          updatedAt: createdAt,
+        });
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("native-intent"),
+          threadId,
+          message: {
+            messageId: MessageId.make("native-message"),
+            role: "user",
+            text: "Continue native extension work",
+            attachments: [],
+          },
+          continuationRequestId: "owned-wake",
+          presentation: "continuation",
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          createdAt,
+        }),
+      );
+      const events = await Effect.runPromise(Stream.runCollect(harness.engine.readEvents(0)));
+      const intent = events.find((event) => event.type === "thread.turn-start-requested");
+      if (!intent || intent.type !== "thread.turn-start-requested")
+        throw new Error("Missing native intent.");
+      expect(intent.payload.continuationRequestId).toBe("owned-wake");
+      const result = await Effect.runPromise(
+        harness.reactor.deliverTurnStart(intent).pipe(Effect.result, Effect.scoped),
+      );
+      expect(result._tag).toBe(live ? "Success" : "Failure");
+      if (result._tag === "Failure")
+        expect(result.failure).toMatchObject({ certainty: "not_sent", retryable: false });
+      if (live)
+        expect(harness.sendTurn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            continuationRequestId: "owned-wake",
+            submissionSource: "automation",
+          }),
+        );
+      else expect(harness.sendTurn).not.toHaveBeenCalled();
+      expect(harness.startSession).not.toHaveBeenCalled();
+      expect(harness.ensureWorktree).not.toHaveBeenCalled();
+    },
+  );
+
   it("does not deliver a pending turn after its thread was archived", async () => {
     const harness = await createHarness();
     const threadId = ThreadId.makeUnsafe("thread-1");

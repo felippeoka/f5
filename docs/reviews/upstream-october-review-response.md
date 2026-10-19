@@ -1015,3 +1015,47 @@ against the remaining provider, orchestration, queue and WebSocket suites. A fre
 remains integrated additively. The strict ledger and all ten October/September
 plan tests pass after attaching per-SHA Pi evidence to sixteen still-deferred
 records. No delivery counts changed.
+
+## Pi native continuation admission and assistant-only history (15l; deferred)
+
+An instance-scoped broker now retains at most 64 native wake owners, with eight
+concurrent admissions and a ten-second deadline. The worker admits the exact owner
+through the durable turn queue after checking project/provider policy, thread state,
+pending input, pause state and competing queue items in the writer transaction.
+Delayed settlement or the source command's delivery cleanup waits within that same
+deadline. Replaced owners cannot clear or adopt a newer wake. Rejection stops the
+owned native child and removes only the obsolete queued continuation; definitive
+not-sent delivery rejection releases its internal queue item without dropping a
+user item or treating an ambiguous outcome as safe to replay.
+
+The adapter buffers at most 256 events and 2 MiB while admission is pending, retains
+native dialog expiry, and adopts ordered output without another Pi prompt. The
+continuation command is internal: client decoding rejects that field. Session
+recovery cannot turn a stale continuation into a fresh prompt, and history/rollback
+cannot race a pending wake. Assistant-only native turns now retain an independently
+verified entry identity; rewinding a later user turn preserves them. A direct fork
+before an assistant-only turn is refused because Pi has no native user boundary.
+Full retained-branch hashes protect rollback read-back, including those turns.
+
+Production integration exposed a capability lookup that used a provider-kind
+default instead of the selected explicit instance. Both reactor lookups now carry
+the active instance id; the service verifies its kind and never starts a session
+while reading capabilities. This also corrects explicit custom ACP routing.
+
+The latest focused run passes 285 tests in eleven server files, including all 84
+ProviderService and 77 ProviderCommandReactor cases. All eight typechecks pass.
+Formatter and lint pass (31 existing warnings). The production smoke uses a real
+built Node server, Chromium, SQLite, queue worker and an owned fake Pi RPC child;
+it requires two assistant messages from one live child and exactly one native
+prompt, an empty unpaused queue, and zero browser errors. It is integration
+transport evidence; installed Pi authentication and automatic native rewind
+projection reconciliation remain pending. The full catch-up is not delivered.
+
+The fresh production build passes all five tasks. Its latest Node/Chromium smoke
+passes with two assistant messages, one live Pi child, one native prompt, no queued
+items and no page errors. The required full run was repeated: desktop 570, shared
+725 (one skipped), web 2,343 and contracts 226 pass. Scripts pass 330 cases and fail
+the same two process-identity migration cases; the server reports the same three
+launcher-identity failures before interruption. The exhaustive Git matrix is not
+reached by that failed root run. The strict 4,084-record ledger check passes.
+No full-gate waiver or delivered Pi disposition is claimed.

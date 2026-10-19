@@ -58,3 +58,15 @@ it.each([
   { leafId: null, entries: [entry("valid", "\0")] },
   { leafId: null, entries: [{ id: "missing-parent" }] },
 ])("rejects ambiguous native listings", (data) => expect(parsePiSessionTree(data)).toBeNull());
+
+it("captures an assistant-only continuation boundary without inventing a native user entry", () => {
+  const tree = parsePiSessionTree({
+    leafId: "wake",
+    entries: [entry("u1", null), entry("a1", "u1", "assistant"), entry("wake", "a1", "assistant")],
+  })!;
+  expect(capturePiTurnTreeBoundary(tree, "a1")).toEqual({
+    turnStartEntryId: null,
+    leafId: "wake",
+    continuationStartEntryId: "wake",
+  });
+});

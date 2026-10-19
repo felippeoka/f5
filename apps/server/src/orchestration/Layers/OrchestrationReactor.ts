@@ -1,5 +1,6 @@
+import { ProviderContinuationWorker } from "../../provider/ProviderContinuationWorker.ts";
 import { CommandId } from "@t3tools/contracts";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Option, Stream } from "effect";
 
 import {
   OrchestrationReactor,
@@ -35,6 +36,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const nextTurnQueueDispatcher = yield* NextTurnQueueDispatcher;
   const nativeSessionCleanupReactor = yield* NativeSessionCleanupReactor;
   const orchestrationEngine = yield* OrchestrationEngineService;
+  const continuationWorker = yield* Effect.serviceOption(ProviderContinuationWorker);
 
   const start: OrchestrationReactorShape["start"] = Effect.gen(function* () {
     yield* providerRuntimeIngestion.start;
@@ -115,6 +117,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
     yield* codeReviewWorkflowService.start;
     yield* investigationWorkflowService.start;
     yield* nextTurnQueueDispatcher.start;
+    if (Option.isSome(continuationWorker)) yield* continuationWorker.value.start;
     yield* nativeSessionCleanupReactor.start;
   });
 

@@ -54,12 +54,21 @@ before runtime events enter the queue. Up to ten prompt images fit within the bo
 F5 resumes Pi's persisted session file. Conversation rollback forks before a captured
 native user entry, persists the adopted session identity before hydration and verifies
 the retained branch. An uncertain result blocks new prompts and is never replayed
-blindly. Conversation rollback does not restore files.
+blindly. Assistant-only extension turns retain their own history boundary. They can
+be retained when rewinding a later user turn, but Pi cannot fork directly before an
+assistant-only turn. Conversation rollback does not restore files.
+
+Extension wakes retain their exact native owner while F5 admits a continuation
+through the normal queue. Admission waits up to ten seconds for the previous F5
+turn to settle. A paused thread, queued user message, pending question, disabled
+provider or stale session rejects the wake and closes its child. Admission replays
+buffered events without sending another prompt; a lost owner is never resumed as
+a new prompt. Buffers and concurrent admission are bounded.
 
 ## Current integration limits
 
 The full October catch-up remains in progress. Pi computer automation and native
-history import are unavailable. An unsolicited native extension wake is stopped
-until the F5 continuation admission path is implemented. Native in-session rewinds and unexpected native session switches block new prompts
-until projection reconciliation is implemented. The driver is early access; these remaining
-items and the required full validation gates prevent marking the Pi phase delivered.
+history import are unavailable. Native in-session rewinds and unexpected native
+session switches block new prompts until projection reconciliation is implemented.
+Real Pi account validation remains pending. These items and the required full
+validation gates prevent marking the Pi phase delivered.

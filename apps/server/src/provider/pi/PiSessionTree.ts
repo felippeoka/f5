@@ -4,6 +4,7 @@ export interface PiSessionEntry {
   readonly id: string;
   readonly parentId: string | null;
   readonly user: boolean;
+  readonly message?: unknown;
 }
 export interface PiSessionTree {
   readonly entries: ReadonlyMap<string, PiSessionEntry>;
@@ -32,6 +33,9 @@ export function parsePiSessionTree(data: unknown): PiSessionTree | null {
     entries.set(id, {
       id,
       parentId,
+      ...(piRecordField(entry, "type") === "message"
+        ? { message: piRecordField(entry, "message") }
+        : {}),
       user:
         piRecordField(entry, "type") === "message" &&
         piRecordString(piRecordField(entry, "message"), "role") === "user",
@@ -59,6 +63,7 @@ export interface PiTurnTreeBoundary {
   /** First user entry appended by this host-owned turn, suitable for Pi's native fork. */
   readonly turnStartEntryId: string | null;
   readonly leafId: string | null;
+  readonly continuationStartEntryId?: string;
   /** Present only when the old leaf still proves this is an in-session rewind. */
   readonly retainedUserEntryIds?: readonly string[];
 }
@@ -78,9 +83,13 @@ export function capturePiTurnTreeBoundary(
       leafId: tree.leafId,
       retainedUserEntryIds: branch.filter((entry) => entry.user).map((entry) => entry.id),
     };
+  const appended = branch.slice(previousIndex + 1);
+  const user = appended.find((entry) => entry.user);
+  const message = appended.find((entry) => entry.message !== undefined);
   return {
-    turnStartEntryId: branch.slice(previousIndex + 1).find((entry) => entry.user)?.id ?? null,
+    turnStartEntryId: user?.id ?? null,
     leafId: tree.leafId,
+    ...(!user && message ? { continuationStartEntryId: message.id } : {}),
   };
 }
 

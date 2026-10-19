@@ -1,7 +1,8 @@
 import { tmpdir } from "node:os";
 import { ApprovalRequestId, type ProviderRuntimeEvent } from "@t3tools/contracts";
-import { Deferred, Effect, Exit, Fiber, Queue, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Option, Queue, Scope, Stream } from "effect";
 import { expect, it } from "vitest";
+import type { ProviderContinuationRequest } from "../ProviderContinuationRequests.ts";
 import { run } from "../pi/PiMetadata.testkit.ts";
 import { fixture, threadId } from "../pi/PiAdapter.testkit.ts";
 import { PiRpcError } from "../pi/PiRpc.ts";
@@ -422,3 +423,153 @@ it.each(["native-rewind", "native-switch"])(
       );
     }),
 );
+
+it("adopts an exact native extension wake without another prompt and fences competing or stale sends", async () =>
+  fixture(async ({ settings, options, trace }) => {
+    options.environment.F5_PI_CASE = "wake";
+    await run(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const offered = yield* Deferred.make<ProviderContinuationRequest>();
+          const adapter = yield* makePiAdapter(settings, {
+            ...options,
+            offerContinuation: (request) =>
+              Deferred.succeed(offered, request).pipe(Effect.as(true)),
+          });
+          const terminal = yield* Queue.unbounded<ProviderRuntimeEvent>();
+          const observed: ProviderRuntimeEvent[] = [];
+          yield* adapter.streamEvents.pipe(
+            Stream.runForEach((event) => {
+              observed.push(event);
+              return event.type === "turn.completed"
+                ? Queue.offer(terminal, event).pipe(Effect.asVoid)
+                : Effect.void;
+            }),
+            Effect.forkScoped,
+          );
+          yield* adapter.startSession({
+            threadId,
+            cwd: tmpdir(),
+            runtimeMode: "approval-required",
+          });
+          const first = yield* adapter.sendTurn({ threadId, input: "Original user prompt" });
+          yield* Queue.take(terminal).pipe(Effect.timeout("5 seconds"));
+          const request = yield* Deferred.await(offered).pipe(Effect.timeout("5 seconds"));
+          expect(request.previousTurnId).toBe(first.turnId);
+          expect(yield* request.status).toBe("pending");
+          expect((yield* adapter.readThread(threadId).pipe(Effect.result))._tag).toBe("Failure");
+          expect((yield* adapter.rollbackThread(threadId, 1).pipe(Effect.result))._tag).toBe(
+            "Failure",
+          );
+          const competing = yield* adapter
+            .sendTurn({ threadId, input: "Human input must wait" })
+            .pipe(Effect.result);
+          expect(competing._tag).toBe("Failure");
+          if (competing._tag === "Failure")
+            expect(competing.failure).toMatchObject({
+              deliveryCertainty: "not_sent",
+              deliveryRetryable: true,
+            });
+          const wrong = yield* adapter
+            .sendTurn({ threadId, input: "Wrong wake", continuationRequestId: "old-request" })
+            .pipe(Effect.result);
+          expect(wrong._tag).toBe("Failure");
+          const adopted = yield* adapter.sendTurn({
+            threadId,
+            input: "Internal continuation placeholder",
+            continuationRequestId: request.requestId,
+          });
+          const ended = yield* Queue.take(terminal).pipe(Effect.timeout("5 seconds"));
+          expect(ended).toMatchObject({
+            type: "turn.completed",
+            turnId: adopted.turnId,
+            payload: { state: "completed" },
+          });
+          expect(yield* request.status).toBe("adopted");
+          expect(
+            observed.some(
+              (event) =>
+                event.type === "content.delta" &&
+                event.turnId === adopted.turnId &&
+                event.payload.delta === "Native reply",
+            ),
+          ).toBe(true);
+          expect(
+            Option.isNone(
+              yield* request.dispatchIfCurrent(Effect.succeed("must not dispatch twice")),
+            ),
+          ).toBe(true);
+          yield* request.clearIfCurrent;
+          expect(yield* adapter.hasSession(threadId)).toBe(true);
+          expect((yield* adapter.readThread(threadId)).turns.map((turn) => turn.id)).toEqual([
+            first.turnId,
+            adopted.turnId,
+          ]);
+          const next = yield* adapter.sendTurn({ threadId, input: "After native continuation" });
+          yield* Queue.take(terminal).pipe(Effect.timeout("5 seconds"));
+          const rollback = { beforeTurnId: next.turnId };
+          const retained = yield* adapter.rollbackThread(threadId, 1, rollback);
+          expect(retained.turns.map((turn) => turn.id)).toEqual([first.turnId, adopted.turnId]);
+          expect(JSON.stringify(retained.turns[1])).toContain("Native reply");
+          expect(
+            (yield* adapter.rollbackThread(threadId, 1, rollback)).turns.map((turn) => turn.id),
+          ).toEqual([first.turnId, adopted.turnId]);
+          expect(
+            (yield* adapter
+              .rollbackThread(threadId, 1, { beforeTurnId: adopted.turnId })
+              .pipe(Effect.result))._tag,
+          ).toBe("Failure");
+          const replay = yield* adapter
+            .sendTurn({ threadId, input: "Never replay", continuationRequestId: request.requestId })
+            .pipe(Effect.result);
+          expect(replay._tag).toBe("Failure");
+          yield* adapter.stopSession(threadId);
+        }),
+      ),
+    );
+    expect((await trace()).filter((record) => record.type === "prompt")).toMatchObject([
+      { message: "Original user prompt" },
+      { message: "After native continuation" },
+    ]);
+    expect((await trace()).filter((record) => record.type === "fork")).toHaveLength(1);
+  }));
+
+it("retires a declined native continuation without replaying it into a replacement session", async () =>
+  fixture(async ({ settings, options, trace }) => {
+    options.environment.F5_PI_CASE = "wake";
+    await run(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const offered = yield* Deferred.make<ProviderContinuationRequest>();
+          const adapter = yield* makePiAdapter(settings, {
+            ...options,
+            offerContinuation: (request) =>
+              Deferred.succeed(offered, request).pipe(Effect.as(true)),
+          });
+          yield* adapter.streamEvents.pipe(Stream.runDrain, Effect.forkScoped);
+          yield* adapter.startSession({
+            threadId,
+            cwd: tmpdir(),
+            runtimeMode: "approval-required",
+          });
+          yield* adapter.sendTurn({ threadId, input: "Original user prompt" });
+          const request = yield* Deferred.await(offered).pipe(Effect.timeout("5 seconds"));
+          yield* request.clearIfCurrent;
+          expect(yield* request.status).toBe("closed");
+          expect(yield* adapter.hasSession(threadId)).toBe(false);
+          yield* adapter.startSession({
+            threadId,
+            cwd: tmpdir(),
+            runtimeMode: "approval-required",
+          });
+          yield* request.clearIfCurrent;
+          expect(yield* adapter.hasSession(threadId)).toBe(true);
+          expect(Option.isNone(yield* request.dispatchIfCurrent(Effect.succeed("stale")))).toBe(
+            true,
+          );
+          yield* adapter.stopSession(threadId);
+        }),
+      ),
+    );
+    expect((await trace()).filter((record) => record.type === "prompt")).toHaveLength(1);
+  }));

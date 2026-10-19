@@ -12,7 +12,7 @@ trace({type:'spawn',pid:process.pid,args:process.argv.slice(2),readOnly:process.
 if(process.argv.includes('--version')){process.stdout.write('0.80.5');process.exit(0);}
 const emit=record=>process.stdout.write(JSON.stringify(record)+'\n');
 const reply=(record,data)=>emit({type:'response',id:record.id,command:record.type,success:true,data});
-let model={provider:'one',id:'shared'}, sessionFile=process.env.F5_PI_SESSION, leafId=null, entries=[], pending='', awaitingModel;
+let model={provider:'one',id:'shared'}, sessionFile=process.env.F5_PI_SESSION, leafId=null, entries=[], pending='', awaitingModel, wakeScheduled=false;
 process.stdin.on('data',chunk=>{pending+=chunk.toString('utf8');for(;;){const end=pending.indexOf('\n');if(end<0)break;const record=JSON.parse(pending.slice(0,end));pending=pending.slice(end+1);trace(record);
 switch(record.type){
 case 'get_state':if(process.env.F5_PI_CASE==='fork-state-failure'&&sessionFile.endsWith('.fork')){emit({type:'response',id:record.id,command:record.type,success:false});break;}reply(record,{model:process.env.F5_PI_CASE==='wrong-model-readback'?{provider:'one',id:'shared'}:model,thinkingLevel:'high',sessionFile,isStreaming:false,isCompacting:false,pendingMessageCount:0});break;
@@ -60,7 +60,15 @@ case 'prompt':{
   const toolEnd={type:'tool_execution_end',toolCallId:'call',toolName:'bash',isError:false,result:{content:[{type:'image',mimeType:'image/png',data:'aGVsbG8='},{type:'text',text:'Done'}],details:{exitCode:2},structuredContent:{count:3}}};
   emit(toolEnd);emit(toolEnd);
  }
- emit({type:'agent_settled',aborted:mode==='abort'});reply(record,{});break;
+ emit({type:'agent_settled',aborted:mode==='abort'});reply(record,{});
+ if(mode==='wake'&&!wakeScheduled){wakeScheduled=true;setTimeout(()=>{
+  const id='wake'+entries.length;
+  entries.push({id,parentId:leafId,type:'message',message:{role:'assistant',content:[{type:'text',text:'Native reply'}]}});leafId=id;
+  emit({type:'agent_start'});emit({type:'message_start',message:{role:'assistant'}});
+  emit({type:'message_end',message:{role:'assistant',content:[{type:'text',text:'Native reply'}],stopReason:'stop'}});
+  emit({type:'agent_settled'});
+ },60);}
+ break;
 }
 default:reply(record,{});
 }}});

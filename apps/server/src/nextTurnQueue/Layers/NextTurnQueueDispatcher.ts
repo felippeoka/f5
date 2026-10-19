@@ -1598,6 +1598,35 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
     handleDeliveryOutcome: (outcome) =>
       Effect.gen(function* () {
         const item = yield* store.getByCommandId(outcome.commandId);
+        if (
+          outcome.state === "rejected" &&
+          item?.command.continuationRequestId &&
+          Option.isSome(sqlOption)
+        ) {
+          // Buffered native output cannot be replayed as a prompt. Retire only a
+          // proven rejection, under the same writer reservation as the state check.
+          const abandoned = yield* sqlOption.value.withTransaction(
+            Effect.gen(function* () {
+              const current = yield* deliveries.getByCommandId(outcome.commandId);
+              if (current?.deliveryId !== outcome.deliveryId || current.state !== "rejected")
+                return false;
+              if (!(yield* deliveries.markAbandoned(outcome.deliveryId))) return false;
+              yield* store.markDeliveryFailed({
+                commandId: outcome.commandId,
+                errorCode: "delivery_rejected",
+                errorDetail: outcome.detail ?? "The buffered native continuation was not adopted.",
+              });
+              yield* store.discardDelivery({ commandId: outcome.commandId });
+              return true;
+            }),
+          );
+          if (abandoned) {
+            yield* reconcileDeliveryPause(outcome.threadId);
+            yield* publishChanged(outcome.threadId);
+            yield* notify(outcome.threadId);
+          }
+          return;
+        }
         if (outcome.state === "rejected" && item?.command.expectedTurnId) {
           yield* store.fallbackSteer(outcome.commandId);
           yield* engine

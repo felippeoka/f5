@@ -1570,6 +1570,9 @@ const decideCommand = Effect.fn("decideOrchestrationCommand")(function* ({
             ? { expectedSessionGeneration: command.expectedSessionGeneration }
             : {}),
           ...(command.presentation ? { presentation: command.presentation } : {}),
+          ...(command.continuationRequestId
+            ? { continuationRequestId: command.continuationRequestId }
+            : {}),
           threadId: command.threadId,
           messageId: command.message.messageId,
           ...(command.provider !== undefined ? { provider: command.provider } : {}),

@@ -197,3 +197,12 @@ rollback recovery. Native extension continuation admission and automatic in-sess
 rewind projection reconciliation remain outstanding. This is implementation evidence,
 not 15l delivery credit; the Pi dispositions and catch-up cut line remain deferred.
 See the Pi session continuation in the review response for exact validation limits.
+
+The next Pi continuation wires bounded native wake admission through the durable
+queue, with exact-owner adoption, no prompt replay, policy/pause checks and stale
+queue cleanup. Assistant-only history survives verified rollback of a later user
+turn. A production Node/Chromium fixture also exposed and now covers explicit
+instance capability routing. The focused server run passes 285 tests; all eight
+typechecks pass. Installed Pi/account evidence, native rewind projection
+reconciliation and required full release gates remain outstanding. These changes
+do not promote any Pi disposition or satisfy the catch-up cut line.

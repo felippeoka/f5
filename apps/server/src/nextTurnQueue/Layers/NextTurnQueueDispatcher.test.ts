@@ -39,7 +39,7 @@ import { NextTurnQueueStoreLive } from "./NextTurnQueueStore.ts";
 const dispatched: CommandId[] = [];
 // Provider delivery rows keyed by command id, and the unresolved delivery that
 // the repository's supersession rule reports per thread.
-const deliveryRows = new Map<string, unknown>();
+const deliveryRows = new Map<string, ReturnType<typeof deliveryRow>>();
 const unresolvedDeliveries = new Map<string, unknown>();
 
 const deliveryRow = (input: {
@@ -91,6 +91,13 @@ const makeDependencies = (
       getByCommandId: () => Effect.succeed(Option.none()),
     } as never),
     Layer.succeed(ProviderTurnDeliveryRepository, {
+      markAbandoned: (deliveryId: CommandId) =>
+        Effect.sync(() => {
+          const row = [...deliveryRows.values()].find((row) => row.deliveryId === deliveryId);
+          if (!row || (row.state !== "rejected" && row.state !== "ambiguous")) return false;
+          row.state = "abandoned";
+          return true;
+        }),
       getByCommandId: (commandId: CommandId) =>
         Effect.sync(() => deliveryRows.get(commandId) ?? null),
       getUnresolvedByThread: (threadId: ThreadId) =>
@@ -410,6 +417,57 @@ layer("NextTurnQueueDispatcher", (it) => {
         } finally {
           cleanup.mockRestore();
         }
+      }),
+  );
+
+  it.effect(
+    "retires rejected buffered native continuations while preserving human items and ambiguous deliveries",
+    () =>
+      Effect.gen(function* () {
+        const dispatcher = yield* NextTurnQueueDispatcher;
+        const store = yield* NextTurnQueueStore;
+        for (const [index, state] of (["rejected", "ambiguous"] as const).entries()) {
+          const threadId = ThreadId.make(`native-${state}`);
+          yield* seedThread(threadId);
+          const native = yield* insert(100 + 2 * index, threadId);
+          const human = yield* insert(101 + 2 * index, threadId);
+          if (native.kind !== "created" || human.kind !== "created")
+            throw new Error("Expected queued fixtures.");
+          const edited = yield* store.updateCommand({
+            itemId: native.item.itemId,
+            expectedUpdatedAt: native.item.updatedAt,
+            update: (command) => ({ ...command, continuationRequestId: command.commandId }),
+          });
+          deliveryRows.set(
+            edited.command.commandId,
+            deliveryRow({ commandId: edited.command.commandId, threadId, state }),
+          );
+          yield* dispatcher.handleDeliveryOutcome({
+            deliveryId: edited.command.commandId,
+            commandId: edited.command.commandId,
+            threadId,
+            state,
+            detail: "Native fixture ended",
+          });
+          const queue = yield* store.listByThread(threadId);
+          assert.equal(
+            queue.items.some((item) => item.itemId === human.item.itemId),
+            true,
+          );
+          assert.equal(
+            queue.items.some((item) => item.itemId === native.item.itemId),
+            state === "ambiguous",
+          );
+          assert.equal(
+            deliveryRows.get(edited.command.commandId)?.state,
+            state === "ambiguous" ? "ambiguous" : "abandoned",
+          );
+          assert.equal(queue.state.paused, state === "ambiguous");
+          yield* store.clear({ threadId, scope: "all", expectedRevision: queue.state.revision });
+          deliveryRows.delete(edited.command.commandId);
+        }
+        yield* dispatcher.drain;
+        dispatched.length = 0;
       }),
   );
 

@@ -1421,6 +1421,9 @@ export const ThreadTurnStartBootstrap = Schema.Struct({
 export type ThreadTurnStartBootstrap = typeof ThreadTurnStartBootstrap.Type;
 
 export const ThreadTurnStartCommand = Schema.Struct({
+  /** Server-only identity; intentionally absent from ClientThreadTurnStartCommand. */
+  continuationRequestId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(128))),
+
   type: Schema.Literal("thread.turn.start"),
   commandId: CommandId,
   threadId: ThreadId,
@@ -2263,6 +2266,8 @@ export const ThreadMessageSentPayload = Schema.Struct({
 });
 
 export const ThreadTurnStartRequestedPayload = Schema.Struct({
+  continuationRequestId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(128))),
+
   expectedTurnId: Schema.optional(TurnId),
   presentation: Schema.optional(Schema.Literal("continuation")),
   threadId: ThreadId,

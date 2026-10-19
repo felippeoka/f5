@@ -6,6 +6,7 @@ import {
   RuntimeRequestId,
   TurnId,
   type PiSettings,
+  type CommandId,
   type ProviderInstanceId,
   type ProviderRuntimeEvent,
   type ProviderSession,
@@ -20,6 +21,8 @@ import {
   Effect,
   Exit,
   FileSystem,
+  Fiber,
+  Option,
   PubSub,
   Scope,
   Schema,
@@ -55,6 +58,8 @@ import {
 } from "../pi/PiProtocol.ts";
 import { piContextUsage, PiTurnUsage } from "../pi/PiUsage.ts";
 import { PiAssistantOutput } from "../pi/PiAssistantOutput.ts";
+import { PiNativeWake, PI_NATIVE_WAKE_ADMISSION_MS } from "../pi/PiNativeWake.ts";
+import type { ProviderContinuationRequest } from "../ProviderContinuationRequests.ts";
 import { PiTurnState, type PiTurnAction } from "../pi/PiTurnState.ts";
 import { PiUiRequests, type PendingPiUiRequest } from "../pi/PiUiRequests.ts";
 import {
@@ -90,6 +95,12 @@ interface PiContext {
   readonly tools: Map<string, { name: string; args: unknown; done: boolean }>;
   readonly barriers: Map<string, Deferred.Deferred<unknown, PiRpcError>>;
   readonly readOnly: boolean;
+  wake: PiNativeWake | null;
+  wakeTimer: Fiber.Fiber<void> | undefined;
+  lastTurnId: TurnId | undefined;
+  activeCommandId: CommandId | undefined;
+  lastCommandId: CommandId | undefined;
+  continuationEligible: boolean;
   lifecycle: boolean;
   session: ProviderSession;
   cursor: PiResumeCursor;
@@ -100,6 +111,7 @@ export interface PiAdapterOptions {
   readonly instanceId: ProviderInstanceId;
   readonly environment: NodeJS.ProcessEnv;
   readonly cacheDir: string;
+  readonly offerContinuation?: (request: ProviderContinuationRequest) => Effect.Effect<boolean>;
   readonly onCatalog?: (catalog: PiCatalog) => Effect.Effect<void>;
   readonly beforeLaunch?: Effect.Effect<void, PiRpcError, Scope.Scope>;
   readonly createMcpSession?: (
@@ -110,7 +122,7 @@ type EventBody<E = ProviderRuntimeEvent> = E extends ProviderRuntimeEvent
   ? Omit<E, "provider" | "providerInstanceId" | "threadId" | "eventId" | "createdAt">
   : never;
 
-/** One owned RPC process per session. Not registered until the integration gate is complete. */
+/** One owned RPC process per session, including native continuation admission. */
 export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =>
   Effect.gen(function* () {
     const rootScope = yield* Effect.scope;
@@ -250,6 +262,8 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
       Effect.gen(function* () {
         if (ctx.closed) return;
         ctx.closed = true;
+        ctx.wake?.cancel();
+        ctx.wake = null;
         for (const reply of ctx.barriers.values())
           yield* Deferred.fail(
             reply,
@@ -294,6 +308,7 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
           boundary?.retainedUserEntryIds !== undefined ||
           piRecordString(state, "sessionFile") !== ctx.cursor.sessionFile;
         if (nativeHistoryChanged) ctx.ready = false;
+        const activeEntries = new Set(tree ? piActiveBranch(tree)?.map((entry) => entry.id) : []);
         if (boundary)
           ctx.cursor = {
             ...ctx.cursor,
@@ -301,12 +316,19 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
             boundaries: [
               ...ctx.cursor.boundaries.filter(
                 (known) =>
-                  boundary.retainedUserEntryIds === undefined ||
-                  boundary.retainedUserEntryIds.includes(known.entryId),
+                  boundary.retainedUserEntryIds === undefined || activeEntries.has(known.entryId),
               ),
               ...(boundary.turnStartEntryId
                 ? [{ turnId: action.turnId, entryId: boundary.turnStartEntryId }]
-                : []),
+                : boundary.continuationStartEntryId
+                  ? [
+                      {
+                        turnId: action.turnId,
+                        entryId: boundary.continuationStartEntryId,
+                        kind: "continuation" as const,
+                      },
+                    ]
+                  : []),
             ].slice(-500),
           };
         yield* completeOpenItems(
@@ -340,6 +362,10 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
           resumeCursor: ctx.cursor,
           updatedAt: new Date().toISOString(),
         };
+        ctx.lastTurnId = TurnId.make(action.turnId);
+        ctx.lastCommandId = ctx.activeCommandId;
+        ctx.activeCommandId = undefined;
+        ctx.continuationEligible = action.state === "completed" && !nativeHistoryChanged;
         yield* emit(ctx, {
           type: "turn.completed",
           turnId: TurnId.make(action.turnId),
@@ -537,6 +563,73 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
           },
         });
       });
+    const beginWake = (ctx: PiContext, event: PiRpcRecord) =>
+      Effect.gen(function* () {
+        if (
+          !options.offerContinuation ||
+          !ctx.ready ||
+          ctx.lifecycle ||
+          !ctx.lastTurnId ||
+          !ctx.continuationEligible
+        )
+          return yield* stop(
+            ctx,
+            "Pi started native work without an available F5 continuation owner.",
+            true,
+          );
+        const wake = new PiNativeWake(randomUUID(), ctx.generation, Date.now());
+        if (!wake.push(event, Date.now()))
+          return yield* stop(ctx, "Pi native wake could not be buffered.", true);
+        ctx.wake = wake;
+        const request: ProviderContinuationRequest = {
+          requestId: wake.requestId,
+          threadId: ctx.threadId,
+          providerInstanceId: options.instanceId,
+          generation: ctx.generation,
+          createdAt: wake.createdAt,
+          previousTurnId: ctx.lastTurnId,
+          ...(ctx.lastCommandId ? { previousCommandId: ctx.lastCommandId } : {}),
+          runtimeMode: ctx.session.runtimeMode,
+          model: ctx.session.model,
+          status: Effect.sync(() =>
+            wake.adopted
+              ? "adopted"
+              : ctx.closed ||
+                  ctx.wake !== wake ||
+                  !wake.isCurrent(wake.requestId, ctx.generation, Date.now())
+                ? "closed"
+                : "pending",
+          ),
+          dispatchIfCurrent: (effect) =>
+            ctx.eventGate.withPermit(
+              Effect.suspend(() =>
+                !ctx.closed &&
+                ctx.wake === wake &&
+                wake.isCurrent(wake.requestId, ctx.generation, Date.now())
+                  ? effect.pipe(Effect.map(Option.some))
+                  : Effect.succeed(Option.none()),
+              ),
+            ),
+          clearIfCurrent: ctx.eventGate.withPermit(
+            Effect.suspend(() => {
+              if (ctx.wake !== wake || ctx.closed) return Effect.void;
+              wake.cancel();
+              ctx.wake = null;
+              return stop(
+                ctx,
+                "Pi native continuation was declined, expired or superseded by F5.",
+                true,
+              );
+            }),
+          ),
+        };
+        if (!(yield* options.offerContinuation(request)))
+          return yield* stop(ctx, "F5 continuation admission is full or already owned.", true);
+        ctx.wakeTimer = yield* Effect.sleep(PI_NATIVE_WAKE_ADMISSION_MS).pipe(
+          Effect.andThen(request.clearIfCurrent),
+          Effect.forkIn(ctx.scope),
+        );
+      });
     const nativeEvent = (ctx: PiContext, event: PiRpcRecord) =>
       Effect.gen(function* () {
         if (ctx.closed) return;
@@ -557,6 +650,13 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
             );
           return;
         }
+        if (ctx.wake) {
+          if (!ctx.wake.push(event, Date.now()))
+            yield* stop(ctx, "Pi native continuation exceeded its bounded admission window.", true);
+          return;
+        }
+        if (!ctx.turns.activeTurnId && event.type === "agent_start")
+          return yield* beginWake(ctx, event);
         if (event.type === "extension_ui_request") return yield* handleDialog(ctx, event);
         if (
           ctx.turns.activeTurnId &&
@@ -602,6 +702,52 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
         }
         yield* actions(ctx, ctx.turns.observe(event));
       });
+    const adoptWake = (ctx: PiContext, input: ProviderAdapterSendTurnInput, claimed: () => void) =>
+      ctx.eventGate.withPermit(
+        Effect.gen(function* () {
+          if (
+            ctx.closed ||
+            ctx.lifecycle ||
+            ctx.turns.activeTurnId ||
+            !ctx.ready ||
+            !ctx.wake ||
+            !input.continuationRequestId ||
+            ((input.interactionMode !== undefined ||
+              input.workflowExecutionProfile !== undefined) &&
+              (input.interactionMode === "plan" || input.workflowExecutionProfile !== undefined) !==
+                ctx.readOnly) ||
+            (input.modelSelection && input.modelSelection.instanceId !== options.instanceId) ||
+            ((input.modelSelection?.model ?? input.model) !== undefined &&
+              (input.modelSelection?.model ?? input.model) !== ctx.session.model)
+          )
+            return yield* requestError(
+              "sendTurn",
+              "This Pi continuation is no longer current; no prompt was sent.",
+            );
+          const records = ctx.wake.take(input.continuationRequestId, ctx.generation, Date.now());
+          if (!records)
+            return yield* requestError(
+              "sendTurn",
+              "This Pi continuation expired; no prompt was sent.",
+            );
+          claimed();
+          ctx.wake = null;
+          if (ctx.wakeTimer) yield* Fiber.interrupt(ctx.wakeTimer);
+          ctx.wakeTimer = undefined;
+          const turnId = TurnId.make(randomUUID());
+          ctx.turns.admitContinuation(turnId);
+          ctx.activeCommandId = input.deliveryId;
+          ctx.session = {
+            ...ctx.session,
+            status: "running",
+            activeTurnId: turnId,
+            updatedAt: new Date().toISOString(),
+          };
+          yield* emit(ctx, { type: "turn.started", turnId, payload: { model: ctx.session.model } });
+          for (const event of records) yield* nativeEvent(ctx, event);
+          return { threadId: input.threadId, turnId, resumeCursor: ctx.cursor };
+        }),
+      );
     const applySelection = (
       ctx: PiContext,
       input: Pick<ProviderAdapterSendTurnInput, "model" | "modelSelection" | "modelOptions">,
@@ -743,6 +889,14 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
                     readOnly:
                       input.interactionMode === "plan" ||
                       input.workflowExecutionProfile !== undefined,
+                    activeCommandId: undefined,
+                    lastCommandId: undefined,
+                    continuationEligible: false,
+                    wake: null,
+                    wakeTimer: undefined,
+                    lastTurnId: resume?.boundaries.at(-1)?.turnId
+                      ? TurnId.make(resume.boundaries.at(-1)!.turnId)
+                      : undefined,
                     lifecycle: false,
                     ready: false,
                     closed: false,
@@ -857,6 +1011,18 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
             let deliveryStarted = false;
             return Effect.gen(function* () {
               const ctx = yield* requireSession(input.threadId);
+              if (input.continuationRequestId)
+                return yield* adoptWake(ctx, input, () => {
+                  deliveryStarted = true;
+                });
+              if (ctx.wake)
+                return yield* new ProviderAdapterRequestError({
+                  provider: "pi",
+                  method: "sendTurn",
+                  deliveryCertainty: "not_sent",
+                  deliveryRetryable: true,
+                  detail: "Pi native work is waiting for F5 continuation admission.",
+                });
               if (!ctx.ready || ctx.lifecycle || ctx.turns.activeTurnId)
                 return yield* requestError("sendTurn", "Pi is not ready for another turn.");
               if (
@@ -910,6 +1076,7 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
                 Effect.gen(function* () {
                   if (ctx.closed || ctx.turns.activeTurnId)
                     return yield* requestError("sendTurn", "Pi turn ownership changed.");
+                  ctx.activeCommandId = input.deliveryId;
                   const id = ctx.turns.admit({
                     turnId,
                     command: compact ? "compact" : "prompt",
@@ -949,7 +1116,9 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
                       provider: "pi",
                       method: "sendTurn",
                       deliveryCertainty: "not_sent",
-                      deliveryRetryable: false,
+                      deliveryRetryable: Schema.is(ProviderAdapterRequestError)(cause)
+                        ? (cause.deliveryRetryable ?? false)
+                        : false,
                       detail: Schema.is(ProviderAdapterRequestError)(cause)
                         ? cause.detail
                         : "Pi rejected this turn before sending its prompt.",
@@ -1006,6 +1175,8 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
           "interruptTurn",
           Effect.gen(function* () {
             const ctx = yield* requireSession(threadId);
+            if (ctx.wake)
+              return yield* stop(ctx, "Pi native continuation interrupted by the user.");
             const abort = ctx.turns.interrupt();
             if (abort) yield* ctx.rpc.send(abort);
           }),
@@ -1042,6 +1213,11 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
             "readThread",
             Effect.gen(function* () {
               const ctx = yield* requireSession(threadId);
+              if (ctx.wake)
+                return yield* requestError(
+                  "readThread",
+                  "Pi native output is waiting for F5 continuation admission.",
+                );
               return (yield* history(ctx)).snapshot;
             }),
           ),
@@ -1055,6 +1231,7 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
               const ctx = yield* requireSession(threadId);
               if (
                 ctx.turns.activeTurnId ||
+                ctx.wake !== null ||
                 ctx.lifecycle ||
                 !Number.isSafeInteger(numTurns) ||
                 numTurns < 1
@@ -1068,7 +1245,14 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
                 rollbackOptions?.beforeTurnId &&
                 rollbackOptions.beforeTurnId === ctx.cursor.rewindBeforeTurnId
               ) {
-                if (ctx.cursor.rewindRetainedHash === piHistoryBoundaryHash(before.userEntryIds))
+                if (
+                  ctx.cursor.rewindRetainedHash ===
+                  piHistoryBoundaryHash(
+                    ctx.cursor.rewindBoundaryKind === "entries"
+                      ? before.activeEntryIds
+                      : before.userEntryIds,
+                  )
+                )
                   return before.snapshot;
                 return yield* requestError(
                   "rollbackThread",
@@ -1085,7 +1269,18 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
                   "rollbackThread",
                   "The Pi rewind boundary no longer matches the selected turns.",
                 );
-              const discarded = before.userEntryIds.slice(index);
+              const activeBranch = piActiveBranch(before.tree)!;
+              const selectedEntryId = before.turnEntryIds[index];
+              const branchIndex = activeBranch.findIndex((entry) => entry.id === selectedEntryId);
+              if (branchIndex < 0 || !activeBranch[branchIndex]?.user)
+                return yield* requestError(
+                  "rollbackThread",
+                  "Select a native user turn to rewind; an assistant-only continuation has no Pi fork boundary.",
+                );
+              const discarded = activeBranch
+                .slice(branchIndex)
+                .filter((entry) => entry.user)
+                .map((entry) => entry.id);
               const entryId = piRollbackEntry(before.tree, discarded);
               const firstTurn = before.snapshot.turns[index];
               if (
@@ -1099,7 +1294,7 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
                   "rollbackThread",
                   "This Pi turn has no captured native rewind boundary.",
                 );
-              const retained = before.userEntryIds.slice(0, index);
+              const retained = activeBranch.slice(0, branchIndex).map((entry) => entry.id);
               const previousFile = ctx.cursor.sessionFile;
               ctx.lifecycle = true;
               return yield* Effect.gen(function* () {
@@ -1147,6 +1342,7 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
                   rewindSourceThreadId: previousFile,
                   rewindBeforeTurnId: firstTurn.id,
                   rewindRetainedHash: piHistoryBoundaryHash(retained),
+                  rewindBoundaryKind: "entries",
                 };
                 ctx.ready = false;
                 ctx.session = {
@@ -1169,7 +1365,7 @@ export const makePiAdapter = (settings: PiSettings, options: PiAdapterOptions) =
                       }),
                   });
                 const branch = tree ? piActiveBranch(tree) : null;
-                const actual = branch?.filter((entry) => entry.user).map((entry) => entry.id);
+                const actual = branch?.map((entry) => entry.id);
                 if (
                   ctx.closed ||
                   ctx.turns.activeTurnId ||

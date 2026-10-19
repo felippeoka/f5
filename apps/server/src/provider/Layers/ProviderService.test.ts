@@ -432,6 +432,46 @@ function makeProviderServiceLayerForAdapters(
   );
 }
 
+it.effect(
+  "reads capabilities from exact explicit instances without requiring a legacy default",
+  () => {
+    const first = makeFakeCodexAdapter("pi");
+    const second = {
+      ...first.adapter,
+      capabilities: { sessionModelSwitch: "restart-session" as const },
+    };
+    const a = ProviderInstanceId.make("pi-a"),
+      b = ProviderInstanceId.make("pi-b");
+    const base = makeAdapterRegistryMock({ pi: first.adapter });
+    const layer = makeProviderServiceLayerForAdapters(new Map([["pi", first.adapter]]), {
+      listInstances: () => Effect.succeed([a, b]),
+      getByInstance: (id) =>
+        id === a
+          ? Effect.succeed(first.adapter)
+          : id === b
+            ? Effect.succeed(second)
+            : base.getByInstance(id),
+      getByProvider: (provider) =>
+        Effect.die(new Error(`Unexpected legacy capability lookup for ${provider}`)),
+      getInstanceInfo: (id) =>
+        base
+          .getInstanceInfo(ProviderInstanceId.make("pi"))
+          .pipe(Effect.map((info) => ({ ...info, instanceId: id }))),
+    });
+    return Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      assert.equal((yield* provider.getCapabilities("pi", a)).sessionModelSwitch, "in-session");
+      assert.equal(
+        (yield* provider.getCapabilities("pi", b)).sessionModelSwitch,
+        "restart-session",
+      );
+      const mismatch = yield* provider.getCapabilities("acp", a).pipe(Effect.flip);
+      assert.equal(mismatch._tag, "ProviderUnsupportedError");
+      assert.equal(first.startSession.mock.calls.length, 0);
+    }).pipe(Effect.provide(layer));
+  },
+);
+
 it.effect("ignores a delayed Claude exit cursor from before transcript repair", () => {
   const claude = makeFakeCodexAdapter("claudeAgent");
   const layer = makeProviderServiceLayerForAdapters(new Map([["claudeAgent", claude.adapter]]));

@@ -108,6 +108,7 @@ import {
   type ProviderAdapterError,
   type ProviderServiceError,
   ProviderSessionActionUnavailableError,
+  ProviderUnsupportedError,
   ProviderValidationError,
   ProviderTurnDeliveryError,
 } from "../Errors.ts";
@@ -1893,7 +1894,8 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 const routed = yield* resolveRoutableSession({
                   threadId: input.threadId,
                   operation: "ProviderService.sendTurn",
-                  allowRecovery: input.expectedTurnId === undefined,
+                  allowRecovery:
+                    input.expectedTurnId === undefined && input.continuationRequestId === undefined,
                   binding,
                 });
                 metricProvider = routed.adapter.provider;
@@ -2566,8 +2568,14 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         });
       });
 
-    const getCapabilities: ProviderServiceShape["getCapabilities"] = (provider) =>
-      registry.getByProvider(provider).pipe(Effect.map((adapter) => adapter.capabilities));
+    const getCapabilities: ProviderServiceShape["getCapabilities"] = (provider, instanceId) =>
+      (instanceId ? registry.getByInstance(instanceId) : registry.getByProvider(provider)).pipe(
+        Effect.flatMap((adapter) =>
+          adapter.provider === provider
+            ? Effect.succeed(adapter.capabilities)
+            : Effect.fail(new ProviderUnsupportedError({ provider })),
+        ),
+      );
 
     const getSessionCapabilities: ProviderServiceShape["getSessionCapabilities"] = (threadId) =>
       Effect.gen(function* () {

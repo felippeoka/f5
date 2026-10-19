@@ -1,6 +1,8 @@
 import { isAbsolute, win32 } from "node:path";
 import { createHash } from "node:crypto";
 import { TurnId, type ThreadId } from "@t3tools/contracts";
+import { stringifyWithinBytes } from "@t3tools/shared/boundedJson";
+import { canonicalJsonHash } from "../../canonicalJsonHash.ts";
 import { Effect } from "effect";
 import type { ProviderThreadSnapshot } from "../Services/ProviderAdapter.ts";
 import { piRecordField, piRecordString, type PiRpcRecord } from "./PiProtocol.ts";
@@ -10,6 +12,7 @@ import { parsePiSessionTree, piActiveBranch } from "./PiSessionTree.ts";
 export interface PiBoundary {
   readonly turnId: string;
   readonly entryId: string;
+  readonly kind?: "continuation";
 }
 export interface PiResumeCursor {
   readonly schemaVersion: 1;
@@ -19,6 +22,7 @@ export interface PiResumeCursor {
   readonly rewindSourceThreadId?: string;
   readonly rewindBeforeTurnId?: string;
   readonly rewindRetainedHash?: string;
+  readonly rewindBoundaryKind?: "entries";
 }
 export function parsePiResumeCursor(value: unknown): PiResumeCursor | undefined {
   const file = piRecordString(value, "sessionFile");
@@ -61,11 +65,15 @@ export function parsePiResumeCursor(value: unknown): PiResumeCursor | undefined 
       return undefined;
     turns.add(turnId);
     entries.add(entryId);
-    parsed.push({ turnId, entryId });
+    const kind = piRecordField(boundary, "kind");
+    if (kind !== undefined && kind !== "continuation") return undefined;
+    parsed.push({ turnId, entryId, ...(kind === "continuation" ? { kind } : {}) });
   }
   const rewindSourceThreadId = piRecordString(value, "rewindSourceThreadId");
   const rewindBeforeTurnId = piRecordString(value, "rewindBeforeTurnId");
   const rewindRetainedHash = piRecordString(value, "rewindRetainedHash");
+  const rewindBoundaryKind = piRecordField(value, "rewindBoundaryKind");
+  if (rewindBoundaryKind !== undefined && rewindBoundaryKind !== "entries") return undefined;
   if (rewindRetainedHash !== undefined && !/^[a-f0-9]{64}$/.test(rewindRetainedHash))
     return undefined;
   if (
@@ -88,6 +96,7 @@ export function parsePiResumeCursor(value: unknown): PiResumeCursor | undefined 
     ...(rewindSourceThreadId ? { rewindSourceThreadId } : {}),
     ...(rewindBeforeTurnId ? { rewindBeforeTurnId } : {}),
     ...(rewindRetainedHash ? { rewindRetainedHash } : {}),
+    ...(rewindBoundaryKind === "entries" ? { rewindBoundaryKind } : {}),
   };
 }
 
@@ -139,16 +148,58 @@ export const readPiHistory = (input: {
     const known = new Map(
       input.cursor.boundaries.map((boundary) => [boundary.entryId, boundary.turnId]),
     );
-    const items = new Map(users.map((id) => [id, [] as unknown[]]));
+    const continuationIds = new Set(
+      input.cursor.boundaries
+        .filter((boundary) => boundary.kind === "continuation")
+        .map((boundary) => boundary.entryId),
+    );
+    const turnEntryIds = branch
+      .filter((entry) => entry.user || continuationIds.has(entry.id))
+      .map((entry) => entry.id);
+    const fingerprint = (message: unknown) =>
+      stringifyWithinBytes(message, 16 * 1024 * 1024) === undefined
+        ? undefined
+        : canonicalJsonHash(message);
+    const continuationByFingerprint = new Map<string, string>();
+    for (const entry of branch) {
+      if (!continuationIds.has(entry.id)) continue;
+      const key = fingerprint(entry.message);
+      if (!key || continuationByFingerprint.has(key))
+        return yield* error("Pi continuation history has ambiguous native message boundaries.");
+      continuationByFingerprint.set(key, entry.id);
+    }
+    // Native message identity must be unique before matching context messages to
+    // assistant-only continuation boundaries. Identical text alone is insufficient.
+    const counts = new Map<string, number>();
+    for (const entry of branch) {
+      if (!continuationByFingerprint.size || entry.message === undefined) continue;
+      const key = fingerprint(entry.message);
+      if (key && continuationByFingerprint.has(key)) counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    if ([...continuationByFingerprint.keys()].some((key) => counts.get(key) !== 1))
+      return yield* error("Pi continuation messages have no unique persisted identity.");
+    const items = new Map(turnEntryIds.map((id) => [id, [] as unknown[]]));
     let userIndex = users.length - nativeUserCount - 1;
+    let current = users[userIndex];
+    const seenContinuations = new Set<string>();
     for (const [index, message] of messages.entries()) {
       const role = piRecordString(message, "role");
+      if (role === "user") {
+        userIndex++;
+        current = users[userIndex];
+      }
+      const key = continuationByFingerprint.size ? fingerprint(message) : undefined;
+      const continuation = key ? continuationByFingerprint.get(key) : undefined;
+      if (continuation) {
+        if (seenContinuations.has(continuation))
+          return yield* error("Pi repeated a continuation history message.");
+        seenContinuations.add(continuation);
+        current = continuation;
+      }
       if (role !== "user" && role !== "assistant") continue;
-      if (role === "user") userIndex++;
-      const id = users[userIndex];
-      if (!id) continue;
-      items.get(id)!.push({
-        id: `${id}:message:${index}`,
+      if (!current) continue;
+      items.get(current)!.push({
+        id: `${current}:message:${index}`,
         type: role === "user" ? "userMessage" : "agentMessage",
         role,
         content: piRecordField(message, "content"),
@@ -163,7 +214,16 @@ export const readPiHistory = (input: {
         boundary: tree.leafId,
         runtimeId: null,
       },
-      turns: users.map((id) => ({ id: TurnId.make(known.get(id) ?? id), items: items.get(id)! })),
+      turns: turnEntryIds.map((id) => ({
+        id: TurnId.make(known.get(id) ?? id),
+        items: items.get(id)!,
+      })),
     };
-    return { snapshot, tree, userEntryIds: users };
+    return {
+      snapshot,
+      tree,
+      userEntryIds: users,
+      turnEntryIds,
+      activeEntryIds: branch.map((entry) => entry.id),
+    };
   });
