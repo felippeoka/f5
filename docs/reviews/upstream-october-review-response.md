@@ -1105,3 +1105,15 @@ still stops on the same two migration process-identity cases (330 scripts pass);
 Turbo interrupts the remaining workspaces before the exhaustive Git stage. No
 process-identity check or release gate was weakened. Independent server and Git
 matrix results follow once those complete.
+
+The independent server run completes with 5,390 passing cases and 12 skipped.
+Alongside the three existing launcher-identity failures, it caught a missing purge
+policy for the new retirement table. That table now has an explicit bounded deletion
+handler, preserving retirement receipts until permanent thread purge. Its existing
+schema-coverage regression and storage suites are rerun below; this failure is not
+classified as environmental.
+
+The purge-policy correction passes all 93 storage/cleanup tests, the formatter,
+lint and all eight typechecks. The preceding complete server run exercised 539
+files; its additional purge-policy failure is now covered by that passing targeted
+run. The three launcher process-identity failures remain unresolved host restrictions.
