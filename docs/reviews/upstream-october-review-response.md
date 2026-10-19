@@ -1536,3 +1536,30 @@ accepted server-component evidence for the incremental projection change, not a
 comparison against original main or successful full interactive coverage. The
 native terminal activity guard, required full gate and remaining 15a audit remain
 open, and no delivery disposition is promoted.
+
+The #16682 source audit finds an existing F5 coalescer rather than the upstream
+per-chunk persistence behavior (`abdf16fd7c`). Ten new regressions nevertheless
+fail against that baseline: meaningful status/title changes without detail,
+structured output and periodic argument/diff progress are lost. The final baseline
+run records ten failures out of 34 cases; two additional positive omitted-kind
+placeholder cases are then retained. In both real ACP modes, the baseline emits
+only three of 17 required tool updates.
+
+`ae320efe8e` preserves meaningful lifecycle/title/structured output immediately,
+samples argument and diff changes every ten updates, and skips identical cloned
+snapshots using value comparison without serializing their contents. The shared
+presentation rules derive generic titles, so empty placeholders stay hidden even
+when the native provider omits kind. The original placeholder integration test
+and the 1,000-redraw regression (114 emitted events with bounded payloads) stay
+intact. Two real-process cases each exercise two turns, both hardening modes,
+ordered event barriers and exact final arguments/output; each turn emits 17 tool
+updates from 125 native tool frames. All 208 focused ACP/adapter cases pass with
+three existing skips, and all eight typechecks, formatter and lint pass. The
+six-task production build passes. The required full run still fails the same two
+scripts recovery identity cases. This adds bounded event-count/correctness proof;
+it does not claim measured CPU improvement or reproduce the upstream storage
+flood. The per-SHA record stays planned until the remaining audit and gates close.
+
+The complete server suite at the ACP checkpoint passes 5,462 cases and skips 12;
+only the same three launcher process-identity cases fail. The strict ledger and
+all 12 September/October plan tests pass. Required full/native gates remain open.

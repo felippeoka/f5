@@ -2264,10 +2264,20 @@
     {
       "upstreamSha": "10e29a26c289140b8f2312045c1ce0c278c7fe1a",
       "subject": "perf(server): ACP tool updates no longer persist a snapshot per streamed chunk (#16682)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(server): ACP tool updates no longer persist a snapshot per streamed chunk (#16682).",
+      "reason": "Planned: F5 already coalesces cumulative tool redraws rather than persisting every native chunk (baseline abdf16fd7c). Individual audit found ten failing-before cases for dropped lifecycle/title/structured output and starved argument-only progress. ae320efe8e preserves meaningful lifecycle and structured output immediately, samples argument/diff changes every ten updates, skips equal snapshots, and preserves empty-placeholder suppression and the existing bounded 1,000-redraw behavior. Two real ACP wire tests exercise both hardening modes and two turns each; all 208 focused cases pass with three existing skips. This is bounded event-count and correctness proof, not a measured CPU improvement or a reproduction of the upstream storage flood. The remaining per-SHA audit and required release gates remain open. Upstream change: perf(server): ACP tool updates no longer persist a snapshot per streamed chunk (#16682).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "plannedWorkstream": "15a",
+      "f5Shas": [
+        "abdf16fd7cdcbb8c1ffaec2b512c19c70609572f",
+        "ae320efe8e478f43a5a5a3f7cb0fb20f1d24ceb5"
+      ],
+      "evidence": [
+        "apps/server/src/provider/acp/AcpRuntimeModel.ts:527",
+        "apps/server/src/provider/acp/AcpRuntimeModel.test.ts:368",
+        "apps/server/src/provider/acp/AcpSessionRuntime.toolProgress.test.ts:1",
+        "apps/server/src/provider/acp/AcpJsonRpcConnection.test.ts:505"
+      ]
     },
     {
       "upstreamSha": "10f39eb9ac80c9a4b7f5097575dd2addc3b6f631",
