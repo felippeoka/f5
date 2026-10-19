@@ -1,4 +1,5 @@
 import { chromium } from "playwright";
+import { installBrowserPerformanceCounters } from "../src/lib/browserPerformanceCollector.ts";
 import { writeFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -22,8 +23,8 @@ const context = await browser.newContext({
   viewport: config.viewport,
   reducedMotion: config.reducedMotion,
 });
+await context.addInitScript(installBrowserPerformanceCounters);
 await context.addInitScript(() => {
-  window.__f5PerformanceCounters = { work: {}, gauges: {}, rowRenders: Object.create(null) };
   window.__perfStartup = new Promise((resolve) => {
     const ready = () => {
       const row = document.querySelector('[data-message-id="perf-small-message-19"]');
@@ -237,6 +238,99 @@ try {
       );
     }
     await control("stop-soak");
+  }
+  if (process.env.F5_PERF_LIFECYCLE === "1") {
+    const assert = (condition, message) => {
+      if (!condition) throw new Error(message);
+    };
+    await control("lifecycle-history");
+    for (let attempt = 0; attempt < 100 && !(await threadLink("perf-history").count()); attempt++) {
+      const more = page.getByRole("button", { name: "Show more", exact: true });
+      if (await more.count()) await more.click();
+      await delay(50);
+    }
+    await navigate("perf-history");
+    await row("perf-history-message-999").waitFor();
+    await control("start-streaming");
+    await navigate("perf-stream-0");
+    await page
+      .getByText(/Streaming frame/)
+      .first()
+      .waitFor();
+    await navigate("perf-history");
+    const beforeHistory = await page.evaluate(
+      () => window.__f5PerformanceCounters.sample().resources.store.retainedMessages,
+    );
+    const beforeHistoryStats = await control("stats");
+    await page.locator('[data-slot="messages-scroll-container"]').evaluate((container) => {
+      container.scrollTop = 0;
+      container.dispatchEvent(new Event("scroll"));
+    });
+    await page.waitForFunction(
+      (before) => window.__f5PerformanceCounters.sample().resources.store.retainedMessages > before,
+      beforeHistory,
+    );
+    await row("perf-history-message-959").waitFor({ state: "attached" });
+    const afterHistoryStats = await control("stats");
+    assert(
+      (afterHistoryStats.rpc["orchestration.getThreadHistoryPage"] ?? 0) >
+        (beforeHistoryStats.rpc["orchestration.getThreadHistoryPage"] ?? 0),
+      "History was not loaded while streaming",
+    );
+    assert(
+      afterHistoryStats.frames > beforeHistoryStats.frames,
+      "Streaming stalled during history loading",
+    );
+    await control("stop-streaming");
+    await navigate("perf-small");
+    await editor.fill("unfinished draft during provider failure");
+    const preservedDraft = await editor.innerText();
+    await control("lifecycle-start");
+    const stop = page.getByRole("button", { name: "Stop generation", exact: true });
+    await stop.waitFor();
+    const full = await control("lifecycle-saturate");
+    assert(full.entries === 1024, "Ordinary admission was not saturated");
+    await stop.click();
+    await stop.waitFor({ state: "hidden" });
+    let stats = (await control("stats")).lifecycle;
+    assert(
+      stats.entries === 1024 && stats.applied["thread.turn.interrupt"] === 1,
+      "Stop did not pass saturated ordinary admission exactly once",
+    );
+    assert((await editor.innerText()) === preservedDraft, "Stop discarded the draft");
+    await control("lifecycle-start");
+    await stop.waitFor();
+    await control("lifecycle-approval");
+    const approve = page.getByRole("button", { name: "Approve once", exact: true });
+    await approve.waitFor();
+    await approve.click();
+    await approve.waitFor({ state: "hidden" });
+    stats = (await control("stats")).lifecycle;
+    assert(
+      stats.entries === 1024 && stats.applied["thread.approval.respond"] === 1,
+      "Approval did not pass saturated ordinary admission exactly once",
+    );
+    await control("lifecycle-crash");
+    await page
+      .getByText("Provider crashed during the turn. Retry when ready.", { exact: true })
+      .waitFor();
+    await stop.waitFor({ state: "hidden" });
+    assert((await editor.innerText()) === preservedDraft, "Provider failure discarded the draft");
+    await editor.press("End");
+    await editor.pressSequentially(" still editable");
+    assert(
+      (await editor.innerText()).includes("still editable"),
+      "Provider failure blocked editing",
+    );
+    report.diagnostics.lifecycle = {
+      stop: true,
+      approval: true,
+      providerCrash: true,
+      draftPreserved: true,
+      historyLoaded: true,
+      switchingWhileStreaming: true,
+    };
+    await control("lifecycle-reset");
   }
   report.loaded = await control("stats");
   if (errors.length) throw new Error(`Browser runtime errors: ${errors.join("\n")}`);

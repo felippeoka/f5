@@ -122,3 +122,8 @@ OpenCode SDK fetches share an owning-session abort signal, installed before
 the adapter emits one runtime error followed by one exit and closes the session
 from its adapter scope, avoiding a fiber waiting for its own scope to close.
 Remote tree cleanup and process escalation respect the shared shutdown deadline.
+
+The killed-server Claude gate (`integration/chaos/claudeRecoveryGate.integration.test.ts`)
+retains complete native transcript text across restart but observes partial, empty
+runtime history after resume. Claude coalescing remains disabled. The shared SDK
+query fake exercises F5 recovery; live CLI compatibility remains separate.

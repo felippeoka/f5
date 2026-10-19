@@ -357,6 +357,10 @@
     "./abortSignal": {
       "types": "./src/abortSignal.ts",
       "import": "./src/abortSignal.ts"
+    },
+    "./turnStateTransitions": {
+      "types": "./src/turnStateTransitions.ts",
+      "import": "./src/turnStateTransitions.ts"
     }
   },
   "scripts": {

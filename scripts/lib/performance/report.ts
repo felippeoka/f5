@@ -92,6 +92,8 @@ export function metadata(root: string) {
           "apps/server/scripts/performance/interactive.perf.ts",
           "apps/server/scripts/performance/native-terminal.mjs",
           "apps/web/scripts/performance-browser.mjs",
+          "apps/web/src/lib/browserPerformanceCollector.ts",
+          "apps/server/scripts/performance/browserLifecycle.ts",
         ].map((file) => readFileSync(path.join(root, file), "utf8")),
       ),
     ),

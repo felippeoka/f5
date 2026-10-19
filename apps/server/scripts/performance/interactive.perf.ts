@@ -165,6 +165,14 @@ it("measures the production renderer, real WS backpressure and native terminal s
     await pumpPromise;
     totalStreamMs += performance.now() - streamStartedAt;
   };
+  const lifecycle =
+    process.env.F5_PERF_LIFECYCLE === "1"
+      ? await Effect.runPromise(
+          (await import("./browserLifecycle.ts")).makeBrowserLifecycle(data, (event) =>
+            Effect.runPromise(bus.publishAll("orchestration.domainEvent", event)),
+          ),
+        )
+      : undefined;
   const inputs = Array.from({ length: fixture.terminal.count }, (_, i) => ({
     threadId: `native-${i}`,
     cwd: directory,
@@ -191,6 +199,16 @@ it("measures the production renderer, real WS backpressure and native terminal s
         if (request.method !== "POST") {
           response.writeHead(405).end();
           return;
+        }
+        if (pathname.startsWith("/_perf/lifecycle-")) {
+          if (!lifecycle) throw new Error("Lifecycle scenarios are disabled");
+          if (pathname === "/_perf/lifecycle-history") {
+            data.addHistoryThread();
+            for (const client of Effect.runSync(Ref.get(clients)))
+              client.close(1001, "fixture reconnect");
+            return json({ ok: true });
+          }
+          return json(await lifecycle.control(pathname.slice("/_perf/lifecycle-".length)));
         }
         switch (pathname) {
           case "/_perf/start-streaming":
@@ -255,6 +273,7 @@ it("measures the production renderer, real WS backpressure and native terminal s
               achievedUpdatesPerSecondPerThread: frames / (totalStreamMs / 1000),
               rpc: Object.fromEntries(requests),
               unknownMethods: [...data.unknownMethods],
+              lifecycle: lifecycle?.stats(),
             });
           default:
             throw new Error(`Unknown control ${pathname}`);
@@ -325,9 +344,22 @@ it("measures the production renderer, real WS backpressure and native terminal s
       const request = JSON.parse(String(raw));
       const tag = String(request.body?._tag);
       requests.set(tag, (requests.get(tag) ?? 0) + 1);
-      void Effect.runPromise(
-        controller.send(socket, JSON.stringify({ id: request.id, result: data.rpc(request.body) })),
-      );
+      void (async () => {
+        const result =
+          lifecycle && tag === "orchestration.dispatchCommand"
+            ? await lifecycle.dispatch(request.body.command)
+            : data.rpc(request.body);
+        await Effect.runPromise(
+          controller.send(socket, JSON.stringify({ id: request.id, result })),
+        );
+      })().catch((error) => {
+        void Effect.runPromise(
+          controller.send(
+            socket,
+            JSON.stringify({ id: request.id, error: { message: String(error) } }),
+          ),
+        );
+      });
     });
   });
   const writer = fork(

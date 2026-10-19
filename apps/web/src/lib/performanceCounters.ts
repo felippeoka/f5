@@ -13,8 +13,12 @@ interface BrowserPerformanceSnapshot {
   rowRenders: Record<string, number>;
   resources?: Record<string, Record<string, number>>;
 }
-interface BrowserPerformanceCounters extends BrowserPerformanceSnapshot {
+export interface BrowserPerformanceCounters extends BrowserPerformanceSnapshot {
   sample?: () => BrowserPerformanceSnapshot;
+  recordRow?: (id: string) => void;
+  registerReader?: (name: "store" | "transport", read: () => Record<string, number>) => () => void;
+  recordWork?: (name: Work, amount?: number) => void;
+  recordGauge?: (name: Gauge, value: number) => void;
 }
 declare global {
   interface Window {
@@ -23,34 +27,8 @@ declare global {
   }
 }
 const counters = typeof window === "undefined" ? undefined : window.__f5PerformanceCounters;
-const readers = new Map<string, () => Record<string, number>>();
-if (counters)
-  counters.sample = () => ({
-    work: { ...counters.work },
-    gauges: { ...counters.gauges },
-    rowRenders: { ...counters.rowRenders },
-    resources: Object.fromEntries([...readers].map(([name, read]) => [name, read()])),
-  });
-export function registerBrowserResourceReader(
-  name: "store" | "transport",
-  read: () => Record<string, number>,
-) {
-  if (counters) readers.set(name, read);
-  return () => {
-    if (readers.get(name) === read) readers.delete(name);
-  };
-}
-export function recordBrowserWork(name: Work, amount = 1) {
-  if (counters) counters.work[name] = (counters.work[name] ?? 0) + amount;
-}
-export function recordBrowserGauge(name: Gauge, value: number) {
-  if (counters) counters.gauges[name] = value;
-}
-export function recordTimelineRowRender(id: string) {
-  if (!counters) return;
-  recordBrowserWork("rowRenders");
-  // Only retain a bounded sample of row identities, even in a long soak.
-  if (!Object.hasOwn(counters.rowRenders, id) && Object.keys(counters.rowRenders).length >= 2048)
-    delete counters.rowRenders[Object.keys(counters.rowRenders)[0]!];
-  counters.rowRenders[id] = (counters.rowRenders[id] ?? 0) + 1;
-}
+const noop = () => {};
+export const registerBrowserResourceReader = counters?.registerReader ?? (() => noop);
+export const recordBrowserWork = counters?.recordWork ?? noop;
+export const recordBrowserGauge = counters?.recordGauge ?? noop;
+export const recordTimelineRowRender = counters?.recordRow ?? noop;

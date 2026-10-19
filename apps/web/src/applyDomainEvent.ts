@@ -1,3 +1,4 @@
+import { projectLatestTurnSession } from "@t3tools/shared/turnStateTransitions";
 import { recordMessageAppend, recordMessageListChange } from "./lib/streamingTextRevision";
 import { detailEntityKey, detailEventIsCovered } from "./orchestration/detailCoverage";
 import {
@@ -318,6 +319,12 @@ function updateLatestTurnFromMessage(
   }
 
   const previous = thread.latestTurn?.turnId === payload.turnId ? thread.latestTurn : null;
+  // Item completion does not settle its still-active provider turn.
+  if (previous && thread.session?.activeTurnId === payload.turnId) {
+    return previous.assistantMessageId === payload.messageId
+      ? previous
+      : { ...previous, assistantMessageId: payload.messageId };
+  }
   const nextState = payload.streaming
     ? previous?.state === "interrupted"
       ? "interrupted"
@@ -1483,26 +1490,7 @@ function reduceDomainEvent(
           event.payload.session.estimatedThinkingTokens ?? thread.estimatedThinkingTokens;
         const nextModelContextWindowTokens =
           event.payload.session.modelContextWindowTokens ?? thread.modelContextWindowTokens;
-        const latestTurn =
-          event.payload.session.status === "running" && event.payload.session.activeTurnId !== null
-            ? {
-                turnId: event.payload.session.activeTurnId,
-                state: "running" as const,
-                requestedAt:
-                  thread.latestTurn?.turnId === event.payload.session.activeTurnId
-                    ? thread.latestTurn.requestedAt
-                    : event.payload.session.updatedAt,
-                startedAt:
-                  thread.latestTurn?.turnId === event.payload.session.activeTurnId
-                    ? (thread.latestTurn.startedAt ?? event.payload.session.updatedAt)
-                    : event.payload.session.updatedAt,
-                completedAt: null,
-                assistantMessageId:
-                  thread.latestTurn?.turnId === event.payload.session.activeTurnId
-                    ? thread.latestTurn.assistantMessageId
-                    : null,
-              }
-            : thread.latestTurn;
+        const latestTurn = projectLatestTurnSession(thread.latestTurn, event.payload);
         const error = visibleThreadSessionError(event.payload.threadId, event.payload.session);
         const pendingUserInputs = projectPendingUserInputs(thread.pendingUserInputs ?? [], event);
         if (

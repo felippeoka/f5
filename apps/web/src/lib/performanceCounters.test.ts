@@ -1,3 +1,4 @@
+import { installBrowserPerformanceCounters } from "./browserPerformanceCollector";
 import { afterEach, expect, it, vi } from "vitest";
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -5,10 +6,9 @@ afterEach(() => {
 });
 
 it("samples bounded row work and resources only when the production runner opts in", async () => {
-  const target = { work: {}, gauges: {}, rowRenders: Object.create(null) } as NonNullable<
-    Window["__f5PerformanceCounters"]
-  >;
-  vi.stubGlobal("window", { __f5PerformanceCounters: target });
+  vi.stubGlobal("window", {});
+  installBrowserPerformanceCounters();
+  const target = window.__f5PerformanceCounters!;
   const probe = await import("./performanceCounters");
   probe.recordBrowserWork("markdownParsedCharacters", 12);
   probe.recordBrowserGauge("highlightJobs", 2);
@@ -27,10 +27,9 @@ it("samples bounded row work and resources only when the production runner opts 
   expect(target.sample!().resources).toEqual({});
 });
 it("old disposers cannot remove the replacement transport reader", async () => {
-  const target = { work: {}, gauges: {}, rowRenders: Object.create(null) } as NonNullable<
-    Window["__f5PerformanceCounters"]
-  >;
-  vi.stubGlobal("window", { __f5PerformanceCounters: target });
+  vi.stubGlobal("window", {});
+  installBrowserPerformanceCounters();
+  const target = window.__f5PerformanceCounters!;
   const probe = await import("./performanceCounters");
   const old = probe.registerBrowserResourceReader("transport", () => ({ pending: 1 }));
   const replacement = probe.registerBrowserResourceReader("transport", () => ({ pending: 0 }));

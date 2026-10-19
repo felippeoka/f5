@@ -1,3 +1,4 @@
+import { startTerminalReceiptRetries } from "../terminalReceiptRecovery.ts";
 import { PerformanceStageProbe } from "../../observability/Metrics.ts";
 import { registerShutdown, AcceptedShutdownWork } from "../../shutdown.ts";
 import { withProviderThreadAccess } from "../../provider/providerThreadAccess.ts";
@@ -58,7 +59,6 @@ import {
   Effect,
   Exit,
   FileSystem,
-  Fiber,
   Layer,
   Option,
   Path,
@@ -6033,30 +6033,7 @@ const make = Effect.gen(function* () {
     yield* Effect.forkScoped(
       Stream.runForEach(providerService.streamEvents, (event) => enqueueRuntimeEvent(event)),
     );
-    const replayDueReceipts = Effect.suspend(() => providerTerminalEventRepository.listDue()).pipe(
-      Effect.flatMap((receipts) =>
-        Effect.forEach(receipts, (receipt) => enqueueRuntimeEvent(receipt.event), {
-          concurrency: 1,
-          discard: true,
-        }),
-      ),
-      Effect.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause)
-          ? Effect.interrupt
-          : Effect.logWarning("failed to retry provider terminal receipts", {
-              cause: Cause.pretty(cause),
-            }),
-      ),
-    );
-    yield* replayDueReceipts;
-    const receiptRetries = yield* replayDueReceipts.pipe(
-      Effect.andThen(Effect.sleep("1 second")),
-      Effect.forever,
-      Effect.forkScoped,
-    );
-    yield* registerShutdown("terminal-receipt-retries", "admission", () =>
-      Fiber.interrupt(receiptRetries),
-    );
+    yield* startTerminalReceiptRetries(providerTerminalEventRepository, enqueueRuntimeEvent);
     yield* reconcileOrphanedProviderTurnsOnStartup().pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("failed to reconcile orphaned provider turns on startup", {

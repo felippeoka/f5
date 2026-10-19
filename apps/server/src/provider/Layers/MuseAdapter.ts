@@ -208,7 +208,10 @@ interface MuseSessionContext {
 }
 
 /** Adapter-internal entries on the notification queue, processed in order with host frames. */
-type AdapterSignal = { readonly method: "$gapError" } | { readonly method: "$gapFilled" };
+type AdapterSignal =
+  | { readonly method: "$gapError" }
+  | { readonly method: "$gapFilled" }
+  | { readonly method: "$closed" };
 
 /** Records an id, dropping the oldest once the set is full. */
 function remember<A>(set: Set<A>, value: A): void {
@@ -231,6 +234,7 @@ function selectionValue(
 
 export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapterOptions) {
   return Effect.gen(function* () {
+    const adapterScope = yield* Effect.scope;
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make(PROVIDER);
     const fileSystem = yield* FileSystem.FileSystem;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -400,6 +404,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
     const stopSessionInternal = (
       ctx: MuseSessionContext,
       exit: { readonly exitKind: "graceful" | "error"; readonly reason?: string },
+      waitForClose = false,
     ) =>
       Effect.gen(function* () {
         if (ctx.stopped) return;
@@ -448,7 +453,9 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
           },
         });
         yield* Queue.shutdown(ctx.notifications);
-        yield* Scope.close(ctx.scope, Exit.void).pipe(Effect.ignore, Effect.forkDetach);
+        const close = Scope.close(ctx.scope, Exit.void).pipe(Effect.ignore);
+        if (waitForClose) yield* close;
+        else yield* close.pipe(Effect.forkIn(adapterScope));
       });
 
     /**
@@ -475,7 +482,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
             yield* awaitTurnSettled(ctx, turnId, CANCEL_SETTLE_TIMEOUT_MS);
           }
           yield* stopSessionInternal(ctx, { exitKind: "error", reason: message });
-        }).pipe(Effect.forkDetach);
+        }).pipe(Effect.forkIn(adapterScope));
       });
 
     const emitItem = (ctx: MuseSessionContext, item: Item, force = false) =>
@@ -1246,14 +1253,14 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
           const cwd = nodePath.resolve(input.cwd);
           const existing = sessions.get(input.threadId);
           if (existing && !existing.stopped) {
-            yield* stopSessionInternal(existing, { exitKind: "graceful" });
+            yield* stopSessionInternal(existing, { exitKind: "graceful" }, true);
           }
           const selection =
             input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
           const requestedEffort =
             selectionValue(selection?.options, "reasoningEffort") ?? DEFAULT_REASONING_EFFORT;
 
-          const sessionScope = yield* Scope.make("sequential");
+          const sessionScope = yield* Scope.fork(adapterScope, "sequential");
           return yield* Effect.gen(function* () {
             const handle = yield* (options?.openHost ?? defaultOpenHost)({ cwd }).pipe(
               Effect.provideService(Scope.Scope, sessionScope),
@@ -1368,22 +1375,21 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
                   ? recoverFromGap(ctx, undefined)
                   : entry.method === "$gapFilled"
                     ? reconcileFold(ctx)
-                    : handleNotification(ctx, entry as Notification),
+                    : entry.method === "$closed"
+                      ? stopSessionInternal(ctx, {
+                          exitKind: "error",
+                          reason: `Muse Code host exited unexpectedly.${handle.stderrTail().trim() ? ` ${handle.stderrTail().trim().slice(-500)}` : ""}`,
+                        })
+                      : handleNotification(ctx, entry as Notification),
               ),
               Effect.forkIn(sessionScope),
             );
+            // The SDK closes only after delivering its final notifications. Put
+            // source closure behind them so asynchronous logging/preparation
+            // cannot be overtaken by the terminal lifecycle event.
             yield* Effect.promise(() => handle.host.connection.closed).pipe(
               Effect.flatMap(() =>
-                ctx.stopped
-                  ? Effect.void
-                  : stopSessionInternal(ctx, {
-                      exitKind: "error",
-                      reason: `Muse Code host exited unexpectedly.${
-                        handle.stderrTail().trim()
-                          ? ` ${handle.stderrTail().trim().slice(-500)}`
-                          : ""
-                      }`,
-                    }),
+                ctx.stopped ? Effect.void : Queue.offer(notifications, { method: "$closed" }),
               ),
               Effect.forkIn(sessionScope),
             );
@@ -1815,7 +1821,7 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
             // A cancel ack only means the request was admitted.
             yield* awaitTurnSettled(ctx, turnId, CANCEL_SETTLE_TIMEOUT_MS);
           }
-          yield* stopSessionInternal(ctx, { exitKind: "graceful" });
+          yield* stopSessionInternal(ctx, { exitKind: "graceful" }, true);
         }),
       );
 
@@ -1831,8 +1837,8 @@ export function makeMuseAdapter(museSettings: MuseSettings, options?: MuseAdapte
     const stopAll: MuseAdapterShape["stopAll"] = () =>
       Effect.forEach(
         Array.from(sessions.values()),
-        (ctx) => stopSessionInternal(ctx, { exitKind: "graceful" }),
-        { discard: true },
+        (ctx) => stopSessionInternal(ctx, { exitKind: "graceful" }, true),
+        { discard: true, concurrency: "unbounded" },
       );
 
     yield* Effect.addFinalizer(() =>

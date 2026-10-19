@@ -2025,13 +2025,11 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           if (runningTurn.value.state !== "running") {
             if (
               event.payload.session.status === "ready" &&
-              canRepairErroredTurnFromSuccessfulSettlement({
-                currentTurnId: runningTurn.value.turnId,
-                currentState: runningTurn.value.state,
-                completedAt: runningTurn.value.completedAt,
-                settledTurnId: event.payload.settledTurnId,
-                settlementAt: event.payload.session.updatedAt,
-              })
+              canRepairErroredTurnFromSuccessfulSettlement(
+                runningTurn.value,
+                event.payload.settledTurnId,
+                event.payload.session.updatedAt,
+              )
             ) {
               yield* projectionTurnRepository.upsertByTurnId({
                 ...runningTurn.value,

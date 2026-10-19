@@ -15,6 +15,45 @@ const host = new MockMspHost(
   process.env.MSP_MOCK_FINGERPRINT ? { fingerprint: process.env.MSP_MOCK_FINGERPRINT } : {},
 );
 
+// A real process can be killed after a visible prefix but before completion.
+if (process.env.MSP_MOCK_STREAM_TURN === "1") {
+  host.handlers.set("turn/start", (params, host) => {
+    const turnId = `turn-${++host.turnCounter}`;
+    setTimeout(() => {
+      host.notify("turn/started", { turnId, commandId: params.commandId });
+      host.notify("item/started", {
+        item: {
+          itemId: "chaos-assistant",
+          kind: "agentMessage",
+          revision: 1,
+          status: "inProgress",
+          turnId,
+          text: "",
+        },
+      });
+      host.notify("item/delta", { itemId: "chaos-assistant", delta: "Muse prefix " });
+      if (process.env.MSP_MOCK_COMPLETE_ITEM === "1")
+        host.notify("item/completed", {
+          item: {
+            itemId: "chaos-assistant",
+            kind: "agentMessage",
+            revision: 2,
+            status: "completed",
+            turnId,
+            text: "Muse prefix ",
+          },
+        });
+    }, 0);
+    return {
+      commandId: params.commandId,
+      disposition: "started",
+      startedNewTurn: true,
+      status: "accepted",
+      turnId,
+    };
+  });
+}
+
 if (process.env.MSP_MOCK_STDERR) process.stderr.write(process.env.MSP_MOCK_STDERR);
 if (process.env.MSP_MOCK_IGNORE_SIGTERM === "1") process.on("SIGTERM", () => undefined);
 

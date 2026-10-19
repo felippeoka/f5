@@ -8,7 +8,13 @@ import type { OrchestrationReadModel } from "@t3tools/contracts";
 import { spawnJsonFixture } from "./process.ts";
 import { connectStoreClient } from "./client.ts";
 
-it.each(["before-send", "after-acceptance", "after-ack", "pending-receipts"] as const)(
+it.each([
+  "before-send",
+  "after-acceptance",
+  "after-ack",
+  "after-ack-before-output",
+  "pending-receipts",
+] as const)(
   "recovers a real server crash %s without resending ambiguous/accepted work",
   async (boundary) => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "f5-server-crash-"));
@@ -68,6 +74,15 @@ it.each(["before-send", "after-acceptance", "after-ack", "pending-receipts"] as 
         await server.next("accepted");
         await waitDelivery("sending", false);
         expect(acceptances()).toBe(1);
+      } else if (boundary === "after-ack-before-output") {
+        await server.next("projection-held");
+        await waitDelivery("accepted", false);
+        server.send("state");
+        const before = (await server.next("state")).value as OrchestrationReadModel;
+        expect(
+          before.threads[0]!.messages.filter((message) => message.role === "assistant"),
+        ).toEqual([]);
+        expect(acceptances()).toBe(1);
       } else {
         await waitDelivery("accepted", true);
         // This fixture has no external durable provider history. Kill after the
@@ -118,6 +133,13 @@ it.each(["before-send", "after-acceptance", "after-ack", "pending-receipts"] as 
       );
       if (boundary === "after-acceptance") expect(recovered.certainty).toBe("unknown");
       else {
+        if (boundary === "after-ack-before-output") {
+          server.send("recover-history");
+          const recoveredHistory = (await server.next("recover-history")).value as {
+            backfilledMessageCount: number;
+          };
+          expect(recoveredHistory.backfilledMessageCount).toBe(1);
+        }
         server.send("settled");
         await server.next("settled");
       }

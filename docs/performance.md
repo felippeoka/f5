@@ -337,3 +337,20 @@ Before/after streaming snapshots remain in the browser artifact; numeric final
 samples also enter the interactive report. Ordinary application sessions do not
 collect these counters. This changes the harness digest; older reports remain valid
 for their pinned comparison, but new comparisons require a matching harness baseline.
+
+The clean-source production-browser smoke at
+`3d89c5d5dbb488549372d94e99a564f17b397f72` recorded composer input p95
+32.10 ms and streaming input p95 32.40 ms in
+`.performance/stability-interactive-smoke-20261019-88.json` (one warmup, two
+repetitions). It is a smoke result, not the full 50 ms qualification. The subsequent
+full run failed its native process-table preflight with `spawn EPERM`, before the
+soak started. Electron smoke also fails before opening the application on this host.
+
+`F5_PERF_LIFECYCLE=1 bun run perf:interactive --smoke --output=.performance/lifecycle-smoke.json`
+adds correctness checks after the measurements: the renderer reconnects, switches
+threads and loads older history while streaming, then sends stop and approval controls while the production admission queue holds 1,024 ordinary
+entries, then displays a provider crash with an editable preserved draft. The wire
+provider is scripted; engine/reactor/writer saturation remains covered by their
+separate tests. This optional phase does not replace full desktop qualification.
+Resource collection and bounded row sampling are installed by the browser runner;
+ordinary app sessions retain only the opt-in recording calls.

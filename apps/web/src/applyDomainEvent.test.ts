@@ -294,7 +294,7 @@ describe("applyDomainEvent", () => {
     expect(next.threads[0]?.messages).toEqual([]);
   });
 
-  it("merges assistant message deltas into the target thread", () => {
+  it("merges assistant deltas without settling an active turn when its item completes", () => {
     const threadId = ThreadId.makeUnsafe("thread-1");
     const turnId = TurnId.makeUnsafe("turn-1");
     const messageId = MessageId.makeUnsafe("assistant-1");
@@ -365,13 +365,30 @@ describe("applyDomainEvent", () => {
     ]);
     expect(afterComplete.threads[0]?.latestTurn).toEqual({
       turnId,
-      state: "completed",
+      state: "running",
       requestedAt: "2026-04-01T09:04:01.000Z",
       startedAt: "2026-04-01T09:04:01.000Z",
-      completedAt: "2026-04-01T09:04:02.000Z",
+      completedAt: null,
       assistantMessageId: messageId,
     });
     expect(afterComplete.threads[0]?.lastInteractionAt).toBe("2026-04-01T09:05:02.000Z");
+    const failed = applyDomainEvent(
+      afterComplete,
+      makeEvent("thread.session-set", {
+        threadId,
+        settledTurnId: turnId,
+        session: {
+          threadId,
+          providerName: "codex",
+          status: "error",
+          activeTurnId: null,
+          lastError: "Host exited",
+          runtimeMode: "full-access",
+          updatedAt: "2026-04-01T09:06:00.000Z",
+        },
+      }),
+    );
+    expect(failed.threads[0]?.latestTurn?.state).toBe("error");
   });
 
   it("estimates thread token usage from message traffic when the provider does not report it", () => {
@@ -582,6 +599,54 @@ describe("applyDomainEvent", () => {
     expect(next.threads[0]?.modelContextWindowTokens).toBe(258_400);
     expect(next.threads[0]?.session?.tokenUsageSource).toBe("provider");
   });
+
+  it.each(["ready", "error", "stopped"] as const)(
+    "settles the live turn when a session becomes %s",
+    (status) => {
+      const threadId = ThreadId.makeUnsafe("thread-1"),
+        turnId = TurnId.makeUnsafe("turn-1");
+      const state = makeState({
+        threads: [
+          makeThread({
+            latestTurn: {
+              turnId,
+              state: "running",
+              requestedAt: "2026-04-01T09:00:00.000Z",
+              startedAt: null,
+              completedAt: null,
+              assistantMessageId: null,
+            },
+          }),
+        ],
+      });
+      const payload = {
+        threadId,
+        settledTurnId: turnId,
+        session: {
+          threadId,
+          status,
+          providerName: "muse",
+          runtimeMode: "auto-accept-edits",
+          activeTurnId: null,
+          lastError: status === "error" ? "Host exited" : null,
+          updatedAt: "2026-04-01T09:06:00.000Z",
+        },
+      } as const;
+      const next = applyDomainEvent(state, makeEvent("thread.session-set", payload));
+      expect(next.threads[0]?.latestTurn).toMatchObject({
+        state: status === "ready" ? "completed" : status === "error" ? "error" : "interrupted",
+        completedAt: payload.session.updatedAt,
+      });
+      const unrelated = applyDomainEvent(
+        state,
+        makeEvent("thread.session-set", {
+          ...payload,
+          settledTurnId: TurnId.makeUnsafe("old-turn"),
+        }),
+      );
+      expect(unrelated.threads[0]?.latestTurn).toBe(state.threads[0]?.latestTurn);
+    },
+  );
 
   it("updates the mapped session state and thread error", () => {
     const turnId = TurnId.makeUnsafe("turn-2");

@@ -1,3 +1,6 @@
+import { ProviderSessionDirectory } from "../src/provider/Services/ProviderSessionDirectory.ts";
+import type { ProviderAdapterShape } from "../src/provider/Services/ProviderAdapter.ts";
+import type { ProviderAdapterError } from "../src/provider/Errors.ts";
 import { GitServiceLive } from "../src/git/Layers/GitService.ts";
 import fs from "node:fs";
 import os from "node:os";
@@ -12,6 +15,7 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   ProjectId,
   type OrchestrationEvent,
+  type OrchestrationCommand,
   type OrchestrationThread,
 } from "@t3tools/contracts";
 import {
@@ -184,6 +188,7 @@ export interface OrchestrationIntegrationHarness {
   readonly engine: OrchestrationEngineShape;
   readonly snapshotQuery: ProjectionSnapshotQuery["Service"];
   readonly providerService: ProviderService["Service"];
+  readonly providerSessionDirectory: ProviderSessionDirectory["Service"];
   readonly checkpointStore: CheckpointStore["Service"];
   readonly checkpointRepository: ProjectionCheckpointRepository["Service"];
   readonly pendingApprovalRepository: ProjectionPendingApprovalRepository["Service"];
@@ -238,9 +243,11 @@ export interface OrchestrationIntegrationHarness {
 }
 
 interface MakeOrchestrationIntegrationHarnessOptions {
+  readonly adapter?: ProviderAdapterShape<ProviderAdapterError>;
   /** Caller-owned directory supports crash/restart scenarios without fixture deletion. */
   readonly rootDir?: string;
   readonly startReactors?: boolean;
+  readonly beforeEngineDispatch?: (command: OrchestrationCommand) => Effect.Effect<void>;
   readonly prepareAdapter?: (adapter: TestProviderAdapterHarness) => Effect.Effect<void>;
   readonly provider?: "codex";
   readonly realCodex?: boolean;
@@ -252,17 +259,23 @@ export const makeOrchestrationIntegrationHarness = (
   Effect.gen(function* () {
     const sleep = (ms: number) => Effect.sleep(ms);
     const provider = options?.provider ?? "codex";
-    const useRealCodex = options?.realCodex === true;
-    const adapterHarness = useRealCodex
-      ? null
-      : yield* makeTestProviderAdapterHarness({
-          provider,
-        });
-    const fakeRegistry = adapterHarness
-      ? Layer.succeed(ProviderAdapterRegistry, {
-          ...makeAdapterRegistryMock({ [adapterHarness.provider]: adapterHarness.adapter }),
-        })
-      : null;
+    const useRealCodex = options?.adapter === undefined && options?.realCodex === true;
+    const adapterHarness =
+      useRealCodex || options?.adapter
+        ? null
+        : yield* makeTestProviderAdapterHarness({
+            provider,
+          });
+    const fakeRegistry = options?.adapter
+      ? Layer.succeed(
+          ProviderAdapterRegistry,
+          makeAdapterRegistryMock({ [options.adapter.provider]: options.adapter }),
+        )
+      : adapterHarness
+        ? Layer.succeed(ProviderAdapterRegistry, {
+            ...makeAdapterRegistryMock({ [adapterHarness.provider]: adapterHarness.adapter }),
+          })
+        : null;
     if (adapterHarness && options?.prepareAdapter) yield* options.prepareAdapter(adapterHarness);
     const rootDir =
       options?.rootDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "t3-orchestration-integration-"));
@@ -274,12 +287,23 @@ export const makeOrchestrationIntegrationHarness = (
     if (!fs.existsSync(path.join(workspaceDir, ".git"))) initializeGitWorkspace(workspaceDir);
 
     const persistenceLayer = makeSqlitePersistenceLive(dbPath);
-    const orchestrationLayer = OrchestrationEngineLive.pipe(
+    const baseOrchestrationLayer = OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
       Layer.provide(OrchestrationProjectionPipelineLive),
       Layer.provide(OrchestrationEventStoreLive),
       Layer.provide(OrchestrationCommandReceiptRepositoryLive),
     );
+    const beforeDispatch = options?.beforeEngineDispatch;
+    const orchestrationLayer = beforeDispatch
+      ? Layer.effect(
+          OrchestrationEngineService,
+          Effect.map(OrchestrationEngineService.asEffect(), (engine) => ({
+            ...engine,
+            dispatch: (command: OrchestrationCommand) =>
+              beforeDispatch(command).pipe(Effect.andThen(engine.dispatch(command))),
+          })),
+        ).pipe(Layer.provide(baseOrchestrationLayer))
+      : baseOrchestrationLayer;
     const providerSessionDirectoryLayer = ProviderSessionDirectoryLive.pipe(
       Layer.provide(ProviderSessionRuntimeRepositoryLive),
     );
@@ -503,6 +527,10 @@ export const makeOrchestrationIntegrationHarness = (
     const providerService = yield* tryRuntimePromise("load ProviderService service", () =>
       runtime.runPromise(Effect.service(ProviderService)),
     ).pipe(Effect.orDie);
+    const providerSessionDirectory = yield* tryRuntimePromise(
+      "load ProviderSessionDirectory service",
+      () => runtime.runPromise(Effect.service(ProviderSessionDirectory)),
+    ).pipe(Effect.orDie);
     const checkpointStore = yield* tryRuntimePromise("load CheckpointStore service", () =>
       runtime.runPromise(Effect.service(CheckpointStore)),
     ).pipe(Effect.orDie);
@@ -673,6 +701,7 @@ export const makeOrchestrationIntegrationHarness = (
       engine,
       snapshotQuery,
       providerService,
+      providerSessionDirectory,
       checkpointStore,
       checkpointRepository,
       pendingApprovalRepository,

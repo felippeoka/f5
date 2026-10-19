@@ -7,8 +7,8 @@ import type {
 } from "@t3tools/contracts";
 import { Cause, Effect } from "effect";
 
-// These drivers finalize assistant messages with their complete native text.
-// Keep opt-in explicit: runtime-local histories cannot repair a lost buffer.
+// Each enabled driver must pass exact-completion and killed-server history-recovery tests.
+// Runtime-local histories cannot repair a lost buffer; Claude currently fails that gate.
 export const COALESCE_STREAMING_DELTAS_DRIVERS: ReadonlySet<ProviderKind> = new Set(["codex"]);
 export type AssistantDeltaCommand = Extract<
   OrchestrationCommand,

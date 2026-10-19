@@ -103,6 +103,12 @@ lines.on("line", (line) => {
     router.flushPending();
     report({
       type: "state",
+      lifecycle: useStore.getState().threads.map((thread) => ({
+        id: thread.id,
+        status: thread.session?.orchestrationStatus ?? null,
+        activeTurnId: thread.session?.activeTurnId ?? null,
+        turnState: thread.latestTurn?.state ?? null,
+      })),
       threads: useStore.getState().threads.map((thread) => ({
         id: thread.id,
         messages: thread.messages.map((message) => ({ id: message.id, text: message.text })),

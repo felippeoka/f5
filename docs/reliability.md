@@ -105,7 +105,8 @@ The reactor processes controls after its current item, with an independent contr
 subscription so blocked bulk admission cannot hide stop or approval events. Stops
 cancel older queued starts and pending durable deliveries; claimed starts check a
 stop fence before dispatch. Controls retain their originating session/turn identity.
-Notification preparation byte admission remains unfinished roadmap work.
+Codex notification preparation has separate bounded byte/count admission and
+explicit incomplete-history recovery, described below.
 Queue retries use one earliest timer per thread, and actionable scans rotate
 through pages of 64.
 
@@ -174,20 +175,46 @@ connection and an overflowing slow connection followed by an oversized startup s
 A separate server process is killed and reopened on the same database before send,
 after native acceptance without acknowledgement, and after acknowledgement plus
 output projection. Unsent intent is replayed once; ambiguous/accepted work is not
-resent. The precise acknowledgement-to-output window still requires an external
-provider history fixture. Restart also exercises a malformed receipt ahead of 65
+resent. The precise acknowledgement-to-output window is also held at an assistant
+projection barrier: after restart, an explicit recheck recovers exact output from
+surviving scripted native history without another provider send. Restart also exercises a malformed receipt ahead of 65
 stale-generation receipts across pages. A killed log-writer process verifies both
 repair tools against a partial final batch and a subsequent writer reopen.
 
-Remaining qualification includes provider death during a turn, the Claude crash/resume
-coalescing gate, non-text incomplete-history repair, production stop/approval under
-saturation, and qualification of desktop quit/reopen with active streams and terminals. The desktop
+A real MSP host is now killed after its visible assistant prefix. The test checks
+that the turn ends in error, the real client store converges in lifecycle as well as
+message text, and the owned process exits. A separate barrier test keeps final MSP
+output ahead of its single terminal event. Session scopes and unexpected-exit cleanup
+are owned by the adapter; explicit stops await closure. Client and server share
+terminal session-to-turn transitions so an errored turn cannot remain completed only
+in the browser.
+
+The Claude crash/resume gate was exercised in a separate killed F5 process with the
+real adapter and a scripted SDK query. The native transcript survives with a complete
+assistant answer, but resume exposes partial runtime-local history and does not
+reconstruct the missing suffix. Coalescing is declined for Claude; guarded append
+projection remains its optimization. This fixture does not certify the external CLI.
+
+The optional production-renderer lifecycle phase switches threads and loads older
+history while ten threads stream. It checks stop and approval through the real
+central admission queue with 1,024 ordinary entries held, provider-crash copy, and
+draft preservation. Reactor/writer saturation is covered separately; the browser's
+provider wire is scripted.
+
+Remaining qualification includes non-text incomplete-history repair and desktop
+quit/reopen with active streams and terminals. The desktop
 smoke runner now checks active terminal history through backend restart and a full
 app quit/relaunch, but Electron launch remains unavailable on this host. Hosted Windows
 validation and three green main pushes remain separate acceptance requirements.
 The server optimization passes its pinned full comparison in `docs/performance.md`;
 full browser/desktop performance qualification still requires a supported host.
-These results do not establish completion of M0 or the entire roadmap.
+These results do not establish hosted M0 acceptance or complete platform qualification.
+Conditional replay, SQLite workers, read-model slimming, visual-matrix expansion,
+and the WebSocket server split remain gated by their stated evidence or coordination
+requirements. Engine commit side effects now live in `orchestration/commitSideEffects.ts`
+inside the same transaction, with focused tests for every handler. Claude assistant
+text handling and receipt retry scheduling were extracted while their lifecycle
+changes were already in progress.
 
 ## Durable reactor catch-up design (not enabled)
 
