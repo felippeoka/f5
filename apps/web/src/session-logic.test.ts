@@ -3354,3 +3354,23 @@ describe("PROVIDER_OPTIONS", () => {
     });
   });
 });
+
+it("derives skill names for old tool history and live tool headings", () => {
+  const activity = makeActivity({
+    id: "skill-history",
+    turnId: "turn-skill",
+    payload: {
+      itemType: "dynamic_tool_call",
+      providerItemId: "skill-call",
+      title: "Tool call",
+      data: { toolName: "Skill", input: { skill: "team:review" } },
+    },
+  });
+  expect(
+    deriveWorkLogEntries([{ ...activity, kind: "tool.completed" }], undefined)[0]?.toolTitle,
+  ).toBe("Skill: team:review");
+  expect(deriveLiveWorkActivity([activity], TurnId.makeUnsafe("turn-skill"))).toMatchObject({
+    kind: "tool",
+    title: "Skill: team:review",
+  });
+});

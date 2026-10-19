@@ -1,3 +1,4 @@
+import { claudeSkillToolTitle } from "./toolActivity";
 import {
   type CompactMcpOauthActivityPayload,
   type CompactMcpStatusActivityPayload,
@@ -656,15 +657,17 @@ function readNormalizedDynamicToolPayload(
   const searchSummary = readToolSearchSummary(toolName, input);
   const normalizedToolName = toolName?.trim().toLowerCase();
 
+  const skillTitle = claudeSkillToolTitle(toolName, input);
   const normalizedTitle =
-    isGenericToolTitle(title) || !title
+    skillTitle ??
+    (isGenericToolTitle(title) || !title
       ? (searchSummary ??
         (readPaths && readPaths.length > 0
           ? "Read file"
           : normalizedToolName === "ls"
             ? "List directory"
             : title))
-      : title;
+      : title);
 
   return {
     ...(normalizedTitle ? { title: normalizedTitle } : {}),

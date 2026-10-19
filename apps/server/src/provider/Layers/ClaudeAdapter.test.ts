@@ -13582,3 +13582,66 @@ for (const terminal of ["task_notification", "task_updated"] as const) {
     });
   }
 }
+
+for (const streamed of [false, true]) {
+  it.effect(
+    `shows the skill name from ${streamed ? "streamed" : "complete"} Claude tool input`,
+    () => {
+      const h = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const events: ProviderRuntimeEvent[] = [];
+        const listener = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+          Effect.sync(() => {
+            events.push(event);
+          }),
+        ).pipe(Effect.forkChild);
+        yield* adapter.startSession({ threadId: THREAD_ID, runtimeMode: "full-access" });
+        yield* adapter.sendTurn({ threadId: THREAD_ID, input: "Review", attachments: [] });
+        const emit = (event: Extract<SDKMessage, { type: "stream_event" }>["event"]) =>
+          h.query.emit({
+            type: "stream_event",
+            session_id: "sdk-session-skill",
+            uuid: "skill-event",
+            parent_tool_use_id: null,
+            event,
+          } as SDKMessage);
+        emit({
+          type: "content_block_start",
+          index: 0,
+          content_block: {
+            type: "tool_use",
+            id: "skill-call",
+            name: "Skill",
+            input: streamed ? {} : { skill: "team:review" },
+          },
+        });
+        if (streamed) {
+          emit({
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "input_json_delta", partial_json: '{"skill":"team:' },
+          });
+          emit({
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "input_json_delta", partial_json: 'review"}' },
+          });
+        }
+        yield* Effect.promise(() =>
+          vi.waitFor(() =>
+            assert.ok(
+              events.some(
+                (event) =>
+                  (event.type === "item.started" || event.type === "item.updated") &&
+                  event.payload.title === "Skill: team:review",
+              ),
+            ),
+          ),
+        );
+        yield* adapter.stopSession(THREAD_ID);
+        yield* Fiber.interrupt(listener);
+      }).pipe(Effect.provide(h.layer));
+    },
+  );
+}

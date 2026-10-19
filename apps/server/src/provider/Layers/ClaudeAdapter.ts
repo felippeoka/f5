@@ -1,3 +1,4 @@
+import { claudeSkillToolTitle } from "@t3tools/shared/toolActivity";
 import {
   rememberClaudeSubagentLaunch,
   resolveClaudeSubagentEffort,
@@ -1593,7 +1594,14 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
   return `${toolName}: ${serialized.slice(0, 397)}...`;
 }
 
-function titleForTool(itemType: CanonicalItemType, input?: Record<string, unknown>): string {
+function titleForTool(
+  itemType: CanonicalItemType,
+  input?: Record<string, unknown>,
+  toolName?: string,
+): string {
+  const skillTitle =
+    itemType === "dynamic_tool_call" ? claudeSkillToolTitle(toolName, input) : undefined;
+  if (skillTitle) return skillTitle;
   switch (itemType) {
     case "command_execution":
       return "Command run";
@@ -4201,7 +4209,9 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               parsedInput && tool.itemType !== "mcp_tool_call"
                 ? classifyToolItemType(tool.toolName, { input: parsedInput })
                 : tool.itemType;
-            const title = parsedInput ? titleForTool(itemType, parsedInput) : tool.title;
+            const title = parsedInput
+              ? titleForTool(itemType, parsedInput, tool.toolName)
+              : tool.title;
             let nextTool: ToolInFlight = {
               ...tool,
               itemType,
@@ -4332,7 +4342,7 @@ export function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             itemId,
             itemType,
             toolName,
-            title: titleForTool(itemType, toolInput),
+            title: titleForTool(itemType, toolInput, toolName),
             detail,
             ...(requestKind ? { requestKind } : {}),
             input: toolInput,

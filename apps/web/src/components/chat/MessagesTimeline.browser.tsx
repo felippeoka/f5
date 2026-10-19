@@ -6,6 +6,7 @@ import "../../index.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { OrchestrationCommandExecution } from "@t3tools/contracts";
 import {
+  EventId,
   MessageId,
   type NativeApi,
   type OrchestrationFileChangeSummary,
@@ -20,7 +21,11 @@ import type {} from "@vitest/browser-playwright"; // Types cdp() as a Playwright
 import { cdp, page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
-import type { deriveTimelineEntries, LiveWorkActivity } from "../../session-logic";
+import {
+  deriveWorkLogEntries,
+  type deriveTimelineEntries,
+  type LiveWorkActivity,
+} from "../../session-logic";
 import { parsePersistedAppSettings } from "../../appSettings";
 import type { TurnDiffSummary } from "../../types";
 import { readTimelineScrollAnchor } from "./timelineScrollAnchors";
@@ -512,6 +517,41 @@ describe("MessagesTimeline (LegendList)", () => {
 
   afterEach(() => {
     document.body.innerHTML = "";
+  });
+
+  it("renders the actual skill name from persisted generic tool history", async () => {
+    const createdAt = "2026-03-04T12:00:01.000Z";
+    const [entry] = deriveWorkLogEntries(
+      [
+        {
+          id: EventId.makeUnsafe("skill-history"),
+          createdAt,
+          kind: "tool.completed",
+          summary: "Tool call completed",
+          tone: "tool",
+          turnId: TurnId.makeUnsafe("turn-1"),
+          payload: {
+            itemType: "dynamic_tool_call",
+            title: "Tool call",
+            providerItemId: "skill-call",
+            status: "completed",
+            data: { toolName: "Skill", input: { skill: "team:review" } },
+          },
+        },
+      ],
+      undefined,
+    );
+    expect(entry?.toolTitle).toBe("Skill: team:review");
+    await render(
+      <TimelineHarness
+        initialEntries={[
+          makeUserEntry("skill-user", "Review the patch", 0),
+          { id: entry!.id, kind: "work", createdAt, entry: entry! },
+        ]}
+        onIsAtEndChangeSpy={vi.fn()}
+      />,
+    );
+    await expect.element(page.getByText("Skill: team:review", { exact: true })).toBeVisible();
   });
 
   it("restores a thread reading position after navigating away", async () => {
