@@ -156,6 +156,14 @@ describe("October 2026 classification artifact", () => {
       expect(bySha.get(sha)?.disposition).toBe("not-applicable");
   });
 
+  it("records the unsupported OpenCode 2 inbox scenario separately from shared provider review", () => {
+    const sha = "dd4549eede928f9dc514778aeae15d74656a87f8";
+    expect(plan.entries.find((entry) => entry.upstreamSha === sha)?.classification).toBe(
+      "not-applicable:upstream-only-subsystem:opencode-2-inbox",
+    );
+    expect(bySha.get(sha)?.disposition).toBe("not-applicable");
+  });
+
   it("names a verification scenario and target for every planned decision", () => {
     for (const entry of [...plan.entries, ...plan.priorIntervalOverrides!]) {
       if (!entry.classification.startsWith("planned:")) continue;

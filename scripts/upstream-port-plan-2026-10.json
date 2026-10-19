@@ -9427,13 +9427,14 @@
     },
     {
       "upstreamSha": "dd4549eede928f9dc514778aeae15d74656a87f8",
-      "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): settle every OpenCode subagent call one report answers (#17134).",
+      "classification": "not-applicable:upstream-only-subsystem:opencode-2-inbox",
+      "reason": "Not-applicable: the patch joins native OpenCode 2 subagent calls and settles them from session.inbox.enqueued reports in the new @opencode/client/effect adapter. F5's supported OpenCode 1.x runtime uses @opencode-ai/sdk/v2 and its properties event stream, with no native inbox/report settlement path. The local supported CLI reports 1.18.32 and installed SDK is 1.14.33. Upstream change: fix(server): settle every OpenCode subagent call one report answers (#17134).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-17134"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "evidence": [
+        "apps/server/src/provider/Layers/OpenCodeAdapter.ts:74",
+        "apps/server/src/provider/Layers/OpenCodeAdapter.ts:848",
+        "docs/reviews/upstream-october-review-response.md:1283"
+      ]
     },
     {
       "upstreamSha": "ee7924ff7fcabe24d5e8d940ac5e878d36477a0d",
@@ -14039,12 +14040,17 @@
     {
       "upstreamSha": "daa1d0ed947c276cb74b08025b5903e2ffe31278",
       "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): subagent cards name the provider account (#15493).",
+      "reason": "Planned: implementation and focused evidence exist for agent cards retain the recorded provider-instance ID and show that configured account's name from the existing cached provider catalog; failing-before model and Chromium reproductions cover two accounts, while unknown or mismatched instances do not borrow another account's label. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(web): subagent cards name the provider account (#15493).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15r-pr-15493"],
         "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      },
+      "f5Shas": ["67d45053138a5e98d15d2e26ea4c0c5c64039225"],
+      "evidence": [
+        "apps/web/src/components/AgentsPanel.browser.tsx:166",
+        "apps/web/src/lib/agentsModel.test.ts:430"
+      ]
     },
     {
       "upstreamSha": "a92c43b80ba307f112e0ae03bf64d841475cf326",
@@ -14785,12 +14791,17 @@
     {
       "upstreamSha": "151c241cd2cc22c3b10ba8735e44f83fb723a511",
       "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(client-runtime): format subagent descriptions as display names (#14999).",
+      "reason": "Planned: implementation and focused evidence exist for native agent path descriptions are formatted as display names by a shared utility; a failing-before fixture covers the visible name and preserves shell titles and provider identities. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(client-runtime): format subagent descriptions as display names (#14999).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15r-pr-14999"],
         "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      },
+      "f5Shas": ["c3fd0ec72843f894b94561017dca7378d1711c7c"],
+      "evidence": [
+        "packages/shared/src/subagentDisplay.test.ts:1",
+        "apps/web/src/lib/agentsModel.test.ts:459"
+      ]
     },
     {
       "upstreamSha": "4f7760e6a0037b06917adaae1b8a220e3ee6e5cc",

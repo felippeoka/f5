@@ -1264,3 +1264,26 @@ fail-closed path. Parent approvals retain their own turn. All 38 Muse adapter,
 provider and event-mapping cases, all eight typechecks, formatter and lint pass.
 The exhaustive Git matrix also passes all 165 cases at the preceding Claude
 lifecycle checkpoint. Per-SHA proofs remain deferred until the full 15r audit closes.
+
+The #15493 reproduction fails in the durable model and Chromium: provider-instance
+identity is dropped before rendering, so two configured accounts of one provider
+cannot be named. The model now retains that identity and cards resolve the exact
+configured instance using the existing cached provider catalog. Removed, unknown,
+legacy-unspecified or driver-mismatched instances do not borrow another account's
+name. No provider validation or account polling is added. All 13 panel Chromium
+cases, nine model cases, all eight typechecks, formatter and lint pass.
+
+The #14999 reproduction fails for `Subagent: /root/coordinator/review_api`.
+A shared display utility now produces `Review Api` for native agent titles, while
+shell titles and underlying provider identifiers remain intact. Unicode and plain
+text cases are included. All eight shared display cases, ten Agents model cases,
+all eight typechecks, formatter and lint pass.
+
+Source review of #17134 finds an OpenCode 2-specific scenario: the new
+`@opencode/client/effect` adapter joins concurrent `subagent` calls and settles
+those calls from `session.inbox.enqueued` reports. F5 uses the classic
+`@opencode-ai/sdk/v2` HTTP adapter and its `properties` event stream; its installed
+SDK is 1.14.33 and the local supported CLI reports 1.18.32. Its task calls have
+no OpenCode 2 inbox/report path. The joined-report settlement scenario is therefore
+not applicable to this supported protocol. This individual classification does not
+discard other OpenCode fixes or add OpenCode 2 support.
