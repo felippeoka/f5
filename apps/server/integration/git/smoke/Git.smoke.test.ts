@@ -185,6 +185,66 @@ describe.concurrent("real Git smoke", () => {
     expect(fs.existsSync(worktreePath)).toBe(false);
   });
 
+  it("rechecks ignored approvals at the Git removal boundary without overriding local changes", async () => {
+    const { git: service, core } = await makeServices();
+    const cwd = await initRepository(service, core);
+    fs.writeFileSync(path.join(cwd, ".gitignore"), ".env\n.env.local\n");
+    await git(service, cwd, ["add", ".gitignore"]);
+    await git(service, cwd, ["commit", "-m", "Ignore config"]);
+    const worktreePath = makeTempDirectory("f5-ignored-boundary-");
+    fs.rmSync(worktreePath, { recursive: true, force: true });
+    await Effect.runPromise(
+      core.createWorktree({
+        cwd,
+        branch: "main",
+        newBranch: "ignored-boundary",
+        path: worktreePath,
+      }),
+    );
+    fs.writeFileSync(path.join(worktreePath, ".env"), "reviewed");
+    await expect(
+      Effect.runPromise(core.removeWorktree({ cwd, path: worktreePath })),
+    ).rejects.toThrow("protected ignored files");
+    fs.writeFileSync(path.join(worktreePath, ".env.local"), "new");
+    await expect(
+      Effect.runPromise(
+        core.removeWorktree({
+          cwd,
+          path: worktreePath,
+          ignoredFiles: { kind: "manual", approvedEntries: [".env"] },
+        }),
+      ),
+    ).rejects.toThrow("protected ignored files");
+    const approvedIgnoredEntries = [".env", ".env.local"];
+    fs.writeFileSync(path.join(worktreePath, "README.md"), "uncommitted");
+    await expect(
+      Effect.runPromise(
+        core.removeWorktree({
+          cwd,
+          path: worktreePath,
+          ignoredFiles: { kind: "manual", approvedEntries: approvedIgnoredEntries },
+        }),
+      ),
+    ).rejects.toThrow("local changes");
+    // Commit the tracked edit so the remaining removal is only of approved ignored files.
+    await git(service, worktreePath, ["add", "README.md"]);
+    await git(service, worktreePath, ["commit", "-m", "Preserve edit"]);
+    await Effect.runPromise(
+      core.removeWorktree({
+        cwd,
+        path: worktreePath,
+        ignoredFiles: {
+          kind: "manual",
+          approvedEntries: approvedIgnoredEntries,
+        },
+      }),
+    );
+    expect(fs.existsSync(worktreePath)).toBe(false);
+    expect(
+      await git(service, cwd, ["rev-parse", "--verify", "refs/heads/ignored-boundary"]),
+    ).toMatch(/^[0-9a-f]{40}$/);
+  });
+
   it("sets upstream on local push and skips a second up-to-date push", async () => {
     const { git: service, core } = await makeServices();
     const cwd = await initRepository(service, core);

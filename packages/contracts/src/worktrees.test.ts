@@ -7,11 +7,24 @@ import {
   WorktreesListInput,
   WorktreesListResult,
   WorktreesInspectInput,
+  WorktreesRemoveInput,
   WorktreesRecoverInput,
   WorktreesSwitchWorkspaceInput,
   WorktreesResolveTransitionInput,
 } from "./worktrees";
 describe("worktree safety wire contracts", () => {
+  it("bounds approval lists while preserving exact ignored paths", () => {
+    const input = { projectId: "p", path: "/worktree", expectedHead: null, deleteBranch: false };
+    const decode = Schema.decodeUnknownSync(WorktreesRemoveInput);
+    const approvedIgnoredEntries = ["node_modules/", " .env\n "];
+    expect(decode({ ...input, approvedIgnoredEntries }).approvedIgnoredEntries).toEqual(
+      approvedIgnoredEntries,
+    );
+    expect(() =>
+      decode({ ...input, approvedIgnoredEntries: Array(32_769).fill(".env") }),
+    ).toThrow();
+    expect(() => decode({ ...input, approvedIgnoredEntries: ["x".repeat(65_536)] })).toThrow();
+  });
   it("preserves paths including leading, trailing and newline whitespace", () => {
     const path = " /tmp/worktree\n ";
     expect(

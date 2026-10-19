@@ -18,6 +18,11 @@ import { Effect, Exit, Option, Schema, Scope } from "effect";
 
 import { GitCore, type GitCoreShape, type RegisteredWorktree } from "../git/Services/GitCore.ts";
 import { canonicalWorktreePath } from "../git/worktreePaths.ts";
+import {
+  blockingIgnoredEntries,
+  type IgnoredFilesRemovalPolicy,
+} from "../git/worktreeIgnoredFiles.ts";
+export { blockingIgnoredEntries } from "../git/worktreeIgnoredFiles.ts";
 import { NextTurnQueueStore } from "../nextTurnQueue/Services/NextTurnQueueStore.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProviderService } from "../provider/Services/ProviderService.ts";
@@ -244,11 +249,6 @@ export const readWorktreeClaims = Effect.fn("readWorktreeClaims")(function* (pat
   } satisfies WorktreeClaims;
 });
 
-/** `node_modules/` (at any depth) is reproducible; every other ignored entry is not. */
-export function blockingIgnoredEntries(entries: ReadonlyArray<string>): ReadonlyArray<string> {
-  return entries.filter((entry) => !/(^|\/)node_modules\/?$/.test(entry));
-}
-
 /**
  * Why ignored files make removing `worktreePath` unsafe, or null when they do
  * not. `git worktree remove` refuses on tracked changes and untracked files but
@@ -259,13 +259,18 @@ export const ignoredFilesBlockRemoval = (
   git: GitCoreShape,
   worktreePath: string,
   inspected?: { readonly entries: ReadonlyArray<string>; readonly truncated: boolean },
+  policy: IgnoredFilesRemovalPolicy = { kind: "protect" },
 ) =>
   (inspected ? Effect.succeed(inspected) : git.listIgnoredEntries(worktreePath)).pipe(
     Effect.map(({ entries, truncated }) => {
       if (truncated) return "too many ignored files to check";
-      const blocking = blockingIgnoredEntries(entries);
+      const blocking = blockingIgnoredEntries(entries, policy);
       return blocking.length > 0
-        ? `ignored files other than node_modules/ (${blocking.slice(0, 3).join(", ")})`
+        ? policy.kind === "manual"
+          ? policy.approvedEntries === undefined
+            ? "Ignored files and folders require explicit deletion confirmation."
+            : "Ignored files changed since review. Inspect this checkout again."
+          : `ignored files other than node_modules/ (${blocking.slice(0, 3).join(", ")})`
         : null;
     }),
     Effect.orElseSucceed(() => "ignored files could not be listed"),
@@ -299,13 +304,7 @@ export function foreignClaims(
   return reasons;
 }
 
-export interface WorktreeRemovalPolicy {
-  readonly kind:
-    | "manual"
-    | "autoCleanup"
-    | "storageMaintenance"
-    | "legacyCleanup"
-    | "ownedRollback";
+interface WorktreeRemovalContext {
   readonly ownThreadId: ThreadId | null;
   readonly ownedCreation?: {
     readonly path: string;
@@ -317,6 +316,20 @@ export interface WorktreeRemovalPolicy {
   };
 }
 
+export type WorktreeRemovalPolicy = WorktreeRemovalContext &
+  (
+    | {
+        readonly kind: "manual";
+        readonly approvedIgnoredEntries?: ReadonlyArray<string> | undefined;
+      }
+    | { readonly kind: "autoCleanup" | "storageMaintenance" | "legacyCleanup" | "ownedRollback" }
+  );
+
+const ignoredRemovalPolicy = (policy: WorktreeRemovalPolicy): IgnoredFilesRemovalPolicy =>
+  policy.kind === "manual"
+    ? { kind: "manual", approvedEntries: policy.approvedIgnoredEntries }
+    : { kind: "protect" };
+
 /** Local-only, fail-closed evaluation. Call again under path then repository locks before mutation. */
 export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(function* (input: {
   readonly projectCwd: string;
@@ -327,6 +340,14 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
   const engine = yield* OrchestrationEngineService;
   const config = yield* ServerConfig;
   const blockedReasons: string[] = [];
+  let ignoredFiles:
+    | {
+        entries: ReadonlyArray<string>;
+        truncated: boolean;
+        requiresApproval: boolean;
+      }
+    | undefined;
+  let ignoredReason: string | null = null;
   const target = yield* canonical(input.path);
   const root = yield* canonical(
     input.policy.kind === "legacyCleanup"
@@ -492,11 +513,18 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
         if (!verifiedCopies)
           blockedReasons.push("it has uncommitted changes (including untracked files)");
       }
-      const ignoredReason = yield* ignoredFilesBlockRemoval(git, input.path, {
+      ignoredReason = yield* ignoredFilesBlockRemoval(
+        git,
+        input.path,
+        { entries: inspected.ignoredEntries, truncated: inspected.ignoredTruncated },
+        ignoredRemovalPolicy(input.policy),
+      );
+      ignoredFiles = {
         entries: inspected.ignoredEntries,
         truncated: inspected.ignoredTruncated,
-      });
-      if (ignoredReason) blockedReasons.push(ignoredReason);
+        requiresApproval:
+          input.policy.kind === "manual" && !inspected.ignoredTruncated && ignoredReason !== null,
+      };
       if (input.policy.kind === "storageMaintenance") {
         let aheadCount = inspected.aheadCount;
         if (inspected.upstreamRef === null) {
@@ -537,9 +565,17 @@ export const evaluateWorktreeRemoval = Effect.fn("evaluateWorktreeRemoval")(func
   return {
     exists,
     registration,
-    blockedReasons: [...new Set(blockedReasons)],
+    blockedReasons: [...new Set([...blockedReasons, ...(ignoredReason ? [ignoredReason] : [])])],
     linkedThreads: claims.threadIds,
     deletedThreadClaims: claims.deletedThreadIds,
+    ...(ignoredFiles
+      ? {
+          ignoredFiles: {
+            ...ignoredFiles,
+            canRemoveAfterApproval: ignoredFiles.requiresApproval && blockedReasons.length === 0,
+          },
+        }
+      : {}),
   };
 });
 
@@ -675,7 +711,11 @@ export const removeWorktreeSafely = Effect.fn("removeWorktreeSafely")(function* 
               checked.blockedReasons.push("Cleanup was cancelled.");
               return checked;
             }
-            yield* git.removeWorktree({ cwd: input.projectCwd, path: input.path });
+            yield* git.removeWorktree({
+              cwd: input.projectCwd,
+              path: input.path,
+              ignoredFiles: ignoredRemovalPolicy(input.policy),
+            });
             if (maintenanceGate) yield* Scope.close(maintenanceGate, Exit.void);
             if (input.afterRemoval) yield* input.afterRemoval(checked.registration);
           }
