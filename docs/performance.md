@@ -192,8 +192,9 @@ deltas for that message wait for its authoritative completion so the stored text
 stays a valid prefix. Other events and other threads continue. Set
 `F5_COALESCE_STREAMING_DELTAS=false` before startup to disable batching independently.
 
-SQLite helper ownership (R12), non-handling projector skipping (P1b), and pragma
-tuning (P3) remain measurement-gated. `synchronous = NORMAL` is not enabled.
+Non-handling projector skipping now runs within the existing command transaction;
+each projector cursor advances once at the final sequence. SQLite helper ownership
+and pragma tuning remain measurement-gated. `synchronous = NORMAL` is not enabled.
 
 The storage gate can run the same ingestion workload while each repetition
 exports a backup and a separate SQLite process holds a read transaction:
@@ -352,5 +353,7 @@ threads and loads older history while streaming, then sends stop and approval co
 entries, then displays a provider crash with an editable preserved draft. The wire
 provider is scripted; engine/reactor/writer saturation remains covered by their
 separate tests. This optional phase does not replace full desktop qualification.
-Resource collection and bounded row sampling are installed by the browser runner;
+The lifecycle phase also verifies the captured reading row's offset after a prepend;
+it waits for the virtual list's initial scroll to settle before generating wheel input.
+Resource collection, the bounded row sample and history-anchor diagnostics are installed by the browser runner;
 ordinary app sessions retain only the opt-in recording calls.

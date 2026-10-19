@@ -1,3 +1,4 @@
+import { preserveTimelineAnchorDuringHistoryLoad } from "./chat/timelineScrollAnchors";
 import { messageAttachmentSources } from "../lib/streamingTextRevision";
 import { WorkspaceTransitionBanner } from "./chat/WorkspaceTransitionBanner";
 import { flushSync } from "react-dom";
@@ -2379,9 +2380,15 @@ export default function ChatView({
   const loadOlderTimelineHistory = useCallback(
     async (signal: AbortSignal) => {
       if (!activeThread) return;
-      await retryThreadHistoryBackfill(queryClient, activeThread.id, {
+      await preserveTimelineAnchorDuringHistoryLoad({
+        getList: () => legendListRef.current,
+        getRowIndex: (id) => timelineEntryRowIndexMapRef.current?.get(id),
         signal,
-        includeCommandExecutionHistory: settings.showAgentCommandTranscripts,
+        load: () =>
+          retryThreadHistoryBackfill(queryClient, activeThread.id, {
+            signal,
+            includeCommandExecutionHistory: settings.showAgentCommandTranscripts,
+          }),
       });
     },
     [activeThread, queryClient, settings.showAgentCommandTranscripts],

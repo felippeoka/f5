@@ -1,5 +1,6 @@
 import {
   TimelineHarness,
+  waitForTimelineLayout,
   makeUserEntry,
   makeAssistantEntry,
   type TimelineHarnessApi,
@@ -170,6 +171,7 @@ async function waitForScrollContainer(host: HTMLElement): Promise<HTMLElement> {
     expect(scrollContainer, "Unable to find the LegendList scroll container.").not.toBeNull();
     expect(scrollContainer!.scrollHeight).toBeGreaterThan(scrollContainer!.clientHeight);
   });
+  await waitForTimelineLayout(() => scrollContainer);
   return scrollContainer!;
 }
 

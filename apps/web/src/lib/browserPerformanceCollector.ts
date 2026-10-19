@@ -8,6 +8,9 @@ export function installBrowserPerformanceCounters() {
     work: {},
     gauges: {},
     rowRenders: Object.create(null),
+    historyLoadStarted(anchor) {
+      counters.lastHistoryAnchor = { rowId: anchor.rowId, top: anchor.top };
+    },
     registerReader(name, read) {
       readers.set(name, read);
       return () => {

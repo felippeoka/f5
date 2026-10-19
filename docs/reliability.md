@@ -198,13 +198,20 @@ projection remains its optimization. This fixture does not certify the external 
 The optional production-renderer lifecycle phase switches threads and loads older
 history while ten threads stream. It checks stop and approval through the real
 central admission queue with 1,024 ordinary entries held, provider-crash copy, and
-draft preservation. Reactor/writer saturation is covered separately; the browser's
-provider wire is scripted.
+draft preservation. History restoration selects visible row geometry rather than
+recycled DOM order, waits for committed rows, and yields to wheel input, cancellation,
+thread replacement or following the tail. Initial end positioning does not trigger
+an unnecessary history load. Reactor/writer saturation is covered separately; the
+browser's provider wire is scripted.
 
-Remaining qualification includes non-text incomplete-history repair and desktop
-quit/reopen with active streams and terminals. The desktop
-smoke runner now checks active terminal history through backend restart and a full
-app quit/relaunch, but Electron launch remains unavailable on this host. Hosted Windows
+Unknown or non-text incomplete native histories retain their admission fence; the
+implemented automatic repair proves only complete plain-text histories. Desktop
+qualification now uses the same scripted Codex stdio host as the real-manager and
+engine/client integration checks. The smoke runner exercises stop, approval, route
+switching while output streams, and a full quit/relaunch with both an active provider
+and terminal, checking persisted message prefixes, terminal history and the draft.
+It also checks terminal history through backend restart. Electron launch remains
+unavailable on this host, so these desktop scenarios still require a supported runner. Hosted Windows
 validation and three green main pushes remain separate acceptance requirements.
 The server optimization passes its pinned full comparison in `docs/performance.md`;
 full browser/desktop performance qualification still requires a supported host.

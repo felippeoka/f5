@@ -116,6 +116,22 @@ async function navigate(id) {
   await editor.waitFor();
   await painted();
 }
+async function settleTimeline() {
+  await page.evaluate(async () => {
+    let previous = "",
+      stable = 0;
+    const deadline = performance.now() + 10_000;
+    while (stable < 6) {
+      await new Promise(requestAnimationFrame);
+      const node = document.querySelector('[data-slot="messages-scroll-container"]');
+      const current = node ? `${node.scrollTop}:${node.scrollHeight}` : "";
+      stable = current && current === previous ? stable + 1 : 0;
+      previous = current;
+      if (performance.now() > deadline)
+        throw new Error("Timeline did not finish its initial scroll");
+    }
+  });
+}
 async function typeMeasurement() {
   await page.evaluate(() => {
     const editable = document.querySelector('[contenteditable="true"]');
@@ -251,6 +267,7 @@ try {
     }
     await navigate("perf-history");
     await row("perf-history-message-999").waitFor();
+    await settleTimeline();
     await control("start-streaming");
     await navigate("perf-stream-0");
     await page
@@ -258,19 +275,30 @@ try {
       .first()
       .waitFor();
     await navigate("perf-history");
+    await settleTimeline();
     const beforeHistory = await page.evaluate(
       () => window.__f5PerformanceCounters.sample().resources.store.retainedMessages,
     );
     const beforeHistoryStats = await control("stats");
-    await page.locator('[data-slot="messages-scroll-container"]').evaluate((container) => {
-      container.scrollTop = 0;
-      container.dispatchEvent(new Event("scroll"));
-    });
+    await page.locator('[data-slot="messages-scroll-container"]').hover();
+    await page.mouse.wheel(0, -100_000);
     await page.waitForFunction(
       (before) => window.__f5PerformanceCounters.sample().resources.store.retainedMessages > before,
       beforeHistory,
     );
-    await row("perf-history-message-959").waitFor({ state: "attached" });
+    await page.waitForFunction(() => {
+      const anchor = window.__f5PerformanceCounters.lastHistoryAnchor;
+      const node = document.querySelector('[data-slot="messages-scroll-container"]');
+      if (!anchor?.rowId || !node) return false;
+      const row = Array.from(node.querySelectorAll("[data-timeline-row-id]")).find(
+        (row) => row.dataset.timelineRowId === anchor.rowId,
+      );
+      return (
+        row &&
+        Math.abs(row.getBoundingClientRect().top - node.getBoundingClientRect().top - anchor.top) <
+          3
+      );
+    });
     const afterHistoryStats = await control("stats");
     assert(
       (afterHistoryStats.rpc["orchestration.getThreadHistoryPage"] ?? 0) >
@@ -328,6 +356,7 @@ try {
       providerCrash: true,
       draftPreserved: true,
       historyLoaded: true,
+      historyAnchorPreserved: true,
       switchingWhileStreaming: true,
     };
     await control("lifecycle-reset");
@@ -338,6 +367,25 @@ try {
   writeFileSync(output, JSON.stringify(report), { flag: "wx" });
 } catch (error) {
   console.error("Fixture diagnostics", await control("stats").catch(() => null));
+  console.error(
+    "History anchor diagnostics",
+    await page
+      .evaluate(() => {
+        const node = document.querySelector('[data-slot="messages-scroll-container"]');
+        const top = node?.getBoundingClientRect().top ?? 0;
+        return {
+          expected: window.__f5PerformanceCounters.lastHistoryAnchor,
+          scrollTop: node?.scrollTop,
+          rows: Array.from(node?.querySelectorAll("[data-timeline-row-id]") ?? [])
+            .map((row) => ({
+              id: row.dataset.timelineRowId,
+              top: row.getBoundingClientRect().top - top,
+            }))
+            .slice(0, 8),
+        };
+      })
+      .catch(() => null),
+  );
   console.error(
     await page
       .locator("body")

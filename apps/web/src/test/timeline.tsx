@@ -15,6 +15,22 @@ import { MessagesTimeline } from "../components/chat/MessagesTimeline";
 import { ComposerDock } from "../components/chat/composer/ComposerDock";
 import type { ImageAttachmentActionItem } from "../components/chat/imageAttachmentActions";
 import { WORK_LOG_PAGE_SIZE } from "../components/chat/workLogConstants";
+/** Wait for LegendList's asynchronous initial measurements and end positioning. */
+export async function waitForTimelineLayout(getNode: () => HTMLElement | null): Promise<void> {
+  let stableFrames = 0;
+  let previous = "";
+  const deadline = performance.now() + 4_000;
+  while (performance.now() < deadline) {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const node = getNode();
+    const current = node ? `${node.scrollTop}:${node.scrollHeight}:${node.clientHeight}` : "";
+    stableFrames = current !== "" && current === previous ? stableFrames + 1 : 0;
+    if (stableFrames >= 6) return;
+    previous = current;
+  }
+  throw new Error("Timeline layout did not settle");
+}
+
 export type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
 const INLINE_DIFF_THREAD_ID = ThreadId.makeUnsafe("thread-inline-browser");
 function makeQueryClient() {
@@ -185,9 +201,10 @@ export function TimelineHarness(
   const queryClientRef = useRef<QueryClient>(props.queryClient ?? makeQueryClient());
   // Expose the list ref out through the callback so tests can observe the
   // real LegendList ref the component received.
-  if (props.onListRefChange) {
-    props.onListRefChange(listRef.current);
-  }
+  useLayoutEffect(() => {
+    props.onListRefChange?.(listRef.current);
+  });
+
   if (props.setApi) {
     props.setApi({
       setEntries,

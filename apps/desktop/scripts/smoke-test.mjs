@@ -21,9 +21,16 @@ mkdirSync(state, { recursive: true });
 writeFileSync(
   join(state, "settings.json"),
   JSON.stringify({
-    providers: Object.fromEntries(
-      ["codex", "claude", "cursor", "opencode", "grok"].map((id) => [id, { enabled: false }]),
-    ),
+    providers: {
+      ...Object.fromEntries(
+        ["claude", "cursor", "opencode", "grok"].map((id) => [id, { enabled: false }]),
+      ),
+      codex: {
+        enabled: true,
+        binaryPath: resolve(desktopDir, "../../scripts/fixtures/codex-lifecycle-host.mjs"),
+        homePath: join(directory, "codex-home"),
+      },
+    },
     prHub: { pollIntervalSeconds: 0, discoverNotifications: false },
   }),
 );
@@ -452,14 +459,14 @@ try {
       { origin: backendOrigin, expected },
       { timeout: 60_000 },
     );
-  const terminalRequest = (method, body) =>
+  const nativeRequest = (method, body) =>
     page.evaluate(
       ({ method, body }) =>
         new Promise((resolve, reject) => {
           const socket = new WebSocket(window.desktopBridge.getWsUrl());
           const controller = new AbortController();
           const timer = setTimeout(
-            () => finish(new Error(`Terminal smoke request timed out: ${method}`)),
+            () => finish(new Error(`Desktop smoke request timed out: ${method}`)),
             15_000,
           );
           const finish = (error, value) => {
@@ -472,28 +479,26 @@ try {
           socket.addEventListener(
             "open",
             () =>
-              socket.send(
-                JSON.stringify({ id: "terminal-smoke", body: { ...body, _tag: method } }),
-              ),
+              socket.send(JSON.stringify({ id: "desktop-smoke", body: { ...body, _tag: method } })),
             { signal: controller.signal },
           );
           socket.addEventListener(
             "message",
             (event) => {
               const response = JSON.parse(String(event.data));
-              if (response.id !== "terminal-smoke") return;
+              if (response.id !== "desktop-smoke") return;
               finish(response.error ? new Error(response.error.message) : null, response.result);
             },
             { signal: controller.signal },
           );
           socket.addEventListener(
             "error",
-            () => finish(new Error("Terminal smoke connection failed")),
+            () => finish(new Error("Desktop smoke connection failed")),
             { signal: controller.signal },
           );
           socket.addEventListener(
             "close",
-            () => finish(new Error("Terminal smoke connection closed")),
+            () => finish(new Error("Desktop smoke connection closed")),
             { signal: controller.signal },
           );
         }),
@@ -509,7 +514,7 @@ try {
   const waitForTerminalOutput = async (marker) => {
     const deadline = Date.now() + 15_000;
     while (Date.now() < deadline) {
-      const snapshot = await terminalRequest("terminal.snapshot", {
+      const snapshot = await nativeRequest("terminal.snapshot", {
         threadId: terminalInput.threadId,
         terminalId: terminalInput.terminalId,
       });
@@ -521,9 +526,9 @@ try {
     throw new Error("Terminal smoke subprocess did not emit output");
   };
   const startTerminalStream = async (marker) => {
-    await terminalRequest("terminal.open", terminalInput);
+    await nativeRequest("terminal.open", terminalInput);
     const script = `process.stdout.write('BEGIN'+String.fromCharCode(10));setInterval(()=>process.stdout.write('${marker}'+String.fromCharCode(10)),100)`;
-    await terminalRequest("terminal.write", {
+    await nativeRequest("terminal.write", {
       threadId: terminalInput.threadId,
       terminalId: terminalInput.terminalId,
       data: `node -e "${script}"\r`,
@@ -551,7 +556,7 @@ try {
   const beforeSecondInstance = recoveryCount();
   await application.evaluate(({ app }) => app.emit("second-instance", {}, [], ""));
   await waitForRecovery(beforeSecondInstance);
-  const restoredTerminal = await terminalRequest("terminal.open", terminalInput);
+  const restoredTerminal = await nativeRequest("terminal.open", terminalInput);
   if (!restoredTerminal.history.includes(recoveryTerminalMarker))
     throw new Error("Backend recovery lost terminal history");
   if ((await page.evaluate(() => window.desktopBridge.getWsUrl())) !== retainedWsUrl)
@@ -617,6 +622,53 @@ try {
   page.off("dialog", observeUnloadDialog);
   await page.reload();
   await page.locator('[contenteditable="true"]').waitFor({ timeout: 60000 });
+  const sendProviderPrompt = async (prompt) => {
+    await page.locator('[contenteditable="true"]').fill(prompt);
+    await page.getByRole("button", { name: "Send message", exact: true }).click();
+    await page.getByRole("button", { name: "Stop generation", exact: true }).waitFor();
+  };
+  const stopProviderTurn = async () => {
+    await page.getByRole("button", { name: "Stop generation", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Stop generation", exact: true })
+      .waitFor({ state: "hidden" });
+  };
+  await sendProviderPrompt("F5_SMOKE_STREAM stop");
+  await page.getByText("Desktop stream 1", { exact: false }).first().waitFor();
+  await stopProviderTurn();
+  await sendProviderPrompt("F5_SMOKE_APPROVAL");
+  await page.getByRole("button", { name: "Approve once", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Approve once", exact: true })
+    .waitFor({ state: "hidden" });
+  await stopProviderTurn();
+  await sendProviderPrompt("F5_SMOKE_STREAM quit");
+  const providerRendererUrl = page.url();
+  const providerSnapshot = await nativeRequest("orchestration.getSnapshot", {});
+  const providerThread = providerSnapshot.threads.find((thread) =>
+    thread.messages.some((message) => message.text === "F5_SMOKE_STREAM quit"),
+  );
+  if (!providerThread) throw new Error("Provider turn did not reach durable orchestration state");
+  const waitForProviderOutput = async () => {
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      const details = await nativeRequest("orchestration.getThreadDetails", {
+        threadId: providerThread.id,
+      });
+      const output = details.messages.filter((message) => message.role === "assistant");
+      if (output.length >= 3 && output.every((message) => message.text.includes("Desktop stream")))
+        return output;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error("Provider stream did not produce persisted output");
+  };
+  await openRoute("#/usage");
+  await waitForTitles("Usage · F5");
+  await page.goto(providerRendererUrl);
+  await page.getByRole("button", { name: "Stop generation", exact: true }).waitFor();
+  const providerMessages = await waitForProviderOutput();
+  const pendingDraft = "Keep this draft through provider and terminal shutdown";
+  await page.locator('[contenteditable="true"]').fill(pendingDraft);
   const quitTerminalMarker = "F5_DESKTOP_QUIT_OUTPUT";
   await startTerminalStream(quitTerminalMarker);
   const popupEvent = application.waitForEvent("window");
@@ -664,12 +716,23 @@ try {
     });
   page = await application.firstWindow({ timeout: 60_000 });
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto(retainedRendererUrl);
+  await page.goto(providerRendererUrl);
   await page.locator('[contenteditable="true"]').waitFor({ timeout: 60_000 });
-  const quitHistory = await terminalRequest("terminal.open", terminalInput);
+  const quitHistory = await nativeRequest("terminal.open", terminalInput);
   if (quitHistory.history.split(quitTerminalMarker).length - 1 < 3)
     throw new Error("Desktop quit/reopen lost active terminal output");
-  await terminalRequest("terminal.close", {
+  const restoredProviderMessages = await waitForProviderOutput();
+  for (const before of providerMessages) {
+    const after = restoredProviderMessages.find((message) => message.id === before.id);
+    if (!after?.text.startsWith(before.text))
+      throw new Error("Desktop quit/reopen lost provider output");
+  }
+  if ((await page.locator('[contenteditable="true"]').innerText()) !== pendingDraft)
+    throw new Error("Desktop quit/reopen lost the streaming thread's draft");
+  await page
+    .getByRole("button", { name: "Stop generation", exact: true })
+    .waitFor({ state: "hidden", timeout: 15_000 });
+  await nativeRequest("terminal.close", {
     threadId: terminalInput.threadId,
     terminalId: terminalInput.terminalId,
   });

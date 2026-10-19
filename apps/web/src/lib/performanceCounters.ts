@@ -15,6 +15,8 @@ interface BrowserPerformanceSnapshot {
 }
 export interface BrowserPerformanceCounters extends BrowserPerformanceSnapshot {
   sample?: () => BrowserPerformanceSnapshot;
+  lastHistoryAnchor?: { rowId: string | null; top: number };
+  historyLoadStarted?: (anchor: { rowId: string | null; top: number }) => void;
   recordRow?: (id: string) => void;
   registerReader?: (name: "store" | "transport", read: () => Record<string, number>) => () => void;
   recordWork?: (name: Work, amount?: number) => void;

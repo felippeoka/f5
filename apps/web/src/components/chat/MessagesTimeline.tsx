@@ -535,6 +535,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const requestOlderHistory = useCallback(() => {
     if (
       !hasOlderHistory ||
+      initialScrollAtEndEnabled ||
       isLoadingOlderHistory ||
       hasHistoryLoadError ||
       !onLoadOlderHistory ||
@@ -542,6 +543,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ) {
       return;
     }
+    const node = listRef.current?.getScrollableNode?.();
+    if (
+      !(node instanceof HTMLElement) ||
+      (isAtEndRef.current && node.scrollHeight > node.clientHeight + 2)
+    )
+      return;
     const controller = new AbortController();
     historyLoadControllerRef.current = controller;
     void onLoadOlderHistory(controller.signal)
@@ -555,7 +562,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           historyLoadControllerRef.current = null;
         }
       });
-  }, [hasHistoryLoadError, hasOlderHistory, isLoadingOlderHistory, onLoadOlderHistory]);
+  }, [
+    hasHistoryLoadError,
+    hasOlderHistory,
+    initialScrollAtEndEnabled,
+    isLoadingOlderHistory,
+    listRef,
+    onLoadOlderHistory,
+  ]);
   const handleViewableItemsChanged = useCallback<NonNullable<OnViewableItemsChanged<TimelineRow>>>(
     ({ viewableItems }) => {
       const firstVisibleIndex = viewableItems.reduce(
@@ -797,7 +811,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   const handleScroll = useCallback(() => {
     syncIsAtEndFromListState();
-  }, [syncIsAtEndFromListState]);
+    if (!isAtEndRef.current && pendingViewableRowIndexRef.current <= 3) requestOlderHistory();
+  }, [requestOlderHistory, syncIsAtEndFromListState]);
 
   const navigateToTimelineRow = useCallback(
     (rowIndex: number, viewPosition: number) => {

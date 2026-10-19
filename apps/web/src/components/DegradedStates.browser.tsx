@@ -7,7 +7,10 @@ import {
   type TimelineHarnessApi,
   type TimelineEntry,
 } from "../test/timeline";
-import { readTimelineScrollAnchor } from "./chat/timelineScrollAnchors";
+import {
+  readTimelineScrollAnchor,
+  preserveTimelineAnchorDuringHistoryLoad,
+} from "./chat/timelineScrollAnchors";
 import "../index.css";
 import { ThreadId, type OrchestrationEvent } from "@t3tools/contracts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -273,6 +276,111 @@ it.each([1200, 420])(
       await expect
         .poll(() => host.querySelector('[data-message-id="new-submission"]'))
         .not.toBeNull();
+    } finally {
+      await mounted.unmount();
+      host.remove();
+    }
+  },
+);
+
+it.each(["restore", "pending layout", "wheel", "abort", "replacement", "tail"] as const)(
+  "preserves a history-load anchor unless %s changes the reading intent",
+  async (mode) => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    let api: TimelineHarnessApi | null = null;
+    let list: LegendListRef | null = null;
+    let entries: TimelineEntry[] = Array.from({ length: 80 }, (_, index) =>
+      makeUserEntry(`anchor-${index}`, `Message ${index}`, index),
+    );
+    const mounted = await render(
+      <TimelineHarness
+        initialEntries={entries}
+        initialHeight={420}
+        onIsAtEndChangeSpy={() => {}}
+        onListRefChange={(value) => {
+          list = value;
+        }}
+        setApi={(value) => {
+          api = value;
+        }}
+      />,
+      { container: host },
+    );
+    try {
+      const node = host.querySelector<HTMLElement>('[data-slot="messages-scroll-container"]')!;
+      await expect
+        .poll(() => node.scrollHeight - node.clientHeight - node.scrollTop)
+        .toBeLessThan(8);
+      await expect.poll(() => list).not.toBeNull();
+      await expect.poll(() => host.querySelector('[data-message-id="anchor-79"]')).not.toBeNull();
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      await list!.scrollToOffset({ offset: 0, animated: false });
+      node.dispatchEvent(new Event("scroll"));
+      await expect.poll(() => readTimelineScrollAnchor(node).atEnd).toBe(false);
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      const before = readTimelineScrollAnchor(node);
+      expect(before.atEnd).toBe(false);
+      expect(before.rowId).not.toBeNull();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const controller = new AbortController();
+      const currentList = list as LegendListRef | null;
+      const scroll = vi.spyOn(currentList!, "scrollToIndex");
+      let replaced = false;
+      if (mode === "pending layout")
+        vi.spyOn(node, "querySelectorAll").mockReturnValueOnce(
+          [] as unknown as NodeListOf<Element>,
+        );
+      const loading = preserveTimelineAnchorDuringHistoryLoad({
+        getList: () => (replaced ? null : currentList),
+        getRowIndex: (id) => {
+          const index = entries.findIndex((entry) => entry.id === id);
+          return index < 0 ? undefined : index;
+        },
+        signal: controller.signal,
+        load: async () => {
+          await gate;
+          entries = [
+            ...Array.from({ length: 40 }, (_, index) =>
+              makeUserEntry(`earlier-${index}`, `Earlier ${index}`, index - 40),
+            ),
+            ...entries,
+          ];
+          api!.setEntries(entries);
+        },
+      });
+      if (mode === "wheel") node.dispatchEvent(new WheelEvent("wheel", { deltaY: 10 }));
+      else if (mode === "abort") controller.abort();
+      else if (mode === "replacement") replaced = true;
+      else if (mode === "tail") {
+        await currentList!.scrollToEnd({ animated: false });
+        await expect.poll(() => readTimelineScrollAnchor(node).atEnd).toBe(true);
+      }
+      release();
+      await loading;
+      if (mode === "restore" || mode === "pending layout") {
+        expect(scroll).toHaveBeenCalledTimes(1);
+
+        await expect
+          .poll(() => {
+            const row = Array.from(
+              node.querySelectorAll<HTMLElement>("[data-timeline-row-id]"),
+            ).find((row) => row.dataset.timelineRowId === before.rowId);
+            return row
+              ? Math.abs(
+                  row.getBoundingClientRect().top - node.getBoundingClientRect().top - before.top,
+                )
+              : Infinity;
+          })
+          .toBeLessThan(3);
+      } else expect(scroll).not.toHaveBeenCalled();
     } finally {
       await mounted.unmount();
       host.remove();
