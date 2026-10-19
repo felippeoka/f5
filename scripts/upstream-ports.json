@@ -20949,10 +20949,19 @@
     {
       "upstreamSha": "9d029a1df25126745dd70ac561ff25d3f8fbac42",
       "subject": "feat(acp): support local provider commands (#16021)",
-      "reason": "Planned: implement and verify the explicitly approved 15k scenario. Upstream change: feat(acp): support local provider commands (#16021).",
+      "reason": "Planned: implementation and focused scenario evidence exist for custom local ACP commands with typed argv/environment, initialization-only ten-second probes, isolated session model catalogs and metadata generation; delivery remains deferred until the required full-workspace release gate passes. Upstream change: feat(acp): support local provider commands (#16021).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15k"
+      "plannedWorkstream": "15k",
+      "f5Shas": ["abaaa91e91ede67408a36b163776e2553f57cc90"],
+      "evidence": [
+        "apps/server/src/provider/acp/CustomAcpSupport.test.ts:1",
+        "apps/server/src/provider/Drivers/AcpDriver.test.ts:1",
+        "apps/web/src/components/settings/AddProviderInstanceDialog.browser.tsx:1",
+        "apps/web/src/components/settings/ProviderInstanceCard.browser.tsx:1",
+        "apps/web/src/components/settings/providerConfigFields.test.ts:1",
+        "docs/providers/acp.md:1"
+      ]
     },
     {
       "upstreamSha": "9d0f2fc212858290e79710b44c0635a28dd92c2f",

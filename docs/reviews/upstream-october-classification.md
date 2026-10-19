@@ -7,12 +7,12 @@ This artifact tracks triage separately from delivery. `scripts/upstream-ports.js
 Implementation is on `fix/upstream-october-review` in the isolated checkout
 `../f5-upstream-october-review`. Main `f711d43051` was merged additively in
 `401725257a`; user work in the original checkout remains intact. The implementation
-through `2dab633b11` includes guided reviews, scoped thread tools, HTML renders,
+through `abaaa91e91` includes guided reviews, scoped thread tools, HTML renders,
 manual GitHub reset waits, durable PR watches, persisted settlement, Codex MCP apps
 and per-project provider policy. The current continuation adds PR review filters,
 per-item forge permissions, thread-owned PR panels, reference chips and opt-in
-merge-message attribution cleanup, forge-aware quick actions and opt-in branch cleanup. It also repairs cross-feature migration and
-runtime integration and attaches per-SHA implementation evidence. Migration 127 and protocol 35 extend the merged baseline. Coverage remains 4,084 ledger records;
+merge-message attribution cleanup, forge-aware quick actions opt-in branch cleanup and custom local ACP agents. It also repairs cross-feature migration and
+runtime integration and attaches per-SHA implementation evidence. Migration 127 and protocol 36 extend the merged baseline. Coverage remains 4,084 ledger records;
 implementation work does not automatically promote deferred obligations.
 
 The full gate and verify-first/security obligations remain incomplete. See
@@ -154,7 +154,7 @@ This is a partial implementation. The catch-up cut line has not been met and the
 
 Feature commits do not change the delivery ledger. Separate ledger commits record only verified per-SHA proof. Artifact reapplication preserves that proof. The ledger includes the separately verified Claude-goal port. Commit-generation delivery proof is recorded only after its feature commit; no unresolved performance, security or carrier obligation is promoted automatically.
 
-At the original branch baseline, the 299 September carrier obligations and 26 settlement overlays were preserved without delivery reconciliation. Current continuations implement several of these features as described above and in the review response; their per-SHA release dispositions remain deferred. Verify-first triage across 15a, 15r, 15t and 15u, custom ACP/Pi, scratch projects, prompt links, usage history, gated passkeys and the remaining PR/chat/panel work are still unfinished.
+At the original branch baseline, the 299 September carrier obligations and 26 settlement overlays were preserved without delivery reconciliation. Current continuations implement several of these features as described above and in the review response; their per-SHA release dispositions remain deferred. Verify-first triage across 15a, 15r, 15t and 15u, Pi, scratch projects, prompt links, usage history, gated passkeys and the remaining PR/chat/panel work are still unfinished.
 
 ## Check results
 
