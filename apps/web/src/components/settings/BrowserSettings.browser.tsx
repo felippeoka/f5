@@ -2,6 +2,7 @@ import "../../index.css";
 import { it, expect, vi, beforeEach } from "vitest";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
+import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts";
 import { BrowserSettings } from "./BrowserSettings";
 const api = vi.hoisted(() => ({
   list: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock("../../nativeApi", () => ({
 }));
 vi.mock("../../hooks/useSettings", () => ({
   useSettings: () => ({
+    ...DEFAULT_UNIFIED_SETTINGS,
     linkOpenTarget: "system",
     enableAgentBrowserAccess: true,
     previewDefaults: { zoomFactor: 1, muted: false, colorScheme: "system" },
