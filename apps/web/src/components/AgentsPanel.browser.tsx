@@ -1,6 +1,6 @@
 import "../index.css";
 
-import { ThreadId } from "@t3tools/contracts";
+import { ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
@@ -159,6 +159,32 @@ describe("AgentsPanelView", () => {
     const title = spans.find((node) => node.textContent === "Review pagination")!;
     expect(getComputedStyle(duration).fontFamily).toBe(getComputedStyle(title).fontFamily);
     expect(getComputedStyle(duration).fontVariantNumeric).toContain("tabular-nums");
+  });
+
+  it("names the configured provider account on each agent card", async () => {
+    const work = entry({
+      id: "account-work",
+      title: "Work agent",
+      providerInstanceId: ProviderInstanceId.make("claude_work"),
+    });
+    const personal = entry({
+      id: "account-personal",
+      title: "Personal agent",
+      providerInstanceId: ProviderInstanceId.make("claude_personal"),
+    });
+    const model = buildAgentsPanelModel([work, personal], null);
+    await render(
+      <Harness
+        models={{ thread: model, all: model }}
+        providerName={(agent) =>
+          agent.providerInstanceId === work.providerInstanceId
+            ? "Claude · Work"
+            : "Claude · Personal"
+        }
+      />,
+    );
+    await expect.element(page.getByText("Claude · Work", { exact: true })).toBeVisible();
+    await expect.element(page.getByText("Claude · Personal", { exact: true })).toBeVisible();
   });
 
   it("switches between this thread and all threads", async () => {

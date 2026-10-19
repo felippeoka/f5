@@ -1,5 +1,6 @@
 import type {
   AgentsSnapshot,
+  ProviderInstanceId,
   BackgroundWorkKind,
   OrchestrationThreadActivity,
   ThreadBackgroundWorkEntry,
@@ -58,6 +59,7 @@ export interface AgentsPanelEntry {
   /** Running or monitoring work that is still alive. */
   readonly live: boolean;
   readonly provider: ThreadBackgroundWorkEntry["provider"];
+  readonly providerInstanceId?: ProviderInstanceId | null;
   readonly model: string | null;
   /** Effective effort reported by this agent, independent of its parent's current selection. */
   readonly effort?: string | null;
@@ -606,6 +608,7 @@ export function deriveAgentsPanelModel(input: {
       active: group.entry.active,
       live: isLiveEntry(group.entry),
       provider: group.entry.provider,
+      providerInstanceId: group.entry.providerInstanceId,
       model: group.entry.model ?? group.detail?.model ?? null,
       ...(group.entry.effort !== undefined ? { effort: group.entry.effort } : {}),
       phase: group.entry.phase ?? group.detail?.type ?? null,
@@ -622,4 +625,17 @@ export function deriveAgentsPanelModel(input: {
   });
 
   return buildAgentsPanelModel(entries, input.snapshot.generatedAt);
+}
+
+/** An old task must never pick up another driver or a guessed default account's name. */
+export function resolveAgentProviderName(
+  entry: Pick<AgentsPanelEntry, "provider" | "providerInstanceId">,
+  instances: ReadonlyMap<
+    ProviderInstanceId,
+    { readonly driverKind: string; readonly displayName: string }
+  >,
+): string | undefined {
+  if (!entry.providerInstanceId) return undefined;
+  const instance = instances.get(entry.providerInstanceId);
+  return instance?.driverKind === entry.provider ? instance.displayName : undefined;
 }

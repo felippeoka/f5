@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   agentTypeLabel,
+  resolveAgentProviderName,
   buildAgentActivityIndex,
   countAgentsByStatus,
   deriveAgentsPanelModel,
@@ -423,4 +424,35 @@ describe("agents panel model", () => {
       "other-shell",
     ]);
   });
+});
+
+it("retains the provider instance that owns a durable background task", () => {
+  const model = deriveAgentsPanelModel({
+    snapshot: snapshot(),
+    activityIndex: buildAgentActivityIndex([source]),
+    threads: [source],
+  });
+  expect(
+    model.agents.find((agent) => agent.workItemIds.includes("provider-parent"))?.providerInstanceId,
+  ).toBe(ProviderInstanceId.make("claude-default"));
+});
+
+it("resolves only the task's recorded provider instance and driver", () => {
+  const id = ProviderInstanceId.make("claude_work");
+  const instances = new Map([[id, { driverKind: "claudeAgent", displayName: "Claude · Work" }]]);
+  expect(
+    resolveAgentProviderName({ provider: "claudeAgent", providerInstanceId: id }, instances),
+  ).toBe("Claude · Work");
+  expect(
+    resolveAgentProviderName({ provider: "codex", providerInstanceId: id }, instances),
+  ).toBeUndefined();
+  expect(
+    resolveAgentProviderName({ provider: "claudeAgent", providerInstanceId: null }, instances),
+  ).toBeUndefined();
+  expect(
+    resolveAgentProviderName(
+      { provider: "claudeAgent", providerInstanceId: ProviderInstanceId.make("removed") },
+      instances,
+    ),
+  ).toBeUndefined();
 });
