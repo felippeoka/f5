@@ -15,6 +15,8 @@ import {
   GetProjectionThreadInput,
   ListProjectionThreadsByProjectInput,
   ProjectionThread,
+  ProjectionThreadActivityState,
+  TouchProjectionThreadInput,
   ProjectionThreadRepository,
   type ProjectionThreadRepositoryShape,
 } from "../Services/ProjectionThreads.ts";
@@ -153,6 +155,28 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
       `,
   });
 
+  const getProjectionThreadActivityState = SqlSchema.findOneOption({
+    Request: GetProjectionThreadInput,
+    Result: ProjectionThreadActivityState.mapFields(
+      Struct.assign({ hasProviderTokenUsage: Schema.BooleanFromBit }),
+    ),
+    execute: ({ threadId }) => sql`
+      SELECT thread.estimated_context_tokens AS "estimatedContextTokens",
+        CASE WHEN session.token_usage_source = 'provider' THEN 1 ELSE 0 END AS "hasProviderTokenUsage"
+      FROM projection_threads AS thread
+      LEFT JOIN projection_thread_sessions AS session ON session.thread_id = thread.thread_id
+      WHERE thread.thread_id = ${threadId}
+    `,
+  });
+
+  const touchProjectionThread = SqlSchema.void({
+    Request: TouchProjectionThreadInput,
+    execute: (input) =>
+      input.estimatedContextTokens === undefined
+        ? sql`UPDATE projection_threads SET last_interaction_at = ${input.occurredAt}, updated_at = ${input.occurredAt} WHERE thread_id = ${input.threadId}`
+        : sql`UPDATE projection_threads SET estimated_context_tokens = ${input.estimatedContextTokens}, last_interaction_at = ${input.occurredAt}, updated_at = ${input.occurredAt} WHERE thread_id = ${input.threadId}`,
+  });
+
   const getProjectionThreadRow = SqlSchema.findOneOption({
     Request: GetProjectionThreadInput,
     Result: ProjectionThreadDbRowSchema,
@@ -260,6 +284,16 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionThreadRepository.upsert:query")),
     );
 
+  const touchActivity: ProjectionThreadRepositoryShape["touchActivity"] = (input) =>
+    touchProjectionThread(input).pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionThreadRepository.touchActivity:query")),
+    );
+
+  const getActivityState: ProjectionThreadRepositoryShape["getActivityState"] = (input) =>
+    getProjectionThreadActivityState(input).pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionThreadRepository.getActivityState:query")),
+    );
+
   const getById: ProjectionThreadRepositoryShape["getById"] = (input) =>
     getProjectionThreadRow(input).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionThreadRepository.getById:query")),
@@ -288,6 +322,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
 
   return {
     listProjectIdsByWorktreePath,
+    touchActivity,
+    getActivityState,
     upsert,
     getById,
     listByProjectId,

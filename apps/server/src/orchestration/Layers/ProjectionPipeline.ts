@@ -1117,31 +1117,31 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
 
         case "thread.proposed-plan-upserted":
         case "thread.activity-appended":
-        case "thread.compacted":
         case "thread.command-execution-recorded":
         case "thread.command-execution-output-appended":
         case "thread.file-change-recorded": {
-          // The live reasoning status must not reorder threads or mark them unread.
+          // Live reasoning status must not reorder threads or mark them unread.
           if (
             event.type === "thread.activity-appended" &&
             event.payload.activity.kind === REASONING_STATUS_ACTIVITY_KIND
-          ) {
+          )
             return;
-          }
+          yield* projectionThreadRepository.touchActivity({
+            threadId: event.payload.threadId,
+            occurredAt: event.occurredAt,
+          });
+          return;
+        }
+
+        case "thread.compacted": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
           });
-          if (Option.isNone(existingRow)) {
-            return;
-          }
+          if (Option.isNone(existingRow)) return;
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
-            ...(event.type === "thread.compacted"
-              ? {
-                  compaction: event.payload.compaction,
-                  estimatedContextTokens: event.payload.compaction.estimatedTokens,
-                }
-              : {}),
+            compaction: event.payload.compaction,
+            estimatedContextTokens: event.payload.compaction.estimatedTokens,
             lastInteractionAt: event.occurredAt,
             updatedAt: event.occurredAt,
           });
@@ -1149,30 +1149,20 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
         }
 
         case "thread.message-sent": {
-          const existingRow = yield* projectionThreadRepository.getById({
+          const state = yield* projectionThreadRepository.getActivityState({
             threadId: event.payload.threadId,
           });
-          if (Option.isNone(existingRow)) {
-            return;
-          }
-          const existingSessionRow = yield* projectionThreadSessionRepository.getByThreadId({
-            threadId: event.payload.threadId,
-          });
-          const hasProviderTokenUsage =
-            Option.isSome(existingSessionRow) &&
-            existingSessionRow.value.tokenUsageSource === "provider";
-          const estimatedContextTokens = hasProviderTokenUsage
-            ? existingRow.value.estimatedContextTokens
+          if (Option.isNone(state)) return;
+          const estimatedContextTokens = state.value.hasProviderTokenUsage
+            ? state.value.estimatedContextTokens
             : yield* estimateContextTokensForMessageEvent(
                 event.payload,
-                existingRow.value.estimatedContextTokens,
+                state.value.estimatedContextTokens,
               );
-
-          yield* projectionThreadRepository.upsert({
-            ...existingRow.value,
+          yield* projectionThreadRepository.touchActivity({
+            threadId: event.payload.threadId,
             estimatedContextTokens,
-            lastInteractionAt: event.occurredAt,
-            updatedAt: event.occurredAt,
+            occurredAt: event.occurredAt,
           });
           return;
         }
@@ -1866,7 +1856,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
                 event.payload,
                 existingRow.value.estimatedContextTokens ??
                   Option.match(
-                    yield* projectionThreadRepository.getById({
+                    yield* projectionThreadRepository.getActivityState({
                       threadId: event.payload.threadId,
                     }),
                     {

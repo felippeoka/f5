@@ -2898,7 +2898,18 @@ projectionLayer("OrchestrationProjectionPipeline", (it) => {
           streaming: false,
         });
 
+        // Large, unrelated metadata must stay byte-identical throughout a stream.
+        const tasks = Array.from({ length: 128 }, (_, index) => ({
+          id: `retained-task-${index}`,
+          content: "retained task ".repeat(64),
+          activeForm: "Waiting",
+          status: "pending",
+        }));
+        yield* sql`UPDATE projection_threads SET tasks_json = ${JSON.stringify(tasks)} WHERE thread_id = ${threadB}`;
+        const before = yield* sql`SELECT * FROM projection_threads WHERE thread_id = ${threadB}`;
         const fullThreadReads: Array<string> = [];
+        const metadataReads: Array<string> = [];
+        const metadataWrites: Array<string> = [];
         const probe = new DatabaseSync(":memory:");
         const statementPrototype = Object.getPrototypeOf(
           probe.prepare("SELECT 1"),
@@ -2911,6 +2922,19 @@ projectionLayer("OrchestrationProjectionPipeline", (it) => {
             this.sourceSQL.includes("ORDER BY created_at ASC, message_id ASC")
           ) {
             fullThreadReads.push(this.sourceSQL);
+          }
+          if (
+            /^\s*SELECT/i.test(this.sourceSQL) &&
+            /\bFROM\s+projection_threads\b/i.test(this.sourceSQL) &&
+            this.sourceSQL.includes("tasks_json")
+          ) {
+            metadataReads.push(this.sourceSQL);
+          }
+          if (
+            /^\s*(INSERT\s+INTO|UPDATE)\s+projection_threads\b/i.test(this.sourceSQL) &&
+            this.sourceSQL.includes("tasks_json")
+          ) {
+            metadataWrites.push(this.sourceSQL);
           }
           return Reflect.apply(originalAll, this, params);
         } as typeof originalAll;
@@ -2939,6 +2963,33 @@ projectionLayer("OrchestrationProjectionPipeline", (it) => {
             text: "thread B reuses the id",
             streaming: false,
           });
+          for (const [threadId, kind, occurredAt] of [
+            [threadB, "tool.updated", "2026-10-01T10:00:06.000Z"],
+            [threadB, "reasoning.status", "2026-10-01T10:00:07.000Z"],
+            [
+              ThreadId.makeUnsafe("thread-targeted-missing"),
+              "tool.updated",
+              "2026-10-01T10:00:08.000Z",
+            ],
+          ] as const) {
+            yield* append({
+              type: "thread.activity-appended",
+              aggregateId: threadId,
+              occurredAt,
+              payload: {
+                threadId,
+                activity: {
+                  id: EventId.makeUnsafe(`targeted-activity-${kind}-${threadId}`),
+                  kind,
+                  tone: "tool",
+                  summary: "Activity leaves metadata alone",
+                  turnId: null,
+                  payload: {},
+                  createdAt: occurredAt,
+                },
+              },
+            } as never);
+          }
         }).pipe(
           Effect.ensuring(
             Effect.sync(() => {
@@ -2948,6 +2999,21 @@ projectionLayer("OrchestrationProjectionPipeline", (it) => {
         );
 
         assert.deepEqual(fullThreadReads, []);
+        assert.deepEqual(metadataReads, []);
+        assert.deepEqual(metadataWrites, []);
+        const after = yield* sql`SELECT * FROM projection_threads WHERE thread_id = ${threadB}`;
+        assert.deepEqual(
+          after,
+          before.map((row) => ({
+            ...row,
+            estimated_context_tokens: 4,
+            last_interaction_at: "2026-10-01T10:00:06.000Z",
+            updated_at: "2026-10-01T10:00:06.000Z",
+          })),
+        );
+        const missing =
+          yield* sql`SELECT * FROM projection_threads WHERE thread_id = 'thread-targeted-missing'`;
+        assert.deepEqual(missing, []);
         const messageRows = yield* sql<{
           readonly messageId: string;
           readonly threadId: string;

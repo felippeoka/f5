@@ -79,6 +79,21 @@ export const GetProjectionThreadInput = Schema.Struct({
 });
 export type GetProjectionThreadInput = typeof GetProjectionThreadInput.Type;
 
+/** Small state required for streamed message accounting, without thread metadata. */
+export const ProjectionThreadActivityState = Schema.Struct({
+  estimatedContextTokens: ProjectionThread.fields.estimatedContextTokens,
+  hasProviderTokenUsage: Schema.Boolean,
+});
+export type ProjectionThreadActivityState = typeof ProjectionThreadActivityState.Type;
+
+export const TouchProjectionThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  occurredAt: IsoDateTime,
+  // Omitted preserves the estimate; null explicitly clears it.
+  estimatedContextTokens: Schema.optional(ProjectionThread.fields.estimatedContextTokens),
+});
+export type TouchProjectionThreadInput = typeof TouchProjectionThreadInput.Type;
+
 export const DeleteProjectionThreadInput = Schema.Struct({
   threadId: ThreadId,
 });
@@ -103,6 +118,16 @@ export interface ProjectionThreadRepositoryShape {
    * Upserts by `threadId`.
    */
   readonly upsert: (thread: ProjectionThread) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Patch activity fields in place. A missing thread is never inserted. */
+  readonly touchActivity: (
+    input: TouchProjectionThreadInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Read only the accounting state needed by message projection. */
+  readonly getActivityState: (
+    input: GetProjectionThreadInput,
+  ) => Effect.Effect<Option.Option<ProjectionThreadActivityState>, ProjectionRepositoryError>;
 
   /**
    * Read a projected thread row by id.

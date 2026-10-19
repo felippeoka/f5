@@ -577,6 +577,8 @@ export const makeGitProjectRepositories = (
     Layer.succeed(ProjectionThreadRepository, {
       listByProjectId: () => Effect.succeed([]),
       listProjectIdsByWorktreePath: () => Effect.succeed([]),
+      touchActivity: () => Effect.void,
+      getActivityState: () => Effect.succeed(Option.none()),
       getById: () => Effect.succeed(Option.none()),
       upsert: () => Effect.void,
       deleteById: () => Effect.void,

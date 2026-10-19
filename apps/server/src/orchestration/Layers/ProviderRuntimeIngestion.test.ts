@@ -3556,28 +3556,44 @@ describe("ProviderRuntimeIngestion", () => {
           thread.session?.activeTurnId === "turn-plan-buffer",
       );
 
+      const deltas = Array.from({ length: 100 }, (_, index) =>
+        index === 0 ? "## Buffered plan\n\n- step 0" : `\n- step ${index}`,
+      );
+      for (const [index, delta] of deltas.entries()) {
+        harness.emit({
+          type: "turn.proposed.delta",
+          eventId: asEventId(`evt-plan-delta-${index}`),
+          provider: "codex",
+          createdAt: now,
+          threadId: asThreadId("thread-1"),
+          turnId: asTurnId("turn-plan-buffer"),
+          payload: { delta },
+        });
+      }
+      // A projected marker proves the ordered ingestion worker consumed all deltas.
       harness.emit({
-        type: "turn.proposed.delta",
-        eventId: asEventId("evt-plan-delta-1"),
+        type: "turn.plan.updated",
+        eventId: asEventId("evt-plan-buffer-drained"),
         provider: "codex",
         createdAt: now,
         threadId: asThreadId("thread-1"),
         turnId: asTurnId("turn-plan-buffer"),
-        payload: {
-          delta: "## Buffered plan\n\n- first",
-        },
+        payload: { plan: [{ step: "All proposal deltas consumed", status: "in_progress" }] },
       });
-      harness.emit({
-        type: "turn.proposed.delta",
-        eventId: asEventId("evt-plan-delta-2"),
-        provider: "codex",
-        createdAt: now,
-        threadId: asThreadId("thread-1"),
-        turnId: asTurnId("turn-plan-buffer"),
-        payload: {
-          delta: "\n- second",
-        },
-      });
+      await waitForThread(harness.engine, (thread) =>
+        thread.activities.some((activity) => activity.id === "evt-plan-buffer-drained"),
+      );
+      await harness.drain();
+      const planWrites = () =>
+        Effect.runPromise(harness.sql<{ count: number }>`
+        SELECT COUNT(*) AS count FROM orchestration_events
+        WHERE stream_id = 'thread-1' AND event_type = 'thread.proposed-plan-upserted'
+      `);
+      expect(await planWrites()).toEqual([{ count: 0 }]);
+      const beforeCompletion = await Effect.runPromise(harness.engine.getReadModel());
+      expect(
+        beforeCompletion.threads.find((thread) => thread.id === "thread-1")?.proposedPlans,
+      ).toEqual([]);
       harness.emit({
         type: "turn.completed",
         eventId: asEventId("evt-turn-completed-plan-buffer"),
@@ -3591,6 +3607,7 @@ describe("ProviderRuntimeIngestion", () => {
       });
 
       await harness.drain();
+      expect(await planWrites()).toEqual([{ count: state === "completed" ? 1 : 0 }]);
       if (state !== "completed") {
         const snapshot = await Effect.runPromise(harness.engine.getReadModel());
         expect(snapshot.threads.find((thread) => thread.id === "thread-1")?.proposedPlans).toEqual(
@@ -3608,7 +3625,7 @@ describe("ProviderRuntimeIngestion", () => {
         (entry: ProviderRuntimeTestProposedPlan) =>
           entry.id === "plan:thread-1:turn:turn-plan-buffer",
       );
-      expect(proposedPlan?.planMarkdown).toBe("## Buffered plan\n\n- first\n- second");
+      expect(proposedPlan?.planMarkdown).toBe(deltas.join(""));
     },
   );
 
