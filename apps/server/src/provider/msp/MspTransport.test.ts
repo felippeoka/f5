@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,12 +15,47 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const mockHostPath = path.join(__dirname, "../../../scripts/msp-mock-host.ts");
 
 const wrapper = (env: Record<string, string>) =>
-  Effect.promise(async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "msp-mock-host-"));
-    return writeAcpWrapper(path.join(dir, "fake-muse"), mockHostPath, { env });
+  Effect.gen(function* () {
+    const dir = yield* Effect.acquireRelease(
+      Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "msp-mock-host-"))),
+      (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })),
+    );
+    return yield* Effect.sync(() =>
+      writeAcpWrapper(path.join(dir, "fake-muse"), mockHostPath, { env }),
+    );
   });
 
 it.layer(NodeServices.layer)("MspTransport", (it) => {
+  it.effect(
+    "rejects an in-flight request when its host exits and close waits for the child",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const binaryPath = yield* wrapper({ MSP_MOCK_EXIT_METHOD: "model/list" });
+          const handle = yield* makeMspTransport({
+            binaryPath,
+            args: ["serve"],
+            cwd: process.cwd(),
+            environment: process.env,
+          });
+          const host = yield* Effect.promise(() =>
+            openMspHost({ transport: handle.transport, clientVersion: "test" }),
+          );
+          const request = host.request("model/list", {});
+          const settled = request.then(
+            () => false,
+            () => true,
+          );
+          yield* Effect.promise(() => handle.exited);
+          const rejected = yield* Effect.promise(() => settled).pipe(Effect.timeout("1 second"));
+          assert.equal(rejected, true);
+          yield* Effect.promise(() => host.close());
+          assert.equal((yield* Effect.promise(() => handle.exited)).code, 23);
+        }),
+      ),
+    30_000,
+  );
+
   it.effect(
     "speaks MSP to a spawned host and keeps the stderr tail",
     () =>

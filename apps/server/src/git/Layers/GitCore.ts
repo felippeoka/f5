@@ -12,6 +12,7 @@ import { parseWorktreeListPorcelain, stripPathTerminator } from "../worktreeList
 import { networkFailureDetail } from "../networkFailureDetail.ts";
 import {
   withWorktreeLifecycleLock,
+  withoutLifecycleLocks,
   withRepositoryLifecycleLock,
   repositoryIdentityHash,
   pathContains,
@@ -257,6 +258,9 @@ function missingCwdErrorDetail(cwd: string): string {
 }
 
 const makeGitCore = Effect.gen(function* () {
+  const serviceScope = yield* Effect.scope;
+  const statusRefreshListeners = new Set<(cwd: string) => void>();
+  yield* Effect.addFinalizer(() => Effect.sync(() => statusRefreshListeners.clear()));
   const git = yield* GitService;
   const preparations = yield* WorktreePreparations;
   const { worktreesDir, baseDir } = yield* ServerConfig;
@@ -579,16 +583,19 @@ const makeGitCore = Effect.gen(function* () {
     env: NodeJS.ProcessEnv,
   ): Effect.Effect<void, GitCommandError> => {
     const refspec = `+refs/heads/${upstream.upstreamBranch}:refs/remotes/${upstream.upstreamRef}`;
-    return executeGit(
+    return withRepositoryLock(
       "GitCore.fetchUpstreamRefForStatus",
       cwd,
-      ["fetch", "--quiet", "--no-tags", upstream.remoteName, refspec],
-      {
-        allowNonZeroExit: true,
-        timeoutMs: Duration.toMillis(STATUS_UPSTREAM_REFRESH_TIMEOUT),
-        env,
-      },
-    ).pipe(Effect.asVoid);
+      executeGit(
+        "GitCore.fetchUpstreamRefForStatus",
+        cwd,
+        ["fetch", "--quiet", "--no-tags", upstream.remoteName, refspec],
+        {
+          timeoutMs: Duration.toMillis(STATUS_UPSTREAM_REFRESH_TIMEOUT),
+          env,
+        },
+      ).pipe(Effect.asVoid),
+    );
   };
 
   const statusUpstreamRefreshGenerationRef = yield* Ref.make(new Map<string, number>());
@@ -633,7 +640,12 @@ const makeGitCore = Effect.gen(function* () {
             ...BACKGROUND_GIT_FETCH_ENV,
           },
         );
-        return yield* isLatestStatusRefreshGeneration(cacheKey, generation);
+        const latest = yield* isLatestStatusRefreshGeneration(cacheKey, generation);
+        if (latest)
+          yield* Effect.sync(() => {
+            for (const listener of statusRefreshListeners) listener(cacheKey.cwd);
+          });
+        return latest;
       }),
     // Keep successful refreshes warm and briefly cool down refresh failures so repeated
     // status checks in the same action do not pay the full upstream timeout each time.
@@ -664,7 +676,11 @@ const makeGitCore = Effect.gen(function* () {
     Effect.gen(function* () {
       const upstream = yield* resolveCurrentUpstream(cwd);
       if (!upstream) return;
-      yield* fetchUpstreamRef(cwd, upstream);
+      yield* withRepositoryLock(
+        "GitCore.refreshCheckedOutBranchUpstream",
+        cwd,
+        fetchUpstreamRef(cwd, upstream),
+      );
     });
 
   const resolveDefaultBranchName = (
@@ -943,7 +959,11 @@ const makeGitCore = Effect.gen(function* () {
         }
       }
 
-      yield* refreshStatusUpstreamIfStale(cwd).pipe(Effect.ignoreCause({ log: true }));
+      yield* refreshStatusUpstreamIfStale(cwd).pipe(
+        Effect.ignoreCause({ log: true }),
+        withoutLifecycleLocks,
+        Effect.forkIn(serviceScope),
+      );
 
       const [statusStdout, unstagedNumstatStdout, stagedNumstatStdout, headNumstatResult] =
         yield* Effect.all(
@@ -2886,8 +2906,10 @@ const makeGitCore = Effect.gen(function* () {
 
       // Refresh upstream refs in the background so checkout remains responsive.
       if (options?.refreshUpstream !== false)
-        yield* Effect.forkScoped(
-          refreshCheckedOutBranchUpstream(input.cwd).pipe(Effect.ignoreCause({ log: true })),
+        yield* refreshCheckedOutBranchUpstream(input.cwd).pipe(
+          Effect.ignoreCause({ log: true }),
+          withoutLifecycleLocks,
+          Effect.forkIn(serviceScope),
         );
     });
 
@@ -2989,6 +3011,13 @@ const makeGitCore = Effect.gen(function* () {
     initRepo,
     listLocalBranchNames,
     readDefaultBranch: (cwd) => resolveDefaultBranchName(cwd, "origin"),
+    subscribeStatusRefresh: (listener) =>
+      Effect.sync(() => {
+        statusRefreshListeners.add(listener);
+        return () => {
+          statusRefreshListeners.delete(listener);
+        };
+      }),
   } satisfies GitCoreShape;
 });
 

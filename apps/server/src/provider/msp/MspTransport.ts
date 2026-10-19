@@ -1,3 +1,4 @@
+import { ServerShutdown } from "../../shutdown.ts";
 /**
  * MspTransport — the SDK's `DuplexTransport` over an Effect-spawned
  * `muse serve` child process.
@@ -11,7 +12,7 @@
  * @module provider/msp/MspTransport
  */
 import type { DuplexTransport } from "@muse-code/sdk";
-import { Cause, Effect, Exit, Fiber, Queue, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Option, Queue, Scope, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { resolveInvocationEffect } from "../../spawn/resolveCommand.ts";
@@ -109,16 +110,30 @@ class ChunkChannel implements AsyncIterable<string> {
   }
 }
 
-const sleep = (ms: number) =>
-  new Promise<"timeout">((resolve) => {
-    const timer = setTimeout(() => resolve("timeout"), ms);
-    timer.unref?.();
-  });
+async function waitWithin<T>(promise: Promise<T>, ms: number): Promise<T | "timeout"> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<"timeout">((resolve) => {
+        timer = setTimeout(() => resolve("timeout"), Math.max(0, ms));
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export const makeMspTransport = Effect.fn("makeMspTransport")(function* (
   options: MspTransportOptions,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const shutdown = Option.getOrUndefined(yield* Effect.serviceOption(ServerShutdown));
+  const remaining = (budget: number) =>
+    shutdown?.deadline === undefined
+      ? budget
+      : Math.min(budget, Math.max(0, shutdown.deadline - Date.now()));
   const scope = yield* Scope.Scope;
   const invocation = yield* resolveInvocationEffect(
     options.binaryPath,
@@ -165,8 +180,14 @@ export const makeMspTransport = Effect.fn("makeMspTransport")(function* (
   );
   yield* handle.exitCode.pipe(
     Effect.match({
-      onFailure: () => resolveExited({ code: null }),
-      onSuccess: (code) => resolveExited({ code }),
+      onFailure: () => {
+        incoming.end(new MspTransportClosedError());
+        resolveExited({ code: null });
+      },
+      onSuccess: (code) => {
+        incoming.end(new MspTransportClosedError());
+        resolveExited({ code });
+      },
     }),
     Effect.forkIn(scope),
   );
@@ -199,14 +220,18 @@ export const makeMspTransport = Effect.fn("makeMspTransport")(function* (
     },
     close: (flushed) => {
       closing ??= (async () => {
-        if (flushed) await Promise.race([flushed.catch(() => undefined), sleep(flushBudgetMs)]);
+        if (flushed)
+          await waitWithin(
+            flushed.catch(() => undefined),
+            remaining(flushBudgetMs),
+          );
         await Effect.runPromise(Queue.end(outbound));
-        await Promise.race([Effect.runPromise(Fiber.await(writer)), sleep(flushBudgetMs)]);
-        if ((await Promise.race([exited, sleep(termAfterMs)])) !== "timeout") return;
+        await waitWithin(Effect.runPromise(Fiber.await(writer)), remaining(flushBudgetMs));
+        if ((await waitWithin(exited, remaining(termAfterMs))) !== "timeout") return;
         kill("SIGTERM");
-        if ((await Promise.race([exited, sleep(killAfterMs)])) !== "timeout") return;
+        if ((await waitWithin(exited, remaining(killAfterMs))) !== "timeout") return;
         kill("SIGKILL");
-        await Promise.race([exited, sleep(killAfterMs)]);
+        await waitWithin(exited, remaining(killAfterMs));
       })();
       return closing;
     },

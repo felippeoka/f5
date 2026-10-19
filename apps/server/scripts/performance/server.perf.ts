@@ -391,7 +391,7 @@ it("records server component performance with deterministic workloads", async ()
     expect(readFileSync(path.join(repository, ".gitmodules"), "utf8")).toContain("modules/sub-1");
   } finally {
     readSpy.mockRestore();
-    terminals.dispose();
+    await terminals.dispose();
     await uploadRuntime.dispose();
     await persistence.dispose();
     await gitRuntime.dispose();
@@ -401,6 +401,14 @@ it("records server component performance with deterministic workloads", async ()
   const stream = await measureAssistantStream(method);
   report.measurements["orchestration.assistant-stream"] = stream.samples;
   report.observations.push(...stream.observations, ...(await measureReadModelMemory()));
+  const claude = await measureAssistantStream(method, "claudeAgent");
+  report.measurements["orchestration.assistant-stream-claude-uncoalesced"] = claude.samples;
+  report.diagnostics = Object.fromEntries([
+    ...Object.entries(stream.diagnostics).map(([key, value]) => [`codex.${key}`, value] as const),
+    ...Object.entries(claude.diagnostics).map(
+      ([key, value]) => [`claudeAgent.uncoalesced.${key}`, value] as const,
+    ),
+  ]);
   mkdirSync(path.dirname(output), { recursive: true });
   writeFileSync(output, JSON.stringify(report, null, 2) + "\n", { flag: "wx" });
   // The streaming scenario alone takes roughly 40 s per repetition before P1.

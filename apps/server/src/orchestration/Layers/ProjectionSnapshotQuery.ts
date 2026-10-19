@@ -1,3 +1,4 @@
+import { SnapshotReadClients, withSnapshotRead } from "../../persistence/snapshotReadExecutor.ts";
 import {
   PlanningWorkflowSummary,
   CodeReviewWorkflowSummary,
@@ -2162,11 +2163,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
-  // Read-model queries intentionally avoid long-lived SQL transactions and
-  // eager fan-out because the desktop sqlite client serves requests through a
-  // single-permit semaphore. Holding that permit for an entire snapshot, or
-  // queueing every statement up front, can starve tiny thread-open reads
-  // behind heavyweight full-snapshot fetches.
+  // The exported executor pins this entire response to one reader transaction.
   const readSnapshotQueries = (params: {
     readonly scope: SnapshotScope;
     readonly historyLoadMode: SnapshotHistoryLoadMode;
@@ -3048,13 +3045,53 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
   } satisfies ProjectionSnapshotQueryShape;
 });
 
+const snapshotRepositories = Layer.mergeAll(
+  ProjectionThreadRepositoryLive,
+  ProjectionThreadActivityRepositoryLive,
+  ProjectionThreadMessageRepositoryLive,
+  ProjectionCheckpointRepositoryLive,
+  ProjectionStateRepositoryLive,
+);
+
 export const OrchestrationProjectionSnapshotQueryLive = Layer.effect(
   ProjectionSnapshotQuery,
-  makeProjectionSnapshotQuery,
-).pipe(
-  Layer.provideMerge(ProjectionThreadRepositoryLive),
-  Layer.provideMerge(ProjectionThreadActivityRepositoryLive),
-  Layer.provideMerge(ProjectionThreadMessageRepositoryLive),
-  Layer.provideMerge(ProjectionCheckpointRepositoryLive),
-  Layer.provideMerge(ProjectionStateRepositoryLive),
-);
+  Effect.gen(function* () {
+    const writer = yield* SqlClient.SqlClient;
+    const clients = yield* Effect.serviceOption(SnapshotReadClients);
+    const foreground = Option.isSome(clients) ? clients.value.foreground : writer;
+    const background = Option.isSome(clients) ? clients.value.background : writer;
+    const bind = (client: SqlClient.SqlClient) =>
+      makeProjectionSnapshotQuery.pipe(
+        Effect.provide(
+          snapshotRepositories.pipe(Layer.provideMerge(Layer.succeed(SqlClient.SqlClient, client))),
+        ),
+      );
+    // Repositories capture their SQL service at construction. A separate graph
+    // per reader is essential; providing a reader to writer-bound closures is not.
+    const front = yield* bind(foreground);
+    const back = foreground === background ? front : yield* bind(background);
+    const run = <A>(
+      client: SqlClient.SqlClient,
+      lane: "foreground" | "background",
+      effect: Effect.Effect<A, ProjectionRepositoryError>,
+    ) =>
+      withSnapshotRead(client, lane, effect, client !== writer).pipe(
+        Effect.mapError((error) =>
+          isPersistenceError(error)
+            ? error
+            : toPersistenceSqlError("ProjectionSnapshotQuery.consistentRead")(error),
+        ),
+      );
+    return {
+      getSnapshot: () => run(background, "background", back.getSnapshot()),
+      getBootstrapSnapshot: () => run(background, "background", back.getBootstrapSnapshot()),
+      getStartupSnapshot: (input) => run(background, "background", back.getStartupSnapshot(input)),
+      getThreadTailDetails: (input) =>
+        run(foreground, "foreground", front.getThreadTailDetails(input)),
+      getThreadHistoryPage: (input) =>
+        run(foreground, "foreground", front.getThreadHistoryPage(input)),
+      getThreadDetails: (input) => run(foreground, "foreground", front.getThreadDetails(input)),
+      getRewindDrafts: (input) => run(foreground, "foreground", front.getRewindDrafts(input)),
+    } satisfies ProjectionSnapshotQueryShape;
+  }),
+).pipe(Layer.provideMerge(snapshotRepositories));

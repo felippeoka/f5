@@ -695,6 +695,8 @@ export function createWsNativeApi(): NativeApi {
       },
     },
     server: {
+      reportClientDiagnostics: (input) =>
+        transport.request(WS_METHODS.serverReportClientDiagnostics, input, { trackLatency: false }),
       getClaudeTranscriptRepair: (input) =>
         transport.request(WS_METHODS.serverGetClaudeTranscriptRepair, input),
       repairClaudeTranscript: (input) =>
@@ -983,6 +985,7 @@ export function createWsNativeApi(): NativeApi {
       onAdvisoriesUpdated: (callback) => onPrHubAdvisoriesUpdated(callback),
     },
     orchestration: {
+      getLatestSequence: () => transport.request(ORCHESTRATION_WS_METHODS.getLatestSequence),
       getSnapshot: () => transport.request(ORCHESTRATION_WS_METHODS.getSnapshot),
       getStartupSnapshot: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.getStartupSnapshot, input),

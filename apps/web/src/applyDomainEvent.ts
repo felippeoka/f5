@@ -1,3 +1,4 @@
+import { detailEntityKey, detailEventIsCovered } from "./orchestration/detailCoverage";
 import {
   summarizePlanningWorkflow,
   summarizeCodeReviewWorkflow,
@@ -597,10 +598,27 @@ function enqueueThreadDetailEvent(
   }
 
   const detailEventBufferByThreadId = new Map(state.detailEventBufferByThreadId);
-  detailEventBufferByThreadId.set(threadId, {
-    ...existingBuffer,
-    events: [...existing, event],
-  });
+  const bytes = existingBuffer.bytes ?? 0;
+  const eventBytes = new TextEncoder().encode(JSON.stringify(event)).byteLength;
+  if (
+    existingBuffer.overflowSequence !== undefined ||
+    existing.length >= 2_000 ||
+    bytes + eventBytes > 32 * 1024 * 1024
+  ) {
+    // A truncated buffer cannot be replayed. Its watermark fences outstanding
+    // hydration and makes the RPC path request a fresh, complete tail instead.
+    detailEventBufferByThreadId.set(threadId, {
+      ...existingBuffer,
+      events: [],
+      bytes: 0,
+      overflowSequence: Math.max(existingBuffer.overflowSequence ?? 0, event.sequence),
+    });
+  } else
+    detailEventBufferByThreadId.set(threadId, {
+      ...existingBuffer,
+      bytes: bytes + eventBytes,
+      events: [...existing, event],
+    });
   return { ...state, detailEventBufferByThreadId };
 }
 
@@ -609,6 +627,7 @@ function gateThreadDetailMutations(
   threadId: Thread["id"],
   event: OrchestrationEvent,
 ): { state: AppState; applyDetailMutations: boolean } {
+  if (detailEventIsCovered(state, threadId, event)) return { state, applyDetailMutations: false };
   const thread = state.threads.find((entry) => entry.id === threadId);
   if (!thread || thread.detailsLoaded) {
     return { state, applyDetailMutations: true };
@@ -623,6 +642,30 @@ function gateThreadDetailMutations(
 }
 
 export function applyDomainEvent(state: AppState, event: OrchestrationEvent): AppState {
+  let next = reduceDomainEvent(state, event);
+  if (event.aggregateKind !== "thread") return next;
+  const threadId = event.aggregateId as Thread["id"];
+  const key = detailEntityKey(event);
+  if (next === state && state.threads.find((thread) => thread.id === threadId)?.detailsLoaded)
+    return state;
+  if (key === null && event.type !== "thread.deleted" && event.type !== "thread.reverted")
+    return next;
+  const coverage = new Map(next.detailCoverageByThreadId);
+  if (event.type === "thread.deleted" || event.type === "thread.reverted")
+    coverage.delete(threadId);
+  else if (next.threads.some((thread) => thread.id === threadId)) {
+    const existing = coverage.get(threadId);
+    coverage.set(threadId, {
+      tailSequence: existing?.tailSequence ?? 0,
+      entities: existing?.entities ?? new Map(),
+      latestMutation: Math.max(existing?.latestMutation ?? 0, event.sequence),
+    });
+  }
+  next = { ...next, detailCoverageByThreadId: coverage };
+  return next;
+}
+
+function reduceDomainEvent(state: AppState, event: OrchestrationEvent): AppState {
   switch (event.type) {
     case "project.created": {
       const existingIndex = state.projects.findIndex(
@@ -1546,7 +1589,9 @@ export function applyDomainEvent(state: AppState, event: OrchestrationEvent): Ap
 
     case "thread.activity-appended": {
       const threads = updateThread(state.threads, event.payload.threadId, (thread) => {
-        const activities = upsertActivity(thread.activities, event.payload.activity);
+        const activities = detailEventIsCovered(state, event.payload.threadId, event)
+          ? thread.activities
+          : upsertActivity(thread.activities, event.payload.activity);
         // The live reasoning status must not reorder threads or mark them unread.
         const lastInteractionAt =
           event.payload.activity.kind === REASONING_STATUS_ACTIVITY_KIND

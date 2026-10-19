@@ -8,9 +8,16 @@ import {
   type WsPushData,
   type WsPushEnvelopeBase,
 } from "@t3tools/contracts";
-import { Deferred, Effect, Queue, Ref, Schema } from "effect";
+import { Deferred, Effect, Metric, Queue, Ref, Schema } from "effect";
 import type { Scope } from "effect";
 import type { WebSocket } from "ws";
+
+import {
+  wsSlowClientClosesTotal,
+  wsCoalescedPushesReplacedTotal,
+  wsPushFrameBytes,
+  wsPushQueueDepth,
+} from "../observability/Metrics.ts";
 
 type PushTarget =
   | { readonly kind: "all" }
@@ -63,6 +70,7 @@ export function makeWebSocketSendController(input: {
     oversizedDrainTimer: ReturnType<typeof setTimeout> | null;
   }
   const sendStateByClient = new WeakMap<WebSocket, ClientSendState>();
+  const closedClients = new WeakSet<WebSocket>();
 
   const getSendState = (client: WebSocket): ClientSendState => {
     const existing = sendStateByClient.get(client);
@@ -86,17 +94,24 @@ export function makeWebSocketSendController(input: {
     });
 
   const closeSlowClient = (client: WebSocket) =>
-    Effect.sync(() => {
-      const state = sendStateByClient.get(client);
-      if (state?.oversizedDrainTimer) clearTimeout(state.oversizedDrainTimer);
-      sendStateByClient.delete(client);
-      try {
-        client.close(SLOW_CLIENT_CLOSE_CODE, SLOW_CLIENT_CLOSE_REASON);
-      } catch {
-        // The socket may already be tearing down. Removing it from the
-        // broadcast set is sufficient; its close handler is idempotent.
-      }
-    }).pipe(Effect.andThen(removeClient(client)));
+    Effect.suspend(() => {
+      if (closedClients.has(client)) return Effect.void;
+      closedClients.add(client);
+      return Effect.sync(() => {
+        const state = sendStateByClient.get(client);
+        if (state?.oversizedDrainTimer) clearTimeout(state.oversizedDrainTimer);
+        sendStateByClient.delete(client);
+        try {
+          client.close(SLOW_CLIENT_CLOSE_CODE, SLOW_CLIENT_CLOSE_REASON);
+        } catch {
+          // The socket may already be tearing down. Removing it from the
+          // broadcast set is sufficient; its close handler is idempotent.
+        }
+      }).pipe(
+        Effect.andThen(Metric.update(wsSlowClientClosesTotal, 1)),
+        Effect.andThen(removeClient(client)),
+      );
+    });
 
   const startFrame = (client: WebSocket, state: ClientSendState, frame: PendingFrame): boolean => {
     state.inFlightBytes = frame.logicalBytes;
@@ -214,8 +229,20 @@ export function pushCoalescingKey<C extends WsPushChannel>(
     const snapshot = data as WsPushData<typeof WS_CHANNELS.nextTurnQueueUpdated>;
     return `${channel}:${snapshot.threadId}`;
   }
+  if (channel === WS_CHANNELS.gitStatusInvalidated) {
+    const payload = data as WsPushData<typeof WS_CHANNELS.gitStatusInvalidated>;
+    return payload.cwd ? `${channel}:${JSON.stringify(payload.cwd)}` : channel;
+  }
+  if (channel === WS_CHANNELS.mcpStatusUpdated) {
+    const payload = data as WsPushData<typeof WS_CHANNELS.mcpStatusUpdated>;
+    return `${channel}:${JSON.stringify([payload.instanceId ?? null, payload.provider ?? null, payload.scope, payload.projectId ?? null])}`;
+  }
   return channel;
 }
+
+const hasGlobalScope = (channel: WsPushChannel) => channel === WS_CHANNELS.gitStatusInvalidated;
+// Channel names come exclusively from the shared static channel schema.
+const channelFamily = (channel: WsPushChannel) => channel.split(".")[0]!;
 
 export interface ServerPushBus {
   readonly publishAll: <C extends WsPushChannel>(
@@ -248,6 +275,14 @@ export const makeServerPushBus = (input: {
           : {}),
       }).send;
     const queue = yield* Queue.bounded<PushQueueEntry>(queueCapacity);
+    yield* Effect.forkScoped(
+      Effect.forever(
+        Effect.sleep("250 millis").pipe(
+          Effect.andThen(Queue.size(queue)),
+          Effect.flatMap((depth) => Metric.update(wsPushQueueDepth, depth)),
+        ),
+      ),
+    );
     const coalescedJobs = yield* Ref.make<ReadonlyMap<string, PushJob>>(new Map());
     const encodePush = Schema.encodeUnknownEffect(Schema.fromJsonString(WsPush));
 
@@ -268,6 +303,10 @@ export const makeServerPushBus = (input: {
         job.target.kind === "all" ? yield* Ref.get(input.clients) : new Set([job.target.client]);
 
       const message = yield* encodePush(push);
+      yield* Metric.update(
+        Metric.withAttributes(wsPushFrameBytes, { channelFamily: channelFamily(job.channel) }),
+        Buffer.byteLength(message),
+      );
       let recipientCount = 0;
 
       for (const client of recipients) {
@@ -307,13 +346,35 @@ export const makeServerPushBus = (input: {
 
     const offerCoalesced = (key: string, job: PushJob) =>
       Ref.modify(coalescedJobs, (current) => {
-        const shouldEnqueue = !current.has(key);
+        // A pending global invalidation already covers every narrower scope.
+        if (hasGlobalScope(job.channel) && key !== job.channel && current.has(job.channel)) {
+          return [{ enqueue: false, replaced: 1 }, current] as const;
+        }
         const next = new Map(current);
+        let replaced = current.has(key) ? 1 : 0;
+        if (hasGlobalScope(job.channel) && key === job.channel) {
+          for (const [pendingKey, pending] of next) {
+            if (pending.channel === job.channel && pendingKey !== key) {
+              next.delete(pendingKey);
+              replaced++;
+            }
+          }
+        }
+        const enqueue = !current.has(key);
         next.set(key, job);
-        return [shouldEnqueue, next] as const;
+        return [{ enqueue, replaced }, next] as const;
       }).pipe(
-        Effect.flatMap((shouldEnqueue) =>
-          shouldEnqueue ? Queue.offer(queue, { kind: "coalesced", key }) : Effect.void,
+        Effect.flatMap(({ enqueue, replaced }) =>
+          Effect.gen(function* () {
+            if (replaced)
+              yield* Metric.update(
+                Metric.withAttributes(wsCoalescedPushesReplacedTotal, {
+                  channelFamily: channelFamily(job.channel),
+                }),
+                replaced,
+              );
+            if (enqueue) yield* Queue.offer(queue, { kind: "coalesced", key });
+          }),
         ),
         Effect.asVoid,
       );

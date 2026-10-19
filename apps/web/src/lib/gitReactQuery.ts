@@ -31,16 +31,54 @@ interface GitAutoRefreshQueryOptionsInput {
   refetchIntervalMs?: number;
 }
 
-export function invalidateGitQueries(queryClient: QueryClient, input?: { cwd?: string | null }) {
-  const cwd = input?.cwd ?? null;
-  if (cwd !== null) {
-    return Promise.all([
-      queryClient.invalidateQueries({ queryKey: gitQueryKeys.status(cwd) }),
-      queryClient.invalidateQueries({ queryKey: gitQueryKeys.branches(cwd) }),
-    ]);
-  }
+const pendingGitInvalidations = new WeakMap<
+  QueryClient,
+  Map<string | null, { dirty: boolean; done: Promise<void> }>
+>();
 
-  return queryClient.invalidateQueries({ queryKey: gitQueryKeys.all });
+export function invalidateGitQueries(
+  queryClient: QueryClient,
+  input?: { cwd?: string | null },
+): Promise<void> {
+  const cwd = input?.cwd ?? null;
+  let pending = pendingGitInvalidations.get(queryClient);
+  if (!pending) {
+    pending = new Map();
+    pendingGitInvalidations.set(queryClient, pending);
+  }
+  const existing = pending.get(cwd);
+  if (existing) {
+    existing.dirty = true;
+    return existing.done;
+  }
+  const entry = { dirty: false, done: Promise.resolve() };
+  pending.set(cwd, entry);
+  entry.done = (async () => {
+    do {
+      entry.dirty = false;
+      const queryKeys =
+        cwd === null ? [gitQueryKeys.all] : [gitQueryKeys.status(cwd), gitQueryKeys.branches(cwd)];
+      // Wait for existing reads before the one dirty rerun. A refresh may have
+      // finished after those reads captured their upstream metadata.
+      const reads = queryClient
+        .getQueryCache()
+        .findAll({ queryKey: cwd === null ? gitQueryKeys.all : ["git"] })
+        .filter(
+          (query) =>
+            query.state.fetchStatus === "fetching" && (cwd === null || query.queryKey[2] === cwd),
+        )
+        .map((query) => query.promise?.catch(() => undefined));
+      await Promise.all(reads);
+      await Promise.all(
+        queryKeys.map((queryKey) =>
+          queryClient.invalidateQueries({ queryKey }, { cancelRefetch: false }),
+        ),
+      );
+    } while (entry.dirty);
+  })().finally(() => {
+    if (pending.get(cwd) === entry) pending.delete(cwd);
+  });
+  return entry.done;
 }
 
 export function gitStatusQueryOptions({

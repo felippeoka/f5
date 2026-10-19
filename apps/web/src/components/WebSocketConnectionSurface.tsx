@@ -1,6 +1,8 @@
+import { Dialog, DialogPopup, DialogTitle, DialogDescription } from "./ui/dialog";
 import { F5_UPGRADE_REQUIRED_MESSAGE } from "@t3tools/contracts";
 import {
   canAutoReloadForProtocolUpgrade,
+  getProtocolState,
   reloadForProtocolUpgrade,
   useProtocolState,
 } from "../protocolState";
@@ -133,11 +135,11 @@ export function SlowRpcWarningToastCoordinator() {
 
 export function WebSocketConnectionSurface({ children }: { readonly children: ReactNode }) {
   const protocol = useProtocolState();
-  const drafts = useComposerDraftStore((state) =>
-    protocol.upgradeRequired ? state.draftsByThreadId : null,
-  );
+  const connectionState = useWsConnectionState();
+  const needsRecovery = protocol.upgradeRequired || connectionState.synchronizationError !== null;
+  const drafts = useComposerDraftStore((state) => (needsRecovery ? state.draftsByThreadId : null));
   const imports = useComposerDraftStore((state) =>
-    protocol.upgradeRequired ? state.imageImportsByThreadId : null,
+    needsRecovery ? state.imageImportsByThreadId : null,
   );
   const [draftStatus, setDraftStatus] =
     useState<ReturnType<typeof getComposerReloadStatus>>("pending");
@@ -157,11 +159,10 @@ export function WebSocketConnectionSurface({ children }: { readonly children: Re
     return () => clearTimeout(timer);
   }, [protocol.upgradeRequired, protocol.activeUploads, drafts, imports, autoReloadAllowed]);
   const enabled = useWsDisconnectSurfaceEnabled();
-  const connectionState = useWsConnectionState();
-
   const shouldBlock = protocol.upgradeRequired;
   const disconnected =
-    enabled && (connectionState.phase !== "connected" || !connectionState.synchronized);
+    connectionState.synchronizationError !== null ||
+    (enabled && (connectionState.phase !== "connected" || !connectionState.synchronized));
   const blockingPhase = connectionState.phase === "reconnecting" ? "reconnecting" : "disconnected";
   const copy = protocol.upgradeRequired
     ? {
@@ -184,6 +185,46 @@ export function WebSocketConnectionSurface({ children }: { readonly children: Re
     connectionState.lastErrorAt,
   );
 
+  const guardedReload = () => {
+    const unsafe = getProtocolState().activeUploads > 0 || getComposerReloadStatus() !== "ready";
+    if (
+      !unsafe ||
+      window.confirm(
+        "Reload anyway? Uploads will be interrupted and unsaved draft attachments will be lost. Download drafts first to keep a recovery copy.",
+      )
+    )
+      window.location.reload();
+  };
+  const recoveryActions = (
+    <>
+      <Button
+        size="sm"
+        disabled={Object.values(imports ?? {}).some((value) => (value?.pendingCount ?? 0) > 0)}
+        onClick={() => {
+          setRecoveryError(null);
+          void serializeComposerDraftRecovery()
+            .then((text) => {
+              const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = "f5-draft-recovery.json";
+              link.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+            })
+            .catch(() =>
+              setRecoveryError("Could not download drafts. Keep this tab open and try again."),
+            );
+        }}
+      >
+        Download drafts
+      </Button>
+      <Button size="sm" variant="outline" onClick={guardedReload}>
+        {protocol.upgradeRequired ? "Reload anyway" : "Reload app"}
+      </Button>
+      {recoveryError && <p role="alert">{recoveryError}</p>}
+    </>
+  );
+
   return (
     <>
       <div aria-hidden={shouldBlock || undefined} inert={shouldBlock}>
@@ -192,38 +233,47 @@ export function WebSocketConnectionSurface({ children }: { readonly children: Re
       {disconnected && !protocol.upgradeRequired ? (
         <aside
           role="status"
-          className="fixed right-4 bottom-4 z-[90] max-w-sm rounded-lg border border-border bg-card p-3 text-sm shadow-lg"
+          className="fixed right-4 bottom-4 z-[90] max-h-[80vh] max-w-sm overflow-y-auto break-words rounded-lg border border-border bg-card p-3 text-sm shadow-lg"
         >
           <p>
-            {connectionState.phase === "connected"
-              ? "Resynchronizing…"
-              : connectionState.phase === "connecting"
-                ? "Connecting…"
-                : "Connection lost. Reconnecting…"}
+            {connectionState.synchronizationError ??
+              (connectionState.phase === "connected"
+                ? "Resynchronizing…"
+                : connectionState.phase === "connecting"
+                  ? "Connecting…"
+                  : "Connection lost. Reconnecting…")}
           </p>
           <p className="text-xs text-muted-foreground">
             Reading and local drafts remain available. Server changes resume after synchronization.
           </p>
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() => void reconnectWsTransport().catch(() => undefined)}
-          >
-            Retry now
-          </Button>
+          {connectionState.synchronizationError ? (
+            recoveryActions
+          ) : (
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => void reconnectWsTransport().catch(() => undefined)}
+            >
+              Retry now
+            </Button>
+          )}
         </aside>
       ) : null}
       {shouldBlock && copy ? (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-background/72 px-4 py-10 text-foreground backdrop-blur-sm sm:px-6">
-          <section className="w-full max-w-xl rounded-[1.75rem] border border-border/80 bg-card/96 p-6 shadow-2xl shadow-black/25 sm:p-8">
+        <Dialog open={shouldBlock} onOpenChange={() => {}}>
+          <DialogPopup
+            showCloseButton={false}
+            bottomStickOnMobile={false}
+            className="z-[90] w-full max-w-xl overflow-y-auto break-words rounded-[1.75rem] border border-border/80 bg-card/96 p-6 shadow-2xl shadow-black/25 sm:p-8"
+          >
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">
                   {copy.eyebrow}
                 </p>
-                <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
+                <DialogTitle className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
                   {copy.title}
-                </h1>
+                </DialogTitle>
               </div>
               <div className="rounded-2xl border border-border/70 bg-background/80 p-3 shadow-sm">
                 {connectionState.phase === "reconnecting" ? (
@@ -234,7 +284,9 @@ export function WebSocketConnectionSurface({ children }: { readonly children: Re
               </div>
             </div>
 
-            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{copy.description}</p>
+            <DialogDescription className="mt-3 text-sm leading-relaxed text-muted-foreground">
+              {copy.description}
+            </DialogDescription>
 
             {!protocol.upgradeRequired && (
               <div className="mt-5 grid gap-3 rounded-2xl border border-border/70 bg-background/60 p-4 text-sm sm:grid-cols-2">
@@ -262,53 +314,7 @@ export function WebSocketConnectionSurface({ children }: { readonly children: Re
             ) : null}
 
             {protocol.upgradeRequired && (
-              <div className="mt-5 flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  disabled={Object.values(imports ?? {}).some(
-                    (value) => (value?.pendingCount ?? 0) > 0,
-                  )}
-                  onClick={() => {
-                    setRecoveryError(null);
-                    void serializeComposerDraftRecovery()
-                      .then((text) => {
-                        const url = URL.createObjectURL(
-                          new Blob([text], { type: "application/json" }),
-                        );
-                        const link = document.createElement("a");
-                        link.href = url;
-                        link.download = "f5-draft-recovery.json";
-                        link.click();
-                        setTimeout(() => URL.revokeObjectURL(url), 1000);
-                      })
-                      .catch(() =>
-                        setRecoveryError(
-                          "Could not download drafts. Keep this tab open and try again.",
-                        ),
-                      );
-                  }}
-                >
-                  Download drafts
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    const unsafe =
-                      protocol.activeUploads > 0 || getComposerReloadStatus() !== "ready";
-                    if (
-                      !unsafe ||
-                      window.confirm(
-                        "Reload anyway? Uploads will be interrupted and unsaved draft attachments will be lost. Download drafts first to keep a recovery copy.",
-                      )
-                    )
-                      window.location.reload();
-                  }}
-                >
-                  Reload anyway
-                </Button>
-                {recoveryError && <p role="alert">{recoveryError}</p>}
-              </div>
+              <div className="mt-5 flex flex-wrap gap-2">{recoveryActions}</div>
             )}
             {!protocol.upgradeRequired && (
               <div className="mt-5 flex flex-wrap gap-2">
@@ -321,13 +327,13 @@ export function WebSocketConnectionSurface({ children }: { readonly children: Re
                   <RefreshCw />
                   Retry now
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
+                <Button size="sm" variant="outline" onClick={guardedReload}>
                   Reload app
                 </Button>
               </div>
             )}
-          </section>
-        </div>
+          </DialogPopup>
+        </Dialog>
       ) : null}
     </>
   );

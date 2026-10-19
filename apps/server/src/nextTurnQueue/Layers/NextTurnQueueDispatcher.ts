@@ -1,3 +1,5 @@
+import { registerShutdown } from "../../shutdown.ts";
+import { makeQueueRetryScheduler } from "../retryScheduler.ts";
 import {
   WorkspaceTransitions,
   workspaceTransitionSnapshot,
@@ -46,7 +48,10 @@ import {
   type ServerSettings,
   type TurnSubmissionResult,
 } from "@t3tools/contracts";
-import { makeDrainableWorker, type DrainableWorker } from "@t3tools/shared/DrainableWorker";
+import {
+  makeBackgroundWorker,
+  type BackgroundWorker as DrainableWorker,
+} from "../../backgroundWorker.ts";
 import {
   Cause,
   Deferred,
@@ -90,11 +95,6 @@ import {
   type NextTurnDispatchOutcome,
 } from "../dispatchOutcome.ts";
 import { resolveNextTurnQueueGate } from "../gate.ts";
-
-interface ThreadWorkState {
-  readonly running: boolean;
-  readonly dirty: boolean;
-}
 
 function shardFor(threadId: ThreadId): number {
   let hash = 2166136261;
@@ -190,8 +190,13 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
 
   const changesPubSub = yield* PubSub.unbounded<ThreadId>();
   const summaryChangesPubSub = yield* PubSub.unbounded<void>();
-  const delayedRetries = yield* PubSub.unbounded<readonly [ThreadId, number]>();
-  const threadWork = yield* Ref.make(new Map<ThreadId, ThreadWorkState>());
+  const retries = makeQueueRetryScheduler((threadId) => {
+    void Effect.runPromise(notify(threadId)).catch((cause) =>
+      Effect.runPromise(Effect.logError("queue retry wakeup failed", { cause })),
+    );
+  });
+  yield* Effect.addFinalizer(() => Effect.sync(() => retries.dispose()));
+  yield* registerShutdown("queue-retries", "admission", () => Effect.sync(() => retries.dispose()));
   const activeDispatches = yield* Ref.make(new Set<CommandId>());
   const automaticCompacting = yield* Ref.make(new Map<ThreadId, number>());
   const waiters = yield* Ref.make(
@@ -578,7 +583,7 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
     });
 
   const scheduleRetry = (threadId: ThreadId, delayMs: number) =>
-    PubSub.publish(delayedRetries, [threadId, delayMs] as const).pipe(Effect.asVoid);
+    Effect.sync(() => retries.schedule(threadId, delayMs));
 
   const applyDispatchFailure = (
     item: NextTurnQueueItem,
@@ -954,50 +959,28 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
 
   const enqueueDirect = (threadId: ThreadId) => workers[shardFor(threadId)]!.enqueue(threadId);
 
-  const finishThread = (threadId: ThreadId) =>
-    Ref.modify(threadWork, (current) => {
-      const state = current.get(threadId);
-      if (state?.dirty) {
-        const next = new Map(current);
-        next.set(threadId, { running: true, dirty: false });
-        return [true, next] as const;
-      }
-      const next = new Map(current);
-      next.delete(threadId);
-      return [false, next] as const;
-    }).pipe(Effect.flatMap((again) => (again ? enqueueDirect(threadId) : Effect.void)));
-
   workers = yield* Effect.forEach(
     Array.from({ length: QUEUE_WORKER_SHARDS }),
-    () =>
-      makeDrainableWorker((threadId: ThreadId) =>
-        processThread(threadId).pipe(
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.failCause(cause)
-              : Effect.logError("next-turn queue worker failed", {
-                  threadId,
-                  cause: Cause.pretty(cause),
-                }),
+    (_, index) =>
+      makeBackgroundWorker(
+        (threadId: ThreadId) =>
+          processThread(threadId).pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.failCause(cause)
+                : Effect.logError("next-turn queue worker failed", {
+                    threadId,
+                    cause: Cause.pretty(cause),
+                  }),
+            ),
           ),
-          Effect.ensuring(finishThread(threadId)),
-        ),
+        { name: `NextTurnQueueDispatcher.${index}`, key: (item) => String(item) },
       ),
     { concurrency: 1 },
   );
 
   const notify = (threadId: ThreadId) =>
-    Ref.modify(threadWork, (current) => {
-      const state = current.get(threadId);
-      if (state) {
-        const next = new Map(current);
-        next.set(threadId, { running: true, dirty: true });
-        return [false, next] as const;
-      }
-      const next = new Map(current);
-      next.set(threadId, { running: true, dirty: false });
-      return [true, next] as const;
-    }).pipe(Effect.flatMap((enqueue) => (enqueue ? enqueueDirect(threadId) : Effect.void)));
+    Effect.sync(() => retries.cancel(threadId)).pipe(Effect.andThen(enqueueDirect(threadId)));
 
   const pauseForEvent = (threadId: ThreadId, reasonCode: QueueReasonCode, detail: string) =>
     store
@@ -1031,6 +1014,12 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
           yield* notify(threadId);
           return;
         case "thread.deleted":
+          retries.cancel(threadId);
+          yield* Ref.update(lastPublishedSnapshots, (snapshots) => {
+            const next = new Map(snapshots);
+            next.delete(threadId);
+            return next;
+          });
           yield* store.deleteForThread(threadId);
           yield* publishChanged(threadId);
           return;
@@ -1701,13 +1690,6 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
       yield* Stream.runForEach(receiptBus.stream, (receipt) => notify(receipt.threadId)).pipe(
         Effect.forkScoped,
       );
-      yield* Stream.runForEach(Stream.fromPubSub(delayedRetries), ([threadId, delayMs]) =>
-        Effect.sleep(Duration.millis(delayMs)).pipe(
-          Effect.andThen(notify(threadId)),
-          Effect.forkScoped,
-          Effect.asVoid,
-        ),
-      ).pipe(Effect.forkScoped);
       yield* Effect.forever(safetySweep.pipe(Effect.andThen(Effect.sleep("5 seconds")))).pipe(
         Effect.forkScoped,
       );

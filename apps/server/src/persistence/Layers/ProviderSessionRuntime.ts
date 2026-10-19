@@ -278,7 +278,31 @@ const makeProviderSessionRuntimeRepository = Effect.gen(function* () {
         ),
       );
 
+  const updateTerminalLifecycleIfCurrent: ProviderSessionRuntimeRepositoryShape["updateTerminalLifecycleIfCurrent"] =
+    (input) =>
+      sql`
+    UPDATE provider_session_runtime SET
+      status = CASE WHEN ${input.eventType} = 'session.exited' THEN 'stopped' ELSE status END,
+      last_seen_at = MAX(last_seen_at, ${input.createdAt}),
+      runtime_payload_json = json_set(COALESCE(runtime_payload_json, '{}'),
+        '$.activeTurnId', NULL, '$.lastRuntimeEvent', ${`provider.${input.eventType}`},
+        '$.lastRuntimeEventAt', ${input.createdAt})
+    WHERE thread_id = ${input.threadId}
+      AND COALESCE(provider_instance_id, provider_name) = ${input.instanceId}
+      AND COALESCE(json_extract(runtime_payload_json, '$.sessionGeneration'), 0) = ${input.generation}
+      AND (${input.eventType} = 'session.exited' OR json_extract(runtime_payload_json, '$.activeTurnId') IS ${input.turnId})
+    RETURNING thread_id
+  `.pipe(
+        Effect.map((rows) => rows.length === 1),
+        Effect.mapError(
+          toPersistenceSqlError(
+            "ProviderSessionRuntimeRepository.updateTerminalLifecycleIfCurrent",
+          ),
+        ),
+      );
+
   return {
+    updateTerminalLifecycleIfCurrent,
     updateMcpStateIfCurrent,
     upsert,
     getByThreadId,

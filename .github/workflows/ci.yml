@@ -213,7 +213,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     defaults:
       run:
         shell: bash
@@ -238,8 +238,9 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         env:
           F5_CI_SUITE_ID: "server-unit-${{ matrix.shard }}"
+          # Per-file storage accounting evidence for the Windows logical-byte gap.
         run: |
-          bun run test:server:shard --shard=${{ matrix.shard }}/2
+          bun run test:server:shard --shard=${{ matrix.shard }}/3
       - name: Summarize test reports
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: node scripts/ci-test-summary.ts server-unit-${{ matrix.shard }}

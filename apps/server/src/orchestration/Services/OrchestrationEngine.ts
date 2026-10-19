@@ -25,6 +25,9 @@ import type { OrchestrationEventStoreError } from "../../persistence/Errors.ts";
  * OrchestrationEngineShape - Service API for orchestration command and event flow.
  */
 export interface OrchestrationEngineShape {
+  /** Process-local admission inventory; never includes command contents. */
+  readonly inspectQueue?: () => { entries: number; bytes: number; oldestAgeMs: number };
+
   /**
    * Read the current in-memory orchestration read model.
    *

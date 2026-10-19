@@ -17,7 +17,7 @@ import {
   type ProviderInstanceId,
   type ThreadId,
 } from "@t3tools/contracts";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeBackgroundWorker } from "../../backgroundWorker.ts";
 import { providerRuntimeCapabilities } from "@t3tools/shared/providerRuntimeCapabilities";
 import { Cause, Effect, Layer, Option, Stream } from "effect";
 
@@ -122,7 +122,7 @@ export const makeNativeSessionCleanupReactor = Effect.gen(function* () {
       ),
     );
 
-  const worker = yield* makeDrainableWorker(cleanup);
+  const worker = yield* makeBackgroundWorker(cleanup, { name: "NativeSessionCleanupReactor" });
 
   /** Captures the job synchronously with the event, before storage purges the binding. */
   const captureJob = (threadId: ThreadId) =>

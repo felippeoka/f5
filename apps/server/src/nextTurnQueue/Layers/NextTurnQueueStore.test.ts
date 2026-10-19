@@ -879,3 +879,26 @@ layer("NextTurnQueueStore", (it) => {
     }),
   );
 });
+
+it.effect(
+  "rotates bounded actionable scans through later pages without starving early threads",
+  () =>
+    Effect.gen(function* () {
+      const store = yield* NextTurnQueueStore;
+      const expected: ThreadId[] = [];
+      for (let index = 0; index < 130; index++) {
+        const threadId = ThreadId.makeUnsafe(`page-thread-${String(index).padStart(3, "0")}`);
+        expected.push(threadId);
+        yield* seedThread(threadId);
+        yield* insert(store, 9000 + index, threadId);
+      }
+      const first = yield* store.listActionableThreadIds,
+        second = yield* store.listActionableThreadIds,
+        third = yield* store.listActionableThreadIds;
+      assert.equal(first.length, 64);
+      assert.equal(second.length, 64);
+      assert.equal(third.length, 2);
+      assert.deepStrictEqual([...first, ...second, ...third], expected);
+      assert.deepStrictEqual(yield* store.listActionableThreadIds, first);
+    }).pipe(Effect.provide(testLayer)),
+);

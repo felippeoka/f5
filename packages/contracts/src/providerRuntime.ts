@@ -258,6 +258,7 @@ const RuntimeWarningType = Schema.Literal("runtime.warning");
 const RuntimeErrorType = Schema.Literal("runtime.error");
 
 const ProviderRuntimeEventBase = Schema.Struct({
+  sessionGeneration: Schema.optional(NonNegativeInt),
   eventId: EventId,
   provider: ProviderKind,
   providerInstanceId: Schema.optional(ProviderInstanceId),

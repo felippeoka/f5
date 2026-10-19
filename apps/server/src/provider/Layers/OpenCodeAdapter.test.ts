@@ -257,6 +257,7 @@ const providerSessionDirectoryTestLayer = Layer.succeed(ProviderSessionDirectory
   listThreadIds: () => Effect.succeed([]),
   listBindings: () => Effect.succeed([]),
   updateMcpStateIfCurrent: () => Effect.succeed(true),
+  updateTerminalLifecycleIfCurrent: () => Effect.succeed(true),
   listBindingsByProject: () => Effect.succeed([]),
 });
 

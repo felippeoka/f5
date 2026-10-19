@@ -3,6 +3,7 @@ import * as Path from "node:path";
 import * as Crypto from "node:crypto";
 import { Deferred, Effect, Exit, Schema, Scope, SynchronizedRef } from "effect";
 import { StorageUsageReport, type StorageScanStatus } from "@t3tools/contracts";
+import { allocatedBytes } from "./diskUsage.ts";
 import { userFacingCauseMessage } from "../causeMessage.ts";
 
 export interface UsageScanState {
@@ -25,7 +26,15 @@ export const makeUsageScanCoordinator = <E>(input: {
   readonly scan: (
     signal: AbortSignal,
     progress: (phase: NonNullable<StorageScanStatus["phase"]>, entries?: number) => void,
-  ) => Effect.Effect<StorageUsageReport, E>;
+  ) => Effect.Effect<
+    | StorageUsageReport
+    | {
+        readonly report: StorageUsageReport;
+        readonly persistenceBytes: { readonly file: number; readonly directory: number };
+      },
+    E
+  >;
+  readonly measureBytes?: typeof allocatedBytes;
 }) =>
   Effect.gen(function* () {
     const scope = yield* Scope.Scope;
@@ -109,38 +118,51 @@ export const makeUsageScanCoordinator = <E>(input: {
                 }));
                 break;
               }
-              const published = yield* SynchronizedRef.modify(ref, (current) => {
-                if (start.generation !== current.generation && attempt < 2)
-                  return [false, current] as const;
-                return [
-                  true,
-                  {
-                    ...current,
-                    latest: { report: result.value, generation: start.generation },
-                    running: null,
-                    lastFailure: null,
-                    revision: current.revision + 1,
-                    scan: { ...current.scan, state: "idle" as const, phase: null },
-                  },
-                ] as const;
-              }).pipe(Effect.uninterruptible);
-              if (!published) continue;
+              if ((yield* snapshot).generation !== start.generation && attempt < 2) continue;
+              const measurement = result.value;
+              const original = "report" in measurement ? measurement.report : measurement;
+              let report = original;
               yield* Effect.tryPromise(async () => {
                 const temporary = `${persistedPath}.${Crypto.randomUUID()}.tmp`;
+                const bytes = input.measureBytes ?? allocatedBytes;
                 try {
-                  await FS.writeFile(
-                    temporary,
-                    JSON.stringify({
-                      ...result.value,
-                      categories: result.value.categories.map((category) => ({
-                        ...category,
-                        targets: category.targets
-                          .toSorted((a, b) => b.bytes - a.bytes || a.id.localeCompare(b.id))
-                          .slice(0, 500),
-                      })),
-                    }),
-                  );
-                  await FS.rename(temporary, persistedPath);
+                  for (let pass = 0; pass < 8; pass++) {
+                    await FS.writeFile(
+                      temporary,
+                      JSON.stringify({
+                        ...report,
+                        categories: report.categories.map((category) => ({
+                          ...category,
+                          targets: category.targets
+                            .toSorted((a, b) => b.bytes - a.bytes || a.id.localeCompare(b.id))
+                            .slice(0, 500),
+                        })),
+                      }),
+                    );
+                    await FS.rename(temporary, persistedPath);
+                    if (!("persistenceBytes" in measurement)) break;
+                    // Include our own replacement in the measurement. Iterate
+                    // until its serialized size stabilizes (logical bytes on
+                    // Windows, allocated blocks on POSIX), without a second walk.
+                    const delta =
+                      bytes(await FS.lstat(persistedPath)) -
+                      measurement.persistenceBytes.file +
+                      bytes(await FS.lstat(input.stateDir)) -
+                      measurement.persistenceBytes.directory;
+                    const next = {
+                      ...original,
+                      totalUsedBytes: original.totalUsedBytes + delta,
+                      otherBytes: Math.max(0, original.otherBytes + delta),
+                    };
+                    if (
+                      next.totalUsedBytes === report.totalUsedBytes &&
+                      next.otherBytes === report.otherBytes
+                    )
+                      break;
+                    report = next;
+                    if (pass === 7)
+                      throw new Error("Storage measurement serialization did not stabilize.");
+                  }
                 } finally {
                   await FS.unlink(temporary).catch(() => {});
                 }
@@ -149,6 +171,19 @@ export const makeUsageScanCoordinator = <E>(input: {
                   Effect.logWarning("Could not persist storage measurement", error),
                 ),
               );
+              // Persistence is part of the scan: callers joining awaitLatest
+              // must not observe a report measured before its own writes.
+              yield* SynchronizedRef.update(ref, (current) => ({
+                ...current,
+                latest: { report, generation: start.generation },
+                running: current.running === done ? null : current.running,
+                lastFailure: null,
+                revision: current.revision + 1,
+                scan:
+                  current.running === done
+                    ? { ...current.scan, state: "idle" as const, phase: null }
+                    : current.scan,
+              })).pipe(Effect.uninterruptible);
               break;
             }
           }).pipe(

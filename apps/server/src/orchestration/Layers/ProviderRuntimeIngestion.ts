@@ -1,3 +1,7 @@
+import { PerformanceStageProbe } from "../../observability/Metrics.ts";
+import { registerShutdown } from "../../shutdown.ts";
+import { withProviderThreadAccess } from "../../provider/providerThreadAccess.ts";
+import { readPersistedSessionGeneration } from "../../provider/sessionCapabilities.ts";
 import { CodexMcpEventBus } from "../../codex/CodexMcpEventBus.ts";
 import { isPreparedComputerEvent } from "../../provider/prepareAutomationRuntimeEvent";
 import { computerToolHeading } from "@t3tools/shared/computerAction";
@@ -26,6 +30,7 @@ import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
   CommandId,
+  ProviderInstanceId,
   EventId,
   MessageId,
   OrchestrationCommandExecutionId,
@@ -46,9 +51,20 @@ import {
   type ProviderSessionCapabilities,
   type OrchestrationUsageLimit,
 } from "@t3tools/contracts";
-import { Cache, Cause, Duration, Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
+import {
+  Cache,
+  Cause,
+  Duration,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Stream,
+} from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeBackgroundWorker } from "../../backgroundWorker.ts";
 import { isBlockingUserInput } from "@t3tools/shared/pendingUserInputs";
 import { reconcileElicitationsOnStartup } from "../elicitationSubmission.ts";
 import {
@@ -87,7 +103,6 @@ import { ProviderTerminalEventRepositoryLive } from "../../persistence/Layers/Pr
 import {
   isProviderTerminalRuntimeEvent,
   ProviderTerminalEventRepository,
-  type ProviderTerminalEventReceipt,
 } from "../../persistence/Services/ProviderTerminalEvents.ts";
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { isGitRepository } from "../../git/isRepo.ts";
@@ -295,10 +310,6 @@ type RuntimeIngestionInput =
   | {
       source: "command-output-flush-all";
     };
-
-function terminalReceiptKey(threadId: ThreadId, turnId: TurnId | null): string {
-  return `${threadId}:${turnId ?? "*"}`;
-}
 
 interface OpenCommandExecutionState {
   readonly id: OrchestrationCommandExecutionId;
@@ -2320,6 +2331,7 @@ export function runtimeEventToActivities(
 }
 
 const make = Effect.gen(function* () {
+  const probe = yield* PerformanceStageProbe;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const serverConfig = yield* ServerConfig;
   const serverSettings = yield* ServerSettingsService;
@@ -3766,11 +3778,22 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    if (isProviderTerminalRuntimeEvent(event)) {
+      yield* providerSessionDirectory.updateTerminalLifecycleIfCurrent({
+        threadId: event.threadId,
+        instanceId: binding.providerInstanceId ?? ProviderInstanceId.makeUnsafe(binding.provider),
+        generation: event.sessionGeneration ?? 0,
+        turnId: event.turnId ?? null,
+        eventType: event.type,
+        createdAt: event.createdAt,
+      });
+      return;
+    }
     yield* providerSessionDirectory.upsert({
       threadId: event.threadId,
       provider: binding.provider,
       providerInstanceId: binding.providerInstanceId ?? event.providerInstanceId ?? null,
-      status: event.type === "session.exited" ? "stopped" : "running",
+      status: "running",
       runtimePayload: {
         activeTurnId,
         lastRuntimeEvent: `provider.${event.type}`,
@@ -3940,11 +3963,68 @@ const make = Effect.gen(function* () {
           ),
         );
       let event = incomingEvent;
+      const lookupStarted = probe ? performance.now() : 0;
       const readModel = yield* orchestrationEngine.getReadModel();
       const thread = readModel.threads.find((entry) => entry.id === event.threadId);
-      if (!thread) {
+      probe?.("ingestion.threadLookup", performance.now() - lookupStarted);
+      if (!thread || thread.deletedAt !== null) {
         streamingDeltas.forgetThread(incomingEvent.threadId);
+        if (isProviderTerminalRuntimeEvent(incomingEvent))
+          yield* providerTerminalEventRepository.markApplied(incomingEvent.eventId);
         return;
+      }
+      if (isProviderTerminalRuntimeEvent(event)) {
+        const binding = Option.getOrUndefined(
+          yield* providerSessionDirectory.getBinding(event.threadId),
+        );
+        const generation = readPersistedSessionGeneration(binding?.runtimePayload);
+        const currentInstance = binding?.providerInstanceId ?? thread.session?.providerInstanceId;
+        const legacyTurnMatches =
+          generation === 0 &&
+          event.turnId !== undefined &&
+          (thread.session?.activeTurnId === event.turnId ||
+            (thread.session?.activeTurnId == null && thread.latestTurn?.turnId === event.turnId));
+        const staleOrigin =
+          (event.sessionGeneration === undefined
+            ? !legacyTurnMatches
+            : event.sessionGeneration !== generation) ||
+          (event.providerInstanceId !== undefined &&
+            currentInstance != null &&
+            currentInstance !== event.providerInstanceId);
+        if (staleOrigin) {
+          // Usage is historical and idempotent; lifecycle and thread-wide cleanup belong
+          // only to the originating session. Never clear the replacement's active turn.
+          const usageFact =
+            event.type === "turn.completed"
+              ? makeCompletedTurnUsageFact({ event, thread })
+              : undefined;
+          if (usageFact)
+            yield* orchestrationEngine.dispatch({
+              type: "thread.usage.record",
+              commandId: providerCommandId(event, "thread-usage-record"),
+              threadId: thread.id,
+              usageFact,
+              createdAt: event.createdAt,
+            });
+          yield* providerTerminalEventRepository.markApplied(event.eventId);
+          return;
+        }
+      }
+      if (
+        !isProviderTerminalRuntimeEvent(event) &&
+        event.sessionGeneration !== undefined &&
+        (event.type.startsWith("session.") ||
+          event.type === "thread.started" ||
+          event.type === "turn.started" ||
+          event.type.startsWith("runtime.") ||
+          event.type.startsWith("request.") ||
+          event.type.startsWith("user-input."))
+      ) {
+        const binding = Option.getOrUndefined(
+          yield* providerSessionDirectory.getBinding(event.threadId),
+        );
+        if (event.sessionGeneration !== readPersistedSessionGeneration(binding?.runtimePayload))
+          return;
       }
       const previousLimit = thread.session?.usageLimit;
       if (
@@ -3981,6 +4061,9 @@ const make = Effect.gen(function* () {
                 threadId: event.threadId,
                 cause: Cause.pretty(cause),
               }),
+            ),
+            Effect.andThen(
+              isProviderTerminalRuntimeEvent(event) ? Effect.failCause(cause) : Effect.void,
             ),
           ),
         ),
@@ -4967,7 +5050,10 @@ const make = Effect.gen(function* () {
                 event.provider === "codex" &&
                 typeof asRecord(asRecord(event.payload.data)?.item)?.text === "string"
                   ? (asRecord(asRecord(event.payload.data)?.item)!.text as string)
-                  : event.payload.detail,
+                  : event.provider === "claudeAgent" &&
+                      typeof asRecord(event.payload.data)?.text === "string"
+                    ? (asRecord(event.payload.data)!.text as string)
+                    : event.payload.detail,
             }
           : undefined;
       const proposedPlanCompletion =
@@ -4988,7 +5074,8 @@ const make = Effect.gen(function* () {
         const finalText = assistantCompletion.fallbackText;
         const persistedText = existingAssistantMessage?.text ?? "";
         const recoverableSuffix =
-          COALESCE_STREAMING_DELTAS_DRIVERS.has(event.provider) &&
+          (COALESCE_STREAMING_DELTAS_DRIVERS.has(event.provider) ||
+            event.provider === "claudeAgent") &&
           finalText !== undefined &&
           finalText.startsWith(persistedText)
             ? finalText.slice(persistedText.length)
@@ -5680,6 +5767,7 @@ const make = Effect.gen(function* () {
                   ? flushCommandExecutionOutput(input.commandExecutionId).pipe(Effect.asVoid)
                   : flushAllCommandExecutionOutput();
 
+  const pendingTerminalEventIds = new Set<string>();
   const processInputSafely = (input: RuntimeIngestionInput) =>
     processInput(input).pipe(
       Effect.catchCause((cause) => {
@@ -5725,7 +5813,37 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const worker = yield* makeDrainableWorker(processInputSafely);
+  const worker = yield* makeBackgroundWorker(
+    (input: RuntimeIngestionInput) =>
+      (input.source === "runtime" && isProviderTerminalRuntimeEvent(input.event)
+        ? withProviderThreadAccess(input.event.threadId, processInputSafely(input))
+        : processInputSafely(input)
+      ).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (input.source === "runtime" && isProviderTerminalRuntimeEvent(input.event))
+              pendingTerminalEventIds.delete(input.event.eventId);
+          }),
+        ),
+      ),
+    { name: "ProviderRuntimeIngestion" },
+  );
+  const enqueueRuntimeEvent = (event: ProviderRuntimeEvent) =>
+    Effect.suspend(() => {
+      if (!isProviderTerminalRuntimeEvent(event))
+        return worker.enqueue({ source: "runtime", event });
+      if (pendingTerminalEventIds.has(event.eventId)) return Effect.void;
+      pendingTerminalEventIds.add(event.eventId);
+      return worker
+        .enqueue({ source: "runtime", event })
+        .pipe(
+          Effect.onExit((exit) =>
+            Exit.isFailure(exit)
+              ? Effect.sync(() => pendingTerminalEventIds.delete(event.eventId))
+              : Effect.void,
+          ),
+        );
+    });
   enqueueResolvedUsageLimit = worker.enqueue;
   enqueueAssistantDeltaFlush = (threadId, messageId, commandId) => {
     void Effect.runPromise(
@@ -5736,16 +5854,14 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       streamingDeltas.cancelTimers();
       yield* worker.enqueue({ source: "assistant-delta-flush-all" });
-      yield* worker.drain;
+      yield* worker.drain.pipe(Effect.orDie);
     }),
   );
   enqueueCommandOutputFlush = (commandExecutionId) => {
     void Effect.runPromise(worker.enqueue({ source: "command-output-flush", commandExecutionId }));
   };
 
-  const reconcileOrphanedProviderTurnsOnStartup = (
-    pendingReceipts: ReadonlyArray<ProviderTerminalEventReceipt>,
-  ) =>
+  const reconcileOrphanedProviderTurnsOnStartup = () =>
     Effect.gen(function* () {
       const [readModel, bindings, liveSessions] = yield* Effect.all([
         orchestrationEngine.getReadModel(),
@@ -5754,9 +5870,6 @@ const make = Effect.gen(function* () {
       ]);
       const bindingsByThreadId = new Map(bindings.map((binding) => [binding.threadId, binding]));
       const liveThreadIds = new Set(liveSessions.map((session) => session.threadId));
-      const pendingTerminalKeys = new Set(
-        pendingReceipts.map((receipt) => terminalReceiptKey(receipt.threadId, receipt.turnId)),
-      );
       let recoveredCount = 0;
 
       for (const thread of readModel.threads) {
@@ -5766,7 +5879,8 @@ const make = Effect.gen(function* () {
           thread.session &&
           !liveThreadIds.has(thread.id) &&
           (thread.session.status === "starting" || thread.session.status === "running") &&
-          thread.session.activeTurnId === null
+          thread.session.activeTurnId === null &&
+          !(yield* providerTerminalEventRepository.hasPending(thread.id, null))
         ) {
           const reconciledAt = new Date().toISOString();
           const binding = bindingsByThreadId.get(thread.id);
@@ -5810,10 +5924,7 @@ const make = Effect.gen(function* () {
         if (!binding || binding.provider !== thread.session.providerName) {
           continue;
         }
-        if (
-          pendingTerminalKeys.has(terminalReceiptKey(thread.id, activeTurnId)) ||
-          pendingTerminalKeys.has(terminalReceiptKey(thread.id, null))
-        ) {
+        if (yield* providerTerminalEventRepository.hasPending(thread.id, activeTurnId)) {
           continue;
         }
 
@@ -5840,15 +5951,19 @@ const make = Effect.gen(function* () {
           continue;
         }
 
-        const event = makeOrphanedSessionExitedEvent({
+        const orphanedEvent = makeOrphanedSessionExitedEvent({
           threadId: thread.id,
           turnId: activeTurnId,
           provider: binding.provider,
           providerInstanceId: binding.providerInstanceId,
           createdAt: new Date().toISOString(),
         });
+        const event = {
+          ...orphanedEvent,
+          sessionGeneration: readPersistedSessionGeneration(binding.runtimePayload),
+        };
         yield* providerTerminalEventRepository.record(event);
-        yield* worker.enqueue({ source: "runtime", event });
+        yield* enqueueRuntimeEvent(event);
         recoveredCount += 1;
       }
 
@@ -5902,34 +6017,30 @@ const make = Effect.gen(function* () {
       }),
     );
     yield* Effect.forkScoped(
-      Stream.runForEach(providerService.streamEvents, (event) =>
-        worker.enqueue({ source: "runtime", event }),
-      ),
+      Stream.runForEach(providerService.streamEvents, (event) => enqueueRuntimeEvent(event)),
     );
-    const pendingReceipts = yield* providerTerminalEventRepository.listPending.pipe(
-      Effect.retry({ times: 3 }),
-      Effect.tap((receipts) =>
-        Effect.forEach(
-          receipts,
-          (receipt) => worker.enqueue({ source: "runtime", event: receipt.event }),
-          { concurrency: 1, discard: true },
-        ).pipe(
-          Effect.tap(() =>
-            receipts.length > 0
-              ? Effect.logInfo("queued pending provider terminal events for replay", {
-                  count: receipts.length,
-                })
-              : Effect.void,
-          ),
-        ),
+    const replayDueReceipts = Effect.suspend(() => providerTerminalEventRepository.listDue()).pipe(
+      Effect.flatMap((receipts) =>
+        Effect.forEach(receipts, (receipt) => enqueueRuntimeEvent(receipt.event), {
+          concurrency: 1,
+          discard: true,
+        }),
       ),
       Effect.catchCause((cause) =>
-        Effect.logWarning("failed to replay pending provider terminal events", {
-          cause: Cause.pretty(cause),
-        }).pipe(Effect.as<ReadonlyArray<ProviderTerminalEventReceipt>>([])),
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.interrupt
+          : Effect.logWarning("failed to retry provider terminal receipts", {
+              cause: Cause.pretty(cause),
+            }),
       ),
     );
-    yield* reconcileOrphanedProviderTurnsOnStartup(pendingReceipts).pipe(
+    yield* replayDueReceipts;
+    yield* replayDueReceipts.pipe(
+      Effect.andThen(Effect.sleep("1 second")),
+      Effect.forever,
+      Effect.forkScoped,
+    );
+    yield* reconcileOrphanedProviderTurnsOnStartup().pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("failed to reconcile orphaned provider turns on startup", {
           cause: Cause.pretty(cause),
@@ -5966,6 +6077,10 @@ const make = Effect.gen(function* () {
       }),
     );
   });
+
+  yield* registerShutdown("provider-ingestion", "drain", () =>
+    worker.enqueue({ source: "command-output-flush-all" }).pipe(Effect.andThen(worker.drain)),
+  );
 
   return {
     start,

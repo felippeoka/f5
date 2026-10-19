@@ -349,7 +349,15 @@
       "import": "./src/storageCleanup.ts"
     },
     "./mcpTools": "./src/mcpTools.ts",
-    "./mcpSecrets": "./src/mcpSecrets.ts"
+    "./mcpSecrets": "./src/mcpSecrets.ts",
+    "./utf8Lines": {
+      "types": "./src/utf8Lines.ts",
+      "import": "./src/utf8Lines.ts"
+    },
+    "./abortSignal": {
+      "types": "./src/abortSignal.ts",
+      "import": "./src/abortSignal.ts"
+    }
   },
   "scripts": {
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",

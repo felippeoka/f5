@@ -1,6 +1,6 @@
 import { hasNativeOperationReservation } from "../../provider/nativeOperations.ts";
 import { CommandId, EventId, type OrchestrationEvent, ThreadId } from "@t3tools/contracts";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeBackgroundWorker } from "../../backgroundWorker.ts";
 import { Cause, Effect, Layer, Stream } from "effect";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
@@ -366,24 +366,26 @@ const make = Effect.gen(function* () {
       });
     });
 
-  const worker = yield* makeDrainableWorker((event: ThreadCompactRequestedEvent) =>
-    processEvent(event).pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          pendingThreadIds.delete(event.payload.threadId);
+  const worker = yield* makeBackgroundWorker(
+    (event: ThreadCompactRequestedEvent) =>
+      processEvent(event).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            pendingThreadIds.delete(event.payload.threadId);
+          }),
+        ),
+        Effect.catchCause((cause) => {
+          if (Cause.hasInterruptsOnly(cause)) {
+            return Effect.failCause(cause);
+          }
+          return Effect.logWarning("conversation compaction failed", {
+            eventId: event.eventId,
+            threadId: event.payload.threadId,
+            cause: Cause.pretty(cause),
+          });
         }),
       ),
-      Effect.catchCause((cause) => {
-        if (Cause.hasInterruptsOnly(cause)) {
-          return Effect.failCause(cause);
-        }
-        return Effect.logWarning("conversation compaction failed", {
-          eventId: event.eventId,
-          threadId: event.payload.threadId,
-          cause: Cause.pretty(cause),
-        });
-      }),
-    ),
+    { name: "CompactionService" },
   );
 
   const start: CompactionServiceShape["start"] = Effect.forkScoped(

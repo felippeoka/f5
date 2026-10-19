@@ -1,3 +1,4 @@
+import { raceWithAbort } from "@t3tools/shared/abortSignal";
 import { isReadOnlyRpc, rpcLane } from "@t3tools/shared/rpcScheduling";
 import {
   getProtocolState,
@@ -84,6 +85,7 @@ interface OutboundMessage {
 }
 
 const REQUEST_TIMEOUT_MS = 60_000;
+const CONNECTION_TIMEOUT_MS = 10_000;
 const MAX_OUTBOUND_QUEUE_SIZE = 256;
 const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000];
 const FOREGROUND_PROBE_COALESCE_MS = 10_000;
@@ -137,15 +139,17 @@ function scrubAuthTokenFromLocationHash(): void {
   );
 }
 
-async function ensureBrowserAuthSession(): Promise<void> {
+async function ensureBrowserAuthSession(signal: AbortSignal): Promise<void> {
   const token = authTokenFromLocationHash();
   if (token) {
     const response = await fetch(AUTH_SESSION_PATH, {
       method: "POST",
+      signal,
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token }),
     });
+    signal.throwIfAborted();
     if (!response.ok) {
       throw new Error("F5 authentication failed. Check the remote access token.");
     }
@@ -155,9 +159,11 @@ async function ensureBrowserAuthSession(): Promise<void> {
 
   const response = await fetch(AUTH_STATUS_PATH, {
     method: "GET",
+    signal,
     credentials: "same-origin",
     cache: "no-store",
   });
+  signal.throwIfAborted();
   if (!response.ok) {
     throw new Error("F5 authentication is required. Open the authenticated remote access URL.");
   }
@@ -178,6 +184,19 @@ export class WsTransport {
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private authConnectInFlight = false;
+  private authController: AbortController | null = null;
+  private authGeneration = 0;
+  private connectionTimer: ReturnType<typeof setTimeout> | null = null;
+  private cancelAuthAttempt() {
+    this.authGeneration++;
+    this.authController?.abort();
+    this.authController = null;
+    this.authConnectInFlight = false;
+  }
+  private clearConnectionTimer() {
+    if (this.connectionTimer !== null) clearTimeout(this.connectionTimer);
+    this.connectionTimer = null;
+  }
   private disposed = false;
   private unsubscribeProtocolState: (() => void) | null = null;
   private unregisterReconnectHandler: (() => void) | null = null;
@@ -220,6 +239,8 @@ export class WsTransport {
   }
 
   private stopForProtocolUpgrade(): void {
+    this.cancelAuthAttempt();
+    this.clearConnectionTimer();
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -275,6 +296,7 @@ export class WsTransport {
     params?: unknown,
     options?: RequestOptions,
   ): Promise<T> {
+    if (this.disposed) throw new Error("Transport disposed");
     if (getProtocolState().upgradeRequired) throw new Error(F5_UPGRADE_REQUIRED_MESSAGE);
     if (typeof method !== "string" || method.length === 0) {
       throw new Error("Request method is required");
@@ -395,9 +417,8 @@ export class WsTransport {
       throw new Error("Transport disposed");
     }
 
-    if (this.ws?.readyState === WebSocket.CONNECTING) {
-      return;
-    }
+    this.cancelAuthAttempt();
+    this.clearConnectionTimer();
 
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
@@ -420,6 +441,8 @@ export class WsTransport {
 
   dispose() {
     this.disposed = true;
+    this.cancelAuthAttempt();
+    this.clearConnectionTimer();
     this.unsubscribeProtocolState?.();
     this.unsubscribeProtocolState = null;
     if (this.reconnectTimer !== null) {
@@ -451,20 +474,38 @@ export class WsTransport {
     if (this.browserSessionAuth) {
       if (this.authConnectInFlight) return;
       this.authConnectInFlight = true;
-      void ensureBrowserAuthSession().then(
-        () => {
-          this.authConnectInFlight = false;
-          if (!this.disposed) this.openSocket();
-        },
-        (error: unknown) => {
-          this.authConnectInFlight = false;
-          if (this.disposed || getProtocolState().upgradeRequired) return;
-          noteWsConnectionError(
-            error instanceof Error ? error.message : "F5 authentication failed.",
-          );
-          this.scheduleReconnect();
-        },
-      );
+      const generation = ++this.authGeneration;
+      const controller = new AbortController();
+      this.authController = controller;
+      const timer = setTimeout(() => controller.abort(), CONNECTION_TIMEOUT_MS);
+      void raceWithAbort(ensureBrowserAuthSession(controller.signal), controller.signal)
+        .then(
+          () => {
+            if (generation !== this.authGeneration || this.disposed) return;
+            this.authConnectInFlight = false;
+            this.authController = null;
+            this.openSocket();
+          },
+          (error: unknown) => {
+            if (
+              generation !== this.authGeneration ||
+              this.disposed ||
+              getProtocolState().upgradeRequired
+            )
+              return;
+            this.authConnectInFlight = false;
+            this.authController = null;
+            noteWsConnectionError(
+              controller.signal.aborted
+                ? "F5 authentication timed out."
+                : error instanceof Error
+                  ? error.message
+                  : "F5 authentication failed.",
+            );
+            this.scheduleReconnect();
+          },
+        )
+        .finally(() => clearTimeout(timer));
       return;
     }
 
@@ -482,6 +523,17 @@ export class WsTransport {
     const generation = ++this.socketGeneration;
     this.ws = ws;
     this.authoritativeSocketGeneration = generation;
+    this.clearConnectionTimer();
+    this.connectionTimer = setTimeout(() => {
+      if (!this.isAuthoritativeSocket(generation, ws) || ws.readyState !== WebSocket.CONNECTING)
+        return;
+      this.detachAuthoritativeSocket();
+      this.failPendingRequests("WebSocket connection timed out.");
+      noteWsConnectionError("WebSocket connection timed out.");
+      noteWsConnectionClosed();
+      ws.close();
+      this.scheduleReconnect();
+    }, CONNECTION_TIMEOUT_MS);
 
     ws.addEventListener("open", () => {
       if (!this.isAuthoritativeSocket(generation, ws)) {
@@ -491,6 +543,7 @@ export class WsTransport {
         return;
       }
 
+      this.clearConnectionTimer();
       this.reconnectAttempt = 0;
       this.lastForegroundProbe = null;
       noteWsConnectionOpened();
@@ -594,6 +647,7 @@ export class WsTransport {
   }
 
   private detachAuthoritativeSocket(): void {
+    this.clearConnectionTimer();
     this.ws = null;
     this.authoritativeSocketGeneration = DETACHED_SOCKET_GENERATION;
   }

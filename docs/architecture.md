@@ -172,3 +172,30 @@ sequenceDiagram
 [18]: ../apps/server/src/orchestration/Layers/ProviderTurnDeliveryWorker.ts
 
 Profiles isolate environments at the process boundary, with sibling registry/lock storage and separate state directories. See [Profiles](profiles.md).
+
+## Retained orchestration message-content consumers
+
+The read model remains complete. This inventory is the first phase of the proposed
+memory redesign; it does not authorize replacing text or truncating decider state.
+The realistic fixture must exceed 300 MB after deleted-thread handling before the
+second phase starts. The warning above 200,000 retained messages is observability
+only, and reports counts/characters without changing retained arrays.
+
+| Consumer                            | Content needed from the engine's retained messages                                                                                                               | Required boundary before slimming                                                                                                                            |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ProviderCommandReactor`            | Text/reasoning/attachment-name character estimates; initial user prompt and title-regeneration context; queued first-send text                                   | Repository-backed context/title reads and incremental character totals, fenced by thread/history revision. Role/turn/id checks can use message metadata.     |
+| `ProviderRuntimeIngestion`          | Existing assistant text for duplicate-prefix/suffix recovery and finalization                                                                                    | A repository read tied to the same message/turn/generation before deciding whether a completion adds a suffix.                                               |
+| `WorkflowService`                   | Strict proposed-plan wrapper validation from the final assistant message; latest user text/attachments when retrying implementation                              | Read the exact pinned completed message or original request through a repository, preserving operation/turn identity.                                        |
+| `SessionNotesService`               | Recent user/assistant text summarized into provider context                                                                                                      | Bounded repository history at an explicit source watermark.                                                                                                  |
+| `codexSnapshotReconciliation`       | Existing assistant text to compare native history and avoid duplicate deltas                                                                                     | Repository reads tied to the reconciliation's captured generation/history coverage.                                                                          |
+| `rewind`                            | Target user-message text/attachments copied into a recoverable draft                                                                                             | Read the immutable target message inside the fenced rewind operation; preserve draft persistence and attachment ownership.                                   |
+| `WorkspaceTransition`               | First user prompt and attachments for branch naming                                                                                                              | Repository-backed first-message lookup before preparation, retaining workspace/root checks.                                                                  |
+| `StuckTurnRepair`                   | Nonempty finalized assistant text as one piece of repair evidence                                                                                                | Read the exact final assistant message for the originating turn; a log's partial final line remains insufficient evidence.                                   |
+| `wsServer` legacy full-snapshot RPC | Entire message text/reasoning is returned by the legacy read-model response                                                                                      | Serve that response from a consistent repository snapshot before changing the engine representation. Tail/history RPCs already use snapshot readers.         |
+| Engine projector and decider        | The projector appends/replaces content and estimates context. Decider message checks include role/id/turn/streaming status, pivot existence and history ordering | Preserve decision equivalence for all message/history commands. Repository fallbacks and retained metadata must exist before replacing content with lengths. |
+
+`CheckpointReactor` needs message IDs/roles/turns for checkpoint association;
+`WorktreeSetup` uses message presence. Their current checks do not require full text.
+The remaining project/worktree/queue/workflow lifecycle reads use aggregate metadata,
+workflow records, sessions, IDs or counts. Re-run the inventory when adding a new
+`getReadModel()` consumer: follow helper calls as well as direct `.messages` accesses.

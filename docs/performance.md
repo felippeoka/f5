@@ -211,3 +211,67 @@ comparison runs without this additional workload.
 ### Section 5.4 validation
 
 Results are recorded in [reviews/server-performance-storage-validation.md](reviews/server-performance-storage-validation.md).
+
+## Stability instrumentation
+
+The Node SQLite adapter records successful and failed execution durations on both
+row and positional result paths. Statements taking more than 100 ms log a warning
+containing the duration and at most 160 characters of the source SQL; bound
+parameters and expanded SQL are never logged. Unit tests inject elapsed time into
+a recursive CTE check, rather than asserting a machine-dependent execution time.
+
+The push bus records encoded frame bytes, replaced/subsumed coalesced pushes and
+slow-client closures. Frame/replacement labels contain only static channel
+families, never workspace paths, thread IDs or MCP identities. Queue depth is
+sampled every 250 ms, at the same cadence as the existing event-loop-delay sampler.
+Repeated callbacks from an already closed client do not count another close.
+
+The four-stream workload includes an uncoalesced `claudeAgent` variant beside
+Codex. Delta latency ends at the production push bus's send callback. Report-only
+`diagnostics` contain queue entries/bytes, SQLite page growth/WAL bytes, event-loop
+percentiles, SQL admission/execution times, ingestion lookup, in-memory projection,
+per-projector time/counts and push admission. Snapshot transactions, worker entries,
+bytes/age/failures and shutdown phase durations also have production metrics. The
+optional stage probe is disabled in normal execution and never records SQL parameters.
+
+The 2026-10-19 smoke used one warmup/two repetitions: Codex delta-to-push p95 was
+68.46 ms; uncoalesced Claude was 538.43 ms, with 80,264 SQL statements in its busiest
+repetition. This validates the C0 harness and identifies a projection workload to
+measure; a smoke run certifies no performance improvement. Browser operation
+inventories and full before/after qualification remain required.
+
+### Baseline qualification status, 2026-10-19
+
+Local collections from the uncommitted stability patch are exploratory diagnostics.
+Their ignored `.performance` files are not reproducible release baselines and must
+not be used for acceptance comparisons. No clean, pinned baseline is recorded yet.
+
+To collect one, use a clean checkout at a recorded commit, the pinned Node/Bun
+versions and an otherwise idle host. Run `bun run perf:server --output=.performance/baseline.json` with the default five warmups and thirty
+repetitions. Retain the complete report as a build artifact alongside its commit,
+fixture/harness digests, runtime and host metadata; collect the candidate on the
+same host and use the comparison rules above. Do not compare reports whose
+metadata is incompatible. Until that artifact exists, performance gates remain
+unqualified.
+
+The interactive fixture now answers `worktrees.getTransition` and
+`worktrees.threadState`; missing responses previously crashed the production chat
+route. Local smoke diagnostics ran, but full interactive qualification failed
+because the production process-table probe returned `spawn EPERM`. Full runs now
+check that capability before allocating the fixture or starting the soak. Rerun
+qualification on a host permitting that probe and retain its complete report.
+
+## Nightly performance reports
+
+`perf-nightly.yml` runs the full server component harness at 04:17 UTC and on
+manual dispatch. It runs separately from `CI result` and does not open
+`ci-main-red` issues or gate merges. Each report uses five warmups and thirty
+measured repetitions. Candidates and diagnostics are retained as workflow artifacts.
+
+The latest retained `perf-baseline` from main supplies the comparison. A missing
+baseline, the dispatch's `reset-baseline` option, or incompatible fixture, harness,
+hardware, OS, Git, browser or runtime metadata records a new baseline, with the
+reason in the step summary. Compatible reports run `bun run perf:compare`;
+regressions fail that workflow and appear in its summary. Feature-branch dispatches
+can compare reports but cannot replace main's baseline. This report covers server
+components; interactive qualification still requires the production-browser report.

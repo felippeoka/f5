@@ -589,6 +589,7 @@ describe("ProviderCommandReactor", () => {
           })),
         ),
       updateMcpStateIfCurrent: () => Effect.succeed(true),
+      updateTerminalLifecycleIfCurrent: () => Effect.succeed(true),
       listBindingsByProject: (projectId) =>
         Effect.sync(() =>
           [...persistedBindings.values()]

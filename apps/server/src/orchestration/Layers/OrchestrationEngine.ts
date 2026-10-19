@@ -27,6 +27,8 @@ import {
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
+  PerformanceStageProbe,
+  measurePerformanceStage,
   metricAttributes,
   orchestrationCommandAckDuration,
   orchestrationCommandsTotal,
@@ -43,6 +45,7 @@ import {
   type OrchestrationDispatchError,
 } from "../Errors.ts";
 import { decideOrchestrationCommand, GLOBAL_PIN_AGGREGATE_ID } from "../decider.ts";
+import { observeReadModelRetention } from "../readModelRetention.ts";
 import { createEmptyReadModel, projectEvent } from "../projector.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
 import {
@@ -124,6 +127,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   let readModel = createEmptyReadModel(new Date().toISOString());
 
   const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
+  const queued = new Map<CommandEnvelope, number>();
+  let queuedBytes = 0;
+  const probe = yield* PerformanceStageProbe;
   const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
 
   const readSteerFallback = (command: OrchestrationCommand) =>
@@ -475,8 +481,14 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
               for (const nextEvent of eventBases) {
                 const savedEvent = yield* eventStore.append(nextEvent);
-                nextReadModel = yield* projectEvent(nextReadModel, savedEvent);
-                yield* projectionPipeline.projectEvent(savedEvent);
+                nextReadModel = yield* measurePerformanceStage(
+                  probe,
+                  "engine.readModelProjection",
+                  projectEvent(nextReadModel, savedEvent),
+                );
+                yield* projectionPipeline.projectEvent(savedEvent, {
+                  deferCursor: projectionPipeline.commitCursors !== undefined,
+                });
                 if (savedEvent.type === "thread.archived" || savedEvent.type === "thread.deleted") {
                   if (Option.isSome(transitions))
                     yield* transitions.value.cancel(savedEvent.payload.threadId).pipe(Effect.orDie);
@@ -754,6 +766,8 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                   .update(record, { phase: "completed", error: null })
                   .pipe(Effect.orDie);
               }
+              if (projectionPipeline.commitCursors)
+                yield* projectionPipeline.commitCursors(lastSavedEvent);
               return {
                 committedEvents,
                 lastSequence: lastSavedEvent.sequence,
@@ -904,8 +918,16 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       }),
   );
 
+  yield* observeReadModelRetention(readModel);
+
   const worker = Effect.forever(
     Queue.take(commandQueue).pipe(
+      Effect.tap((envelope) =>
+        Effect.sync(() => {
+          queuedBytes -= queued.get(envelope) ?? 0;
+          queued.delete(envelope);
+        }),
+      ),
       Effect.flatMap((envelope) => maintenanceLock.withShared(processEnvelope(envelope))),
     ),
   );
@@ -972,17 +994,29 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         }
       }
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
-      yield* Queue.offer(commandQueue, {
+      const envelope: CommandEnvelope = {
         command,
         result,
         startedAtMs: Date.now(),
         workspaceWrite: yield* WorkspaceWriteContext,
         ...(workspace ? { workspace } : {}),
-      });
+      };
+      const bytes = Buffer.byteLength(JSON.stringify(command));
+      yield* Effect.uninterruptible(
+        Effect.sync(() => {
+          queued.set(envelope, bytes);
+          queuedBytes += bytes;
+        }).pipe(Effect.andThen(Queue.offer(commandQueue, envelope))),
+      );
       return yield* Deferred.await(result);
     });
 
   return {
+    inspectQueue: () => ({
+      entries: queued.size,
+      bytes: queuedBytes,
+      oldestAgeMs: queued.size ? Date.now() - queued.keys().next().value!.startedAtMs : 0,
+    }),
     getReadModel,
     readEvents,
     dispatch,

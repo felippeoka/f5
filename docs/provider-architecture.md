@@ -72,3 +72,39 @@ There are three layers, each with its own owner:
 
 Instances may also expose `inventory` (read-only hooks, plugins, connectors and agents,
 served by `server.getProviderInventory`) and `deleteNativeSession`.
+
+## Transport framing and delivery outcomes
+
+Codex and ACP use the shared incremental UTF-8/CRLF line framer. It preserves
+empty lines, split code points and final unterminated lines. ACP retains its
+16 MiB frame limit and fails its transport on decode/framing failure, settling
+pending requests. Codex session stdout has no new frame ceiling: large history
+responses remain valid. A malformed session line produces a protocol error event
+and leaves the session alive. Codex stderr is framed incrementally and can carry
+a truncation marker on unusually long diagnostic lines.
+
+The Codex stdin writer tracks queued admission separately from physical writes.
+Expired or cancelled queued entries are removed before `stdin.write`; they fail
+as `not_sent`. Once writing has begun, timeout/abort is an `unknown` outcome and
+cannot authorize an automatic resend. Interrupts and approval/input replies have
+reserved admission and run after the active physical write. Delivery certainty
+and retryability survive adapter/service wrapping into the durable delivery result.
+
+Exit/error settles pending Codex RPCs immediately, including replaced contexts.
+Notification sources drain to EOF or the shutdown budget and retain the originating
+session generation. Per-generation FIFO preparation orders native logging, mapping,
+image preparation and publication; completion cannot overtake earlier output.
+Version probes are asynchronous, share only concurrent checks of the same resolved
+executable identity/environment, and cancel the child when their last waiter exits.
+MSP child exit closes its incoming channel immediately, settling in-flight SDK
+requests. Close waits for child exit with bounded escalation, removes its timeout
+waiters, and observes the application deadline when shutting down. The spawned-host
+fixture verifies request failure after exit and forced termination. ACP adapter-level
+failure cases and the owned OpenCode HTTP/SSE/process-group audit remain required
+before claiming the complete per-transport guarantees.
+
+Claude completion records carry exact emitted block text in `payload.data.text`,
+including leading newlines and trailing whitespace; display detail is not the recovery
+source. Ingestion can restore a missing suffix from that text. Claude delta coalescing
+remains disabled until its server-crash/transcript-resume test passes and the C0
+comparison meets the proposed latency/queue criteria.

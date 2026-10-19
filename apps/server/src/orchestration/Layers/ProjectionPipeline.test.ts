@@ -1,4 +1,5 @@
 import {
+  type OrchestrationEvent,
   CheckpointRef,
   CommandId,
   CorrelationId,
@@ -62,6 +63,76 @@ const runWithProjectionPipelineLayer = <A, E>(
 const projectionLayer = it.layer(makeProjectionPipelineTestLayer(process.cwd()));
 
 projectionLayer("OrchestrationProjectionPipeline", (it) => {
+  it.effect(
+    "commits cursors once per command, including ignored projectors, and rolls the entire command back on cursor failure",
+    () =>
+      runWithProjectionPipelineLayer(
+        process.cwd(),
+        Effect.gen(function* () {
+          const pipeline = yield* OrchestrationProjectionPipeline;
+          const store = yield* OrchestrationEventStore;
+          const sql = yield* SqlClient.SqlClient;
+          const now = "2026-10-19T00:00:00.000Z";
+          const events: OrchestrationEvent[] = [];
+          for (let index = 0; index < 3; index++) {
+            const projectId = ProjectId.makeUnsafe(`cursor-batch-${index}`);
+            events.push(
+              yield* store.append({
+                eventId: EventId.makeUnsafe(`cursor-batch-${index}`),
+                type: "project.created",
+                aggregateKind: "project",
+                aggregateId: projectId,
+                occurredAt: now,
+                commandId: null,
+                causationEventId: null,
+                correlationId: null,
+                metadata: {},
+                payload: {
+                  projectId,
+                  title: "batch",
+                  workspaceRoot: `/tmp/cursor-batch-${index}`,
+                  defaultModel: null,
+                  scripts: [],
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              }),
+            );
+          }
+          yield* sql`CREATE TABLE cursor_writes (projector TEXT)`;
+          yield* sql`CREATE TRIGGER count_cursor_inserts AFTER INSERT ON projection_state BEGIN INSERT INTO cursor_writes VALUES (NEW.projector); END`;
+          yield* sql`CREATE TRIGGER count_cursor_updates AFTER UPDATE ON projection_state BEGIN INSERT INTO cursor_writes VALUES (NEW.projector); END`;
+          const applyCommand = sql.withTransaction(
+            Effect.gen(function* () {
+              for (const event of events)
+                yield* pipeline.projectEvent(event, { deferCursor: true });
+              yield* pipeline.commitCursors!(events.at(-1)!);
+            }),
+          );
+          yield* sql`CREATE TRIGGER fail_cursor BEFORE INSERT ON projection_state WHEN NEW.projector = 'projection.thread-messages' BEGIN SELECT RAISE(ABORT, 'cursor failure'); END`;
+          assert.equal((yield* Effect.result(applyCommand))._tag, "Failure");
+          assert.deepEqual(yield* sql`SELECT project_id FROM projection_projects`, []);
+          assert.deepEqual(yield* sql`SELECT projector FROM cursor_writes`, []);
+          yield* sql`DROP TRIGGER fail_cursor`;
+          yield* applyCommand;
+          const rows = yield* sql<{
+            projector: string;
+            sequence: number;
+            writes: number;
+          }>`SELECT p.projector, p.last_applied_sequence AS sequence, COUNT(*) AS writes FROM projection_state p JOIN cursor_writes w ON p.projector = w.projector GROUP BY p.projector`;
+          assert.equal(rows.length, Object.keys(ORCHESTRATION_PROJECTOR_NAMES).length);
+          for (const row of rows) {
+            assert.equal(row.sequence, events.at(-1)!.sequence);
+            assert.equal(row.writes, 1);
+          }
+          assert.equal((yield* sql`SELECT project_id FROM projection_projects`).length, 3);
+          // Bootstrap must skip this complete command without writing another cursor.
+          yield* pipeline.bootstrap;
+          assert.equal((yield* sql`SELECT projector FROM cursor_writes`).length, rows.length);
+        }),
+      ),
+  );
+
   it.effect("replays PR links with its own cursor without duplicating search documents", () =>
     runWithProjectionPipelineLayer(
       process.cwd(),

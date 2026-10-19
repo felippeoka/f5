@@ -5155,11 +5155,19 @@ describe("ClaudeAdapterLive", () => {
       stream({
         type: "content_block_delta",
         index: 0,
-        delta: { type: "text_delta", text: "Answer" },
+        delta: { type: "text_delta", text: "\nAnswer \t" },
       });
       stream({ type: "content_block_stop", index: 0 });
       // The text block's own stop still completes the text block.
-      assert.deepEqual(lifecycle(yield* Fiber.join(firstPhase)), [
+      const firstEvents = Array.from(yield* Fiber.join(firstPhase));
+      const completed = firstEvents.find(
+        (event) =>
+          event.type === "item.completed" && event.payload.itemType === "assistant_message",
+      );
+      assert.deepEqual(completed?.type === "item.completed" ? completed.payload.data : undefined, {
+        text: "\nAnswer \t",
+      });
+      assert.deepEqual(lifecycle(firstEvents), [
         "item.started reasoning",
         "item.completed reasoning",
         "item.completed assistant_message",

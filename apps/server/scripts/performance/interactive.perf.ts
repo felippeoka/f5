@@ -62,6 +62,23 @@ it("measures the production renderer, real WS backpressure and native terminal s
   if (!existsSync(path.join(root, "apps/web/dist/index.html")))
     throw new Error("Build apps/web first");
   const method = smoke ? { ...fixture.method, warmups: 1, repetitions: 2 } : fixture.method;
+  // Full qualification requires real process activity, not merely PTY output.
+  // Fail before the ten-minute soak on restricted hosts. Older pinned builds
+  // predate the shared process-table module and retain their original probe path.
+  if (
+    !smoke &&
+    existsSync(fileURLToPath(new URL("../../src/terminal/processTable.ts", import.meta.url)))
+  ) {
+    try {
+      const { readTerminalProcessTable } = await import("../../src/terminal/processTable.ts");
+      await readTerminalProcessTable();
+    } catch (cause) {
+      throw new Error(
+        "Full interactive measurements require native terminal process-table access. Run on a host that permits the production process probe.",
+        { cause },
+      );
+    }
+  }
   const directory = mkdtempSync(path.join(tmpdir(), "f5-interactive-perf-"));
   // Old pinned builds predate the protocol constant; their welcome fixture uses v1.
   const protocolVersion = (Contracts as { F5_PROTOCOL_VERSION?: number }).F5_PROTOCOL_VERSION ?? 1;
@@ -455,7 +472,7 @@ it("measures the production renderer, real WS backpressure and native terminal s
       await writerExited;
     }
     for (const input of inputs) await terminals.close(input);
-    terminals.dispose();
+    await terminals.dispose();
     await native.dispose();
     for (const socket of allSockets) socket.terminate();
     await new Promise<void>((resolve) => wss.close(() => resolve()));
