@@ -28,7 +28,9 @@ export const inspectAttachableWorkspace = (
           "Only the project checkout and this profile's managed worktrees can be attached.",
         ),
       );
-    yield* Effect.tryPromise(() => assertNotOtherProfileManagedCheckout(config, target));
+    yield* Effect.tryPromise(() => assertNotOtherProfileManagedCheckout(config, target)).pipe(
+      Effect.mapError((error) => (error.cause instanceof Error ? error.cause : error)),
+    );
     const inspected = yield* git.inspectCheckout(path);
     if (
       inspected.canonicalRoot !== target ||
