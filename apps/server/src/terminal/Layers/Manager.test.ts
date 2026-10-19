@@ -737,6 +737,27 @@ describe("TerminalManager", () => {
     }
   });
 
+  it("does not rewrite unchanged histories on repeated close, reopen and shutdown", async () => {
+    const write = vi.fn(async (filePath: string, history: string) => {
+      await fs.promises.writeFile(filePath, history, "utf8");
+    });
+    const { manager, ptyAdapter } = makeManager(5000, { writeHistory: write });
+    try {
+      await manager.open(openInput());
+      ptyAdapter.processes[0]!.emitData("persist once\n");
+      await manager.close({ threadId: "thread-1" });
+      expect(write).toHaveBeenCalledTimes(1);
+      await manager.open(openInput());
+      await manager.close({ threadId: "thread-1" });
+      expect(write).toHaveBeenCalledTimes(1);
+      await manager.open(openInput());
+      await manager.dispose();
+      expect(write).toHaveBeenCalledTimes(1);
+    } finally {
+      await manager.dispose();
+    }
+  });
+
   it("retains a dirty snapshot after a failed write and repairs it during final flush", async () => {
     const write = vi.fn(async (filePath: string, history: string) => {
       if (write.mock.calls.length === 1) throw new Error("disk temporarily unavailable");

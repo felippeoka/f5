@@ -109,6 +109,10 @@ also passed fifty iterations with all eighteen assertions per iteration. Imports
 now happen during file setup, outside the first rendering assertion's deadline;
 no global retry or timeout increase was added. Git/workspace tests synchronize
 with explicit completion barriers, and Bots tests subscribe to startup recovery.
+A subsequent full run exposed `ENOTEMPTY` while removing a Git fixture whose
+service-scoped upstream refresh was still writing. Fixture finalization now awaits
+refreshes admitted for that checkout. The behind-count checkout case passed another
+50/50 iterations without retries on 2026-10-19.
 These local results do not establish hosted Windows behavior.
 
 Workflow lint uses the pinned actionlint Docker image with shellcheck enabled.

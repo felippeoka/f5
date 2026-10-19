@@ -184,45 +184,61 @@ const make = Effect.gen(function* () {
                       ),
                     ),
                   prepared: (snapshot) =>
-                    Effect.suspend(() =>
-                      engine.isTurnStartSuperseded?.(claimed.event)
-                        ? Effect.fail(
-                            new ProviderTurnDeliveryError({
-                              certainty: "not_sent",
-                              retryable: false,
-                              detail: "The session stopped before this turn was sent.",
-                            }),
-                          )
-                        : repository
-                            .recordDispatchIntent({
-                              deliveryId,
-                              attemptId: claimed.attemptId!,
-                              preSendTurnIds:
-                                snapshot?.turns.map((turn) => turn.id) ?? claimed.preSendTurnIds,
-                              historyEvidence: snapshot?.history ?? claimed.historyEvidence ?? null,
-                            })
-                            .pipe(
-                              Effect.mapError(
-                                (cause) =>
-                                  new ProviderTurnDeliveryError({
-                                    certainty: "not_sent",
-                                    retryable: true,
-                                    detail: "Could not persist provider dispatch intent.",
-                                    cause,
-                                  }),
-                              ),
-                              Effect.flatMap((recorded) =>
-                                recorded
-                                  ? handoff
-                                  : Effect.fail(
+                    (engine.waitForControlProgress?.(claimed.threadId) ?? Effect.void).pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new ProviderTurnDeliveryError({
+                            certainty: "not_sent",
+                            retryable: true,
+                            detail: "Control processing stopped before dispatch.",
+                            cause,
+                          }),
+                      ),
+                      Effect.andThen(
+                        Effect.suspend(() =>
+                          engine.isTurnStartSuperseded?.(claimed.event)
+                            ? Effect.fail(
+                                new ProviderTurnDeliveryError({
+                                  certainty: "not_sent",
+                                  retryable: false,
+                                  detail: "The session stopped before this turn was sent.",
+                                }),
+                              )
+                            : repository
+                                .recordDispatchIntent({
+                                  deliveryId,
+                                  attemptId: claimed.attemptId!,
+                                  preSendTurnIds:
+                                    snapshot?.turns.map((turn) => turn.id) ??
+                                    claimed.preSendTurnIds,
+                                  historyEvidence:
+                                    snapshot?.history ?? claimed.historyEvidence ?? null,
+                                })
+                                .pipe(
+                                  Effect.mapError(
+                                    (cause) =>
                                       new ProviderTurnDeliveryError({
                                         certainty: "not_sent",
-                                        retryable: false,
-                                        detail: "This delivery attempt no longer owns dispatch.",
+                                        retryable: true,
+                                        detail: "Could not persist provider dispatch intent.",
+                                        cause,
                                       }),
-                                    ),
-                              ),
-                            ),
+                                  ),
+                                  Effect.flatMap((recorded) =>
+                                    recorded
+                                      ? handoff
+                                      : Effect.fail(
+                                          new ProviderTurnDeliveryError({
+                                            certainty: "not_sent",
+                                            retryable: false,
+                                            detail:
+                                              "This delivery attempt no longer owns dispatch.",
+                                          }),
+                                        ),
+                                  ),
+                                ),
+                        ),
+                      ),
                     ),
                 }
               : null,
@@ -374,6 +390,9 @@ const make = Effect.gen(function* () {
         Metric.withAttributes(deliveryOutboxRowsDecoded, metricAttributes({ source: "claim" })),
         1,
       );
+      // A later turn must not create/reuse a session while an earlier stop is
+      // still in the reactor. Stops also reject pending rows before claim.
+      yield* engine.waitForControlProgress?.(candidate.threadId) ?? Effect.void;
       const baseline = yield* provider
         .readThread(candidate.threadId)
         .pipe(Effect.catchCause(() => Effect.succeed(null)));

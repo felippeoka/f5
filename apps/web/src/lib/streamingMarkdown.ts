@@ -1,3 +1,4 @@
+import { suffixSince, type TextRevision } from "./streamingTextRevision";
 export type StreamingMarkdownBlockKind =
   | "paragraph"
   | "heading"
@@ -9,6 +10,9 @@ export type StreamingMarkdownBlockKind =
 
 export interface StreamingMarkdownState {
   readonly text: string;
+  readonly textRevision?: TextRevision | undefined;
+  readonly parsedCharacters?: number;
+  readonly validatedCharacters?: number;
   readonly sealedBlocks: readonly string[];
   readonly activeBlock: string;
   readonly activeBlockKind: StreamingMarkdownBlockKind | null;
@@ -460,12 +464,86 @@ function parseStreamingMarkdown(text: string): ParsedFragment {
   };
 }
 
+interface FenceProgress {
+  readonly marker: "`" | "~";
+  readonly length: number;
+  leading: number;
+  markers: number;
+  trailing: boolean;
+  invalid: boolean;
+}
+const stableParagraphs = new WeakSet<StreamingMarkdownState>();
+const fenceProgress = new WeakMap<StreamingMarkdownState, FenceProgress>();
+function scanFence(progress: FenceProgress, suffix: string): boolean {
+  for (const character of suffix) {
+    if (character === "\n") {
+      if (!progress.invalid && progress.markers >= progress.length) return false;
+      progress.leading = 0;
+      progress.markers = 0;
+      progress.trailing = false;
+      progress.invalid = false;
+    } else if (!progress.invalid) {
+      if (!progress.markers && character === " " && progress.leading < 3) progress.leading++;
+      else if (!progress.trailing && character === progress.marker) progress.markers++;
+      else if (progress.markers >= progress.length && /\s/u.test(character))
+        progress.trailing = true;
+      else progress.invalid = true;
+    }
+  }
+  return true;
+}
+/** Revisit the full active block only when its grammar can actually change. */
+function appendStableActive(
+  previous: StreamingMarkdownState,
+  suffix: string,
+): { parsed: ParsedFragment; fence?: FenceProgress; paragraph?: true } | null {
+  if (previous.activeBlockKind === "paragraph" && !suffix.includes("\n")) {
+    const tailStart = stableParagraphs.has(previous)
+      ? 0
+      : previous.activeBlock.lastIndexOf("\n") + 1;
+    if (
+      stableParagraphs.has(previous) ||
+      /^ {0,3}[A-Za-z]/u.test(previous.activeBlock.slice(tailStart, tailStart + 4))
+    )
+      return {
+        paragraph: true,
+        parsed: {
+          sealedBlocks: EMPTY_BLOCKS,
+          activeBlock: previous.activeBlock + suffix,
+          activeBlockKind: "paragraph",
+        },
+      };
+  }
+  if (previous.activeBlockKind !== "fenced-code") return null;
+  let before = fenceProgress.get(previous);
+  if (!before) {
+    const openingEnd = previous.activeBlock.indexOf("\n");
+    if (openingEnd < 0) return null; // The opening fence can still grow/change.
+    const opening = matchFence(previous.activeBlock.slice(0, openingEnd));
+    if (!opening) return null;
+    before = { ...opening, leading: 0, markers: 0, trailing: false, invalid: false };
+    const lastLine = previous.activeBlock.slice(previous.activeBlock.lastIndexOf("\n") + 1);
+    if (!scanFence(before, lastLine)) return null;
+  }
+  const next = { ...before };
+  if (!scanFence(next, suffix)) return null;
+  return {
+    parsed: {
+      sealedBlocks: EMPTY_BLOCKS,
+      activeBlock: previous.activeBlock + suffix,
+      activeBlockKind: "fenced-code",
+    },
+    fence: next,
+  };
+}
+
 export function advanceStreamingMarkdown(
   previous: StreamingMarkdownState | null,
   nextText: string,
+  textRevision?: TextRevision,
 ): StreamingMarkdownState {
   if (previous && previous.text === nextText) {
-    return previous;
+    return previous.textRevision === textRevision ? previous : { ...previous, textRevision };
   }
 
   if (!previous) {
@@ -476,6 +554,9 @@ export function advanceStreamingMarkdown(
     const parsed = parseStreamingMarkdown(nextText);
     return {
       text: nextText,
+      textRevision,
+      parsedCharacters: nextText.length,
+      validatedCharacters: 0,
       sealedBlocks: parsed.sealedBlocks,
       activeBlock: parsed.activeBlock,
       activeBlockKind: parsed.activeBlockKind,
@@ -483,10 +564,21 @@ export function advanceStreamingMarkdown(
     };
   }
 
-  if (!nextText.startsWith(previous.text)) {
+  const knownSuffix = suffixSince(previous.textRevision, textRevision);
+  // Revisions come only from reducer appends. Missing/expired provenance keeps
+  // the validated full-text path used for snapshots, replacements and rewinds.
+  if (
+    knownSuffix === null &&
+    (previous.textRevision !== undefined ||
+      textRevision !== undefined ||
+      !nextText.startsWith(previous.text))
+  ) {
     const parsed = parseStreamingMarkdown(nextText);
     return {
       text: nextText,
+      textRevision,
+      parsedCharacters: nextText.length + (previous?.parsedCharacters ?? 0),
+      validatedCharacters: previous?.validatedCharacters ?? 0,
       sealedBlocks: parsed.sealedBlocks,
       activeBlock: parsed.activeBlock,
       activeBlockKind: parsed.activeBlockKind,
@@ -494,22 +586,32 @@ export function advanceStreamingMarkdown(
     };
   }
 
-  const suffix = nextText.slice(previous.text.length);
+  const suffix = knownSuffix ?? nextText.slice(previous.text.length);
   if (suffix.length === 0) {
     return previous;
   }
 
-  const parsed = parseStreamingMarkdown(`${previous.activeBlock}${suffix}`);
+  const incremental = appendStableActive(previous, suffix);
+  const parsed = incremental?.parsed ?? parseStreamingMarkdown(`${previous.activeBlock}${suffix}`);
   const sealedBlocks =
     parsed.sealedBlocks.length === 0
       ? previous.sealedBlocks
       : [...previous.sealedBlocks, ...parsed.sealedBlocks];
 
-  return {
+  const result: StreamingMarkdownState = {
     text: nextText,
+    textRevision,
+    parsedCharacters:
+      (previous.parsedCharacters ?? 0) +
+      (incremental ? suffix.length : previous.activeBlock.length + suffix.length),
+    validatedCharacters:
+      (previous.validatedCharacters ?? 0) + (knownSuffix === null ? previous.text.length : 0),
     sealedBlocks,
     activeBlock: parsed.activeBlock,
     activeBlockKind: parsed.activeBlockKind,
     needsFullRebuild: false,
   };
+  if (incremental?.fence) fenceProgress.set(result, incremental.fence);
+  if (incremental?.paragraph) stableParagraphs.add(result);
+  return result;
 }

@@ -285,3 +285,16 @@ reason in the step summary. Compatible reports run `bun run perf:compare`;
 regressions fail that workflow and appear in its summary. Feature-branch dispatches
 can compare reports but cannot replace main's baseline. This report covers server
 components; interactive qualification still requires the production-browser report.
+
+The deleted-thread memory fixture can be run independently with
+`F5_PERF_READ_MODEL=1 F5_PERF_DELETED_MEMORY_REPORT=/absolute/new-report.json bun run --cwd apps/server test:file --config vitest.performance.config.ts`.
+It seeds 500 threads with 300 messages each, marks exactly 5% deleted, and takes
+the median of three fresh-process hydrations. Use the same fixture on both pinned
+source trees for a comparison; the ordinary all-live foundation fixture is unchanged.
+
+Streaming reducer tests count structural timeline and row derivations independently
+of content updates, verify one private thread-array copy per batch, and preserve
+unchanged-row identity. Markdown state exposes parsed/validated character counts;
+revision-based plain-paragraph and fenced-code tests verify linear growth without
+a whole-prefix validation. These deterministic invariants do not establish the
+production browser composer-latency gate.

@@ -26,6 +26,7 @@ import {
 import { makeChildStdio, makeTerminationError } from "./_internal/stdio";
 
 export interface AcpClientOptions {
+  readonly onTermination?: (error: AcpError.AcpError) => Effect.Effect<void, never>;
   readonly transformStdoutLine?: (line: string) => string;
   readonly onStderr?: (chunk: string) => void;
   readonly sanitizeStderr?: (text: string) => string;
@@ -410,6 +411,7 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     ...(options.logIncoming !== undefined ? { logIncoming: options.logIncoming } : {}),
     ...(options.logOutgoing !== undefined ? { logOutgoing: options.logOutgoing } : {}),
     ...(options.logger ? { logger: options.logger } : {}),
+    ...(options.onTermination ? { onTermination: options.onTermination } : {}),
     onNotification: dispatchNotification,
     onExtRequest: dispatchExtRequest,
   });

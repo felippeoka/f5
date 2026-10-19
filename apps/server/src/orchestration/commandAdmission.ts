@@ -22,7 +22,7 @@ export const makeCommandAdmission = <A>(
   } = {},
 ) =>
   Effect.gen(function* () {
-    type Entry = { item: A; bytes: number; control: boolean; admittedAt: number };
+    type Entry = { item: A; bytes: number; control: boolean; admittedAt: number; owner?: A };
     const ordinary: Entry[] = [],
       controls: Entry[] = [];
     const accepted = new Map<A, Entry>();
@@ -41,7 +41,9 @@ export const makeCommandAdmission = <A>(
         const entry = accepted.get(item);
         if (!entry) return;
         accepted.delete(item);
-        if (entry.control) controlEntries--;
+        if (entry.owner !== undefined) {
+          /* Shares its parent's reservation. */
+        } else if (entry.control) controlEntries--;
         else {
           ordinaryEntries--;
           ordinaryBytes -= entry.bytes;
@@ -78,6 +80,38 @@ export const makeCommandAdmission = <A>(
             yield* notify;
           }),
         ),
+      // A control's own projection/failure bookkeeping uses its existing lease.
+      // Only one continuation per owner can be admitted; it cannot be hidden
+      // behind a saturated ordinary queue or consume another control's capacity.
+      offerContinuation: (item: A, size: number, owner: A) =>
+        Effect.uninterruptible(
+          Effect.gen(function* () {
+            const parent = accepted.get(owner);
+            if (
+              closed ||
+              !parent?.control ||
+              parent.owner !== undefined ||
+              !Number.isFinite(size) ||
+              size < 0 ||
+              size > (options.ordinaryBytes ?? 32 * 1024 * 1024) ||
+              [...accepted.values()].some((entry) => entry.owner === owner)
+            )
+              return yield* new OrchestrationOverloadError({
+                lane: "control",
+                reason: closed ? "closed" : "full",
+              });
+            const entry: Entry = {
+              item,
+              bytes: size,
+              control: true,
+              admittedAt: Date.now(),
+              owner,
+            };
+            accepted.set(item, entry);
+            controls.push(entry);
+            yield* notify;
+          }),
+        ),
       take: Effect.suspend(function take(): Effect.Effect<A | undefined> {
         const entry = controls.shift() ?? ordinary.shift();
         if (entry) return Effect.succeed(entry.item);
@@ -102,7 +136,7 @@ export const makeCommandAdmission = <A>(
         yield* notify;
       }),
       snapshot: () => ({
-        entries: accepted.size,
+        entries: ordinaryEntries + controlEntries,
         bytes: [...accepted.values()].reduce((sum, entry) => sum + entry.bytes, 0),
         oldestAgeMs: Math.max(
           0,

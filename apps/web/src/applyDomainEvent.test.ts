@@ -1,3 +1,5 @@
+import { createTimelineEntryCache, deriveTimelineEntries } from "./session-logic";
+import { createTimelineRowCache, buildTimelineRows } from "./components/chat/MessagesTimeline";
 import { summarizeInvestigationWorkflow } from "@t3tools/shared/workflowSummary";
 import {
   ApprovalRequestId,
@@ -14,7 +16,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { roughTokenEstimateFromCharacters } from "@t3tools/shared/model";
 
-import { applyDomainEvent } from "./applyDomainEvent";
+import { applyDomainEvent, createDomainEventBatch } from "./applyDomainEvent";
 import type { AppState } from "./store";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Project, type Thread } from "./types";
 
@@ -1494,3 +1496,76 @@ it.each(["running", "interrupted"] as const)(
     expect(next.threads[0]?.latestTurn?.completedAt).toBe(thread.latestTurn?.completedAt);
   },
 );
+
+describe("streaming batch and timeline work", () => {
+  it("copies the thread collection once and reuses timeline structure for text-only updates", () => {
+    const original = makeState();
+    const id = MessageId.makeUnsafe("streaming");
+    const event = (text: string, sequence: number) =>
+      makeEvent(
+        "thread.message-sent",
+        {
+          threadId: original.threads[0]!.id,
+          messageId: id,
+          role: "assistant",
+          text,
+          turnId: null,
+          streaming: true,
+          createdAt: "2026-04-01T09:04:00.000Z",
+          updatedAt: "2026-04-01T09:04:00.000Z",
+        },
+        { sequence },
+      );
+    const batch = createDomainEventBatch();
+    let state = applyDomainEvent(original, event("A", 1), batch);
+    const owned = state.threads;
+    expect(owned).not.toBe(original.threads);
+    const plans: [] = [],
+      work: [] = [],
+      commands: [] = [];
+    const entries = createTimelineEntryCache();
+    const rows = createTimelineRowCache();
+    const derive = () =>
+      deriveTimelineEntries(state.threads[0]!.messages, plans, work, commands, entries);
+    const build = () =>
+      buildTimelineRows({
+        timelineEntries: derive(),
+        completionDividerBeforeEntryId: null,
+        completionSummary: null,
+        isWorking: false,
+        activeTurnStartedAt: null,
+        liveActivity: null,
+        expandMcpToolCalls: false,
+        cache: rows,
+      });
+    build();
+    for (let index = 2; index < 20; index++) {
+      state = applyDomainEvent(state, event("a", index), batch);
+      expect(state.threads).toBe(owned);
+      const rendered = build();
+      expect(rendered[0]?.kind === "message" && rendered[0].message.text.length).toBe(index);
+    }
+    expect(original.threads[0]?.messages).toEqual([]);
+    expect(entries.structuralDerivations).toBe(1);
+    expect(rows.structuralDerivations).toBe(1);
+    expect(entries.contentUpdates).toBe(18);
+    expect(rows.contentUpdates).toBe(18);
+    expect(state.detailCoverageByThreadId?.get(original.threads[0]!.id)?.latestMutation).toBe(19);
+    // History replacement gets a fresh structural identity and invalidates caches.
+    state = {
+      ...state,
+      threads: [
+        {
+          ...state.threads[0]!,
+          messages: state.threads[0]!.messages.map((message) => ({
+            ...message,
+            text: "replacement",
+          })),
+        },
+      ],
+    };
+    build();
+    expect(entries.structuralDerivations).toBe(2);
+    expect(rows.structuralDerivations).toBe(2);
+  });
+});

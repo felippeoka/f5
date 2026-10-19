@@ -1,3 +1,4 @@
+import { recordMessageAppend, recordMessageListChange } from "./lib/streamingTextRevision";
 import { detailEntityKey, detailEventIsCovered } from "./orchestration/detailCoverage";
 import {
   summarizePlanningWorkflow,
@@ -48,11 +49,24 @@ import type {
   TurnDiffSummary,
 } from "./types";
 
-function updateThread(
+function updateThreadCollection(
   threads: Thread[],
   threadId: Thread["id"],
   updater: (thread: Thread) => Thread,
+  batch?: DomainEventBatch,
 ): Thread[] {
+  if (batch) {
+    const index = threads.findIndex((thread) => thread.id === threadId);
+    if (index < 0) return threads;
+    const previous = threads[index]!;
+    const next = updater(previous);
+    if (previous === next) return threads;
+    const result = batch.owned.has(threads) ? threads : threads.slice();
+    batch.owned.add(result);
+    batch.changed = true;
+    result[index] = next;
+    return result;
+  }
   let changed = false;
   const nextThreads = threads.map((thread) => {
     if (thread.id !== threadId) {
@@ -260,12 +274,18 @@ function upsertMessage(
     ...(attachments && attachments.length > 0 ? { attachments } : {}),
   };
 
+  if (existing && payload.streaming) {
+    recordMessageAppend(existing, nextMessage, payload.text, payload.reasoningText ?? "");
+  }
   if (existingIndex < 0) {
-    return [...messages, nextMessage].slice(-MAX_THREAD_MESSAGES);
+    const next = [...messages, nextMessage].slice(-MAX_THREAD_MESSAGES);
+    recordMessageListChange(messages, next, existing, nextMessage);
+    return next;
   }
 
   const nextMessages = [...messages];
   nextMessages[existingIndex] = nextMessage;
+  recordMessageListChange(messages, nextMessages, existing, nextMessage);
   return arraysShallowEqual(nextMessages, messages) ? messages : nextMessages;
 }
 
@@ -641,8 +661,23 @@ function gateThreadDetailMutations(
   };
 }
 
-export function applyDomainEvent(state: AppState, event: OrchestrationEvent): AppState {
-  let next = reduceDomainEvent(state, event);
+/** An owned array is private to one synchronous Zustand update, never the input state. */
+interface DomainEventBatch {
+  readonly owned: WeakSet<Thread[]>;
+  changed: boolean;
+}
+export function createDomainEventBatch(): DomainEventBatch {
+  return { owned: new WeakSet(), changed: false };
+}
+
+export function applyDomainEvent(
+  state: AppState,
+  event: OrchestrationEvent,
+  batch?: DomainEventBatch,
+): AppState {
+  if (batch) batch.changed = false;
+  let next = reduceDomainEvent(state, event, batch);
+  if (next === state && batch?.changed) next = { ...state };
   if (event.aggregateKind !== "thread") return next;
   const threadId = event.aggregateId as Thread["id"];
   const key = detailEntityKey(event);
@@ -665,7 +700,13 @@ export function applyDomainEvent(state: AppState, event: OrchestrationEvent): Ap
   return next;
 }
 
-function reduceDomainEvent(state: AppState, event: OrchestrationEvent): AppState {
+function reduceDomainEvent(
+  state: AppState,
+  event: OrchestrationEvent,
+  batch?: DomainEventBatch,
+): AppState {
+  const updateThread = (threads: Thread[], id: Thread["id"], update: (thread: Thread) => Thread) =>
+    updateThreadCollection(threads, id, update, batch);
   switch (event.type) {
     case "project.created": {
       const existingIndex = state.projects.findIndex(

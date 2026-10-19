@@ -43,3 +43,32 @@ it.effect("cancels only queued starts and closes an idle consumer without leakin
     assert.isTrue(Exit.isFailure(yield* Effect.exit(queue.offer("late", 1, true))));
   }),
 );
+
+it.effect("control bookkeeping shares its reserved slot while bulk admission is full", () =>
+  Effect.gen(function* () {
+    const queue = yield* makeCommandAdmission<string>({
+      ordinaryEntries: 1,
+      ordinaryBytes: 10,
+      controlEntries: 1,
+    });
+    yield* queue.offer("bulk", 10, false);
+    yield* queue.offer("stop", 1, true);
+    assert.equal(yield* queue.take, "stop");
+    yield* queue.offerContinuation("session-set", 1, "stop");
+    assert.isTrue(
+      Exit.isFailure(yield* Effect.exit(queue.offerContinuation("another", 1, "stop"))),
+    );
+    assert.isTrue(Exit.isFailure(yield* Effect.exit(queue.offer("other-control", 1, true))));
+    assert.equal(queue.snapshot().entries, 2);
+    assert.equal(yield* queue.take, "session-set");
+    yield* queue.release("session-set");
+    assert.equal(queue.snapshot().entries, 2);
+    yield* queue.release("stop");
+    yield* queue.offer("other-control", 1, true);
+    assert.equal(yield* queue.take, "other-control");
+    yield* queue.release("other-control");
+    assert.equal(yield* queue.take, "bulk");
+    yield* queue.release("bulk");
+    assert.equal(queue.snapshot().entries, 0);
+  }),
+);

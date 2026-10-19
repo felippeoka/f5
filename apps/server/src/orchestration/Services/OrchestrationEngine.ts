@@ -18,7 +18,7 @@ import type {
 import { ServiceMap } from "effect";
 import type { Effect, Scope, Stream } from "effect";
 
-import type { OrchestrationDispatchError } from "../Errors.ts";
+import type { OrchestrationDispatchError, OrchestrationOverloadError } from "../Errors.ts";
 import type { OrchestrationEventStoreError } from "../../persistence/Errors.ts";
 
 /**
@@ -32,6 +32,10 @@ export interface OrchestrationEngineShape {
   readonly completeControl?: (commandId: string) => Effect.Effect<void>;
   readonly controlOrigin?: (commandId: string) => ControlOrigin | undefined;
   readonly isTurnStartSuperseded?: (event: OrchestrationEvent) => boolean;
+  /** Wait for controls already admitted for this thread before preparing a new send. */
+  readonly waitForControlProgress?: (
+    threadId: string,
+  ) => Effect.Effect<void, OrchestrationOverloadError>;
 
   /** Process-local admission inventory; never includes command contents. */
   readonly inspectQueue?: () => { entries: number; bytes: number; oldestAgeMs: number };

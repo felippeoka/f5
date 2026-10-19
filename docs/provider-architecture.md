@@ -99,8 +99,15 @@ executable identity/environment, and cancel the child when their last waiter exi
 MSP child exit closes its incoming channel immediately, settling in-flight SDK
 requests. Close waits for child exit with bounded escalation, removes its timeout
 waiters, and observes the application deadline when shutting down. The spawned-host
-fixture verifies request failure after exit and forced termination. ACP adapter-level
-failure cases and the owned OpenCode HTTP/SSE/process-group audit remain required
+fixture verifies request failure after exit and forced termination.
+
+ACP malformed input is fatal to the transport: pending requests reject, and a
+FIFO termination notification reaches the adapter after prior notifications.
+Cursor, Grok and Antigravity publish one runtime error and one session exit,
+retire the matching context and close its scope from a sibling fiber. A stale
+context cannot close its replacement. Their spawned-agent tests cover both malformed
+JSON and child exit, request settlement within one second, repeated disposal and
+confirmed child termination. The owned OpenCode process-group audit remains required
 before claiming the complete per-transport guarantees.
 
 Claude completion records carry exact emitted block text in `payload.data.text`,

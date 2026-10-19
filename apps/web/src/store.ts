@@ -30,7 +30,7 @@ import {
   type TurnDiffSummary,
 } from "./types";
 import { Debouncer } from "@tanstack/react-pacer";
-import { applyDomainEvent, taskItemsEqual } from "./applyDomainEvent";
+import { applyDomainEvent, createDomainEventBatch, taskItemsEqual } from "./applyDomainEvent";
 import {
   areUnknownEqual,
   arraysShallowEqual,
@@ -2275,6 +2275,7 @@ export const useStore = create<AppStore>((set) => ({
       }
       // Hydration never moves this cursor. Only committed stream batches and
       // global snapshots can deduplicate an entire event across all entities.
+      const batch = createDomainEventBatch();
       const committedBefore = state.lastAppliedSequence;
       let nextState: AppState = state;
       let maxSequence = committedBefore;
@@ -2282,7 +2283,7 @@ export const useStore = create<AppStore>((set) => ({
         if (event.sequence <= committedBefore) {
           continue;
         }
-        nextState = applyDomainEvent(nextState, event);
+        nextState = applyDomainEvent(nextState, event, batch);
         if (event.sequence > maxSequence) {
           maxSequence = event.sequence;
         }

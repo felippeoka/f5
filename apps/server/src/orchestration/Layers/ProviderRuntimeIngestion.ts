@@ -1,5 +1,5 @@
 import { PerformanceStageProbe } from "../../observability/Metrics.ts";
-import { registerShutdown } from "../../shutdown.ts";
+import { registerShutdown, AcceptedShutdownWork } from "../../shutdown.ts";
 import { withProviderThreadAccess } from "../../provider/providerThreadAccess.ts";
 import { readPersistedSessionGeneration } from "../../provider/sessionCapabilities.ts";
 import { CodexMcpEventBus } from "../../codex/CodexMcpEventBus.ts";
@@ -58,6 +58,7 @@ import {
   Effect,
   Exit,
   FileSystem,
+  Fiber,
   Layer,
   Option,
   Path,
@@ -5819,6 +5820,7 @@ const make = Effect.gen(function* () {
         ? withProviderThreadAccess(input.event.threadId, processInputSafely(input))
         : processInputSafely(input)
       ).pipe(
+        Effect.provideService(AcceptedShutdownWork, true),
         Effect.ensuring(
           Effect.sync(() => {
             if (input.source === "runtime" && isProviderTerminalRuntimeEvent(input.event))
@@ -6035,10 +6037,13 @@ const make = Effect.gen(function* () {
       ),
     );
     yield* replayDueReceipts;
-    yield* replayDueReceipts.pipe(
+    const receiptRetries = yield* replayDueReceipts.pipe(
       Effect.andThen(Effect.sleep("1 second")),
       Effect.forever,
       Effect.forkScoped,
+    );
+    yield* registerShutdown("terminal-receipt-retries", "admission", () =>
+      Fiber.interrupt(receiptRetries),
     );
     yield* reconcileOrphanedProviderTurnsOnStartup().pipe(
       Effect.catchCause((cause) =>
@@ -6079,17 +6084,17 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const drain = worker
+    .enqueue({ source: "command-output-flush-all" })
+    .pipe(
+      Effect.andThen(worker.enqueue({ source: "assistant-delta-flush-all" })),
+      Effect.andThen(worker.drain),
+    );
   yield* registerShutdown("provider-ingestion", "drain", () =>
-    worker.enqueue({ source: "command-output-flush-all" }).pipe(Effect.andThen(worker.drain)),
+    Effect.sync(() => streamingDeltas.cancelTimers()).pipe(Effect.andThen(drain)),
   );
 
-  return {
-    start,
-    drain: worker.enqueue({ source: "command-output-flush-all" }).pipe(
-      Effect.flatMap(() => worker.enqueue({ source: "assistant-delta-flush-all" })),
-      Effect.flatMap(() => worker.drain),
-    ),
-  } satisfies ProviderRuntimeIngestionShape;
+  return { start, drain } satisfies ProviderRuntimeIngestionShape;
 });
 
 export const ProviderRuntimeIngestionLive = Layer.effect(

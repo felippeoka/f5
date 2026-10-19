@@ -9,7 +9,7 @@ import {
   type OrchestrationUsageLimit,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Metric, Option, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Metric, Option, Stream } from "effect";
 
 import {
   deliveryAmbiguousTotal,
@@ -49,6 +49,7 @@ let reconciliationCount = 0;
 let acceptSend = false;
 let unavailableDispatchSnapshot = false;
 let supersededByStop = false;
+let pendingControl: Effect.Effect<void> | undefined;
 let methodNotFound = false;
 let reconciliationFails = false;
 let extraReplayDelivery: ProviderTurnDelivery | null = null;
@@ -93,6 +94,7 @@ function resetDelivery() {
   acceptSend = false;
   unavailableDispatchSnapshot = false;
   supersededByStop = false;
+  pendingControl = undefined;
   methodNotFound = false;
   reconciliationFails = false;
   extraReplayDelivery = null;
@@ -291,6 +293,7 @@ const testLayer = ProviderTurnDeliveryWorkerLive.pipe(
     Layer.succeed(OrchestrationEngineService, {
       streamDomainEvents: Stream.empty,
       isTurnStartSuperseded: () => supersededByStop,
+      waitForControlProgress: () => pendingControl ?? Effect.void,
       getReadModel: () =>
         Effect.succeed({
           threads: [
@@ -707,4 +710,29 @@ it.effect("a stop fences a claimed start before dispatch intent and never retrie
     assert.equal(requeueCount, 0);
     assert.include(state.errorDetail!, "stopped before");
   }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect.each(["finish", "stop"] as const)(
+  "waits for admitted controls before claiming a new turn (%s)",
+  (outcome) =>
+    Effect.gen(function* () {
+      resetDelivery();
+      const entered = yield* Deferred.make<void>(),
+        release = yield* Deferred.make<void>();
+      pendingControl = Deferred.succeed(entered, undefined).pipe(
+        Effect.andThen(Deferred.await(release)),
+      );
+      acceptSend = true;
+      const worker = yield* ProviderTurnDeliveryWorker;
+      yield* worker.start;
+      yield* Deferred.await(entered);
+      assert.equal(state.state, "pending");
+      assert.equal(state.attempt, 0);
+      assert.equal(activeAttemptsDuringDelivery, null);
+      if (outcome === "stop") state = { ...state, state: "rejected", certainty: "not_sent" };
+      yield* Deferred.succeed(release, undefined);
+      yield* worker.drain;
+      assert.equal(state.state, outcome === "stop" ? "rejected" : "accepted");
+      assert.equal(state.attempt, outcome === "stop" ? 0 : 1);
+    }).pipe(Effect.provide(testLayer)),
 );

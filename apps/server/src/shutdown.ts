@@ -94,6 +94,11 @@ export class ShutdownRegistry {
     return results;
   }
 }
+/** Only work already owned by critical source/drain workers may persist after admission stops. */
+export const AcceptedShutdownWork = ServiceMap.Reference<boolean>("f5/shutdown/AcceptedWork", {
+  defaultValue: () => false,
+});
+
 export class ServerShutdown extends ServiceMap.Service<ServerShutdown, ShutdownRegistry>()(
   "t3/shutdown/ServerShutdown",
 ) {}

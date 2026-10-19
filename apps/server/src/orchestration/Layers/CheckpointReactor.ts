@@ -1,3 +1,4 @@
+import { AcceptedShutdownWork, registerShutdown } from "../../shutdown.ts";
 import { pruneCheckpointRefs } from "../../checkpointing/pruneCheckpointRefs.ts";
 import { dispatchVerifiedWorkspace } from "../../project/workspaceTransitionContext.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
@@ -951,7 +952,12 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const worker = yield* makeBackgroundWorker(processInputSafely, { name: "CheckpointReactor" });
+  const worker = yield* makeBackgroundWorker(
+    (input: Parameters<typeof processInputSafely>[0]) =>
+      processInputSafely(input).pipe(Effect.provideService(AcceptedShutdownWork, true)),
+    { name: "CheckpointReactor" },
+  );
+  yield* registerShutdown("checkpoints", "drain", () => worker.drain);
 
   const reconcileStartupQuiescence = Effect.gen(function* () {
     const unquiesced = yield* turns.listTerminalUnquiesced.pipe(

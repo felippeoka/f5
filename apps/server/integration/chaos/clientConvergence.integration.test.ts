@@ -8,7 +8,7 @@ import {
   ORCHESTRATION_WS_CHANNELS,
   ThreadId,
 } from "@t3tools/contracts";
-import { Effect, Ref, Scope, Stream } from "effect";
+import { Effect, Ref, Stream } from "effect";
 import { it, assert } from "@effect/vitest";
 import {
   makeOrchestrationIntegrationHarness,

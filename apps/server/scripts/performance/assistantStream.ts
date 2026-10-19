@@ -679,6 +679,7 @@ const readModelThreadId = (index: number) => ThreadId.makeUnsafe(`perf-read-mode
 const readModelDatabase = (directory: string) => path.join(directory, "read-model.sqlite");
 
 export interface EngineHydrationMemory {
+  readonly deletedMessages: number;
   readonly heapBytes: number;
   readonly rssBytes: number;
 }
@@ -703,8 +704,18 @@ export async function measureEngineHydration(directory: string): Promise<EngineH
     const model = await runtime.runPromise(engine.getReadModel());
     const hydrated = model.threads.filter((thread) => thread.id.startsWith("perf-read-model-"));
     expect(hydrated).toHaveLength(workload.readModelThreads);
-    expect(hydrated.every((t) => t.messages.length === workload.readModelMessages)).toBe(true);
+    const deletedPercent = Number(process.env.F5_PERF_READ_MODEL_DELETED_PERCENT ?? "0");
+    const deletedCount = Math.floor((workload.readModelThreads * deletedPercent) / 100);
+    expect(hydrated.filter((t) => t.deletedAt !== null)).toHaveLength(deletedCount);
+    expect(
+      hydrated
+        .filter((t) => t.deletedAt === null)
+        .every((t) => t.messages.length === workload.readModelMessages),
+    ).toBe(true);
     return {
+      deletedMessages: hydrated
+        .filter((t) => t.deletedAt !== null)
+        .reduce((count, thread) => count + thread.messages.length, 0),
       heapBytes: Math.max(0, after.heapUsed - before.heapUsed),
       rssBytes: Math.max(0, after.rss - before.rss),
     };
@@ -714,13 +725,30 @@ export async function measureEngineHydration(directory: string): Promise<EngineH
 }
 
 /** Seeds once here, then takes the median of several fresh-process hydrations. */
-export async function measureReadModelMemory(): Promise<Observation[]> {
+export async function measureReadModelMemory(
+  options: { deletedPercent?: number } = {},
+): Promise<Observation[]> {
+  const deletedPercent = options.deletedPercent ?? 0;
+  if (!Number.isFinite(deletedPercent) || deletedPercent < 0 || deletedPercent > 100)
+    throw new Error("Invalid deleted thread percentage");
   const directory = mkdtempSync(path.join(tmpdir(), "f5-performance-read-model-"));
   try {
     const threadIds = Array.from({ length: workload.readModelThreads }, (_, i) =>
       readModelThreadId(i),
     );
     await seed(directory, readModelDatabase(directory), threadIds, workload.readModelMessages);
+    if (deletedPercent > 0) {
+      const db = new DatabaseSync(readModelDatabase(directory));
+      try {
+        const remove = db.prepare(
+          "UPDATE projection_threads SET deleted_at = ? WHERE thread_id = ?",
+        );
+        for (const id of threadIds.slice(0, Math.floor((threadIds.length * deletedPercent) / 100)))
+          remove.run(at(1), id);
+      } finally {
+        db.close();
+      }
+    }
     const serverRoot = fileURLToPath(new URL("../..", import.meta.url));
     // A nested vitest must not inherit this worker's pool identity.
     const env = Object.fromEntries(
@@ -728,6 +756,7 @@ export async function measureReadModelMemory(): Promise<Observation[]> {
     );
     const heap: number[] = [];
     const rss: number[] = [];
+    const deletedMessages: number[] = [];
     for (let run = 0; run < READ_MODEL_MEMORY_RUNS; run++) {
       const output = path.join(directory, `hydration-${run}.json`);
       const child = spawnSync(
@@ -745,6 +774,7 @@ export async function measureReadModelMemory(): Promise<Observation[]> {
             ...env,
             F5_PERF_READ_MODEL: "1",
             F5_PERF_READ_MODEL_DIR: directory,
+            F5_PERF_READ_MODEL_DELETED_PERCENT: String(deletedPercent),
             F5_PERF_READ_MODEL_OUTPUT: output,
           },
         },
@@ -754,10 +784,14 @@ export async function measureReadModelMemory(): Promise<Observation[]> {
           `Read-model hydration process failed (${child.status ?? child.signal}): ${child.stderr.slice(-4096) || child.stdout.slice(-4096)}`,
         );
       const result = JSON.parse(readFileSync(output, "utf8")) as EngineHydrationMemory;
+      deletedMessages.push(result.deletedMessages);
       heap.push(result.heapBytes);
       rss.push(result.rssBytes);
     }
     return [
+      ...(deletedPercent > 0
+        ? [maximumObservation("readModel.deletedMessages", percentile(deletedMessages, 0.5), 0)]
+        : []),
       maximumObservation(
         "readModel.heapBytes",
         percentile(heap, 0.5),

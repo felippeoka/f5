@@ -1,3 +1,4 @@
+import { messageAttachmentSources } from "../lib/streamingTextRevision";
 import { WorkspaceTransitionBanner } from "./chat/WorkspaceTransitionBanner";
 import { flushSync } from "react-dom";
 import { WorktreeMissingBanner } from "./chat/WorktreeMissingBanner";
@@ -2260,12 +2261,12 @@ export default function ChatView({
     }
     return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
+  const imageSources = messageAttachmentSources(timelineMessages);
   useEffect(() => {
-    const imageSources = timelineMessages.flatMap((message) => message.attachments ?? []);
     setExpandedImage((existing) =>
       existing ? refreshExpandedImageActionSources(existing, imageSources) : existing,
     );
-  }, [timelineMessages]);
+  }, [imageSources]);
   // Reuses unchanged entries (and the array itself) across streaming deltas so
   // memoized timeline rows only re-render when their own entry changed.
   const timelineEntryCacheRef = useRef<TimelineEntryCache | null>(null);

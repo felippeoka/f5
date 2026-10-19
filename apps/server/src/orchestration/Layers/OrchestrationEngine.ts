@@ -1,7 +1,9 @@
+import { hydrateDeciderReadModel, withoutDeletedThreadDetails } from "../deciderReadModel.ts";
+import { ProviderControlTarget } from "../../provider/controlTarget.ts";
 import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
 import { makeCommandAdmission, isControlCommand, isControlEvent } from "../commandAdmission.ts";
 import { readPersistedSessionGeneration } from "../../provider/sessionCapabilities.ts";
-import { registerShutdown } from "../../shutdown.ts";
+import { registerShutdown, AcceptedShutdownWork } from "../../shutdown.ts";
 import { requireAttachmentOwner } from "../../attachmentOwnership.ts";
 import {
   WorkspaceWriteContext,
@@ -68,8 +70,10 @@ interface CommandEnvelope {
   workspaceWrite?: WorkspaceWrite | null;
   result: Deferred.Deferred<{ sequence: number }, OrchestrationDispatchError>;
   startedAtMs: number;
+  admissionOrder: number;
   controlCommitted?: boolean;
   controlOrigin?: ControlOrigin;
+  controlFinished?: Deferred.Deferred<void, OrchestrationOverloadError>;
   workspace?: { path: string; branch: string | null; projectCwd: string };
 }
 
@@ -111,6 +115,21 @@ function commandToAggregateRef(command: OrchestrationCommand): {
   }
 }
 
+function controlCommandConflict(existing: CommandEnvelope, command: OrchestrationCommand) {
+  const accepted = commandToAggregateRef(existing.command);
+  const incoming = commandToAggregateRef(command);
+  return accepted.aggregateKind === incoming.aggregateKind &&
+    accepted.aggregateId === incoming.aggregateId
+    ? undefined
+    : new OrchestrationCommandIdConflictError({
+        commandId: command.commandId,
+        receiptAggregateKind: accepted.aggregateKind,
+        receiptAggregateId: accepted.aggregateId,
+        commandAggregateKind: incoming.aggregateKind,
+        commandAggregateId: incoming.aggregateId,
+      });
+}
+
 /** Queue pauses the user or environment chose, which a conversation revert must not undo. */
 const QUEUE_PAUSES_KEPT_ACROSS_REVERT: ReadonlySet<string> = new Set([
   "manual_pause",
@@ -133,18 +152,28 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const diskSpaceMonitor = yield* Effect.serviceOption(DiskSpaceMonitor);
 
   let readModel = createEmptyReadModel(new Date().toISOString());
+  let hasDeletedThreads = false;
 
   const admission = yield* makeCommandAdmission<CommandEnvelope>();
   const controlReservations = new Map<string, CommandEnvelope>();
+  let admissionOrder = 0;
+  let accepting = true;
   const stoppedSequences = new Map<string, number>();
   const releaseControl = (commandId: string) =>
-    Effect.gen(function* () {
-      const envelope = controlReservations.get(commandId);
-      if (!envelope) return;
-      controlReservations.delete(commandId);
-      yield* admission.release(envelope);
-    });
-  yield* registerShutdown("orchestration-admission", "admission", () => admission.close);
+    Effect.uninterruptible(
+      Effect.gen(function* () {
+        const envelope = controlReservations.get(commandId);
+        if (!envelope) return;
+        controlReservations.delete(commandId);
+        yield* admission.release(envelope);
+        if (envelope.controlFinished) yield* Deferred.succeed(envelope.controlFinished, undefined);
+      }),
+    );
+  yield* registerShutdown("orchestration-admission", "admission", () =>
+    Effect.sync(() => {
+      accepting = false;
+    }),
+  );
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
       yield* admission.close;
@@ -156,6 +185,11 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             reason: "closed",
           }),
         );
+        if (envelope.controlFinished)
+          yield* Deferred.fail(
+            envelope.controlFinished,
+            new OrchestrationOverloadError({ lane: "control", reason: "closed" }),
+          );
         yield* admission.release(envelope);
       }
       controlReservations.clear();
@@ -184,6 +218,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
     const dispatchStartSequence = readModel.snapshotSequence;
+    let commandReadModel = readModel;
     const processingStartedAtMs = Date.now();
     const aggregateRef = commandToAggregateRef(envelope.command);
     const baseMetricAttributes = {
@@ -198,11 +233,12 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         return;
       }
 
-      let nextReadModel = readModel;
+      let nextReadModel = commandReadModel;
       for (const persistedEvent of persistedEvents) {
         nextReadModel = yield* projectEvent(nextReadModel, persistedEvent);
       }
-      readModel = nextReadModel;
+      hasDeletedThreads ||= persistedEvents.some((event) => event.type === "thread.deleted");
+      readModel = hasDeletedThreads ? withoutDeletedThreadDetails(nextReadModel) : nextReadModel;
 
       for (const persistedEvent of persistedEvents) {
         yield* PubSub.publish(eventPubSub, persistedEvent);
@@ -478,9 +514,15 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 "Conversations still reference this project workspace. Create a separate project for the new workspace.",
             });
         }
+        if (hasDeletedThreads && projectionSnapshotQuery.getRetainedThreadDetails)
+          commandReadModel = yield* hydrateDeciderReadModel(
+            readModel,
+            envelope.command,
+            projectionSnapshotQuery.getRetainedThreadDetails,
+          );
         const eventBase = yield* decideOrchestrationCommand({
           command: envelope.command,
-          readModel,
+          readModel: commandReadModel,
           ...(envelope.command.type === "thread.turn.start" && providerRegistry._tag === "Some"
             ? { providerInstances: yield* providerRegistry.value.getProviders }
             : {}),
@@ -509,7 +551,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                   });
               }
               const committedEvents: OrchestrationEvent[] = [];
-              let nextReadModel = readModel;
+              let nextReadModel = commandReadModel;
 
               for (const nextEvent of eventBases) {
                 const savedEvent = yield* eventStore.append(nextEvent);
@@ -819,7 +861,12 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             ),
           );
 
-        readModel = committedCommand.nextReadModel;
+        hasDeletedThreads ||= committedCommand.committedEvents.some(
+          (event) => event.type === "thread.deleted",
+        );
+        readModel = hasDeletedThreads
+          ? withoutDeletedThreadDetails(committedCommand.nextReadModel)
+          : committedCommand.nextReadModel;
         for (const [index, event] of committedCommand.committedEvents.entries()) {
           if (isControlEvent(event)) envelope.controlCommitted = true;
           if (event.type === "thread.session-stop-requested" || event.type === "thread.archived") {
@@ -827,7 +874,8 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             const cancelled = yield* admission.cancelQueued(
               (queued) =>
                 queued.command.type === "thread.turn.start" &&
-                queued.command.threadId === event.payload.threadId,
+                queued.command.threadId === event.payload.threadId &&
+                queued.admissionOrder < envelope.admissionOrder,
             );
             for (const pending of cancelled)
               yield* Deferred.fail(
@@ -969,6 +1017,8 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       }),
   );
 
+  hasDeletedThreads = readModel.threads.some((thread) => thread.deletedAt !== null);
+  if (hasDeletedThreads) readModel = withoutDeletedThreadDetails(readModel);
   yield* observeReadModelRetention(readModel);
 
   const worker = Effect.gen(function* () {
@@ -1053,8 +1103,16 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         }
       }
       const control = isControlCommand(command);
+      const inheritedControl =
+        command.type === "thread.session.set" || command.type === "thread.activity.append"
+          ? yield* ProviderControlTarget
+          : undefined;
       const existingControl = controlReservations.get(command.commandId);
-      if (control && existingControl) return yield* Deferred.await(existingControl.result);
+      if (control && existingControl) {
+        const conflict = controlCommandConflict(existingControl, command);
+        if (conflict) return yield* conflict;
+        return yield* Deferred.await(existingControl.result);
+      }
       let controlOrigin: ControlOrigin | undefined;
       if (control && "threadId" in command) {
         let binding: { provider: string; instanceId: string | null; payload: unknown } | undefined;
@@ -1100,16 +1158,50 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         command,
         result,
         startedAtMs: Date.now(),
+        admissionOrder: 0,
         workspaceWrite: yield* WorkspaceWriteContext,
-        ...(controlOrigin ? { controlOrigin } : {}),
+        ...(controlOrigin
+          ? {
+              controlOrigin,
+              controlFinished: yield* Deferred.make<void, OrchestrationOverloadError>(),
+            }
+          : {}),
         ...(workspace ? { workspace } : {}),
       };
       const bytes = Buffer.byteLength(JSON.stringify(command));
       const admittedResult = yield* Effect.uninterruptible(
         Effect.gen(function* () {
+          if (
+            !accepting &&
+            !(yield* AcceptedShutdownWork) &&
+            !(
+              inheritedControl &&
+              [...controlReservations.values()].some(
+                (pending) => pending.controlOrigin === inheritedControl,
+              )
+            )
+          )
+            return yield* new OrchestrationOverloadError({
+              lane: control ? "control" : "ordinary",
+              reason: "closed",
+            });
           const existing = control ? controlReservations.get(command.commandId) : undefined;
-          if (existing) return existing.result;
-          yield* admission.offer(envelope, bytes, control);
+          if (existing) {
+            const conflict = controlCommandConflict(existing, command);
+            if (conflict) return yield* conflict;
+            return existing.result;
+          }
+          envelope.admissionOrder = ++admissionOrder;
+          const owner =
+            inheritedControl &&
+            "threadId" in command &&
+            command.threadId === inheritedControl.threadId
+              ? [...controlReservations.values()].find(
+                  (pending) => pending.controlOrigin === inheritedControl,
+                )
+              : undefined;
+          if (owner) yield* admission.offerContinuation(envelope, bytes, owner);
+          else yield* admission.offer(envelope, bytes, control);
           if (control) controlReservations.set(command.commandId, envelope);
           return result;
         }),
@@ -1119,6 +1211,17 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   return {
     completeControl: releaseControl,
+    waitForControlProgress: (threadId) =>
+      Effect.suspend(() =>
+        Effect.forEach(
+          [...controlReservations.values()].filter(
+            (envelope) => envelope.controlOrigin?.threadId === threadId,
+          ),
+          (envelope) =>
+            envelope.controlFinished ? Deferred.await(envelope.controlFinished) : Effect.void,
+          { concurrency: "unbounded", discard: true },
+        ),
+      ),
     controlOrigin: (commandId) => controlReservations.get(commandId)?.controlOrigin,
     isTurnStartSuperseded: (event) =>
       event.aggregateKind === "thread" &&

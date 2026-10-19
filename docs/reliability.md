@@ -78,6 +78,13 @@ read failure. Memory persistence keeps its single database and preserves an
 already-held writer transaction. Transactions retain their connection lease until
 commit or rollback completes.
 
+Deleted threads retain their metadata in the engine but release message, plan and
+activity arrays at bootstrap and after commits. SQLite keeps the original history.
+A command targeting a deleted thread (or an active thread referencing its plan)
+loads the retained details into a temporary decision model; no message state is
+truncated to meet a memory budget. Decision parity covers every thread-command
+schema, and a file-backed restart test verifies append/completion behavior.
+
 Migrations 124–125 add nullable terminal-receipt origin identity, retry due times
 and pending/due indexes without rewriting event JSON. Due reads use pages of 64;
 continuous retries back off with jitter up to thirty seconds. Malformed rows are
@@ -132,7 +139,16 @@ and transient failures retry without blacklisting a thread. Partial final lines 
 removed before another append; they never prove completion. A log failure is reported
 while authoritative runtime events and terminal receipts continue to publish.
 
-Notification preparation admission, browser streaming work, production lifecycle
+Reducer batches reuse a private thread-array copy and leave the published input
+state untouched. Text-only appends preserve timeline/row structure and attachment
+indexes. Transient text revisions retain at most 32 suffixes/64 KiB, including
+skipped renders; hydration, replacement and expired provenance rebuild safely.
+Reasoning display keeps its whitespace trimming while processing only new suffixes.
+The parser advances long plain paragraphs and fenced code incrementally; other
+active grammars retain the validated parsing path and still need controlled
+operation-count qualification.
+
+Notification preparation admission, remaining browser streaming work, production lifecycle
 scenarios and the remaining chaos matrix remain open. The real client store now has
 a WebSocket-drop convergence test. Hosted Windows validation, three green main pushes
 and browser/desktop performance qualification remain separate acceptance requirements.

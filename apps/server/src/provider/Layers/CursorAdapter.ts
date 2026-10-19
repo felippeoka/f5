@@ -420,6 +420,7 @@ export function makeCursorAdapter(
   options?: CursorAdapterLiveOptions,
 ) {
   return Effect.gen(function* () {
+    const adapterScope = yield* Scope.Scope;
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("cursor");
     const fileSystem = yield* FileSystem.FileSystem;
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -602,23 +603,41 @@ export function makeCursorAdapter(
       return Effect.succeed(ctx);
     };
 
-    const stopSessionInternal = (ctx: CursorSessionContext) =>
+    const stopSessionInternal = (ctx: CursorSessionContext, failure?: string) =>
       Effect.gen(function* () {
         if (ctx.stopped) return;
         ctx.stopped = true;
+        if (failure)
+          yield* offerRuntimeEvent({
+            type: "runtime.error",
+            ...(yield* makeEventStamp(ctx)),
+            provider: PROVIDER,
+            threadId: ctx.threadId,
+            ...(ctx.activeTurnId ? { turnId: ctx.activeTurnId } : {}),
+            payload: { class: "transport_error", message: failure },
+          });
         yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
         yield* settlePendingUserInputsAsEmptyAnswers(ctx.pendingUserInputs);
         if (ctx.notificationFiber) {
           yield* Fiber.interrupt(ctx.notificationFiber);
         }
         yield* Effect.ignore(Scope.close(ctx.scope, Exit.void));
-        sessions.delete(ctx.threadId);
+        if (sessions.get(ctx.threadId) === ctx) sessions.delete(ctx.threadId);
+        if (failure && ctx.activeTurnId)
+          yield* offerRuntimeEvent({
+            type: "turn.completed",
+            ...(yield* makeEventStamp(ctx)),
+            provider: PROVIDER,
+            threadId: ctx.threadId,
+            turnId: ctx.activeTurnId,
+            payload: { state: "failed", errorMessage: failure },
+          });
         yield* offerRuntimeEvent({
           type: "session.exited",
           ...(yield* makeEventStamp(ctx)),
           provider: PROVIDER,
           threadId: ctx.threadId,
-          payload: { exitKind: "graceful" },
+          payload: { exitKind: failure ? "error" : "graceful" },
         });
       });
 
@@ -1064,6 +1083,18 @@ export function makeCursorAdapter(
               Effect.gen(function* () {
                 if (event._tag === "ToolCallUpdated") classifyAcpToolEvent(catalogs, event);
                 switch (event._tag) {
+                  case "TransportTerminated":
+                    // Closing a scope from its own notification fiber deadlocks.
+                    // A sibling owns teardown, fenced against session replacement.
+                    yield* withSessionLock(
+                      ctx.threadId,
+                      Effect.suspend(() =>
+                        sessions.get(ctx.threadId) === ctx && !ctx.stopped
+                          ? stopSessionInternal(ctx, event.message)
+                          : Effect.void,
+                      ),
+                    ).pipe(Effect.forkIn(adapterScope));
+                    return;
                   case "ModeChanged":
                     return;
                   case "AssistantItemStarted":
@@ -1632,10 +1663,10 @@ export function makeCursorAdapter(
       });
 
     const stopAll: CursorAdapterShape["stopAll"] = () =>
-      Effect.forEach(sessions.values(), stopSessionInternal, { discard: true });
+      Effect.forEach(sessions.values(), (ctx) => stopSessionInternal(ctx), { discard: true });
 
     yield* Effect.addFinalizer(() =>
-      Effect.forEach(sessions.values(), stopSessionInternal, { discard: true }).pipe(
+      Effect.forEach(sessions.values(), (ctx) => stopSessionInternal(ctx), { discard: true }).pipe(
         Effect.tap(() => PubSub.shutdown(runtimeEventPubSub)),
         Effect.tap(() => managedNativeEventLogger?.close() ?? Effect.void),
       ),

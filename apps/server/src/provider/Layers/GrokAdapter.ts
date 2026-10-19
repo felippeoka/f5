@@ -162,6 +162,7 @@ interface GrokSessionContext {
   promptsInFlight: number;
   currentModelId: string | undefined;
   stopped: boolean;
+  transportFailure?: string | undefined;
   readonly backgroundTasks: Map<string, GrokBackgroundTaskRecord>;
   readonly antigravityTasks: AntigravityTasks;
 }
@@ -232,6 +233,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
     const PROVIDER = options?.provider ?? "grok";
     const providerLabel = PROVIDER === "antigravity" ? "Antigravity" : "Grok";
     const normalizeModel = options?.normalizeModel ?? resolveGrokAcpBaseModelId;
+    const adapterScope = yield* Scope.Scope;
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make(PROVIDER);
     const fileSystem = yield* FileSystem.FileSystem;
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -476,10 +478,20 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         startupPendingUserInputs.delete(threadId);
       });
 
-    const stopSessionInternal = (ctx: GrokSessionContext) =>
+    const stopSessionInternal = (ctx: GrokSessionContext, failure?: string) =>
       Effect.gen(function* () {
         if (ctx.stopped) return;
         ctx.stopped = true;
+        ctx.transportFailure = failure;
+        if (failure)
+          yield* offerRuntimeEvent({
+            type: "runtime.error",
+            ...(yield* makeEventStamp(ctx)),
+            provider: PROVIDER,
+            threadId: ctx.threadId,
+            ...(ctx.activeTurnId ? { turnId: ctx.activeTurnId } : {}),
+            payload: { class: "transport_error", message: failure },
+          });
         sessions.delete(ctx.threadId);
         yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
         yield* settlePendingUserInputsAsCancelled(ctx.pendingUserInputs);
@@ -518,7 +530,9 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             provider: PROVIDER,
             threadId: ctx.threadId,
             turnId: ctx.activeTurnId,
-            payload: { state: "cancelled", stopReason: "cancelled" },
+            payload: failure
+              ? { state: "failed", errorMessage: failure }
+              : { state: "cancelled", stopReason: "cancelled" },
           });
         }
         yield* offerRuntimeEvent({
@@ -526,7 +540,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           ...(yield* makeEventStamp(ctx)),
           provider: PROVIDER,
           threadId: ctx.threadId,
-          payload: { exitKind: "graceful" },
+          payload: { exitKind: failure ? "error" : "graceful" },
         });
       });
 
@@ -1012,6 +1026,18 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 const computerCall =
                   event._tag === "ToolCallUpdated" && classifyAcpToolEvent(catalogs, event);
                 switch (event._tag) {
+                  case "TransportTerminated":
+                    // Closing a scope from its own notification fiber deadlocks.
+                    // A sibling owns teardown, fenced against session replacement.
+                    yield* withThreadLock(
+                      ctx.threadId,
+                      Effect.suspend(() =>
+                        sessions.get(ctx.threadId) === ctx && !ctx.stopped
+                          ? stopSessionInternal(ctx, event.message)
+                          : Effect.void,
+                      ),
+                    ).pipe(Effect.forkIn(adapterScope));
+                    return;
                   case "ModeChanged":
                     return;
                   case "AssistantItemStarted":
@@ -1427,7 +1453,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           );
         }).pipe(
           Effect.catchCause((cause) =>
-            sessions.get(input.threadId) !== prepared.context
+            sessions.get(input.threadId) !== prepared.context && !prepared.context.transportFailure
               ? Effect.succeed({ threadId: input.threadId, turnId: prepared.turnId })
               : Effect.failCause(cause),
           ),
@@ -1580,7 +1606,9 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       });
 
     const stopAll: GrokAdapterShape["stopAll"] = () =>
-      Effect.forEach(Array.from(sessions.values()), stopSessionInternal, { discard: true });
+      Effect.forEach(Array.from(sessions.values()), (ctx) => stopSessionInternal(ctx), {
+        discard: true,
+      });
 
     yield* Effect.addFinalizer(() =>
       Effect.ignore(stopAll()).pipe(

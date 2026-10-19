@@ -604,11 +604,8 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       "source closure",
     );
     for (const session of sessions) {
-      session.history.finish();
-      this.pendingPersistHistory.set(
-        toSessionKey(session.threadId, session.terminalId),
-        session.history,
-      );
+      if (session.history.finish())
+        this.queuePersist(session.threadId, session.terminalId, session.history);
       this.cleanupProcessHandles(session);
       session.process = null;
     }
@@ -917,7 +914,8 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     });
     await treeStop;
     if (session.process === source) {
-      session.history.finish();
+      if (session.history.finish())
+        this.queuePersist(session.threadId, session.terminalId, session.history);
       this.cleanupProcessHandles(session);
       session.process = null;
       session.pid = null;
@@ -925,7 +923,6 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       session.status = "exited";
       session.updatedAt = new Date().toISOString();
     }
-    this.queuePersist(session.threadId, session.terminalId, session.history);
     this.evictInactiveSessionsIfNeeded();
     this.updateSubprocessPollingState();
   }
