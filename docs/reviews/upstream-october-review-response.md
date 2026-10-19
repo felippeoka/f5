@@ -1483,3 +1483,40 @@ records retain their planned disposition until the 15a audit and gates close.
 The required full run after this change again fails the same two scripts recovery
 identity cases, with 333 passing scripts cases. It does not reach the exhaustive
 Git matrix. No waiver or permission bypass is applied.
+
+The complete server suite after `1338d41a6c` passes 5,443 cases and skips 12;
+only the same three launcher process-identity cases fail. The subsequent clean
+server measurement on `cd03f2c2b7b3aee196cffdee12651199a71c1c9f` completes five
+warmups and 30 repetitions with every absolute resource observation passing.
+[The first candidate report](./upstream-october-thread-activity-first-candidate.json)
+is preserved. However, comparison with the saved baseline fails: replay p95 is
+331.79 ms versus 291.76 ms, crossing the latency regression rule, and streaming
+CPU p95 is 679.16 ms versus 671.05 ms, missing the required 20% improvement.
+Projection statements decrease from 3,812 to 3,681 and total statements from
+7,288 to 7,157. This is not accepted comparative performance evidence; the failed
+result is retained while the remaining live projection overhead is investigated.
+
+Investigation of that first comparison finds a further F5-specific live-projection
+cost: each event advances 19 cursors through separate projector operations. A new
+failing-before reproduction also shows that a late cursor failure leaves an earlier
+message committed when the pipeline is called directly outside the engine's outer
+transaction. `01a72d7ec4` now applies one live event and all cursor advances in one
+transaction, issuing one validated cursor upsert statement. The regression verifies
+complete rollback, unchanged cursors, successful retry and all 19 cursors advancing
+to the event sequence. Per-projector bootstrap batching retains its prior behavior.
+Shared helpers keep failure logging and attachment side-effect handling consistent.
+All 222 focused projection/ingestion/engine cases, all eight typechecks, formatter,
+lint and the six-task production build pass. Comparative acceptance remains open.
+
+A fresh built Node 26.12.0/SQLite/Chromium regression using the deterministic Pi
+fixture passes on protocol 38: two native assistant messages, one live child,
+three intentional prompts, exact native rewind reconciliation, zero queued items,
+a paused queue and zero page errors. The root is `/tmp/f5-pi-production-_u35qc92`.
+It adds no installed Pi/account proof. The required full run still fails only the
+two scripts process-identity cases (333 pass); web passes all 2,349 tests, shared
+passes 742 with one skip, and desktop passes 570 before the root run stops.
+
+The complete server suite after atomic live projection passes 5,444 cases and
+skips 12. Only the same three launcher process-identity cases fail. The strict
+ledger and all 12 September/October plan tests pass with 1,190 planned entries;
+the source audit and required release gates remain open.

@@ -7998,15 +7998,21 @@
     {
       "upstreamSha": "3b2ebcee2f6eeb4ed3dde6c89fc59f2eb5bd996d",
       "subject": "perf(server): streamed events no longer rewrite the whole thread row (#18890)",
-      "reason": "Planned: individual implementation or baseline proof exists; a valid failing-before reproduction observes seven whole-thread metadata reads in a short stream/activity sequence. F5 now patches only activity timestamps and the estimate, reads narrow accounting state through one indexed join, and preserves unrelated metadata byte-for-byte. Missing threads are not inserted, omitted estimates are preserved, null explicitly clears, and reasoning status leaves activity timestamps unchanged. The 194 focused server cases pass; measured improvement is not yet established. The remaining per-SHA audit, comparative performance and required release gates are open. Upstream change: perf(server): streamed events no longer rewrite the whole thread row (#18890).",
+      "reason": "Planned: individual implementation or baseline proof exists; a valid failing-before reproduction observes seven whole-thread metadata reads in a short stream/activity sequence. F5 now patches only activity timestamps and the estimate, reads narrow accounting state through one indexed join, and preserves unrelated metadata byte-for-byte. Missing threads are not inserted, omitted estimates are preserved, null explicitly clears, and reasoning status leaves activity timestamps unchanged. The 194 focused server cases pass; measured improvement is not yet established. The remaining per-SHA audit, comparative performance and required release gates are open. Further F5-specific reproduction found partial direct-call live projection after a late cursor failure. Live events and all 19 cursor advances are now atomic with one cursor statement; 222 focused cases pass. The first performance comparison fails its replay-latency and streaming-CPU targets and is preserved; comparative acceptance remains open. Upstream change: perf(server): streamed events no longer rewrite the whole thread row (#18890).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
       "plannedWorkstream": "15a",
-      "f5Shas": ["1338d41a6cbe2c66d5fd54ec52ef4deb3d7f61cd"],
+      "f5Shas": [
+        "1338d41a6cbe2c66d5fd54ec52ef4deb3d7f61cd",
+        "01a72d7ec438a8b32f3d82f7b7ef5d991c0fe0b0"
+      ],
       "evidence": [
-        "apps/server/src/orchestration/Layers/ProjectionPipeline.test.ts:2795",
+        "apps/server/src/orchestration/Layers/ProjectionPipeline.test.ts:2909",
         "apps/server/src/persistence/Layers/ProjectionThreads.ts:158",
-        "apps/server/src/persistence/Layers/ProjectionThreads.test.ts:1"
+        "apps/server/src/persistence/Layers/ProjectionThreads.test.ts:1",
+        "apps/server/src/orchestration/Layers/ProjectionPipeline.test.ts:137",
+        "apps/server/src/orchestration/Layers/ProjectionPipeline.ts:2776",
+        "apps/server/src/persistence/Layers/ProjectionState.ts:82"
       ]
     },
     {
