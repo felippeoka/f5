@@ -139,6 +139,21 @@ describe("October 2026 classification artifact", () => {
     ).toThrow("duplicate prior-interval override");
   });
 
+  it("keeps source-inspected Lineage and relay changes outside the native Agents workstream", () => {
+    const decisions = new Map(plan.entries.map((entry) => [entry.upstreamSha, entry]));
+    expect(decisions.get("d3071275d576bb289a6cb177c6cc28fff8e95015")?.classification).toBe(
+      "not-applicable:upstream-only-subsystem:lineage-delegation",
+    );
+    expect(decisions.get("d668ffcd64d74daba16520cbbfb0fdb431983eac")?.classification).toBe(
+      "not-applicable:relay-cloud",
+    );
+    for (const sha of [
+      "d3071275d576bb289a6cb177c6cc28fff8e95015",
+      "d668ffcd64d74daba16520cbbfb0fdb431983eac",
+    ])
+      expect(bySha.get(sha)?.disposition).toBe("not-applicable");
+  });
+
   it("names a verification scenario and target for every planned decision", () => {
     for (const entry of [...plan.entries, ...plan.priorIntervalOverrides!]) {
       if (!entry.classification.startsWith("planned:")) continue;

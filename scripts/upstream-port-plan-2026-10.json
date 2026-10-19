@@ -7078,12 +7078,14 @@
     {
       "upstreamSha": "109aaae6cd251e1d3aa595624209758a164d8b33",
       "classification": "planned:15r",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(client): \"Subagent needs input\" no longer sticks after the subagent finishes (#18996).",
+      "reason": "Planned: implementation and focused evidence exist for owned native task completion cancels that child's unanswered question or approval without cancelling the parent's request; both native terminal forms have failing-before reproductions. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(client): \"Subagent needs input\" no longer sticks after the subagent finishes (#18996).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15r-pr-18996"],
         "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      },
+      "f5Shas": ["bb7b674bb952ff31f0b029e645e8531105ef036d"],
+      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13495"]
     },
     {
       "upstreamSha": "a4e2539483495d000a30f5f3c01aadb36f13dcec",
@@ -7238,7 +7240,8 @@
       },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -7248,12 +7251,18 @@
     {
       "upstreamSha": "9a9fd2e3ed613275b0c1fdf356def2230480c47e",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(pi): queue turn-start prompts when native work is running (#18639).",
+      "reason": "Planned: partial implementation and focused evidence exist for bounded exact-owner native continuation admission through the durable queue without prompt replay; installed Pi/account proof, full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): queue turn-start prompts when native work is running (#18639).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-18639"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": ["b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"],
+      "evidence": [
+        "apps/server/src/provider/ProviderContinuationWorker.test.ts:1",
+        "apps/server/src/provider/Drivers/PiDriver.ts:1",
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:430"
+      ]
     },
     {
       "upstreamSha": "446be6933f4ecc207eed94db361ff40a88c3964f",
@@ -7596,7 +7605,7 @@
     {
       "upstreamSha": "5753207d53362608f281738eda3a9faf4e13b6be",
       "classification": "deferred",
-      "reason": "Deferred: retain for individual source and scenario review in apps/desktop/src/app/DesktopEarlyElectronStartup.test.ts, apps/desktop/src/app/DesktopEarlyElectronStartup.ts; no implementation or maintenance equivalence is claimed. Upstream change: fix(desktop): avoid Hyprland 0.48\u20130.50 Wayland color-manager startup crashes (#18566).",
+      "reason": "Deferred: retain for individual source and scenario review in apps/desktop/src/app/DesktopEarlyElectronStartup.test.ts, apps/desktop/src/app/DesktopEarlyElectronStartup.ts; no implementation or maintenance equivalence is claimed. Upstream change: fix(desktop): avoid Hyprland 0.48–0.50 Wayland color-manager startup crashes (#18566).",
       "reviewStatus": "reviewed"
     },
     {
@@ -8996,7 +9005,8 @@
       },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -9054,7 +9064,8 @@
       },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -9072,7 +9083,8 @@
       },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -9090,7 +9102,8 @@
       },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -9109,7 +9122,8 @@
       },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -9128,7 +9142,8 @@
       },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": ["docs/reviews/upstream-october-review-response.md:941", "docs/providers/pi.md:1"]
     },
@@ -9175,7 +9190,8 @@
       },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -9339,12 +9355,18 @@
     {
       "upstreamSha": "98beed1a226c42b85c52ff5ee9d5dbb67d776a77",
       "classification": "planned:15r",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(server): Claude subagents show the reasoning effort they run at (#17496).",
+      "reason": "Planned: implementation and focused evidence exist for native child model/effort propagation, bounded metadata, inherited nested selection and durable effort display. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(server): Claude subagents show the reasoning effort they run at (#17496).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15r-pr-17496"],
         "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      },
+      "f5Shas": ["d8606c47cb81de499bdea2c5ebf6f6120a64c885"],
+      "evidence": [
+        "apps/server/src/provider/claudeSubagentSelection.test.ts:1",
+        "apps/server/src/persistence/Migrations/129_BackgroundWorkEffort.test.ts:1",
+        "apps/web/src/components/AgentsPanel.browser.tsx:1"
+      ]
     },
     {
       "upstreamSha": "94d1a8e93f0434d34fa894523a04fe6a6f6172f6",
@@ -10473,7 +10495,8 @@
       },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -10585,17 +10608,23 @@
     {
       "upstreamSha": "cb46c62504aca99295a4a8879644625a20685b7f",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: test(provider-pi): cover continuation offers through the driver (#17407).",
+      "reason": "Planned: partial implementation and focused evidence exist for bounded exact-owner native continuation admission through the durable queue without prompt replay; installed Pi/account proof, full 15l delivery and required release gates remain deferred. Upstream change: test(provider-pi): cover continuation offers through the driver (#17407).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-17407"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": ["b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"],
+      "evidence": [
+        "apps/server/src/provider/ProviderContinuationWorker.test.ts:1",
+        "apps/server/src/provider/Drivers/PiDriver.ts:1",
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:430"
+      ]
     },
     {
       "upstreamSha": "7a2b1c72beed4f560aebb41aa7b26e0792eeb938",
       "classification": "planned:15l",
-      "reason": "Planned: partial implementation and focused evidence exist for verified host rollback and cursor adoption; native extension rewinds remain blocked pending projection reconciliation; full 15l delivery and required release gates remain deferred. Upstream change: fix(server): reconcile Pi native session rewinds (#13839).",
+      "reason": "Planned: partial implementation and focused evidence exist for same-session native rewind reconciliation, exact persisted message ownership and durable retirement across restart; installed Pi/account proof, full 15l delivery and required release gates remain deferred. Upstream change: fix(server): reconcile Pi native session rewinds (#13839).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-13839"],
@@ -10603,12 +10632,18 @@
       },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3",
+        "c47a5b97d083086bfd5e3012ce63604dfa1548e1",
+        "e68a0637224080f195ef16d766454ad554a1a7f3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
         "apps/server/src/provider/Layers/PiAdapter.test.ts:1",
-        "apps/server/src/orchestration/rewind.test.ts:1"
+        "apps/server/src/orchestration/rewind.test.ts:1",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.test.ts:2200",
+        "apps/server/src/provider/ProviderNativeHistory.test.ts:1",
+        "packages/shared/src/nativeHistoryReconciliation.test.ts:1"
       ]
     },
     {
@@ -10636,7 +10671,8 @@
       },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -10728,7 +10764,8 @@
       },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -10990,7 +11027,8 @@
       },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -11014,7 +11052,8 @@
       },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -11040,7 +11079,8 @@
       },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -11050,12 +11090,18 @@
     {
       "upstreamSha": "f999eb2a8e7d8db74d4f4ab7dd66f86163e1a226",
       "classification": "planned:15l",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(server): Pi extension wakes get an owned continuation turn (#17214).",
+      "reason": "Planned: partial implementation and focused evidence exist for bounded exact-owner native continuation admission through the durable queue without prompt replay; installed Pi/account proof, full 15l delivery and required release gates remain deferred. Upstream change: fix(server): Pi extension wakes get an owned continuation turn (#17214).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15l-pr-17214"],
         "targetModules": ["apps/server/src/provider/builtInDrivers.ts"]
-      }
+      },
+      "f5Shas": ["b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"],
+      "evidence": [
+        "apps/server/src/provider/ProviderContinuationWorker.test.ts:1",
+        "apps/server/src/provider/Drivers/PiDriver.ts:1",
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:430"
+      ]
     },
     {
       "upstreamSha": "62a5d3720f82f2dc3ace48fcb26c90c6e3976b50",
@@ -12097,7 +12143,8 @@
       },
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -14203,13 +14250,10 @@
     },
     {
       "upstreamSha": "d3071275d576bb289a6cb177c6cc28fff8e95015",
-      "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): subagents sent a follow-up show as running in Lineage (#15334).",
+      "classification": "not-applicable:upstream-only-subsystem:lineage-delegation",
+      "reason": "Not-applicable: the patch only changes ThreadRelationshipsControl.tsx and threadRelationships.ts to read a delegated child thread's activity in Lineage. The approved F5 architecture retains its independent Agents panel and creates no native subagent child threads. Upstream change: fix(web): subagents sent a follow-up show as running in Lineage (#15334).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-15334"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:123"]
     },
     {
       "upstreamSha": "f2cc80a7a44ee05c1f39442779f2b719e31faeb5",
@@ -14681,13 +14725,10 @@
     },
     {
       "upstreamSha": "d668ffcd64d74daba16520cbbfb0fdb431983eac",
-      "classification": "planned:15r",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): subagent threads stop publishing tombstones to the relay (#15016).",
+      "classification": "not-applicable:relay-cloud",
+      "reason": "Not-applicable: the production change is confined to relay/AgentAwarenessRelay.ts, suppressing cloud tombstones for native subagent child threads. F5 has neither this relay publisher nor those child threads; Agent Bridge and the local Agents panel do not use that path. Upstream change: fix(server): subagent threads stop publishing tombstones to the relay (#15016).",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15r-pr-15016"],
-        "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      "evidence": ["docs/reviews/upstream-october-classification.md:123"]
     },
     {
       "upstreamSha": "3a7058da50c91906158c89fc3f845e6c04379414",
@@ -14740,12 +14781,18 @@
     {
       "upstreamSha": "43bd6677392b80cd12742f865c277c9939239543",
       "classification": "planned:15r",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(web): Claude skill calls show the skill name (#14980).",
+      "reason": "Planned: implementation and focused evidence exist for skill headings derive from complete or streamed native input and survive activity compaction; an actual Chromium timeline fixture covers available persisted input. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(web): Claude skill calls show the skill name (#14980).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15r-pr-14980"],
         "targetModules": ["apps/web/src/components", "apps/server/src/provider"]
-      }
+      },
+      "f5Shas": ["5d74a6bde2b856176f0d85637995688a5832bb31"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13585",
+        "packages/shared/src/orchestrationActivityPayload.test.ts:1",
+        "apps/web/src/components/chat/MessagesTimeline.browser.tsx:1"
+      ]
     },
     {
       "upstreamSha": "bb7997709dd5ed91a3aa18c091286f5f5331b0ef",
@@ -16934,6 +16981,100 @@
     }
   ],
   "septemberCarriers": {
+    "2": {
+      "carrierWorkstream": "15a",
+      "upstreamShas": [
+        "076d753ae6cb97136b6b4199fb8fc0b379282dba",
+        "0bfb6df34b26dfe0162db6c09dca00bc8c5a5ec4",
+        "108f295cc3672716c3cb8291ce487846df5ce098",
+        "1246146f59a5a0f7a6f2da46bdd91f79b231d6a6",
+        "15eda897d37aad232fca5089f5eb6ef7b726c31c",
+        "163d86a78430d23414abde323ca70d8379280c0b",
+        "17490c0a00a6cf9a542fc8fa5d85f489fa662e70",
+        "19c1710a88a2c87c159d76269dacdf0b17ddd9f4",
+        "211618fd9fe39d3dde01171a6856ce9f633571c9",
+        "2263e13fda8c9a4f1b6f4dee32e3c9020195e2aa",
+        "27e6cc27fe0f3cff53a44905e40615b7db99c80c",
+        "281b92b48810062275798dd4107364384ebaf432",
+        "2b7d3a45e6ee9454e4dd46aaf0276ca05d8555d3",
+        "33118d9ab263904e4180b3bf2cbf0a36fe0695e2",
+        "355fbd96d5e90b52961ac5f1e035112fc3bad4a9",
+        "3bb06ad910389fcfc886bd5156f41dc73f307f80",
+        "494cfac2494095c3f9b24cc16fb73721f84894a4",
+        "4a4c6dd2adc350a68ba18bb28b24b5a7e4660dab",
+        "50bfca43d76ced00f5d67cfbab8bc44c50eb0e53",
+        "589a9d0e29e26b290024899c16f0a4e0d6aebe26",
+        "592c5983c14d248aa3cfddb8e6c7372f12cd1ab6",
+        "5b377e2a047569ff928ccc6b07a900f698332496",
+        "5eab021a5185e492b6b021f83564143d5263e8a6",
+        "6365919f2e5bcfb4fa4020b95e19af26ae40979f",
+        "63eb0429f49fad5f8722407ea971e3199e6c4514",
+        "643b21edaa08eb1d19d633dbb0b275164bfa60be",
+        "64fafbdfcf91d3c44b533f5b8febbe8d6b19d482",
+        "6866fd6b5ccff82333ad4386ce68cdec03531b68",
+        "6e8931d75615ec020e602e97df2694b0541a6272",
+        "71c6f8248775066ebaf4bfc6680d3e2acb4bb2d1",
+        "72c44a847c0a76f33b0d21f47548125b7032ec35",
+        "7e460f429b740180cd72730418262a2df971ba54",
+        "7e4ce3bbb16c3cfa1ea756de917d8f9398e5999e",
+        "8078c532ceeee5cb951325031f216171507f3d5e",
+        "82059df1523d070b00ab6f45159115f626a4977e",
+        "84aebb72f306f17bed680e1241dab9ab8e8df741",
+        "887ece307131bdc853cc10f3b82067dee77c4ecf",
+        "8ac5462920c45cdee63af15b2598909736f2ec84",
+        "8ef478eb0a6deeef81c5421dd7bb1c6b8c4d0e7d",
+        "8fc253605e6d203c3654dbb1ce22fa1fd6fa0767",
+        "95f9b14f873c7b119f0ffb6dbd194c7063293aa2",
+        "9a7b1e21e51609266adf657bcab0b43b6bcd445c",
+        "9c9ae3dc0e94a957d9c4a61bb211caf914828054",
+        "9ea892e3b365faff31eed294ac38f70d122656b2",
+        "a37b85279d71f958482cb8b6fef1886cdb43f364",
+        "a5da32750125c3bedb959bf331e5e49e95b95e5d",
+        "a9dabbf100d1f6c0b2ed7b5e879d469ac14fd186",
+        "a9ffb8279614df6ae2f1f4b7f09a0dc42edef797",
+        "aefef95ffc34eb76c8e2db9a219b86681f644576",
+        "b17cc2ab5d5029f898121798ca19db3288cba616",
+        "b17cc3d1bf0f4a5deee6dd6a470e36970b864a9b",
+        "b3e1d88590489da2bb63b95c18a57e6f400b8b7f",
+        "b883fc066ea5c9bebbe1c3e9b4bc2471aab3685f",
+        "bd16b86d50c1df49afeb7c0a7568a4908ade4048",
+        "bd5dc58c65b87bfd2222e4697c4742b48e639ea4",
+        "be7d35aaeb49a04483ec5e0d2284e8b5b70a3b6e",
+        "c034f51bb727de3d4888c74497b13e878ee65187",
+        "c163d502dd32b993c03d8c20a5fae55b159bd8dc",
+        "c2283ce14628127ef1758974ddab4f5b1f89d47a",
+        "c3caceade14ccda0686db0031aca79d7d38a71d0",
+        "c66f15f39e61fda0a9a100578833ec12e7526859",
+        "c7c1dfe4df99edf65a49d8a31b39ef1361f37f44",
+        "c8f77e0d441264efb0acfac312e852c81ae3da83",
+        "ca6416ec2d1d194738bc78a81df4b82a75cb72e2",
+        "cccd7e3c885065e925f559c5708378cdb3b51eb3",
+        "ce4712d5b04fb998f79fe132245289191147e5d5",
+        "d7cf8aaa8d4fbcbdd523b4f4bc86fda5c47b4a70",
+        "d7d7f8f3eb7bf593925281eb62348e15a91252b8",
+        "da7e46d08e85bcb07ecd78721a40f7b612fac2f2",
+        "dab5f6e6e02e78675655e69503aa89654e5b8050",
+        "dffb4cd3b16dc6f41aced99922950ee3083082c6",
+        "e145c5f22a10d7433420b447537ed3f29a66d7d9",
+        "e4e9fa9a0b1a77e393ab6cffd75ec22dbb258bdc",
+        "e86604d3372acccd9f6a33a2c4ae46f4e2685541",
+        "ea646c0834a3394ecb0be4a30c5d367e5a9002bd",
+        "eb8ed80300bd719b49fc80ad8708f9839bb48c92",
+        "ec8b2119c377f5c1dbe6235b221ef98eca31a96e",
+        "ed6fe339d71863f39a1d5405554a3bac892e55b6",
+        "efcf7d1ac03e784bdb26843d61ae0ff81c03cec6",
+        "f075a58119f392137d699cefe5290b2aa6e55935",
+        "f2e3764c257a7e27c8171d7dd1e38d4383074206",
+        "f87ecf0cc307f974745da8eea856fab5711023f3",
+        "fa1e1715538f6f8ac076761f7821f68479f616ab",
+        "fa219001dc2f14cfd9c7774c2c03c153359144be",
+        "fc53b273039cf5e0a932582b1fbb56e7223ad4ab",
+        "fe281c5408164250da6688de6fc71ac12d8a9d8f",
+        "feb3ea7ebf83de2e301adb1f20300b262773ec54",
+        "fec606f9ae524277ef1f6886e614f32d9e15e36e",
+        "ff1761012af46ceb5f1ecc9b2be00aae288a1691"
+      ]
+    },
     "10": {
       "carrierWorkstream": "15o",
       "upstreamShas": [
@@ -16972,6 +17113,36 @@
     "11": {
       "carrierWorkstream": "15t",
       "upstreamShas": ["ead4ce52a1624d9c55461f61524580978fc8b719"]
+    },
+    "14": {
+      "carrierWorkstream": "15s",
+      "upstreamShas": [
+        "05e3bcbc65d43adc70c900f176bec6c095b3b833",
+        "082358f9ef6feaadfaafd59a7512da26beb00100",
+        "0de956ed2f92b8a6ead56e1566801db232d365dc",
+        "160c76c6d1c5ab78441e21503cd10e7942b917f6",
+        "1a6599437b6ad77330923819613cc28be3b33945",
+        "2fb99a7a664faf045f1884f38c620016b34874cb",
+        "311f05c8e333a9f7adfbbf5681b849888670d00a",
+        "3cde99b259249a02e50079f326a00b5ba38e7235",
+        "4ba39a6f408bdee468df2e3ffdf7d5dc08e7b59d",
+        "4e169df1dd12e0ed960dcb310e9460897759a55e",
+        "5014e5fcdd6e5f4a53d0fea4cbecba733821a854",
+        "5427ca056270ad49ac88431ac1fb8bb54dd7b91b",
+        "5f1147cad72197d7315a2fd073c30d7ffe1767f2",
+        "683aa87096899aa191e150429415ecc78966f538",
+        "6f5c951a494e6ed0111222959a4bd9c7c8af6c23",
+        "8d5b712de3cbd84118327808c403756e8894014a",
+        "9375c779707fb95c06670db6da87441720b2d2e2",
+        "a354dd9ddc08ef67da7e971ad59a3cd095068325",
+        "b4be33f0747445f1c9df126e932c7b9792f322d5",
+        "b70015b6db8ffafd902174f78cb260cc8082fc6e",
+        "bab4b6f02b8bdaf15fd32636a97f69ff657cec50",
+        "ccf220be205f0e509021dbc8cbda90daa638e20d",
+        "dc0ff8f13eaa9753fdf0de60203c9e819f1cee27",
+        "dcdf5e6a013607b42836a270165286181da48296",
+        "eb8f6f42a5cad1a5d0bc51eaa16cff13a9c69f45"
+      ]
     },
     "11a": {
       "carrierWorkstream": "15q",
@@ -17149,130 +17320,6 @@
         "dcf8942304cfef382af55c0068cb2f04c86757fc",
         "ef7014d851f56bb037a9da963095ffd883c7fa08",
         "f57d3832c0219b4f6fbe2e86f824fedd232492c0"
-      ]
-    },
-    "14": {
-      "carrierWorkstream": "15s",
-      "upstreamShas": [
-        "05e3bcbc65d43adc70c900f176bec6c095b3b833",
-        "082358f9ef6feaadfaafd59a7512da26beb00100",
-        "0de956ed2f92b8a6ead56e1566801db232d365dc",
-        "160c76c6d1c5ab78441e21503cd10e7942b917f6",
-        "1a6599437b6ad77330923819613cc28be3b33945",
-        "2fb99a7a664faf045f1884f38c620016b34874cb",
-        "311f05c8e333a9f7adfbbf5681b849888670d00a",
-        "3cde99b259249a02e50079f326a00b5ba38e7235",
-        "4ba39a6f408bdee468df2e3ffdf7d5dc08e7b59d",
-        "4e169df1dd12e0ed960dcb310e9460897759a55e",
-        "5014e5fcdd6e5f4a53d0fea4cbecba733821a854",
-        "5427ca056270ad49ac88431ac1fb8bb54dd7b91b",
-        "5f1147cad72197d7315a2fd073c30d7ffe1767f2",
-        "683aa87096899aa191e150429415ecc78966f538",
-        "6f5c951a494e6ed0111222959a4bd9c7c8af6c23",
-        "8d5b712de3cbd84118327808c403756e8894014a",
-        "9375c779707fb95c06670db6da87441720b2d2e2",
-        "a354dd9ddc08ef67da7e971ad59a3cd095068325",
-        "b4be33f0747445f1c9df126e932c7b9792f322d5",
-        "b70015b6db8ffafd902174f78cb260cc8082fc6e",
-        "bab4b6f02b8bdaf15fd32636a97f69ff657cec50",
-        "ccf220be205f0e509021dbc8cbda90daa638e20d",
-        "dc0ff8f13eaa9753fdf0de60203c9e819f1cee27",
-        "dcdf5e6a013607b42836a270165286181da48296",
-        "eb8f6f42a5cad1a5d0bc51eaa16cff13a9c69f45"
-      ]
-    },
-    "2": {
-      "carrierWorkstream": "15a",
-      "upstreamShas": [
-        "076d753ae6cb97136b6b4199fb8fc0b379282dba",
-        "0bfb6df34b26dfe0162db6c09dca00bc8c5a5ec4",
-        "108f295cc3672716c3cb8291ce487846df5ce098",
-        "1246146f59a5a0f7a6f2da46bdd91f79b231d6a6",
-        "15eda897d37aad232fca5089f5eb6ef7b726c31c",
-        "163d86a78430d23414abde323ca70d8379280c0b",
-        "17490c0a00a6cf9a542fc8fa5d85f489fa662e70",
-        "19c1710a88a2c87c159d76269dacdf0b17ddd9f4",
-        "211618fd9fe39d3dde01171a6856ce9f633571c9",
-        "2263e13fda8c9a4f1b6f4dee32e3c9020195e2aa",
-        "27e6cc27fe0f3cff53a44905e40615b7db99c80c",
-        "281b92b48810062275798dd4107364384ebaf432",
-        "2b7d3a45e6ee9454e4dd46aaf0276ca05d8555d3",
-        "33118d9ab263904e4180b3bf2cbf0a36fe0695e2",
-        "355fbd96d5e90b52961ac5f1e035112fc3bad4a9",
-        "3bb06ad910389fcfc886bd5156f41dc73f307f80",
-        "494cfac2494095c3f9b24cc16fb73721f84894a4",
-        "4a4c6dd2adc350a68ba18bb28b24b5a7e4660dab",
-        "50bfca43d76ced00f5d67cfbab8bc44c50eb0e53",
-        "589a9d0e29e26b290024899c16f0a4e0d6aebe26",
-        "592c5983c14d248aa3cfddb8e6c7372f12cd1ab6",
-        "5b377e2a047569ff928ccc6b07a900f698332496",
-        "5eab021a5185e492b6b021f83564143d5263e8a6",
-        "6365919f2e5bcfb4fa4020b95e19af26ae40979f",
-        "63eb0429f49fad5f8722407ea971e3199e6c4514",
-        "643b21edaa08eb1d19d633dbb0b275164bfa60be",
-        "64fafbdfcf91d3c44b533f5b8febbe8d6b19d482",
-        "6866fd6b5ccff82333ad4386ce68cdec03531b68",
-        "6e8931d75615ec020e602e97df2694b0541a6272",
-        "71c6f8248775066ebaf4bfc6680d3e2acb4bb2d1",
-        "72c44a847c0a76f33b0d21f47548125b7032ec35",
-        "7e460f429b740180cd72730418262a2df971ba54",
-        "7e4ce3bbb16c3cfa1ea756de917d8f9398e5999e",
-        "8078c532ceeee5cb951325031f216171507f3d5e",
-        "82059df1523d070b00ab6f45159115f626a4977e",
-        "84aebb72f306f17bed680e1241dab9ab8e8df741",
-        "887ece307131bdc853cc10f3b82067dee77c4ecf",
-        "8ac5462920c45cdee63af15b2598909736f2ec84",
-        "8ef478eb0a6deeef81c5421dd7bb1c6b8c4d0e7d",
-        "8fc253605e6d203c3654dbb1ce22fa1fd6fa0767",
-        "95f9b14f873c7b119f0ffb6dbd194c7063293aa2",
-        "9a7b1e21e51609266adf657bcab0b43b6bcd445c",
-        "9c9ae3dc0e94a957d9c4a61bb211caf914828054",
-        "9ea892e3b365faff31eed294ac38f70d122656b2",
-        "a37b85279d71f958482cb8b6fef1886cdb43f364",
-        "a5da32750125c3bedb959bf331e5e49e95b95e5d",
-        "a9dabbf100d1f6c0b2ed7b5e879d469ac14fd186",
-        "a9ffb8279614df6ae2f1f4b7f09a0dc42edef797",
-        "aefef95ffc34eb76c8e2db9a219b86681f644576",
-        "b17cc2ab5d5029f898121798ca19db3288cba616",
-        "b17cc3d1bf0f4a5deee6dd6a470e36970b864a9b",
-        "b3e1d88590489da2bb63b95c18a57e6f400b8b7f",
-        "b883fc066ea5c9bebbe1c3e9b4bc2471aab3685f",
-        "bd16b86d50c1df49afeb7c0a7568a4908ade4048",
-        "bd5dc58c65b87bfd2222e4697c4742b48e639ea4",
-        "be7d35aaeb49a04483ec5e0d2284e8b5b70a3b6e",
-        "c034f51bb727de3d4888c74497b13e878ee65187",
-        "c163d502dd32b993c03d8c20a5fae55b159bd8dc",
-        "c2283ce14628127ef1758974ddab4f5b1f89d47a",
-        "c3caceade14ccda0686db0031aca79d7d38a71d0",
-        "c66f15f39e61fda0a9a100578833ec12e7526859",
-        "c7c1dfe4df99edf65a49d8a31b39ef1361f37f44",
-        "c8f77e0d441264efb0acfac312e852c81ae3da83",
-        "ca6416ec2d1d194738bc78a81df4b82a75cb72e2",
-        "cccd7e3c885065e925f559c5708378cdb3b51eb3",
-        "ce4712d5b04fb998f79fe132245289191147e5d5",
-        "d7cf8aaa8d4fbcbdd523b4f4bc86fda5c47b4a70",
-        "d7d7f8f3eb7bf593925281eb62348e15a91252b8",
-        "da7e46d08e85bcb07ecd78721a40f7b612fac2f2",
-        "dab5f6e6e02e78675655e69503aa89654e5b8050",
-        "dffb4cd3b16dc6f41aced99922950ee3083082c6",
-        "e145c5f22a10d7433420b447537ed3f29a66d7d9",
-        "e4e9fa9a0b1a77e393ab6cffd75ec22dbb258bdc",
-        "e86604d3372acccd9f6a33a2c4ae46f4e2685541",
-        "ea646c0834a3394ecb0be4a30c5d367e5a9002bd",
-        "eb8ed80300bd719b49fc80ad8708f9839bb48c92",
-        "ec8b2119c377f5c1dbe6235b221ef98eca31a96e",
-        "ed6fe339d71863f39a1d5405554a3bac892e55b6",
-        "efcf7d1ac03e784bdb26843d61ae0ff81c03cec6",
-        "f075a58119f392137d699cefe5290b2aa6e55935",
-        "f2e3764c257a7e27c8171d7dd1e38d4383074206",
-        "f87ecf0cc307f974745da8eea856fab5711023f3",
-        "fa1e1715538f6f8ac076761f7821f68479f616ab",
-        "fa219001dc2f14cfd9c7774c2c03c153359144be",
-        "fc53b273039cf5e0a932582b1fbb56e7223ad4ab",
-        "fe281c5408164250da6688de6fc71ac12d8a9d8f",
-        "feb3ea7ebf83de2e301adb1f20300b262773ec54",
-        "fec606f9ae524277ef1f6886e614f32d9e15e36e",
-        "ff1761012af46ceb5f1ecc9b2be00aae288a1691"
       ]
     },
     "3e": {

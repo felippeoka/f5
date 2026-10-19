@@ -164,7 +164,7 @@
     {
       "upstreamSha": "0150c6a53b409ba3bcb45645709b649cf8708354",
       "subject": "feat(web): start new threads with multiple models in separate worktrees (#12179)",
-      "reason": "Phase 9d: Shift+click selects up to six models; each gets its own thread, worktree (requireWorktree) and upload copies, submitted three at a time with a retry guard. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9d: Shift+click selects up to six models; each gets its own thread, worktree (requireWorktree) and upload copies, submitted three at a time with a retry guard. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9d",
@@ -358,7 +358,7 @@
     {
       "upstreamSha": "0310cbf9f46ca94e9df0231a3440bca08ac44709",
       "subject": "fix: keep worktree setup visible after leaving and reopening the thread (#11836)",
-      "reason": "Phase 9c: The setup card is rebuilt from the persisted activity and live updates, so it stays visible after leaving and reopening the thread. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9c: The setup card is rebuilt from the persisted activity and live updates, so it stays visible after leaving and reopening the thread. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9c",
@@ -1426,8 +1426,8 @@
     },
     {
       "upstreamSha": "0a91b9a116117dd5df619fb7c1248cba9cf6f43c",
-      "subject": "feat(mobile): show startup crashes in Settings \u2192 Diagnostics (#11540)",
-      "reason": "Not applicable: f5 has no mobile application; mobile behavior and native mobile dependencies are excluded. Upstream change: feat(mobile): show startup crashes in Settings \u2192 Diagnostics.",
+      "subject": "feat(mobile): show startup crashes in Settings → Diagnostics (#11540)",
+      "reason": "Not applicable: f5 has no mobile application; mobile behavior and native mobile dependencies are excluded. Upstream change: feat(mobile): show startup crashes in Settings → Diagnostics.",
       "reviewStatus": "reviewed",
       "disposition": "not-applicable"
     },
@@ -1529,7 +1529,8 @@
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -2041,7 +2042,7 @@
     {
       "upstreamSha": "0f5a1513e09fb41e0d0f86157aff64cc3657975d",
       "subject": "fix(web): stop the worktree setup card from flashing and shifting (#12015)",
-      "reason": "Phase 9c: Snapshots are ordered by sequence and the card's visibility rule ignores stale or settled states, avoiding flashes and layout shifts. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9c: Snapshots are ordered by sequence and the card's visibility rule ignores stale or settled states, avoiding flashes and layout shifts. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9c",
@@ -2210,10 +2211,12 @@
     {
       "upstreamSha": "109aaae6cd251e1d3aa595624209758a164d8b33",
       "subject": "fix(client): \"Subagent needs input\" no longer sticks after the subagent finishes (#18996)",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(client): \"Subagent needs input\" no longer sticks after the subagent finishes (#18996).",
+      "reason": "Planned: implementation and focused evidence exist for owned native task completion cancels that child's unanswered question or approval without cancelling the parent's request; both native terminal forms have failing-before reproductions. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(client): \"Subagent needs input\" no longer sticks after the subagent finishes (#18996).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "plannedWorkstream": "15r",
+      "f5Shas": ["bb7b674bb952ff31f0b029e645e8531105ef036d"],
+      "evidence": ["apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13495"]
     },
     {
       "upstreamSha": "10ac2f2ba495508a2a2fd469e67eda5df73f0df1",
@@ -2566,7 +2569,7 @@
     {
       "upstreamSha": "12f5604442564d3e8c1cb23135b27b37ab4af1cf",
       "subject": "fix(web): correct pending question attachment message (#10599)",
-      "reason": "Phase 8b: Independent pending-question projection/replay, atomic answer enqueue, dismissal and answer attachment ownership. Implemented with f5\u2019s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 8b: Independent pending-question projection/replay, atomic answer enqueue, dismissal and answer attachment ownership. Implemented with f5’s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "8b",
@@ -2970,7 +2973,8 @@
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -3636,7 +3640,7 @@
     {
       "upstreamSha": "1abc717f0dbd08027b5be4ec45ae6c5bccf96418",
       "subject": "fix(server): keep interrupted threads resumable after restarts (#10421)",
-      "reason": "Phase 8d: Scoped opt-in graceful-shutdown markers, atomic exactly-once continuation admission, eligibility/expiry checks and recovery presentation; abrupt shutdown without a marker remains outside the approved Phase 8d mechanism. Implemented with f5\u2019s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 8d: Scoped opt-in graceful-shutdown markers, atomic exactly-once continuation admission, eligibility/expiry checks and recovery presentation; abrupt shutdown without a marker remains outside the approved Phase 8d mechanism. Implemented with f5’s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "8d",
@@ -4232,7 +4236,7 @@
     },
     {
       "upstreamSha": "200fa826b02cf0503c6f6c2bd7250a58747bff2d",
-      "subject": "feat(web): prompt stash \u2014 cmd+S saves the composer to a per-provider queue (#4453)",
+      "subject": "feat(web): prompt stash — cmd+S saves the composer to a per-provider queue (#4453)",
       "disposition": "ported",
       "f5Shas": ["989d9d9d33fd51d8499536fc0528556f1f8e0378"],
       "reason": "Added a durable 20-entry prompt stash with a composer-scoped Mod+S binding, full sendable-draft serialization, transactional restore confirmations, workspace file re-authorization, terminal-context filtering, image persistence, and restore/delete UI.",
@@ -5929,7 +5933,7 @@
     {
       "upstreamSha": "2c19283afed1e3b69a9af33360980527aeb37494",
       "subject": "feat(server): persist the worktree setup send and progress on the thread (#11852)",
-      "reason": "Phase 9c: The queued first send is gated by a durable worktree block token, and setup progress persists as a thread activity, so both survive reconnects and restarts. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9c: The queued first send is gated by a durable worktree block token, and setup progress persists as a thread activity, so both survive reconnects and restarts. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9c",
@@ -6017,7 +6021,8 @@
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -6756,7 +6761,8 @@
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -7683,7 +7689,8 @@
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -8036,7 +8043,8 @@
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -8182,7 +8190,7 @@
     {
       "upstreamSha": "3bee4c286e586c2eb7f8d196a65b4b5ea6a95241",
       "subject": "fix(server): settle cancelled worktree setup before rollback (#12176)",
-      "reason": "Phase 9c: Cancel pauses the queue and stops the running stage before releasing created artifacts, and checks for an already-accepted turn before rolling back. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9c: Cancel pauses the queue and stops the running stage before releasing created artifacts, and checks for an already-accepted turn before rolling back. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9c",
@@ -8441,7 +8449,7 @@
     {
       "upstreamSha": "3e1333319aacff96856a3c161b8787ff6b0ddd6b",
       "subject": "fix(web): reset markdown widgets when the previewed file changes (#9910)",
-      "reason": "Phase 3: file visit identity invalidates stale saves, including A\u2192B\u2192A navigation; content-hash keyed viewers discard stale highlighting. Existing content-hash write conflicts remain enforced.",
+      "reason": "Phase 3: file visit identity invalidates stale saves, including A→B→A navigation; content-hash keyed viewers discard stale highlighting. Existing content-hash write conflicts remain enforced.",
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "3e",
@@ -9185,10 +9193,16 @@
     {
       "upstreamSha": "43bd6677392b80cd12742f865c277c9939239543",
       "subject": "fix(web): Claude skill calls show the skill name (#14980)",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(web): Claude skill calls show the skill name (#14980).",
+      "reason": "Planned: implementation and focused evidence exist for skill headings derive from complete or streamed native input and survive activity compaction; an actual Chromium timeline fixture covers available persisted input. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(web): Claude skill calls show the skill name (#14980).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "plannedWorkstream": "15r",
+      "f5Shas": ["5d74a6bde2b856176f0d85637995688a5832bb31"],
+      "evidence": [
+        "apps/server/src/provider/Layers/ClaudeAdapter.test.ts:13585",
+        "packages/shared/src/orchestrationActivityPayload.test.ts:1",
+        "apps/web/src/components/chat/MessagesTimeline.browser.tsx:1"
+      ]
     },
     {
       "upstreamSha": "43f723f807e8cc05d7fcd36ee7c3e57c9b3c4980",
@@ -10477,7 +10491,8 @@
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -11606,7 +11621,7 @@
     {
       "upstreamSha": "5623089aea68ca62811f51321686c259fa4c810f",
       "subject": "fix(server): disable color probes in worktree setup (#11843)",
-      "reason": "Phase 9c: The setup script runs as an owned process with NO_COLOR and FORCE_COLOR=0, and ANSI output is stripped from the tail. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9c: The setup script runs as an owned process with NO_COLOR and FORCE_COLOR=0, and ANSI output is stripped from the tail. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9c",
@@ -11805,8 +11820,8 @@
     },
     {
       "upstreamSha": "5753207d53362608f281738eda3a9faf4e13b6be",
-      "subject": "fix(desktop): avoid Hyprland 0.48\u20130.50 Wayland color-manager startup crashes (#18566)",
-      "reason": "Deferred: retain for individual source and scenario review in apps/desktop/src/app/DesktopEarlyElectronStartup.test.ts, apps/desktop/src/app/DesktopEarlyElectronStartup.ts; no implementation or maintenance equivalence is claimed. Upstream change: fix(desktop): avoid Hyprland 0.48\u20130.50 Wayland color-manager startup crashes (#18566).",
+      "subject": "fix(desktop): avoid Hyprland 0.48–0.50 Wayland color-manager startup crashes (#18566)",
+      "reason": "Deferred: retain for individual source and scenario review in apps/desktop/src/app/DesktopEarlyElectronStartup.test.ts, apps/desktop/src/app/DesktopEarlyElectronStartup.ts; no implementation or maintenance equivalence is claimed. Upstream change: fix(desktop): avoid Hyprland 0.48–0.50 Wayland color-manager startup crashes (#18566).",
       "reviewStatus": "reviewed",
       "disposition": "deferred"
     },
@@ -11997,7 +12012,7 @@
     {
       "upstreamSha": "584450a1f198c8592d28947a0a7a060d28013298",
       "subject": "fix(web): compact the worktree setup glass popover (#12802)",
-      "reason": "Phase 9c: f5 shows setup as a compact card above the composer with a five-line script tail rather than upstream's glass popover; same information, f5 layout. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9c: f5 shows setup as a compact card above the composer with a five-line script tail rather than upstream's glass popover; same information, f5 layout. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9c",
@@ -12388,7 +12403,7 @@
     {
       "upstreamSha": "5b7d72aad14ed37e8e5e4c02a6d49814bfe528ac",
       "subject": "feat(updates): continue active threads across server restarts (#9167)",
-      "reason": "Phase 8d: Scoped opt-in graceful-shutdown markers, atomic exactly-once continuation admission, eligibility/expiry checks and recovery presentation; abrupt shutdown without a marker remains outside the approved Phase 8d mechanism. Implemented with f5\u2019s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 8d: Scoped opt-in graceful-shutdown markers, atomic exactly-once continuation admission, eligibility/expiry checks and recovery presentation; abrupt shutdown without a marker remains outside the approved Phase 8d mechanism. Implemented with f5’s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "8d",
@@ -12804,7 +12819,7 @@
     {
       "upstreamSha": "5ea6439816470288d3f2b6b43635fea41fbbb101",
       "subject": "feat(web): inline worktree setup rows and async setup scripts (#11832)",
-      "reason": "Phase 9c: Setup stages render inline in the setup card, and project scripts gain an 'Agent waits for this script' toggle; other setup scripts run alongside the agent. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9c: Setup stages render inline in the setup card, and project scripts gain an 'Agent waits for this script' toggle; other setup scripts run alongside the agent. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9c",
@@ -12888,7 +12903,8 @@
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -13292,9 +13308,9 @@
     },
     {
       "upstreamSha": "62cf4617594c2a0d8c9c5dc4bbc2012d0ead802d",
-      "subject": "fix: better defaults \u2014 Claude 1M context, Codex gpt-5.6, worktrees from origin main (#4240)",
+      "subject": "fix: better defaults — Claude 1M context, Codex gpt-5.6, worktrees from origin main (#4240)",
       "disposition": "deferred",
-      "reason": "Outside the reviewed merged port set; retain for a later f5-native user-impact assessment (fix: better defaults \u2014 Claude 1M context, Codex gpt-5.6, worktrees from origin main (#4240)).",
+      "reason": "Outside the reviewed merged port set; retain for a later f5-native user-impact assessment (fix: better defaults — Claude 1M context, Codex gpt-5.6, worktrees from origin main (#4240)).",
       "reviewStatus": "legacy"
     },
     {
@@ -13319,7 +13335,8 @@
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -13757,7 +13774,7 @@
     {
       "upstreamSha": "65f1839ae82af4e67f389f23e4ccc50f51a4a83f",
       "subject": "fix(web): keep codex restart responses continuous (#9560)",
-      "reason": "Phase 8d: Scoped opt-in graceful-shutdown markers, atomic exactly-once continuation admission, eligibility/expiry checks and recovery presentation; abrupt shutdown without a marker remains outside the approved Phase 8d mechanism. Implemented with f5\u2019s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 8d: Scoped opt-in graceful-shutdown markers, atomic exactly-once continuation admission, eligibility/expiry checks and recovery presentation; abrupt shutdown without a marker remains outside the approved Phase 8d mechanism. Implemented with f5’s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "8d",
@@ -14919,7 +14936,8 @@
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -15310,7 +15328,7 @@
     {
       "upstreamSha": "7112697e8be2d6f231726a91eb565e00ddbeebec",
       "subject": "feat(threads): dismiss async questions without replying (#10431)",
-      "reason": "Phase 8b: Independent pending-question projection/replay, atomic answer enqueue, dismissal and answer attachment ownership. Implemented with f5\u2019s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 8b: Independent pending-question projection/replay, atomic answer enqueue, dismissal and answer attachment ownership. Implemented with f5’s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "8b",
@@ -15391,7 +15409,7 @@
     {
       "upstreamSha": "719a76ca1dbf5490f1aa33ffb9966301e02be9a9",
       "subject": "feat(web): choose queue or steer for follow-up messages (#11964)",
-      "reason": "Phase 8a: Durable steering, same-ID start fallback, conservative ambiguous delivery recovery, provider adapters, follow-up preference and shortcut. Implemented with f5\u2019s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 8a: Durable steering, same-ID start fallback, conservative ambiguous delivery recovery, provider adapters, follow-up preference and shortcut. Implemented with f5’s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "8a",
@@ -15495,7 +15513,7 @@
     {
       "upstreamSha": "7220dfe2c949476eaa7d21eccbcd3a0ce0eddb49",
       "subject": "feat(chat): attach files to question answers (#9871)",
-      "reason": "Phase 8b: Independent pending-question projection/replay, atomic answer enqueue, dismissal and answer attachment ownership. Implemented with f5\u2019s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 8b: Independent pending-question projection/replay, atomic answer enqueue, dismissal and answer attachment ownership. Implemented with f5’s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "8b",
@@ -15699,7 +15717,7 @@
     {
       "upstreamSha": "73b206f4bf99e7e98ae144a9d9edbf7cb2700fc1",
       "subject": "feat(web): show each worktree setup step and let users cancel it (#11372)",
-      "reason": "Phase 9c: Background worktree setup reports fetch, checkout (with progress), submodule, setup-script and agent stages, with cancel that removes only clean, unclaimed artifacts it created. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9c: Background worktree setup reports fetch, checkout (with progress), submodule, setup-script and agent stages, with cancel that removes only clean, unclaimed artifacts it created. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9c",
@@ -16613,18 +16631,24 @@
     {
       "upstreamSha": "7a2b1c72beed4f560aebb41aa7b26e0792eeb938",
       "subject": "fix(server): reconcile Pi native session rewinds (#13839)",
-      "reason": "Planned: partial implementation and focused evidence exist for verified host rollback and cursor adoption; native extension rewinds remain blocked pending projection reconciliation; full 15l delivery and required release gates remain deferred. Upstream change: fix(server): reconcile Pi native session rewinds (#13839).",
+      "reason": "Planned: partial implementation and focused evidence exist for same-session native rewind reconciliation, exact persisted message ownership and durable retirement across restart; installed Pi/account proof, full 15l delivery and required release gates remain deferred. Upstream change: fix(server): reconcile Pi native session rewinds (#13839).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3",
+        "c47a5b97d083086bfd5e3012ce63604dfa1548e1",
+        "e68a0637224080f195ef16d766454ad554a1a7f3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
         "apps/server/src/provider/Layers/PiAdapter.test.ts:1",
-        "apps/server/src/orchestration/rewind.test.ts:1"
+        "apps/server/src/orchestration/rewind.test.ts:1",
+        "apps/server/src/orchestration/Layers/OrchestrationEngine.test.ts:2200",
+        "apps/server/src/provider/ProviderNativeHistory.test.ts:1",
+        "packages/shared/src/nativeHistoryReconciliation.test.ts:1"
       ]
     },
     {
@@ -17094,7 +17118,8 @@
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -18296,7 +18321,7 @@
     {
       "upstreamSha": "8824f8f24f8b81fd6aed6f228a57a1d4013d01d9",
       "subject": "fix(web): retry failed thread bootstraps with a fresh id (#7664)",
-      "reason": "Phase 9b: A failed first-send bootstrap reports whether the thread was not created or was rolled back and deleted; the draft moves to a fresh thread id so sending again works. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9b: A failed first-send bootstrap reports whether the thread was not created or was rolled back and deleted; the draft moves to a fresh thread id so sending again works. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9b",
@@ -19216,7 +19241,7 @@
     },
     {
       "upstreamSha": "8eca20005b47e197b3610f7996f3fd02355c1891",
-      "subject": "feat(web): configurable fonts and sizes under Settings \u2192 Appearance (#5103)",
+      "subject": "feat(web): configurable fonts and sizes under Settings → Appearance (#5103)",
       "disposition": "ported",
       "f5Shas": ["120eb36729b35d63dc2bf2a10843ff4a604a4c4a"],
       "reason": "Reimplemented through f5's client-local AppSettings path with validated interface, chat, code, and terminal font controls; pre-paint and live CSS-variable application across app, chat, diff, and preview surfaces; and explicit xterm updates, refits, and PTY resize synchronization without session restarts.",
@@ -19994,7 +20019,7 @@
     },
     {
       "upstreamSha": "949feb61e4bfd96669ba0e8cf3dca7c6d7f885b3",
-      "subject": "feat(web): configurable browser defaults in Settings \u2192 Integrations (#7082)",
+      "subject": "feat(web): configurable browser defaults in Settings → Integrations (#7082)",
       "reason": "Phase 13: Authoritative web-local preview defaults with Integrations controls.",
       "reviewStatus": "reviewed",
       "disposition": "ported",
@@ -20511,10 +20536,16 @@
     {
       "upstreamSha": "98beed1a226c42b85c52ff5ee9d5dbb67d776a77",
       "subject": "fix(server): Claude subagents show the reasoning effort they run at (#17496)",
-      "reason": "Planned: implement and verify the explicitly approved 15r scenario. Upstream change: fix(server): Claude subagents show the reasoning effort they run at (#17496).",
+      "reason": "Planned: implementation and focused evidence exist for native child model/effort propagation, bounded metadata, inherited nested selection and durable effort display. The remaining 15r per-SHA audit and required release gates are not complete. Upstream change: fix(server): Claude subagents show the reasoning effort they run at (#17496).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "plannedWorkstream": "15r",
+      "f5Shas": ["d8606c47cb81de499bdea2c5ebf6f6120a64c885"],
+      "evidence": [
+        "apps/server/src/provider/claudeSubagentSelection.test.ts:1",
+        "apps/server/src/persistence/Migrations/129_BackgroundWorkEffort.test.ts:1",
+        "apps/web/src/components/AgentsPanel.browser.tsx:1"
+      ]
     },
     {
       "upstreamSha": "990bb0b689b23a33f8e53f12962fe2542b3f4005",
@@ -20788,10 +20819,16 @@
     {
       "upstreamSha": "9a9fd2e3ed613275b0c1fdf356def2230480c47e",
       "subject": "fix(pi): queue turn-start prompts when native work is running (#18639)",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(pi): queue turn-start prompts when native work is running (#18639).",
+      "reason": "Planned: partial implementation and focused evidence exist for bounded exact-owner native continuation admission through the durable queue without prompt replay; installed Pi/account proof, full 15l delivery and required release gates remain deferred. Upstream change: fix(pi): queue turn-start prompts when native work is running (#18639).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15l"
+      "plannedWorkstream": "15l",
+      "f5Shas": ["b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"],
+      "evidence": [
+        "apps/server/src/provider/ProviderContinuationWorker.test.ts:1",
+        "apps/server/src/provider/Drivers/PiDriver.ts:1",
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:430"
+      ]
     },
     {
       "upstreamSha": "9ab0635db6abb1abf15e664141a0f8b6f0c33eae",
@@ -22022,7 +22059,7 @@
     {
       "upstreamSha": "a40aef4ccbc10b7bcd7bc817151db8d5a9b1c257",
       "subject": "fix(server): a draft can retry its first send after a failed bootstrap (#8226)",
-      "reason": "Phase 9b: First sends, including thread and worktree bootstrap, go through nextTurnQueue.submit with single-flight replay, so a draft can retry after a failed bootstrap without duplicating the thread or turn. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9b: First sends, including thread and worktree bootstrap, go through nextTurnQueue.submit with single-flight replay, so a draft can retry after a failed bootstrap without duplicating the thread or turn. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9b",
@@ -22961,7 +22998,7 @@
     },
     {
       "upstreamSha": "abc409c2d4a072c2de46c9015f5cffff00dcc46b",
-      "subject": "Add project file picker (\u2318P) and project content search (\u21e7\u2318F) (#4855)",
+      "subject": "Add project file picker (⌘P) and project content search (⇧⌘F) (#4855)",
       "disposition": "ported",
       "f5Shas": ["a1b619b1604fee4c6437a3947a7744165c0b3f3d"],
       "reviewStatus": "legacy"
@@ -23249,7 +23286,7 @@
     {
       "upstreamSha": "ae53072af0560c0606202b87b5fdb7e52d48ac5c",
       "subject": "fix(web): keep the composer ready during background worktree setup (#11883)",
-      "reason": "Phase 9c: A worktree first send returns 'queued' immediately and the composer stays usable while setup runs in the background. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9c: A worktree first send returns 'queued' immediately and the composer stays usable while setup runs in the background. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9c",
@@ -23775,7 +23812,7 @@
     },
     {
       "upstreamSha": "b28f9bf0a1bd562623c027c5ed80b5ca50395b28",
-      "subject": "feat(web): pull request surfaces \u2014 filters & qualifiers, all-server listing, update branch, reactions, in-place editing, smarter diffs (#6039)",
+      "subject": "feat(web): pull request surfaces — filters & qualifiers, all-server listing, update branch, reactions, in-place editing, smarter diffs (#6039)",
       "disposition": "deferred",
       "reason": "Deferred until the provider-neutral GitHub PR detail seam is complete.",
       "reviewStatus": "legacy"
@@ -24030,7 +24067,7 @@
     {
       "upstreamSha": "b4620d595554654c259ec7c0afb3d3d5532959a8",
       "subject": "fix(server): reject file rewind in shared workspaces (#12306)",
-      "reason": "Phase 8c: Verified durable conversation rewind, Claude retained boundaries, isolated file restore, OpenCode keep-files checkpoint and recoverable drafts. Implemented with f5\u2019s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 8c: Verified durable conversation rewind, Claude retained boundaries, isolated file restore, OpenCode keep-files checkpoint and recoverable drafts. Implemented with f5’s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "8c",
@@ -24591,7 +24628,7 @@
     {
       "upstreamSha": "b906ce2d73d025e801877f42a35b7a2f5629806f",
       "subject": "fix(server): recover opted-in threads after machine restarts (#9803)",
-      "reason": "Phase 8d: Scoped opt-in graceful-shutdown markers, atomic exactly-once continuation admission, eligibility/expiry checks and recovery presentation; abrupt shutdown without a marker remains outside the approved Phase 8d mechanism. Implemented with f5\u2019s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 8d: Scoped opt-in graceful-shutdown markers, atomic exactly-once continuation admission, eligibility/expiry checks and recovery presentation; abrupt shutdown without a marker remains outside the approved Phase 8d mechanism. Implemented with f5’s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "8d",
@@ -24749,7 +24786,7 @@
     {
       "upstreamSha": "ba3cb0773859334fe9f75016295bb3893c9e6044",
       "subject": "feat(projects): automatically pull clean default branches (#9277)",
-      "reason": "Phase 9f: Off-by-default auto-pull fast-forwards clean default-branch project roots every 15 minutes under the path lock and a background cross-profile repository lock, with dry run and audit records. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9f: Off-by-default auto-pull fast-forwards clean default-branch project roots every 15 minutes under the path lock and a background cross-profile repository lock, with dry run and audit records. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9f",
@@ -25487,7 +25524,8 @@
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -26215,7 +26253,7 @@
     {
       "upstreamSha": "c4ca1b0f94e56bd93899704f03015d51948a6b4d",
       "subject": "feat(settings): add automatic storage cleanup per machine and project (#11598)",
-      "reason": "Phase 9e: Off-by-default storage cleanup removes idle F5 worktrees by project-scopable rules (never forced, branch kept, all claims re-checked under the lifecycle lock) and old provider logs, with dry run, redacted audit records and configurable preview-artifact retention. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9e: Off-by-default storage cleanup removes idle F5 worktrees by project-scopable rules (never forced, branch kept, all claims re-checked under the lifecycle lock) and old provider logs, with dry run, redacted audit records and configurable preview-artifact retention. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9e",
@@ -27071,10 +27109,16 @@
     {
       "upstreamSha": "cb46c62504aca99295a4a8879644625a20685b7f",
       "subject": "test(provider-pi): cover continuation offers through the driver (#17407)",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: test(provider-pi): cover continuation offers through the driver (#17407).",
+      "reason": "Planned: partial implementation and focused evidence exist for bounded exact-owner native continuation admission through the durable queue without prompt replay; installed Pi/account proof, full 15l delivery and required release gates remain deferred. Upstream change: test(provider-pi): cover continuation offers through the driver (#17407).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15l"
+      "plannedWorkstream": "15l",
+      "f5Shas": ["b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"],
+      "evidence": [
+        "apps/server/src/provider/ProviderContinuationWorker.test.ts:1",
+        "apps/server/src/provider/Drivers/PiDriver.ts:1",
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:430"
+      ]
     },
     {
       "upstreamSha": "cb49e5d7201ef6bcb288bf447785bbd374e8644d",
@@ -27943,7 +27987,7 @@
     {
       "upstreamSha": "d2042d288eaf7aaf7feda85eb7d1a6f546302c12",
       "subject": "fix(web): avoid stale file writes on close (#8630)",
-      "reason": "Phase 3: file visit identity invalidates stale saves, including A\u2192B\u2192A navigation; content-hash keyed viewers discard stale highlighting. Existing content-hash write conflicts remain enforced.",
+      "reason": "Phase 3: file visit identity invalidates stale saves, including A→B→A navigation; content-hash keyed viewers discard stale highlighting. Existing content-hash write conflicts remain enforced.",
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "3e",
@@ -28103,10 +28147,10 @@
     {
       "upstreamSha": "d3071275d576bb289a6cb177c6cc28fff8e95015",
       "subject": "fix(web): subagents sent a follow-up show as running in Lineage (#15334)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): subagents sent a follow-up show as running in Lineage (#15334).",
+      "reason": "Not-applicable: the patch only changes ThreadRelationshipsControl.tsx and threadRelationships.ts to read a delegated child thread's activity in Lineage. The approved F5 architecture retains its independent Agents panel and creates no native subagent child threads. Upstream change: fix(web): subagents sent a follow-up show as running in Lineage (#15334).",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "not-applicable",
+      "evidence": ["docs/reviews/upstream-october-classification.md:123"]
     },
     {
       "upstreamSha": "d330759f58bad677b9296d4dd9134ccc902821ce",
@@ -28524,10 +28568,10 @@
     {
       "upstreamSha": "d668ffcd64d74daba16520cbbfb0fdb431983eac",
       "subject": "fix(server): subagent threads stop publishing tombstones to the relay (#15016)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): subagent threads stop publishing tombstones to the relay (#15016).",
+      "reason": "Not-applicable: the production change is confined to relay/AgentAwarenessRelay.ts, suppressing cloud tombstones for native subagent child threads. F5 has neither this relay publisher nor those child threads; Agent Bridge and the local Agents panel do not use that path. Upstream change: fix(server): subagent threads stop publishing tombstones to the relay (#15016).",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15r"
+      "disposition": "not-applicable",
+      "evidence": ["docs/reviews/upstream-october-classification.md:123"]
     },
     {
       "upstreamSha": "d67157a09c28883d7856d03d2b1d3aecdbf1b890",
@@ -28632,7 +28676,7 @@
     {
       "upstreamSha": "d76b24dd15a219666941ab1b4967d8f738adcda0",
       "subject": "feat(codex): support async questions (#9512)",
-      "reason": "Phase 8b: Independent pending-question projection/replay, atomic answer enqueue, dismissal and answer attachment ownership. Implemented with f5\u2019s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 8b: Independent pending-question projection/replay, atomic answer enqueue, dismissal and answer attachment ownership. Implemented with f5’s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "8b",
@@ -29282,7 +29326,7 @@
     {
       "upstreamSha": "db9a0671bb8921ebf5f9da16cd54f7e87f5ef3b0",
       "subject": "refactor(web): move settings scope pickers into breadcrumbs (#13165)",
-      "reason": "Phase 6: scope controls are a Global \u203a Project breadcrumb with search, scroll and URL persistence.",
+      "reason": "Phase 6: scope controls are a Global › Project breadcrumb with search, scroll and URL persistence.",
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "6",
@@ -29467,7 +29511,7 @@
     {
       "upstreamSha": "dd6ba84dc96f83000388e14b90f6533d5f63315d",
       "subject": "fix(server): fall back when new worktrees are unavailable (#6208)",
-      "reason": "Phase 9c: When a worktree cannot be prepared, the send falls back to the project root unless the request requires a worktree; failed setups offer Work locally. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9c: When a worktree cannot be prepared, the send falls back to the project root unless the request requires a worktree; failed setups offer Work locally. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9c",
@@ -29531,9 +29575,9 @@
     },
     {
       "upstreamSha": "ddd5a46f3942df302f8a13310cdfa47838b0ca81",
-      "subject": "fix(web): sidebar v2 polish \u2014 jump hints, working duration, in-flight fade, settled sort (#4274)",
+      "subject": "fix(web): sidebar v2 polish — jump hints, working duration, in-flight fade, settled sort (#4274)",
       "disposition": "deferred",
-      "reason": "Outside the reviewed merged port set; retain for a later f5-native user-impact assessment (fix(web): sidebar v2 polish \u2014 jump hints, working duration, in-flight fade, settled sort (#4274)).",
+      "reason": "Outside the reviewed merged port set; retain for a later f5-native user-impact assessment (fix(web): sidebar v2 polish — jump hints, working duration, in-flight fade, settled sort (#4274)).",
       "reviewStatus": "legacy"
     },
     {
@@ -29669,7 +29713,8 @@
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -29829,7 +29874,7 @@
     {
       "upstreamSha": "df8e0eb46bca3dc01c17cc74a53b19aaacbe252b",
       "subject": "fix(web): discard stale highlights after file edits (#9902)",
-      "reason": "Phase 3: file visit identity invalidates stale saves, including A\u2192B\u2192A navigation; content-hash keyed viewers discard stale highlighting. Existing content-hash write conflicts remain enforced.",
+      "reason": "Phase 3: file visit identity invalidates stale saves, including A→B→A navigation; content-hash keyed viewers discard stale highlighting. Existing content-hash write conflicts remain enforced.",
       "reviewStatus": "reviewed",
       "disposition": "ported",
       "plannedWorkstream": "3e",
@@ -30457,7 +30502,8 @@
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": ["docs/reviews/upstream-october-review-response.md:941", "docs/providers/pi.md:1"]
     },
@@ -30694,7 +30740,7 @@
     {
       "upstreamSha": "e63ddb48e2fd23854a0b4a480b32cbf33e601981",
       "subject": "fix(threads): keep completed requests closed across clients (#10123)",
-      "reason": "Phase 8b: Independent pending-question projection/replay, atomic answer enqueue, dismissal and answer attachment ownership. Implemented with f5\u2019s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 8b: Independent pending-question projection/replay, atomic answer enqueue, dismissal and answer attachment ownership. Implemented with f5’s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "8b",
@@ -31054,7 +31100,8 @@
       "plannedWorkstream": "15l",
       "f5Shas": [
         "165260f3602ea67865002372c2c579bca63e52e6",
-        "afc90b20382bc63045665a054a3159710e1862fc"
+        "afc90b20382bc63045665a054a3159710e1862fc",
+        "b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"
       ],
       "evidence": [
         "docs/reviews/upstream-october-review-response.md:941",
@@ -31881,7 +31928,7 @@
     {
       "upstreamSha": "eed974c122e192de45b54b7dac7ca1a51448c08f",
       "subject": "fix(server): keep Claude rewind when fork history length changes (#11954)",
-      "reason": "Phase 8c: Verified durable conversation rewind, Claude retained boundaries, isolated file restore, OpenCode keep-files checkpoint and recoverable drafts. Implemented with f5\u2019s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 8c: Verified durable conversation rewind, Claude retained boundaries, isolated file restore, OpenCode keep-files checkpoint and recoverable drafts. Implemented with f5’s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "8c",
@@ -31991,7 +32038,7 @@
     {
       "upstreamSha": "ef84bc9873a6c4565fbeb64dce3f552570e95a2d",
       "subject": "fix(chat): smooth worktree setup status (#8922)",
-      "reason": "Phase 9c: Progress pushes are throttled to 100 ms and persistence to 500 ms, keeping status updates smooth. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9c: Progress pushes are throttled to 100 ms and persistence to 500 ms, keeping status updates smooth. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9c",
@@ -32011,7 +32058,7 @@
     {
       "upstreamSha": "efccda9ac9230db22b36990cffabdad218fa41b0",
       "subject": "feat: rewind conversations while keeping file changes (#11358)",
-      "reason": "Phase 8c: Verified durable conversation rewind, Claude retained boundaries, isolated file restore, OpenCode keep-files checkpoint and recoverable drafts. Implemented with f5\u2019s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 8c: Verified durable conversation rewind, Claude retained boundaries, isolated file restore, OpenCode keep-files checkpoint and recoverable drafts. Implemented with f5’s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "8c",
@@ -32299,7 +32346,7 @@
     {
       "upstreamSha": "f14f41b894448298a86865c9114e6700245356e7",
       "subject": "fix(web): preserve composer draft during worktree setup (#9197)",
-      "reason": "Phase 9c: Discarding a cancelled or failed setup deletes the empty thread and restores the message into a new draft. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9c: Discarding a cancelled or failed setup deletes the empty thread and restores the message into a new draft. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9c",
@@ -33135,7 +33182,7 @@
     {
       "upstreamSha": "f6db4206258b0ef30e8dd8949627acfd209bf338",
       "subject": "fix(web): reset automatic pull to default (#9763)",
-      "reason": "Phase 9f: Auto-pull is project-scopable with the standard per-project Reset, and a checked-in f5.json cannot turn it on. Implemented with f5\u2019s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 9f: Auto-pull is project-scopable with the standard per-project Reset, and a checked-in f5.json cannot turn it on. Implemented with f5’s durable queue and worktree lifecycle locks; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "9f",
@@ -33508,10 +33555,16 @@
     {
       "upstreamSha": "f999eb2a8e7d8db74d4f4ab7dd66f86163e1a226",
       "subject": "fix(server): Pi extension wakes get an owned continuation turn (#17214)",
-      "reason": "Planned: reconcile the approved 15l feature and its follow-ups. Upstream change: fix(server): Pi extension wakes get an owned continuation turn (#17214).",
+      "reason": "Planned: partial implementation and focused evidence exist for bounded exact-owner native continuation admission through the durable queue without prompt replay; installed Pi/account proof, full 15l delivery and required release gates remain deferred. Upstream change: fix(server): Pi extension wakes get an owned continuation turn (#17214).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
-      "plannedWorkstream": "15l"
+      "plannedWorkstream": "15l",
+      "f5Shas": ["b688ff8c47a260f0d4cb6447214d5ccf8abd1fa3"],
+      "evidence": [
+        "apps/server/src/provider/ProviderContinuationWorker.test.ts:1",
+        "apps/server/src/provider/Drivers/PiDriver.ts:1",
+        "apps/server/src/provider/Layers/PiAdapter.test.ts:430"
+      ]
     },
     {
       "upstreamSha": "f99b20275359ff7acecdb916a9fa25ac33102b12",
@@ -33706,7 +33759,7 @@
     },
     {
       "upstreamSha": "fbd77420f27c1322d49726dd927861b8b5903494",
-      "subject": "feat: add \"Auto\" runtime mode \u2014 AI-reviewed approvals for Codex and Claude (#4272)",
+      "subject": "feat: add \"Auto\" runtime mode — AI-reviewed approvals for Codex and Claude (#4272)",
       "disposition": "ported",
       "f5Shas": ["d071c612efe95ad13ce798a6de2726b5a226c417"],
       "reviewStatus": "legacy"
@@ -33896,7 +33949,7 @@
     {
       "upstreamSha": "fd5553f1afcef4f410a067687faa991743b5034c",
       "subject": "fix: restore provider history and prompts when rewinding (#11338)",
-      "reason": "Phase 8c: Verified durable conversation rewind, Claude retained boundaries, isolated file restore, OpenCode keep-files checkpoint and recoverable drafts. Implemented with f5\u2019s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
+      "reason": "Phase 8c: Verified durable conversation rewind, Claude retained boundaries, isolated file restore, OpenCode keep-files checkpoint and recoverable drafts. Implemented with f5’s durable queue, attachment ownership and provider recovery architecture; validated by the full workspace, real-Git and browser suites.",
       "reviewStatus": "reviewed",
       "disposition": "equivalent",
       "plannedWorkstream": "8c",

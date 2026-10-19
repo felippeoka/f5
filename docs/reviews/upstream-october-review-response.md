@@ -1117,3 +1117,75 @@ The purge-policy correction passes all 93 storage/cleanup tests, the formatter,
 lint and all eight typechecks. The preceding complete server run exercised 539
 files; its additional purge-policy failure is now covered by that passing targeted
 run. The three launcher process-identity failures remain unresolved host restrictions.
+
+The exhaustive real-Git matrix passes all 165 cases after native reconciliation.
+Nineteen Pi records now carry the continuation/rewind implementation SHAs and exact
+file evidence. Their deferred dispositions and coverage are unchanged.
+
+## Agents verify-first: model and effort propagation (15r; audit ongoing)
+
+The older-turn count scenario (#20785) is already handled by F5's independent
+Agents panel: its model uses durable work from all turns rather than the active
+turn's roster. A new fixture confirms both older live work and current live work
+remain counted. Baseline implementation provenance is `848bc1063123` for the panel
+model and `8498153f6ed9` for durable background-work lifecycle handling.
+
+The effort scenario (#17496) reproduces in F5: a native Agent launch requested low
+effort, but its task-start event omitted it. That fixture fails before this change
+and passes after it. The adapter now records bounded launch metadata, uses the
+reported child model before resolving nested Agent calls, and inherits the owner's
+launch effort. An explicit native selection overrides the parent's current setting;
+unsupported effort is hidden for that model while raw launch metadata remains
+available for nested inheritance. Configured subagent model defaults apply only
+when the Agent call does not explicitly select `inherit`. Private child output
+continues to stay out of the parent's conversation.
+
+Runtime events, resume cursors and migration 129 preserve effort through durable
+background-work snapshots. Heartbeats preserve it; an actual model change without
+compatible effort clears it. The Agents details panel displays the agent's effort
+beside its own model. The migration preserves old metadata, tolerates an already
+present column and bounds the stored value.
+
+Focused validation passes 315 server cases in six files, 13 web unit cases and all
+11 Agents panel Chromium cases, including the visible effort metadata. Broader
+validation and the remaining per-SHA audit follow; these checks do not close the
+remaining 33-item Agents audit, the mandatory verify-first cut line or the catch-up plan.
+
+Source inspection closes two 15r scope exclusions: #15334 changes only the
+upstream Lineage relationship view and its child-thread activity model; #15016
+changes only the relay's subagent tombstone publisher. Those paths are explicitly
+excluded by the approved F5 architecture. Their individual records now say why
+and the classification regression pins both decisions. The Copilot ACP routing
+commit remains under review because its provider changes need separate scrutiny;
+a mobile-labelled details commit also touches shared/web display code. Neither
+is discarded from review merely because of its title.
+
+The latest five-task build and all eight typechecks pass. The built Node/SQLite/
+Chromium Pi rewind regression also passes after migration 129: one child, three
+intentional prompts, no fork or extra prompt, exact abandoned-message removal,
+an empty paused queue and no browser errors. The required full run still stops
+on the two existing scripts process-identity cases (330 pass, contracts 227 pass);
+its failure leaves the release gate closed. The independent server suite reports 5,400 passing cases, 12 skips and only
+the three previously recorded launcher process-identity failures caused by the
+host denying `/bin/ps`. No other server cases fail. These failures remain release
+blockers; the safety checks have not been weakened to bypass the host restriction.
+
+The next native lifecycle reproduction covers #18996 in F5's permission path:
+a completed Claude child can leave a question or approval pending when its SDK
+abort signal never fires. Both reproductions fail before the fix. Pending requests
+now retain the SDK's native agent identity, and either terminal notification
+cancels only that child's requests. Parent requests remain pending. Four cases
+cover questions and approvals through both `task_notification` and `task_updated`,
+including the absence of duplicate resolution during subsequent session cleanup.
+The focused adapter/background-work run passes 301 cases; all eight typechecks
+and lint pass at that checkpoint. Approval waits also release their abort listener
+and handle an already-aborted signal.
+
+The #14980 reproduction likewise fails for both complete and streamed Skill input.
+A shared bounded heading helper now supplies the adapter and activity normalization;
+new compaction preserves the skill name, and older generic payloads with native
+input still present can derive it on read. Existing compact records that already
+lost the native input cannot recover an unknown skill name. Validation passes all
+288 Claude adapter cases, 47 shared cases, 111 web session-logic cases and a new
+Chromium timeline case using persisted generic tool history. The broader verify-first
+audit and full release gates remain open.
