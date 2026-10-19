@@ -5685,7 +5685,7 @@
     {
       "upstreamSha": "3b2ebcee2f6eeb4ed3dde6c89fc59f2eb5bd996d",
       "classification": "planned:15a",
-      "reason": "Planned: individual implementation or baseline proof exists; a valid failing-before reproduction observes seven whole-thread metadata reads in a short stream/activity sequence. F5 now patches only activity timestamps and the estimate, reads narrow accounting state through one indexed join, and preserves unrelated metadata byte-for-byte. Missing threads are not inserted, omitted estimates are preserved, null explicitly clears, and reasoning status leaves activity timestamps unchanged. The 194 focused server cases pass; measured improvement is not yet established. The remaining per-SHA audit, comparative performance and required release gates are open. Further F5-specific reproduction found partial direct-call live projection after a late cursor failure. Live events and all 19 cursor advances are now atomic with one cursor statement; 222 focused cases pass. The first performance comparison fails its replay-latency and streaming-CPU targets and is preserved; comparative acceptance remains open. Upstream change: perf(server): streamed events no longer rewrite the whole thread row (#18890).",
+      "reason": "Planned: individual implementation or baseline proof exists; a valid failing-before reproduction observes seven whole-thread metadata reads in a short stream/activity sequence. F5 now patches only activity timestamps and the estimate, reads narrow accounting state through one indexed join, and preserves unrelated metadata byte-for-byte. Missing threads are not inserted, omitted estimates are preserved, null explicitly clears, and reasoning status leaves activity timestamps unchanged. The 194 focused server cases pass; the subsequent matched server comparison shows streaming CPU p95 down 24.05%, wall p95 down 15.77%, and no workload latency regression. The remaining per-SHA audit, full interactive comparison and required release gates are open. Further F5-specific reproduction found partial direct-call live projection after a late cursor failure. Live events and all 19 cursor advances are now atomic with one cursor statement; 222 focused cases pass. The first performance comparison fails its replay-latency and streaming-CPU targets and is preserved; the subsequent atomic candidate passes the matched server comparison, including the 20% streaming CPU target; full interactive coverage and the broader audit remain open. Upstream change: perf(server): streamed events no longer rewrite the whole thread row (#18890).",
       "reviewStatus": "reviewed",
       "verification": {
         "scenarioIds": ["15a-pr-18890"],
@@ -5695,7 +5695,7 @@
           "apps/server/src/persistence/Layers/ProjectionState.ts"
         ],
         "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
+          "docs/reviews/upstream-october-server-baseline-20261020.json:1 -> docs/reviews/upstream-october-live-projection-server-candidate.json:1: matching five warmups and 30 repetitions pass every server comparison gate, including the 20% orchestration.assistant-stream CPU target; full interactive coverage remains open"
         ]
       },
       "f5Shas": [
@@ -5708,7 +5708,9 @@
         "apps/server/src/persistence/Layers/ProjectionThreads.test.ts:1",
         "apps/server/src/orchestration/Layers/ProjectionPipeline.test.ts:137",
         "apps/server/src/orchestration/Layers/ProjectionPipeline.ts:2776",
-        "apps/server/src/persistence/Layers/ProjectionState.ts:82"
+        "apps/server/src/persistence/Layers/ProjectionState.ts:82",
+        "docs/reviews/upstream-october-server-baseline-20261020.json:1",
+        "docs/reviews/upstream-october-live-projection-server-candidate.json:1"
       ]
     },
     {

@@ -1520,3 +1520,19 @@ The complete server suite after atomic live projection passes 5,444 cases and
 skips 12. Only the same three launcher process-identity cases fail. The strict
 ledger and all 12 September/October plan tests pass with 1,190 planned entries;
 the source audit and required release gates remain open.
+
+The subsequent server measurement runs alone on clean
+`fbbc374dd2ed3204913a54d396da49f05f0c22ad` with the unchanged fixture, harness and
+runtime. [Its raw candidate report](./upstream-october-live-projection-server-candidate.json)
+passes comparison against the [saved baseline](./upstream-october-server-baseline-20261020.json),
+including the named `orchestration.assistant-stream` CPU target. Both reports use
+five warmups and 30 measured repetitions. Streaming CPU p95 falls from 671.045 to
+509.680 ms (24.05%); wall p95 falls from 1,093.304 to 920.932 ms (15.77%). Projection
+SQL statements fall from 3,812 to 1,107, and total statements from 7,288 to 2,009.
+Per-delta p95 falls from 77.036 to 65.749 ms. Every absolute bound passes and no
+workload crosses the latency regression rule; replay p95 is 298.739 ms versus
+291.758 ms (2.39%). The first failed candidate remains preserved above. This is
+accepted server-component evidence for the incremental projection change, not a
+comparison against original main or successful full interactive coverage. The
+native terminal activity guard, required full gate and remaining 15a audit remain
+open, and no delivery disposition is promoted.
