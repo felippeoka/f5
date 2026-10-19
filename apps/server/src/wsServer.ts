@@ -1601,9 +1601,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       );
       if (!project) return yield* new RouteRequestError({ message: "Unknown project." });
       if (!input.worktreePath) {
-        yield* Effect.tryPromise(() =>
-          assertNotOtherProfileManagedCheckout(serverConfig, project.workspaceRoot),
-        ).pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+        yield* Effect.tryPromise({
+          try: () => assertNotOtherProfileManagedCheckout(serverConfig, project.workspaceRoot),
+          catch: (cause) =>
+            new RouteRequestError({
+              message: cause instanceof Error ? cause.message : String(cause),
+            }),
+        });
         return;
       }
       yield* withWorktreeLifecycleLock(
