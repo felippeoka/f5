@@ -504,3 +504,43 @@ matrix passes 162 cases again. The required full command ran and stopped at the
 two existing migration-recovery process-identity failures (330 scripts checks
 passed). Final typecheck and format results are tracked with the implementation
 commit; this record does not waive the failed full gate.
+
+## Codex MCP apps continuation (2026-10-19)
+
+Migration 127 and protocol 34 add owned MCP app snapshots, live-session RPCs and
+persisted latest model context. The native protocol manifest includes resource
+reads and tool calls. Completed Codex MCP tool calls capture exact `ui://` HTML
+resources before turn completion, with ten-second capture deadlines, two active
+reads and bounded admission. Failure retains the ordinary tool row. Captures are
+owned by adapter scope and release completion barriers on shutdown.
+
+The web host ports the pinned upstream MCP JSON-RPC host into the existing F5
+runtime. Apps use opaque sandboxed frames, declared-origin CSP, theme and cookie
+compatibility bootstraps, and a private document-liveness channel. Navigation,
+unmount and replacement revoke bridge access. Live session identities bind tool
+approvals; both the RPC service and native manager re-read tool visibility and
+read-only annotations before a single mutation. Every app message uses explicit
+confirmation and normal durable submission. Saved context has per-app and aggregate
+budgets and is delivered separately from the user text on the next ordinary Codex
+turn. Offline frames explain how to reconnect; prior-turn apps remain visible when
+work logs collapse. Fullscreen exits on Escape or any app/native approval.
+
+Source reconciliation covers #16236 (capture, routing, context and host), #17026
+(saved-document theme bootstrap), #17027 (blocked-cookie compatibility), #17962
+(scrollable full argument approval with visible decisions), and #20691/#20759
+(stable bridge lifetime without manual memo hooks). F5 snapshots already travel
+through its owned attachment route; upstream's signed asset URL/cache refresh
+mechanism has no matching implementation to copy. Instead, the attachment ID and
+frame nonce define bridge lifetime, and a browser regression preserves the bridge
+through native approval updates. Mobile branches remain outside this web/desktop
+port. Individual ledger promotion still requires the plan's release gates.
+
+Validation: the nine provider/capture/context suites pass 574 cases (one existing
+skip). The subsequent native-input test brings the adapter suite to 69 cases and
+passes alongside both capture cases. All 78 app/timeline Chromium scenarios pass
+before the additional long-argument approval scenario; all ten app scenarios then
+pass with that bounded-approval case. Shared policy/encoding tests pass 17 cases,
+and the final web host/session/timeline unit suites pass 165. All eight workspace
+TypeScript checks pass, lint has no errors, and the required full command ran:
+330 script checks pass and two process-identity recovery checks fail because this
+host denies `ps`. The full gate remains failed; no completion waiver is claimed.

@@ -1301,6 +1301,31 @@ describe("deriveWorkLogEntries", () => {
     expect(entries[0]?.status).toBe("completed");
   });
 
+  it("retains a valid historical MCP app and its turn correlation", () => {
+    const payload = {
+      reference: {
+        attachmentId: "app-document",
+        server: "weather",
+        tool: "forecast",
+        resourceUri: "ui://weather/app",
+      },
+      arguments: { city: "Berlin" },
+      result: { content: [{ type: "text", text: "Sunny" }] },
+    };
+    const entries = deriveWorkLogEntries(
+      [
+        makeActivity({ id: "app", kind: "mcpApp", turnId: "old-turn", payload }),
+        makeActivity({ id: "broken-app", kind: "mcpApp", turnId: "old-turn", payload: {} }),
+      ],
+      TurnId.makeUnsafe("new-turn"),
+    );
+    expect(entries.find((entry) => entry.id === "app")).toMatchObject({
+      turnId: "old-turn",
+      mcpApp: payload,
+    });
+    expect(entries.find((entry) => entry.id === "broken-app")?.mcpApp).toBeUndefined();
+  });
+
   it("filters noisy account diagnostics from the work log", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

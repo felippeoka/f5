@@ -62,3 +62,5 @@ export * from "./workflowSummary";
 export * from "./worktrees";
 
 export * from "./threadSettlement";
+
+export * from "./mcpApps";

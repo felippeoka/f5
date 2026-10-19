@@ -2564,6 +2564,36 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         return capabilities;
       });
 
+    const withLiveMcpApps = <A, E>(
+      threadId: ThreadId,
+      run: (
+        apps: NonNullable<
+          import("../Services/ProviderAdapter.ts").ProviderAdapterShape<
+            import("../Errors.ts").ProviderAdapterError
+          >["mcpApps"]
+        >,
+      ) => Effect.Effect<A, E>,
+    ) =>
+      withProviderThreadAccess(
+        threadId,
+        Effect.gen(function* () {
+          const routed = yield* resolveRoutableSession({
+            threadId,
+            operation: "ProviderService.mcpApps",
+            allowRecovery: false,
+          });
+          if (!routed.isActive || routed.adapter.provider !== "codex" || !routed.adapter.mcpApps)
+            return yield* toValidationError("McpApps", "Send a message to reconnect.");
+          return yield* run(routed.adapter.mcpApps);
+        }),
+      );
+    const mcpApps: NonNullable<ProviderServiceShape["mcpApps"]> = {
+      identity: (threadId) => withLiveMcpApps(threadId, (apps) => apps.identity(threadId)),
+      listTools: (input) => withLiveMcpApps(input.threadId, (apps) => apps.listTools(input)),
+      callTool: (input) => withLiveMcpApps(input.threadId, (apps) => apps.callTool(input)),
+      readResource: (input) => withLiveMcpApps(input.threadId, (apps) => apps.readResource(input)),
+    };
+
     const readThread: ProviderServiceShape["readThread"] = (rawThreadId) =>
       Effect.gen(function* () {
         const threadId = yield* decodeInputOrValidationError({
@@ -3440,6 +3470,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       getCapabilities,
       getSessionCapabilities,
       assertSessionAction,
+      mcpApps,
       readThread: (threadId) => withProviderThreadAccess(threadId, readThread(threadId)),
       rollbackConversation: (input) =>
         withProviderThreadAccess(input.threadId, rollbackConversation(input)),

@@ -1,3 +1,4 @@
+import { readMcpAppModelContext } from "../../mcpApps/McpAppContext.ts";
 import { ServerConfig } from "../../config.ts";
 import { withRepositoryLifecycleLock } from "../../project/Layers/WorktreeLifecycleCoordinator.ts";
 import { dispatchVerifiedWorkspace } from "../../project/workspaceTransitionContext.ts";
@@ -372,6 +373,12 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
   const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
+  const appContextForTurn = (threadId: ThreadId, enabled: boolean) =>
+    enabled && Option.isSome(sqlOption)
+      ? readMcpAppModelContext(threadId).pipe(
+          Effect.provideService(SqlClient.SqlClient, sqlOption.value),
+        )
+      : Effect.succeed("");
   const providerSessionDirectory = yield* ProviderSessionDirectory;
   const projectMcpConfigService = yield* ProjectMcpConfigService;
   const git = yield* GitCore;
@@ -1323,6 +1330,10 @@ const make = Effect.gen(function* () {
       input.provider ??
       inferProviderForModel(thread.model, "codex");
 
+    const mcpAppContext = yield* appContextForTurn(
+      input.threadId,
+      recoveryProvider === "codex" && input.submissionSource !== "automation",
+    );
     yield* providerSessionDirectory.upsert({
       threadId: input.threadId,
       provider: recoveryProvider,
@@ -1341,6 +1352,7 @@ const make = Effect.gen(function* () {
 
     return yield* providerService.sendTurn({
       threadId: input.threadId,
+      ...(mcpAppContext ? { mcpAppContext } : {}),
       ...(input.submissionSource ? { submissionSource: input.submissionSource } : {}),
       ...(input.deliveryId !== undefined ? { deliveryId: input.deliveryId } : {}),
       ...(normalizedInput ? { input: normalizedInput } : {}),
@@ -1701,8 +1713,14 @@ const make = Effect.gen(function* () {
         worktreePath: thread.worktreePath,
         branch: thread.branch,
       }).pipe(Effect.mapError(toProviderTurnDeliveryError));
+      const mcpAppContext = yield* appContextForTurn(
+        thread.id,
+        providerFromSessionName(thread.session?.providerName) === "codex" &&
+          submissionSource !== "automation",
+      );
       return yield* providerService.sendTurn({
         threadId: thread.id,
+        ...(mcpAppContext ? { mcpAppContext } : {}),
         ...(event.commandId ? { deliveryId: event.commandId } : {}),
         ...(submissionSource ? { submissionSource } : {}),
         expectedTurnId: event.payload.expectedTurnId,

@@ -1,3 +1,5 @@
+import { readMcpAppReferenceForTool, readMcpAppToolResult } from "@t3tools/shared/mcpApp";
+import { stringifyWithinBytes } from "@t3tools/shared/boundedJson";
 import { CodexMcpEventBus } from "../../codex/CodexMcpEventBus.ts";
 import { isPreparedComputerEvent } from "../../provider/prepareAutomationRuntimeEvent";
 import { computerToolHeading } from "@t3tools/shared/computerAction";
@@ -2267,6 +2269,25 @@ export function runtimeEventToActivities(
         return [];
       }
       const normalizedTitle = commandExecutionLifecycleTitle(event);
+      const data = asRecord(event.payload.data);
+      const native = asRecord(data?.item);
+      const reference =
+        event.provider === "codex" &&
+        native &&
+        typeof native.server === "string" &&
+        typeof native.tool === "string"
+          ? readMcpAppReferenceForTool(data?.mcpApp, native.server, native.tool)
+          : undefined;
+      const bootstrap = asRecord(data?.mcpAppBootstrap);
+      const initialResult = readMcpAppToolResult(bootstrap?.result);
+      const initial =
+        reference && initialResult
+          ? stringifyWithinBytes(
+              { arguments: asRecord(bootstrap?.arguments) ?? {}, result: initialResult },
+              192 * 1024,
+            )
+          : undefined;
+
       return [
         {
           id: event.eventId,
@@ -2284,6 +2305,20 @@ export function runtimeEventToActivities(
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
         },
+        ...(reference && initial
+          ? [
+              {
+                id: EventId.makeUnsafe(`${event.eventId}:mcp-app`),
+                createdAt: event.createdAt,
+                tone: "tool" as const,
+                kind: "mcpApp",
+                summary: reference.tool,
+                payload: { reference, ...(JSON.parse(initial) as Record<string, unknown>) },
+                turnId: toTurnId(event.turnId) ?? null,
+                ...maybeSequence,
+              },
+            ]
+          : []),
       ];
     }
 

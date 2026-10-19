@@ -1,3 +1,5 @@
+import { stringifyWithinBytes } from "@t3tools/shared/boundedJson";
+import { findMcpAppToolPolicy } from "@t3tools/shared/mcpApp";
 import type { ProviderAdapterSessionStartInput } from "./provider/Services/ProviderAdapter.ts";
 import { readBoundedPages } from "./codex/readBoundedPages.ts";
 import {
@@ -2797,6 +2799,97 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     } catch {
       return undefined;
     }
+  }
+
+  private readonly mcpAppIdentities = new WeakMap<object, string>();
+  getMcpAppSessionIdentity(threadId: ThreadId): string {
+    const context = this.requireSession(threadId);
+    if (!this.isLiveContext(context) || !["ready", "running"].includes(context.session.status))
+      throw new Error("Send a message to reconnect.");
+    const observation = this.getMcpObservationContext(threadId);
+    let identity = this.mcpAppIdentities.get(observation);
+    if (!identity) {
+      identity = randomUUID();
+      this.mcpAppIdentities.set(observation, identity);
+    }
+    return identity;
+  }
+
+  /** App calls use the already-running session and never start or recover one. */
+  async callMcpAppTool(
+    threadId: ThreadId,
+    server: string,
+    tool: string,
+    args: Record<string, unknown>,
+    expectedIdentity: string,
+    approved: boolean,
+  ): Promise<unknown> {
+    const context = this.requireSession(threadId);
+    if (!this.isLiveContext(context) || !["ready", "running"].includes(context.session.status))
+      throw new Error("Send a message to reconnect.");
+    if (
+      !server.trim() ||
+      server.length > 256 ||
+      !tool.trim() ||
+      tool.length > 256 ||
+      stringifyWithinBytes(args, 65536) === undefined
+    )
+      throw new Error("Invalid MCP app tool request.");
+    const generation = this.getMcpObservationContext(threadId);
+    if (this.getMcpAppSessionIdentity(threadId) !== expectedIdentity)
+      throw new Error("The MCP app session changed before approval was used.");
+    const listing = await this.getMcpServerStatuses(threadId, { deadline: Date.now() + 10000 });
+    const policy = findMcpAppToolPolicy(
+      Object.values(listing.entries.find((entry) => entry.name === server)?.tools ?? {}),
+      tool,
+    );
+    if (!listing.complete || !policy || (!approved && !policy.readOnlyHint))
+      throw new Error("The MCP app tool needs approval or is unavailable.");
+    if (
+      !this.isLiveContext(context) ||
+      generation !== this.getMcpObservationContext(threadId) ||
+      this.getMcpAppSessionIdentity(threadId) !== expectedIdentity
+    )
+      throw new Error("The MCP app session changed before dispatch.");
+    const result = await this.sendRequest(
+      context,
+      "mcpServer/tool/call",
+      { threadId: this.nativeThreadId(context), server, tool, arguments: args },
+      30000,
+    );
+    if (!this.isLiveContext(context) || generation !== this.getMcpObservationContext(threadId))
+      throw new Error(
+        "The MCP app session changed; the tool outcome is unknown. Do not retry automatically.",
+      );
+    return result;
+  }
+
+  async readMcpAppResource(
+    threadId: ThreadId,
+    server: string,
+    uri: string,
+    expectedIdentity?: string,
+  ): Promise<unknown> {
+    const context = this.requireSession(threadId);
+    if (!this.isLiveContext(context) || !["ready", "running"].includes(context.session.status))
+      throw new Error("Send a message to reconnect.");
+    if (!server.trim() || server.length > 256 || !uri.trim() || uri.length > 4096)
+      throw new Error("Invalid MCP app resource request.");
+    const generation = this.getMcpObservationContext(threadId);
+    if (
+      expectedIdentity !== undefined &&
+      this.getMcpAppSessionIdentity(threadId) !== expectedIdentity
+    )
+      throw new Error("The MCP app session changed before capture.");
+    const result = await this.sendRequest(
+      context,
+      "mcpServer/resource/read",
+      { threadId: this.nativeThreadId(context), server, uri },
+      10000,
+    );
+    if (!this.isLiveContext(context) || generation !== this.getMcpObservationContext(threadId))
+      throw new Error("The MCP app session changed.");
+    return result;
   }
 
   getMcpObservationContext(threadId: ThreadId): object {

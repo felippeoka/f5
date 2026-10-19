@@ -1,3 +1,7 @@
+import { stringifyWithinBytes } from "@t3tools/shared/boundedJson";
+import { readMcpAppToolResult } from "@t3tools/shared/mcpApp";
+import { snapshotMcpApp } from "../../mcpApps/McpAppSnapshot.ts";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { observeCodexMcpServers } from "../codexMcpObservation.ts";
 import { mcpProviderReads, mcpContextKey } from "../../mcp/McpReadCoordinator.ts";
 import {
@@ -78,7 +82,21 @@ import {
   codexNotificationDisposition,
   codexThreadItemDisposition,
 } from "@t3tools/shared/codexProtocolManifest";
-import { Effect, Layer, Queue, Schema, ServiceMap, Stream } from "effect";
+import {
+  Cause,
+  Effect,
+  Fiber,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Queue,
+  Schema,
+  Scope,
+  Semaphore,
+  ServiceMap,
+  Stream,
+} from "effect";
 
 import {
   ProviderAdapterProcessError,
@@ -2434,6 +2452,7 @@ function mapToRuntimeEvents(
 export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
   Effect.gen(function* () {
     const serverConfig = yield* Effect.service(ServerConfig);
+    const adapterScope = yield* Scope.Scope;
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make(PROVIDER);
     const nativeEventLogger =
       options?.nativeEventLogger ??
@@ -2768,7 +2787,7 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           { concurrency: 1 },
         );
         const providerInput = appendProviderAttachmentRuntimeContext(
-          input.input,
+          input.mcpAppContext ? `${input.input ?? ""}${input.mcpAppContext}` : input.input,
           input.resolvedAttachments ?? [],
         );
 
@@ -3073,6 +3092,12 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
         manager.stopAll();
       });
 
+    const appSql = yield* Effect.serviceOption(SqlClient.SqlClient);
+    const appFs = yield* Effect.serviceOption(FileSystem.FileSystem);
+    const appPath = yield* Effect.serviceOption(Path.Path);
+    const appCaptures = new Map<ThreadId, Set<Promise<void>>>();
+    const capturePermit = yield* Semaphore.make(2);
+    let captureCount = 0;
     const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const prepareRuntimeEvent = yield* makeAutomationRuntimeEventPreparer;
 
@@ -3099,11 +3124,65 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
         const listener = (event: ProviderEvent) => {
           // Retain synchronously at admission: asynchronous logging/image storage
           // can still be running when a replacement retires this provider process.
+          const nativeItem =
+            event.method === "item/completed" ? asObject(asObject(event.payload)?.item) : undefined;
+          const appUri =
+            asString(asObject(nativeItem?.mcpAppUi)?.resourceUri) ??
+            asString(nativeItem?.mcpAppResourceUri);
+          const eligibleApp =
+            nativeItem?.type === "mcpToolCall" &&
+            nativeItem.status === "completed" &&
+            nativeItem.error == null &&
+            captureCount < 8 &&
+            (appCaptures.get(event.threadId)?.size ?? 0) < 4;
+          const initialResult =
+            eligibleApp && appUri?.startsWith("ui://") && appUri.length <= 4096
+              ? readMcpAppToolResult(nativeItem?.result)
+              : undefined;
+          const initialJson =
+            nativeItem && initialResult
+              ? stringifyWithinBytes(
+                  { arguments: asObject(nativeItem.arguments) ?? {}, result: initialResult },
+                  192 * 1024,
+                )
+              : undefined;
+          const appBootstrap = initialJson
+            ? (JSON.parse(initialJson) as Record<string, unknown>)
+            : undefined;
+          const appCapture = eligibleApp && appBootstrap !== undefined;
+          let appIdentity: string | undefined;
+          if (appCapture) {
+            try {
+              appIdentity = manager.getMcpAppSessionIdentity(event.threadId);
+            } catch {
+              /* Ordinary tool fallback. */
+            }
+          }
+          const predecessors = [
+            "turn/completed",
+            "turn/aborted",
+            "session/exited",
+            "session/closed",
+          ].includes(event.method)
+            ? [...(appCaptures.get(event.threadId) ?? [])]
+            : [];
+          let releaseAppCapture: (() => void) | undefined;
+          let barrier: Promise<void> | undefined;
+          if (appCapture) {
+            captureCount++;
+            barrier = new Promise<void>((resolve) => {
+              releaseAppCapture = resolve;
+            });
+            const pending = appCaptures.get(event.threadId) ?? new Set<Promise<void>>();
+            pending.add(barrier);
+            appCaptures.set(event.threadId, pending);
+          }
           const releaseProvenance = automationEventSanitizer.retain(event.threadId);
           return Effect.gen(function* () {
             if (isSyntheticOneOffThreadId(event.threadId)) {
               return;
             }
+            if (predecessors.length) yield* Effect.promise(() => Promise.all(predecessors));
             yield* writeNativeEvent(event);
             if (event.method === "turn/started")
               turnStartedAtByThread.set(event.threadId, event.createdAt);
@@ -3123,7 +3202,7 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
             const previewServerName = previewMcpSessions.get(event.threadId)?.serverName;
             if (event.method === "turn/completed" && event.turnId)
               computerMcpSessions.get(event.threadId)?.endTurn?.(event.turnId);
-            const runtimeEvents = withAgentBrowserPreview(
+            let runtimeEvents = withAgentBrowserPreview(
               mapToRuntimeEvents(
                 event,
                 event.threadId,
@@ -3135,6 +3214,67 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
               computerMcpSessions.get(event.threadId)?.serverName,
               computerDecisions.get(event.threadId),
             );
+            if (
+              appCapture &&
+              nativeItem &&
+              appUri &&
+              appIdentity &&
+              Option.isSome(appSql) &&
+              Option.isSome(appFs) &&
+              Option.isSome(appPath)
+            ) {
+              const server = asString(nativeItem.server),
+                tool = asString(nativeItem.tool);
+              if (server && tool) {
+                const reference = yield* capturePermit
+                  .withPermits(1)(
+                    Effect.tryPromise({
+                      try: () =>
+                        manager.readMcpAppResource(event.threadId, server, appUri, appIdentity),
+                      catch: (cause) =>
+                        toRequestError(event.threadId, "mcpServer/resource/read", cause),
+                    }).pipe(
+                      Effect.flatMap((response) =>
+                        snapshotMcpApp({
+                          attachmentsDir: serverConfig.attachmentsDir,
+                          threadId: event.threadId,
+                          activityId: `${event.id}:mcp-app`,
+                          itemKey: `mcp-app:${String(nativeItem.id)}`,
+                          server,
+                          tool,
+                          resourceUri: appUri,
+                          response,
+                        }),
+                      ),
+                      Effect.provideService(SqlClient.SqlClient, appSql.value),
+                      Effect.provideService(FileSystem.FileSystem, appFs.value),
+                      Effect.provideService(Path.Path, appPath.value),
+                    ),
+                  )
+                  .pipe(
+                    Effect.timeout("10 seconds"),
+                    Effect.catchCause((cause) =>
+                      Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.succeed(undefined),
+                    ),
+                  );
+                if (reference)
+                  runtimeEvents = runtimeEvents.map((item) =>
+                    item.type === "item.completed"
+                      ? {
+                          ...item,
+                          payload: {
+                            ...item.payload,
+                            data: {
+                              ...asObject(item.payload.data),
+                              mcpApp: reference,
+                              mcpAppBootstrap: appBootstrap,
+                            },
+                          },
+                        }
+                      : item,
+                  );
+              }
+            }
             // Redact at admission, before lifecycle cleanup removes provenance.
             const safeRuntimeEvents = yield* Effect.forEach(runtimeEvents, prepareRuntimeEvent);
             if (event.method === "session/exited" || event.method === "session/closed") {
@@ -3154,7 +3294,28 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
               return;
             }
             yield* Queue.offerAll(runtimeEventQueue, safeRuntimeEvents);
-          }).pipe(Effect.ensuring(Effect.sync(releaseProvenance)), Effect.runPromiseWith(services));
+          }).pipe(
+            Effect.forkIn(adapterScope),
+            Effect.flatMap(Fiber.join),
+            Effect.ensuring(
+              Effect.sync(() => {
+                releaseProvenance();
+                releaseAppCapture?.();
+                if (barrier) {
+                  captureCount--;
+                  const pending = appCaptures.get(event.threadId);
+                  pending?.delete(barrier);
+                  if (!pending?.size) appCaptures.delete(event.threadId);
+                }
+              }),
+            ),
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.void
+                : Effect.logWarning("Codex event processing failed."),
+            ),
+            Effect.runPromiseWith(services),
+          );
         };
         manager.on("event", listener);
         return listener;
@@ -3208,6 +3369,37 @@ export const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           try: () => manager.renameThread(threadId, title),
           catch: (cause) => toRequestError(threadId, "thread/name/set", cause),
         }),
+      mcpApps: {
+        identity: (threadId) =>
+          Effect.try({
+            try: () => manager.getMcpAppSessionIdentity(threadId),
+            catch: (cause) => toRequestError(threadId, "mcpApps.identity", cause),
+          }),
+        listTools: ({ threadId, server }) =>
+          Effect.tryPromise({
+            try: async () => {
+              const listing = await manager.getMcpServerStatuses(threadId, {
+                deadline: Date.now() + 10000,
+              });
+              if (!listing.complete) throw new Error("MCP tool inventory is incomplete.");
+              return Object.values(
+                listing.entries.find((entry) => entry.name === server)?.tools ?? {},
+              );
+            },
+            catch: (cause) => toRequestError(threadId, "mcpServerStatus/list", cause),
+          }),
+        callTool: ({ threadId, server, tool, arguments: args, sessionIdentity, approved }) =>
+          Effect.tryPromise({
+            try: () =>
+              manager.callMcpAppTool(threadId, server, tool, args, sessionIdentity, approved),
+            catch: (cause) => toRequestError(threadId, "mcpServer/tool/call", cause),
+          }),
+        readResource: ({ threadId, server, uri }) =>
+          Effect.tryPromise({
+            try: () => manager.readMcpAppResource(threadId, server, uri),
+            catch: (cause) => toRequestError(threadId, "mcpServer/resource/read", cause),
+          }),
+      },
       startSession,
       sendTurn,
       steerTurn: sendTurn,

@@ -1,3 +1,4 @@
+import { MCP_APPS_WS_METHODS, McpAppToolInfo, McpAppToolResult } from "@t3tools/contracts";
 import { THREAD_SETTLEMENT_WS_METHODS } from "@t3tools/contracts";
 import {
   PR_WATCH_WS_METHODS,
@@ -552,6 +553,18 @@ export function createWsNativeApi(): NativeApi {
         transport.subscribe(WS_CHANNELS.agentComputerUseChanged, (message) =>
           listener(message.data),
         ),
+    },
+    mcpApps: {
+      toolInfo: async (input) =>
+        Schema.decodeUnknownSync(McpAppToolInfo)(
+          await transport.request(MCP_APPS_WS_METHODS.toolInfo, input),
+        ),
+      callTool: async (input) =>
+        Schema.decodeUnknownSync(McpAppToolResult)(
+          await transport.request(MCP_APPS_WS_METHODS.callTool, input),
+        ),
+      readResource: requestMethod(MCP_APPS_WS_METHODS.readResource),
+      updateModelContext: requestMethod(MCP_APPS_WS_METHODS.updateModelContext),
     },
     threadSettlement: {
       settleProjectIdle: requestMethod(THREAD_SETTLEMENT_WS_METHODS.settleProjectIdle),

@@ -1,3 +1,10 @@
+import {
+  MCP_APPS_WS_METHODS,
+  McpAppCallToolInput,
+  McpAppReadResourceInput,
+  McpAppToolInfoInput,
+  McpAppUpdateModelContextInput,
+} from "./mcpApps";
 import { THREAD_SETTLEMENT_WS_METHODS, SettleProjectIdleInput } from "./threadSettlement";
 import {
   PR_WATCH_WS_METHODS,
@@ -660,6 +667,10 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(PR_HUB_WS_METHODS.listAccountRouting, Schema.Struct({})),
   tagRequestBody(PR_HUB_WS_METHODS.setAccountRouting, ForgeAccountRouting),
   tagRequestBody(PR_HUB_WS_METHODS.removeAccountRouting, ForgeAccountRouting),
+  tagRequestBody(MCP_APPS_WS_METHODS.toolInfo, McpAppToolInfoInput),
+  tagRequestBody(MCP_APPS_WS_METHODS.callTool, McpAppCallToolInput),
+  tagRequestBody(MCP_APPS_WS_METHODS.readResource, McpAppReadResourceInput),
+  tagRequestBody(MCP_APPS_WS_METHODS.updateModelContext, McpAppUpdateModelContextInput),
   tagRequestBody(THREAD_SETTLEMENT_WS_METHODS.settleProjectIdle, SettleProjectIdleInput),
   tagRequestBody(PR_WATCH_WS_METHODS.list, PullRequestWatchListInput),
   tagRequestBody(PR_WATCH_WS_METHODS.start, PullRequestWatchInput),

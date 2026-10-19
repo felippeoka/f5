@@ -1,4 +1,12 @@
 import type {
+  McpAppCallToolInput,
+  McpAppReadResourceInput,
+  McpAppToolInfoInput,
+  McpAppToolInfo,
+  McpAppToolResult,
+  McpAppUpdateModelContextInput,
+} from "./mcpApps";
+import type {
   PullRequestWatchEntry,
   PullRequestWatchInput,
   PullRequestWatchChanged,
@@ -716,6 +724,12 @@ export interface DesktopPreviewBridge {
 }
 
 export interface NativeApi {
+  mcpApps: {
+    toolInfo: (input: McpAppToolInfoInput) => Promise<McpAppToolInfo>;
+    callTool: (input: McpAppCallToolInput) => Promise<McpAppToolResult>;
+    readResource: (input: McpAppReadResourceInput) => Promise<unknown>;
+    updateModelContext: (input: McpAppUpdateModelContextInput) => Promise<void>;
+  };
   threadSettlement: {
     settleProjectIdle: (input: { projectId: ProjectId }) => Promise<{ settled: number }>;
   };

@@ -1,3 +1,4 @@
+import { McpAppServiceLive } from "./mcpApps/McpAppService.ts";
 import { ThreadSettlementServiceLive } from "./orchestration/Layers/ThreadSettlementService.ts";
 import { PullRequestWatchServiceLive } from "./orchestration/Layers/PullRequestWatchService.ts";
 import { ThreadMcpBroker, ThreadMcpBrokerLive } from "./mcp/threadMcpTools.ts";
@@ -555,5 +556,6 @@ export function makeServerOrchestrationRuntimeLayer() {
     defaultBranchAutoPullLayer,
     PullRequestWatchServiceLive.pipe(Layer.provideMerge(nextTurnQueueDispatcherLayer)),
     ThreadSettlementServiceLive.pipe(Layer.provideMerge(nextTurnQueueDispatcherLayer)),
+    McpAppServiceLive.pipe(Layer.provideMerge(runtimeServicesLayer)),
   ).pipe(Layer.provideMerge(NodeServices.layer));
 }

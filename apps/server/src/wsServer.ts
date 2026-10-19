@@ -1,3 +1,5 @@
+import { McpAppService } from "./mcpApps/McpAppService.ts";
+import { MCP_APPS_WS_METHODS } from "@t3tools/contracts";
 import { ThreadSettlementService } from "./orchestration/Layers/ThreadSettlementService.ts";
 import { THREAD_SETTLEMENT_WS_METHODS } from "@t3tools/contracts";
 import { PullRequestWatchService } from "./orchestration/Layers/PullRequestWatchService.ts";
@@ -913,6 +915,7 @@ function formatServerLifecycleRouteFailure(error: ServerLifecycleError): string 
 const ORCHESTRATION_RUNTIME_ROUTE_WAIT_MS = 55_000;
 
 interface OrchestrationRuntimeServices {
+  readonly mcpApps: McpAppService["Service"];
   readonly threadSettlement: ThreadSettlementService["Service"];
   readonly pullRequestWatches: PullRequestWatchService["Service"];
   readonly projectSkillSyncService: ProjectSkillSyncServiceShape;
@@ -2752,6 +2755,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         orchestrationRuntimeServices,
         NextTurnQueueDispatcher,
       );
+      const mcpApps = ServiceMap.get(orchestrationRuntimeServices, McpAppService);
       const threadSettlement = ServiceMap.get(
         orchestrationRuntimeServices,
         ThreadSettlementService,
@@ -2942,6 +2946,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       yield* Ref.set(nextTurnQueueDispatcherRef, nextTurnQueueDispatcher);
       yield* readiness.markOrchestrationSubscriptionsReady;
       yield* Deferred.succeed(orchestrationRuntime, {
+        mcpApps,
         threadSettlement,
         pullRequestWatches,
         threadBackgroundWork,
@@ -5497,6 +5502,22 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return yield* prHubAdvisory.analyzeAdvisories(body);
       }
 
+      case MCP_APPS_WS_METHODS.toolInfo:
+        return yield* (yield* awaitOrchestrationRuntimeForRoute).mcpApps.toolInfo(
+          stripRequestTag(request.body),
+        );
+      case MCP_APPS_WS_METHODS.callTool:
+        return yield* (yield* awaitOrchestrationRuntimeForRoute).mcpApps.callTool(
+          stripRequestTag(request.body),
+        );
+      case MCP_APPS_WS_METHODS.readResource:
+        return yield* (yield* awaitOrchestrationRuntimeForRoute).mcpApps.readResource(
+          stripRequestTag(request.body),
+        );
+      case MCP_APPS_WS_METHODS.updateModelContext:
+        return yield* (yield* awaitOrchestrationRuntimeForRoute).mcpApps.updateModelContext(
+          stripRequestTag(request.body),
+        );
       case THREAD_SETTLEMENT_WS_METHODS.settleProjectIdle:
         return yield* (yield* awaitOrchestrationRuntimeForRoute).threadSettlement.settleProjectIdle(
           request.body.projectId,

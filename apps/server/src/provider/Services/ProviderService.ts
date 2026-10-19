@@ -57,6 +57,7 @@ export interface ProviderSubmissionHandle {
 }
 
 export interface ProviderServiceShape {
+  readonly mcpApps?: import("./ProviderAdapter.ts").ProviderMcpApps<ProviderServiceError>;
   /** Registers a service-owned operation; caller cancellation cannot abandon transport. */
   readonly submitTurn?: (input: ProviderSendTurnInput) => Effect.Effect<ProviderSubmissionHandle>;
 

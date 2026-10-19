@@ -1,3 +1,4 @@
+import { McpAppFrame } from "./McpAppFrame";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { computerToolHeading } from "@t3tools/shared/computerAction";
 import { NativeFilePreview } from "./NativeFilePreview";
@@ -3213,6 +3214,7 @@ const WorkEntryRow = memo(function WorkEntryRow(props: {
   onImageExpand: (preview: ExpandedImagePreview) => void;
 }) {
   const { workEntry } = props;
+  const { threadId } = useTimelineRowContext();
   const timestamp = (className: string) => (
     <time
       dateTime={workEntry.createdAt}
@@ -3229,38 +3231,41 @@ const WorkEntryRow = memo(function WorkEntryRow(props: {
   // in the shared right gutter overlapped the card's corner whenever it was wider.
   const mcpCard =
     !workEntry.diagnostic && workEntry.itemType === "mcp_tool_call" && props.expandMcpToolCalls;
-  const row = workEntry.htmlRender ? (
-    <HtmlRenderFrame reference={workEntry.htmlRender} onImageExpand={props.onImageExpand} />
-  ) : workEntry.diagnostic ? (
-    <DiagnosticWorkEntryRow workEntry={workEntry} />
-  ) : workEntry.itemType === "collab_agent_tool_call" ? (
-    <SubagentWorkEntryRow
-      workEntry={workEntry}
-      turnDiffSummaryByTurnId={props.turnDiffSummaryByTurnId}
-      workspaceRoot={props.workspaceRoot}
-      markdownCwd={props.markdownCwd}
-    />
-  ) : mcpCard ? (
-    <McpToolCallRow
-      workEntry={workEntry}
-      expandByDefault={props.expandMcpByDefault}
-      turnDiffSummaryByTurnId={props.turnDiffSummaryByTurnId}
-      workspaceRoot={props.workspaceRoot}
-      markdownCwd={props.markdownCwd}
-      timestamp={timestamp("shrink-0 pt-0.5")}
-      onImageExpand={props.onImageExpand}
-    />
-  ) : (
-    <SimpleWorkEntryRow
-      workEntry={workEntry}
-      turnDiffSummaryByTurnId={props.turnDiffSummaryByTurnId}
-      workspaceRoot={props.workspaceRoot}
-      resolvedTheme={props.resolvedTheme}
-      showFileChangeDiffsInline={props.showFileChangeDiffsInline}
-      chatDiffContext={props.chatDiffContext}
-      onOpenTurnDiff={props.onOpenTurnDiff}
-    />
-  );
+  const row =
+    workEntry.mcpApp && threadId ? (
+      <McpAppFrame app={workEntry.mcpApp} threadId={threadId} />
+    ) : workEntry.htmlRender ? (
+      <HtmlRenderFrame reference={workEntry.htmlRender} onImageExpand={props.onImageExpand} />
+    ) : workEntry.diagnostic ? (
+      <DiagnosticWorkEntryRow workEntry={workEntry} />
+    ) : workEntry.itemType === "collab_agent_tool_call" ? (
+      <SubagentWorkEntryRow
+        workEntry={workEntry}
+        turnDiffSummaryByTurnId={props.turnDiffSummaryByTurnId}
+        workspaceRoot={props.workspaceRoot}
+        markdownCwd={props.markdownCwd}
+      />
+    ) : mcpCard ? (
+      <McpToolCallRow
+        workEntry={workEntry}
+        expandByDefault={props.expandMcpByDefault}
+        turnDiffSummaryByTurnId={props.turnDiffSummaryByTurnId}
+        workspaceRoot={props.workspaceRoot}
+        markdownCwd={props.markdownCwd}
+        timestamp={timestamp("shrink-0 pt-0.5")}
+        onImageExpand={props.onImageExpand}
+      />
+    ) : (
+      <SimpleWorkEntryRow
+        workEntry={workEntry}
+        turnDiffSummaryByTurnId={props.turnDiffSummaryByTurnId}
+        workspaceRoot={props.workspaceRoot}
+        resolvedTheme={props.resolvedTheme}
+        showFileChangeDiffsInline={props.showFileChangeDiffsInline}
+        chatDiffContext={props.chatDiffContext}
+        onOpenTurnDiff={props.onOpenTurnDiff}
+      />
+    );
 
   return (
     <div className={cn("group/work-entry relative min-w-0", !mcpCard && "pr-14")}>
@@ -3476,58 +3481,58 @@ function WorkGroupRowContent(props: {
     workspaceRoot,
   } = useTimelineRowContext();
   const groupId = row.id;
-  const groupState = resolveWorkGroupRenderState(row.groupedEntries, externals.expandedCount);
+  const appEntries = row.groupedEntries.filter((entry) => entry.mcpApp);
+  const logEntries = row.groupedEntries.filter((entry) => !entry.mcpApp);
+  const groupState = resolveWorkGroupRenderState(logEntries, externals.expandedCount);
+  const entryProps = {
+    timestampFormat,
+    expandMcpToolCalls,
+    expandMcpByDefault: expandMcpToolCallCardsByDefault,
+    turnDiffSummaryByTurnId: externals.turnDiffSummaryByTurnId,
+    workspaceRoot,
+    markdownCwd,
+    resolvedTheme,
+    showFileChangeDiffsInline,
+    chatDiffContext: externals.chatDiffContext,
+    onOpenTurnDiff: actions.onOpenTurnDiff,
+    onImageExpand: actions.onImageExpand,
+  };
+  const appRows = appEntries.map((entry) => (
+    <WorkEntryRow key={`app:${entry.id}`} workEntry={entry} {...entryProps} />
+  ));
+  if (!logEntries.length) return <div className="min-w-0 space-y-2">{appRows}</div>;
   const standaloneExpandedMcpEntry =
-    row.groupedEntries.length === 1 && row.groupedEntries[0]?.htmlRender
+    row.groupedEntries.length === 1 &&
+    (row.groupedEntries[0]?.htmlRender || row.groupedEntries[0]?.mcpApp)
       ? row.groupedEntries[0]
       : resolveStandaloneExpandedMcpWorkEntry(row.groupedEntries, {
           settingsExpandMcpToolCalls: expandMcpToolCalls,
         });
 
-  if (standaloneExpandedMcpEntry) {
+  if (!appEntries.length && standaloneExpandedMcpEntry) {
     return (
       <div className="min-w-0 px-1 py-0.5">
-        <WorkEntryRow
-          workEntry={standaloneExpandedMcpEntry}
-          timestampFormat={timestampFormat}
-          expandMcpToolCalls={expandMcpToolCalls}
-          expandMcpByDefault={expandMcpToolCallCardsByDefault}
-          turnDiffSummaryByTurnId={externals.turnDiffSummaryByTurnId}
-          workspaceRoot={workspaceRoot}
-          markdownCwd={markdownCwd}
-          resolvedTheme={resolvedTheme}
-          showFileChangeDiffsInline={showFileChangeDiffsInline}
-          chatDiffContext={externals.chatDiffContext}
-          onOpenTurnDiff={actions.onOpenTurnDiff}
-          onImageExpand={actions.onImageExpand}
-        />
+        <WorkEntryRow workEntry={standaloneExpandedMcpEntry} {...entryProps} />
       </div>
     );
   }
 
   const expanded = externals.collapseOverride ?? !(row.isPriorTurn && collapseCompletedWorkLogs);
-  if (!expanded) {
-    return (
-      <div className="min-w-0 px-1 py-0.5">
-        <button
-          type="button"
-          aria-expanded={false}
-          data-slot="work-group-summary"
-          className="flex min-h-7 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-ui text-muted-foreground outline-none transition-colors duration-(--duration-fast) hover:bg-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => actions.onSetWorkGroupExpanded(groupId, true)}
-        >
-          <ChevronRightIcon
-            aria-hidden="true"
-            className="size-3.5 shrink-0 text-faint-foreground"
-          />
-          <span className="min-w-0 truncate">{row.workSummary}</span>
-        </button>
-      </div>
-    );
-  }
   const canCollapse = row.isPriorTurn && canSetWorkGroupExpanded;
-
-  return (
+  const log = !expanded ? (
+    <div className="min-w-0 px-1 py-0.5">
+      <button
+        type="button"
+        aria-expanded={false}
+        data-slot="work-group-summary"
+        className="flex min-h-7 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-ui text-muted-foreground outline-none transition-colors duration-(--duration-fast) hover:bg-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => actions.onSetWorkGroupExpanded(groupId, true)}
+      >
+        <ChevronRightIcon aria-hidden="true" className="size-3.5 shrink-0 text-faint-foreground" />
+        <span className="min-w-0 truncate">{row.workSummary}</span>
+      </button>
+    </div>
+  ) : (
     <div className="rounded-xl border border-border bg-card/50 px-2 py-1.5">
       {(groupState.showHeader || canCollapse) && (
         <div className="mb-1 flex min-h-6 items-center justify-between gap-2 px-0.5">
@@ -3545,7 +3550,7 @@ function WorkGroupRowContent(props: {
               <span className="truncate">{row.workSummary}</span>
             </button>
           ) : (
-            <SectionLabel as="span" count={row.groupedEntries.length} className="min-h-0">
+            <SectionLabel as="span" count={logEntries.length} className="min-h-0">
               {groupState.groupLabel}
             </SectionLabel>
           )}
@@ -3564,24 +3569,18 @@ function WorkGroupRowContent(props: {
       )}
       <div className="space-y-0.5">
         {groupState.visibleEntries.map((workEntry) => (
-          <WorkEntryRow
-            key={`work-row:${workEntry.id}`}
-            workEntry={workEntry}
-            timestampFormat={timestampFormat}
-            expandMcpToolCalls={expandMcpToolCalls}
-            expandMcpByDefault={expandMcpToolCallCardsByDefault}
-            turnDiffSummaryByTurnId={externals.turnDiffSummaryByTurnId}
-            workspaceRoot={workspaceRoot}
-            markdownCwd={markdownCwd}
-            resolvedTheme={resolvedTheme}
-            showFileChangeDiffsInline={showFileChangeDiffsInline}
-            chatDiffContext={externals.chatDiffContext}
-            onOpenTurnDiff={actions.onOpenTurnDiff}
-            onImageExpand={actions.onImageExpand}
-          />
+          <WorkEntryRow key={`work-row:${workEntry.id}`} workEntry={workEntry} {...entryProps} />
         ))}
       </div>
     </div>
+  );
+  return appRows.length ? (
+    <div className="min-w-0 space-y-2">
+      {appRows}
+      {log}
+    </div>
+  ) : (
+    log
   );
 }
 

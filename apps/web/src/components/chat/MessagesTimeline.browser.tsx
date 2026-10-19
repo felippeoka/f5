@@ -764,6 +764,55 @@ describe("MessagesTimeline (LegendList)", () => {
     }
   });
 
+  it("keeps a prior-turn MCP app visible while ordinary work logs collapse", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const appEntry = makeReadWorkEntry("app-work", "unused", 2);
+    if (appEntry.kind !== "work") throw new Error("Expected work entry");
+    appEntry.entry = {
+      ...appEntry.entry,
+      label: "Weather app",
+      readPaths: [],
+      changedFiles: [],
+      mcpApp: {
+        reference: {
+          attachmentId: "weather-doc",
+          server: "weather",
+          tool: "forecast",
+          resourceUri: "ui://weather/app",
+        },
+        arguments: {},
+        result: { content: [] },
+      },
+    };
+    const screen = await render(
+      <TimelineHarness
+        threadId={INLINE_DIFF_THREAD_ID}
+        initialEntries={[
+          makeUserEntry("app-user-1", "Weather", 0),
+          makeReadWorkEntry("app-read", "src/weather.ts", 1),
+          appEntry,
+          makeAssistantEntry("app-answer", "Sunny", 3),
+          makeUserEntry("app-user-2", "Tomorrow?", 4),
+        ]}
+        onIsAtEndChangeSpy={() => {}}
+      />,
+      { container: host },
+    );
+    try {
+      await vi.waitFor(() => {
+        expect(
+          host.querySelector('[data-slot="work-group-summary"]')?.getAttribute("aria-expanded"),
+        ).toBe("false");
+        expect(host.textContent).toContain("Send a message to reconnect.");
+      });
+      expect(host.textContent).not.toContain("src/weather.ts");
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
   it("keeps prior work logs open when the collapse setting is off", async () => {
     persistAppSettings({ collapseCompletedWorkLogs: false });
     const host = document.createElement("div");

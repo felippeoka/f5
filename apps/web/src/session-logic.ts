@@ -1,3 +1,4 @@
+import { readMcpAppView, type McpAppView } from "@t3tools/shared/mcpApp";
 import { HtmlRenderReference } from "@t3tools/contracts";
 import { Schema } from "effect";
 import {
@@ -89,6 +90,7 @@ export const PROVIDER_OPTIONS: Array<{
 
 export interface WorkLogEntry {
   htmlRender?: HtmlRenderReference;
+  mcpApp?: McpAppView;
   imagePath?: string;
   id: string;
   createdAt: string;
@@ -724,7 +726,7 @@ function shouldKeepHistoricalWorkEntry(
   latestTurnId: TurnId | undefined,
   terminalCodexProviderItemIds: ReadonlySet<ProviderItemId>,
 ): boolean {
-  if (!latestTurnId || activity.kind === "htmlRender") {
+  if (!latestTurnId || activity.kind === "htmlRender" || activity.kind === "mcpApp") {
     return true;
   }
   if (
@@ -763,6 +765,7 @@ function shouldKeepHistoricalWorkEntry(
 function workEntryVisibleSignature(entry: WorkLogEntry): string {
   return JSON.stringify({
     htmlRender: entry.htmlRender,
+    mcpApp: entry.mcpApp?.reference.attachmentId,
     label: entry.label,
     toolTitle: entry.toolTitle,
     itemType: entry.itemType,
@@ -1507,6 +1510,10 @@ export function deriveWorkLogEntries(
         tone: usageLimit || activity.tone === "approval" ? "info" : activity.tone,
         activityKind: activity.kind,
       };
+      if (activity.kind === "mcpApp") {
+        const app = readMcpAppView(payload);
+        if (app) entry.mcpApp = app;
+      }
       if (activity.kind === "htmlRender") {
         const parsed = Schema.decodeUnknownOption(HtmlRenderReference)(payload?.htmlRender);
         if (parsed._tag === "Some") entry.htmlRender = parsed.value;
@@ -1632,7 +1639,7 @@ export function deriveWorkLogEntries(
       if (diagnostic) {
         entry.diagnostic = diagnostic;
         entry.category = diagnostic.type === "hook" ? "hook" : "review";
-      } else if (toolPayload) {
+      } else if (toolPayload || entry.mcpApp) {
         entry.category = "tool";
       } else if (
         activity.kind === "runtime.warning" ||

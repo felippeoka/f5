@@ -7,9 +7,9 @@ This artifact tracks triage separately from delivery. `scripts/upstream-ports.js
 Implementation is on `fix/upstream-october-review` in the isolated checkout
 `../f5-upstream-october-review`. Main `f711d43051` was merged additively in
 `401725257a`; user work in the original checkout remains intact. The implementation
-through `fc5e96ff55` includes guided reviews, scoped thread tools, HTML renders,
-manual GitHub reset waits and durable PR watches. Settlement is the current
-continuation. Migration 126 and protocol 33 extend the merged baseline. Coverage remains 4,084 ledger records;
+through `8f0e182ac6` includes guided reviews, scoped thread tools, HTML renders,
+manual GitHub reset waits, durable PR watches and persisted settlement. The current
+continuation adds Codex MCP apps. Migration 127 and protocol 34 extend the merged baseline. Coverage remains 4,084 ledger records;
 implementation work does not automatically promote deferred obligations.
 
 The full gate and verify-first/security obligations remain incomplete. See
