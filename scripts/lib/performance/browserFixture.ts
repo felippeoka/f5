@@ -1,4 +1,5 @@
 import { ProjectId } from "@t3tools/contracts";
+import type { WorktreesThreadStateResult } from "@t3tools/contracts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { fixture, messageFixture } from "./fixtures.ts";
 
@@ -244,10 +245,20 @@ export function createBrowserFixture(protocolVersion = 1) {
           return [];
         case "prHub.getThreadLinks":
           return [];
-        case "orchestration.getRewindDrafts":
-          return { threadId: id, drafts: [] };
-        case "worktreeSetup.subscribe":
-          return { snapshot: null, generation: 0, sequence: 0 };
+        case "pullRequestWatches.list":
+          return [];
+        case "worktrees.getTransition":
+          return null;
+        case "worktrees.threadState":
+          return {
+            worktreePath: null,
+            branch: "main",
+            directoryExists: true,
+            registration: "none",
+            branchExists: true,
+            defaultBranch: "main",
+            recovery: "none",
+          } satisfies WorktreesThreadStateResult;
         case "orchestration.getSnapshot":
           return snapshot();
         case "orchestration.getStartupSnapshot":
