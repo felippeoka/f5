@@ -33,6 +33,8 @@ function assertBoundedJobs(jobs: Record<string, Job>, visited = new Set<string>(
       const called = parse(
         readFileSync(new URL(`../${job.uses.slice(2)}`, import.meta.url), "utf8"),
       ) as { jobs: Record<string, Job> };
+      for (const [calledId, calledJob] of Object.entries(called.jobs))
+        expect(calledJob["continue-on-error"], calledId).toBeUndefined();
       assertBoundedJobs(called.jobs, new Set([...visited, job.uses]));
     } else expect(job["timeout-minutes"], id).toBeGreaterThan(0);
   }

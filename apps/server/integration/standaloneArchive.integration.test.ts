@@ -163,7 +163,7 @@ it.skipIf(!required && (!archive || !manifest))(
       } finally {
         await stopChild(supervisor);
       }
-      console.log(`Real archive staging/activation smoke passed. Isolated artifacts: ${root}`);
+      console.log("Real archive staging/activation smoke passed.");
     } catch (error) {
       failure = error;
       throw error;

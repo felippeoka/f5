@@ -664,42 +664,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.packaging == 'true'
     uses: ./.github/workflows/windows-release-checks.yml
-    # TEMP: the five-target rehearsal below includes the Windows archives.
-    with:
-      check-cli: false
-  # TEMP: validate every archive and unsigned Linux packaging before the shared workflows land.
-  cli-rehearsal:
-    uses: ./.github/workflows/build-cli.yml
-  linux-packaging-rehearsal:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    defaults:
-      run:
-        shell: bash
-    env:
-      T3CODE_DESKTOP_UPDATE_CHANNEL: latest
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - name: Read current version
-        run: echo "VERSION=$(node -p 'require("./apps/desktop/package.json").version')" >> "$GITHUB_ENV"
-      - run: |
-          node scripts/update-release-package-versions.ts "$VERSION"
-          bun run build:desktop
-          node scripts/build-desktop-artifact.ts --skip-build --platform linux --arch x64 --target AppImage --build-version "$VERSION" --output-dir distribution-linux
-      - if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: distribution-linux-appimage-${{ github.run_attempt }}
-          path: |
-            distribution-linux/*
-            !distribution-linux/builder-debug.yml
-            !distribution-linux/builder-effective-config.yaml
-          retention-days: 7
-          if-no-files-found: ignore
   ci-result:
     name: CI result
     runs-on: ubuntu-latest
@@ -718,8 +682,6 @@ jobs:
         macos-profiles,
         macos-suite,
         windows-release-checks,
-        cli-rehearsal,
-        linux-packaging-rehearsal,
       ]
     steps:
       - name: Require every job verdict

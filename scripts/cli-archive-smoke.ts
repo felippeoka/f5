@@ -132,7 +132,7 @@ try {
     throw new Error("Standalone backup download is incomplete.");
   await fs.writeFile(path.join(directory, "standalone.f5backup"), backupBytes);
   console.log(
-    `Standalone clean-PATH smoke passed for ${artifact.target}: server, migrations, web assets, native PTY, native search and backup maintenance. Artifacts: ${directory}`,
+    `Standalone clean-PATH smoke passed for ${artifact.target}: server, migrations, web assets, native PTY, native search and backup maintenance.`,
   );
 } catch (error) {
   failure = error;

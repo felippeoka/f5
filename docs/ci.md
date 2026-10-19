@@ -162,6 +162,14 @@ recovery; manual runs do not notify. The maintainer reviews the issue and checks
 schedule activity monthly because GitHub can disable schedules after 60 days
 without repository activity.
 
+The distribution rehearsal on [PR #177, run 39226735921](https://github.com/lopes-felipe/f5/actions/runs/39226735921)
+passed clean-PATH smoke and mandatory integration on all five native archive targets,
+with exactly one passed integration and zero skips in each uploaded JSON report.
+Linux AppImage packaging and the unsigned Windows installed-upgrade rehearsal also
+passed. Temporary PR rehearsal jobs were removed in an additive follow-up commit.
+A protected release dry run and the main-only distribution dispatch remain maintainer
+validation after merge; the dependency audit already reports high/critical findings.
+
 ## Maintainer rollout
 
 PR #163 combines the Agent Bridge fix, workflow restructure, reports/diagnostics
