@@ -400,6 +400,8 @@ export function getProviderEnvironmentKey(
       return `grok|binary:${normalized?.grok?.binaryPath ?? ""}`;
     case "antigravity":
       return "antigravity|managed";
+    case "acp":
+      return "acp|instance";
     case "muse":
       // Binary path and credentials live on the provider instance.
       return "muse|instance";

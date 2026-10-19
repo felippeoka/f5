@@ -52,8 +52,10 @@ export function providerRuntimeCapabilities(
     asyncQuestions: driver === "codex" && supportsCodexAsyncQuestions(version),
     maxImagesPerTurn: isKnownProviderKind(driver) ? providerMaxImages(driver) : 0,
     // Claude reports models through SDK initialization; Codex and Muse through `model/list`.
-    reportedModels: driver === "claudeAgent" || driver === "codex" || driver === "muse",
-    sessionCommandCatalog: driver === "claudeAgent" || driver === "codex" || driver === "grok",
+    reportedModels:
+      driver === "claudeAgent" || driver === "codex" || driver === "muse" || driver === "acp",
+    sessionCommandCatalog:
+      driver === "claudeAgent" || driver === "codex" || driver === "grok" || driver === "acp",
     instanceInventory: driver === "claudeAgent" || driver === "codex",
     nativeSessionCleanup: driver === "claudeAgent",
   };

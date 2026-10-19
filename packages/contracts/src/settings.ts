@@ -183,6 +183,35 @@ export const AntigravitySettings = Schema.Struct({
 });
 export type AntigravitySettings = typeof AntigravitySettings.Type;
 
+/** Local ACP commands are executed directly, with an argument vector and instance environment. */
+export const AcpSettings = Schema.Struct({
+  command: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(4096),
+    Schema.makeFilter(
+      (value) => !value.includes("\0") && !value.includes("\r") && !value.includes("\n"),
+    ),
+  ),
+  args: Schema.Array(
+    Schema.String.check(
+      Schema.isMaxLength(16384),
+      Schema.makeFilter((value) => !value.includes("\0")),
+    ),
+  )
+    .check(Schema.isMaxLength(256))
+    .pipe(Schema.withDecodingDefault(() => [])),
+  env: Schema.Record(
+    Schema.String.check(Schema.isPattern(/^[a-zA-Z_][a-zA-Z0-9_]*$/)),
+    Schema.String.check(
+      Schema.isMaxLength(65536),
+      Schema.makeFilter((value) => !value.includes("\0")),
+    ),
+  )
+    .check(Schema.makeFilter((values) => Object.keys(values).length <= 128))
+    .pipe(Schema.withDecodingDefault(() => ({}))),
+  customModels: Schema.Array(CustomModelSetting).pipe(Schema.withDecodingDefault(() => [])),
+});
+export type AcpSettings = typeof AcpSettings.Type;
+
 export const OtlpHeader = Schema.Struct({
   name: TrimmedNonEmptyString.check(
     Schema.isMaxLength(128),

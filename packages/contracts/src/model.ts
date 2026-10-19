@@ -71,6 +71,7 @@ export const ProviderModelOptions = Schema.Struct({
   grok: Schema.optional(Schema.Struct({})),
   antigravity: Schema.optional(Schema.Struct({})),
   muse: Schema.optional(MuseModelOptions),
+  acp: Schema.optional(Schema.Struct({})),
 });
 export type ProviderModelOptions = typeof ProviderModelOptions.Type;
 
@@ -252,6 +253,7 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
   grok: [{ slug: "grok-build", name: "Grok Build" }],
   antigravity: [{ slug: "antigravity-default", name: "Antigravity Default" }],
   muse: [{ slug: "muse-spark-1.3", name: "Muse Spark 1.3" }],
+  acp: [{ slug: "acp-default", name: "Agent default" }],
 } as const satisfies Record<ProviderKind, readonly ModelOption[]>;
 export type ModelOptionsByProvider = typeof MODEL_OPTIONS_BY_PROVIDER;
 export type ClaudeBuiltInModelSlug = ModelOptionsByProvider["claudeAgent"][number]["slug"];
@@ -267,6 +269,7 @@ export const DEFAULT_MODEL_BY_PROVIDER = {
   grok: "grok-build",
   antigravity: "antigravity-default",
   muse: "muse-spark-1.3",
+  acp: "acp-default",
 } as const satisfies Record<ProviderKind, ModelSlug>;
 
 export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
@@ -283,6 +286,7 @@ export const DEFAULT_THREAD_TITLE_MODEL_BY_PROVIDER = {
   grok: "grok-build",
   antigravity: "antigravity-default",
   muse: "muse-spark-1.3",
+  acp: "acp-default",
 } as const satisfies Record<ProviderKind, ModelSlug>;
 
 export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER = {
@@ -293,6 +297,7 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER = {
   grok: "grok-build",
   antigravity: "antigravity-default",
   muse: "muse-spark-1.3",
+  acp: "acp-default",
 } as const satisfies Record<ProviderKind, ModelSlug>;
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER = {
@@ -371,6 +376,7 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER = {
   grok: {},
   antigravity: {},
   muse: {},
+  acp: {},
 } as const satisfies Record<ProviderKind, Record<string, ModelSlug>>;
 
 export const PROVIDER_DISPLAY_NAMES = {
@@ -381,6 +387,7 @@ export const PROVIDER_DISPLAY_NAMES = {
   grok: "Grok",
   antigravity: "Antigravity",
   muse: "Muse Code",
+  acp: "Custom ACP agent",
 } as const satisfies Record<ProviderKind, string>;
 
 export const REASONING_EFFORT_OPTIONS_BY_PROVIDER = {
@@ -391,6 +398,7 @@ export const REASONING_EFFORT_OPTIONS_BY_PROVIDER = {
   grok: [],
   antigravity: [],
   muse: MUSE_REASONING_EFFORT_OPTIONS,
+  acp: [],
 } as const satisfies Record<ProviderKind, readonly ProviderReasoningEffort[]>;
 
 export const DEFAULT_REASONING_EFFORT_BY_PROVIDER = {
@@ -401,4 +409,5 @@ export const DEFAULT_REASONING_EFFORT_BY_PROVIDER = {
   grok: "high",
   antigravity: "high",
   muse: "high",
+  acp: "high",
 } as const satisfies Record<ProviderKind, ProviderReasoningEffort>;

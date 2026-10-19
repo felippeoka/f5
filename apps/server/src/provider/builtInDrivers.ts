@@ -1,3 +1,4 @@
+import { AcpDriver, type AcpDriverEnv } from "./Drivers/AcpDriver.ts";
 import { AntigravityDriver, type AntigravityDriverEnv } from "./Drivers/AntigravityDriver.ts";
 /**
  * BUILT_IN_DRIVERS — the static set of `ProviderDriver`s this build ships
@@ -35,6 +36,7 @@ import type { AnyProviderDriver } from "./ProviderDriver.ts";
  * layer must provide every service in this union.
  */
 export type BuiltInDriversEnv =
+  | AcpDriverEnv
   | AntigravityDriverEnv
   | ClaudeDriverEnv
   | CodexDriverEnv
@@ -56,4 +58,5 @@ export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv
   GrokDriver,
   AntigravityDriver,
   MuseDriver,
+  AcpDriver,
 ];

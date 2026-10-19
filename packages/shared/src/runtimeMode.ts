@@ -23,6 +23,7 @@ export function runtimeModeCapabilities(provider: ProviderKind): ReadonlySet<Run
     case "cursor":
     case "grok":
     case "antigravity":
+    case "acp":
       return BASIC_MODES;
     case "muse":
       return MUSE_MODES;

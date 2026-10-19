@@ -224,7 +224,8 @@ function selectAutoApprovedPermissionOption(
 export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapterLiveOptions) {
   return Effect.gen(function* () {
     const PROVIDER = options?.provider ?? "grok";
-    const providerLabel = PROVIDER === "antigravity" ? "Antigravity" : "Grok";
+    const providerLabel =
+      PROVIDER === "acp" ? "Custom ACP agent" : PROVIDER === "antigravity" ? "Antigravity" : "Grok";
     const normalizeModel = options?.normalizeModel ?? resolveGrokAcpBaseModelId;
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make(PROVIDER);
     const fileSystem = yield* FileSystem.FileSystem;
@@ -565,7 +566,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           const resumeSessionId = parseGrokResume(input.resumeCursor)?.sessionId;
           const catalogs = yield* prepareAcpAutomationCatalogs({
             threadId: input.threadId,
-            provider: PROVIDER as "cursor" | "grok" | "antigravity",
+            provider: PROVIDER as "cursor" | "grok" | "antigravity" | "acp",
             scope: sessionScope,
             ...(options?.previewMcpHttpServer ? { preview: options.previewMcpHttpServer } : {}),
             ...(options?.computerAutomationBroker
@@ -924,9 +925,11 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             : undefined;
           const boundModelId = yield* applyGrokAcpModelSelection({
             runtime: acp,
+            defaultModelId: PROVIDER === "acp" ? "acp-default" : "grok-build",
             currentModelId: currentGrokModelIdFromSessionSetup(started.sessionSetupResult),
             requestedModelId:
-              PROVIDER === "antigravity" && requestedStartModelId === "antigravity-default"
+              (PROVIDER === "antigravity" && requestedStartModelId === "antigravity-default") ||
+              (PROVIDER === "acp" && requestedStartModelId === "acp-default")
                 ? undefined
                 : requestedStartModelId,
             mapError: (cause) =>
@@ -1202,9 +1205,11 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 : undefined;
               const currentModelId = yield* applyGrokAcpModelSelection({
                 runtime: ctx.acp,
+                defaultModelId: PROVIDER === "acp" ? "acp-default" : "grok-build",
                 currentModelId: ctx.currentModelId,
                 requestedModelId:
-                  PROVIDER === "antigravity" && requestedTurnModelId === "antigravity-default"
+                  (PROVIDER === "antigravity" && requestedTurnModelId === "antigravity-default") ||
+                  (PROVIDER === "acp" && requestedTurnModelId === "acp-default")
                     ? undefined
                     : requestedTurnModelId,
                 mapError: (cause) =>

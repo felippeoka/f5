@@ -765,3 +765,39 @@ be verified on this host (330 script cases pass). The launcher suite also report
 its three process-inspection failures before the scripts failure stops Turbo. The
 exhaustive Git matrix was run independently and passes all 163 cases. These are
 reported failures, not a waiver or a reason to weaken recovery ownership checks.
+
+## Custom ACP agents continuation (2026-10-19)
+
+The `acp` driver (#16021) uses the existing ACP runtime and adapter with a typed
+command, argument array and environment map. Commands execute directly. Instance
+environment entries override config defaults through the existing profile/account
+environment boundary. Custom agents have no implicit default instance. The Add
+provider dialog and instance card share field decoding and preserve unrelated
+configuration. Model catalogs come from session config options and remain scoped
+to the instance; model selection uses the config-option method when available.
+Metadata generation uses the same account in a temporary workspace with typed
+output. A model update does not spawn another health probe.
+
+Health probes send only `initialize`, advertise no client capabilities and stop
+after ten seconds, including child-process cleanup. They do not authenticate or
+create a session. Session startup leaves authentication to the preconfigured local
+agent rather than choosing an auth method. Preview/computer verification flags
+remain false; the MCP server rejects custom ACP computer scopes. Existing session
+approval/cancel/resume and private protocol-based MCP setup are retained. Protocol
+36 adds the provider kind. See `docs/providers/acp.md` for setup and limitations.
+
+The six focused server suites pass 49 cases, including real executable/argv
+handling, initialization-only probes, native model selection and the ten-second
+silent-agent deadline. The driver integration test proves separate instance
+catalogs, one initialization per probe/session, and schema-validated metadata.
+The two settings Chromium suites pass 21 cases; the focused web run passes 33
+cases. All eight workspace typechecks, formatting and lint pass. The broad web
+suite passes 2,332 cases after updating two explicit provider-list/closed-gate
+expectations for ACP. Full-workspace delivery remains conditional on the required
+full gate; no ledger disposition is promoted by this implementation evidence.
+
+The required full command was repeated after fixing those ACP expectations. It
+fails the two existing migration-recovery process-identity cases; the launcher
+suite reports its three existing failures before Turbo interrupts the server
+workspace. The web and shared workspaces pass. This is an outstanding gate, and
+process ownership checks have not been relaxed.

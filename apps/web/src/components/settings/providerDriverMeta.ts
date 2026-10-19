@@ -1,5 +1,6 @@
 import { ProviderDriverKind } from "@t3tools/contracts";
 import {
+  ACPRegistryIcon,
   Gemini,
   ClaudeAI,
   CursorIcon,
@@ -23,6 +24,8 @@ export interface DriverFieldDef {
   readonly placeholder?: string;
   readonly description?: string;
   readonly type?: "text" | "password";
+  readonly format?: "json-array" | "json-record";
+  readonly required?: boolean;
 }
 
 /**
@@ -46,6 +49,35 @@ export interface DriverOption {
 }
 
 export const DRIVER_OPTIONS: readonly DriverOption[] = [
+  {
+    value: ProviderDriverKind.make("acp"),
+    label: "Custom ACP agent",
+    icon: ACPRegistryIcon,
+    fields: [
+      {
+        key: "command",
+        label: "Command",
+        placeholder: "/path/to/agent",
+        required: true,
+        description: "Executable for an ACP agent already set up on this machine.",
+      },
+      {
+        key: "args",
+        label: "Arguments (JSON)",
+        placeholder: '["--acp"]',
+        format: "json-array",
+        description: "Each array item is one argument; shell expansion is not used.",
+      },
+      {
+        key: "env",
+        label: "Environment defaults (JSON)",
+        placeholder: '{"AGENT_HOME":"/path/to/home"}',
+        format: "json-record",
+        description:
+          "For credentials, use sensitive environment variables in the instance settings.",
+      },
+    ],
+  },
   { value: ProviderDriverKind.make("antigravity"), label: "Antigravity", icon: Gemini, fields: [] },
   {
     value: ProviderDriverKind.make("codex"),

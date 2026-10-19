@@ -60,7 +60,11 @@ export function resolveProjectProviderInstanceEnabled(
   const instance = Object.hasOwn(settings.providerInstances, instanceId)
     ? settings.providerInstances[instanceId]
     : undefined;
-  if (!instance && !isKnownProviderKind(instanceId)) return false;
+  if (
+    !instance &&
+    (!isKnownProviderKind(instanceId) || !Object.hasOwn(settings.providers, instanceId))
+  )
+    return false;
   const override =
     projectId && Object.hasOwn(settings.projectSettingsOverrides, projectId)
       ? settings.projectSettingsOverrides[projectId]?.providerInstances?.[instanceId]?.enabled
@@ -77,7 +81,7 @@ export function resolveProjectProviderInstanceEnabled(
         : undefined;
     return instance.enabled ?? configured ?? true;
   }
-  return settings.providers[instanceId as ProviderKind].enabled;
+  return settings.providers[instanceId as keyof typeof settings.providers]?.enabled ?? false;
 }
 
 /** Retains readiness/catalog information while projecting the chosen scope's enablement. */

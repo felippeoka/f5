@@ -214,6 +214,7 @@ export function providerSelectionsToModelOptions(
             : {}),
         },
       });
+    case "acp":
     case "antigravity":
     case "grok":
       return null;
@@ -277,6 +278,7 @@ export function providerModelOptionsToSelections(
       pushString("reasoningEffort", museOptions.reasoningEffort);
       break;
     }
+    case "acp":
     case "antigravity":
     case "grok":
       break;

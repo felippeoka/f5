@@ -38,6 +38,7 @@ const MODEL_OPTIONS_BY_PROVIDER = {
   grok: [{ slug: "grok-build", name: "Grok Build" }],
   antigravity: [],
   muse: [],
+  acp: [],
 } satisfies Record<ProviderKind, ReadonlyArray<ModelPickerModelOption>>;
 
 async function mountPicker(props?: {
@@ -241,6 +242,7 @@ describe("ProviderModelPicker", () => {
       grok: [],
       antigravity: [],
       muse: [],
+      acp: [],
     } satisfies Record<ProviderKind, ReadonlyArray<ModelPickerModelOption>>;
     const mounted = await mountPicker({
       provider: "codex",

@@ -342,3 +342,13 @@ describe("project provider policy", () => {
     ).toBeUndefined();
   });
 });
+
+it("does not invent a globally enabled ACP runtime for an unconfigured instance", () => {
+  expect(
+    resolveProjectProviderInstanceEnabled(
+      DEFAULT_SERVER_SETTINGS,
+      null,
+      ProviderInstanceId.make("acp"),
+    ),
+  ).toBe(false);
+});

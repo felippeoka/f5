@@ -94,7 +94,7 @@ export interface PreviewMcpHttpServerShape {
     readonly providerInstanceId?: ProviderInstanceId;
     readonly existingServerNames?: ReadonlySet<string>;
     readonly catalog?: "preview" | "computer" | "thread";
-    readonly provider?: ComputerAgentProvider;
+    readonly provider?: ComputerAgentProvider | "acp";
     readonly serverName?: string;
   }) => PreviewMcpSessionConfig;
 }
@@ -447,7 +447,11 @@ export const makePreviewMcpHttpServer = Effect.gen(function* () {
           ? createComputerSessionScope({
               broker: computer!,
               threadId: input.threadId,
-              provider: input.provider ?? "codex",
+              provider: (() => {
+                if (input.provider === "acp")
+                  throw new Error("Custom ACP computer access is not certified.");
+                return input.provider ?? "codex";
+              })(),
               serverName,
             })
           : undefined;

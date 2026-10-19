@@ -82,18 +82,26 @@ export function currentGrokModelIdFromSessionSetup(
     | EffectAcpSchema.NewSessionResponse
     | EffectAcpSchema.ResumeSessionResponse,
 ): string | undefined {
-  return sessionSetupResult.models?.currentModelId?.trim() || undefined;
+  const reported = sessionSetupResult.models?.currentModelId?.trim();
+  if (reported) return reported;
+  const model = sessionSetupResult.configOptions?.find(
+    (option) => option.id === "model" || option.category === "model",
+  );
+  return model?.type === "select" && typeof model.currentValue === "string"
+    ? model.currentValue.trim() || undefined
+    : undefined;
 }
 
 export function applyGrokAcpModelSelection<E>(input: {
   readonly runtime: Pick<AcpSessionRuntimeShape, "setSessionModel">;
   readonly currentModelId: string | undefined;
   readonly requestedModelId: string | undefined;
+  readonly defaultModelId?: string;
   readonly mapError: (cause: EffectAcpErrors.AcpError) => E;
 }): Effect.Effect<string | undefined, E> {
   if (
     !input.requestedModelId ||
-    input.requestedModelId === "grok-build" ||
+    input.requestedModelId === (input.defaultModelId ?? "grok-build") ||
     input.requestedModelId === input.currentModelId
   ) {
     return Effect.succeed(input.currentModelId);

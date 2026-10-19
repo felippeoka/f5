@@ -101,6 +101,8 @@ function connectivityTimeoutMessage(provider: ProviderKind): string {
       return "Antigravity one-off prompt query timed out.";
     case "muse":
       return "Muse Code one-off prompt query timed out.";
+    case "acp":
+      return "Custom ACP agent one-off prompt query timed out.";
   }
 }
 
@@ -250,6 +252,8 @@ function providerDisplayName(provider: ProviderKind): string {
       return "Antigravity";
     case "muse":
       return "Muse Code";
+    case "acp":
+      return "Custom ACP agent";
   }
 }
 

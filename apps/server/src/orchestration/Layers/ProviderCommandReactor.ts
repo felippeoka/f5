@@ -158,6 +158,8 @@ function providerDisplayName(provider: ProviderKind): string {
       return "Antigravity";
     case "muse":
       return "Muse Code";
+    case "acp":
+      return "Custom ACP agent";
   }
 }
 
@@ -170,6 +172,7 @@ function providerFromSessionName(value: string | null | undefined): ProviderKind
     case "grok":
     case "antigravity":
     case "muse":
+    case "acp":
       return value;
     default:
       return undefined;

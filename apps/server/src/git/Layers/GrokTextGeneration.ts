@@ -139,9 +139,10 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
         const started = yield* runtime.start();
         yield* applyGrokAcpModelSelection({
           runtime,
+          ...(options ? { defaultModelId: options.defaultModelSelection.model } : {}),
           currentModelId: currentGrokModelIdFromSessionSetup(started.sessionSetupResult),
           requestedModelId:
-            options?.useAccountDefaultModel && resolvedModel === "antigravity-default"
+            options?.useAccountDefaultModel && resolvedModel === options.defaultModelSelection.model
               ? undefined
               : resolvedModel,
           mapError: (cause) =>

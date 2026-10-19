@@ -50,6 +50,41 @@ export interface AcpSpawnInput {
   readonly extendEnv?: boolean;
 }
 
+/** Shared direct-exec boundary for session startup and initialize-only health probes. */
+export const spawnAcpAgent = (spawn: AcpSpawnInput) =>
+  Effect.gen(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const spawnEnvironment = spawn.env
+      ? spawn.extendEnv === false
+        ? spawn.env
+        : { ...process.env, ...spawn.env }
+      : process.env;
+    const invocation = yield* resolveInvocationEffect(spawn.command, spawn.args, spawnEnvironment, {
+      cwd: spawn.cwd,
+    }).pipe(
+      Effect.mapError(
+        (cause) => new EffectAcpErrors.AcpSpawnError({ command: spawn.command, cause }),
+      ),
+    );
+    return yield* spawner
+      .spawn(
+        ChildProcess.make(invocation.file, [...invocation.args], {
+          ...(spawn.cwd ? { cwd: spawn.cwd } : {}),
+          env: spawnEnvironment,
+          extendEnv: spawn.extendEnv !== false,
+        }),
+      )
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new EffectAcpErrors.AcpSpawnError({
+              command: spawn.command,
+              cause,
+            }),
+        ),
+      );
+  });
+
 export interface AcpSessionRuntimeOptions {
   readonly spawn: AcpSpawnInput;
   readonly cwd: string;
@@ -59,7 +94,7 @@ export interface AcpSessionRuntimeOptions {
     readonly name: string;
     readonly version: string;
   };
-  readonly authMethodId: string;
+  readonly authMethodId?: string;
   readonly transformStdoutLine?: (line: string) => string;
   readonly onStderr?: (chunk: string) => void;
   readonly hasSensitiveConfiguration?: () => boolean;
@@ -333,39 +368,10 @@ const makeAcpSessionRuntime = (
         ),
       );
 
-    const spawnEnvironment = options.spawn.env
-      ? options.spawn.extendEnv === false
-        ? options.spawn.env
-        : { ...process.env, ...options.spawn.env }
-      : process.env;
-    const invocation = yield* resolveInvocationEffect(
-      options.spawn.command,
-      options.spawn.args,
-      spawnEnvironment,
-      { cwd: options.spawn.cwd },
-    ).pipe(
-      Effect.mapError(
-        (cause) => new EffectAcpErrors.AcpSpawnError({ command: options.spawn.command, cause }),
-      ),
+    const child = yield* spawnAcpAgent(options.spawn).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.provideService(Scope.Scope, runtimeScope),
     );
-    const child = yield* spawner
-      .spawn(
-        ChildProcess.make(invocation.file, [...invocation.args], {
-          ...(options.spawn.cwd ? { cwd: options.spawn.cwd } : {}),
-          env: spawnEnvironment,
-          extendEnv: options.spawn.extendEnv !== false,
-        }),
-      )
-      .pipe(
-        Effect.provideService(Scope.Scope, runtimeScope),
-        Effect.mapError(
-          (cause) =>
-            new EffectAcpErrors.AcpSpawnError({
-              command: options.spawn.command,
-              cause,
-            }),
-        ),
-      );
 
     const acpContext = yield* Layer.build(
       EffectAcpClient.layerChildProcess(child, {
@@ -723,15 +729,17 @@ const makeAcpSessionRuntime = (
         catch: () => EffectAcpErrors.AcpRequestError.internalError("ACP_MCP_CONFIGURATION_FAILED"),
       });
 
-      const authenticatePayload = {
-        methodId: options.authMethodId,
-      } satisfies EffectAcpSchema.AuthenticateRequest;
+      if (options.authMethodId) {
+        const authenticatePayload = {
+          methodId: options.authMethodId,
+        } satisfies EffectAcpSchema.AuthenticateRequest;
 
-      yield* runLoggedRequest(
-        "authenticate",
-        authenticatePayload,
-        acp.agent.authenticate(authenticatePayload),
-      );
+        yield* runLoggedRequest(
+          "authenticate",
+          authenticatePayload,
+          acp.agent.authenticate(authenticatePayload),
+        );
+      }
 
       let sessionId: string;
       let sessionSetupResult:

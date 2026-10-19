@@ -636,7 +636,11 @@ function getServerCustomModelsForProvider(
     );
   }
 
-  return serverSettings.providers[provider].customModels.map(customModelSlug);
+  return provider in serverSettings.providers
+    ? serverSettings.providers[provider as keyof typeof serverSettings.providers].customModels.map(
+        customModelSlug,
+      )
+    : [];
 }
 
 function getProviderCustomModelsForPicker(
@@ -736,6 +740,7 @@ export function getProviderDispatchModelsByProvider(
     grok: modelsFor("grok"),
     antigravity: modelsFor("antigravity"),
     muse: modelsFor("muse"),
+    acp: modelsFor("acp"),
   };
 }
 

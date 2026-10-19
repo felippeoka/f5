@@ -6,6 +6,7 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import {
+  ACPRegistryIcon,
   ClaudeAI,
   CursorIcon,
   Gemini,
@@ -34,6 +35,7 @@ export const PROVIDER_LABEL_BY_PROVIDER: Record<ProviderKind, string> = {
   grok: "Grok",
   antigravity: "Antigravity",
   muse: "Muse Code",
+  acp: "Custom ACP agent",
 };
 
 export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<string, Icon>> = {
@@ -44,6 +46,7 @@ export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<string, Icon>> = {
   [ProviderDriverKind.make("grok")]: GrokIcon,
   [ProviderDriverKind.make("antigravity")]: Gemini,
   [ProviderDriverKind.make("muse")]: MuseIcon,
+  [ProviderDriverKind.make("acp")]: ACPRegistryIcon,
 };
 
 export const PROVIDER_ICON_BY_PICKER_KIND: Record<ProviderPickerKind, Icon> = {
@@ -54,6 +57,7 @@ export const PROVIDER_ICON_BY_PICKER_KIND: Record<ProviderPickerKind, Icon> = {
   grok: GrokIcon,
   antigravity: Gemini,
   muse: MuseIcon,
+  acp: ACPRegistryIcon,
 };
 
 export const COMING_SOON_PROVIDER_OPTIONS = [

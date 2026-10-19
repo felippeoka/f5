@@ -3311,6 +3311,7 @@ describe("PROVIDER_OPTIONS", () => {
       { value: "grok", label: "Grok", available: true },
       { value: "antigravity", label: "Antigravity", available: true },
       { value: "muse", label: "Muse Code", available: true },
+      { value: "acp", label: "Custom ACP agent", available: true },
     ]);
     expect(claude).toEqual({
       value: "claudeAgent",
