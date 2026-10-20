@@ -719,6 +719,82 @@ for (const scenario of [
   });
 }
 
+for (const steering of [true, false]) {
+  it.effect(`lets only steers into the live turn through branch drift: ${steering}`, () => {
+    const target = path.join(os.tmpdir(), `f5-drift-${crypto.randomUUID()}`);
+    const threadId = ThreadId.makeUnsafe(`queue-drift-${steering}`);
+    const liveTurn = TurnId.makeUnsafe("live-turn");
+    const thread = {
+      id: threadId,
+      projectId: ProjectId.makeUnsafe("queue-dispatcher-project"),
+      deletedAt: null,
+      archivedAt: null,
+      pendingUserInputs: [],
+      session: {
+        threadId,
+        providerInstanceId: "codex",
+        status: steering ? "running" : "ready",
+        activeTurnId: steering ? liveTurn : null,
+        lastError: null,
+        updatedAt: new Date().toISOString(),
+      },
+    } as unknown as OrchestrationThread;
+    // The agent switched the recorded `feature` worktree to another branch.
+    const git = makeFakeGitCore({
+      listWorktrees: () =>
+        Effect.promise(async () => [
+          {
+            path: target,
+            canonicalPath: await canonicalWorktreePath(target),
+            branch: "agent-branch",
+            headSha: "abc123",
+            bare: false,
+            detached: false,
+            locked: null,
+            prunable: null,
+            isMain: false,
+          },
+        ]),
+      inspectCheckout: () =>
+        Effect.promise(async () => ({
+          canonicalRoot: await canonicalWorktreePath(target),
+          commonDir: await canonicalWorktreePath(`${process.cwd()}/.git`),
+          branch: "agent-branch",
+        })) as never,
+    });
+    return Effect.gen(function* () {
+      dispatched.length = 0;
+      yield* Effect.promise(() => fs.mkdir(target, { recursive: true }));
+      const dispatcher = yield* NextTurnQueueDispatcher;
+      const store = yield* NextTurnQueueStore;
+      yield* seedThread(threadId);
+      yield* insert(70, threadId);
+      if (steering) {
+        const sql = yield* SqlClient.SqlClient;
+        const item = (yield* store.listByThread(threadId)).items[0]!;
+        yield* sql`UPDATE next_turn_queue SET command_json = ${JSON.stringify({
+          ...item.command,
+          expectedTurnId: liveTurn,
+        })} WHERE item_id = ${item.itemId}`;
+      }
+      yield* dispatcher.notify(threadId);
+      yield* dispatcher.drain;
+      const queue = yield* store.listByThread(threadId);
+      if (steering) {
+        assert.equal(dispatched.length, 1);
+        assert.equal(queue.state.paused, false);
+      } else {
+        assert.equal(dispatched.length, 0);
+        assert.equal(queue.state.paused, true);
+        assert.equal(queue.state.pauseReasonCode, "worktree_missing");
+      }
+    }).pipe(
+      Effect.provide(makeTestLayer(git.service, target, thread)),
+      Effect.ensuring(Effect.promise(() => fs.rm(target, { recursive: true, force: true }))),
+    );
+  });
+}
+
 for (const automatic of [false, true]) {
   it.effect(`schedules reset recovery at startup only when opted in: ${automatic}`, () => {
     const threadId = ThreadId.makeUnsafe(`recovery-startup-${automatic}`);

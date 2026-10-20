@@ -3249,6 +3249,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             branch: workspaceThread.branch,
           },
           body.intent !== "steer",
+          {
+            allowBranchDrift:
+              body.intent === "steer" && Boolean(workspaceThread.session?.activeTurnId),
+          },
         ).pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
       }
       const command = yield* normalizeDispatchCommand({

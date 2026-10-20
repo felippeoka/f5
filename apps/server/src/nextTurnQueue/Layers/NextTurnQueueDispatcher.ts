@@ -319,8 +319,11 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
       const model = yield* engine.getReadModel();
       const project = model.projects.find((entry) => entry.id === thread.projectId);
       if (!project) return { kind: "autoPause" as const, reasonCode: "worktree_missing" as const };
+      const steeringActiveTurn =
+        expectedTurnId !== undefined &&
+        Option.getOrNull(sessionOption)?.activeTurnId === expectedTurnId;
       return yield* Effect.gen(function* () {
-        yield* assertWorktreeReady(
+        const readiness = yield* assertWorktreeReady(
           git,
           {
             projectCwd: project.workspaceRoot,
@@ -328,7 +331,14 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
             branch: thread.branch,
           },
           !requireExisting,
+          { allowBranchDrift: steeringActiveTurn },
         );
+        // The live turn keeps running in the drifted checkout; the recorded
+        // branch is neither needed nor recreatable for this steer.
+        if (readiness?.branchDrift) {
+          if (recreate || requireExisting) inspectionRetries.delete(item.threadId);
+          return gate;
+        }
         if (thread.branch && !(yield* git.branchExists(project.workspaceRoot, thread.branch))) {
           return {
             kind: "autoPause" as const,

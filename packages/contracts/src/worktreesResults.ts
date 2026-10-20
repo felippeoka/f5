@@ -47,6 +47,12 @@ export const WorktreesThreadStateResult = Schema.Struct({
   registration: Schema.Literals(["none", "matching", "stale", "otherBranch"]),
   branchExists: Schema.Boolean,
   defaultBranch: Schema.NullOr(Schema.String),
+  /** The branch the recorded worktree is actually on; null when detached or missing. */
+  checkoutBranch: Schema.optional(Schema.NullOr(Schema.String)),
+  /** The recorded checkout is intact and only switched branches. */
+  branchDriftOnly: Schema.optional(Schema.Boolean),
+  /** Uncommitted changes in a drifted checkout; null when unknown. */
+  checkoutDirty: Schema.optional(Schema.NullOr(Schema.Boolean)),
 });
 export type WorktreesThreadStateResult = typeof WorktreesThreadStateResult.Type;
 

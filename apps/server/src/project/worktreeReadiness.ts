@@ -44,16 +44,23 @@ export const readWorktreeState = (
         null)
       : null;
     let matching = entry !== undefined && (input.branch === null || entry.branch === input.branch);
+    let checkoutBranch: string | null = null;
+    let branchDriftOnly = false;
     if (directoryExists && input.worktreePath !== null) {
       const inspected = yield* git.inspectCheckoutIdentity(target);
       const expectedCommon = yield* git
         .resolveCommonDir(input.projectCwd)
         .pipe(Effect.flatMap((value) => Effect.tryPromise(() => canonicalWorktreePath(value))));
-      matching =
-        matching &&
+      const sameCheckout =
+        entry !== undefined &&
         inspected.canonicalRoot === canonical &&
-        inspected.commonDir === expectedCommon &&
-        (input.branch === null || inspected.branch === input.branch);
+        inspected.commonDir === expectedCommon;
+      checkoutBranch = inspected.branch;
+      // The same registered checkout of this repository, only switched to
+      // another branch (or detached), e.g. by an agent running `git checkout`.
+      branchDriftOnly = sameCheckout && input.branch !== null && inspected.branch !== input.branch;
+      matching =
+        matching && sameCheckout && (input.branch === null || inspected.branch === input.branch);
     }
     const registration = entry
       ? matching
@@ -69,6 +76,8 @@ export const readWorktreeState = (
       registration,
       branchExists,
       defaultBranch,
+      checkoutBranch,
+      branchDriftOnly,
     } as const;
   });
 
@@ -80,6 +89,13 @@ export const assertWorktreeReady = (
     branch: string | null;
   },
   allowRecreation = false,
+  options: {
+    /**
+     * Steers join a live turn whose cwd is already fixed, so a checkout that
+     * only switched branches is still the workspace that turn is running in.
+     */
+    readonly allowBranchDrift?: boolean;
+  } = {},
 ) =>
   Effect.gen(function* () {
     if (input.worktreePath === null) return;
@@ -100,6 +116,7 @@ export const assertWorktreeReady = (
           `Worktree branch ${input.branch ?? "(unknown)"} is missing. ${MISSING_WORKTREE_MESSAGE}`,
         ),
       );
+    if (options.allowBranchDrift && state.branchDriftOnly) return { branchDrift: true } as const;
     if (
       state.registration === "otherBranch" ||
       (state.directoryExists && state.registration !== "matching")

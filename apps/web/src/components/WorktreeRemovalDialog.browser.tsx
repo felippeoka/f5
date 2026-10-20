@@ -324,9 +324,85 @@ it("offers recreate now in the queue when the original branch survives", async (
     defaultBranch: "main",
   });
   const screen = await mount(
-    <WorktreeMissingBanner threadId={ThreadId.makeUnsafe("queued")} queue />,
+    <WorktreeMissingBanner threadId={ThreadId.makeUnsafe("queued")} queueBlocked />,
   );
   await expect.element(screen.getByRole("button", { name: "Recreate now" })).toBeVisible();
+});
+
+const driftState = {
+  worktreePath: "/drifted",
+  branch: "t3code/abc",
+  directoryExists: true,
+  registration: "otherBranch",
+  branchExists: true,
+  defaultBranch: "main",
+  checkoutBranch: "feat/x",
+  branchDriftOnly: true,
+  checkoutDirty: false,
+} as const;
+
+it("offers one-click branch fixes when the worktree only switched branches", async () => {
+  api.worktrees.threadState.mockResolvedValue(driftState);
+  api.nextTurnQueue.list.mockResolvedValue({ revision: 3 });
+  api.worktrees.recover.mockResolvedValue({});
+  const threadId = ThreadId.makeUnsafe("drift");
+  const screen = await mount(
+    <WorktreeMissingBanner threadId={threadId} worktreePath="/drifted" branch="t3code/abc" />,
+  );
+  await expect
+    .element(screen.getByRole("status"))
+    .toHaveTextContent(
+      "This worktree is on feat/x, but this thread expects t3code/abc. Your files are untouched.",
+    );
+  await expect
+    .element(screen.getByRole("button", { name: "Switch back to t3code/abc" }))
+    .toBeEnabled();
+  await screen.getByRole("button", { name: "Use feat/x" }).click();
+  expect(api.worktrees.recover).toHaveBeenCalledWith({
+    threadId,
+    action: "adoptCheckoutBranch",
+    expectedQueueRevision: 3,
+  });
+  await screen.getByRole("button", { name: "More options" }).click();
+  await expect.element(screen.getByRole("menuitem", { name: "Recreate from main" })).toBeVisible();
+  await expect
+    .element(screen.getByRole("menuitem", { name: "Continue in project checkout" }))
+    .toBeVisible();
+});
+
+it("keeps adopting available but disables transitions while a turn is running", async () => {
+  api.worktrees.threadState.mockResolvedValue({ ...driftState, checkoutDirty: true });
+  const screen = await mount(
+    <WorktreeMissingBanner
+      threadId={ThreadId.makeUnsafe("drift-busy")}
+      worktreePath="/drifted"
+      branch="t3code/abc"
+      turnActive
+    />,
+  );
+  await expect.element(screen.getByRole("button", { name: "Use feat/x" })).toBeEnabled();
+  await expect
+    .element(screen.getByRole("button", { name: "Switch back to t3code/abc" }))
+    .toBeDisabled();
+  await expect
+    .element(screen.getByText("Commit or stash the worktree's changes to switch back."))
+    .toBeVisible();
+  await expect
+    .element(screen.getByText("Available after the current turn finishes."))
+    .toBeVisible();
+});
+
+it("hides adopting for a detached HEAD", async () => {
+  api.worktrees.threadState.mockResolvedValue({ ...driftState, checkoutBranch: null });
+  const screen = await mount(
+    <WorktreeMissingBanner
+      threadId={ThreadId.makeUnsafe("drift-detached")}
+      worktreePath="/drifted"
+      branch="t3code/abc"
+    />,
+  );
+  await expect.element(screen.getByRole("status")).toHaveTextContent("is on a detached HEAD");
+  expect(screen.getByRole("button", { name: /^Use / }).query()).toBeNull();
 });
 
 it("closes when selected removals succeed even when other rows are kept or blocked", async () => {
@@ -355,7 +431,7 @@ it("closes when selected removals succeed even when other rows are kept or block
 
 it.each([false, true])(
   "keeps interrupted recovery retryable after reload (queue: %s)",
-  async (queue) => {
+  async (queueBlocked) => {
     api.worktrees.threadState.mockResolvedValue({
       worktreePath: "/recovered",
       branch: "feature",
@@ -373,8 +449,7 @@ it.each([false, true])(
         threadId={threadId}
         worktreePath="/recovered"
         branch="feature"
-        queue={queue}
-        recoveryOnly={queue}
+        queueBlocked={queueBlocked}
       />
     );
     const first = await mount(banner);

@@ -1,22 +1,28 @@
 import type { ThreadId, WorktreesRecoverInput } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronDownIcon } from "lucide-react";
 import { useState } from "react";
 import { ensureNativeApi } from "../../nativeApi";
 import { useNextTurnQueueStore } from "../../nextTurnQueueStore";
 import { Button } from "../ui/button";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+
+const AFTER_TURN_REASON = "Available after the current turn finishes.";
 
 export function WorktreeMissingBanner({
   threadId,
   worktreePath,
   branch,
-  queue = false,
-  recoveryOnly = false,
+  queueBlocked = false,
+  turnActive = false,
 }: {
   threadId: ThreadId;
   worktreePath?: string | null;
   branch?: string | null;
-  queue?: boolean;
-  recoveryOnly?: boolean;
+  /** The queue is paused on this workspace, so a lazily recreatable worktree still needs action. */
+  queueBlocked?: boolean;
+  /** Workspace transitions are refused while a turn is active or pending. */
+  turnActive?: boolean;
 }) {
   const queryClient = useQueryClient();
   const revision = useNextTurnQueueStore((state) => state.byThreadId[threadId]?.snapshot?.revision);
@@ -44,6 +50,14 @@ export function WorktreeMissingBanner({
       setBusy(false);
     }
   };
+  const errorLine = error && (
+    <p role="alert" className="text-destructive">
+      {error}
+    </p>
+  );
+  const turnLine = turnActive && (
+    <p className="text-muted-foreground text-xs">{AFTER_TURN_REASON}</p>
+  );
   if (state.error)
     return (
       <div role="alert" className="space-y-2 rounded border border-warning/40 p-3 text-sm">
@@ -51,11 +65,12 @@ export function WorktreeMissingBanner({
         <Button
           size="sm"
           variant="outline"
-          disabled={busy || state.data?.recovery === "running"}
+          disabled={busy || turnActive || state.data?.recovery === "running"}
           onClick={() => void recover("useProjectCheckout")}
         >
           Continue in project checkout
         </Button>
+        {turnLine}
         {error && <p className="text-destructive">{error}</p>}
       </div>
     );
@@ -64,8 +79,7 @@ export function WorktreeMissingBanner({
     (!state.data.worktreePath &&
       state.data.recovery !== "running" &&
       state.data.recovery !== "interrupted") ||
-    (recoveryOnly && state.data.recovery !== "interrupted" && state.data.recovery !== "running") ||
-    (!queue &&
+    (!queueBlocked &&
       state.data.recovery !== "interrupted" &&
       state.data.recovery !== "running" &&
       (state.data.registration === "matching" ||
@@ -76,6 +90,66 @@ export function WorktreeMissingBanner({
     return null;
   const data = state.data;
   const recovering = data.recovery === "running";
+  const transitionDisabled = busy || recovering || turnActive;
+
+  if (data.branchDriftOnly && data.recovery !== "interrupted" && !recovering && data.branch) {
+    const switchBackReason = !data.branchExists
+      ? `Branch ${data.branch} no longer exists.`
+      : data.checkoutDirty !== false
+        ? "Commit or stash the worktree's changes to switch back."
+        : null;
+    return (
+      <div
+        className="space-y-2 rounded border border-warning/40 bg-warning/5 p-3 text-sm"
+        role="status"
+      >
+        <p>
+          This worktree is on{" "}
+          {data.checkoutBranch ? <code>{data.checkoutBranch}</code> : "a detached HEAD"}, but this
+          thread expects <code>{data.branch}</code>. Your files are untouched.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {data.checkoutBranch && (
+            <Button size="sm" disabled={busy} onClick={() => void recover("adoptCheckoutBranch")}>
+              Use {data.checkoutBranch}
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant={data.checkoutBranch ? "outline" : "default"}
+            disabled={transitionDisabled || switchBackReason !== null}
+            title={switchBackReason ?? undefined}
+            onClick={() => void recover("restoreRecordedBranch")}
+          >
+            Switch back to {data.branch}
+          </Button>
+          <Menu>
+            <MenuTrigger render={<Button size="sm" variant="ghost" disabled={busy} />}>
+              More options <ChevronDownIcon aria-hidden="true" />
+            </MenuTrigger>
+            <MenuPopup align="start" className="min-w-52">
+              <MenuItem
+                disabled={transitionDisabled || !data.defaultBranch}
+                onClick={() => void recover("recreateFromBase")}
+              >
+                Recreate from {data.defaultBranch ?? "default branch"}
+              </MenuItem>
+              <MenuItem
+                disabled={transitionDisabled}
+                onClick={() => void recover("useProjectCheckout")}
+              >
+                Continue in project checkout
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
+        </div>
+        {switchBackReason && <p className="text-muted-foreground text-xs">{switchBackReason}</p>}
+        {turnLine}
+        {errorLine}
+      </div>
+    );
+  }
+
   const canRecreateOriginal =
     data.branchExists &&
     (data.registration === "matching" ||
@@ -91,7 +165,7 @@ export function WorktreeMissingBanner({
           : recovering
             ? "Worktree recovery is in progress."
             : data.directoryExists && data.registration === "otherBranch"
-              ? "This checkout is on a different branch or has a different identity. Its files have been kept. Restore the recorded branch to continue here, or choose another workspace."
+              ? "This checkout no longer matches the recorded worktree. Its files have been kept. Choose another workspace to continue."
               : data.branchExists || data.directoryExists
                 ? "This conversation's worktree needs recovery."
                 : `This thread's worktree and branch ${data.branch ?? "(unknown)"} are gone.`}
@@ -101,7 +175,7 @@ export function WorktreeMissingBanner({
           (canRecreateOriginal ? (
             <Button
               size="sm"
-              disabled={busy || state.data?.recovery === "running"}
+              disabled={transitionDisabled}
               onClick={() => void recover("recreate")}
             >
               {data.recovery === "interrupted" ? "Retry recovery" : "Recreate now"}
@@ -109,7 +183,7 @@ export function WorktreeMissingBanner({
           ) : (
             <Button
               size="sm"
-              disabled={busy || recovering || !data.defaultBranch}
+              disabled={transitionDisabled || !data.defaultBranch}
               onClick={() => void recover("recreateFromBase")}
             >
               Recreate from {data.defaultBranch ?? "default branch"}
@@ -123,17 +197,14 @@ export function WorktreeMissingBanner({
         <Button
           size="sm"
           variant="outline"
-          disabled={busy || state.data?.recovery === "running"}
+          disabled={transitionDisabled}
           onClick={() => void recover("useProjectCheckout")}
         >
           Continue in project checkout
         </Button>
       </div>
-      {error && (
-        <p role="alert" className="text-destructive">
-          {error}
-        </p>
-      )}
+      {!recovering && turnLine}
+      {errorLine}
     </div>
   );
 }

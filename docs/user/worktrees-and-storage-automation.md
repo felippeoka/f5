@@ -53,6 +53,14 @@ Use **Recreate now** (the branch still exists), **Recreate from the default bran
 or **Continue in project checkout**. A checkout found on a different branch is kept untouched and
 blocked until you restore the branch or choose a recovery action.
 
+When the thread's own worktree only switched branches (for example, the agent ran `git checkout`),
+the banner names both branches. **Use `<branch>`** points the thread at the branch the worktree is
+on now, and works while a turn is running. **Switch back to `<branch>`** checks out the recorded
+branch again. It is available only when the worktree has no uncommitted changes and no turn is
+running. Recreate and project checkout move under **More options**. Messages steered into the
+running turn, including answers to its questions, are still delivered because that turn keeps
+working in the same folder. New turns wait until the branch is resolved.
+
 ## Auto-pull and backups
 
 **Settings → Git & GitHub → Auto-pull default branches** fast-forwards clean project roots with `git pull --ff-only`. It

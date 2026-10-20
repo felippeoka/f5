@@ -546,6 +546,94 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
     );
   });
 
+  it("adopts the branch a drifted worktree switched to, even during a turn", async () => {
+    const { repo, world, run, notified } = await fixture();
+    const threadId = ThreadId.makeUnsafe("drift-adopt");
+    world.queueStates.set(threadId, {
+      revision: 4,
+      paused: true,
+      pauseReasonCode: "worktree_missing",
+      worktreeBlockToken: null,
+    });
+    await run((manager, root) =>
+      Effect.gen(function* () {
+        const target = path.join(root, "drift-adopt");
+        git(repo.root, "worktree", "add", "-q", "-b", "recorded", target, "main");
+        world.threads.push({
+          ...thread({ id: threadId, projectId: "p", branch: "recorded", worktreePath: target }),
+          session: { status: "running", activeTurnId: "live-turn" },
+        } as never);
+        git(target, "checkout", "-q", "-b", "agent-branch");
+        const state = yield* manager.threadState({ threadId });
+        expect(state).toMatchObject({
+          branchDriftOnly: true,
+          checkoutBranch: "agent-branch",
+          checkoutDirty: false,
+        });
+        // Switching back is a checkout, so it waits for the live turn.
+        expect(
+          (yield* manager
+            .recover({ threadId, action: "restoreRecordedBranch", expectedQueueRevision: 4 })
+            .pipe(Effect.flip)).message,
+        ).toContain("Wait for the active or pending turn");
+        const adopted = yield* manager.recover({
+          threadId,
+          action: "adoptCheckoutBranch",
+          expectedQueueRevision: 4,
+        });
+        expect(world.threads.find((entry) => entry.id === threadId)?.branch).toBe("agent-branch");
+        expect(adopted).toMatchObject({ registration: "matching", branchDriftOnly: false });
+        expect(world.queueStates.get(threadId)?.paused).toBe(false);
+        expect(notified).toContain(threadId);
+      }),
+    );
+  });
+
+  it("switches a clean drifted worktree back and refuses dirty or detached repairs", async () => {
+    const { repo, world, run } = await fixture();
+    const threadId = ThreadId.makeUnsafe("drift-restore");
+    await run((manager, root) =>
+      Effect.gen(function* () {
+        const target = path.join(root, "drift-restore");
+        git(repo.root, "worktree", "add", "-q", "-b", "recorded", target, "main");
+        world.threads.push(
+          thread({ id: threadId, projectId: "p", branch: "recorded", worktreePath: target }),
+        );
+        git(target, "checkout", "-q", "--detach");
+        const revision = () => world.queueStates.get(threadId)?.revision ?? 0;
+        expect(
+          (yield* manager
+            .recover({ threadId, action: "adoptCheckoutBranch", expectedQueueRevision: revision() })
+            .pipe(Effect.flip)).message,
+        ).toContain("detached HEAD");
+        yield* Effect.promise(() => fs.writeFile(path.join(target, "scratch.txt"), "wip"));
+        expect(
+          (yield* manager
+            .recover({
+              threadId,
+              action: "restoreRecordedBranch",
+              expectedQueueRevision: revision(),
+            })
+            .pipe(Effect.flip)).message,
+        ).toContain("Commit or stash");
+        yield* Effect.promise(() => fs.rm(path.join(target, "scratch.txt")));
+        const restored = yield* manager.recover({
+          threadId,
+          action: "restoreRecordedBranch",
+          expectedQueueRevision: revision(),
+        });
+        expect(restored).toMatchObject({ registration: "matching", checkoutBranch: "recorded" });
+        expect(git(target, "branch", "--show-current").trim()).toBe("recorded");
+        // A checkout that matches is not drift, so neither repair applies.
+        expect(
+          (yield* manager
+            .recover({ threadId, action: "adoptCheckoutBranch", expectedQueueRevision: revision() })
+            .pipe(Effect.flip)).message,
+        ).toContain("no longer only differs by branch");
+      }),
+    );
+  });
+
   it("requires the durable transition service for recovery and keeps queue pauses intact", async () => {
     const { world, run } = await fixture();
     const threadId = ThreadId.makeUnsafe("recovery-owner");

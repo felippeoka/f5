@@ -7436,6 +7436,12 @@ export default function ChatView({
                           threadId={threadId}
                           worktreePath={activeThread?.worktreePath}
                           branch={activeThread?.branch}
+                          queueBlocked={
+                            nextTurnQueueState.snapshot?.reasonCode === "worktree_missing"
+                          }
+                          turnActive={
+                            phase === "running" || Boolean(activeThread?.session?.activeTurnId)
+                          }
                         />
                       </>
                     )}

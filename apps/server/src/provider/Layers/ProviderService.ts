@@ -341,7 +341,11 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
     const nativeScope = yield* Effect.scope;
     const workspaceGit = yield* Effect.serviceOption(GitCore);
     const workspaceSql = yield* Effect.serviceOption(SqlClient.SqlClient);
-    const checkWorkspace = (threadId: ThreadId, sessionCwd?: string) =>
+    const checkWorkspace = (
+      threadId: ThreadId,
+      sessionCwd?: string,
+      options: { readonly allowBranchDrift?: boolean } = {},
+    ) =>
       Effect.gen(function* () {
         if (Option.isNone(workspaceSql)) return;
         const switching =
@@ -380,11 +384,16 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               "The provider session is attached to a different workspace. Restart the session before sending.",
             ),
           );
-        yield* assertWorktreeReady(workspaceGit.value, {
-          projectCwd: row.projectCwd,
-          worktreePath: row.worktreePath,
-          branch: row.branch,
-        });
+        yield* assertWorktreeReady(
+          workspaceGit.value,
+          {
+            projectCwd: row.projectCwd,
+            worktreePath: row.worktreePath,
+            branch: row.branch,
+          },
+          false,
+          options,
+        );
       }).pipe(
         Effect.mapError(
           (error) => new ProviderValidationError({ operation: "workspace", issue: error.message }),
@@ -2014,6 +2023,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             Option.isSome(deliveryBinding)
               ? readPersistedCwd(deliveryBinding.value.runtimePayload)
               : undefined,
+            { allowBranchDrift: input.expectedTurnId !== undefined },
           ).pipe(
             Effect.mapError(
               (error) =>

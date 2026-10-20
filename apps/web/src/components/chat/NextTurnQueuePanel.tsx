@@ -1,5 +1,4 @@
 import { WorkspaceTransitionSummary } from "./WorkspaceTransitionBanner";
-import { WorktreeMissingBanner } from "./WorktreeMissingBanner";
 import type {
   CommandId,
   CompactRuntimeConfiguredActivityPayload,
@@ -410,14 +409,6 @@ export function NextTurnQueuePanel({
           {snapshot.workspaceTransition && (
             <WorkspaceTransitionSummary transition={snapshot.workspaceTransition} />
           )}
-          {snapshot.reasonCode === "worktree_missing" ||
-          snapshot.reasonCode === "worktree_setup_failed" ? (
-            <WorktreeMissingBanner
-              threadId={threadId}
-              queue
-              recoveryOnly={snapshot.reasonCode === "worktree_setup_failed"}
-            />
-          ) : null}
           {hasDeliveryFailure || hasDeliveryPause ? (
             <span className="ml-1 inline-flex gap-1">
               <Button
