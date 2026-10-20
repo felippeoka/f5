@@ -101,6 +101,12 @@ const ClaudeAgentRemoteMcpServerConfig = Schema.Struct({
   type: Schema.Literals(["sse", "http"]),
   url: TrimmedNonEmptyString,
   headers: Schema.optional(McpStringRecord),
+  oauth: Schema.optional(
+    Schema.Struct({
+      clientId: Schema.optional(TrimmedNonEmptyString),
+      callbackPort: Schema.optional(McpPort),
+    }),
+  ),
 });
 
 export const ClaudeAgentMcpServerConfig = Schema.Union([

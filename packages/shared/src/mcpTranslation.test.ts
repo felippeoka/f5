@@ -14,6 +14,67 @@ import {
 } from "./mcpTranslation";
 
 describe("mcpTranslation", () => {
+  it.each(["http", "sse"] as const)("forwards Claude %s OAuth settings", (type) => {
+    expect(
+      translateMcpForClaudeAgent({
+        slack: {
+          type,
+          url: "https://mcp.slack.com/mcp",
+          oauthClientId: "1601185624273.8899143856786",
+          oauthCallbackPort: 3118,
+          scopes: ["search:read"],
+          oauthCallbackUrl: "http://localhost:3118/callback",
+          oauthResource: "slack",
+        },
+      }),
+    ).toEqual({
+      slack: {
+        type,
+        url: "https://mcp.slack.com/mcp",
+        oauth: { clientId: "1601185624273.8899143856786", callbackPort: 3118 },
+      },
+    });
+  });
+
+  it.each(["http", "sse"] as const)("forwards individual Claude %s OAuth settings", (type) => {
+    for (const [settings, oauth] of [
+      [{ oauthClientId: " client-1 " }, { clientId: "client-1" }],
+      [{ oauthCallbackPort: 3118 }, { callbackPort: 3118 }],
+    ] as const) {
+      expect(
+        translateMcpForClaudeAgent({
+          server: { type, url: "https://example.test/mcp", ...settings },
+        }),
+      ).toEqual({ server: { type, url: "https://example.test/mcp", oauth } });
+    }
+  });
+
+  it.each(["http", "sse"] as const)(
+    "omits Claude %s OAuth when no settings are configured",
+    (type) => {
+      for (const settings of [{}, { oauthClientId: " \t " }]) {
+        expect(
+          translateMcpForClaudeAgent({
+            server: { type, url: "https://example.test/mcp", ...settings },
+          }),
+        ).toEqual({ server: { type, url: "https://example.test/mcp" } });
+      }
+    },
+  );
+
+  it("omits OAuth settings for Claude stdio servers", () => {
+    expect(
+      translateMcpForClaudeAgent({
+        server: {
+          type: "stdio",
+          command: "node",
+          oauthClientId: "client-1",
+          oauthCallbackPort: 3118,
+        },
+      }),
+    ).toEqual({ server: { type: "stdio", command: "node" } });
+  });
+
   it.each(["stdio", "http", "sse"] as const)(
     "translates Claude %s tool timeouts to milliseconds",
     (type) => {

@@ -259,6 +259,16 @@ export function translateMcpForClaudeAgent(
       ...timeout,
       url: normalized.url,
       ...(normalized.headers ? { headers: normalized.headers } : {}),
+      ...(normalized.oauthClientId || normalized.oauthCallbackPort !== undefined
+        ? {
+            oauth: {
+              ...(normalized.oauthClientId ? { clientId: normalized.oauthClientId } : {}),
+              ...(normalized.oauthCallbackPort !== undefined
+                ? { callbackPort: normalized.oauthCallbackPort }
+                : {}),
+            },
+          }
+        : {}),
     };
   }
 
