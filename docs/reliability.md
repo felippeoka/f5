@@ -58,11 +58,19 @@ debounce delay. One registry poller observes at most four unavailable/missing
 paths concurrently. Each observation releases its polling slot; dirty hints
 schedule one bounded rerun. Healthy watchers perform no periodic directory scans.
 
+Background Git refresh downloads into a unique temporary ref without writing
+`FETCH_HEAD` or the remote tracking ref. It promotes the result with a short,
+fail-fast background repository lock and a compare-and-set against the previously
+observed tracking SHA. A concurrent pull keeps its newer ref; cleanup removes the
+temporary ref. Network waits do not hold the shared user-operation lock.
+
 Codex process exit/error rejects pending RPCs immediately, including contexts
 replaced by a new session. Written requests reject even if their responses remain
 buffered. The matching context drains notification sources through EOF, capped at
 1,800 ms, before its terminal lifecycle event; replaced contexts never close their
 replacement. Stderr framing retains partial UTF-8/lines until source closure.
+Terminal exit flushes buffered assistant text and finalizes streaming messages even
+when the provider dies without sending item-completion notifications.
 
 Compaction packs whole message/output groups into transactions toward 2,000
 events. Larger groups run alone; groups above 50,000 events are reported and
@@ -73,8 +81,9 @@ File-backed persistence owns two query-only snapshot readers, created after writ
 migrations. Foreground tail/history reads have their own connection; startup and
 background snapshots use the other reader. Each complete response reads its
 sequence and constituent repositories in one deferred transaction. A cooperative
-two-second deadline releases the transaction on expiry and returns a retryable
-read failure. Memory persistence keeps its single database and preserves an
+two-second deadline is checked before each subsequent statement and returns a retryable
+read failure on expiry; a completed response is retained. Full bootstrap and startup
+snapshots opt out of this interactive budget so large profiles can finish loading. Memory persistence keeps its single database and preserves an
 already-held writer transaction. Transactions retain their connection lease until
 commit or rollback completes.
 
@@ -104,6 +113,10 @@ regeneration rejects visibly when busy. Lossless subscribers use blocking count
 admission; large provider events have no implicit frame ceiling. Engine admission
 allows 1,024 ordinary entries/32 MiB and 64 separately reserved controls. Control
 reservations survive intent commit until reactor completion or recorded failure.
+A control that the reactor has not started within 30 seconds is fenced against late
+execution, reported as not sent, and released after its failure activity is recorded.
+Waiters fail instead of hanging. Claimed controls retain their reservation through
+processing, including slow maintenance; expiry never retries an ambiguous action.
 The reactor processes controls after its current item, with an independent control
 subscription so blocked bulk admission cannot hide stop or approval events. Stops
 cancel older queued starts and pending durable deliveries; claimed starts check a
@@ -111,7 +124,8 @@ stop fence before dispatch. Controls retain their originating session/turn ident
 Codex notification preparation has separate bounded byte/count admission and
 explicit incomplete-history recovery, described below.
 Queue retries use one earliest timer per thread, and actionable scans rotate
-through pages of 64.
+through pages of 64. Startup visits every page up to a captured high-water ID
+before periodic scans begin, without retaining the whole actionable inventory.
 
 Hydration retains at most 2,000 pending detail events or 32 MiB per thread. Overflow
 discards the unusable buffer and fences older tail responses until a fresh read

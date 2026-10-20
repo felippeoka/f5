@@ -112,8 +112,17 @@ if (import.meta.main) {
     );
     if (process.env.GITHUB_OUTPUT)
       appendFileSync(process.env.GITHUB_OUTPUT, `replace-baseline=${decision.replace}\n`);
-    let summary = decision.reason + "\n";
+    let summary =
+      "Nightly comparisons do not gate merges. A regression fails this workflow.\n\n" +
+      decision.reason +
+      "\n";
     console.log(decision.reason);
+    if (decision.replace && baseline && process.env.RESET_BASELINE !== "true") {
+      const warning =
+        "Baseline incompatible: no performance comparison was made. The previous baseline is retained in the candidate diagnostics artifact; qualification requires a compatible comparison.";
+      console.log(`::warning::${warning}`);
+      summary += `\n> **Warning:** ${warning}\n`;
+    }
     if (!decision.replace) {
       const comparison = spawnSync("bun", ["run", "perf:compare", baselinePath, candidatePath], {
         encoding: "utf8",

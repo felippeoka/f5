@@ -283,7 +283,10 @@ The latest retained `perf-baseline` from a successful main run of this repositor
 nightly workflow supplies the comparison; fork heads and other workflows are excluded. A missing
 baseline, the dispatch's `reset-baseline` option, or incompatible fixture, harness,
 hardware, OS, Git, browser or runtime metadata records a new baseline, with the
-reason in the step summary. Compatible reports run `bun run perf:compare`;
+reason in the step summary. Incompatibility also emits a workflow warning: no
+performance comparison was made, and the previous baseline remains in the candidate
+diagnostics artifact. Re-baselining does not qualify performance acceptance.
+Compatible reports run `bun run perf:compare`;
 regressions fail that workflow and appear in its summary. Feature-branch dispatches
 can compare reports but cannot replace main's baseline. Every successful comparison
 re-uploads the unchanged comparison baseline to refresh its 90-day artifact retention;

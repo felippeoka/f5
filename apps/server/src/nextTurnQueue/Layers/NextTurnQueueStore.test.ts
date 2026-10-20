@@ -900,5 +900,17 @@ it.effect(
       assert.equal(third.length, 2);
       assert.deepStrictEqual([...first, ...second, ...third], expected);
       assert.deepStrictEqual(yield* store.listActionableThreadIds, first);
+      const scanned: ThreadId[] = [];
+      const sizes: number[] = [];
+      yield* store.scanActionableThreads((page) =>
+        Effect.sync(() => {
+          sizes.push(page.length);
+          scanned.push(...page);
+        }),
+      );
+      assert.deepStrictEqual(sizes, [64, 64, 2]);
+      assert.deepStrictEqual(scanned, expected);
+      // A startup scan never moves the independent periodic rotation cursor.
+      assert.deepStrictEqual(yield* store.listActionableThreadIds, second);
     }).pipe(Effect.provide(testLayer)),
 );

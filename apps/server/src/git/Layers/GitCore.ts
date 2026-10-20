@@ -1,7 +1,7 @@
 import { makeMoveSnapshotOperations } from "../moveSnapshot.ts";
 import { checkoutFingerprint } from "../checkoutFingerprint.ts";
 import { blockingIgnoredEntries } from "../worktreeIgnoredFiles.ts";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname } from "node:path";
 import {
   WorktreePreparations,
@@ -595,39 +595,65 @@ const makeGitCore = Effect.gen(function* () {
       };
     });
 
-  const fetchUpstreamRef = (
-    cwd: string,
-    upstream: { upstreamRef: string; remoteName: string; upstreamBranch: string },
-  ): Effect.Effect<void, GitCommandError> => {
-    const refspec = `+refs/heads/${upstream.upstreamBranch}:refs/remotes/${upstream.upstreamRef}`;
-    return runGit(
-      "GitCore.fetchUpstreamRef",
-      cwd,
-      ["fetch", "--quiet", "--no-tags", upstream.remoteName, refspec],
-      true,
-    );
-  };
-
-  const fetchUpstreamRefForStatus = (
+  const fetchUpstreamRefInBackground = (
     cwd: string,
     upstream: { upstreamRef: string; remoteName: string; upstreamBranch: string },
     env: NodeJS.ProcessEnv,
-  ): Effect.Effect<void, GitCommandError> => {
-    const refspec = `+refs/heads/${upstream.upstreamBranch}:refs/remotes/${upstream.upstreamRef}`;
-    return withRepositoryLock(
-      "GitCore.fetchUpstreamRefForStatus",
-      cwd,
-      executeGit(
-        "GitCore.fetchUpstreamRefForStatus",
-        cwd,
-        ["fetch", "--quiet", "--no-tags", upstream.remoteName, refspec],
-        {
-          timeoutMs: Duration.toMillis(STATUS_UPSTREAM_REFRESH_TIMEOUT),
-          env,
-        },
-      ).pipe(Effect.asVoid),
-    );
-  };
+  ): Effect.Effect<boolean, GitCommandError> =>
+    Effect.gen(function* () {
+      const operation = "GitCore.fetchUpstreamRefInBackground";
+      const destination = `refs/remotes/${upstream.upstreamRef}`;
+      const before = yield* executeGit(operation, cwd, ["rev-parse", "--verify", destination], {
+        allowNonZeroExit: true,
+      });
+      const previous = before.code === 0 ? before.stdout.trim() : "";
+      const temporary = `refs/f5/status/${randomUUID()}`;
+      // Download under an isolated ref: concurrent user pulls must own FETCH_HEAD
+      // and their tracking refs. Only the short compare-and-set takes the shared lock.
+      return yield* Effect.acquireUseRelease(
+        Effect.succeed(temporary),
+        (ref) =>
+          Effect.gen(function* () {
+            const fetched = yield* executeGit(
+              operation,
+              cwd,
+              [
+                "fetch",
+                "--quiet",
+                "--no-tags",
+                "--no-write-fetch-head",
+                "--no-auto-maintenance",
+                "--refmap=",
+                upstream.remoteName,
+                `+refs/heads/${upstream.upstreamBranch}:${ref}`,
+              ],
+              {
+                timeoutMs: Duration.toMillis(STATUS_UPSTREAM_REFRESH_TIMEOUT),
+                env,
+                allowNonZeroExit: true,
+              },
+            );
+            if (fetched.code !== 0) return false;
+            const head = yield* runGitStdout(operation, cwd, ["rev-parse", "--verify", ref]);
+            if (head.trim() === previous) return true;
+            return yield* withRepositoryLock(
+              operation,
+              cwd,
+              executeGit(operation, cwd, ["update-ref", destination, head.trim(), previous], {
+                allowNonZeroExit: true,
+              }),
+              "background",
+            ).pipe(Effect.map((result) => result.code === 0));
+          }),
+        (ref) =>
+          executeGit(operation, cwd, ["update-ref", "-d", ref], { allowNonZeroExit: true }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("failed to clean up status refresh ref", { cause: String(cause) }),
+            ),
+            Effect.asVoid,
+          ),
+      );
+    });
 
   const statusUpstreamRefreshGenerationRef = yield* Ref.make(new Map<string, number>());
   const statusUpstreamRefreshGenerationKey = (key: StatusUpstreamRefreshCacheKey) =>
@@ -659,7 +685,7 @@ const makeGitCore = Effect.gen(function* () {
     lookup: (cacheKey: StatusUpstreamRefreshCacheKey) =>
       Effect.gen(function* () {
         const generation = yield* startStatusRefreshGeneration(cacheKey);
-        yield* fetchUpstreamRefForStatus(
+        const fetched = yield* fetchUpstreamRefInBackground(
           cacheKey.cwd,
           {
             upstreamRef: cacheKey.upstreamRef,
@@ -672,11 +698,11 @@ const makeGitCore = Effect.gen(function* () {
           },
         );
         const latest = yield* isLatestStatusRefreshGeneration(cacheKey, generation);
-        if (latest)
+        if (latest && fetched)
           yield* Effect.sync(() => {
             for (const listener of statusRefreshListeners) listener(cacheKey.cwd);
           });
-        return latest;
+        return latest && fetched;
       }),
     // Keep successful refreshes warm and briefly cool down refresh failures so repeated
     // status checks in the same action do not pay the full upstream timeout each time.
@@ -707,11 +733,10 @@ const makeGitCore = Effect.gen(function* () {
     Effect.gen(function* () {
       const upstream = yield* resolveCurrentUpstream(cwd);
       if (!upstream) return;
-      yield* withRepositoryLock(
-        "GitCore.refreshCheckedOutBranchUpstream",
-        cwd,
-        fetchUpstreamRef(cwd, upstream),
-      );
+      yield* fetchUpstreamRefInBackground(cwd, upstream, {
+        ...process.env,
+        ...BACKGROUND_GIT_FETCH_ENV,
+      });
     });
 
   const resolveDefaultBranchName = (
@@ -1934,9 +1959,12 @@ const makeGitCore = Effect.gen(function* () {
     operation: string,
     cwd: string,
     effect: Effect.Effect<A, GitCommandError>,
+    mode: "user" | "background" = "user",
   ): Effect.Effect<A, GitCommandError> =>
     resolveCommonDir(cwd).pipe(
-      Effect.flatMap((commonDir) => withRepositoryLifecycleLock(baseDir, commonDir, effect)),
+      Effect.flatMap((commonDir) =>
+        withRepositoryLifecycleLock(baseDir, commonDir, effect, { mode }),
+      ),
       Effect.mapError((error) =>
         Schema.is(GitCommandError)(error)
           ? error

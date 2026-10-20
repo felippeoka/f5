@@ -29,6 +29,8 @@ import type { ProviderControlOrigin as ControlOrigin } from "../../provider/cont
 
 export interface OrchestrationEngineShape {
   /** Releases a reserved control slot after its provider-side outcome is recorded. */
+  /** Claim immediately before processing; expired/unowned events must never run late. */
+  readonly claimControl?: (commandId: string) => Effect.Effect<boolean>;
   readonly completeControl?: (commandId: string) => Effect.Effect<void>;
   readonly controlOrigin?: (commandId: string) => ControlOrigin | undefined;
   readonly isTurnStartSuperseded?: (event: OrchestrationEvent) => boolean;

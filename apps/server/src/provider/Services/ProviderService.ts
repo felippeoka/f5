@@ -57,6 +57,10 @@ export interface ProviderSubmissionHandle {
 }
 
 export interface ProviderServiceShape {
+  /** Published before adapter startup, until its durable binding has been written. */
+  readonly getStartingSessionIdentity?: (
+    threadId: ThreadId,
+  ) => { readonly instanceId: ProviderInstanceId; readonly generation: number } | undefined;
   readonly acknowledgeHistoryReconciliation?: (input: {
     readonly threadId: ThreadId;
     readonly markerId: string;

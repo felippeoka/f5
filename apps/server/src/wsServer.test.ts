@@ -1739,6 +1739,10 @@ describe("WebSocket Server", () => {
     expect(await bundle.text()).toBe("globalThis.bundleLoaded = true;");
     expect(bundle.headers.get("cache-control")).toContain("immutable");
     expect(bundle.headers.get("content-security-policy")).toBeNull();
+    fs.writeFileSync(path.join(staticDir, "assets", "code-highlight-worker.js"), "// worker");
+    const worker = await fetch(`http://127.0.0.1:${port}/assets/code-highlight-worker.js`);
+    expect(worker.headers.get("cache-control")).toBe("no-cache");
+    expect(await worker.text()).toBe("// worker");
     const head = await fetch(`http://127.0.0.1:${port}/assets/main-abcdef12.js`, {
       method: "HEAD",
     });

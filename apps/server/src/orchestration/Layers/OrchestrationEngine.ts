@@ -14,7 +14,7 @@ import { assertWorktreeReady, WorktreeInspectionError } from "../../project/work
 import { GitCore } from "../../git/Services/GitCore.ts";
 import type { OrchestrationReadModel, ProjectId, ThreadId } from "@t3tools/contracts";
 import { NextTurnQueueStore } from "../../nextTurnQueue/Services/NextTurnQueueStore.ts";
-import { OrchestrationCommand, OrchestrationEvent } from "@t3tools/contracts";
+import { CommandId, EventId, OrchestrationCommand, OrchestrationEvent } from "@t3tools/contracts";
 import {
   Cause,
   Deferred,
@@ -26,6 +26,7 @@ import {
   Option,
   PubSub,
   Schema,
+  ServiceMap,
   Stream,
 } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -71,6 +72,9 @@ interface CommandEnvelope {
   startedAtMs: number;
   admissionOrder: number;
   controlCommitted?: boolean;
+  controlCommittedAt?: number;
+  controlClaimed?: boolean;
+  controlExpired?: boolean;
   controlOrigin?: ControlOrigin;
   controlFinished?: Deferred.Deferred<void, OrchestrationOverloadError>;
   workspace?: { path: string; branch: string | null; projectCwd: string };
@@ -129,6 +133,13 @@ function controlCommandConflict(existing: CommandEnvelope, command: Orchestratio
       });
 }
 
+/** Only unclaimed control delivery expires; a running side effect keeps its lease. */
+export const ControlDeliveryClock = ServiceMap.Reference<() => number>(
+  "f5/orchestration/ControlDeliveryClock",
+  { defaultValue: () => Date.now },
+);
+const CONTROL_DELIVERY_TIMEOUT_MS = 30_000;
+
 const makeOrchestrationEngine = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const transitions = yield* Effect.serviceOption(WorkspaceTransitions);
@@ -147,6 +158,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   let readModel = createEmptyReadModel(new Date().toISOString());
   let hasDeletedThreads = false;
 
+  const controlNow = yield* ControlDeliveryClock;
   const admission = yield* makeCommandAdmission<CommandEnvelope>();
   const controlReservations = new Map<string, CommandEnvelope>();
   let admissionOrder = 0;
@@ -162,6 +174,12 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         if (envelope.controlFinished) yield* Deferred.succeed(envelope.controlFinished, undefined);
       }),
     );
+  const releaseEnvelopeAdmission = (envelope: CommandEnvelope) =>
+    envelope.controlCommitted
+      ? Effect.void
+      : isControlCommand(envelope.command)
+        ? releaseControl(envelope.command.commandId)
+        : admission.release(envelope);
   yield* registerShutdown("orchestration-admission", "admission", () =>
     Effect.sync(() => {
       accepting = false;
@@ -639,7 +657,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           ? withoutDeletedThreadDetails(committedCommand.nextReadModel)
           : committedCommand.nextReadModel;
         for (const [index, event] of committedCommand.committedEvents.entries()) {
-          if (isControlEvent(event)) envelope.controlCommitted = true;
+          if (isControlEvent(event)) {
+            envelope.controlCommitted = true;
+            envelope.controlCommittedAt = controlNow();
+          }
           if (
             event.type === "thread.session-stop-requested" ||
             event.type === "thread.archived" ||
@@ -703,6 +724,8 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           );
 
           if (Exit.isSuccess(exit)) {
+            // Release a completed continuation before its caller can submit the next.
+            yield* releaseEnvelopeAdmission(envelope);
             yield* Deferred.succeed(envelope.result, exit.value);
             return;
           }
@@ -742,6 +765,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               })
               .pipe(Effect.catch(() => Effect.void));
           }
+          yield* releaseEnvelopeAdmission(envelope);
           yield* Deferred.fail(envelope.result, error);
         }),
       ),
@@ -803,17 +827,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       if (!envelope) return;
       yield* maintenanceLock
         .withShared(processEnvelope(envelope))
-        .pipe(
-          Effect.ensuring(
-            Effect.suspend(() =>
-              envelope.controlCommitted
-                ? Effect.void
-                : isControlCommand(envelope.command)
-                  ? releaseControl(envelope.command.commandId)
-                  : admission.release(envelope),
-            ),
-          ),
-        );
+        .pipe(Effect.ensuring(Effect.suspend(() => releaseEnvelopeAdmission(envelope))));
     }
   });
   yield* Effect.forkScoped(worker);
@@ -976,17 +990,101 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                   (pending) => pending.controlOrigin === inheritedControl,
                 )
               : undefined;
-          if (owner) yield* admission.offerContinuation(envelope, bytes, owner);
-          else yield* admission.offer(envelope, bytes, control);
+          // Publish the identity before waking the engine/consumer. Admission may yield.
           if (control) controlReservations.set(command.commandId, envelope);
+          yield* (
+            owner
+              ? admission.offerContinuation(envelope, bytes, owner)
+              : admission.offer(envelope, bytes, control)
+          ).pipe(
+            Effect.onError((cause) =>
+              Effect.gen(function* () {
+                if (controlReservations.get(command.commandId) === envelope)
+                  controlReservations.delete(command.commandId);
+                // A duplicate may already be waiting on this temporarily published
+                // reservation. Admission failure must settle that waiter as well.
+                yield* Deferred.failCause(result, cause);
+              }),
+            ),
+          );
           return result;
         }),
       );
       return yield* Deferred.await(admittedResult);
     });
 
+  // PubSub is intentionally not replayed. Detect a missing/dead consumer without
+  // releasing controls that have already begun a potentially ambiguous side effect.
+  yield* Effect.forever(
+    Effect.sleep("1 second").pipe(
+      Effect.andThen(
+        Effect.gen(function* () {
+          for (const envelope of controlReservations.values()) {
+            if (
+              envelope.controlClaimed ||
+              envelope.controlExpired ||
+              envelope.controlCommittedAt === undefined ||
+              controlNow() - envelope.controlCommittedAt < CONTROL_DELIVERY_TIMEOUT_MS
+            )
+              continue;
+            envelope.controlExpired = true;
+            const error = new OrchestrationOverloadError({ lane: "control", reason: "closed" });
+            if (envelope.controlFinished) yield* Deferred.fail(envelope.controlFinished, error);
+            const command = envelope.command;
+            if (!isControlCommand(command) || !("threadId" in command)) continue;
+            const createdAt = new Date().toISOString();
+            yield* Effect.logWarning("provider control was not consumed; action was not sent", {
+              commandId: command.commandId,
+              commandType: command.type,
+            });
+            yield* dispatch({
+              type: "thread.activity.append",
+              commandId: CommandId.makeUnsafe(`${command.commandId}:unconsumed`),
+              threadId: command.threadId,
+              activity: {
+                id: EventId.makeUnsafe(`${command.commandId}:unconsumed`),
+                tone: "error",
+                kind:
+                  command.type === "thread.session.stop"
+                    ? "provider.session.stop.failed"
+                    : command.type === "thread.turn.interrupt"
+                      ? "provider.turn.interrupt.failed"
+                      : command.type === "thread.approval.respond"
+                        ? "provider.approval.respond.failed"
+                        : "provider.user-input.respond.failed",
+                summary: "The provider action could not start",
+                payload: {
+                  detail:
+                    "The action was not sent because the provider command consumer did not start it. Retry the action after recovery.",
+                },
+                turnId: null,
+                createdAt,
+              },
+              createdAt,
+            }).pipe(
+              Effect.provideService(ProviderControlTarget, envelope.controlOrigin),
+              Effect.catchCause((cause) =>
+                Effect.logWarning("failed to record unconsumed control", {
+                  cause: Cause.pretty(cause),
+                }),
+              ),
+              Effect.ensuring(releaseControl(command.commandId)),
+            );
+          }
+        }),
+      ),
+    ),
+  ).pipe(Effect.forkScoped);
+
   return {
     completeControl: releaseControl,
+    claimControl: (commandId) =>
+      Effect.sync(() => {
+        const envelope = controlReservations.get(commandId);
+        if (!envelope || envelope.controlExpired || envelope.controlClaimed) return false;
+        envelope.controlClaimed = true;
+        return true;
+      }),
     waitForControlProgress: (threadId) =>
       Effect.suspend(() =>
         Effect.forEach(

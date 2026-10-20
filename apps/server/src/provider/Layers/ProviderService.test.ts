@@ -859,6 +859,7 @@ it.effect("stamps and answers a startup form processed before the new binding is
     gate.closed = true;
     const restart = yield* service.startSession(threadId, start).pipe(Effect.forkChild);
     yield* Deferred.await(gate.reached);
+    assert.equal(service.getStartingSessionIdentity?.(threadId)?.generation, 2);
     // The adapter returned; its form request is processed before generation 2 is stored.
     const requested = yield* Stream.runHead(
       Stream.filter(service.streamEvents, (event) => event.type === "user-input.requested"),
@@ -4210,3 +4211,53 @@ it.live(
     }).pipe(Effect.provide(layer), Effect.scoped);
   },
 );
+
+for (const terminalType of ["session.exited", "turn.completed", "turn.aborted"] as const) {
+  it.effect(`ignores retired ${terminalType} when correlating a replacement submission`, () => {
+    const fake = makeFakeCodexAdapter();
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const threadId = asThreadId(`retired-completion:${terminalType}`);
+      const input = { threadId, provider: "codex" as const, runtimeMode: "full-access" as const };
+      yield* service.startSession(threadId, input);
+      yield* service.startSession(threadId, input);
+      const generation = service.getStartingSessionIdentity?.(threadId);
+      assert.equal(generation, undefined);
+      const handle = yield* service.submitTurn!({ threadId, input: "new turn" });
+      const accepted = yield* handle.acceptance;
+      const completion = yield* handle.completion.pipe(Effect.forkScoped);
+      const observed = yield* Stream.runHead(
+        Stream.filter(
+          service.streamEvents,
+          (event) => event.eventId === asEventId("retired-terminal"),
+        ),
+      ).pipe(Effect.forkScoped);
+      yield* sleep(20);
+      fake.emit({
+        type: terminalType,
+        eventId: asEventId("retired-terminal"),
+        provider: "codex",
+        threadId,
+        turnId: accepted.turnId,
+        sessionGeneration: 1,
+        createdAt: new Date().toISOString(),
+        payload: terminalType === "turn.completed" ? { state: "completed" } : {},
+      } as unknown as LegacyProviderRuntimeEvent);
+      yield* Fiber.join(observed);
+      assert.equal(completion.pollUnsafe(), undefined);
+      fake.emit({
+        type: "turn.completed",
+        eventId: asEventId("current-terminal"),
+        provider: "codex",
+        threadId,
+        turnId: accepted.turnId,
+        sessionGeneration: 2,
+        createdAt: new Date().toISOString(),
+        payload: { state: "completed" },
+      } as unknown as LegacyProviderRuntimeEvent);
+      yield* Fiber.join(completion).pipe(Effect.timeout("2 seconds"));
+    }).pipe(
+      Effect.provide(makeProviderServiceLayerForAdapters(new Map([["codex", fake.adapter]]))),
+    );
+  });
+}

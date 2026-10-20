@@ -3,7 +3,7 @@ import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSna
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Deferred, Effect, Exit, Fiber, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import * as FS from "node:fs/promises";
 import * as OS from "node:os";
 import * as Path from "node:path";
@@ -168,6 +168,62 @@ it("binds the real snapshot repository graph to readers even inside a writer tra
         expect((yield* snapshots.getSnapshot()).projects.map((project) => project.id)).toEqual([
           "uncommitted-project",
         ]);
+      }).pipe(Effect.provide(layer)),
+    ),
+  );
+});
+
+it("checks deadlines before the next statement, preserving a body that has finished", async () => {
+  const persistence = await fixture();
+  let now = 0;
+  const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const readers = yield* SnapshotReadClients;
+          const read = Effect.gen(function* () {
+            yield* readers.foreground`SELECT 1`;
+            now += 2_100;
+            return "complete";
+          });
+          expect(yield* withSnapshotRead(readers.foreground, "foreground", read)).toBe("complete");
+          const expired = yield* Effect.exit(
+            withSnapshotRead(
+              readers.foreground,
+              "foreground",
+              read.pipe(Effect.andThen(readers.foreground`SELECT 2`)),
+            ),
+          );
+          expect(Exit.isFailure(expired)).toBe(true);
+        }).pipe(Effect.provide(persistence.pipe(Layer.provideMerge(NodeServices.layer)))),
+      ),
+    );
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+it("allows full bootstrap and startup snapshots beyond the interactive read budget", async () => {
+  const persistence = await fixture();
+  const layer = OrchestrationProjectionSnapshotQueryLive.pipe(
+    Layer.provideMerge(persistence),
+    Layer.provideMerge(NodeServices.layer),
+  );
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const snapshots = yield* ProjectionSnapshotQuery;
+        let now = 0;
+        // Advance between statements, without introducing a wall-clock timing assertion.
+        const clock = vi.spyOn(performance, "now").mockImplementation(() => (now += 2_100));
+        try {
+          expect((yield* snapshots.getBootstrapSnapshot()).threads).toEqual([]);
+          expect((yield* snapshots.getStartupSnapshot({})).snapshot.threads).toEqual([]);
+          expect(Exit.isFailure(yield* Effect.exit(snapshots.getSnapshot()))).toBe(true);
+        } finally {
+          clock.mockRestore();
+        }
       }).pipe(Effect.provide(layer)),
     ),
   );

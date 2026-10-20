@@ -1002,3 +1002,22 @@ it.layer(
     }),
   );
 });
+
+it.effect("starts every actionable page before the first safety-sweep interval", () =>
+  Effect.gen(function* () {
+    const dispatcher = yield* NextTurnQueueDispatcher;
+    const store = yield* NextTurnQueueStore;
+    const expected = new Set<CommandId>();
+    for (let index = 0; index < 130; index++) {
+      const threadId = ThreadId.makeUnsafe(`startup-page-${String(index).padStart(3, "0")}`);
+      yield* seedThread(threadId);
+      yield* insert(20_000 + index, threadId);
+      expected.add(CommandId.makeUnsafe(`dispatcher-command-${20_000 + index}`));
+    }
+    const periodic = yield* store.listActionableThreadIds;
+    assert.equal(periodic.length, 64);
+    yield* dispatcher.start;
+    yield* dispatcher.drain;
+    assert.equal(dispatched.filter((id) => expected.has(id)).length, 130);
+  }).pipe(Effect.provide(makeTestLayer())),
+);

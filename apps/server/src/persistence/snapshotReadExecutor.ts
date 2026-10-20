@@ -74,11 +74,12 @@ export const withSnapshotRead = <A, E, R>(
   lane: "foreground" | "background",
   effect: Effect.Effect<A, E, R>,
   isolateTransaction = true,
+  budgetMs = 2_000,
 ) =>
   Effect.suspend(() => {
     const started = performance.now();
-    return client.withTransaction(effect.pipe(Effect.tap(() => checkDeadline))).pipe(
-      Effect.provideService(SnapshotReadDeadline, started + 2_000),
+    return client.withTransaction(effect).pipe(
+      Effect.provideService(SnapshotReadDeadline, started + budgetMs),
       Effect.updateServices((services: ServiceMap.ServiceMap<R>) =>
         isolateTransaction
           ? (ServiceMap.omit(SqlClient.TransactionConnection)(services) as ServiceMap.ServiceMap<R>)
@@ -99,7 +100,7 @@ export const withSnapshotRead = <A, E, R>(
           Metric.withAttributes(snapshotReadDuration, { lane }),
           Duration.millis(duration),
         );
-        return duration >= 2_000
+        return duration >= budgetMs
           ? record.pipe(
               Effect.andThen(
                 Metric.update(Metric.withAttributes(snapshotReadOverruns, { lane }), 1),

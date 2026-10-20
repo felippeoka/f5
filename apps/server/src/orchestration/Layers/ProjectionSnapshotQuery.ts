@@ -3106,8 +3106,9 @@ export const OrchestrationProjectionSnapshotQueryLive = Layer.effect(
       client: SqlClient.SqlClient,
       lane: "foreground" | "background",
       effect: Effect.Effect<A, ProjectionRepositoryError>,
+      budgetMs = 2_000,
     ) =>
-      withSnapshotRead(client, lane, effect, client !== writer).pipe(
+      withSnapshotRead(client, lane, effect, client !== writer, budgetMs).pipe(
         Effect.mapError((error) =>
           isPersistenceError(error)
             ? error
@@ -3118,8 +3119,11 @@ export const OrchestrationProjectionSnapshotQueryLive = Layer.effect(
       getSnapshot: () => run(background, "background", back.getSnapshot()),
       getRetainedThreadDetails: (threadId) =>
         run(foreground, "foreground", front.getRetainedThreadDetails(threadId)),
-      getBootstrapSnapshot: () => run(background, "background", back.getBootstrapSnapshot()),
-      getStartupSnapshot: (input) => run(background, "background", back.getStartupSnapshot(input)),
+      // Full startup reads must finish even on databases that exceed the interactive budget.
+      getBootstrapSnapshot: () =>
+        run(background, "background", back.getBootstrapSnapshot(), Infinity),
+      getStartupSnapshot: (input) =>
+        run(background, "background", back.getStartupSnapshot(input), Infinity),
       getThreadTailDetails: (input) =>
         run(foreground, "foreground", front.getThreadTailDetails(input)),
       getThreadHistoryPage: (input) =>

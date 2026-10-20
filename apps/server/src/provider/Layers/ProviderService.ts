@@ -770,13 +770,20 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           }
           return;
         }
+        const terminalGeneration =
+          event.type === "turn.completed" ||
+          event.type === "turn.aborted" ||
+          event.type === "session.exited"
+            ? (event.sessionGeneration ??
+              (yield* nativeGeneration(event.threadId).pipe(Effect.orElseSucceed(() => -1))))
+            : undefined;
         if ((event.type === "turn.completed" || event.type === "turn.aborted") && event.turnId) {
           for (const [id, completion] of submissionCompletions) {
             if (
               completion.threadId !== event.threadId ||
               completion.instanceId !== item.source.instanceId ||
-              completion.generation !==
-                (yield* nativeGeneration(event.threadId).pipe(Effect.orElseSucceed(() => -1)))
+              completion.instanceId !== event.providerInstanceId ||
+              completion.generation !== terminalGeneration
             )
               continue;
             if (completion.turnId === event.turnId) {
@@ -802,8 +809,8 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             if (
               completion.threadId !== event.threadId ||
               completion.instanceId !== item.source.instanceId ||
-              completion.generation !==
-                (yield* nativeGeneration(event.threadId).pipe(Effect.orElseSucceed(() => -1)))
+              completion.instanceId !== event.providerInstanceId ||
+              completion.generation !== terminalGeneration
             )
               continue;
             yield* Deferred.succeed(completion.done, undefined);
@@ -3699,6 +3706,12 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
 
     return {
       acknowledgeHistoryReconciliation,
+      getStartingSessionIdentity: (threadId) => {
+        const starting = startingSessions.get(threadId);
+        return starting?.session.providerInstanceId
+          ? { instanceId: starting.session.providerInstanceId, generation: starting.generation }
+          : undefined;
+      },
       nativeOperations,
       renameThread,
       replaceSession,

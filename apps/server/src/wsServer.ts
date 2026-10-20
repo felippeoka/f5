@@ -2439,7 +2439,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         }
         const relative = path.relative(staticRoot, filePath);
         const fingerprinted =
-          relative.startsWith(`assets${path.sep}`) && /-[a-zA-Z0-9_-]{8,}\.[^.]+$/.test(relative);
+          relative.startsWith(`assets${path.sep}`) && /-[a-zA-Z0-9_]{8,}\.[^.]+$/.test(relative);
         const contentType = Mime.getType(filePath) ?? "application/octet-stream";
         yield* Effect.promise(async () => {
           try {

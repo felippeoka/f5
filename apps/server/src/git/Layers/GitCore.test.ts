@@ -346,6 +346,14 @@ describe("GitCore unit", () => {
       if (argsEqual(input, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])) {
         return { stdout: "origin/feature/cache\n" };
       }
+      if (argsEqual(input, ["rev-parse", "--verify", "refs/remotes/origin/feature/cache"]))
+        return { stdout: `${"a".repeat(40)}\n` };
+      if (
+        input.args[0] === "rev-parse" &&
+        input.args[1] === "--verify" &&
+        input.args[2]?.startsWith("refs/f5/status/")
+      )
+        return { stdout: `${"b".repeat(40)}\n` };
       if (argsEqual(input, ["remote"])) {
         return { stdout: "origin\n" };
       }
@@ -366,6 +374,7 @@ describe("GitCore unit", () => {
     await Effect.runPromise(core.subscribeStatusRefresh!(() => refreshed.resolve()));
     await Effect.runPromise(core.statusDetails(process.cwd()));
     await refreshed.promise;
+    await Effect.runPromise(core.drainUpstreamRefreshes!(process.cwd()));
     await Effect.runPromise(core.statusDetails(process.cwd()));
 
     const refreshes = scripted.calls.filter((call) => call.args[0] === "fetch");
@@ -374,9 +383,26 @@ describe("GitCore unit", () => {
       "fetch",
       "--quiet",
       "--no-tags",
+      "--no-write-fetch-head",
+      "--no-auto-maintenance",
+      "--refmap=",
       "origin",
-      "+refs/heads/feature/cache:refs/remotes/origin/feature/cache",
+      expect.stringMatching(/^\+refs\/heads\/feature\/cache:refs\/f5\/status\//),
     ]);
+    expect(scripted.calls.map((call) => call.args)).toContainEqual([
+      "update-ref",
+      "refs/remotes/origin/feature/cache",
+      "b".repeat(40),
+      "a".repeat(40),
+    ]);
+    expect(
+      scripted.calls.some(
+        (call) =>
+          call.args[0] === "update-ref" &&
+          call.args[1] === "-d" &&
+          call.args[2]?.startsWith("refs/f5/status/"),
+      ),
+    ).toBe(true);
     expect(
       scripted.calls.filter((call) =>
         argsEqual(call, ["symbolic-ref", "refs/remotes/origin/HEAD"]),

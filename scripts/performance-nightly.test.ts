@@ -102,7 +102,7 @@ it("selects only retained artifacts from successful own-repository main nightly 
   ).toBe(101);
 });
 
-it.each(["pass", "regression", "initialize"] as const)(
+it.each(["pass", "regression", "initialize", "incompatible"] as const)(
   "%s retains only the correct successful comparison anchor",
   (mode) => {
     const directory = mkdtempSync(join(tmpdir(), "f5-nightly-retention-"));
@@ -113,6 +113,14 @@ it.each(["pass", "regression", "initialize"] as const)(
     try {
       const baseline = report(),
         candidate = report();
+      if (mode === "incompatible")
+        candidate.metadata = {
+          ...candidate.metadata,
+          runtime: {
+            ...candidate.metadata.runtime,
+            versions: { ...candidate.metadata.runtime.versions, node: "different-runtime" },
+          },
+        };
       candidate.measurements.sample!.wallMs = Array(30).fill(mode === "regression" ? 100 : 1.01);
       writeFileSync(candidatePath, JSON.stringify(candidate));
       if (mode !== "initialize") writeFileSync(baselinePath, JSON.stringify(baseline));
@@ -137,12 +145,19 @@ it.each(["pass", "regression", "initialize"] as const)(
         },
       );
       expect(result.status, result.stdout + result.stderr).toBe(mode === "regression" ? 1 : 0);
+      if (mode === "incompatible") {
+        expect(result.stdout).toContain("::warning::Baseline incompatible");
+        expect(readFileSync(join(directory, "summary.md"), "utf8")).toContain(
+          "no performance comparison was made",
+        );
+        expect(JSON.parse(readFileSync(baselinePath, "utf8"))).toEqual(baseline);
+      }
       if (mode === "regression") {
         expect(existsSync(retainedPath)).toBe(false);
         expect(readFileSync(outputPath, "utf8")).not.toContain("retain-baseline=true");
       } else {
         expect(JSON.parse(readFileSync(retainedPath, "utf8"))).toEqual(
-          mode === "initialize" ? candidate : baseline,
+          mode === "initialize" || mode === "incompatible" ? candidate : baseline,
         );
         expect(readFileSync(outputPath, "utf8")).toContain("retain-baseline=true");
       }

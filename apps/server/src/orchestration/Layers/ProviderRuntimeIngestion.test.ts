@@ -117,6 +117,10 @@ type LegacyProviderRuntimeEvent = {
 function createProviderServiceHarness() {
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
   const runtimeSessions: ProviderSession[] = [];
+  const startingIdentities = new Map<
+    ThreadId,
+    { instanceId: ProviderInstanceId; generation: number }
+  >();
   const interruptedTurns: Array<Parameters<ProviderServiceShape["interruptTurn"]>[0]> = [];
   const requestResponses: Array<Parameters<ProviderServiceShape["respondToRequest"]>[0]> = [];
   const userInputResponses: Array<Parameters<ProviderServiceShape["respondToUserInput"]>[0]> = [];
@@ -136,6 +140,7 @@ function createProviderServiceHarness() {
   const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
   let sessionCapabilities: ProviderSessionCapabilities | null = null;
   const service: ProviderServiceShape = {
+    getStartingSessionIdentity: (threadId) => startingIdentities.get(threadId),
     startSession: () => unsupported(),
     replaceSession: () => unsupported(),
     sendTurn: () => unsupported(),
@@ -198,6 +203,7 @@ function createProviderServiceHarness() {
 
   return {
     service,
+    startingIdentities,
     emit,
     setSessionCapabilities: (next: ProviderSessionCapabilities | null) => {
       sessionCapabilities = next;
@@ -474,6 +480,7 @@ describe("ProviderRuntimeIngestion", () => {
 
     return {
       engine,
+      startingIdentities: provider.startingIdentities,
       emit: provider.emit,
       providerSessionDirectory,
       setProviderSession: provider.setSession,
@@ -895,6 +902,136 @@ describe("ProviderRuntimeIngestion", () => {
     }
   });
 
+  it("projects startup requests while the new generation binding write is held", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const instanceId = ProviderInstanceId.makeUnsafe("codex");
+    const entered = Deferred.makeUnsafe<void>();
+    const release = Deferred.makeUnsafe<void>();
+    harness.startingIdentities.set(threadId, { instanceId, generation: 1 });
+    const write = Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Deferred.succeed(entered, undefined);
+        yield* Deferred.await(release);
+        yield* harness.providerSessionDirectory.upsert({
+          threadId,
+          provider: "codex",
+          providerInstanceId: instanceId,
+          runtimePayload: { sessionGeneration: 1, activeTurnId: null },
+        });
+      }),
+    );
+    try {
+      await Effect.runPromise(Deferred.await(entered));
+      for (const generation of [0, 1])
+        harness.emit({
+          type: "user-input.requested",
+          eventId: asEventId(`startup-form-${generation}`),
+          provider: "codex",
+          providerInstanceId: instanceId,
+          sessionGeneration: generation,
+          threadId,
+          requestId: ApprovalRequestId.makeUnsafe(`startup-form-${generation}`),
+          createdAt: new Date().toISOString(),
+          payload: {
+            questions: [],
+            elicitation: {
+              mode: "form",
+              message: "Token?",
+              generation,
+              fields: [{ key: "token", title: "Token", required: true, type: "string" }],
+            },
+          },
+        });
+      const thread = await waitForThread(harness.engine, (thread) =>
+        thread.activities.some((activity) => activity.kind === "user-input.requested"),
+      );
+      const requests = thread.activities.filter(
+        (activity) => activity.kind === "user-input.requested",
+      );
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.payload).toMatchObject({
+        requestId: "startup-form-1",
+        elicitation: { generation: 1 },
+      });
+      expect(
+        Option.getOrThrow(
+          await Effect.runPromise(harness.providerSessionDirectory.getBinding(threadId)),
+        ).runtimePayload,
+      ).not.toMatchObject({ sessionGeneration: 1 });
+    } finally {
+      await Effect.runPromise(Deferred.succeed(release, undefined));
+      await write;
+      harness.startingIdentities.delete(threadId);
+    }
+  });
+
+  it.each(["streaming", "buffered"] as const)(
+    "finalizes %s output when a source exits without item completion",
+    async (mode) => {
+      const harness = await createHarness();
+      const threadId = asThreadId("thread-1"),
+        turnId = asTurnId("source-exit-turn");
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe("source-turn-request"),
+          threadId,
+          message: {
+            messageId: asMessageId("source-user"),
+            role: "user",
+            text: "stream",
+            attachments: [],
+          },
+          assistantDeliveryMode: mode,
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      await harness.drain();
+      harness.emit({
+        type: "turn.started",
+        eventId: asEventId("source-start"),
+        provider: "codex",
+        threadId,
+        turnId,
+        createdAt: new Date().toISOString(),
+      });
+      await waitForThread(harness.engine, (thread) => thread.session?.activeTurnId === turnId);
+      harness.emit({
+        type: "content.delta",
+        eventId: asEventId("source-text"),
+        provider: "codex",
+        threadId,
+        turnId,
+        itemId: asItemId("source-item"),
+        createdAt: new Date().toISOString(),
+        payload: { streamKind: "assistant_text", delta: "received output" },
+      });
+      await harness.drain();
+      harness.emit({
+        type: "session.exited",
+        eventId: asEventId("source-exit"),
+        provider: "codex",
+        threadId,
+        createdAt: new Date().toISOString(),
+        payload: { reason: "Process terminated" },
+      });
+      await harness.drain();
+      const thread = await waitForThread(
+        harness.engine,
+        (thread) => thread.session?.status === "stopped",
+      );
+      expect(thread.messages.filter((message) => message.role === "assistant")).toEqual([
+        expect.objectContaining({ text: "received output", streaming: false }),
+      ]);
+      expect(await Effect.runPromise(harness.providerTerminalEventRepository.listPending)).toEqual(
+        [],
+      );
+    },
+  );
+
   it("acknowledges receipts for removed threads so they cannot monopolize due pages", async () => {
     const harness = await createHarness();
     const event = {
@@ -1134,94 +1271,103 @@ describe("ProviderRuntimeIngestion", () => {
     expect(receipts).toEqual([{ appliedAt: null, attempt: 1 }]);
   });
 
-  it("replays a pending terminal receipt idempotently on startup", async () => {
-    const harness = await createHarness({ startIngestion: false });
-    const threadId = asThreadId("thread-1");
-    const turnId = asTurnId("turn-pending-terminal-replay");
-    const now = new Date().toISOString();
-    const event = {
-      type: "turn.completed",
-      eventId: asEventId("evt-pending-terminal-replay"),
-      provider: "codex",
-      threadId,
-      createdAt: now,
-      turnId,
-      payload: {
-        state: "completed",
-        usage: { input_tokens: 10, output_tokens: 5 },
-      },
-    } as const;
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.makeUnsafe("cmd-pending-terminal-running"),
-        threadId,
-        session: {
+  it.each([0, 1, 7])(
+    "replays a legacy terminal receipt at session generation %i on startup",
+    async (generation) => {
+      const harness = await createHarness({ startIngestion: false });
+      const threadId = asThreadId("thread-1");
+      const turnId = asTurnId("turn-pending-terminal-replay");
+      await Effect.runPromise(
+        harness.providerSessionDirectory.upsert({
           threadId,
-          status: "running",
-          providerName: "codex",
-          runtimeMode: "approval-required",
-          activeTurnId: turnId,
-          lastError: null,
-          updatedAt: now,
+          provider: "codex",
+          runtimePayload: { sessionGeneration: generation, activeTurnId: turnId },
+        }),
+      );
+      const now = new Date().toISOString();
+      const event = {
+        type: "turn.completed",
+        eventId: asEventId("evt-pending-terminal-replay"),
+        provider: "codex",
+        threadId,
+        createdAt: now,
+        turnId,
+        payload: {
+          state: "completed",
+          usage: { input_tokens: 10, output_tokens: 5 },
         },
-        createdAt: now,
-      }),
-    );
-    const messageId = asMessageId("message-pending-terminal-replay");
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.message.assistant.delta",
-        commandId: CommandId.makeUnsafe("cmd-pending-terminal-message-delta"),
-        threadId,
-        messageId,
-        delta: "Final response",
-        turnId,
-        createdAt: now,
-      }),
-    );
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.message.assistant.complete",
-        commandId: CommandId.makeUnsafe("cmd-pending-terminal-message-complete"),
-        threadId,
-        messageId,
-        turnId,
-        createdAt: now,
-      }),
-    );
-    await Effect.runPromise(harness.providerTerminalEventRepository.record(event));
+      } as const;
 
-    await harness.startIngestion();
-    await harness.drain();
-    const settled = await waitForThread(
-      harness.engine,
-      (thread) => thread.session?.status === "ready" && thread.session.activeTurnId === null,
-    );
-    expect(settled.latestTurn?.state).toBe("completed");
-    expect(await Effect.runPromise(harness.providerTerminalEventRepository.listPending)).toEqual(
-      [],
-    );
-    const beforeRetry = {
-      messages: settled.messages.length,
-      activities: settled.activities.length,
-      checkpoints: settled.checkpoints.length,
-    };
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.makeUnsafe("cmd-pending-terminal-running"),
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: turnId,
+            lastError: null,
+            updatedAt: now,
+          },
+          createdAt: now,
+        }),
+      );
+      const messageId = asMessageId("message-pending-terminal-replay");
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.message.assistant.delta",
+          commandId: CommandId.makeUnsafe("cmd-pending-terminal-message-delta"),
+          threadId,
+          messageId,
+          delta: "Final response",
+          turnId,
+          createdAt: now,
+        }),
+      );
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.message.assistant.complete",
+          commandId: CommandId.makeUnsafe("cmd-pending-terminal-message-complete"),
+          threadId,
+          messageId,
+          turnId,
+          createdAt: now,
+        }),
+      );
+      await Effect.runPromise(harness.providerTerminalEventRepository.record(event));
 
-    harness.emit(event);
-    await harness.drain();
-    const retried = await waitForThread(
-      harness.engine,
-      (thread) => thread.session?.status === "ready" && thread.session.activeTurnId === null,
-    );
-    expect({
-      messages: retried.messages.length,
-      activities: retried.activities.length,
-      checkpoints: retried.checkpoints.length,
-    }).toEqual(beforeRetry);
-    const commandCounts = await Effect.runPromise(
-      harness.sql<{ readonly commandId: string; readonly count: number }>`
+      await harness.startIngestion();
+      await harness.drain();
+      const settled = await waitForThread(
+        harness.engine,
+        (thread) => thread.session?.status === "ready" && thread.session.activeTurnId === null,
+      );
+      expect(settled.latestTurn?.state).toBe("completed");
+      expect(await Effect.runPromise(harness.providerTerminalEventRepository.listPending)).toEqual(
+        [],
+      );
+      const beforeRetry = {
+        messages: settled.messages.length,
+        activities: settled.activities.length,
+        checkpoints: settled.checkpoints.length,
+      };
+
+      harness.emit(event);
+      await harness.drain();
+      const retried = await waitForThread(
+        harness.engine,
+        (thread) => thread.session?.status === "ready" && thread.session.activeTurnId === null,
+      );
+      expect({
+        messages: retried.messages.length,
+        activities: retried.activities.length,
+        checkpoints: retried.checkpoints.length,
+      }).toEqual(beforeRetry);
+      const commandCounts = await Effect.runPromise(
+        harness.sql<{ readonly commandId: string; readonly count: number }>`
         SELECT command_id AS "commandId", count(*) AS count
         FROM orchestration_events
         WHERE command_id IN (
@@ -1231,18 +1377,19 @@ describe("ProviderRuntimeIngestion", () => {
         GROUP BY command_id
         ORDER BY command_id
       `,
-    );
-    expect(commandCounts).toEqual([
-      {
-        commandId: "provider:evt-pending-terminal-replay:thread-session-set",
-        count: 1,
-      },
-      {
-        commandId: "provider:evt-pending-terminal-replay:thread-usage-record",
-        count: 1,
-      },
-    ]);
-  });
+      );
+      expect(commandCounts).toEqual([
+        {
+          commandId: "provider:evt-pending-terminal-replay:thread-session-set",
+          count: 1,
+        },
+        {
+          commandId: "provider:evt-pending-terminal-replay:thread-usage-record",
+          count: 1,
+        },
+      ]);
+    },
+  );
 
   it.each([
     { branchExists: true, paused: false },

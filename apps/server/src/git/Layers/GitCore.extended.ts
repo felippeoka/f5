@@ -1009,6 +1009,93 @@ it.layer(TestLayer)("git integration", (it) => {
       }),
     );
 
+    it.effect("does not hold the repository lock while a status refresh waits on the network", () =>
+      Effect.gen(function* () {
+        const remote = yield* makeTmpDir(),
+          source = yield* makeTmpDir();
+        yield* git(remote, ["init", "--bare"]);
+        yield* initRepoWithCommit(source);
+        const branch = (yield* git(source, ["branch", "--show-current"])).trim();
+        yield* git(source, ["remote", "add", "origin", remote]);
+        yield* git(source, ["push", "-u", "origin", branch]);
+        yield* git(source, ["branch", "local-while-fetching"]);
+        const entered = yield* Deferred.make<void>(),
+          release = yield* Deferred.make<void>();
+        const realGitService = yield* GitService;
+        const core = yield* makeIsolatedGitCore({
+          execute: (input) =>
+            input.args[0] === "fetch"
+              ? Deferred.succeed(entered, undefined).pipe(
+                  Effect.andThen(Deferred.await(release)),
+                  Effect.as({ code: 128, stdout: "", stderr: "offline" }),
+                )
+              : realGitService.execute(input),
+        });
+        yield* core.statusDetails(source);
+        yield* Deferred.await(entered);
+        yield* core
+          .checkoutBranch({ cwd: source, branch: "local-while-fetching" })
+          .pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+        expect((yield* git(source, ["branch", "--show-current"])).trim()).toBe(
+          "local-while-fetching",
+        );
+      }),
+    );
+
+    it.effect("keeps user pull refs and FETCH_HEAD when a delayed status fetch finishes", () =>
+      Effect.gen(function* () {
+        const remote = yield* makeTmpDir(),
+          source = yield* makeTmpDir(),
+          clone = yield* makeTmpDir();
+        yield* git(remote, ["init", "--bare"]);
+        yield* initRepoWithCommit(source);
+        const branch = (yield* git(source, ["branch", "--show-current"])).trim();
+        yield* git(source, ["remote", "add", "origin", remote]);
+        yield* git(source, ["push", "-u", "origin", branch]);
+        yield* git(clone, ["clone", remote, "."]);
+        yield* git(clone, ["config", "user.email", "test@test.com"]);
+        yield* git(clone, ["config", "user.name", "Test"]);
+        yield* git(clone, ["checkout", branch]);
+        yield* writeTextFile(path.join(clone, "new.txt"), "first update");
+        yield* git(clone, ["add", "new.txt"]);
+        yield* git(clone, ["commit", "-m", "first update"]);
+        yield* git(clone, ["push", "origin", branch]);
+        const fetched = yield* Deferred.make<void>(),
+          release = yield* Deferred.make<void>();
+        const realGitService = yield* GitService;
+        const core = yield* makeIsolatedGitCore({
+          execute: (input) =>
+            realGitService
+              .execute(input)
+              .pipe(
+                Effect.tap(() =>
+                  input.args[0] === "fetch"
+                    ? Deferred.succeed(fetched, undefined).pipe(
+                        Effect.andThen(Deferred.await(release)),
+                      )
+                    : Effect.void,
+                ),
+              ),
+        });
+        yield* core.statusDetails(source);
+        yield* Deferred.await(fetched);
+        yield* Effect.gen(function* () {
+          yield* writeTextFile(path.join(clone, "new.txt"), "newer update");
+          yield* git(clone, ["add", "new.txt"]);
+          yield* git(clone, ["commit", "-m", "newer update"]);
+          yield* git(clone, ["push", "origin", branch]);
+          yield* git(source, ["pull", "--ff-only"]);
+        }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+        yield* core.drainUpstreamRefreshes!(source);
+        const head = (yield* git(source, ["rev-parse", "HEAD"])).trim();
+        expect((yield* git(source, ["rev-parse", `refs/remotes/origin/${branch}`])).trim()).toBe(
+          head,
+        );
+        expect((yield* git(source, ["rev-parse", "FETCH_HEAD"])).trim()).toBe(head);
+        expect((yield* git(source, ["for-each-ref", "refs/f5/status"])).trim()).toBe("");
+      }),
+    );
+
     it.effect("keeps checkout successful when upstream refresh fails", () =>
       Effect.gen(function* () {
         const remote = yield* makeTmpDir();
@@ -1136,7 +1223,7 @@ it.layer(TestLayer)("git integration", (it) => {
           execute: (input) => {
             if (input.args[0] === "fetch") {
               fetchArgs = [...input.args];
-              return Effect.succeed({ code: 0, stdout: "", stderr: "" });
+              return realGitService.execute(input);
             }
             return realGitService.execute(input);
           },
@@ -1153,8 +1240,11 @@ it.layer(TestLayer)("git integration", (it) => {
           "fetch",
           "--quiet",
           "--no-tags",
+          "--no-write-fetch-head",
+          "--no-auto-maintenance",
+          "--refmap=",
           "origin",
-          `+refs/heads/${featureBranch}:refs/remotes/origin/${featureBranch}`,
+          expect.stringMatching(new RegExp(`^\\+refs/heads/${featureBranch}:refs/f5/status/`)),
         ]);
       }),
     );
@@ -1240,8 +1330,8 @@ it.layer(TestLayer)("git integration", (it) => {
             execute: (input) => {
               if (input.args[0] === "fetch") {
                 fetchStarted = true;
-                return Effect.promise(() =>
-                  waitForReleasePromise.then(() => ({ code: 0, stdout: "", stderr: "" })),
+                return Effect.promise(() => waitForReleasePromise).pipe(
+                  Effect.andThen(realGitService.execute(input)),
                 );
               }
               return realGitService.execute(input);

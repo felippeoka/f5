@@ -1693,8 +1693,9 @@ export const makeNextTurnQueueDispatcher = Effect.gen(function* () {
         yield* store.drainOrphanedAttachments;
         yield* recoverRestartTurns;
         yield* scanUsageLimitResumes();
-        const actionable = yield* store.listActionableThreadIds;
-        yield* Effect.forEach(actionable, notify, { concurrency: 4, discard: true });
+        yield* store.scanActionableThreads((page) =>
+          Effect.forEach(page, notify, { concurrency: 4, discard: true }),
+        );
       }).pipe(
         Effect.catchCause((cause) =>
           Effect.logError("next-turn queue startup reconciliation failed", {

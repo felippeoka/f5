@@ -2804,60 +2804,73 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.withSpan(`provider.reactor.${event.type}`));
 
   const processDomainEventSafely = (event: ProviderIntentEvent) =>
-    Effect.gen(function* () {
-      const origin = event.commandId
-        ? orchestrationEngine.controlOrigin?.(event.commandId)
-        : undefined;
-      if (isControlEvent(event) && origin) {
-        const current = Option.getOrUndefined(
-          yield* providerSessionDirectory.getBinding(event.payload.threadId),
-        );
-        const thread = yield* resolveThread(event.payload.threadId);
+    Effect.suspend(() => {
+      let ownsControl = !orchestrationEngine.claimControl;
+      return Effect.gen(function* () {
         if (
-          (current?.provider ?? null) !== origin.provider ||
-          (current?.providerInstanceId ?? current?.provider ?? null) !== origin.instanceId ||
-          (current ? readPersistedSessionGeneration(current.runtimePayload) : null) !==
-            origin.generation ||
-          (origin.activeTurnId !== null &&
-            (thread?.session?.activeTurnId ?? null) !== origin.activeTurnId)
-        ) {
-          yield* appendProviderFailureActivity({
-            threadId: event.payload.threadId,
-            kind:
-              event.type === "thread.session-stop-requested"
-                ? "provider.session.stop.failed"
-                : event.type === "thread.turn-interrupt-requested"
-                  ? "provider.turn.interrupt.failed"
-                  : event.type === "thread.approval-response-requested"
-                    ? "provider.approval.respond.failed"
-                    : "provider.user-input.respond.failed",
-            summary: "The provider session changed before this action ran",
-            detail: "The action was not sent to the replacement session or turn.",
-            turnId: null,
-            createdAt: event.occurredAt,
-          });
+          isControlEvent(event) &&
+          orchestrationEngine.claimControl &&
+          (!event.commandId || !(yield* orchestrationEngine.claimControl(event.commandId)))
+        )
           return;
+        ownsControl = true;
+        const origin = event.commandId
+          ? orchestrationEngine.controlOrigin?.(event.commandId)
+          : undefined;
+        if (isControlEvent(event) && origin) {
+          const current = Option.getOrUndefined(
+            yield* providerSessionDirectory.getBinding(event.payload.threadId),
+          );
+          const thread = yield* resolveThread(event.payload.threadId);
+          if (
+            (current?.provider ?? null) !== origin.provider ||
+            (current?.providerInstanceId ?? current?.provider ?? null) !== origin.instanceId ||
+            (current ? readPersistedSessionGeneration(current.runtimePayload) : null) !==
+              origin.generation ||
+            (origin.activeTurnId !== null &&
+              (thread?.session?.activeTurnId ?? null) !== origin.activeTurnId)
+          ) {
+            yield* appendProviderFailureActivity({
+              threadId: event.payload.threadId,
+              kind:
+                event.type === "thread.session-stop-requested"
+                  ? "provider.session.stop.failed"
+                  : event.type === "thread.turn-interrupt-requested"
+                    ? "provider.turn.interrupt.failed"
+                    : event.type === "thread.approval-response-requested"
+                      ? "provider.approval.respond.failed"
+                      : "provider.user-input.respond.failed",
+              summary: "The provider session changed before this action ran",
+              detail: "The action was not sent to the replacement session or turn.",
+              turnId: null,
+              createdAt: event.occurredAt,
+            });
+            return;
+          }
         }
-      }
-      yield* processDomainEvent(event).pipe(Effect.provideService(ProviderControlTarget, origin));
-    }).pipe(
-      Effect.catchCause((cause) => {
-        if (Cause.hasInterruptsOnly(cause)) {
-          return Effect.failCause(cause);
-        }
-        return Effect.logWarning("provider command reactor failed to process event", {
-          eventType: event.type,
-          cause: Cause.pretty(cause),
-        });
-      }),
-      Effect.ensuring(
-        Effect.suspend(() =>
-          event.commandId && isControlEvent(event) && orchestrationEngine.completeControl
-            ? orchestrationEngine.completeControl(event.commandId)
-            : Effect.void,
+        yield* processDomainEvent(event).pipe(Effect.provideService(ProviderControlTarget, origin));
+      }).pipe(
+        Effect.catchCause((cause) => {
+          if (Cause.hasInterruptsOnly(cause)) {
+            return Effect.failCause(cause);
+          }
+          return Effect.logWarning("provider command reactor failed to process event", {
+            eventType: event.type,
+            cause: Cause.pretty(cause),
+          });
+        }),
+        Effect.ensuring(
+          Effect.suspend(() =>
+            ownsControl &&
+            event.commandId &&
+            isControlEvent(event) &&
+            orchestrationEngine.completeControl
+              ? orchestrationEngine.completeControl(event.commandId)
+              : Effect.void,
+          ),
         ),
-      ),
-    );
+      );
+    });
 
   const worker = yield* makeBackgroundWorker(processDomainEventSafely, {
     name: "ProviderCommandReactor",

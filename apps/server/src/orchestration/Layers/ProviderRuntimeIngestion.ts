@@ -3981,7 +3981,6 @@ const make = Effect.gen(function* () {
         const generation = readPersistedSessionGeneration(binding?.runtimePayload);
         const currentInstance = binding?.providerInstanceId ?? thread.session?.providerInstanceId;
         const legacyTurnMatches =
-          generation === 0 &&
           event.turnId !== undefined &&
           (thread.session?.activeTurnId === event.turnId ||
             (thread.session?.activeTurnId == null && thread.latestTurn?.turnId === event.turnId));
@@ -4024,7 +4023,18 @@ const make = Effect.gen(function* () {
         const binding = Option.getOrUndefined(
           yield* providerSessionDirectory.getBinding(event.threadId),
         );
-        if (event.sessionGeneration !== readPersistedSessionGeneration(binding?.runtimePayload))
+        // Startup may emit requests before startSession publishes the new binding.
+        // Prefer that admitted identity so retired events cannot pass during replacement.
+        const starting = providerService.getStartingSessionIdentity?.(event.threadId);
+        const generation =
+          starting?.generation ?? readPersistedSessionGeneration(binding?.runtimePayload);
+        const instance = starting?.instanceId ?? binding?.providerInstanceId;
+        if (
+          event.sessionGeneration !== generation ||
+          (event.providerInstanceId !== undefined &&
+            instance != null &&
+            event.providerInstanceId !== instance)
+        )
           return;
       }
       const previousLimit = thread.session?.usageLimit;
@@ -5244,6 +5254,38 @@ const make = Effect.gen(function* () {
             });
           else yield* clearBufferedProposedPlan(proposedPlanIdForTurn(thread.id, turnId));
         }
+      }
+
+      if (event.type === "session.exited" || event.type === "turn.aborted") {
+        // A killed source (notably Windows termination) may never send item.completed.
+        // Preserve buffered output and close persisted streams before discarding caches.
+        const pendingMessages = new Map<MessageId, TurnId | undefined>();
+        for (const message of thread.messages) {
+          if (
+            message.role === "assistant" &&
+            message.streaming &&
+            (event.type === "session.exited" || !eventTurnId || message.turnId === eventTurnId)
+          )
+            pendingMessages.set(message.id, message.turnId ?? undefined);
+        }
+        const prefix = `${thread.id}:`;
+        for (const key of Array.from(yield* Cache.keys(turnMessageIdsByTurnKey))) {
+          if (!key.startsWith(prefix)) continue;
+          const turnId = TurnId.makeUnsafe(key.slice(prefix.length));
+          if (event.type === "turn.aborted" && eventTurnId && turnId !== eventTurnId) continue;
+          for (const id of yield* getAssistantMessageIdsForTurn(thread.id, turnId))
+            pendingMessages.set(id, turnId);
+        }
+        for (const [messageId, turnId] of pendingMessages)
+          yield* finalizeAssistantMessage({
+            event,
+            threadId: thread.id,
+            messageId,
+            ...(turnId ? { turnId } : {}),
+            createdAt: now,
+            commandTag: "assistant-interrupted-finalize",
+            finalDeltaCommandTag: "assistant-interrupted-flush",
+          });
       }
 
       if (event.type === "turn.aborted") {

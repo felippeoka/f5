@@ -52,7 +52,7 @@ import {
   OrchestrationEventStore,
   type OrchestrationEventStoreShape,
 } from "../../persistence/Services/OrchestrationEventStore.ts";
-import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
+import { ControlDeliveryClock, OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -115,6 +115,7 @@ function diskSpaceMonitorLayer(hold: { current: string | null }) {
 
 async function createOrchestrationSystem(input?: {
   readonly tracePath?: string;
+  readonly controlClock?: () => number;
   readonly git?: GitCoreShape;
   readonly queue?: NextTurnQueueStoreShape;
   readonly diskSpaceHold?: { current: string | null };
@@ -135,6 +136,9 @@ async function createOrchestrationSystem(input?: {
       )
     : Layer.empty;
   const orchestrationLayer = OrchestrationEngineLive.pipe(
+    Layer.provide(
+      input?.controlClock ? Layer.succeed(ControlDeliveryClock, input.controlClock) : Layer.empty,
+    ),
     Layer.provide(input?.shutdown ? Layer.succeed(ServerShutdown, input.shutdown) : Layer.empty),
     Layer.provide(OrchestrationProjectionSnapshotQueryLive),
     Layer.provide(OrchestrationProjectionPipelineLive),
@@ -2597,6 +2601,76 @@ describe("command admission", () => {
       await system.dispose();
     }
   });
+  it("expires undelivered controls without expiring claimed work or allowing late execution", async () => {
+    let time = 0;
+    const system = await createOrchestrationSystem({ controlClock: () => time });
+    const projectId = asProjectId("watchdog-project"),
+      threadId = ThreadId.makeUnsafe("watchdog-thread");
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("watchdog-project"),
+          projectId,
+          title: "Project",
+          workspaceRoot: process.cwd(),
+          createdAt: now(),
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("watchdog-thread"),
+          threadId,
+          projectId,
+          title: "Thread",
+          model: "gpt-5-codex",
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+          createdAt: now(),
+        }),
+      );
+      for (let i = 0; i < 64; i++)
+        await system.run(
+          system.engine.dispatch({
+            type: "thread.session.stop",
+            commandId: CommandId.makeUnsafe(`watchdog-${i}`),
+            threadId,
+            createdAt: now(),
+          }),
+        );
+      expect(await system.run(system.engine.claimControl!("watchdog-0"))).toBe(true);
+      const progress = system.run(
+        system.engine.waitForControlProgress!(threadId).pipe(Effect.exit),
+      );
+      time = 30_001;
+      expect(Exit.isFailure(await progress)).toBe(true);
+      await expect.poll(() => system.engine.inspectQueue!().entries, { timeout: 5_000 }).toBe(1);
+      const thread = (await system.run(system.engine.getReadModel())).threads[0]!;
+      expect(
+        thread.activities.filter((a) => a.kind === "provider.session.stop.failed"),
+      ).toHaveLength(63);
+      expect(await system.run(system.engine.claimControl!("watchdog-1"))).toBe(false);
+      expect(system.engine.controlOrigin!("watchdog-0")).toBeDefined();
+      await system.run(system.engine.completeControl!("watchdog-0"));
+      expect(system.engine.inspectQueue!().entries).toBe(0);
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.session.stop",
+          commandId: CommandId.makeUnsafe("watchdog-recovered"),
+          threadId,
+          createdAt: now(),
+        }),
+      );
+      expect(await system.run(system.engine.claimControl!("watchdog-recovered"))).toBe(true);
+      await system.run(system.engine.completeControl!("watchdog-recovered"));
+    } finally {
+      await system.dispose();
+    }
+  });
+
   it("reserves controls before commit and releases slots only after reactor completion", async () => {
     const system = await createOrchestrationSystem();
     const projectId = asProjectId("control-project"),
@@ -2649,6 +2723,22 @@ describe("command admission", () => {
             .pipe(Effect.flip),
         ),
       ).toMatchObject({ _tag: "OrchestrationOverloadError", lane: "control" });
+      const duplicateOverload = {
+        type: "thread.session.stop" as const,
+        commandId: CommandId.makeUnsafe("duplicate-full-control"),
+        threadId,
+        createdAt: now(),
+      };
+      const duplicateResults = await system.run(
+        Effect.all(
+          [
+            system.engine.dispatch(duplicateOverload).pipe(Effect.exit),
+            system.engine.dispatch(duplicateOverload).pipe(Effect.exit),
+          ],
+          { concurrency: "unbounded" },
+        ).pipe(Effect.timeout("2 seconds")),
+      );
+      expect(duplicateResults.every(Exit.isFailure)).toBe(true);
       expect((await system.run(system.engine.getReadModel())).snapshotSequence).toBe(sequence);
       await system.run(system.engine.completeControl!("control-0"));
       await system.run(
