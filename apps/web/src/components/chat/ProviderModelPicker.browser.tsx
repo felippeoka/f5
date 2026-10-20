@@ -11,6 +11,20 @@ import { parsePersistedAppSettings } from "../../appSettings";
 import { useModelPreferencesStore } from "../../modelPreferencesStore";
 import { createTestServerProvider } from "../../testServerProvider";
 
+const rowRenders = vi.hoisted(() => new Map<string, number>());
+
+vi.mock("./ModelListRow", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./ModelListRow")>();
+  const { createElement, memo } = await import("react");
+  type RowProps = Parameters<typeof actual.ModelListRow>[0];
+  return {
+    ModelListRow: memo(function CountedModelListRow(props: RowProps) {
+      rowRenders.set(props.model.slug, (rowRenders.get(props.model.slug) ?? 0) + 1);
+      return createElement(actual.ModelListRow, props);
+    }),
+  };
+});
+
 const APP_SETTINGS_STORAGE_KEY = "t3code:app-settings:v1";
 const NOW_ISO = "2026-05-04T12:00:00.000Z";
 
@@ -125,6 +139,28 @@ describe("ProviderModelPicker", () => {
         expect(text).toContain("Sonnet 4.6");
         expect(text).not.toContain("GPT-5.4 Mini");
       });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("does not re-render an unchanged row while the search query is typed", async () => {
+    const mounted = await mountPicker();
+
+    try {
+      await page.getByRole("button", { name: /GPT-5.5/ }).click();
+      await page.getByPlaceholder("Search models...").fill("sonn");
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").not.toContain("GPT-5.4 Mini");
+        expect(rowRenders.get("claude-sonnet-4-6")).toBeGreaterThan(0);
+      });
+      const before = rowRenders.get("claude-sonnet-4-6");
+
+      await page.getByPlaceholder("Search models...").fill("sonne");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(document.body.textContent ?? "").toContain("Sonnet 4.6");
+      expect(rowRenders.get("claude-sonnet-4-6")).toBe(before);
     } finally {
       await mounted.cleanup();
     }
