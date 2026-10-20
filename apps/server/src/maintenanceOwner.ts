@@ -29,7 +29,9 @@ export async function watchMaintenanceOwner(fd = 3): Promise<() => Promise<void>
     try {
       // Read through this worker's filesystem I/O, so neither synchronous SQL
       // nor a blocking pipe read prevents the worker from acknowledging stop.
-      if (process.platform !== "win32") {
+      // Bun's Windows socket dispatch can wait on the blocked main thread.
+      // Filesystem reads complete on the owning worker instead.
+      if (process.platform !== "win32" || process.versions.bun !== undefined) {
         const byte = Buffer.alloc(1);
         const poll = () => read(workerData.fd, byte, 0, 1, null, (error, bytes) => {
           if (Atomics.load(stopping, 0) !== 0) return;
