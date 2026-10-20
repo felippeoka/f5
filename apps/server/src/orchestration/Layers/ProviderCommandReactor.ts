@@ -1714,11 +1714,18 @@ const make = Effect.gen(function* () {
           retryable: false,
           detail: "Unknown project",
         });
-      yield* assertWorktreeReady(git, {
-        projectCwd: project.workspaceRoot,
-        worktreePath: thread.worktreePath,
-        branch: thread.branch,
-      }).pipe(Effect.mapError(toProviderTurnDeliveryError));
+      // sendTurn rejects the steer unless `expectedTurnId` is still the live
+      // turn, which keeps running in its checkout even if that switched branches.
+      yield* assertWorktreeReady(
+        git,
+        {
+          projectCwd: project.workspaceRoot,
+          worktreePath: thread.worktreePath,
+          branch: thread.branch,
+        },
+        false,
+        { allowBranchDrift: true },
+      ).pipe(Effect.mapError(toProviderTurnDeliveryError));
       yield* requireDeliverableThread(thread.id);
       return yield* providerService.sendTurn({
         threadId: thread.id,

@@ -17,14 +17,37 @@ export function buildQueueRowDisplay(item: NextTurnQueueItem) {
     imageCount,
     fileCount,
     label:
-      displayed.visibleText.trim().length === 0 &&
+      describeAnswerDelivery(item) ??
+      (displayed.visibleText.trim().length === 0 &&
       displayed.attachedFilePaths.length === 0 &&
       imageCount + fileCount > 0
         ? fileCount > 0
           ? "Attachment-only turn"
           : "Image-only turn"
-        : displayed.visibleText,
+        : displayed.visibleText),
   };
+}
+
+/**
+ * Message-mode question answers are delivered as JSON for the provider; show
+ * the chosen answers instead. Display only; the queued text is unchanged.
+ */
+function describeAnswerDelivery(item: NextTurnQueueItem): string | null {
+  if (!item.command.commandId.startsWith("answer-delivery:")) return null;
+  try {
+    const parsed: unknown = JSON.parse(item.command.message.text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const answers: string[] = [];
+    for (const entry of Object.values(parsed)) {
+      const values = (entry as { answers?: unknown } | null)?.answers;
+      if (!Array.isArray(values) || !values.every((value) => typeof value === "string"))
+        return null;
+      answers.push(...values);
+    }
+    return answers.length > 0 ? `Answer · ${answers.join(", ")}` : null;
+  } catch {
+    return null;
+  }
 }
 
 export function moveItemInOrder(
@@ -64,7 +87,10 @@ export function mergeVisibleOrder(
   );
 }
 
-export function describeQueueBlockedState(snapshot: NextTurnQueueSnapshot): string | null {
+export function describeQueueBlockedState(
+  snapshot: NextTurnQueueSnapshot,
+  options: { readonly workspaceBannerShown?: boolean } = {},
+): string | null {
   const fallback = snapshot.reasonDetail;
   switch (snapshot.reasonCode) {
     case "active_turn":
@@ -104,7 +130,11 @@ export function describeQueueBlockedState(snapshot: NextTurnQueueSnapshot): stri
     case "workspace_switch_failed":
       return fallback ?? "Inspect and resolve the interrupted workspace switch.";
     case "worktree_missing":
-      return fallback ?? "Queue paused because the worktree is missing.";
+      // The workspace banner above the composer owns the details and recovery
+      // actions; it only renders for a thread that records a worktree.
+      return snapshot.paused && options.workspaceBannerShown
+        ? "Queue paused: workspace needs attention (see above)."
+        : (fallback ?? "Queue paused because the worktree is missing.");
     case "dispatch_rejected":
     case "delivery_rejected":
     case "delivery_ambiguous":

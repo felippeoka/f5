@@ -3,7 +3,7 @@ import { dispatchVerifiedWorkspace } from "../../project/workspaceTransitionCont
 import { GitCore } from "../../git/Services/GitCore.ts";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { makeConversationRewind } from "../rewind.ts";
-import { canonicalWorktreePath, isTemporaryWorktreeBranch } from "../../git/worktreePaths.ts";
+import { followsCheckoutBranchAtTurnEnd } from "../../project/worktreeReadiness.ts";
 import { GitService } from "../../git/Services/GitService.ts";
 import type { CheckpointStoreError } from "../../checkpointing/Errors.ts";
 import {
@@ -310,23 +310,16 @@ const make = Effect.gen(function* () {
           allowNonZeroExit: true,
         });
         const branch = result.stdout.trim();
+        if (result.code !== 0 || !branch || branch === input.thread.branch) return;
         if (
-          result.code !== 0 ||
-          !branch ||
-          branch === input.thread.branch ||
-          isTemporaryWorktreeBranch(branch)
+          !(yield* followsCheckoutBranchAtTurnEnd(
+            yield* orchestrationEngine.getReadModel(),
+            input.threadId,
+            input.cwd,
+            branch,
+          ))
         )
           return;
-        const current = yield* orchestrationEngine.getReadModel();
-        const canonical = yield* Effect.tryPromise(() => canonicalWorktreePath(input.cwd));
-        for (const other of current.threads) {
-          if (other.id === input.threadId || other.deletedAt !== null) continue;
-          const owner = current.projects.find((project) => project.id === other.projectId);
-          const effective = other.worktreePath ?? owner?.workspaceRoot;
-          if (!effective) return;
-          const otherPath = yield* Effect.tryPromise(() => canonicalWorktreePath(effective));
-          if (otherPath === canonical) return;
-        }
         if (Option.isNone(workspaceGit)) return;
         yield* dispatchVerifiedWorkspace(
           orchestrationEngine,

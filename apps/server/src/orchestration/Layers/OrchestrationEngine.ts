@@ -959,6 +959,11 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               branch: workspace.branch,
             },
             command.type === "thread.turn.start",
+            {
+              allowBranchDrift:
+                command.expectedTurnId !== undefined &&
+                thread.session?.activeTurnId === command.expectedTurnId,
+            },
           ).pipe(
             Effect.mapError((error) =>
               error instanceof WorktreeInspectionError

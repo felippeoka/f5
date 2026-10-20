@@ -14,6 +14,7 @@ import {
 import { withRepositoryLifecycleLock } from "./Layers/WorktreeLifecycleCoordinator.ts";
 import {
   assertWorktreeReady,
+  readWorktreeState,
   WorktreeInspectionError,
   WorktreeNotReadyError,
 } from "./worktreeReadiness.ts";
@@ -65,14 +66,49 @@ it("checks identity without status scans and verifies existing worktrees while t
       ).pipe(Effect.flip);
       expect(failed).toBeInstanceOf(WorktreeInspectionError);
       expect(failed.message).toContain("retry");
+      expect(yield* readWorktreeState(core, input, false)).toMatchObject({
+        checkoutBranch: "ready",
+        branchDriftOnly: false,
+      });
       git(target, "checkout", "-q", "-b", "agent-branch");
       expect(yield* assertWorktreeReady(core, input).pipe(Effect.flip)).toBeInstanceOf(
         WorktreeNotReadyError,
       );
+      expect(yield* readWorktreeState(core, input, false)).toMatchObject({
+        registration: "otherBranch",
+        checkoutBranch: "agent-branch",
+        branchDriftOnly: true,
+      });
+      // Steers into the live turn tolerate drift; new turns do not.
+      expect(yield* assertWorktreeReady(core, input, false, { allowBranchDrift: true })).toEqual({
+        branchDrift: true,
+      });
       git(target, "checkout", "-q", "--detach");
       expect(yield* assertWorktreeReady(core, input).pipe(Effect.flip)).toBeInstanceOf(
         WorktreeNotReadyError,
       );
+      expect(yield* readWorktreeState(core, input, false)).toMatchObject({
+        checkoutBranch: null,
+        branchDriftOnly: true,
+      });
+      // A foreign repository at the recorded path is never treated as drift.
+      expect(
+        yield* readWorktreeState(
+          { ...core, resolveCommonDir: () => Effect.succeed("/elsewhere/.git") },
+          input,
+          false,
+        ),
+      ).toMatchObject({ branchDriftOnly: false });
+      const missing = { ...input, worktreePath: path.join(config.worktreesDir, "missing") };
+      expect(yield* readWorktreeState(core, missing, false)).toMatchObject({
+        directoryExists: false,
+        branchDriftOnly: false,
+      });
+      expect(
+        yield* assertWorktreeReady(core, missing, false, { allowBranchDrift: true }).pipe(
+          Effect.flip,
+        ),
+      ).toBeInstanceOf(WorktreeNotReadyError);
     }).pipe(Effect.provide(automationLayer(world, {}, "f5-readiness-state-")), Effect.scoped),
   );
 });
