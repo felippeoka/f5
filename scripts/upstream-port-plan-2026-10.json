@@ -3197,17 +3197,10 @@
     },
     {
       "upstreamSha": "47d98aca3a145507949f0ce2b3ab3fad096c76ca",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Windows terminal kill no longer waits on timeouts (#18519).",
+      "classification": "equivalent:apps/server/src/terminal/Layers/Manager.ts:839",
+      "reason": "Equivalent: upstream stopped its Windows terminal kill from sleeping through SIGTERM grace timeouts. f5's Windows path kills the descendant tree with taskkill and closes ConPTY immediately, with no grace wait. Upstream change: fix(server): Windows terminal kill no longer waits on timeouts (#18519)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-18519"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "f5Shas": ["de26827bdc26045fcaef20ae12dfd5032648e0cd"]
     },
     {
       "upstreamSha": "89ce030d0520a8fb3f749d8635b8319c43e0bde8",
@@ -3382,20 +3375,9 @@
     },
     {
       "upstreamSha": "3962ae8586333310eeef655c917389b35f7b679d",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(desktop): picture-in-picture stops re-encoding an unchanged page (#20070).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20070"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:preview-picture-in-picture",
+      "reason": "Not-applicable: changes frame encoding in upstream's preview picture-in-picture window, which f5's desktop preview does not have. Upstream change: perf(desktop): picture-in-picture stops re-encoding an unchanged page (#20070)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "e74f477eed81012834e518ba172d0a83e33fe55e",
@@ -3405,20 +3387,9 @@
     },
     {
       "upstreamSha": "ccca13dcf4a70a45954a3a1a6de8306a67ef9a6f",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): expanding a wide ignored folder no longer classifies every child (#20062).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20062"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:workspace-tree-ignored-labels",
+      "reason": "Not-applicable: upstream labels every child of an expanded folder as ignored or not, one git check-ignore per child. f5 has no ignored labels on folder listings; its check-ignore runs only to filter search indexing, with --no-index so git does not consult the index. Upstream change: perf(server): expanding a wide ignored folder no longer classifies every child (#20062)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "f1e0a4d4d0600b2803e311989151c7f89ced3251",
@@ -3990,20 +3961,9 @@
     },
     {
       "upstreamSha": "cde9caecbd731a295e998460f42ea1f06be0b6ac",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): replace Windows PowerShell port polling with netstat (#18524).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-18524"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:preview-port-polling",
+      "reason": "Not-applicable: replaces upstream's Windows PowerShell port polling. f5 never polls listening ports; it probes only URLs its own previews own (apps/server/src/preview/PortScanner.ts:153). Upstream change: perf(server): replace Windows PowerShell port polling with netstat (#18524)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "6e5322b6cf37521e4999f6137607983e95491fcc",
@@ -4249,20 +4209,9 @@
     },
     {
       "upstreamSha": "ab3a3cd162d90fd9f01ac62efdb9d4ad55c33639",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): commands on busy threads stop decoding thousands of finished tool nodes (#19675).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-19675"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:orchestration-v2",
+      "reason": "Not-applicable: stops upstream's v2 Orchestrator decoding finished tool nodes per command. f5 commands run against its in-memory read model and never load execution nodes. Upstream change: perf(server): commands on busy threads stop decoding thousands of finished tool nodes (#19675)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "742c229957b69a0cc5a1379dff6c66b595854057",
@@ -4740,17 +4689,9 @@
     },
     {
       "upstreamSha": "3417bc3856a25fa772f969faeaf8428a58010d47",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): service updates no longer fail on full disks or large databases (#19311).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-19311"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:service-launcher",
+      "reason": "Not-applicable: fixes upstream's serviceLauncher update path; f5 has no service launcher. Upstream change: fix(server): service updates no longer fail on full disks or large databases (#19311)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "bc95bbd790580ff22bf1351edfa84231493c4ecc",
@@ -5057,37 +4998,15 @@
     },
     {
       "upstreamSha": "bac35a2ffcf90bb9fac7f63582bda9c549fd75ff",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): avoid quadratic resource history replay (#18825).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-18825"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:resource-telemetry",
+      "reason": "Not-applicable: changes upstream's resource telemetry history replay; f5 has no resource telemetry subsystem. Upstream change: perf(server): avoid quadratic resource history replay (#18825)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "8855a6dd052a8cbc9aac125dc2e8d14a0c2decd6",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): reuse stored turn item positions (#19230).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-19230"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:orchestration-v2",
+      "reason": "Not-applicable: changes the v2 TurnItemPositionStore; f5 has no turn item position store. Upstream change: perf(server): reuse stored turn item positions (#19230)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "570542662a3f9f3fb44f88778cb24753072f78aa",
@@ -7078,20 +6997,9 @@
     },
     {
       "upstreamSha": "cf8479e605eb3cc8662dee38cbf1925020a1c1a7",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): drive shell last-error lookup from thread bindings (#17842).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-17842"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:orchestration-v2",
+      "reason": "Not-applicable: changes the v2 ProjectionStore shell last-error lookup; f5 reads session errors from projection_thread_sessions rows. Upstream change: perf(server): drive shell last-error lookup from thread bindings (#17842)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "72fbad7b1ad303a5e0a896e1de5c6489f8d10fc8",
@@ -7511,20 +7419,9 @@
     },
     {
       "upstreamSha": "a11f464133291122e0f6381b35e1b245d0aa9c73",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): t3_thread_list reads only the listed project's threads (#17843).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-17843"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:orchestration-v2",
+      "reason": "Not-applicable: scopes upstream's t3_thread_list MCP tool and v2 ThreadManagementService; f5 has neither. Upstream change: perf(server): t3_thread_list reads only the listed project's threads (#17843)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "afd98d7d1840ed76f57d3ece556257aebc00f1bc",
@@ -9448,17 +9345,9 @@
     },
     {
       "upstreamSha": "1f31906c8e3003b2a9d7118c4da163544fa86586",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): shell snapshots no longer block other database reads while decoding (#17141).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-17141"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:orchestration-v2",
+      "reason": "Not-applicable: moves v2 shell snapshot decoding out of its read transaction. f5's thread-list read skips detail JSON decoding; the reader-worker follow-up is deferred with t3code#19226. Upstream change: fix(server): shell snapshots no longer block other database reads while decoding (#17141)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "4d1f24ba4123279708e169fcb196f78da8f11351",
@@ -13697,17 +13586,9 @@
     },
     {
       "upstreamSha": "b528a701102f95089544596856a3f208f4404613",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): restore Windows terminal startup after node-pty upgrade (#13927).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-13927"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:node-pty-beta-upgrade",
+      "reason": "Not-applicable: repairs Windows terminal startup after upstream moved to a patched node-pty 1.2.0 beta. f5 stays on node-pty ^1.1.0 with no patch. Upstream change: fix(server): restore Windows terminal startup after node-pty upgrade (#13927)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "72330e22c0d08159641ab10579eb75393c4d95b6",
@@ -14956,17 +14837,9 @@
     },
     {
       "upstreamSha": "e4eb9977f0b02b29cb2ee361b0c433c685e87615",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): stop replaying old agent alerts on restart (#13340).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-13340"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:relay-cloud",
+      "reason": "Not-applicable: changes upstream's AgentAwarenessRelay, part of the relay that f5 does not ship. Upstream change: fix(server): stop replaying old agent alerts on restart (#13340)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "894d33419dceb366eecda8e5e27c6fc043c3959e",

@@ -1737,3 +1737,15 @@ Found while testing: five tests in
 `apps/server/src/provider/Layers/ProviderSessionDirectory.test.ts` use plain
 `it(...)` with an Effect body inside `it.layer`, so their bodies never run.
 Run as `it.effect`, two of them fail. This is not fixed here.
+
+**Batch 6 (platform and upstream-only server subsystems, 15 records).**
+[t3code#19966](https://github.com/pingdotgg/t3code/pull/19966) and
+[t3code#17384](https://github.com/pingdotgg/t3code/pull/17384) are ported in
+one change: the desktop marks the backend environment as prepared, and the
+server stops repeating the login-shell or PowerShell PATH probe. This was not
+run on Windows. [t3code#18519](https://github.com/pingdotgg/t3code/pull/18519)
+is equivalent, because f5 already kills the Windows terminal tree without a
+grace wait. The rest change subsystems f5 does not have: the node-pty 1.2
+beta upgrade, preview picture-in-picture, ignored labels on folder listings,
+port polling, resource telemetry, the service launcher, the relay, and five
+`orchestration-v2` paths.

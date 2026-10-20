@@ -465,10 +465,12 @@
     {
       "upstreamSha": "03bd839554c9da27aae37b027bcdb2fa9896af09",
       "subject": "perf(desktop): reuse the prepared shell environment in the local backend (#17384)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(desktop): reuse the prepared shell environment in the local backend (#17384).",
+      "reason": "Ported together with t3code#19966: the local backend reuses the shell environment the desktop prepared instead of probing again. Upstream change: perf(desktop): reuse the prepared shell environment in the local backend (#17384)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["80914920b4f0d04ae77db533285a56506ed3b4af"],
+      "evidence": ["apps/desktop/src/backendEnv.ts:79", "apps/server/src/os-jank.ts:14"]
     },
     {
       "upstreamSha": "03c6cd8badb7af4dfd05d370f3180d16f6927591",
@@ -4209,10 +4211,9 @@
     {
       "upstreamSha": "1f31906c8e3003b2a9d7118c4da163544fa86586",
       "subject": "fix(server): shell snapshots no longer block other database reads while decoding (#17141)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): shell snapshots no longer block other database reads while decoding (#17141).",
+      "reason": "Not-applicable: moves v2 shell snapshot decoding out of its read transaction. f5's thread-list read skips detail JSON decoding; the reader-worker follow-up is deferred with t3code#19226. Upstream change: fix(server): shell snapshots no longer block other database reads while decoding (#17141)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "1f6df6bf1f50ab5b8e3253716773da2571f8243e",
@@ -7150,10 +7151,9 @@
     {
       "upstreamSha": "3417bc3856a25fa772f969faeaf8428a58010d47",
       "subject": "fix(server): service updates no longer fail on full disks or large databases (#19311)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): service updates no longer fail on full disks or large databases (#19311).",
+      "reason": "Not-applicable: fixes upstream's serviceLauncher update path; f5 has no service launcher. Upstream change: fix(server): service updates no longer fail on full disks or large databases (#19311)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "343db2c328af56fe0fa7672f3af055550832689b",
@@ -7868,10 +7868,9 @@
     {
       "upstreamSha": "3962ae8586333310eeef655c917389b35f7b679d",
       "subject": "perf(desktop): picture-in-picture stops re-encoding an unchanged page (#20070)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(desktop): picture-in-picture stops re-encoding an unchanged page (#20070).",
+      "reason": "Not-applicable: changes frame encoding in upstream's preview picture-in-picture window, which f5's desktop preview does not have. Upstream change: perf(desktop): picture-in-picture stops re-encoding an unchanged page (#20070)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "397a46123999ada6b9ddcbe85534631a241bb0ed",
@@ -9744,10 +9743,11 @@
     {
       "upstreamSha": "47d98aca3a145507949f0ce2b3ab3fad096c76ca",
       "subject": "fix(server): Windows terminal kill no longer waits on timeouts (#18519)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): Windows terminal kill no longer waits on timeouts (#18519).",
+      "reason": "Equivalent: upstream stopped its Windows terminal kill from sleeping through SIGTERM grace timeouts. f5's Windows path kills the descendant tree with taskkill and closes ConPTY immediately, with no grace wait. Upstream change: fix(server): Windows terminal kill no longer waits on timeouts (#18519)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": ["de26827bdc26045fcaef20ae12dfd5032648e0cd"],
+      "evidence": ["apps/server/src/terminal/Layers/Manager.ts:839"]
     },
     {
       "upstreamSha": "47dbb06c3b171c40ebdfbd5b38cd954127949bc0",
@@ -18433,10 +18433,9 @@
     {
       "upstreamSha": "8855a6dd052a8cbc9aac125dc2e8d14a0c2decd6",
       "subject": "perf(server): reuse stored turn item positions (#19230)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): reuse stored turn item positions (#19230).",
+      "reason": "Not-applicable: changes the v2 TurnItemPositionStore; f5 has no turn item position store. Upstream change: perf(server): reuse stored turn item positions (#19230)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "886195ec1e6335d46d34fb3819ab4f3440b42b6d",
@@ -21791,10 +21790,9 @@
     {
       "upstreamSha": "a11f464133291122e0f6381b35e1b245d0aa9c73",
       "subject": "perf(server): t3_thread_list reads only the listed project's threads (#17843)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): t3_thread_list reads only the listed project's threads (#17843).",
+      "reason": "Not-applicable: scopes upstream's t3_thread_list MCP tool and v2 ThreadManagementService; f5 has neither. Upstream change: perf(server): t3_thread_list reads only the listed project's threads (#17843)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a12589dc0bec60b498e72bdd2190871ee6b5c80d",
@@ -23016,10 +23014,9 @@
     {
       "upstreamSha": "ab3a3cd162d90fd9f01ac62efdb9d4ad55c33639",
       "subject": "perf(server): commands on busy threads stop decoding thousands of finished tool nodes (#19675)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): commands on busy threads stop decoding thousands of finished tool nodes (#19675).",
+      "reason": "Not-applicable: stops upstream's v2 Orchestrator decoding finished tool nodes per command. f5 commands run against its in-memory read model and never load execution nodes. Upstream change: perf(server): commands on busy threads stop decoding thousands of finished tool nodes (#19675)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ab3b55e29ac20a6212f09e38f1983b856fd77695",
@@ -24243,10 +24240,9 @@
     {
       "upstreamSha": "b528a701102f95089544596856a3f208f4404613",
       "subject": "fix(server): restore Windows terminal startup after node-pty upgrade (#13927)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): restore Windows terminal startup after node-pty upgrade (#13927).",
+      "reason": "Not-applicable: repairs Windows terminal startup after upstream moved to a patched node-pty 1.2.0 beta. f5 stays on node-pty ^1.1.0 with no patch. Upstream change: fix(server): restore Windows terminal startup after node-pty upgrade (#13927)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "b54bfc9312b030bad9d89771fbf561ccbfb2d315",
@@ -24965,10 +24961,9 @@
     {
       "upstreamSha": "bac35a2ffcf90bb9fac7f63582bda9c549fd75ff",
       "subject": "perf(server): avoid quadratic resource history replay (#18825)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): avoid quadratic resource history replay (#18825).",
+      "reason": "Not-applicable: changes upstream's resource telemetry history replay; f5 has no resource telemetry subsystem. Upstream change: perf(server): avoid quadratic resource history replay (#18825)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "bad1143b02f7b585d1fe1335b3d9a97983ce8d8b",
@@ -27380,10 +27375,9 @@
     {
       "upstreamSha": "ccca13dcf4a70a45954a3a1a6de8306a67ef9a6f",
       "subject": "perf(server): expanding a wide ignored folder no longer classifies every child (#20062)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): expanding a wide ignored folder no longer classifies every child (#20062).",
+      "reason": "Not-applicable: upstream labels every child of an expanded folder as ignored or not, one git check-ignore per child. f5 has no ignored labels on folder listings; its check-ignore runs only to filter search indexing, with --no-index so git does not consult the index. Upstream change: perf(server): expanding a wide ignored folder no longer classifies every child (#20062)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "cccd7e3c885065e925f559c5708378cdb3b51eb3",
@@ -27517,10 +27511,9 @@
     {
       "upstreamSha": "cde9caecbd731a295e998460f42ea1f06be0b6ac",
       "subject": "perf(server): replace Windows PowerShell port polling with netstat (#18524)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): replace Windows PowerShell port polling with netstat (#18524).",
+      "reason": "Not-applicable: replaces upstream's Windows PowerShell port polling. f5 never polls listening ports; it probes only URLs its own previews own (apps/server/src/preview/PortScanner.ts:153). Upstream change: perf(server): replace Windows PowerShell port polling with netstat (#18524)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "ce29ba9cd774ae996d51ca444d1e0165e5d7d527",
@@ -27723,10 +27716,9 @@
     {
       "upstreamSha": "cf8479e605eb3cc8662dee38cbf1925020a1c1a7",
       "subject": "perf(server): drive shell last-error lookup from thread bindings (#17842)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): drive shell last-error lookup from thread bindings (#17842).",
+      "reason": "Not-applicable: changes the v2 ProjectionStore shell last-error lookup; f5 reads session errors from projection_thread_sessions rows. Upstream change: perf(server): drive shell last-error lookup from thread bindings (#17842)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "cf9729d5ee9660c08556e823080d3bb19648ed28",
@@ -30679,10 +30671,9 @@
     {
       "upstreamSha": "e4eb9977f0b02b29cb2ee361b0c433c685e87615",
       "subject": "fix(server): stop replaying old agent alerts on restart (#13340)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(server): stop replaying old agent alerts on restart (#13340).",
+      "reason": "Not-applicable: changes upstream's AgentAwarenessRelay, part of the relay that f5 does not ship. Upstream change: fix(server): stop replaying old agent alerts on restart (#13340)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "e4ef8d36bad346e0b8c38da276329cc54a1cce6f",
@@ -32072,10 +32063,12 @@
     {
       "upstreamSha": "eef0e4e1f96d38d312f44baf377f2d1953f86370",
       "subject": "perf(server): skip Windows probes for desktop-prepared environments (#19966)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(server): skip Windows probes for desktop-prepared environments (#19966).",
+      "reason": "Ported: the desktop marks the backend environment with F5_SHELL_ENVIRONMENT_PREPARED=1 after syncShellEnvironment, and fixPath skips its Windows registry (PowerShell) and macOS login-shell probes when it is set. The new test failed before the change. Not run on Windows. Upstream change: perf(server): skip Windows probes for desktop-prepared environments (#19966)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["80914920b4f0d04ae77db533285a56506ed3b4af"],
+      "evidence": ["apps/server/src/os-jank.ts:14", "apps/server/src/os-jank.test.ts:20"]
     },
     {
       "upstreamSha": "eef36a67c37fa74905fc7feaa836e5a81daa8685",
