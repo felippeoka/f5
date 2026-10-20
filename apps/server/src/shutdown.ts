@@ -42,6 +42,9 @@ export class ShutdownRegistry {
   private async finish(deadline: number): Promise<ReadonlyArray<ShutdownResult>> {
     const results: ShutdownResult[] = [];
     for (const phase of phases) {
+      // Keep the same absolute deadline, reserving final persistence/log time.
+      const reserved = phase === "logs" ? 0 : phase === "drain" ? 150 : 450;
+      const phaseDeadline = deadline - reserved;
       const remaining = new Set([...this.steps].filter((step) => step.phase === phase));
       while (remaining.size > 0) {
         const ready = [...remaining].filter(
@@ -63,7 +66,7 @@ export class ShutdownRegistry {
             let outcome: ShutdownResult["outcome"] = "complete";
             try {
               await Promise.race([
-                Promise.resolve().then(() => step.run(deadline, controller.signal)),
+                Promise.resolve().then(() => step.run(phaseDeadline, controller.signal)),
                 new Promise<void>((resolve) => {
                   timer = setTimeout(
                     () => {
@@ -71,7 +74,7 @@ export class ShutdownRegistry {
                       controller.abort();
                       resolve();
                     },
-                    Math.max(0, deadline - Date.now()),
+                    Math.max(0, phaseDeadline - Date.now()),
                   );
                 }),
               ]);

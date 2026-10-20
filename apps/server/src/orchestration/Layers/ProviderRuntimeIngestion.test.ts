@@ -902,6 +902,137 @@ describe("ProviderRuntimeIngestion", () => {
     }
   });
 
+  it("rejects retired session-field frames before they mutate current usage or identity", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1"),
+      instanceId = ProviderInstanceId.makeUnsafe("codex");
+    await Effect.runPromise(
+      harness.providerSessionDirectory.upsert({
+        threadId,
+        provider: "codex",
+        providerInstanceId: instanceId,
+        runtimePayload: { sessionGeneration: 2, activeTurnId: null },
+      }),
+    );
+    const base = { provider: "codex" as const, threadId, createdAt: new Date().toISOString() };
+    const token = {
+      type: "thread.token-usage.updated" as const,
+      payload: { contextTokens: 900_000, modelContextWindowTokens: 1_000_000 },
+    };
+    const old = {
+      ...base,
+      providerInstanceId: ProviderInstanceId.makeUnsafe("retired-account"),
+      sessionGeneration: 1,
+    };
+    harness.emit({ ...old, ...token, eventId: asEventId("old-usage") });
+    harness.emit({
+      ...old,
+      type: "thread.thinking-tokens.updated",
+      eventId: asEventId("old-thinking"),
+      payload: { estimatedTokens: 50_000, estimatedTokensDelta: 50_000 },
+    });
+    harness.emit({
+      ...base,
+      providerInstanceId: instanceId,
+      sessionGeneration: 2,
+      type: "thread.token-usage.updated",
+      eventId: asEventId("current-usage"),
+      payload: { contextTokens: 120 },
+    });
+    await harness.drain();
+    const thread = (await Effect.runPromise(harness.engine.getReadModel())).threads.find(
+      (entry) => entry.id === threadId,
+    )!;
+    expect(thread.estimatedContextTokens).toBe(120);
+    expect(thread.estimatedThinkingTokens ?? 0).toBe(0);
+    expect(thread.session?.providerInstanceId).toBe(instanceId);
+    expect(thread.session?.modelContextWindowTokens).not.toBe(1_000_000);
+  });
+
+  it("reconciles an orphan after its blocking receipt exhausts retries without restarting", async () => {
+    let repairFailureInjected = false;
+    const harness = await createHarness({
+      startIngestion: false,
+      failDispatchOnce: (command) => {
+        if (String(command.commandId).startsWith("server:terminal-receipt-repair:")) {
+          repairFailureInjected = true;
+          return true;
+        }
+        return false;
+      },
+    });
+    const threadId = asThreadId("thread-1"),
+      instanceId = ProviderInstanceId.makeUnsafe("codex"),
+      turnId = asTurnId("exhausted-turn");
+    const now = new Date().toISOString();
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("exhausted-running"),
+        threadId,
+        createdAt: now,
+        session: {
+          threadId,
+          status: "running",
+          providerName: "codex",
+          providerInstanceId: instanceId,
+          runtimeMode: "approval-required",
+          activeTurnId: turnId,
+          lastError: null,
+          updatedAt: now,
+        },
+      }),
+    );
+    await Effect.runPromise(
+      harness.providerSessionDirectory.upsert({
+        threadId,
+        provider: "codex",
+        providerInstanceId: instanceId,
+        runtimePayload: { sessionGeneration: 2, activeTurnId: turnId },
+      }),
+    );
+    const eventId = asEventId("blocked-exit");
+    await Effect.runPromise(
+      harness.providerTerminalEventRepository.record({
+        type: "session.exited",
+        eventId,
+        provider: "codex",
+        threadId,
+        providerInstanceId: instanceId,
+        sessionGeneration: 2,
+        turnId,
+        createdAt: now,
+        payload: { reason: "process exited" },
+      }),
+    );
+    await Effect.runPromise(
+      harness.sql`UPDATE provider_terminal_events SET next_due_at = '9999-01-01' WHERE event_id = ${eventId}`,
+    );
+    harness.clearProviderSessions();
+    await harness.startIngestion();
+    await harness.drain();
+    expect(
+      (await Effect.runPromise(harness.engine.getReadModel())).threads[0]?.session?.status,
+    ).toBe("running");
+    for (let attempt = 0; attempt < 10; attempt++)
+      await Effect.runPromise(
+        harness.providerTerminalEventRepository.markFailed({ eventId, error: "permanent" }),
+      );
+    const settled = await waitForThread(
+      harness.engine,
+      (thread) => thread.session?.status === "stopped",
+      5000,
+    );
+    expect(
+      settled.activities.some((activity) => activity.kind === "provider.receipt.repair-required"),
+    ).toBe(true);
+    expect(repairFailureInjected).toBe(true);
+    const retained = await Effect.runPromise(
+      harness.sql`SELECT applied_at, attempt FROM provider_terminal_events WHERE event_id = ${eventId}`,
+    );
+    expect(retained).toEqual([{ applied_at: null, attempt: 10 }]);
+  });
+
   it("projects startup requests while the new generation binding write is held", async () => {
     const harness = await createHarness();
     const threadId = asThreadId("thread-1");
@@ -1026,9 +1157,9 @@ describe("ProviderRuntimeIngestion", () => {
       expect(thread.messages.filter((message) => message.role === "assistant")).toEqual([
         expect.objectContaining({ text: "received output", streaming: false }),
       ]);
-      expect(await Effect.runPromise(harness.providerTerminalEventRepository.listPending)).toEqual(
-        [],
-      );
+      expect(
+        await Effect.runPromise(harness.providerTerminalEventRepository.listPendingPage),
+      ).toEqual([]);
     },
   );
 
@@ -1046,9 +1177,9 @@ describe("ProviderRuntimeIngestion", () => {
     await Effect.runPromise(harness.providerTerminalEventRepository.record(event));
     harness.emit(event);
     await harness.drain();
-    expect(await Effect.runPromise(harness.providerTerminalEventRepository.listPending)).toEqual(
-      [],
-    );
+    expect(
+      await Effect.runPromise(harness.providerTerminalEventRepository.listPendingPage),
+    ).toEqual([]);
   });
 
   it("retries a partially applied terminal receipt without restarting ingestion", async () => {
@@ -1080,12 +1211,13 @@ describe("ProviderRuntimeIngestion", () => {
     harness.emit(event);
     await harness.drain();
     expect(
-      (await Effect.runPromise(harness.providerTerminalEventRepository.listPending))[0]?.attempt,
+      (await Effect.runPromise(harness.providerTerminalEventRepository.listPendingPage))[0]
+        ?.attempt,
     ).toBe(1);
     await vi.waitFor(
       async () =>
         expect(
-          await Effect.runPromise(harness.providerTerminalEventRepository.listPending),
+          await Effect.runPromise(harness.providerTerminalEventRepository.listPendingPage),
         ).toEqual([]),
       { timeout: 4000 },
     );
@@ -1142,7 +1274,7 @@ describe("ProviderRuntimeIngestion", () => {
     await vi.waitFor(
       async () =>
         expect(
-          await Effect.runPromise(harness.providerTerminalEventRepository.listPending),
+          await Effect.runPromise(harness.providerTerminalEventRepository.listPendingPage),
         ).toEqual([]),
       { timeout: 4000 },
     );
@@ -1346,9 +1478,9 @@ describe("ProviderRuntimeIngestion", () => {
         (thread) => thread.session?.status === "ready" && thread.session.activeTurnId === null,
       );
       expect(settled.latestTurn?.state).toBe("completed");
-      expect(await Effect.runPromise(harness.providerTerminalEventRepository.listPending)).toEqual(
-        [],
-      );
+      expect(
+        await Effect.runPromise(harness.providerTerminalEventRepository.listPendingPage),
+      ).toEqual([]);
       const beforeRetry = {
         messages: settled.messages.length,
         activities: settled.activities.length,
@@ -1577,9 +1709,9 @@ describe("ProviderRuntimeIngestion", () => {
       turnId,
       state: "interrupted",
     });
-    expect(await Effect.runPromise(harness.providerTerminalEventRepository.listPending)).toEqual(
-      [],
-    );
+    expect(
+      await Effect.runPromise(harness.providerTerminalEventRepository.listPendingPage),
+    ).toEqual([]);
     const receipts = await Effect.runPromise(
       harness.sql<{
         readonly eventId: string;
@@ -1658,9 +1790,9 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(thread.session?.status).toBe("running");
     expect(thread.latestTurn?.state).toBe("running");
-    expect(await Effect.runPromise(harness.providerTerminalEventRepository.listPending)).toEqual(
-      [],
-    );
+    expect(
+      await Effect.runPromise(harness.providerTerminalEventRepository.listPendingPage),
+    ).toEqual([]);
     const receipts = await Effect.runPromise(
       harness.sql<{ readonly count: number }>`
         SELECT count(*) AS count

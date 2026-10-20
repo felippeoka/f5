@@ -11,6 +11,7 @@ import {
   Fiber,
   FileSystem,
   Layer,
+  Logger,
   PlatformError,
   Scope,
   ServiceMap,
@@ -1093,6 +1094,80 @@ it.layer(TestLayer)("git integration", (it) => {
         );
         expect((yield* git(source, ["rev-parse", "FETCH_HEAD"])).trim()).toBe(head);
         expect((yield* git(source, ["for-each-ref", "refs/f5/status"])).trim()).toBe("");
+      }),
+    );
+
+    it.effect("warns once when background refresh uses unsupported Git options", () => {
+      const messages: string[] = [];
+      return Effect.gen(function* () {
+        const remote = yield* makeTmpDir(),
+          source = yield* makeTmpDir(),
+          other = yield* makeTmpDir();
+        yield* git(remote, ["init", "--bare"]);
+        yield* initRepoWithCommit(source);
+        const branch = (yield* git(source, ["branch", "--show-current"])).trim();
+        yield* git(source, ["remote", "add", "origin", remote]);
+        yield* git(source, ["push", "-u", "origin", branch]);
+        yield* git(other, ["clone", source, "."]);
+        const realGitService = yield* GitService;
+        let fetches = 0;
+        const core = yield* makeIsolatedGitCore({
+          execute: (input) =>
+            input.args[0] === "fetch"
+              ? Effect.sync(() => {
+                  fetches++;
+                  return {
+                    code: 129,
+                    stdout: "",
+                    stderr: "error: unknown option no-write-fetch-head",
+                  };
+                })
+              : realGitService.execute(input),
+        });
+        for (const cwd of [source, other]) {
+          yield* core.statusDetails(cwd);
+          yield* core.drainUpstreamRefreshes!(cwd);
+        }
+        expect(fetches).toBe(2);
+        expect(
+          messages.filter((message) => message.includes("fetch options are unsupported")),
+        ).toHaveLength(1);
+      }).pipe(
+        Effect.provide(
+          Logger.layer(
+            [
+              Logger.make((entry) => {
+                messages.push(String(entry.message));
+              }),
+            ],
+            { mergeWithExisting: false },
+          ),
+        ),
+      );
+    });
+
+    it.effect("sweeps abandoned status refs without deleting another live profile's refs", () =>
+      Effect.gen(function* () {
+        const remote = yield* makeTmpDir(),
+          source = yield* makeTmpDir();
+        yield* git(remote, ["init", "--bare"]);
+        yield* initRepoWithCommit(source);
+        const branch = (yield* git(source, ["branch", "--show-current"])).trim();
+        yield* git(source, ["remote", "add", "origin", remote]);
+        yield* git(source, ["push", "-u", "origin", branch]);
+        const stale = `refs/f5/status/${Date.now() - 31 * 60_000}-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa`;
+        const live = `refs/f5/status/${Date.now()}-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb`;
+        const legacy = "refs/f5/status/cccccccc-cccc-cccc-cccc-cccccccccccc";
+        for (const ref of [stale, live, legacy]) yield* git(source, ["update-ref", ref, "HEAD"]);
+        const core = yield* makeIsolatedGitCore(yield* GitService);
+        yield* core.statusDetails(source);
+        yield* core.drainUpstreamRefreshes!(source);
+        const refs = (yield* git(source, [
+          "for-each-ref",
+          "--format=%(refname)",
+          "refs/f5/status/",
+        ])).split("\n");
+        expect(refs).toEqual([live, legacy].sort());
       }),
     );
 

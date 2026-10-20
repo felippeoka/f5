@@ -59,7 +59,18 @@ let failure = "";
 let screenshot;
 const exportDiagnostics = () => {
   writeDiagnostics(artifactDirectory || directory, "desktop-smoke", {
-    logs: output,
+    logs:
+      output +
+      (() => {
+        try {
+          return (
+            "\nDesktop main process:\n" +
+            readFileSync(join(state, "logs", "desktop-main.log"), "utf8").slice(-65_536)
+          );
+        } catch {
+          return "";
+        }
+      })(),
     failure,
     screenshot,
     paths: [directory, resolve(desktopDir, "../.."), process.env.HOME, process.env.USERPROFILE],
@@ -705,8 +716,8 @@ try {
   await popup.waitForLoadState();
   // Inject through Electron so this exercises before-input-event on a non-app renderer.
   // CDP keyboard events do not consistently reach that native hook on macOS.
-  const pressQuit = () =>
-    application.evaluate(async ({ BrowserWindow }) => {
+  const pressQuit = (taps = 1) =>
+    application.evaluate(async ({ BrowserWindow }, count) => {
       const popup = BrowserWindow.getAllWindows().find(
         (window) => window.getTitle() === "Quit smoke popup",
       );
@@ -714,17 +725,20 @@ try {
       popup.focus();
       popup.webContents.focus();
       const modifiers = process.platform === "darwin" ? ["meta"] : ["control"];
-      popup.webContents.sendInputEvent({ type: "keyDown", keyCode: "Q", modifiers });
-      await new Promise((resolve) => setTimeout(resolve, 40));
-      if (!popup.isDestroyed())
-        popup.webContents.sendInputEvent({ type: "keyUp", keyCode: "Q", modifiers });
-    });
+      for (let tap = 0; tap < count; tap++) {
+        popup.webContents.sendInputEvent({ type: "keyDown", keyCode: "Q", modifiers });
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        if (!popup.isDestroyed())
+          popup.webContents.sendInputEvent({ type: "keyUp", keyCode: "Q", modifiers });
+      }
+    }, taps);
   await pressQuit();
   await new Promise((resolve) => setTimeout(resolve, 650));
   if (electronProcess.exitCode !== null) throw new Error("A single quit tap closed the app");
   const closed = application.waitForEvent("close", { timeout: 10000 });
-  await pressQuit();
-  await pressQuit();
+  // Keep the two native taps in one main-process evaluation: two CDP
+  // round trips under streaming load can exceed the 500 ms gesture window.
+  await pressQuit(2);
   await closed;
   // Reopen the same isolated profile after a real app quit with a live PTY.
   application = await _electron.launch({

@@ -62,7 +62,11 @@ Background Git refresh downloads into a unique temporary ref without writing
 `FETCH_HEAD` or the remote tracking ref. It promotes the result with a short,
 fail-fast background repository lock and a compare-and-set against the previously
 observed tracking SHA. A concurrent pull keeps its newer ref; cleanup removes the
-temporary ref. Network waits do not hold the shared user-operation lock.
+temporary ref. Network waits do not hold the shared user-operation lock. First-use
+cleanup examines up to 256 namespace refs and removes only refs older than thirty
+minutes, with a compare-and-set for each deletion. Recent refs from other profiles
+are preserved. Legacy UUID refs use filesystem age, never commit age. Unsupported
+fetch options emit one actionable Git 2.29+ upgrade warning per server lifetime.
 
 Codex process exit/error rejects pending RPCs immediately, including contexts
 replaced by a new session. Written requests reject even if their responses remain
@@ -94,16 +98,21 @@ loads the retained details into a temporary decision model; no message state is
 truncated to meet a memory budget. Decision parity covers every thread-command
 schema, and a file-backed restart test verifies append/completion behavior.
 
-Migrations 124–125 add nullable terminal-receipt origin identity, retry due times
-and pending/due indexes without rewriting event JSON. Due reads use pages of 64;
+Migrations 124–126 add nullable terminal-receipt origin identity, retry due times
+and pending/due/age indexes without rewriting event JSON. Due reads use pages of 64;
 continuous retries back off with jitter up to thirty seconds. Malformed rows are
 deferred separately, and removed-thread receipts are acknowledged so they cannot
-block later pages. Lifecycle writes compare the originating instance, generation
+block later pages. After ten failures, a receipt leaves automatic retry but retains
+its original event and last error for repair; the thread receives a visible repair
+activity. Orphan detection considers only receipts for the current instance,
+generation and turn. Applied/exhausted receipts trigger another bounded dirty-thread
+reconciliation without restarting. Exhausted counts and oldest eligible receipt
+age have static metrics. Lifecycle writes compare the originating instance, generation
 and turn. Legacy receipts cannot settle a replacement generation. Receipts remain
 pending until replay-critical effects finish; deterministic command IDs make a
 retry after partial application idempotent. A file-backed compatibility check creates
 the schema through 123, interrupts an upgrade, closes every connection, upgrades to
-125 and reopens with the preceding migration catalog and explicit-column receipt
+126 and reopens with the preceding migration catalog and explicit-column receipt
 queries. Node and Bun execute the same check; it does not launch a released beta binary.
 
 Drainable workers track accepting, draining, failed and closed states, settle
@@ -144,7 +153,10 @@ asynchronous and capped by the remaining shutdown budget.
 Application shutdown coordinates admission, history flushes, producer termination,
 ingestion drain and log closure against one absolute 1,800 ms deadline, before
 persistence layers close. Phases run components concurrently, record their durations
-and mark failures/deadline expiry as incomplete. Terminal disposal is awaited and
+and mark failures/deadline expiry as incomplete. Earlier phases stop 450 ms before
+the global deadline, reserving 300 ms for ingestion drain and 150 ms for log closure;
+unused time carries forward. These are cooperative budgets, not guarantees against
+a blocked event loop. Terminal disposal is awaited and
 idempotent, keeps source listeners through termination, flushes final decoder output,
 and writes histories atomically with per-terminal serialization. Dirty histories are
 flushed before inactive-session eviction. The desktop quit/reopen scenario still

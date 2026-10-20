@@ -117,9 +117,10 @@ if (import.meta.main) {
       decision.reason +
       "\n";
     console.log(decision.reason);
-    if (decision.replace && baseline && process.env.RESET_BASELINE !== "true") {
-      const warning =
-        "Baseline incompatible: no performance comparison was made. The previous baseline is retained in the candidate diagnostics artifact; qualification requires a compatible comparison.";
+    if (decision.replace && process.env.RESET_BASELINE !== "true") {
+      const warning = baseline
+        ? "Baseline incompatible: no performance comparison was made. The previous baseline is retained in the candidate diagnostics artifact; qualification requires a compatible comparison."
+        : "No retained baseline: initializing without a performance comparison. This may follow artifact expiry after failed comparisons; qualification requires a compatible comparison.";
       console.log(`::warning::${warning}`);
       summary += `\n> **Warning:** ${warning}\n`;
     }

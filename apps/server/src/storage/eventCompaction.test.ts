@@ -437,7 +437,25 @@ it.layer(layer)("compactThreadEvents", (it) => {
         Effect.forkChild,
       );
       yield* Deferred.await(rewritten);
+      const attempted = yield* Deferred.make<void>();
+      let writerFinished = false;
+      const writer = yield* Deferred.succeed(attempted, undefined).pipe(
+        Effect.andThen(
+          sql`UPDATE projection_threads SET title = 'writer resumed' WHERE thread_id = ${threadId}`,
+        ),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            writerFinished = true;
+          }),
+        ),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(attempted);
+      yield* Effect.yieldNow;
+      assert.isFalse(writerFinished);
       yield* Fiber.interrupt(fiber);
+      yield* Fiber.join(writer);
+      assert.isTrue(writerFinished);
       assert.deepStrictEqual(
         yield* sql`SELECT sequence, payload_json FROM orchestration_events ORDER BY sequence`,
         before,

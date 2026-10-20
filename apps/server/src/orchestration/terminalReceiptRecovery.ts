@@ -7,6 +7,7 @@ import { registerShutdown } from "../shutdown.ts";
 export function startTerminalReceiptRetries<E>(
   repository: Pick<ProviderTerminalEventRepositoryShape, "listDue">,
   enqueue: (event: ProviderRuntimeEvent) => Effect.Effect<unknown, E>,
+  afterReplay: Effect.Effect<unknown, E> = Effect.void,
 ) {
   return Effect.gen(function* () {
     const replayDueReceipts = Effect.suspend(() => repository.listDue()).pipe(
@@ -16,6 +17,7 @@ export function startTerminalReceiptRetries<E>(
           discard: true,
         }),
       ),
+      Effect.andThen(afterReplay),
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.interrupt

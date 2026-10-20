@@ -152,6 +152,10 @@ it.each(["pass", "regression", "initialize", "incompatible"] as const)(
         );
         expect(JSON.parse(readFileSync(baselinePath, "utf8"))).toEqual(baseline);
       }
+      if (mode === "initialize") {
+        expect(result.stdout).toContain("::warning::No retained baseline");
+        expect(readFileSync(join(directory, "summary.md"), "utf8")).toContain("artifact expiry");
+      }
       if (mode === "regression") {
         expect(existsSync(retainedPath)).toBe(false);
         expect(readFileSync(outputPath, "utf8")).not.toContain("retain-baseline=true");

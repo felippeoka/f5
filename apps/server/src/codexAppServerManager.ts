@@ -3290,6 +3290,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       const goal = asObject(asObject(notification.params)?.goal);
       if (goal && goal.status !== "active") context.nativeGoalActive = false;
       if (
+        this.isLiveContext(context) &&
         goal?.status === "active" &&
         (!context.nativeGoalActive ||
           (context.nativeGoalBudget !== undefined &&
@@ -3303,6 +3304,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           status: "paused",
         })
           .catch(() => {
+            if (!this.isLiveContext(context)) return;
             this.emitLifecycleEvent(
               context,
               "session/goalPauseFailed",
@@ -3406,6 +3408,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
 
     if (notification.method === "account/login/completed") {
+      if (!this.isLiveContext(context)) return;
       const login = asObject(notification.params);
       if (login?.success !== true) {
         context.account = {
@@ -3484,6 +3487,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   }
 
   private handleServerRequest(context: CodexSessionContext, request: JsonRpcRequest): void {
+    if (!this.isLiveContext(context)) return;
     const route = this.readRouteFields(request.params);
     if (
       request.method === "mcpServer/elicitation/request" &&

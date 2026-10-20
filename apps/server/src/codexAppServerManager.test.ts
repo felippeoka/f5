@@ -3096,8 +3096,8 @@ describe("respondToRequest", () => {
 });
 
 describe("Codex server requests", () => {
-  function requestContext() {
-    return {
+  function requestContext(manager: CodexAppServerManager) {
+    const context = {
       session: {
         provider: "codex",
         status: "ready",
@@ -3111,11 +3111,16 @@ describe("Codex server requests", () => {
       elicitations: new ElicitationRegistry(),
       nativeRequestCorrelations: new Map(),
     };
+    (manager as unknown as { sessions: Map<string, unknown> }).sessions.set(
+      context.session.threadId,
+      context,
+    );
+    return context;
   }
 
   it("routes legacy callId fields to provider items", () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     (
       manager as unknown as {
         handleServerRequest: (context: unknown, request: Record<string, unknown>) => void;
@@ -3144,7 +3149,7 @@ describe("Codex server requests", () => {
 
   it("bounds native request correlations while retaining the newest prompts", () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const handleServerRequest = (
       manager as unknown as {
         handleServerRequest: (context: unknown, request: Record<string, unknown>) => void;
@@ -3194,7 +3199,7 @@ describe("Codex server requests", () => {
 
   it("answers currentTime/read without creating a prompt", async () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const writeMessage = vi
       .spyOn(
         manager as unknown as { writeMessage: (...args: unknown[]) => Promise<void> },
@@ -3224,7 +3229,7 @@ describe("Codex server requests", () => {
 
   it("keeps MCP app approval pending until the user chooses an advertised response", async () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const writeMessage = vi
       .spyOn(
         manager as unknown as { writeMessage: (...args: unknown[]) => Promise<void> },
@@ -3270,7 +3275,7 @@ describe("Codex server requests", () => {
 
   it("sends an execpolicy amendment only when the command approval offered it", async () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const writeMessage = vi
       .spyOn(
         manager as unknown as { writeMessage: (...args: unknown[]) => Promise<void> },
@@ -3340,7 +3345,7 @@ describe("Codex server requests", () => {
 
   it("cancels MCP forms with unsupported constraints visibly, without publishing a request", () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const writeMessage = vi
       .spyOn(
         manager as unknown as { writeMessage: (...args: unknown[]) => Promise<void> },
@@ -3377,7 +3382,7 @@ describe("Codex server requests", () => {
   it("answers supported MCP forms privately and settles them on native completion", async () => {
     const SENTINEL = "sentinel-value-4be1";
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const writeMessage = vi
       .spyOn(
         manager as unknown as { writeMessage: (...args: unknown[]) => Promise<void> },
@@ -3453,7 +3458,7 @@ describe("Codex server requests", () => {
 
   it("settles a cancelled MCP form as cancelled, not as a provided answer", async () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     vi.spyOn(
       manager as unknown as { writeMessage: (...args: unknown[]) => Promise<void> },
       "writeMessage",
@@ -3498,7 +3503,7 @@ describe("Codex server requests", () => {
     ["attestation/generate", "attestation"],
   ] as const)("rejects unexpected %s requests deterministically", async (method, messagePart) => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const events: Array<{ method: string; message?: string }> = [];
     manager.on("event", (event) =>
       events.push({
@@ -3538,7 +3543,7 @@ describe("Codex server requests", () => {
 
   it("clears externally resolved prompts while preserving request type", () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const requestId = ApprovalRequestId.makeUnsafe("req-external");
     context.pendingApprovals.set(requestId, {});
     context.nativeRequestCorrelations.set("85", {
@@ -3579,7 +3584,7 @@ describe("Codex server requests", () => {
 
   it("suppresses the server acknowledgement after a local resolution", () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const requestId = ApprovalRequestId.makeUnsafe("req-local");
     context.nativeRequestCorrelations.set("86", {
       nativeRequestId: "86",
@@ -3607,7 +3612,7 @@ describe("Codex server requests", () => {
 
   it("suppresses uncorrelated late server acknowledgements", () => {
     const manager = new CodexAppServerManager();
-    const context = requestContext();
+    const context = requestContext(manager);
     const events: unknown[] = [];
     manager.on("event", (event) => events.push(event));
 
@@ -3731,6 +3736,10 @@ describe("respondToUserInput", () => {
       pendingApprovals: new Map(),
       pendingUserInputs: new Map(),
     };
+    (manager as unknown as { sessions: Map<string, unknown> }).sessions.set(
+      context.session.threadId,
+      context,
+    );
     type ApprovalRequestContext = {
       session: typeof context.session;
       pendingApprovals: typeof context.pendingApprovals;
@@ -3772,6 +3781,10 @@ describe("respondToUserInput", () => {
       pendingApprovals: new Map(),
       pendingUserInputs: new Map(),
     };
+    (manager as unknown as { sessions: Map<string, unknown> }).sessions.set(
+      context.session.threadId,
+      context,
+    );
     type ApprovalRequestContext = {
       session: typeof context.session;
       pendingApprovals: typeof context.pendingApprovals;
@@ -3818,6 +3831,10 @@ describe("respondToUserInput", () => {
       pendingApprovals: new Map(),
       pendingUserInputs: new Map(),
     };
+    (manager as unknown as { sessions: Map<string, unknown> }).sessions.set(
+      context.session.threadId,
+      context,
+    );
     type ApprovalRequestContext = {
       session: typeof context.session;
       pendingApprovals: typeof context.pendingApprovals;
@@ -4538,3 +4555,31 @@ it("cancels a queued session start without releasing the preceding start's exclu
   await Promise.all([first, third]);
   expect(start).toHaveBeenCalledTimes(2);
 });
+
+it.each([false, true])(
+  "retired goal pause cannot stop a replacement (request already started: %s)",
+  async (started) => {
+    const { manager, context, sendRequest } = createThreadControlHarness();
+    const internal = manager as unknown as {
+      sessions: Map<string, unknown>;
+      handleServerNotification: (context: unknown, notification: unknown) => void;
+    };
+    internal.sessions.set(context.session.threadId, context);
+    const stop = vi.spyOn(manager, "stopSession").mockImplementation(() => {});
+    const request = Promise.withResolvers<never>();
+    sendRequest.mockReturnValue(request.promise);
+    const frame = {
+      method: "thread/goal/updated",
+      params: { threadId: "thread_1", goal: { status: "active" } },
+    };
+    if (started) internal.handleServerNotification(context, frame);
+    const replacement = { session: { ...context.session } };
+    internal.sessions.set(context.session.threadId, replacement);
+    if (started) request.reject(new Error("retired writer closed"));
+    else internal.handleServerNotification(context, frame);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stop).not.toHaveBeenCalled();
+    expect(sendRequest).toHaveBeenCalledTimes(started ? 1 : 0);
+    expect(internal.sessions.get(context.session.threadId)).toBe(replacement);
+  },
+);

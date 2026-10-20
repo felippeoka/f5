@@ -283,7 +283,7 @@ The latest retained `perf-baseline` from a successful main run of this repositor
 nightly workflow supplies the comparison; fork heads and other workflows are excluded. A missing
 baseline, the dispatch's `reset-baseline` option, or incompatible fixture, harness,
 hardware, OS, Git, browser or runtime metadata records a new baseline, with the
-reason in the step summary. Incompatibility also emits a workflow warning: no
+reason in the step summary. Incompatibility and missing artifacts both emit a workflow warning: no
 performance comparison was made, and the previous baseline remains in the candidate
 diagnostics artifact. Re-baselining does not qualify performance acceptance.
 Compatible reports run `bun run perf:compare`;
@@ -291,7 +291,9 @@ regressions fail that workflow and appear in its summary. Feature-branch dispatc
 can compare reports but cannot replace main's baseline. Every successful comparison
 re-uploads the unchanged comparison baseline to refresh its 90-day artifact retention;
 the anchor changes only on explicit reset, incompatibility, or a missing artifact.
-Failed comparisons never promote candidates or refresh retention. This report covers server
+Failed comparisons never promote candidates or refresh retention. If a long failure
+streak expires the artifact, initialization explicitly warns that comparison was
+skipped and the new baseline does not establish performance qualification. This report covers server
 components; interactive qualification still requires the production-browser report.
 
 The deleted-thread memory fixture can be run independently with
@@ -381,3 +383,27 @@ when it starts. Disposal before its module loads creates no timers or listeners,
 and a reporting-module failure does not prevent synchronization. With the subsequent
 main changes included, the initial web JavaScript is 1,506,835 bytes, below the
 unchanged 1,507,108-byte budget.
+
+### Largest atomic compaction group
+
+`apps/server/scripts/performance/compaction.ts` measures one file-backed group of
+50,000 message events, with an ordinary writer admitted at the first rewrite.
+Fixture reset is outside timing; five warmups precede thirty measured repetitions.
+The normal server report includes this scenario and its writer/transaction maxima.
+To run it alone from this revision:
+
+```sh
+F5_PERF_COMPACTION=1 F5_PERF_REPORT=/tmp/f5-compaction.json bun run --cwd apps/server test:file --config vitest.performance.config.ts
+```
+
+A local macOS arm64 / Node 24.13.1 / SQLite 3.51.2 run on 2026-10-20 measured
+313.21 ms median and 326.22 ms p95 total compaction wall time, 307.85 ms median CPU,
+321.52 ms maximum transaction duration and 321.80 ms maximum ordinary-writer wait.
+This is a worst-group diagnostic, not a baseline comparison or a Windows result.
+Atomicity preserves replay equivalence; yielding between delete statements does
+not release the writer lease. The 2,000-event target still packs complete small
+groups, while a group up to the 50,000-event ceiling runs alone. Time budgets are
+checked between groups. Large-group write stalls remain an explicit tradeoff;
+observe production statement/event-loop data before starting the gated SQLite
+worker track. A deterministic interruption test verifies the writer remains
+blocked until rollback and then resumes.

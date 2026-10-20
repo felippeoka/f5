@@ -1,3 +1,4 @@
+import Migration0126 from "./Migrations/126_ProviderTerminalRecoveryIndexes.ts";
 import Migration0124 from "./Migrations/124_ProviderTerminalRetry.ts";
 import Migration0125 from "./Migrations/125_ProviderTerminalRetryIndexes.ts";
 import Migration0123 from "./Migrations/123_WorkspaceMoveRecoveryIndex.ts";
@@ -160,6 +161,7 @@ import Migration0101 from "./Migrations/101_UsageResetCreditRequests.ts";
 export const MIGRATIONS = {
   "124_ProviderTerminalRetry": Migration0124,
   "125_ProviderTerminalRetryIndexes": Migration0125,
+  "126_ProviderTerminalRecoveryIndexes": Migration0126,
   "122_StorageActivity": Migration0122,
   "123_WorkspaceMoveRecoveryIndex": Migration0123,
   "121_AttachmentDeletionGuards": Migration0121,

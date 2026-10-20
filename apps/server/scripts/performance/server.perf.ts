@@ -42,6 +42,8 @@ import {
   type PerformanceReport,
 } from "../../../../scripts/lib/performance/report.ts";
 
+import { measureCompaction } from "./compaction.ts";
+
 const root = fileURLToPath(new URL("../../../..", import.meta.url));
 
 /** Deterministic PTY bytes; the production manager still filters, caps and persists them. */
@@ -403,7 +405,18 @@ it("records server component performance with deterministic workloads", async ()
   report.observations.push(...stream.observations, ...(await measureReadModelMemory()));
   const claude = await measureAssistantStream(method, "claudeAgent");
   report.measurements["orchestration.assistant-stream-claude-uncoalesced"] = claude.samples;
+  const compactionDirectory = mkdtempSync(path.join(tmpdir(), "f5-compaction-perf-"));
+  let compaction;
+  try {
+    compaction = await measureCompaction(path.join(compactionDirectory, "state.sqlite"), method);
+  } finally {
+    rmSync(compactionDirectory, { recursive: true, force: true });
+  }
+  report.measurements["sqlite.compaction-50000-event-group"] = compaction.samples;
   report.diagnostics = Object.fromEntries([
+    ...Object.entries(compaction.diagnostics).map(
+      ([key, value]) => [`compaction.${key}`, value] as const,
+    ),
     ...Object.entries(stream.diagnostics).map(([key, value]) => [`codex.${key}`, value] as const),
     ...Object.entries(claude.diagnostics).map(
       ([key, value]) => [`claudeAgent.uncoalesced.${key}`, value] as const,

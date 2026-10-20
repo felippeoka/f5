@@ -595,6 +595,53 @@ const makeGitCore = Effect.gen(function* () {
       };
     });
 
+  const sweptStatusRepositories = new Set<string>();
+  let warnedUnsupportedStatusFetch = false;
+  const sweepStatusRefs = (cwd: string) =>
+    Effect.gen(function* () {
+      const commonDir = yield* canonicalPath(yield* resolveCommonDir(cwd));
+      if (sweptStatusRepositories.has(commonDir)) return;
+      sweptStatusRepositories.add(commonDir);
+      if (sweptStatusRepositories.size > 256)
+        sweptStatusRepositories.delete(sweptStatusRepositories.values().next().value!);
+      const refs = yield* runGitStdout("GitCore.sweepStatusRefs", cwd, [
+        "for-each-ref",
+        "--count=256",
+        "--format=%(refname)%09%(objectname)",
+        "refs/f5/status/",
+      ]);
+      const cutoff = Date.now() - 30 * 60_000;
+      for (const line of refs.trim().split("\n")) {
+        const [ref, oid] = line.split("\t");
+        if (!ref || !oid || !/^refs\/f5\/status\/(?:\d{13,}-)?[a-f0-9-]+$/.test(ref)) continue;
+        const timestamp = /^refs\/f5\/status\/(\d{13,})-/.exec(ref)?.[1];
+        // Earlier builds used bare UUIDs. Only filesystem age establishes their
+        // age; a commit's timestamp says nothing about when its ref was created.
+        const created = timestamp
+          ? Number(timestamp)
+          : yield* Effect.promise(async () => {
+              try {
+                return (await inspectPath(joinPath(commonDir, ref))).mtimeMs;
+              } catch {
+                try {
+                  return (await inspectPath(joinPath(commonDir, "packed-refs"))).mtimeMs;
+                } catch {
+                  return Infinity;
+                }
+              }
+            });
+        if (created >= cutoff) continue;
+        yield* withRepositoryLock(
+          "GitCore.sweepStatusRefs",
+          cwd,
+          executeGit("GitCore.sweepStatusRefs", cwd, ["update-ref", "-d", ref, oid], {
+            allowNonZeroExit: true,
+          }),
+          "background",
+        );
+      }
+    });
+
   const fetchUpstreamRefInBackground = (
     cwd: string,
     upstream: { upstreamRef: string; remoteName: string; upstreamBranch: string },
@@ -602,12 +649,17 @@ const makeGitCore = Effect.gen(function* () {
   ): Effect.Effect<boolean, GitCommandError> =>
     Effect.gen(function* () {
       const operation = "GitCore.fetchUpstreamRefInBackground";
+      yield* sweepStatusRefs(cwd).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("status refresh ref sweep failed", { cause: String(cause) }),
+        ),
+      );
       const destination = `refs/remotes/${upstream.upstreamRef}`;
       const before = yield* executeGit(operation, cwd, ["rev-parse", "--verify", destination], {
         allowNonZeroExit: true,
       });
       const previous = before.code === 0 ? before.stdout.trim() : "";
-      const temporary = `refs/f5/status/${randomUUID()}`;
+      const temporary = `refs/f5/status/${Date.now()}-${randomUUID()}`;
       // Download under an isolated ref: concurrent user pulls must own FETCH_HEAD
       // and their tracking refs. Only the short compare-and-set takes the shared lock.
       return yield* Effect.acquireUseRelease(
@@ -633,7 +685,18 @@ const makeGitCore = Effect.gen(function* () {
                 allowNonZeroExit: true,
               },
             );
-            if (fetched.code !== 0) return false;
+            if (fetched.code !== 0) {
+              if (
+                !warnedUnsupportedStatusFetch &&
+                /(?:unknown|unrecognized) option/i.test(fetched.stderr)
+              ) {
+                warnedUnsupportedStatusFetch = true;
+                yield* Effect.logWarning(
+                  "Background Git refresh requires Git 2.29 or later; fetch options are unsupported. Upgrade Git to restore automatic upstream refresh.",
+                );
+              }
+              return false;
+            }
             const head = yield* runGitStdout(operation, cwd, ["rev-parse", "--verify", ref]);
             if (head.trim() === previous) return true;
             return yield* withRepositoryLock(

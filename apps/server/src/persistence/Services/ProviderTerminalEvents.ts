@@ -40,11 +40,17 @@ export type ProviderTerminalEventReceipt = typeof ProviderTerminalEventReceipt.T
 
 export type ProviderTerminalEventRepositoryError = PersistenceSqlError | PersistenceDecodeError;
 
+export const MAX_TERMINAL_RECEIPT_ATTEMPTS = 10;
+export interface TerminalReceiptOrigin {
+  readonly providerInstanceId: ProviderInstanceId | null;
+  readonly sessionGeneration: number;
+}
+
 export interface ProviderTerminalEventRepositoryShape {
   readonly record: (
     event: ProviderTerminalRuntimeEvent,
   ) => Effect.Effect<void, ProviderTerminalEventRepositoryError>;
-  readonly listPending: Effect.Effect<
+  readonly listPendingPage: Effect.Effect<
     ReadonlyArray<ProviderTerminalEventReceipt>,
     ProviderTerminalEventRepositoryError
   >;
@@ -57,7 +63,16 @@ export interface ProviderTerminalEventRepositoryShape {
   readonly hasPending: (
     threadId: ThreadId,
     turnId: TurnId | null,
+    origin: TerminalReceiptOrigin,
   ) => Effect.Effect<boolean, ProviderTerminalEventRepositoryError>;
+  readonly hasExhausted: (
+    threadId?: ThreadId,
+  ) => Effect.Effect<boolean, ProviderTerminalEventRepositoryError>;
+  /** Null requests a full reconciliation after the bounded dirty set overflowed. */
+  readonly takeRecoveryThreadIds: Effect.Effect<
+    ReadonlyArray<ThreadId> | null,
+    ProviderTerminalEventRepositoryError
+  >;
   readonly markApplied: (
     eventId: EventId,
   ) => Effect.Effect<void, ProviderTerminalEventRepositoryError>;

@@ -62,7 +62,7 @@ it("upgrades an existing file database and reopens it with the preceding migrati
           const applied = yield* sql<{
             id: number;
           }>`SELECT migration_id AS id FROM effect_sql_migrations ORDER BY migration_id DESC LIMIT 1`;
-          assert.equal(applied[0]?.id, 125);
+          assert.equal(applied[0]?.id, 126);
         }),
       );
     } finally {
@@ -72,7 +72,7 @@ it("upgrades an existing file database and reopens it with the preceding migrati
     try {
       await reopened.runPromise(
         Effect.gen(function* () {
-          // The preceding beta's catalog is unaware of 124–125. Its migration
+          // The preceding beta's catalog is unaware of 124–126. Its migration
           // runner and its explicit-column receipt reads/writes must still work.
           yield* runLegacy;
           const sql = yield* SqlClient.SqlClient;
@@ -124,6 +124,58 @@ it.layer(makeRuntimeSqliteLayer({ filename: ":memory:" }))("terminal retry migra
 it.layer(ProviderTerminalEventRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)))(
   "bounded terminal retries",
   (it) => {
+    it.effect("origin fences and retry exhaustion cannot permanently block orphan recovery", () =>
+      Effect.gen(function* () {
+        const repository = yield* ProviderTerminalEventRepository;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.makeUnsafe("orphan"),
+          turnId = TurnId.makeUnsafe("active");
+        const providerInstanceId = ProviderInstanceId.makeUnsafe("codex-test");
+        const eventId = EventId.makeUnsafe("old-exit");
+        yield* repository.record({
+          type: "session.exited",
+          eventId,
+          provider: "codex",
+          threadId,
+          providerInstanceId,
+          sessionGeneration: 1,
+          createdAt: "2026-10-20T00:00:00.000Z",
+          payload: { reason: "exit" },
+        });
+        yield* sql`UPDATE provider_terminal_events SET next_due_at = '9999-01-01' WHERE event_id = ${eventId}`;
+        const origin = { providerInstanceId, sessionGeneration: 2 };
+        assert.isFalse(yield* repository.hasPending(threadId, turnId, origin));
+        assert.isTrue(
+          yield* repository.hasPending(threadId, turnId, { ...origin, sessionGeneration: 1 }),
+        );
+        assert.isFalse(
+          yield* repository.hasPending(threadId, turnId, {
+            ...origin,
+            providerInstanceId: ProviderInstanceId.makeUnsafe("other"),
+            sessionGeneration: 1,
+          }),
+        );
+        yield* repository.takeRecoveryThreadIds;
+        for (let index = 0; index < 12; index++)
+          yield* repository.markFailed({ eventId, error: "permanent" });
+        assert.isFalse(
+          yield* repository.hasPending(threadId, turnId, { ...origin, sessionGeneration: 1 }),
+        );
+        assert.isTrue(yield* repository.hasExhausted(threadId));
+        assert.deepStrictEqual(yield* repository.takeRecoveryThreadIds, [threadId]);
+        const rows = yield* sql<{
+          attempt: number;
+          applied_at: null;
+          event_json: string;
+        }>`SELECT attempt, applied_at, event_json FROM provider_terminal_events WHERE event_id = ${eventId}`;
+        assert.equal(rows[0]?.attempt, 10);
+        assert.isNull(rows[0]?.applied_at);
+        assert.isString(rows[0]?.event_json);
+        assert.deepStrictEqual(yield* repository.listDue("9999-12-31"), []);
+        yield* repository.markApplied(eventId);
+        assert.deepStrictEqual(yield* repository.takeRecoveryThreadIds, [threadId]);
+      }),
+    );
     it.effect(
       "pages through pending receipts, isolates malformed rows and retains origin identity",
       () =>
@@ -152,6 +204,10 @@ it.layer(ProviderTerminalEventRepositoryLive.pipe(Layer.provideMerge(SqlitePersi
             yield* repository.hasPending(
               ThreadId.makeUnsafe("thread-129"),
               TurnId.makeUnsafe("turn-129"),
+              {
+                providerInstanceId: ProviderInstanceId.makeUnsafe("codex-test"),
+                sessionGeneration: 7,
+              },
             ),
           );
           for (const receipt of first) yield* repository.markApplied(receipt.eventId);

@@ -540,3 +540,16 @@ export const measurePerformanceStage = <A, E, R>(
           Effect.ensuring(Effect.sync(() => probe(stage, performance.now() - started))),
         );
       });
+
+export const terminalReceiptExhaustedTotal = Metric.counter(
+  "f5_terminal_receipts_exhausted_total",
+  {
+    description: "Terminal receipts retained for explicit repair after bounded retries.",
+  },
+);
+export const terminalReceiptOldestPendingMs = Metric.gauge(
+  "f5_terminal_receipt_oldest_pending_ms",
+  {
+    description: "Age of the oldest terminal receipt eligible for automatic retry.",
+  },
+);

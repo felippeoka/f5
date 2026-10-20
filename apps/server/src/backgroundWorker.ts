@@ -29,3 +29,7 @@ export const makeBackgroundWorker = <A, E, R>(
       }),
     ),
   );
+
+/** Timer callbacks cannot await admission; closed/failed workers must not reject a detached Promise. */
+export const enqueueBackgroundWork = (admission: Effect.Effect<void>) =>
+  Effect.runFork(admission.pipe(Effect.ignoreCause));

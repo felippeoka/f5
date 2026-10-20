@@ -65,7 +65,7 @@ import {
   Stream,
 } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { makeBackgroundWorker } from "../../backgroundWorker.ts";
+import { enqueueBackgroundWork, makeBackgroundWorker } from "../../backgroundWorker.ts";
 import { isBlockingUserInput } from "@t3tools/shared/pendingUserInputs";
 import { reconcileElicitationsOnStartup } from "../elicitationSubmission.ts";
 import {
@@ -4015,6 +4015,10 @@ const make = Effect.gen(function* () {
         event.sessionGeneration !== undefined &&
         (event.type.startsWith("session.") ||
           event.type === "thread.started" ||
+          event.type === "thread.state.changed" ||
+          event.type === "thread.token-usage.updated" ||
+          event.type === "thread.thinking-tokens.updated" ||
+          event.type === "compaction.recommended" ||
           event.type === "turn.started" ||
           event.type.startsWith("runtime.") ||
           event.type.startsWith("request.") ||
@@ -5902,7 +5906,7 @@ const make = Effect.gen(function* () {
 
   enqueueResolvedUsageLimit = worker.enqueue;
   enqueueAssistantDeltaFlush = (threadId, messageId, commandId) => {
-    void Effect.runPromise(
+    enqueueBackgroundWork(
       worker.enqueue({ source: "assistant-delta-flush", threadId, messageId, commandId }),
     );
   };
@@ -5914,10 +5918,10 @@ const make = Effect.gen(function* () {
     }),
   );
   enqueueCommandOutputFlush = (commandExecutionId) => {
-    void Effect.runPromise(worker.enqueue({ source: "command-output-flush", commandExecutionId }));
+    enqueueBackgroundWork(worker.enqueue({ source: "command-output-flush", commandExecutionId }));
   };
 
-  const reconcileOrphanedProviderTurnsOnStartup = () =>
+  const reconcileOrphanedProviderTurnsOnStartup = (threadIds?: ReadonlySet<ThreadId>) =>
     Effect.gen(function* () {
       const [readModel, bindings, liveSessions] = yield* Effect.all([
         orchestrationEngine.getReadModel(),
@@ -5927,8 +5931,35 @@ const make = Effect.gen(function* () {
       const bindingsByThreadId = new Map(bindings.map((binding) => [binding.threadId, binding]));
       const liveThreadIds = new Set(liveSessions.map((session) => session.threadId));
       let recoveredCount = 0;
+      const needsRepair = yield* providerTerminalEventRepository.hasExhausted();
 
       for (const thread of readModel.threads) {
+        if (threadIds && !threadIds.has(thread.id)) continue;
+        const currentBinding = bindingsByThreadId.get(thread.id);
+        const origin = {
+          providerInstanceId: currentBinding?.providerInstanceId ?? null,
+          sessionGeneration: readPersistedSessionGeneration(currentBinding?.runtimePayload),
+        };
+        if (needsRepair && (yield* providerTerminalEventRepository.hasExhausted(thread.id))) {
+          const repairId = `server:terminal-receipt-repair:${thread.id}:${origin.sessionGeneration}`;
+          const repairedAt = new Date().toISOString();
+          yield* orchestrationEngine.dispatch({
+            type: "thread.activity.append",
+            commandId: CommandId.makeUnsafe(repairId),
+            threadId: thread.id,
+            createdAt: repairedAt,
+            activity: {
+              id: EventId.makeUnsafe(repairId),
+              kind: "provider.receipt.repair-required",
+              tone: "error",
+              summary:
+                "Provider completion could not be recovered. History repair is required before retrying an uncertain turn.",
+              payload: { requiresHistoryRepair: true },
+              turnId: thread.session?.activeTurnId ?? null,
+              createdAt: repairedAt,
+            },
+          });
+        }
         // Sessions can be orphaned before a turn id was allocated. They have no
         // terminal receipt to replay, but must not remain "starting" forever.
         if (
@@ -5936,7 +5967,7 @@ const make = Effect.gen(function* () {
           !liveThreadIds.has(thread.id) &&
           (thread.session.status === "starting" || thread.session.status === "running") &&
           thread.session.activeTurnId === null &&
-          !(yield* providerTerminalEventRepository.hasPending(thread.id, null))
+          !(yield* providerTerminalEventRepository.hasPending(thread.id, null, origin))
         ) {
           const reconciledAt = new Date().toISOString();
           const binding = bindingsByThreadId.get(thread.id);
@@ -5980,7 +6011,7 @@ const make = Effect.gen(function* () {
         if (!binding || binding.provider !== thread.session.providerName) {
           continue;
         }
-        if (yield* providerTerminalEventRepository.hasPending(thread.id, activeTurnId)) {
+        if (yield* providerTerminalEventRepository.hasPending(thread.id, activeTurnId, origin)) {
           continue;
         }
 
@@ -6075,13 +6106,29 @@ const make = Effect.gen(function* () {
     yield* Effect.forkScoped(
       Stream.runForEach(providerService.streamEvents, (event) => enqueueRuntimeEvent(event)),
     );
-    yield* startTerminalReceiptRetries(providerTerminalEventRepository, enqueueRuntimeEvent);
-    yield* reconcileOrphanedProviderTurnsOnStartup().pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("failed to reconcile orphaned provider turns on startup", {
-          cause: Cause.pretty(cause),
-        }),
-      ),
+    const recoveryThreadIds = new Set<ThreadId>();
+    let recoverAllThreads = false;
+    yield* startTerminalReceiptRetries(
+      providerTerminalEventRepository,
+      enqueueRuntimeEvent,
+      Effect.gen(function* () {
+        const ids = yield* providerTerminalEventRepository.takeRecoveryThreadIds;
+        if (ids === null) recoverAllThreads = true;
+        else
+          for (const id of ids) {
+            if (recoveryThreadIds.size < 256) recoveryThreadIds.add(id);
+            else recoverAllThreads = true;
+          }
+        if (recoverAllThreads || recoveryThreadIds.size > 0) {
+          // Keep candidates until all repair effects succeed, so a transient
+          // dispatch/storage failure cannot consume the only recovery wakeup.
+          yield* reconcileOrphanedProviderTurnsOnStartup(
+            recoverAllThreads ? undefined : recoveryThreadIds,
+          );
+          recoveryThreadIds.clear();
+          recoverAllThreads = false;
+        }
+      }),
     );
     yield* reconcileProfiledTurnWatchdogsOnStartup.pipe(
       Effect.catchCause((cause) =>
@@ -6127,7 +6174,11 @@ const make = Effect.gen(function* () {
   yield* registerShutdown(
     "provider-ingestion",
     "drain",
-    () => Effect.sync(() => streamingDeltas.cancelTimers()).pipe(Effect.andThen(drain)),
+    () =>
+      Effect.sync(() => {
+        streamingDeltas.cancelTimers();
+        clearAllCommandExecutionFlushTimers();
+      }).pipe(Effect.andThen(drain)),
     ["provider-event-delivery"],
   );
 

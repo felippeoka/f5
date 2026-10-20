@@ -31,7 +31,8 @@ it("shares an absolute deadline, runs phases in order, and settles incomplete wo
     expect(shutdown.run()).toBe(work);
     await vi.advanceTimersByTimeAsync(1800);
     const results = await work;
-    expect(new Set(deadlines).size).toBe(1);
+    expect(deadlines.slice(0, 4)).toEqual(Array(4).fill(shutdown.deadline! - 450));
+    expect(deadlines[4]).toBe(shutdown.deadline! - 150);
     expect(order).toEqual(["admission", "history", "logs", "provider", "ingestion"]);
     expect(results.find((step) => step.name === "provider")?.outcome).toBe("incomplete");
     expect(results.find((step) => step.name === "ingestion")?.outcome).toBe("complete");
@@ -131,4 +132,27 @@ it("stops source subscriptions and retry timers before producer shutdown", async
       }),
     ).pipe(Effect.provideService(ServerShutdown, shutdown)),
   );
+});
+
+it("reserves drain and final-log time even when an earlier phase hangs", async () => {
+  vi.useFakeTimers();
+  try {
+    const shutdown = new ShutdownRegistry();
+    const budgets: number[] = [];
+    for (const phase of ["admission", "drain", "logs"] as const)
+      shutdown.register({
+        name: phase,
+        phase,
+        run: async (deadline) => {
+          budgets.push(deadline - Date.now());
+          return new Promise(() => {});
+        },
+      });
+    const work = shutdown.run();
+    await vi.advanceTimersByTimeAsync(1800);
+    expect(budgets).toEqual([1350, 300, 150]);
+    expect((await work).map((r) => r.outcome)).toEqual(["incomplete", "incomplete", "incomplete"]);
+  } finally {
+    vi.useRealTimers();
+  }
 });
