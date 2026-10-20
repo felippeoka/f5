@@ -1787,3 +1787,25 @@ terminal drawers (f5 mounts only the open drawer of the active thread), and
 three Ghostty renderer changes (f5 uses xterm.js). The four new reason keys
 use the `upstream-only-subsystem:` prefix, because the plan validator accepts
 only that prefix outside its fixed key list.
+
+**Batch 9 (settings, 18 records).** One port:
+[t3code#17859](https://github.com/pingdotgg/t3code/pull/17859) makes Cmd/Ctrl+F
+focus the settings search. Before, it did nothing there, because only the chat
+view handles `chat.find`. One is equivalent:
+[t3code#20764](https://github.com/pingdotgg/t3code/pull/20764) persists the
+clamped search highlight, which f5's settings search already does. Four are
+compiler-motivated refactors or compiler workarounds that f5 does not need: its
+settings are not compiled, and none of the four changes behavior. Twelve change
+upstream pieces f5 does not have:
+- the `preview.focusUrl` label
+- the licenses page
+- the project-group settings hook
+- the SnapShot coordinator
+- dynamic Lucide project icons
+- the client snapshot cache
+- multi-environment setting writes
+- the Connections panel widths
+- ChatCanvas measurement
+- the client connection registry
+- the local font picker
+- the shortcut recorder (f5 takes shortcuts as typed text)

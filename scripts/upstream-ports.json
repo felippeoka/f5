@@ -2889,10 +2889,9 @@
     {
       "upstreamSha": "1544a94578c14c17c1e6ed52c077d9b978769e76",
       "subject": "perf(web): snapshot coordinator keeps the last route target in state (#20466)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): snapshot coordinator keeps the last route target in state (#20466).",
+      "reason": "Not-applicable: compiler-motivated refactor of upstream's desktop SnapShot coordinator, which f5 does not have. Upstream change: perf(web): snapshot coordinator keeps the last route target in state (#20466)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "1550058056ba660b8581c8eda990c9d40c493a4b",
@@ -4744,10 +4743,9 @@
     {
       "upstreamSha": "23290944bce8a2ff9f9438cb6d16f152559858d8",
       "subject": "perf(web): viewed-file tracking passes its flush target instead of reading refs (#20463)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): viewed-file tracking passes its flush target instead of reading refs (#20463).",
+      "reason": "Not-applicable: compiler-motivated refactor of upstream's pull request viewed-file hook (passes the flush target instead of reading refs); no behavior change, and f5 has no such hook. Upstream change: perf(web): viewed-file tracking passes its flush target instead of reading refs (#20463)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "232de5e8aac61e6f3de4bc61d10746167db9e905",
@@ -15339,10 +15337,9 @@
     {
       "upstreamSha": "70d5cfb49247ca04301ae97338293e48a628cc1e",
       "subject": "perf(web): the project action editor resets its form without an effect (#20550)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the project action editor resets its form without an effect (#20550).",
+      "reason": "Not-applicable: compiler-motivated refactor that resets upstream's project action editor dialog during render instead of in an effect; no behavior change. Upstream change: perf(web): the project action editor resets its form without an effect (#20550)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "70d60e03a7a35c6fa131825bbfa05ec893e69912",
@@ -15518,10 +15515,9 @@
     {
       "upstreamSha": "71a90ae70e3ff880396363809bd9bfcfd520f30c",
       "subject": "fix(web): hotkey settings record plain keys and Tab (#14548)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): hotkey settings record plain keys and Tab (#14548).",
+      "reason": "Not-applicable: lets upstream's shortcut recorder capture plain keys and Tab; f5's keybinding editor takes the shortcut as typed text (apps/web/src/components/settings/KeybindingEditor.tsx:357). Upstream change: fix(web): hotkey settings record plain keys and Tab (#14548)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "71c6f8248775066ebaf4bfc6680d3e2acb4bb2d1",
@@ -15744,10 +15740,9 @@
     {
       "upstreamSha": "734e8876713b0238deb8339ac92982c5bedb02ca",
       "subject": "perf(web): searching keybindings only renders rows entering or leaving the filter (#20840)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): searching keybindings only renders rows entering or leaving the filter (#20840).",
+      "reason": "Not-applicable: works around the React Compiler joining upstream's keybinding rows to the search query's cache scope. f5's keybinding editor is not compiled and builds its rows in useMemo (apps/web/src/components/settings/KeybindingEditor.tsx:163). Upstream change: perf(web): searching keybindings only renders rows entering or leaving the filter (#20840)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "736130c2fd39b85cd515fa2a41cd10c8a8a52630",
@@ -17649,10 +17644,9 @@
     {
       "upstreamSha": "821a6d7e0685a5876d8ad12a7a72b23c2becb505",
       "subject": "fix(web): keybinding settings label Focus URL with a capitalized acronym (#18279)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): keybinding settings label Focus URL with a capitalized acronym (#18279).",
+      "reason": "Not-applicable: adds a label for upstream's preview.focusUrl command; f5 has no such command, and its keybinding labels are written by hand per command (apps/web/src/lib/keybindingConflicts.ts:139). Upstream change: fix(web): keybinding settings label Focus URL with a capitalized acronym (#18279)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "823119350ee29cca434b1295aa5c560f4c9ef98a",
@@ -18738,10 +18732,9 @@
     {
       "upstreamSha": "8ac4b97dae6bff7258fa5091a908116902fbd635",
       "subject": "fix(web): settings warn when an environment silently drops a setting (#18334)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): settings warn when an environment silently drops a setting (#18334).",
+      "reason": "Not-applicable: warns when one of several connected environments drops a setting on write; f5 connects to a single server. Upstream change: fix(web): settings warn when an environment silently drops a setting (#18334)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "8ac5462920c45cdee63af15b2598909736f2ec84",
@@ -21894,10 +21887,9 @@
     {
       "upstreamSha": "a17781f638226b2f1c5f46954175e2be969ad112",
       "subject": "perf(web): panel presence keeps its retained value in state (#20459)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): panel presence keeps its retained value in state (#20459).",
+      "reason": "Not-applicable: compiler-motivated refactor of upstream's panel presence helper (keeps the retained value in state instead of a ref); f5 has no panelAnimations module. Upstream change: perf(web): panel presence keeps its retained value in state (#20459)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a17cbc3b4022b824cda9b199e4c53a8c9a608923",
@@ -22425,10 +22417,9 @@
     {
       "upstreamSha": "a6698271a41a4c1f2c42f25ca5d69cd7d1fa9c30",
       "subject": "fix(web): chat content keeps pace with sidebar resizing (#17383)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): chat content keeps pace with sidebar resizing (#17383).",
+      "reason": "Not-applicable: flushes upstream's ChatCanvas ResizeObserver measurement synchronously; f5 has no ChatCanvas measurement layer. Upstream change: fix(web): chat content keeps pace with sidebar resizing (#17383)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "a6797b3b97dca6b6941574ff062d069c45c89b9a",
@@ -22532,10 +22523,11 @@
     {
       "upstreamSha": "a72b58e127a5a1e8c40c09f6334d6e72a50cbe6b",
       "subject": "fix(web): settings search keeps the clamped highlight when results shrink (#20764)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): settings search keeps the clamped highlight when results shrink (#20764).",
+      "reason": "Equivalent: upstream stores the clamped highlight index so results that shrink and grow back keep it. f5's settings search already writes the clamp back to state whenever the result count changes. Upstream change: fix(web): settings search keeps the clamped highlight when results shrink (#20764)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "equivalent",
+      "f5Shas": ["72d2c5dcc1bf0b581cdecd33bc34b801ced0baab"],
+      "evidence": ["apps/web/src/components/settings/SettingsLayout.tsx:194"]
     },
     {
       "upstreamSha": "a72d1fcc5a89b3576cccaa6f062ba7cda1589fc5",
@@ -24199,10 +24191,9 @@
     {
       "upstreamSha": "b47746bb9c1edd5a9a0769426d311f184a02b08c",
       "subject": "perf(web): load project icons as one chunk instead of ~1,700 (#20147)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): load project icons as one chunk instead of ~1,700 (#20147).",
+      "reason": "Not-applicable: bundles upstream's ~1,700 dynamically imported Lucide project icons into one chunk. f5's project icons are ten statically imported glyphs (apps/web/src/components/ProjectIcon.tsx:25). Upstream change: perf(web): load project icons as one chunk instead of ~1,700 (#20147)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "b491e41da366beb03c54b585745318553f1239c5",
@@ -25126,10 +25117,9 @@
     {
       "upstreamSha": "bc2748241776066c532f3312a26f1756d9740f9c",
       "subject": "perf(web): validate monospace fonts when selected (#15642)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): validate monospace fonts when selected (#15642).",
+      "reason": "Not-applicable: moves upstream's monospace check from the local font list to the pick; f5 has no local font enumeration picker. Upstream change: perf(web): validate monospace fonts when selected (#15642)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "bc3dc2694b5d15613ef610d693d18ebd904b0d56",
@@ -29157,10 +29147,9 @@
     {
       "upstreamSha": "da0792efb1974df29b0949abb0b7e6479210a9c1",
       "subject": "perf(web): toggling a client setting no longer re-renders every settings row (#20830)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): toggling a client setting no longer re-renders every settings row (#20830).",
+      "reason": "Not-applicable: narrows upstream's useSettingsProjectGroups selector; f5's settings have no project-group hook or per-field client settings selectors. Upstream change: perf(web): toggling a client setting no longer re-renders every settings row (#20830)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "da11342e03dbf2bf46058d66b9c4f4eab8047a5a",
@@ -30412,10 +30401,9 @@
     {
       "upstreamSha": "e2b929f10a4c7436b9f0a5a517aec61ae94394f1",
       "subject": "perf(web): saving the thread list cache no longer re-encodes every thread (#19915)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): saving the thread list cache no longer re-encodes every thread (#19915).",
+      "reason": "Not-applicable: speeds up upstream's thread list cache encoding in client-runtime; f5 has no client snapshot cache. Upstream change: perf(web): saving the thread list cache no longer re-encodes every thread (#19915)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "e2cd2383cec150ea674030d408f2a99a411c94fc",
@@ -32271,10 +32259,9 @@
     {
       "upstreamSha": "f02002ab95c94510ab23a592f19f669fc50da0e9",
       "subject": "fix(web): align settings page widths (#12158)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): align settings page widths (#12158).",
+      "reason": "Not-applicable: aligns the widths of upstream's Connections and provider settings panels; f5's settings use one shared layout column (apps/web/src/components/settings/SettingsLayout.tsx:297). Upstream change: fix(web): align settings page widths (#12158)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f03378f70ac37f56276210e193769c970a759047",
@@ -32842,10 +32829,9 @@
     {
       "upstreamSha": "f36df1852423fef7f7855f86946c9f9a95c3429f",
       "subject": "fix(web): a rejected desktop-local credential is not retried every poll (#16273)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): a rejected desktop-local credential is not retried every poll (#16273).",
+      "reason": "Not-applicable: stops upstream's client-runtime connection registry retrying a rejected desktop-local credential; f5 has no connection registry or desktop-local credentials. Upstream change: fix(web): a rejected desktop-local credential is not retried every poll (#16273)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f372c0061f7678da94853110da06e821a3af7c83",
@@ -33371,18 +33357,23 @@
     {
       "upstreamSha": "f7664fdf425555e0f85b74d904cfa4eaf57cf7af",
       "subject": "perf(web): Open Source Licenses downloads its manifest once per session (#17119)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): Open Source Licenses downloads its manifest once per session (#17119).",
+      "reason": "Not-applicable: caches upstream's Open Source Licenses manifest download; f5 has no licenses page. Upstream change: perf(web): Open Source Licenses downloads its manifest once per session (#17119)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "not-applicable"
     },
     {
       "upstreamSha": "f769e01e28c80745621a699ed5ee021cc78039b6",
       "subject": "fix(web): focus settings search with command-f (#17859)",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): focus settings search with command-f (#17859).",
+      "reason": "Ported: Cmd/Ctrl+F did nothing on the settings page, because only the chat view handles chat.find and the settings search listened for / alone. Cmd/Ctrl+F now focuses settings search from anywhere except dialogs and popups; / still applies only outside text fields. Upstream change: fix(web): focus settings search with command-f (#17859)",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["7f8fe647b92e844afe879a2df565b4aa37f9b5af"],
+      "evidence": [
+        "apps/web/src/components/settings/settingsSearchShortcut.ts:12",
+        "apps/web/src/components/settings/SettingsLayout.tsx:209",
+        "apps/web/src/components/settings/settingsSearchShortcut.test.ts:16"
+      ]
     },
     {
       "upstreamSha": "f786ff3548aef904b7bdd47f263e8704ba20ca4b",

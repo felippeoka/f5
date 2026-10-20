@@ -297,20 +297,9 @@
     },
     {
       "upstreamSha": "734e8876713b0238deb8339ac92982c5bedb02ca",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): searching keybindings only renders rows entering or leaving the filter (#20840).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20840"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: works around the React Compiler joining upstream's keybinding rows to the search query's cache scope. f5's keybinding editor is not compiled and builds its rows in useMemo (apps/web/src/components/settings/KeybindingEditor.tsx:163). Upstream change: perf(web): searching keybindings only renders rows entering or leaving the filter (#20840)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "1994d6396fda6ce6edff03c57b0757edf5e03b28",
@@ -327,20 +316,9 @@
     },
     {
       "upstreamSha": "da0792efb1974df29b0949abb0b7e6479210a9c1",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): toggling a client setting no longer re-renders every settings row (#20830).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20830"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:settings-project-groups",
+      "reason": "Not-applicable: narrows upstream's useSettingsProjectGroups selector; f5's settings have no project-group hook or per-field client settings selectors. Upstream change: perf(web): toggling a client setting no longer re-renders every settings row (#20830)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "2171c50726d82bab6c12f1398fa5b46b82668f45",
@@ -895,17 +873,10 @@
     },
     {
       "upstreamSha": "a72b58e127a5a1e8c40c09f6334d6e72a50cbe6b",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): settings search keeps the clamped highlight when results shrink (#20764).",
+      "classification": "equivalent:apps/web/src/components/settings/SettingsLayout.tsx:194",
+      "reason": "Equivalent: upstream stores the clamped highlight index so results that shrink and grow back keep it. f5's settings search already writes the clamp back to state whenever the result count changes. Upstream change: fix(web): settings search keeps the clamped highlight when results shrink (#20764)",
       "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20764"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "f5Shas": ["72d2c5dcc1bf0b581cdecd33bc34b801ced0baab"]
     },
     {
       "upstreamSha": "33672c47e3c45a6afabdc1a0dd89033e77237bec",
@@ -1028,20 +999,9 @@
     },
     {
       "upstreamSha": "70d5cfb49247ca04301ae97338293e48a628cc1e",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): the project action editor resets its form without an effect (#20550).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20550"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: compiler-motivated refactor that resets upstream's project action editor dialog during render instead of in an effect; no behavior change. Upstream change: perf(web): the project action editor resets its form without an effect (#20550)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "65ebf8f86e33a1f65edfb371b7d5bcc0d96a0f3f",
@@ -2785,20 +2745,9 @@
     },
     {
       "upstreamSha": "1544a94578c14c17c1e6ed52c077d9b978769e76",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): snapshot coordinator keeps the last route target in state (#20466).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20466"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:snapshot-coordinator",
+      "reason": "Not-applicable: compiler-motivated refactor of upstream's desktop SnapShot coordinator, which f5 does not have. Upstream change: perf(web): snapshot coordinator keeps the last route target in state (#20466)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "635396ca3cdc858f7d829e3b31dd498cda2a8cab",
@@ -2819,20 +2768,9 @@
     },
     {
       "upstreamSha": "23290944bce8a2ff9f9438cb6d16f152559858d8",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): viewed-file tracking passes its flush target instead of reading refs (#20463).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20463"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: compiler-motivated refactor of upstream's pull request viewed-file hook (passes the flush target instead of reading refs); no behavior change, and f5 has no such hook. Upstream change: perf(web): viewed-file tracking passes its flush target instead of reading refs (#20463)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "546c67f443765cebcecbc5db96999ac36aafbadc",
@@ -2870,20 +2808,9 @@
     },
     {
       "upstreamSha": "a17781f638226b2f1c5f46954175e2be969ad112",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): panel presence keeps its retained value in state (#20459).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20459"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:maintenance",
+      "reason": "Not-applicable: compiler-motivated refactor of upstream's panel presence helper (keeps the retained value in state instead of a ref); f5 has no panelAnimations module. Upstream change: perf(web): panel presence keeps its retained value in state (#20459)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "275e55cfca59ead9ea39ab1fb514535c91bc4414",
@@ -3331,20 +3258,9 @@
     },
     {
       "upstreamSha": "b47746bb9c1edd5a9a0769426d311f184a02b08c",
-      "classification": "planned:15a",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(web): load project icons as one chunk instead of ~1,700 (#20147).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-20147"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:dynamic-project-icons",
+      "reason": "Not-applicable: bundles upstream's ~1,700 dynamically imported Lucide project icons into one chunk. f5's project icons are ten statically imported glyphs (apps/web/src/components/ProjectIcon.tsx:25). Upstream change: perf(web): load project icons as one chunk instead of ~1,700 (#20147)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "9b150f791b8d3c8b284c3c701d2c1ef8aa14df45",
@@ -3398,20 +3314,9 @@
     },
     {
       "upstreamSha": "e2b929f10a4c7436b9f0a5a517aec61ae94394f1",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): saving the thread list cache no longer re-encodes every thread (#19915).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-19915"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:client-snapshot-cache",
+      "reason": "Not-applicable: speeds up upstream's thread list cache encoding in client-runtime; f5 has no client snapshot cache. Upstream change: perf(web): saving the thread list cache no longer re-encodes every thread (#19915)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "2dd87a4047a18ad7918e7dc1265469d19d101e0c",
@@ -5315,17 +5220,9 @@
     },
     {
       "upstreamSha": "8ac4b97dae6bff7258fa5091a908116902fbd635",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): settings warn when an environment silently drops a setting (#18334).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-18334"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:multi-environment",
+      "reason": "Not-applicable: warns when one of several connected environments drops a setting on write; f5 connects to a single server. Upstream change: fix(web): settings warn when an environment silently drops a setting (#18334)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "4292720fd927f4c81c21da4e596bdfcedbde32ce",
@@ -5985,17 +5882,9 @@
     },
     {
       "upstreamSha": "821a6d7e0685a5876d8ad12a7a72b23c2becb505",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): keybinding settings label Focus URL with a capitalized acronym (#18279).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-18279"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:preview-focus-url",
+      "reason": "Not-applicable: adds a label for upstream's preview.focusUrl command; f5 has no such command, and its keybinding labels are written by hand per command (apps/web/src/lib/keybindingConflicts.ts:139). Upstream change: fix(web): keybinding settings label Focus URL with a capitalized acronym (#18279)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "f570294df8f5a73b31af7ae8f3105dc1efa6d419",
@@ -7409,20 +7298,9 @@
     },
     {
       "upstreamSha": "f7664fdf425555e0f85b74d904cfa4eaf57cf7af",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): Open Source Licenses downloads its manifest once per session (#17119).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-17119"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:open-source-licenses",
+      "reason": "Not-applicable: caches upstream's Open Source Licenses manifest download; f5 has no licenses page. Upstream change: perf(web): Open Source Licenses downloads its manifest once per session (#17119)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "8bf0a38873aed486a585b2cebd8dd577ae5656b3",
@@ -7817,17 +7695,9 @@
     },
     {
       "upstreamSha": "f02002ab95c94510ab23a592f19f669fc50da0e9",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): align settings page widths (#12158).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-12158"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:connections-settings",
+      "reason": "Not-applicable: aligns the widths of upstream's Connections and provider settings panels; f5's settings use one shared layout column (apps/web/src/components/settings/SettingsLayout.tsx:297). Upstream change: fix(web): align settings page widths (#12158)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "03bd839554c9da27aae37b027bcdb2fa9896af09",
@@ -8542,17 +8412,9 @@
     },
     {
       "upstreamSha": "a6698271a41a4c1f2c42f25ca5d69cd7d1fa9c30",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): chat content keeps pace with sidebar resizing (#17383).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-17383"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:chat-canvas",
+      "reason": "Not-applicable: flushes upstream's ChatCanvas ResizeObserver measurement synchronously; f5 has no ChatCanvas measurement layer. Upstream change: fix(web): chat content keeps pace with sidebar resizing (#17383)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "b1508672a63c4799fed6d9091001de00175d9316",
@@ -10902,17 +10764,9 @@
     },
     {
       "upstreamSha": "f36df1852423fef7f7855f86946c9f9a95c3429f",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): a rejected desktop-local credential is not retried every poll (#16273).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-16273"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:client-connection-registry",
+      "reason": "Not-applicable: stops upstream's client-runtime connection registry retrying a rejected desktop-local credential; f5 has no connection registry or desktop-local credentials. Upstream change: fix(web): a rejected desktop-local credential is not retried every poll (#16273)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "8bd7745f0af918582807326d90e58d59324bb2a6",
@@ -11584,20 +11438,9 @@
     },
     {
       "upstreamSha": "bc2748241776066c532f3312a26f1756d9740f9c",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: perf(web): validate monospace fonts when selected (#15642).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-15642"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ],
-        "perfTargets": [
-          "docs/performance.md: compare 5 warmups and 30 measured repetitions on matching fixtures"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:local-font-picker",
+      "reason": "Not-applicable: moves upstream's monospace check from the local font list to the pick; f5 has no local font enumeration picker. Upstream change: perf(web): validate monospace fonts when selected (#15642)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "801ca76ed6a5b9d5d6a40f6c1ba231d9ffb3757e",
@@ -13112,17 +12955,9 @@
     },
     {
       "upstreamSha": "71a90ae70e3ff880396363809bd9bfcfd520f30c",
-      "classification": "planned:15a",
-      "reason": "Planned: verify the shared-subsystem behavior before claiming delivery or equivalence. Upstream change: fix(web): hotkey settings record plain keys and Tab (#14548).",
-      "reviewStatus": "reviewed",
-      "verification": {
-        "scenarioIds": ["15a-pr-14548"],
-        "targetModules": [
-          "apps/server/src/persistence/NodeSqliteClient.ts",
-          "apps/server/src/orchestration",
-          "apps/web/src/components/ChatView.tsx"
-        ]
-      }
+      "classification": "not-applicable:upstream-only-subsystem:shortcut-recorder",
+      "reason": "Not-applicable: lets upstream's shortcut recorder capture plain keys and Tab; f5's keybinding editor takes the shortcut as typed text (apps/web/src/components/settings/KeybindingEditor.tsx:357). Upstream change: fix(web): hotkey settings record plain keys and Tab (#14548)",
+      "reviewStatus": "reviewed"
     },
     {
       "upstreamSha": "921cb3c8bc772309ccab4c422b091d0a91497a49",
