@@ -998,6 +998,7 @@ export default function ThreadTerminalDrawer({
     startY: number;
     startHeight: number;
     startPreferredHeight: number;
+    drawer: HTMLElement | null;
   } | null>(null);
   const didResizeDuringDragRef = useRef(false);
 
@@ -1181,9 +1182,12 @@ export default function ThreadTerminalDrawer({
       startY: event.clientY,
       startHeight: drawerHeightRef.current,
       startPreferredHeight: preferredHeightRef.current,
+      drawer: event.currentTarget.parentElement,
     };
   }, []);
 
+  // Writes the height straight to the drawer while dragging so the edge lands in the
+  // pointer's frame; React state, the terminal fit and persistence follow on release.
   const handleResizePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const resizeState = resizeStateRef.current;
     if (!resizeState || resizeState.pointerId !== event.pointerId) return;
@@ -1196,8 +1200,7 @@ export default function ThreadTerminalDrawer({
     }
     didResizeDuringDragRef.current = true;
     drawerHeightRef.current = clampedHeight;
-    preferredHeightRef.current = clampedHeight;
-    setPreferredHeight(clampedHeight);
+    resizeState.drawer?.style.setProperty("height", `${clampedHeight}px`);
   }, []);
 
   const handleResizePointerEnd = useCallback(
@@ -1219,7 +1222,9 @@ export default function ThreadTerminalDrawer({
         setResizeEpoch((value) => value + 1);
         return;
       }
-      syncHeight(preferredHeightRef.current);
+      preferredHeightRef.current = drawerHeightRef.current;
+      setPreferredHeight(drawerHeightRef.current);
+      syncHeight(drawerHeightRef.current);
       setResizeEpoch((value) => value + 1);
     },
     [syncHeight],
