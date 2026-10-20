@@ -65,6 +65,19 @@ export async function preserveTimelineAnchorDuringHistoryLoad(input: {
   input.signal.addEventListener("abort", cancelRestore, { once: true });
   for (const type of ["wheel", "touchstart", "pointerdown", "keydown"])
     node.addEventListener(type, cancelRestore, { passive: true, signal: lifetime.signal });
+  // Remember reaching the tail while the request is pending. A later prepend
+  // can move the tail before restoration checks it again.
+  node.addEventListener(
+    "scroll",
+    () => {
+      if (
+        node.scrollHeight - node.scrollTop - node.clientHeight <
+        Math.max(2, node.clientHeight * 0.1)
+      )
+        cancelRestore();
+    },
+    { passive: true, signal: lifetime.signal },
+  );
   const nextFrame = () =>
     new Promise<void>((resolve) => {
       const done = () => {

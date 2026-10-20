@@ -362,6 +362,7 @@ it.each(["restore", "pending layout", "wheel", "abort", "replacement", "tail"] a
       else if (mode === "tail") {
         await currentList!.scrollToEnd({ animated: false });
         await expect.poll(() => readTimelineScrollAnchor(node).atEnd).toBe(true);
+        node.dispatchEvent(new Event("scroll"));
       }
       release();
       await loading;
@@ -387,3 +388,48 @@ it.each(["restore", "pending layout", "wheel", "abort", "replacement", "tail"] a
     }
   },
 );
+
+it("remembers tail navigation when a history prepend changes the scroll geometry", async () => {
+  const node = document.createElement("div");
+  node.style.cssText = "height:120px;width:320px;overflow:auto";
+  const row = document.createElement("div");
+  row.dataset.timelineRowId = "history-anchor";
+  row.style.height = "400px";
+  node.append(row);
+  document.body.append(node);
+  const scroll = vi.fn();
+  const list = {
+    getScrollableNode: () => node,
+    scrollToIndex: scroll,
+  } as unknown as LegendListRef;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const load = vi.fn(async () => {
+    await gate;
+    // The tail was reached while the request was pending. Prepending history
+    // now makes a one-time check of the distance to the tail miss that intent.
+    row.style.height = "800px";
+  });
+  const loading = preserveTimelineAnchorDuringHistoryLoad({
+    getList: () => list,
+    getRowIndex: () => 0,
+    signal: new AbortController().signal,
+    load,
+  });
+  try {
+    expect(load).toHaveBeenCalledOnce();
+    node.scrollTop = node.scrollHeight;
+    expect(readTimelineScrollAnchor(node).atEnd).toBe(true);
+    node.dispatchEvent(new Event("scroll"));
+    release();
+    await loading;
+    expect(readTimelineScrollAnchor(node).atEnd).toBe(false);
+    expect(scroll).not.toHaveBeenCalled();
+  } finally {
+    release();
+    await loading;
+    node.remove();
+  }
+});
