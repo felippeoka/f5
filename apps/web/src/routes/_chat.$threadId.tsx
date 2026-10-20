@@ -20,7 +20,7 @@ import {
 
 import { Schema } from "effect";
 import { getLocalStorageItem } from "../hooks/useLocalStorage";
-import { useAppSettings } from "../appSettings";
+import { type AppSettings, updateAppSettings, useAppSettingsSelector } from "../appSettings";
 import ChatView from "../components/ChatView";
 import { DiffSurfaceBoundary } from "../components/DiffSurfaceBoundary";
 import PlanSidebar from "../components/PlanSidebar";
@@ -71,6 +71,13 @@ import { useStore } from "../store";
 import { useThread } from "../threadSelectors";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
 import { AppTitlebar } from "~/components/AppTitlebar";
+
+function selectThreadRouteSettings(settings: AppSettings) {
+  return {
+    timestampFormat: settings.timestampFormat,
+    workspaceFileTreeEntryLimit: settings.workspaceFileTreeEntryLimit,
+  };
+}
 
 const PrLinkedPanel = lazy(() => import("../components/prHub/PrLinkedPanel"));
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
@@ -186,18 +193,18 @@ const RightPanelInlineSidebar = (props: {
   children: ReactNode;
 }) => {
   const { open, onClose, onOpenDefaultSurface, threadId } = props;
-  const { settings, updateSettings } = useAppSettings();
+  const rightPanelWidths = useAppSettingsSelector((settings) => settings.rightPanelWidths);
   const width =
-    settings.rightPanelWidths[threadId] ??
+    rightPanelWidths[threadId] ??
     getLocalStorageItem(RIGHT_PANEL_INLINE_SIDEBAR_WIDTH_STORAGE_KEY, Schema.Finite);
   const saveWidth = useCallback(
     (nextWidth: number) => {
-      const entries = Object.entries(settings.rightPanelWidths).filter(([id]) => id !== threadId);
-      updateSettings({
+      const entries = Object.entries(rightPanelWidths).filter(([id]) => id !== threadId);
+      updateAppSettings({
         rightPanelWidths: Object.fromEntries([...entries.slice(-49), [threadId, nextWidth]]),
       });
     },
-    [settings.rightPanelWidths, threadId, updateSettings],
+    [rightPanelWidths, threadId],
   );
   const onOpenChange = useCallback(
     (open: boolean) => {
@@ -335,7 +342,7 @@ function ChatThreadRouteView() {
     select: (params) => ThreadId.makeUnsafe(params.threadId),
   });
   const search = Route.useSearch();
-  const { settings } = useAppSettings();
+  const settings = useAppSettingsSelector(selectThreadRouteSettings);
   const thread = useThread(threadId);
   const threadExists = thread !== undefined;
   const draftThread = useComposerDraftStore(

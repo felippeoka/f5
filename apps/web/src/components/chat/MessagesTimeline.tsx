@@ -119,7 +119,7 @@ import {
 } from "~/lib/terminalContext";
 import { relativePathForDisplay } from "~/lib/attachedFiles";
 import { cn } from "~/lib/utils";
-import { type TimestampFormat, useAppSettings } from "../../appSettings";
+import { type AppSettings, type TimestampFormat, useAppSettingsSelector } from "../../appSettings";
 import { readNativeApi } from "../../nativeApi";
 import {
   extractTerminalLinks,
@@ -373,6 +373,17 @@ const EMPTY_CHAT_DIFF_CONTEXT: ChatDiffContext = {
   onOpenFileChangeDiff: () => {},
 };
 
+// Only these settings re-render the timeline; other setting writes keep the selection.
+function selectTimelineSettings(settings: AppSettings) {
+  return {
+    collapseCompletedWorkLogs: settings.collapseCompletedWorkLogs,
+    expandMcpToolCallCardsByDefault: settings.expandMcpToolCallCardsByDefault,
+    expandMcpToolCalls: settings.expandMcpToolCalls,
+    showFileChangeDiffsInline: settings.showFileChangeDiffsInline,
+    showReasoningExpanded: settings.showReasoningExpanded,
+  };
+}
+
 export const MessagesTimeline = memo(function MessagesTimeline({
   nativeSessionCapabilities,
   threadId = null,
@@ -424,7 +435,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   chatDiffContext = EMPTY_CHAT_DIFF_CONTEXT,
   onWorkingRibbonFocusLost,
 }: MessagesTimelineProps) {
-  const { settings } = useAppSettings();
+  const settings = useAppSettingsSelector(selectTimelineSettings);
   // The working label can be picked up and steered (see WorkingRibbon).
   const reducedMotion = useReducedMotion();
   const [ribbonOrigin, setRibbonOrigin] = useState<RibbonPoint | null>(null);

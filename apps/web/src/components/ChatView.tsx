@@ -232,8 +232,8 @@ import { finishThreadOpenTrace } from "../lib/threadOpenTrace";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isKeyboardEventComposing } from "../lib/keyboardComposition";
 import { recordModelSelection } from "../modelPreferencesStore";
-import { getCustomModelOptionsByInstance } from "../modelSelection";
-import { useSettings } from "../hooks/useSettings";
+import { getCustomModelOptionsByInstance, type ModelCatalogSettings } from "../modelSelection";
+import { selectServerSettings, type UnifiedWebSettings, useSettings } from "../hooks/useSettings";
 import { useWsConnectionState } from "../wsConnectionState";
 import BranchToolbar from "./BranchToolbar";
 import { useChatViewBranchDriftGuard } from "./ChatViewBranchDriftGuard";
@@ -268,7 +268,7 @@ import { resolveThreadStatusPillForThread } from "../threadStatus";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { wasBootstrapThreadRolledBack } from "~/lib/bootstrapErrors";
 import { ensureNativeApi, readNativeApi } from "~/nativeApi";
-import { resolveThreadTitleModel, useAppSettings } from "../appSettings";
+import { type AppSettings, resolveThreadTitleModel, useAppSettingsSelector } from "../appSettings";
 import { resolveProviderOptionsForDispatch } from "../providerOptionsForDispatch";
 import {
   type ComposerImageAttachment,
@@ -661,6 +661,45 @@ function providerKindForDriver(driver: ProviderDriverKind): ProviderKind | null 
     : null;
 }
 
+// ChatView reads settings through these selectors, so a write to any other setting keeps
+// the selection's identity and does not re-render the conversation.
+function selectChatViewSettings(settings: AppSettings) {
+  return {
+    alwaysExpandAgentCommandTranscripts: settings.alwaysExpandAgentCommandTranscripts,
+    claudeBinaryPath: settings.claudeBinaryPath,
+    claudeLaunchArgs: settings.claudeLaunchArgs,
+    claudeProjectSettings: settings.claudeProjectSettings,
+    claudeSubagentDefaults: settings.claudeSubagentDefaults,
+    codexBinaryPath: settings.codexBinaryPath,
+    codexHomePath: settings.codexHomePath,
+    codexThreadTitleModel: settings.codexThreadTitleModel,
+    customClaudeModels: settings.customClaudeModels,
+    customCodexModels: settings.customCodexModels,
+    customGrokModels: settings.customGrokModels,
+    followUpBehavior: settings.followUpBehavior,
+    gitStatusAutoRefreshIntervalSeconds: settings.gitStatusAutoRefreshIntervalSeconds,
+    openFileLinksInPanel: settings.openFileLinksInPanel,
+    providerModelPreferences: settings.providerModelPreferences,
+    runtimeWarningVisibility: settings.runtimeWarningVisibility,
+    sendShortcut: settings.sendShortcut,
+    showAgentCommandTranscripts: settings.showAgentCommandTranscripts,
+    showFileChangeDiffsInline: settings.showFileChangeDiffsInline,
+    showProviderRuntimeMetadata: settings.showProviderRuntimeMetadata,
+    tasksPanelAutoOpen: settings.tasksPanelAutoOpen,
+    timestampFormat: settings.timestampFormat,
+    workLogFilter: settings.workLogFilter,
+    workLogMode: settings.workLogMode,
+  };
+}
+
+function selectModelCatalogSettings(settings: UnifiedWebSettings): ModelCatalogSettings {
+  return {
+    providerInstances: settings.providerInstances,
+    providers: settings.providers,
+    providerModelPreferences: settings.providerModelPreferences,
+  };
+}
+
 export default function ChatView({
   threadId,
   liveAgentCount,
@@ -704,8 +743,8 @@ export default function ChatView({
     (store) => store.setChangedFilesExpandedForThread,
   );
   const changedFilesExpandedByThreadId = useStore((store) => store.changedFilesExpandedByThreadId);
-  const { settings } = useAppSettings();
-  const unifiedSettings = useSettings();
+  const settings = useAppSettingsSelector(selectChatViewSettings);
+  const unifiedSettings = useSettings(selectModelCatalogSettings);
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const diskSpaceStatus = useDiskSpaceStatus();
   const timestampFormat = settings.timestampFormat;
@@ -1098,7 +1137,7 @@ export default function ChatView({
     }
     return null;
   }, [activeThread, codeReviewWorkflows, investigationWorkflows, planningWorkflows]);
-  const projectSettings = useSettings(undefined, activeThread?.projectId);
+  const projectSettings = useSettings(selectServerSettings, activeThread?.projectId);
   const runtimeMode =
     composerDraft.runtimeMode ?? activeThread?.runtimeMode ?? projectSettings.defaultRuntimeMode;
   const interactionMode =
@@ -2430,25 +2469,38 @@ export default function ChatView({
     },
     [activeThread, queryClient, settings.showAgentCommandTranscripts],
   );
-  const historyStatusContent =
-    activeThread && activeThreadHistory.stage === "backfilling" ? (
-      <div className="mx-auto mb-4 w-full max-w-(--chat-content-max-width) rounded-2xl border border-border/70 bg-card/70 px-4 py-3 text-sm text-muted-foreground shadow-sm backdrop-blur-sm">
-        Loading earlier messages...
-      </div>
-    ) : activeThread && activeThreadHistory.stage === "error" ? (
-      <div className="mx-auto mb-4 flex w-full max-w-(--chat-content-max-width) items-center justify-between gap-3 rounded-2xl border border-border/70 bg-card/70 px-4 py-3 shadow-sm backdrop-blur-sm">
-        <p className="text-sm text-muted-foreground">Retry loading earlier messages.</p>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            void retryThreadHistoryBackfill(queryClient, activeThread.id);
-          }}
-        >
-          Retry
-        </Button>
-      </div>
-    ) : null;
+  const historyThreadId = activeThread?.id ?? null;
+  const historyStage = activeThreadHistory.stage;
+  // Memoized so a ChatView render that changes nothing in the timeline (opening an image,
+  // a dialog) keeps the timeline's props equal and skips its render.
+  const timelineListHeaderContent = useMemo(
+    () =>
+      historyThreadId === null ? null : (
+        <>
+          {historyStage === "backfilling" ? (
+            <div className="mx-auto mb-4 w-full max-w-(--chat-content-max-width) rounded-2xl border border-border/70 bg-card/70 px-4 py-3 text-sm text-muted-foreground shadow-sm backdrop-blur-sm">
+              Loading earlier messages...
+            </div>
+          ) : historyStage === "error" ? (
+            <div className="mx-auto mb-4 flex w-full max-w-(--chat-content-max-width) items-center justify-between gap-3 rounded-2xl border border-border/70 bg-card/70 px-4 py-3 shadow-sm backdrop-blur-sm">
+              <p className="text-sm text-muted-foreground">Retry loading earlier messages.</p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  void retryThreadHistoryBackfill(queryClient, historyThreadId);
+                }}
+              >
+                Retry
+              </Button>
+            </div>
+          ) : null}
+          <NewerMessageHistoryControl threadId={historyThreadId} />
+          <OlderActivityHistoryControl threadId={historyThreadId} />
+        </>
+      ),
+    [historyStage, historyThreadId, queryClient],
+  );
   const turnDiffSummaryByAssistantMessageId = useMemo(() => {
     const byMessageId = new Map<MessageId, TurnDiffSummary>();
     for (const summary of turnDiffSummaries) {
@@ -7646,13 +7698,7 @@ export default function ChatView({
                       onToggleAllDirectories={onToggleAllDirectories}
                       chatDiffContext={chatDiffContext}
                       onWorkingRibbonFocusLost={scheduleComposerFocus}
-                      listHeaderContent={
-                        <>
-                          {historyStatusContent}
-                          <NewerMessageHistoryControl threadId={activeThread.id} />
-                          <OlderActivityHistoryControl threadId={activeThread.id} />
-                        </>
-                      }
+                      listHeaderContent={timelineListHeaderContent}
                     />
                   </ThreadFindContext>
                 ) : (

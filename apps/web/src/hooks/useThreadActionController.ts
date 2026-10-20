@@ -2,7 +2,7 @@ import { type ThreadId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 
-import { useAppSettings } from "~/appSettings";
+import { useAppSettingsSelector } from "~/appSettings";
 import { deleteThreadsWithCleanup, setThreadArchived } from "~/archiveActions";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { isSnoozedThread } from "~/lib/threadOrdering";
@@ -111,7 +111,7 @@ export function useThreadActionController(input: {
   const projects = useStore((state) => state.projects);
   const pinRevision = useStore((state) => state.pinRevision ?? 0);
   const markThreadUnread = useStore((state) => state.markThreadUnread);
-  const { settings } = useAppSettings();
+  const confirmThreadDelete = useAppSettingsSelector((settings) => settings.confirmThreadDelete);
   const navigate = useNavigate();
   const clearComposerDraftForThread = useComposerDraftStore((state) => state.clearThreadDraft);
   const clearProjectDraftThreadById = useComposerDraftStore(
@@ -355,7 +355,7 @@ export function useThreadActionController(input: {
         return;
       }
       if (actionId !== "delete") return;
-      if (settings.confirmThreadDelete) {
+      if (confirmThreadDelete) {
         const confirmed = await api.dialogs.confirm(
           [
             `Delete thread "${thread.title}"?`,
@@ -377,7 +377,7 @@ export function useThreadActionController(input: {
       navigate,
       pinRevision,
       projects,
-      settings.confirmThreadDelete,
+      confirmThreadDelete,
     ],
   );
 

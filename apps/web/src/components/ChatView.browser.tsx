@@ -76,6 +76,51 @@ vi.mock("./DiffWorkerPoolProvider", () => ({
   DiffWorkerPoolProvider: ({ children }: { children?: ReactNode }) => children ?? null,
 }));
 
+// Counts commits inside the timeline and composer subtrees for the render isolation tests.
+// The timeline wrapper is memoized like the real component, so it renders exactly when the
+// real one would; the composer wrapper is not, because the real composer is not memoized.
+const renderCommits = vi.hoisted(() => ({ timeline: 0, composer: 0 }));
+
+vi.mock("./chat/MessagesTimeline", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./chat/MessagesTimeline")>();
+  const { Profiler, createElement, memo } = await import("react");
+  const Timeline = actual.MessagesTimeline;
+  const ProfiledTimeline = memo(function ProfiledMessagesTimeline(
+    props: Parameters<typeof Timeline>[0],
+  ) {
+    return createElement(
+      Profiler,
+      {
+        id: "timeline",
+        onRender: () => {
+          renderCommits.timeline += 1;
+        },
+      },
+      createElement(Timeline, props),
+    );
+  });
+  return { ...actual, MessagesTimeline: ProfiledTimeline };
+});
+
+vi.mock("./chat/composer/ChatComposer", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./chat/composer/ChatComposer")>();
+  const { Profiler, createElement } = await import("react");
+  const Composer = actual.ChatComposer;
+  function ProfiledChatComposer(props: Parameters<typeof Composer>[0]) {
+    return createElement(
+      Profiler,
+      {
+        id: "composer",
+        onRender: () => {
+          renderCommits.composer += 1;
+        },
+      },
+      createElement(Composer, props),
+    );
+  }
+  return { ...actual, ChatComposer: ProfiledChatComposer };
+});
+
 const redesignBootstrapFixture = {
   ...baseServerBootstrapFixture,
   capabilities: [...baseServerBootstrapFixture.capabilities, "composer-redesign"],
@@ -8226,4 +8271,203 @@ describe("ChatView timeline (full app)", () => {
       }
     },
   );
+
+  describe("render isolation", () => {
+    const OTHER_THREAD_ID = "thread-render-isolation-other" as ThreadId;
+    const NO_COMMITS = { timeline: 0, composer: 0 };
+
+    function resetRenderCommits() {
+      renderCommits.timeline = 0;
+      renderCommits.composer = 0;
+    }
+
+    // Waits until neither subtree has committed for a while, so late effects count.
+    async function waitForRenderQuiet() {
+      let previous = { ...renderCommits };
+      let stableSince = performance.now();
+      await vi.waitFor(
+        () => {
+          const now = performance.now();
+          if (
+            renderCommits.timeline !== previous.timeline ||
+            renderCommits.composer !== previous.composer
+          ) {
+            previous = { ...renderCommits };
+            stableSince = now;
+          }
+          expect(now - stableSince).toBeGreaterThan(400);
+        },
+        { timeout: 10_000, interval: 50 },
+      );
+    }
+
+    async function mountIsolatedChatView() {
+      let connectedClient: TestWsClient | null = null;
+      const snapshot = addThreadToSnapshot(
+        createSnapshotForTargetUser({
+          targetMessageId: "msg-render-isolation" as MessageId,
+          targetText: "render isolation",
+          targetAttachmentCount: 1,
+          fillerPairCount: 4,
+          targetPairIndex: 3,
+        }),
+        OTHER_THREAD_ID,
+      );
+      const mounted = await mountChatView({
+        viewport: DEFAULT_VIEWPORT,
+        snapshot,
+        configureFixture: (next) => {
+          next.resolveWsRequest = (_body, client) => {
+            connectedClient = client;
+            return null;
+          };
+        },
+      });
+      await waitForComposerEditor();
+      await vi.waitFor(() => expect(connectedClient).not.toBeNull());
+      await waitForRenderQuiet();
+      // The profiled wrappers are mounted, so a zero below means "no commit", not "absent".
+      expect(renderCommits.timeline).toBeGreaterThan(0);
+      expect(renderCommits.composer).toBeGreaterThan(0);
+      return {
+        mounted,
+        client: connectedClient as unknown as TestWsClient,
+        nextSequence: snapshot.snapshotSequence + 1,
+      };
+    }
+
+    it("does not commit the timeline or composer for a token on another thread", async () => {
+      const { mounted, client, nextSequence } = await mountIsolatedChatView();
+      try {
+        resetRenderCommits();
+        client.send(
+          JSON.stringify({
+            type: "push",
+            sequence: 2,
+            channel: ORCHESTRATION_WS_CHANNELS.domainEvent,
+            data: {
+              sequence: nextSequence,
+              eventId: EventId.makeUnsafe("event-render-isolation-other-token"),
+              aggregateKind: "thread",
+              aggregateId: OTHER_THREAD_ID,
+              occurredAt: isoAt(240),
+              commandId: null,
+              causationEventId: null,
+              correlationId: null,
+              metadata: {},
+              type: "thread.message-sent",
+              payload: {
+                threadId: OTHER_THREAD_ID,
+                messageId: "msg-render-isolation-other" as MessageId,
+                role: "assistant",
+                text: "background token",
+                turnId: TurnId.makeUnsafe("turn-render-isolation-other"),
+                streaming: true,
+                createdAt: isoAt(240),
+                updatedAt: isoAt(240),
+              },
+            } satisfies Extract<OrchestrationEvent, { type: "thread.message-sent" }>,
+          }),
+        );
+        await vi.waitFor(() => {
+          const thread = useStore.getState().threads.find((entry) => entry.id === OTHER_THREAD_ID);
+          expect(thread?.messages.some((message) => message.text === "background token")).toBe(
+            true,
+          );
+        });
+        await waitForRenderQuiet();
+        expect({ ...renderCommits }).toEqual(NO_COMMITS);
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+
+    it("does not commit the timeline or composer for an equal provider snapshot", async () => {
+      const { mounted, client } = await mountIsolatedChatView();
+      try {
+        resetRenderCommits();
+        client.send(
+          JSON.stringify({
+            type: "push",
+            sequence: 2,
+            channel: WS_CHANNELS.serverConfigUpdated,
+            data: {
+              source: "providers",
+              issues: [],
+              providers: structuredClone(fixture.serverConfig.providers),
+            },
+          }),
+        );
+        await waitForRenderQuiet();
+        expect({ ...renderCommits }).toEqual(NO_COMMITS);
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+
+    it("does not commit the timeline or composer for an unrelated settings write", async () => {
+      const { mounted } = await mountIsolatedChatView();
+      try {
+        resetRenderCommits();
+        const stored = JSON.parse(localStorage.getItem(APP_SETTINGS_STORAGE_KEY) ?? "{}");
+        localStorage.setItem(
+          APP_SETTINGS_STORAGE_KEY,
+          JSON.stringify({ ...stored, sidebarThreadPreviewCount: 9 }),
+        );
+        window.dispatchEvent(
+          new CustomEvent("t3code:local_storage_change", {
+            detail: { key: APP_SETTINGS_STORAGE_KEY },
+          }),
+        );
+        await vi.waitFor(() =>
+          expect(
+            parsePersistedAppSettings(localStorage.getItem(APP_SETTINGS_STORAGE_KEY))
+              .sidebarThreadPreviewCount,
+          ).toBe(9),
+        );
+        await waitForRenderQuiet();
+        expect({ ...renderCommits }).toEqual(NO_COMMITS);
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+
+    it("does not commit the conversation when an image preview opens", async () => {
+      const { mounted } = await mountIsolatedChatView();
+      try {
+        const preview = await waitForElement(
+          () =>
+            document.querySelector<HTMLButtonElement>('[aria-label="Preview attachment-1.png"]'),
+          "The user message image should render a preview button.",
+        );
+        resetRenderCommits();
+        preview.click();
+        await waitForElement(
+          () => document.querySelector('[aria-label="Expanded image preview"]'),
+          "Clicking the image should open the expanded preview.",
+        );
+        await waitForRenderQuiet();
+        expect(renderCommits.timeline).toBe(0);
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+
+    it("does not commit the conversation when a dialog opens", async () => {
+      const { mounted } = await mountIsolatedChatView();
+      try {
+        const addAction = await waitForButtonContainingText("Add action");
+        resetRenderCommits();
+        addAction.click();
+        await waitForElement(
+          () => document.querySelector('[data-slot="dialog-popup"]'),
+          "The add action dialog should open.",
+        );
+        await waitForRenderQuiet();
+        expect(renderCommits.timeline).toBe(0);
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+  });
 });

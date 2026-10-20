@@ -7,7 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { ChevronRightIcon } from "lucide-react";
 import { memo, useCallback, useMemo } from "react";
-import { useAppSettings } from "../../appSettings";
+import { useDiffWordWrap } from "../../appSettings";
 import { openInPreferredEditor } from "../../editorPreferences";
 import { useFileNavigation } from "../../fileNavigationContext";
 import type { TurnDiffSummary } from "../../types";
@@ -59,7 +59,7 @@ export const InlineFileChangeDiff = memo(function InlineFileChangeDiff(
     onOpenTurnDiff,
   } = props;
   const handleFileNavigation = useFileNavigation();
-  const { settings } = useAppSettings();
+  const diffWordWrap = useDiffWordWrap();
   const diffUnavailable =
     threadId === null || typeof checkpointTurnCount !== "number" || filePaths.length === 0;
 
@@ -223,7 +223,7 @@ export const InlineFileChangeDiff = memo(function InlineFileChangeDiff(
                   lineDiffType: "none",
                   theme: resolveDiffThemeName(resolvedTheme),
                   themeType: resolvedTheme,
-                  overflow: settings.diffWordWrap ? "wrap" : "scroll",
+                  overflow: diffWordWrap ? "wrap" : "scroll",
                   disableFileHeader: true,
                   unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
                 }}

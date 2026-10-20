@@ -3,14 +3,23 @@ import { useRouter } from "@tanstack/react-router";
 import { formatSourceControlPullRequestKey } from "@t3tools/shared/sourceControl";
 import { parsePullRequestReference } from "../lib/pullRequestReference";
 import { ThreadId } from "@t3tools/contracts";
-import { useAppSettings } from "../appSettings";
+import { type AppSettings, useAppSettingsSelector } from "../appSettings";
 import * as nativeApi from "../nativeApi";
 import { useRightPanelStore } from "../rightPanelStore";
 export function setMostRecentOpenLinkThread(_thread: ThreadId): void {}
 export const OpenLinkThread = createContext<ThreadId | undefined>(undefined);
 /** Web builds always use the system browser. Preview URLs require a current thread. */
+function selectOpenLinkSettings(settings: AppSettings) {
+  return {
+    linkOpenTarget: settings.linkOpenTarget,
+    pullRequestLinksOpenInApp: settings.pullRequestLinksOpenInApp,
+    previewDefaults: { colorScheme: settings.previewDefaults.colorScheme },
+  };
+}
+
 export function useOpenLink(threadId?: ThreadId) {
-  const { settings } = useAppSettings();
+  // Every rendered markdown fragment calls this, so it must ignore unrelated setting writes.
+  const settings = useAppSettingsSelector(selectOpenLinkSettings);
   const currentThread = useContext(OpenLinkThread);
   const router = useRouter({ warn: false });
   threadId ??= currentThread;

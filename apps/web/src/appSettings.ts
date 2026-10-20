@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { Effect, Option, Schema, SchemaTransformation } from "effect";
 import {
   DEFAULT_THREAD_TITLE_MODEL_BY_PROVIDER,
@@ -10,8 +10,11 @@ import {
   type ProviderKind,
 } from "@t3tools/contracts";
 import { getDefaultModel, getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
+import { replaceEqualDeep } from "@tanstack/react-query";
 import {
+  dispatchLocalStorageChange,
   readLocalStorageRawItem,
+  setLocalStorageItem,
   subscribeLocalStorageKey,
   useLocalStorage,
 } from "./hooks/useLocalStorage";
@@ -1143,6 +1146,37 @@ export function getClaudeProjectSettings(
   };
 }
 
+function applyAppSettingsPatch(prev: AppSettings, patch: Partial<AppSettings>): AppSettings {
+  return normalizeAppSettings({
+    ...prev,
+    ...patch,
+    ...(patch.notificationMode === undefined && patch.enableThreadStatusNotifications !== undefined
+      ? {
+          notificationMode: patch.enableThreadStatusNotifications
+            ? ("system" as const)
+            : ("off" as const),
+        }
+      : {}),
+  });
+}
+
+/**
+ * Writes a settings patch without subscribing the caller to settings changes, for
+ * components that update settings but do not render from them.
+ */
+export function updateAppSettings(patch: Partial<AppSettings>): void {
+  try {
+    setLocalStorageItem(
+      APP_SETTINGS_STORAGE_KEY,
+      applyAppSettingsPatch(readAppSettingsSnapshot(), patch),
+      AppSettingsSchema,
+    );
+    dispatchLocalStorageChange(APP_SETTINGS_STORAGE_KEY);
+  } catch (error) {
+    console.error("[LOCALSTORAGE] Error:", error);
+  }
+}
+
 export function useAppSettings() {
   const [settings, setSettings] = useLocalStorage(
     APP_SETTINGS_STORAGE_KEY,
@@ -1153,20 +1187,7 @@ export function useAppSettings() {
 
   const updateSettings = useCallback(
     (patch: Partial<AppSettings>) => {
-      setSettings((prev) =>
-        normalizeAppSettings({
-          ...prev,
-          ...patch,
-          ...(patch.notificationMode === undefined &&
-          patch.enableThreadStatusNotifications !== undefined
-            ? {
-                notificationMode: patch.enableThreadStatusNotifications
-                  ? ("system" as const)
-                  : ("off" as const),
-              }
-            : {}),
-        }),
-      );
+      setSettings((prev) => applyAppSettingsPatch(prev, patch));
     },
     [setSettings],
   );
@@ -1199,6 +1220,29 @@ export function readAppSettingsSnapshot(): AppSettings {
 
 export function subscribeAppSettings(listener: () => void): () => void {
   return subscribeLocalStorageKey(APP_SETTINGS_STORAGE_KEY, listener);
+}
+
+/**
+ * App settings narrowed by `selector`. The component re-renders only when the selected
+ * value changes, compared structurally, so a write to an unrelated setting is free.
+ * Inline selectors re-run each render; structural sharing keeps their result stable.
+ */
+export function useAppSettingsSelector<T>(selector: (settings: AppSettings) => T): T {
+  const getSnapshot = useMemo(() => {
+    let selected: { settings: AppSettings; selector: unknown; value: T } | null = null;
+    return (activeSelector: (settings: AppSettings) => T): T => {
+      const settings = readAppSettingsSnapshot();
+      if (selected && selected.settings === settings && selected.selector === activeSelector) {
+        return selected.value;
+      }
+      const next = activeSelector(settings);
+      const value = selected ? replaceEqualDeep(selected.value, next) : next;
+      selected = { settings, selector: activeSelector, value };
+      return value;
+    };
+  }, []);
+  const getSelectedSnapshot = () => getSnapshot(selector);
+  return useSyncExternalStore(subscribeAppSettings, getSelectedSnapshot, getSelectedSnapshot);
 }
 
 /** Primitive selector for hot rendering paths; unrelated setting writes keep the same snapshot. */

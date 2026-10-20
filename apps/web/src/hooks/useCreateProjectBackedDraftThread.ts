@@ -19,7 +19,7 @@ import {
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback } from "react";
 
-import { useAppSettings, type AppSettings } from "../appSettings";
+import { type AppSettings, updateAppSettings, useAppSettingsSelector } from "../appSettings";
 import {
   type DraftThreadEnvMode,
   type DraftThreadState,
@@ -269,7 +269,7 @@ export async function createProjectBackedDraftThread({
 
 export function useCreateProjectBackedDraftThread() {
   const navigate = useNavigate();
-  const { settings, updateSettings } = useAppSettings();
+  const onboardingLiteStatus = useAppSettingsSelector((settings) => settings.onboardingLiteStatus);
   const resolveProjectThreadEnvMode = useProjectThreadEnvModeResolver();
   const routeThreadId = useParams({
     strict: false,
@@ -287,19 +287,13 @@ export function useCreateProjectBackedDraftThread() {
       });
       return createProjectBackedDraftThread({
         navigate,
-        onboardingLiteStatus: settings.onboardingLiteStatus,
+        onboardingLiteStatus,
         projectId,
         routeThreadId,
-        updateSettings,
+        updateSettings: updateAppSettings,
         options: { ...draftOptions, envMode },
       });
     },
-    [
-      navigate,
-      resolveProjectThreadEnvMode,
-      routeThreadId,
-      settings.onboardingLiteStatus,
-      updateSettings,
-    ],
+    [navigate, onboardingLiteStatus, resolveProjectThreadEnvMode, routeThreadId],
   );
 }

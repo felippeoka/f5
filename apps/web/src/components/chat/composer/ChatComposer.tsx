@@ -5,7 +5,7 @@ import { PopupFocusContext } from "~/components/ui/popupFocus";
 import { type ComposerMention, insertComposerMentionTrigger } from "~/composer-editor-mentions";
 import { recallComposerMentions } from "~/composerMentionHistoryStore";
 import { collapseExpandedComposerCursor } from "~/composer-logic";
-import { useAppSettings } from "~/appSettings";
+import { type AppSettings, useAppSettingsSelector } from "~/appSettings";
 import { useEffect, useRef, useId } from "react";
 import { isKeyboardEventComposing } from "~/lib/keyboardComposition";
 import { stepPromptHistory, type PromptHistoryPosition } from "./promptHistory";
@@ -90,6 +90,15 @@ export interface ChatComposerProps {
   attachments: ComposerAttachments;
 }
 
+// Only these settings re-render the composer; other setting writes keep the selection.
+function selectComposerSettings(settings: AppSettings) {
+  return {
+    composerCollapseOnScroll: settings.composerCollapseOnScroll,
+    composerRichTextEnabled: settings.composerRichTextEnabled,
+    sendShortcut: settings.sendShortcut,
+  };
+}
+
 export function ChatComposer({
   redesignEnabled,
   getTimeline,
@@ -120,7 +129,7 @@ export function ChatComposer({
   sendControls,
   attachments,
 }: ChatComposerProps) {
-  const { settings } = useAppSettings();
+  const settings = useAppSettingsSelector(selectComposerSettings);
   const attachmentTrayId = useId();
   const historyPosition = useRef<PromptHistoryPosition | null>(null);
   const sendShortcutLabel = composerSendShortcutLabel(
