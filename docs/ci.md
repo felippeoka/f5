@@ -113,6 +113,9 @@ A subsequent full run exposed `ENOTEMPTY` while removing a Git fixture whose
 service-scoped upstream refresh was still writing. Fixture finalization now awaits
 refreshes admitted for that checkout. The behind-count checkout case passed another
 50/50 iterations without retries on 2026-10-19.
+After syncing main on 2026-10-20, the OAuth callback-settings unit test also passed
+50/50 iterations. It stubs and asserts the port probe instead of probing fixed port
+3118; the separate real-socket ownership and callback-preflight tests remain enabled.
 These local results do not establish hosted Windows behavior.
 
 Workflow lint uses the pinned actionlint Docker image with shellcheck enabled.

@@ -1,4 +1,4 @@
-import { startClientDiagnostics } from "./clientDiagnostics";
+import { startDeferredClientDiagnostics } from "./deferredClientDiagnostics";
 import type { AppSettings } from "../appSettings";
 import { startSequenceReconciliation } from "./sequenceReconciliation";
 import { getWsConnectionState, subscribeWsConnectionState } from "../wsConnectionState";
@@ -790,7 +790,7 @@ export function createOrchestrationSyncController(deps: OrchestrationSyncControl
     now: () => environment.now(),
   });
   const { flushPending, syncSnapshot, clearSnapshotRetry, waitForCommittedSequence } = router;
-  const diagnostics = startClientDiagnostics({
+  const diagnostics = startDeferredClientDiagnostics({
     read: router.getDiagnostics,
     report: api.server.reportClientDiagnostics,
     clientKind: environment.clientKind,

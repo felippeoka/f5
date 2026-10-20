@@ -367,3 +367,10 @@ Composer input p95 was 32.4 ms both idle and streaming; the report is
 in its `.browser.json` companion. It uses one warmup/two repetitions and does not
 qualify the full 50 ms gate or memory soak. The rebuilt desktop smoke still fails
 before opening a window; Playwright records `kill EPERM` during launch cleanup.
+
+Client diagnostics reporting loads separately from stream subscription setup.
+Router counters accumulate immediately; the reporter reads those accumulated values
+when it starts. Disposal before its module loads creates no timers or listeners,
+and a reporting-module failure does not prevent synchronization. With the subsequent
+main changes included, the initial web JavaScript is 1,506,835 bytes, below the
+unchanged 1,507,108-byte budget.
