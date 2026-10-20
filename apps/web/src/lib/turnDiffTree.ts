@@ -31,7 +31,6 @@ interface MutableDirectoryNode {
   files: TurnDiffTreeFileNode[];
 }
 
-
 function normalizePathSegments(pathValue: string): string[] {
   return pathValue
     .replaceAll("\\", "/")
