@@ -638,6 +638,38 @@ describe("MessagesTimeline (LegendList)", () => {
     });
   });
 
+  it("scrolls the timeline when the wheel turns over the turn rail or minimap", async () => {
+    await page.viewport(1200, 896);
+    const host = document.createElement("div");
+    document.body.append(host);
+    let listRef: LegendListRef | null = null;
+    await render(
+      <TimelineHarness
+        initialEntries={makeOverflowEntries(40)}
+        initialHeight={360}
+        onIsAtEndChangeSpy={() => {}}
+        onListRefChange={(next) => {
+          listRef = next;
+        }}
+      />,
+      { container: host },
+    );
+    const container = await waitForScrollContainer(host);
+    await scrollTimelineToOffset(listRef, container, container.scrollHeight);
+    const targets = [
+      host.querySelector<HTMLElement>('[data-testid="timeline-turn-rail-strip"]'),
+      host.querySelector<HTMLElement>('[aria-label="Conversation minimap"]'),
+    ];
+    for (const target of targets) {
+      expect(target).not.toBeNull();
+      const before = container.scrollTop;
+      const wheel = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -200 });
+      target!.dispatchEvent(wheel);
+      expect(wheel.defaultPrevented).toBe(true);
+      await vi.waitFor(() => expect(container.scrollTop).toBeLessThan(before));
+    }
+  });
+
   it("tracks the active turn-rail tick while scrolling", async () => {
     await page.viewport(1200, 896);
     const host = document.createElement("div");

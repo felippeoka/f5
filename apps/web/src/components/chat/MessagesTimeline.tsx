@@ -106,6 +106,7 @@ import {
   TIMELINE_TURN_RAIL_MIN_ITEMS,
 } from "./MessagesTimeline.logic";
 import { TimelineTurnRail } from "./TimelineTurnRail";
+import { forwardWheelToTimeline } from "./timelineMinimapWheel";
 import { WorkingRibbon, type WorkingRibbonReleaseReason } from "./WorkingRibbon";
 import { useNowIso } from "../../lib/nowTicker";
 import type { RibbonPoint } from "./WorkingRibbon.logic";
@@ -811,6 +812,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [listRef, onIsAtEndChange],
   );
 
+  const forwardOverlayWheel = useCallback(
+    (event: WheelEvent) => {
+      const node = listRef.current?.getScrollableNode?.();
+      if (node instanceof HTMLElement) forwardWheelToTimeline(event, node);
+    },
+    [listRef],
+  );
+
   const keyExtractor = useCallback((row: TimelineRow) => row.id, []);
 
   // Revert popover state lives here, not in the row: LegendList recycles rows,
@@ -1201,6 +1210,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             activeRowIndex={activeMinimapRowIndex}
             hasUnloadedHistory={hasOlderHistory}
             onNavigate={(rowIndex) => navigateToTimelineRow(rowIndex, 0.3)}
+            onWheel={forwardOverlayWheel}
           />
         ) : null}
         {turnRailItems.length >= TIMELINE_TURN_RAIL_MIN_ITEMS ? (
@@ -1210,6 +1220,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             hitStripWidth={turnRailHitStripWidth}
             activeTickIndex={turnRailActiveTickIndex}
             onSelect={(item) => navigateToTimelineRow(item.rowIndex, 0.1)}
+            onWheel={forwardOverlayWheel}
           />
         ) : null}
       </div>
@@ -1223,8 +1234,22 @@ function TimelineMinimap(props: {
   activeRowIndex: number;
   hasUnloadedHistory: boolean;
   onNavigate: (rowIndex: number) => void;
+  onWheel: (event: WheelEvent) => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
+  const { onWheel } = props;
+  const setTrackRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      trackRef.current = node;
+      if (!node) return;
+      node.addEventListener("wheel", onWheel, { passive: false });
+      return () => {
+        node.removeEventListener("wheel", onWheel);
+        trackRef.current = null;
+      };
+    },
+    [onWheel],
+  );
   const activeMarkerIndex = findNearestMinimapMarkerIndex(
     props.markerRowIndices,
     props.activeRowIndex,
@@ -1275,7 +1300,7 @@ function TimelineMinimap(props: {
         <ChevronDownIcon className="size-3" />
       </button>
       <div
-        ref={trackRef}
+        ref={setTrackRef}
         className="absolute top-5 right-1 bottom-5 z-10 w-3 touch-none rounded-full bg-background/70 opacity-45 backdrop-blur-sm transition-opacity hover:opacity-100 focus-visible:opacity-100"
         role="slider"
         tabIndex={0}
