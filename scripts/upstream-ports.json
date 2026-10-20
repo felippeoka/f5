@@ -11587,7 +11587,7 @@
     {
       "upstreamSha": "5584d21688fc0e4cf6cd8057167df2514b759d3b",
       "subject": "fix(server): update fff to stop runaway watcher rescans (#14543)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): update fff to stop runaway watcher rescans (#14543).",
+      "reason": "Deferred: blocked because endpoint security terminates installation of @ff-labs/fff-bin-darwin-arm64@0.11.0 (libfff_c.dylib sha256 d052aae92b8d89f4734399aa53f80a327c4931f1b5dea0a7d96f9c488229ba43); revisit after a security review. Upstream change: fix(server): update fff to stop runaway watcher rescans (#14543).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
       "plannedWorkstream": "15a"
@@ -14930,7 +14930,7 @@
     {
       "upstreamSha": "6e5322b6cf37521e4999f6137607983e95491fcc",
       "subject": "perf(server): cut fff-node FFI marshaling overhead on large workspaces (#18514)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: perf(server): cut fff-node FFI marshaling overhead on large workspaces (#18514).",
+      "reason": "Deferred: blocked because endpoint security terminates installation of @ff-labs/fff-bin-darwin-arm64@0.11.0 (libfff_c.dylib sha256 d052aae92b8d89f4734399aa53f80a327c4931f1b5dea0a7d96f9c488229ba43), which this patch targets; revisit after a security review. Upstream change: perf(server): cut fff-node FFI marshaling overhead on large workspaces (#18514).",
       "reviewStatus": "reviewed",
       "disposition": "deferred",
       "plannedWorkstream": "15a"
@@ -31047,10 +31047,18 @@
     {
       "upstreamSha": "e77a48e81a6aaea575b0c7672ac2134cd6ee04aa",
       "subject": "fix(server): fail runs whose provider stream ends without a terminal (#19131)",
-      "reason": "Planned: implement and verify the explicitly approved 15a scenario. Upstream change: fix(server): fail runs whose provider stream ends without a terminal (#19131).",
+      "reason": "Ported: ACP adapters (Cursor, Grok, Antigravity, custom ACP) now fail the unfinished turn and emit an error session.exited when the agent process exits, instead of keeping a dead session live; failing-before Cursor and Grok tests now pass. Claude, Codex, OpenCode, Pi and Muse already settled on stream end or process exit. Upstream change: fix(server): fail runs whose provider stream ends without a terminal (#19131).",
       "reviewStatus": "reviewed",
-      "disposition": "deferred",
-      "plannedWorkstream": "15a"
+      "disposition": "ported",
+      "plannedWorkstream": "15a",
+      "f5Shas": ["60efcb2f360989c98dcf4da8eee95e3107ba511a"],
+      "evidence": [
+        "apps/server/src/provider/acp/AcpSessionRuntime.ts:170",
+        "apps/server/src/provider/Layers/CursorAdapter.ts:621",
+        "apps/server/src/provider/Layers/GrokAdapter.ts:540",
+        "apps/server/src/provider/Layers/CursorAdapter.test.ts:1611",
+        "apps/server/src/provider/Layers/GrokAdapter.test.ts:399"
+      ]
     },
     {
       "upstreamSha": "e77f42c111dc40e0b208393957ebb23863330e2e",
