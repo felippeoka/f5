@@ -106,9 +106,11 @@ describe("describeQueueBlockedState", () => {
       maxItems: 10,
       quarantinedCount: 0,
     };
-    expect(describeQueueBlockedState(snapshot)).toBe(
+    expect(describeQueueBlockedState(snapshot, { workspaceBannerShown: true })).toBe(
       "Queue paused: workspace needs attention (see above).",
     );
+    // Without a recorded worktree no banner renders, so keep the server's detail.
+    expect(describeQueueBlockedState(snapshot)).toBe(snapshot.reasonDetail);
   });
 });
 

@@ -607,6 +607,118 @@ describe("OrchestrationEngine", () => {
     }
   });
 
+  it("admits steers into the live turn on a drifted branch but not new turns", async () => {
+    const target = await canonicalWorktreePath(
+      fs.mkdtempSync(path.join(os.tmpdir(), "f5-engine-drift-")),
+    );
+    const commonDir = await canonicalWorktreePath(path.join(target, ".git"));
+    // The agent switched the recorded `feature` worktree to another branch.
+    const fake = makeFakeGitCore({
+      listWorktrees: () =>
+        Effect.succeed([
+          {
+            path: target,
+            canonicalPath: target,
+            branch: "agent-branch",
+            headSha: "abc",
+            isMain: false,
+            bare: false,
+            detached: false,
+            locked: null,
+            prunable: null,
+          },
+        ]),
+      inspectCheckoutIdentity: () =>
+        Effect.succeed({ canonicalRoot: target, commonDir, branch: "agent-branch" }),
+      resolveCommonDir: () => Effect.succeed(commonDir),
+    });
+    const system = await createOrchestrationSystem({ git: fake.service });
+    const threadId = ThreadId.makeUnsafe("drift-thread");
+    const projectId = asProjectId("drift-project");
+    const createdAt = now();
+    const turn = (id: string) => ({
+      commandId: CommandId.makeUnsafe(id),
+      threadId,
+      message: { messageId: asMessageId(id), role: "user" as const, text: id, attachments: [] },
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "approval-required" as const,
+      createdAt,
+    });
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("drift-project"),
+          projectId,
+          title: "Project",
+          workspaceRoot: target,
+          defaultModel: "gpt-5-codex",
+          createdAt,
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("drift-thread"),
+          threadId,
+          projectId,
+          title: "Thread",
+          model: "gpt-5-codex",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: "feature",
+          worktreePath: target,
+          createdAt,
+        }),
+      );
+      const liveTurn = TurnId.makeUnsafe("live-turn");
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.makeUnsafe("drift-session"),
+          threadId,
+          createdAt,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "codex",
+            providerInstanceId: null,
+            runtimeMode: "approval-required",
+            activeTurnId: liveTurn,
+            lastError: null,
+            lastErrorId: null,
+            lastErrorOccurredAt: null,
+            lastErrorRetryability: null,
+            updatedAt: createdAt,
+          },
+        }),
+      );
+      const rejected = await system.run(
+        system.engine
+          .dispatch({ type: "thread.turn.start", ...turn("drift-start") })
+          .pipe(Effect.flip),
+      );
+      expect(rejected.message).toContain("does not match this repository and branch");
+      const steerError = await system.run(
+        system.engine
+          .dispatch({
+            type: "thread.turn.steer",
+            ...turn("drift-steer"),
+            expectedTurnId: liveTurn,
+          })
+          .pipe(
+            Effect.flip,
+            Effect.map((error) => error.message),
+            Effect.orElseSucceed(() => null),
+          ),
+      );
+      expect(steerError).toBeNull();
+    } finally {
+      await system.dispose();
+      fs.rmSync(target, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     "transient",
     "barrier",

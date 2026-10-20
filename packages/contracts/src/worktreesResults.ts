@@ -53,6 +53,8 @@ export const WorktreesThreadStateResult = Schema.Struct({
   branchDriftOnly: Schema.optional(Schema.Boolean),
   /** Uncommitted changes in a drifted checkout; null when unknown. */
   checkoutDirty: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  /** The end-of-turn sync will re-record `checkoutBranch` for this thread. */
+  followsCheckoutAtTurnEnd: Schema.optional(Schema.Boolean),
 });
 export type WorktreesThreadStateResult = typeof WorktreesThreadStateResult.Type;
 

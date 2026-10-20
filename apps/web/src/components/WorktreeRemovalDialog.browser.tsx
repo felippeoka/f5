@@ -403,6 +403,43 @@ it("hides adopting for a detached HEAD", async () => {
   );
   await expect.element(screen.getByRole("status")).toHaveTextContent("is on a detached HEAD");
   expect(screen.getByRole("button", { name: /^Use / }).query()).toBeNull();
+  await expect
+    .element(screen.getByRole("button", { name: "Switch back to t3code/abc" }))
+    .toBeDisabled();
+  await expect.element(screen.getByText(/commits on the detached HEAD are kept/)).toBeVisible();
+});
+
+it("says the thread follows the branch at turn end instead of promising a later switch back", async () => {
+  api.worktrees.threadState.mockResolvedValue({ ...driftState, followsCheckoutAtTurnEnd: true });
+  const screen = await mount(
+    <WorktreeMissingBanner
+      threadId={ThreadId.makeUnsafe("drift-follow")}
+      worktreePath="/drifted"
+      branch="t3code/abc"
+      turnActive
+    />,
+  );
+  await expect
+    .element(screen.getByRole("status"))
+    .toHaveTextContent("When this turn ends, the thread switches to feat/x.");
+  await expect.element(screen.getByRole("button", { name: "Use feat/x" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: /^Switch back/ }).query()).toBeNull();
+});
+
+it("enables switching back once the worktree's changes are committed elsewhere", async () => {
+  api.worktrees.threadState.mockResolvedValue({ ...driftState, checkoutDirty: true });
+  const screen = await mount(
+    <WorktreeMissingBanner
+      threadId={ThreadId.makeUnsafe("drift-refresh")}
+      worktreePath="/drifted"
+      branch="t3code/abc"
+    />,
+  );
+  const switchBack = screen.getByRole("button", { name: "Switch back to t3code/abc" });
+  await expect.element(switchBack).toBeDisabled();
+  // e.g. the user committed in the integrated terminal; no query input changes.
+  api.worktrees.threadState.mockResolvedValue(driftState);
+  await expect.element(switchBack, { timeout: 8_000 }).toBeEnabled();
 });
 
 it("closes when selected removals succeed even when other rows are kept or blocked", async () => {

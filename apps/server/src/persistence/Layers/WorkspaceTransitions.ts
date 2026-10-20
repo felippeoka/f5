@@ -123,8 +123,12 @@ export const makeWorkspaceTransitions = Effect.gen(function* () {
           .length
       )
         return yield* fail("Wait for the dispatching queue item to settle.");
+      // Restoring the recorded branch of a drifted checkout is a recovery too.
+      const restoringRecordedBranch =
+        record.intent === "checkout_branch" && record.target.branch === expected.branch;
       const recoveringPausedQueue =
-        ["recreate", "recreate_from_base", "use_project_checkout"].includes(record.intent) &&
+        (["recreate", "recreate_from_base", "use_project_checkout"].includes(record.intent) ||
+          restoringRecordedBranch) &&
         setup[0]?.paused === 1 &&
         setup[0]?.reason === "worktree_missing";
       if (

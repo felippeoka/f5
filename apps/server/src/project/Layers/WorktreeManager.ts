@@ -20,7 +20,7 @@ import {
   removeWorktreeSafely,
   stopDeletedWorktreeClaims,
 } from "../worktreeClaims.ts";
-import { readWorktreeState } from "../worktreeReadiness.ts";
+import { followsCheckoutBranchAtTurnEnd, readWorktreeState } from "../worktreeReadiness.ts";
 import { dispatchVerifiedWorkspace } from "../workspaceTransitionContext.ts";
 import { WorktreeManager, type WorktreeManagerShape } from "../Services/WorktreeManager.ts";
 import { WorktreeSetupGate } from "../Services/WorktreeSetupGate.ts";
@@ -265,10 +265,20 @@ export const makeWorktreeManager = Effect.gen(function* () {
               checkoutBranch: null,
               branchDriftOnly: false,
             };
+      // isDirty maps Git failures to null ("unknown"), so this never hides the banner.
       const checkoutDirty =
         state.branchDriftOnly && state.worktreePath !== null
           ? yield* git.isDirty(state.worktreePath)
           : null;
+      const followsCheckoutAtTurnEnd =
+        state.branchDriftOnly && state.worktreePath !== null && state.checkoutBranch !== null
+          ? yield* followsCheckoutBranchAtTurnEnd(
+              yield* engine.getReadModel(),
+              thread.id,
+              state.worktreePath,
+              state.checkoutBranch,
+            )
+          : false;
       const data = yield* queue.listByThread(thread.id);
       const token = data.state.worktreeBlockToken;
       const receipt =
@@ -294,7 +304,7 @@ export const makeWorktreeManager = Effect.gen(function* () {
             : preparationInterrupted
               ? "interrupted"
               : "none";
-      return { ...state, checkoutDirty, recovery } as const;
+      return { ...state, checkoutDirty, followsCheckoutAtTurnEnd, recovery } as const;
     });
   const recover: WorktreeManagerShape["recover"] = (input) =>
     Effect.gen(function* () {
@@ -302,7 +312,7 @@ export const makeWorktreeManager = Effect.gen(function* () {
       const data = yield* queue.listByThread(thread.id);
       if (data.state.revision !== input.expectedQueueRevision)
         return yield* Effect.fail(new Error("The queue changed. Refresh and try again."));
-      // Branch drift keeps the recorded checkout, so no workspace transition is involved.
+      // Adopting only re-records metadata; restoring runs its own in-place transition.
       if (input.action === "adoptCheckoutBranch" || input.action === "restoreRecordedBranch") {
         yield* repairBranchDrift(input.action, thread, data);
         return yield* resumeAfterRecovery(thread.id, input);
@@ -362,7 +372,7 @@ export const makeWorktreeManager = Effect.gen(function* () {
       yield* dispatcher.notify(threadId);
       return yield* threadState(input);
     });
-  /** Repairs a checkout that only switched branches, without a workspace transition. */
+  /** Repairs a checkout that only switched branches. */
   const repairBranchDrift = (
     action: "adoptCheckoutBranch" | "restoreRecordedBranch",
     thread: Effect.Success<ReturnType<typeof context>>["thread"],
@@ -378,12 +388,23 @@ export const makeWorktreeManager = Effect.gen(function* () {
         return yield* Effect.fail(
           new Error("The worktree no longer only differs by branch. Refresh and try again."),
         );
-      if (action === "adoptCheckoutBranch") {
-        if (!current.checkoutBranch)
+      if (action === "restoreRecordedBranch") {
+        const { operation } = yield* git.inspectCheckout(current.worktreePath);
+        if (operation)
           return yield* Effect.fail(
-            new Error("The worktree is on a detached HEAD. Check out a branch first."),
+            new Error(`Finish or abort the ${operation} in progress before switching branches.`),
           );
+      }
+      if (!current.checkoutBranch)
+        return yield* Effect.fail(
+          new Error(
+            "The worktree is on a detached HEAD. Check out a branch in it first, so no commits are left unreachable.",
+          ),
+        );
+      if (action === "adoptCheckoutBranch") {
         // Metadata only: the live session keeps its cwd, so this is safe mid-turn.
+        // Unlike the end-of-turn sync, this is an explicit choice, so temporary
+        // and shared-path branches are allowed.
         yield* dispatchVerifiedWorkspace(
           engine,
           git,
@@ -393,6 +414,8 @@ export const makeWorktreeManager = Effect.gen(function* () {
             threadId: thread.id,
             branch: current.checkoutBranch,
             worktreePath: current.worktreePath,
+            expectedBranch: thread.branch,
+            expectedWorktreePath: thread.worktreePath,
           },
           { observation: true },
         );
@@ -404,20 +427,26 @@ export const makeWorktreeManager = Effect.gen(function* () {
         return yield* Effect.fail(
           new Error("Commit or stash the worktree's changes before switching branches."),
         );
-      if (
-        thread.session?.activeTurnId ||
-        thread.session?.status === "starting" ||
-        thread.session?.status === "running" ||
-        thread.latestTurn?.state === "running" ||
-        data.items.some((item) => item.status === "dispatching")
-      )
-        return yield* Effect.fail(new Error("Wait for the active or pending turn to finish."));
-      yield* git
-        .checkoutBranch(
-          { threadId: thread.id, cwd: current.worktreePath, branch: current.branch },
-          { refreshUpstream: false },
-        )
-        .pipe(Effect.scoped);
+      if (Option.isNone(transitions))
+        return yield* Effect.fail(new Error("Workspace transitions are unavailable."));
+      // An in-place checkout transition takes the checkout and repository locks,
+      // refuses other conversations, terminals, profiles, pending turns and
+      // in-progress Git operations, and verifies the target under the lock.
+      const result = yield* transitions.value.switchWorkspace({
+        operationId: crypto.randomUUID(),
+        threadId: thread.id,
+        expected: {
+          branch: thread.branch,
+          worktreePath: thread.worktreePath,
+          sessionUpdatedAt: thread.session?.updatedAt ?? null,
+        },
+        intent: "checkout_branch",
+        branch: current.branch,
+      });
+      if (result.phase !== "completed")
+        return yield* Effect.fail(
+          new Error(result.error ?? "Inspect and resolve the workspace transition."),
+        );
     });
   const list: WorktreeManagerShape["list"] = (input) =>
     engine

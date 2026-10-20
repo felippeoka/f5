@@ -33,6 +33,9 @@ export function WorktreeMissingBanner({
     queryFn: () => ensureNativeApi().worktrees.threadState({ threadId }),
     enabled: true,
     staleTime: 30_000,
+    // Committing or stashing in a terminal changes no query input, so keep a
+    // drift banner's "Switch back" availability current while it is shown.
+    refetchInterval: (query) => (query.state.data?.branchDriftOnly ? 5_000 : false),
   });
   const recover = async (action: WorktreesRecoverInput["action"]) => {
     setBusy(true);
@@ -93,11 +96,16 @@ export function WorktreeMissingBanner({
   const transitionDisabled = busy || recovering || turnActive;
 
   if (data.branchDriftOnly && data.recovery !== "interrupted" && !recovering && data.branch) {
-    const switchBackReason = !data.branchExists
-      ? `Branch ${data.branch} no longer exists.`
-      : data.checkoutDirty !== false
-        ? "Commit or stash the worktree's changes to switch back."
-        : null;
+    // The end-of-turn sync re-records the current branch, so a switch back
+    // "after the turn" would never be offered; say what will happen instead.
+    const followsAtTurnEnd = turnActive && data.followsCheckoutAtTurnEnd === true;
+    const switchBackReason = !data.checkoutBranch
+      ? "Check out a branch in the worktree first, so commits on the detached HEAD are kept."
+      : !data.branchExists
+        ? `Branch ${data.branch} no longer exists.`
+        : data.checkoutDirty !== false
+          ? "Commit or stash the worktree's changes to switch back."
+          : null;
     return (
       <div
         className="space-y-2 rounded border border-warning/40 bg-warning/5 p-3 text-sm"
@@ -107,6 +115,12 @@ export function WorktreeMissingBanner({
           This worktree is on{" "}
           {data.checkoutBranch ? <code>{data.checkoutBranch}</code> : "a detached HEAD"}, but this
           thread expects <code>{data.branch}</code>. Your files are untouched.
+          {followsAtTurnEnd && (
+            <>
+              {" "}
+              When this turn ends, the thread switches to <code>{data.checkoutBranch}</code>.
+            </>
+          )}
         </p>
         <div className="flex flex-wrap gap-2">
           {data.checkoutBranch && (
@@ -114,15 +128,17 @@ export function WorktreeMissingBanner({
               Use {data.checkoutBranch}
             </Button>
           )}
-          <Button
-            size="sm"
-            variant={data.checkoutBranch ? "outline" : "default"}
-            disabled={transitionDisabled || switchBackReason !== null}
-            title={switchBackReason ?? undefined}
-            onClick={() => void recover("restoreRecordedBranch")}
-          >
-            Switch back to {data.branch}
-          </Button>
+          {!followsAtTurnEnd && (
+            <Button
+              size="sm"
+              variant={data.checkoutBranch ? "outline" : "default"}
+              disabled={transitionDisabled || switchBackReason !== null}
+              title={switchBackReason ?? undefined}
+              onClick={() => void recover("restoreRecordedBranch")}
+            >
+              Switch back to {data.branch}
+            </Button>
+          )}
           <Menu>
             <MenuTrigger render={<Button size="sm" variant="ghost" disabled={busy} />}>
               More options <ChevronDownIcon aria-hidden="true" />
@@ -143,7 +159,9 @@ export function WorktreeMissingBanner({
             </MenuPopup>
           </Menu>
         </div>
-        {switchBackReason && <p className="text-muted-foreground text-xs">{switchBackReason}</p>}
+        {switchBackReason && !followsAtTurnEnd && (
+          <p className="text-muted-foreground text-xs">{switchBackReason}</p>
+        )}
         {turnLine}
         {errorLine}
       </div>

@@ -87,7 +87,10 @@ export function mergeVisibleOrder(
   );
 }
 
-export function describeQueueBlockedState(snapshot: NextTurnQueueSnapshot): string | null {
+export function describeQueueBlockedState(
+  snapshot: NextTurnQueueSnapshot,
+  options: { readonly workspaceBannerShown?: boolean } = {},
+): string | null {
   const fallback = snapshot.reasonDetail;
   switch (snapshot.reasonCode) {
     case "active_turn":
@@ -127,10 +130,11 @@ export function describeQueueBlockedState(snapshot: NextTurnQueueSnapshot): stri
     case "workspace_switch_failed":
       return fallback ?? "Inspect and resolve the interrupted workspace switch.";
     case "worktree_missing":
-      // The workspace banner above the composer owns the details and recovery actions.
-      return snapshot.paused
+      // The workspace banner above the composer owns the details and recovery
+      // actions; it only renders for a thread that records a worktree.
+      return snapshot.paused && options.workspaceBannerShown
         ? "Queue paused: workspace needs attention (see above)."
-        : (fallback ?? "Checking the worktree.");
+        : (fallback ?? "Queue paused because the worktree is missing.");
     case "dispatch_rejected":
     case "delivery_rejected":
     case "delivery_ambiguous":

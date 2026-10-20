@@ -56,8 +56,11 @@ blocked until you restore the branch or choose a recovery action.
 When the thread's own worktree only switched branches (for example, the agent ran `git checkout`),
 the banner names both branches. **Use `<branch>`** points the thread at the branch the worktree is
 on now, and works while a turn is running. **Switch back to `<branch>`** checks out the recorded
-branch again. It is available only when the worktree has no uncommitted changes and no turn is
-running. Recreate and project checkout move under **More options**. Messages steered into the
+branch again, like any in-place branch switch. It needs a clean worktree on a branch (not a
+detached HEAD), no Git operation in progress, no running or pending turn, and no other
+conversation, terminal, or profile using the checkout. If the agent switched to a regular branch
+during a turn, the thread follows that branch automatically when the turn ends. Recreate and
+project checkout move under **More options**. Messages steered into the
 running turn, including answers to its questions, are still delivered because that turn keeps
 working in the same folder. New turns wait until the branch is resolved.
 

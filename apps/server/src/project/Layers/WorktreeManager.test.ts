@@ -569,13 +569,9 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
           branchDriftOnly: true,
           checkoutBranch: "agent-branch",
           checkoutDirty: false,
+          // The end-of-turn checkpoint sync would re-record this branch.
+          followsCheckoutAtTurnEnd: true,
         });
-        // Switching back is a checkout, so it waits for the live turn.
-        expect(
-          (yield* manager
-            .recover({ threadId, action: "restoreRecordedBranch", expectedQueueRevision: 4 })
-            .pipe(Effect.flip)).message,
-        ).toContain("Wait for the active or pending turn");
         const adopted = yield* manager.recover({
           threadId,
           action: "adoptCheckoutBranch",
@@ -589,47 +585,39 @@ describe("WorktreeManager safety and recovery", { timeout: 60_000 }, () => {
     );
   });
 
-  it("switches a clean drifted worktree back and refuses dirty or detached repairs", async () => {
+  it("refuses branch repairs on a detached HEAD or once the checkout matches again", async () => {
     const { repo, world, run } = await fixture();
-    const threadId = ThreadId.makeUnsafe("drift-restore");
+    const threadId = ThreadId.makeUnsafe("drift-detached");
     await run((manager, root) =>
       Effect.gen(function* () {
-        const target = path.join(root, "drift-restore");
+        const target = path.join(root, "drift-detached");
         git(repo.root, "worktree", "add", "-q", "-b", "recorded", target, "main");
         world.threads.push(
           thread({ id: threadId, projectId: "p", branch: "recorded", worktreePath: target }),
         );
-        git(target, "checkout", "-q", "--detach");
-        const revision = () => world.queueStates.get(threadId)?.revision ?? 0;
-        expect(
-          (yield* manager
-            .recover({ threadId, action: "adoptCheckoutBranch", expectedQueueRevision: revision() })
-            .pipe(Effect.flip)).message,
-        ).toContain("detached HEAD");
-        yield* Effect.promise(() => fs.writeFile(path.join(target, "scratch.txt"), "wip"));
-        expect(
-          (yield* manager
+        const recover = (action: "adoptCheckoutBranch" | "restoreRecordedBranch") =>
+          manager
             .recover({
               threadId,
-              action: "restoreRecordedBranch",
-              expectedQueueRevision: revision(),
+              action,
+              expectedQueueRevision: world.queueStates.get(threadId)?.revision ?? 0,
             })
-            .pipe(Effect.flip)).message,
-        ).toContain("Commit or stash");
-        yield* Effect.promise(() => fs.rm(path.join(target, "scratch.txt")));
-        const restored = yield* manager.recover({
-          threadId,
-          action: "restoreRecordedBranch",
-          expectedQueueRevision: revision(),
+            .pipe(
+              Effect.flip,
+              Effect.map((error) => error.message),
+            );
+        git(target, "checkout", "-q", "--detach");
+        // Commits made on a detached HEAD would become unreachable after a checkout.
+        expect(yield* recover("adoptCheckoutBranch")).toContain("detached HEAD");
+        expect(yield* recover("restoreRecordedBranch")).toContain("detached HEAD");
+        git(target, "checkout", "-q", "-b", "t3code/1234abcd");
+        // Temporary branches are renamed later, so the turn-end sync leaves them alone.
+        expect(yield* manager.threadState({ threadId })).toMatchObject({
+          branchDriftOnly: true,
+          followsCheckoutAtTurnEnd: false,
         });
-        expect(restored).toMatchObject({ registration: "matching", checkoutBranch: "recorded" });
-        expect(git(target, "branch", "--show-current").trim()).toBe("recorded");
-        // A checkout that matches is not drift, so neither repair applies.
-        expect(
-          (yield* manager
-            .recover({ threadId, action: "adoptCheckoutBranch", expectedQueueRevision: revision() })
-            .pipe(Effect.flip)).message,
-        ).toContain("no longer only differs by branch");
+        git(target, "checkout", "-q", "recorded");
+        expect(yield* recover("adoptCheckoutBranch")).toContain("no longer only differs by branch");
       }),
     );
   });

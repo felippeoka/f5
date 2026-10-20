@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
 import { Effect } from "effect";
 import type { GitCoreShape } from "../git/Services/GitCore.ts";
-import { canonicalWorktreePath } from "../git/worktreePaths.ts";
+import { canonicalWorktreePath, isTemporaryWorktreeBranch } from "../git/worktreePaths.ts";
 
 export class WorktreeNotReadyError extends Error {
   readonly _tag = "WorktreeNotReadyError";
@@ -9,6 +9,39 @@ export class WorktreeNotReadyError extends Error {
 export class WorktreeInspectionError extends Error {
   readonly _tag = "WorktreeInspectionError";
 }
+
+/**
+ * Whether the end-of-turn checkpoint sync re-records `branch` for this thread:
+ * temporary branches are renamed later, and a path shared with another
+ * conversation is not owned by this one.
+ */
+export const followsCheckoutBranchAtTurnEnd = (
+  model: {
+    readonly threads: ReadonlyArray<{
+      readonly id: string;
+      readonly projectId: string;
+      readonly worktreePath: string | null;
+      readonly deletedAt: string | null;
+    }>;
+    readonly projects: ReadonlyArray<{ readonly id: string; readonly workspaceRoot: string }>;
+  },
+  threadId: string,
+  cwd: string,
+  branch: string,
+) =>
+  Effect.gen(function* () {
+    if (isTemporaryWorktreeBranch(branch)) return false;
+    const canonical = yield* Effect.tryPromise(() => canonicalWorktreePath(cwd));
+    for (const other of model.threads) {
+      if (other.id === threadId || other.deletedAt !== null) continue;
+      const owner = model.projects.find((project) => project.id === other.projectId);
+      const effective = other.worktreePath ?? owner?.workspaceRoot;
+      if (!effective) return false;
+      if ((yield* Effect.tryPromise(() => canonicalWorktreePath(effective))) === canonical)
+        return false;
+    }
+    return true;
+  });
 
 export const MISSING_WORKTREE_MESSAGE =
   "This thread's worktree is gone. Recreate it or continue in the project checkout.";
