@@ -1,14 +1,17 @@
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, StatementSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, it } from "@effect/vitest";
+import { vi } from "vitest";
 import { Effect, Exit, Metric } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { sqlConnectionWaitDuration, sqlExecutionDuration } from "../observability/Metrics.ts";
 import * as SqliteClient from "./NodeSqliteClient.ts";
 import { withReadTransaction } from "./sqliteTransactions.ts";
+
+const largeText = "x".repeat(64 * 1024 + 1);
 
 const layer = it.layer(SqliteClient.layerMemory());
 
@@ -65,6 +68,66 @@ layer("NodeSqliteClient", (it) => {
       assert.equal(values[1]?.[1], "beta");
     }),
   );
+
+  it.effect("keeps large text and blob parameters off cached statements", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const statements: Array<StatementSync> = [];
+      const all = StatementSync.prototype.all;
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          vi.spyOn(StatementSync.prototype, "all").mockImplementation(function (
+            this: StatementSync,
+            ...params
+          ) {
+            statements.push(this);
+            return all.apply(this, params);
+          }),
+        ),
+        (spy) => Effect.sync(() => spy.mockRestore()),
+      );
+
+      const small = "small";
+      const queries = [
+        (value: string | Uint8Array) => sql`SELECT length(${value}) AS size`,
+        (value: string | Uint8Array) =>
+          sql.unsafe("SELECT length($value) AS size", [{ $value: value }]),
+      ];
+      const cached = new Set<StatementSync>();
+      const large = new Set<StatementSync>();
+      const largeValues = [largeText, new Uint8Array(64 * 1024 + 1)];
+      for (const value of [small, ...largeValues, small]) {
+        const expected = typeof value === "string" ? value.length : value.byteLength;
+        for (const query of queries) {
+          assert.deepEqual((yield* query(value)).map(Object.values), [[expected]]);
+          assert.deepEqual(yield* query(value).values, [[expected]]);
+          for (const statement of statements.splice(0)) {
+            (value === small ? cached : large).add(statement);
+          }
+        }
+      }
+
+      // Small parameters keep reusing the one cached statement for each query.
+      assert.equal(cached.size, queries.length);
+      // Each large execution gets a statement that nothing holds on to afterwards.
+      assert.equal(large.size, queries.length * largeValues.length * 2);
+      assert.isTrue([...cached].every((statement) => !large.has(statement)));
+    }),
+  );
+
+  it.effect("reads integers on the values path as the caller asked, cached or not", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      for (const value of ["small", largeText]) {
+        const values = sql`SELECT 1 AS id, length(${value}) AS size`.values;
+        assert.deepEqual(yield* values.pipe(Effect.provideService(SqlClient.SafeIntegers, true)), [
+          [1n, BigInt(value.length)],
+        ]);
+        assert.deepEqual(yield* values, [[1, value.length]]);
+      }
+    }),
+  );
+
   it.effect("preserves raw write metadata", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

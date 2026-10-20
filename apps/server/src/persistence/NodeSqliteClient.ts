@@ -87,6 +87,48 @@ const checkNodeSqliteCompat = () => {
   return Effect.void;
 };
 
+/**
+ * SQLite keeps its copy of a statement's text and blob parameters until the
+ * statement is bound again or finalized, and `node:sqlite` cannot clear them.
+ * A cached statement would hold its last payload for as long as it stays
+ * cached, so executions binding more than this many string code units and
+ * blob bytes, or a named parameter behind a getter, get a throwaway statement
+ * instead.
+ */
+const LARGE_BINDING_SIZE = 64 * 1024;
+
+const bindingSize = (value: unknown): number => {
+  if (typeof value === "string") return value.length;
+  return ArrayBuffer.isView(value) ? value.byteLength : 0;
+};
+
+const hasLargeBinding = (params: ReadonlyArray<unknown>): boolean => {
+  try {
+    let size = 0;
+    for (const param of params) {
+      if (
+        (typeof param === "object" || typeof param === "function") &&
+        param !== null &&
+        !ArrayBuffer.isView(param)
+      ) {
+        // `node:sqlite` takes named parameters as one object, callable or not.
+        // Read data properties only: calling a getter here would run it twice.
+        for (const property of Object.values(Object.getOwnPropertyDescriptors(param))) {
+          if (!property.enumerable) continue;
+          if (!("value" in property)) return true;
+          size += bindingSize(property.value);
+        }
+      } else {
+        size += bindingSize(param);
+      }
+    }
+    return size > LARGE_BINDING_SIZE;
+  } catch {
+    // A parameter that cannot be measured is left for the statement to report.
+    return true;
+  }
+};
+
 const makeWithDatabase = (
   options: SqliteClientConfig,
   openDatabase: () => DatabaseSync,
@@ -150,6 +192,8 @@ const makeWithDatabase = (
           Exit.isSuccess(exit) ? (options.prepareCacheTTL ?? Duration.minutes(10)) : Duration.zero,
         lookup: prepare,
       });
+      const statementFor = (sql: string, params: ReadonlyArray<unknown>) =>
+        hasLargeBinding(params) ? prepare(sql) : Cache.get(prepareCache, sql);
 
       const runStatement = (
         statement: StatementSync,
@@ -184,15 +228,19 @@ const makeWithDatabase = (
         });
 
       const run = (sql: string, params: ReadonlyArray<unknown>, raw = false) =>
-        Effect.flatMap(Cache.get(prepareCache, sql), (s) => runStatement(s, params, raw)).pipe(
+        Effect.flatMap(statementFor(sql, params), (s) => runStatement(s, params, raw)).pipe(
           Effect.ensuring(Effect.sync(() => checkpoint?.())),
         );
 
       const runValues = (sql: string, params: ReadonlyArray<unknown>) =>
         Effect.acquireUseRelease(
-          Cache.get(prepareCache, sql),
+          statementFor(sql, params),
           (statement) =>
-            Effect.suspend(() => {
+            Effect.withFiber<ReadonlyArray<ReadonlyArray<unknown>>, SqlError>((fiber) => {
+              // A cached statement otherwise keeps whatever the last caller asked for.
+              statement.setReadBigInts(
+                Boolean(ServiceMap.get(fiber.services, Client.SafeIntegers)),
+              );
               const startedAt = performance.now();
               return Effect.try({
                 try: () => {
