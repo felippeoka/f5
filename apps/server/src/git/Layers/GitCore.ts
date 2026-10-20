@@ -923,7 +923,7 @@ const makeGitCore = Effect.gen(function* () {
       return branchLastCommit;
     });
 
-  const statusDetails: GitCoreShape["statusDetails"] = (cwd) =>
+  const statusDetails: GitCoreShape["statusDetails"] = (cwd, options) =>
     Effect.gen(function* () {
       // Short-circuit if the worktree directory has been deleted on disk. Without
       // this, `git.status` polling spams ENOENT errors every few seconds for stale
@@ -960,7 +960,8 @@ const makeGitCore = Effect.gen(function* () {
         }
       }
 
-      yield* refreshStatusUpstreamIfStale(cwd).pipe(Effect.ignoreCause({ log: true }));
+      if (options?.refreshUpstream !== false)
+        yield* refreshStatusUpstreamIfStale(cwd).pipe(Effect.ignoreCause({ log: true }));
 
       // Porcelain diff can refresh the real index even with optional locks
       // disabled. Plumbing preserves status totals without that side effect.

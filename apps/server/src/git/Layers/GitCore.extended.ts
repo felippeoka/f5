@@ -126,7 +126,7 @@ const makeIsolatedGitCore = (gitService: GitServiceShape) =>
       ensureWorktree: (input) => core.ensureWorktree(input),
       branchExists: (cwd, branch) => core.branchExists(cwd, branch),
       status: (input) => core.status(input),
-      statusDetails: (cwd) => core.statusDetails(cwd),
+      statusDetails: (cwd, options?) => core.statusDetails(cwd, options),
       cleanupSafetyProbe: (cwd) => core.cleanupSafetyProbe(cwd),
       prepareCommitContext: (cwd, filePaths?) => core.prepareCommitContext(cwd, filePaths),
       commit: (cwd, subject, body) => core.commit(cwd, subject, body),
@@ -1635,6 +1635,35 @@ it.layer(TestLayer)("git integration", (it) => {
         expect(first.branch).toBe(featureBranch);
         expect(second.branch).toBe(featureBranch);
         expect(refreshFetchAttempts).toBe(1);
+      }),
+    );
+
+    it.effect("local-only status checks never fetch the upstream", () =>
+      Effect.gen(function* () {
+        const remote = yield* makeTmpDir();
+        const source = yield* makeTmpDir();
+        yield* git(remote, ["init", "--bare"]);
+        yield* initRepoWithCommit(source);
+        const defaultBranch = (yield* listGitBranches({ cwd: source })).branches.find(
+          (branch) => branch.current,
+        )!.name;
+        yield* git(source, ["remote", "add", "origin", remote]);
+        yield* git(source, ["push", "-u", "origin", defaultBranch]);
+
+        const realGitService = yield* GitService;
+        let fetches = 0;
+        const core = yield* makeIsolatedGitCore({
+          execute: (input) => {
+            if (input.args[0] === "fetch") fetches += 1;
+            return realGitService.execute(input);
+          },
+        });
+
+        const local = yield* core.statusDetails(source, { refreshUpstream: false });
+        expect(local.branch).toBe(defaultBranch);
+        expect(fetches).toBe(0);
+        yield* core.statusDetails(source);
+        expect(fetches).toBe(1);
       }),
     );
 

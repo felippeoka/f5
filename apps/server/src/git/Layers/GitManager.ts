@@ -1242,7 +1242,9 @@ export const makeGitManager = Effect.gen(function* () {
         changeRequest: null,
       };
     }
-    const details = yield* gitCore.statusDetails(input.cwd);
+    const details = yield* gitCore.statusDetails(input.cwd, {
+      refreshUpstream: input.includeRemote !== false,
+    });
     const sourceControlProvider = yield* resolveSourceControlProviderIdentity(input.cwd);
 
     const latestPr =

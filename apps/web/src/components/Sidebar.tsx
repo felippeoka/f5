@@ -275,6 +275,8 @@ export default function Sidebar() {
         autoRefresh: appSettings.gitStatusAutoRefreshIntervalSeconds > 0,
         staleTimeMs: 30_000,
         refetchIntervalMs: appSettings.gitStatusAutoRefreshIntervalSeconds * 1000,
+        // Rows only show the branch's PR, so they never fetch from the remote.
+        includeRemote: false,
       }),
     })),
   });

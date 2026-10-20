@@ -39,6 +39,8 @@ const GitPreparePullRequestThreadMode = Schema.Literals(["local", "worktree"]);
 
 export const GitStatusInput = Schema.Struct({
   cwd: FilesystemPath,
+  /** false skips the stale-upstream fetch; passive callers such as sidebar rows read local state. */
+  includeRemote: Schema.optionalKey(Schema.Boolean),
 });
 export type GitStatusInput = typeof GitStatusInput.Type;
 

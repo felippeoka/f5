@@ -230,7 +230,11 @@ export interface GitCoreShape extends MoveSnapshotOperations {
   ) => Effect.Effect<void, GitCommandError>;
   readonly branchExists: (cwd: string, branch: string) => Effect.Effect<boolean, GitCommandError>;
   /** Read detailed status without the polling cache, for mutation decisions. */
-  readonly statusDetails: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;
+  /** `refreshUpstream: false` skips the stale-upstream fetch, for callers that only read local state. */
+  readonly statusDetails: (
+    cwd: string,
+    options?: { readonly refreshUpstream?: boolean },
+  ) => Effect.Effect<GitStatusDetails, GitCommandError>;
   /** Uncached removal check; repository config cannot hide untracked or ignored files. */
   readonly cleanupSafetyProbe: (
     cwd: string,
