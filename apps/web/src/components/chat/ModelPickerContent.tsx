@@ -36,6 +36,7 @@ type ModelPickerItem = ModelPickerModelOption & {
 };
 
 const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>();
+const MODEL_LIST_ESTIMATED_ITEM_SIZE = 58;
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 
 function toModelKey(providerKind: ProviderKind, modelId: string): string {
@@ -77,6 +78,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const highlightedModelKeyRef = useRef<string | null>(null);
   const modelListRef = useRef<LegendListRef | null>(null);
+  const pickerContentRef = useRef<HTMLDivElement>(null);
   const keybindings = props.keybindings ?? EMPTY_KEYBINDINGS;
   const [selectedProvider, setSelectedProvider] = useState<ProviderKind | "favorites">(() => {
     if (props.lockedProvider !== null) {
@@ -239,6 +241,17 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const isLocked = props.lockedProvider !== null;
   const isSearching = searchQuery.trim().length > 0;
   const showSidebar = !isLocked && !isSearching;
+  const [modelListContentSize, setModelListContentSize] = useState(
+    () => filteredModelKeys.length * MODEL_LIST_ESTIMATED_ITEM_SIZE,
+  );
+  const [searchHeight, setSearchHeight] = useState(0);
+  useLayoutEffect(
+    () => modelListRef.current?.getState().listen("totalSize", setModelListContentSize),
+    [],
+  );
+  // Fit the list to its rows plus the LegendList `py-1`, so a short list leaves no empty space.
+  const modelListHeight =
+    filteredModelKeys.length === 0 ? 0 : `calc(${modelListContentSize}px + var(--spacing) * 2)`;
   const lockedProviderIcon =
     props.lockedProvider !== null ? PROVIDER_ICON_BY_PROVIDER[props.lockedProvider] : null;
   const modelJumpCommandByKey = useMemo(() => {
@@ -323,10 +336,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   return (
     <TooltipProvider delay={0}>
       <div
+        ref={pickerContentRef}
         className={cn(
-          "relative flex h-screen max-h-96 w-screen max-w-100 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg/5",
+          "relative flex max-h-96 w-screen max-w-100 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg/5",
           isLocked ? "flex-col" : "flex-row",
         )}
+        // Hold the height from when the search started; results scroll instead of resizing.
+        style={isSearching ? { height: searchHeight } : undefined}
+        data-model-picker-content="true"
       >
         {isLocked && lockedProviderIcon && props.lockedProvider ? (
           <div className="flex items-center gap-2 border-b px-4 py-3">
@@ -391,7 +408,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 showTrigger={false}
                 startAddon={<SearchIcon className="size-4 shrink-0 text-muted-foreground" />}
                 value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
+                onChange={(event) => {
+                  if (!isSearching) setSearchHeight(pickerContentRef.current?.offsetHeight ?? 0);
+                  setSearchQuery(event.target.value);
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") {
                     event.preventDefault();
@@ -419,7 +439,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               />
             </div>
 
-            <div className="relative min-h-0 flex-1 overflow-hidden before:pointer-events-none before:absolute before:inset-0 before:bg-muted/40">
+            <div
+              className="relative min-h-0 overflow-hidden before:pointer-events-none before:absolute before:inset-0 before:bg-muted/40"
+              style={{ height: modelListHeight }}
+            >
               <ComboboxListVirtualized className="model-picker-list size-full p-0">
                 <LegendList<string>
                   ref={modelListRef}
@@ -453,7 +476,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                       />
                     );
                   }}
-                  estimatedItemSize={58}
+                  estimatedItemSize={MODEL_LIST_ESTIMATED_ITEM_SIZE}
                   drawDistance={464}
                   recycleItems
                   className="size-full overflow-x-hidden px-2 py-1"

@@ -315,6 +315,36 @@ describe("ProviderModelPicker", () => {
     }
   });
 
+  it("sizes a short list to its rows and holds that height while searching", async () => {
+    const mounted = await mountPicker({
+      provider: "codex",
+      model: "gpt-5.5",
+      lockedProvider: "codex",
+    });
+
+    try {
+      await page.getByRole("button", { name: /GPT-5.5/ }).click();
+      const content = () =>
+        document.querySelector<HTMLElement>('[data-model-picker-content="true"]');
+      let fittedHeight = 0;
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("GPT-5.4 Mini");
+        fittedHeight = content()!.offsetHeight;
+        // Three rows plus the locked header fit well under the 384px cap.
+        expect(fittedHeight).toBeGreaterThan(0);
+        expect(fittedHeight).toBeLessThan(320);
+      });
+
+      await page.getByPlaceholder("Search models...").fill("mini");
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").not.toContain("openai/gpt-oss-120b");
+        expect(content()!.offsetHeight).toBe(fittedHeight);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("rejects cross-provider selection for locked threads", async () => {
     const mounted = await mountPicker({
       provider: "codex",
