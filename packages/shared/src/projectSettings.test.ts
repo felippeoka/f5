@@ -28,7 +28,7 @@ describe("project settings", () => {
         autoPullDefaultBranch: true,
         worktreeCleanup: {
           mode: "custom",
-          rules: { afterDays: 1, onMerge: true, onDelete: true, unchanged: true },
+          rules: { afterDays: 1, onMerge: true, onDelete: true, unchanged: true, minIdleHours: 1 },
         },
       },
       sourceFile: "f5.json",

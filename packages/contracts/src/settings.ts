@@ -236,6 +236,14 @@ export const StorageRetentionDays = Schema.NullOr(
 );
 export type StorageRetentionDays = typeof StorageRetentionDays.Type;
 
+export const MAX_WORKTREE_CLEANUP_MIN_IDLE_HOURS = 720;
+export const DEFAULT_WORKTREE_CLEANUP_MIN_IDLE_HOURS = 24;
+
+/** Hours a thread must be idle before `onMerge` or `unchanged` may remove its worktree. */
+export const WorktreeCleanupMinIdleHours = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: MAX_WORKTREE_CLEANUP_MIN_IDLE_HOURS }),
+);
+
 /**
  * When an idle managed worktree may be removed. Removal keeps the branch and
  * the thread's worktree path, so resuming the thread recreates the checkout.
@@ -249,6 +257,15 @@ export const WorktreeCleanupRules = Schema.Struct({
   onDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   /** Remove when HEAD has no commits beyond the default branch. */
   unchanged: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  /**
+   * `onMerge` and `unchanged` apply only once the thread has been idle this
+   * many hours: a new worktree has no commits until the agent makes one, and a
+   * restart leaves an interrupted thread without the session that would
+   * otherwise claim it.
+   */
+  minIdleHours: WorktreeCleanupMinIdleHours.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_WORKTREE_CLEANUP_MIN_IDLE_HOURS),
+  ),
 });
 export type WorktreeCleanupRules = typeof WorktreeCleanupRules.Type;
 
@@ -301,6 +318,7 @@ const StorageCleanupSettingsPatch = Schema.Struct({
       onMerge: Schema.optionalKey(Schema.Boolean),
       onDelete: Schema.optionalKey(Schema.Boolean),
       unchanged: Schema.optionalKey(Schema.Boolean),
+      minIdleHours: Schema.optionalKey(WorktreeCleanupMinIdleHours),
     }),
   ),
   providerLogsAfterDays: Schema.optionalKey(StorageRetentionDays),

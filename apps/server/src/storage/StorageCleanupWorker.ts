@@ -78,6 +78,9 @@ import { StorageMaintenance } from "./StorageMaintenance.ts";
  * agent session. Every check is repeated under the worktree lifecycle lock
  * right before `git worktree remove` (never `--force`). The branch and the
  * thread's worktree path are kept, so resuming the thread recreates it.
+ * The content rules (`unchanged`, `onMerge`) also wait until the thread has
+ * been idle `minIdleHours`: a new worktree has no commits until the agent makes
+ * one, and after a restart an interrupted thread has no session claiming it.
  *
  * With `storageCleanup.inactiveWorktrees`, each pass also runs the Storage
  * settings cleanup of inactive F5 worktrees and missing registrations (see
@@ -98,7 +101,8 @@ export class StorageCleanupWorker extends ServiceMap.Service<
   StorageCleanupWorkerShape
 >()("t3/storage/StorageCleanupWorker") {}
 
-const DAY_MS = 24 * 60 * 60 * 1_000;
+const HOUR_MS = 60 * 60 * 1_000;
+const DAY_MS = 24 * HOUR_MS;
 const STARTUP_DELAY = "30 seconds";
 const CLEANUP_INTERVAL = "1 hour";
 const EVALUATION_CONCURRENCY = 2;
@@ -124,6 +128,11 @@ const terminalLogsLabel = (includeArchived: boolean) =>
 
 const CODEX_LEFTOVER_MIN_AGE_HOURS = CODEX_MARKETPLACE_LEFTOVER_MIN_AGE_MS / (60 * 60 * 1_000);
 
+export type WorktreeCleanupRuleMatch =
+  | { readonly kind: "remove"; readonly reason: string }
+  /** A content rule matched, but the thread was active too recently. */
+  | { readonly kind: "wait"; readonly reason: string };
+
 /** Which rule makes a worktree eligible, or null when none applies. */
 export function matchWorktreeCleanupRule(input: {
   readonly rules: WorktreeCleanupRules;
@@ -132,22 +141,33 @@ export function matchWorktreeCleanupRule(input: {
   readonly nowMs: number;
   readonly headInDefaultBranch: boolean | null;
   readonly pullRequestMerged: boolean | null;
-}): string | null {
-  if (input.deleted && input.rules.onDelete) return "the thread was deleted";
+}): WorktreeCleanupRuleMatch | null {
+  if (input.deleted && input.rules.onDelete) {
+    return { kind: "remove", reason: "the thread was deleted" };
+  }
   if (input.deleted) return null;
-  if (input.rules.afterDays !== null) {
-    const idleMs = input.nowMs - Date.parse(input.lastInteractionAt);
-    if (Number.isFinite(idleMs) && idleMs >= input.rules.afterDays * DAY_MS) {
-      return `idle for ${Math.floor(idleMs / DAY_MS)} days`;
-    }
+  // An unreadable timestamp counts as just active: never removes early.
+  const parsedIdleMs = input.nowMs - Date.parse(input.lastInteractionAt);
+  const idleMs = Number.isFinite(parsedIdleMs) ? parsedIdleMs : 0;
+  if (input.rules.afterDays !== null && idleMs >= input.rules.afterDays * DAY_MS) {
+    return { kind: "remove", reason: `idle for ${Math.floor(idleMs / DAY_MS)} days` };
   }
-  if (input.rules.unchanged && input.headInDefaultBranch === true) {
-    return "no commits beyond the default branch";
-  }
-  if (input.rules.onMerge && input.headInDefaultBranch === true && input.pullRequestMerged) {
-    return "the pull request was merged";
-  }
-  return null;
+  const contentReason =
+    input.rules.unchanged && input.headInDefaultBranch === true
+      ? "no commits beyond the default branch"
+      : input.rules.onMerge && input.headInDefaultBranch === true && input.pullRequestMerged
+        ? "the pull request was merged"
+        : null;
+  if (contentReason === null) return null;
+  const hours = input.rules.minIdleHours;
+  return idleMs >= hours * HOUR_MS
+    ? { kind: "remove", reason: contentReason }
+    : {
+        kind: "wait",
+        reason: `${contentReason}, but the thread was active within the last ${hours} ${
+          hours === 1 ? "hour" : "hours"
+        }`,
+      };
 }
 
 type Evaluation =
@@ -290,13 +310,22 @@ export const makeStorageCleanupWorker = Effect.gen(function* () {
         pullRequestMerged,
       });
       if (matched === null) return { kind: "ignore" } as const;
+      if (matched.kind === "wait") {
+        return {
+          kind: "target",
+          target: skip(base, matched.reason),
+          worktreePath,
+          projectRoot,
+          headSha,
+        } as const;
+      }
       const blocked = yield* safetyBlock(thread, worktreePath);
       return {
         kind: "target",
         target:
           blocked === null
-            ? { ...base, action: "remove" as const, reason: matched }
-            : skip(base, `${matched}, but ${blocked}`),
+            ? { ...base, action: "remove" as const, reason: matched.reason }
+            : skip(base, `${matched.reason}, but ${blocked}`),
         worktreePath,
         projectRoot,
         headSha,

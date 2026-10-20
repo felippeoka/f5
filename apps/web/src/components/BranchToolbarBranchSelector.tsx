@@ -189,9 +189,15 @@ export function BranchToolbarBranchSelector({
   const prReference = parsePullRequestReference(trimmedBranchQuery);
   const isSelectingWorktreeBase =
     effectiveEnvMode === "worktree" && !envLocked && !activeWorktreePath;
+  // The thread's checkout is gone: there is nothing to switch or create a
+  // branch in until a send recreates it.
+  const worktreeMissing = branchesQuery.data?.worktreeMissing === true;
   const checkoutPullRequestItemValue =
-    prReference && onCheckoutPullRequestRequest ? `__checkout_pull_request__:${prReference}` : null;
-  const canCreateBranch = !isSelectingWorktreeBase && trimmedBranchQuery.length > 0;
+    prReference && onCheckoutPullRequestRequest && !worktreeMissing
+      ? `__checkout_pull_request__:${prReference}`
+      : null;
+  const canCreateBranch =
+    !isSelectingWorktreeBase && !worktreeMissing && trimmedBranchQuery.length > 0;
   const newRefName = sanitizeNewRefName(trimmedBranchQuery);
   const hasExactBranchMatch = branchByName.has(newRefName);
   const createBranchItemValue = canCreateBranch
@@ -611,7 +617,13 @@ export function BranchToolbarBranchSelector({
               onChange={(event) => setBranchQuery(event.target.value)}
             />
           </div>
-          <ComboboxEmpty>No branches found.</ComboboxEmpty>
+          <ComboboxEmpty>
+            {worktreeMissing
+              ? activeThreadBranch
+                ? `Worktree missing. Send a message to recreate it on ${activeThreadBranch}.`
+                : "Worktree missing."
+              : "No branches found."}
+          </ComboboxEmpty>
 
           {shouldVirtualizeBranchList ? (
             <ComboboxListVirtualized>

@@ -27,16 +27,19 @@ import {
   type AutomationWorld,
 } from "./storageAutomation.testHarness.ts";
 
-const DAY_MS = 24 * 60 * 60 * 1_000;
+const HOUR_MS = 60 * 60 * 1_000;
+const DAY_MS = 24 * HOUR_MS;
 const unchangedRule = {
   storageCleanup: {
     enabled: true,
     worktree: { afterDays: null, onMerge: false, onDelete: false, unchanged: true },
   },
 };
+/** Past the default 24-hour wait of the content rules. */
+const idleSince = () => new Date(Date.now() - 2 * DAY_MS).toISOString();
 
 describe("worktree cleanup rules", () => {
-  const rules = { afterDays: 7, onMerge: true, onDelete: true, unchanged: false };
+  const rules = { afterDays: 7, onMerge: true, onDelete: true, unchanged: false, minIdleHours: 24 };
   const base = {
     rules,
     deleted: false,
@@ -45,26 +48,83 @@ describe("worktree cleanup rules", () => {
     headInDefaultBranch: false,
     pullRequestMerged: false,
   };
+  const remove = (reason: string) => ({ kind: "remove", reason });
 
   it("matches idle age, deletion, merges and unchanged branches", () => {
     expect(matchWorktreeCleanupRule(base)).toBeNull();
-    expect(matchWorktreeCleanupRule({ ...base, nowMs: 8 * DAY_MS })).toBe("idle for 8 days");
-    expect(matchWorktreeCleanupRule({ ...base, deleted: true })).toBe("the thread was deleted");
+    expect(matchWorktreeCleanupRule({ ...base, nowMs: 8 * DAY_MS })).toEqual(
+      remove("idle for 8 days"),
+    );
+    expect(matchWorktreeCleanupRule({ ...base, deleted: true })).toEqual(
+      remove("the thread was deleted"),
+    );
     // A merged PR whose head is not in the default branch is not eligible.
     expect(matchWorktreeCleanupRule({ ...base, pullRequestMerged: true })).toBeNull();
     expect(
       matchWorktreeCleanupRule({ ...base, pullRequestMerged: true, headInDefaultBranch: true }),
-    ).toBe("the pull request was merged");
+    ).toEqual(remove("the pull request was merged"));
     expect(
       matchWorktreeCleanupRule({
         ...base,
         rules: { ...rules, unchanged: true },
         headInDefaultBranch: true,
       }),
-    ).toBe("no commits beyond the default branch");
+    ).toEqual(remove("no commits beyond the default branch"));
     expect(
       matchWorktreeCleanupRule({ ...base, rules: { ...rules, onDelete: false }, deleted: true }),
     ).toBeNull();
+  });
+
+  it("waits until the thread has been idle minIdleHours for content rules", () => {
+    const unchanged = { ...base, rules: { ...rules, unchanged: true }, headInDefaultBranch: true };
+    // A thread interrupted by a restart 37 seconds before the cleanup pass.
+    expect(matchWorktreeCleanupRule({ ...unchanged, nowMs: 37_000 })).toEqual({
+      kind: "wait",
+      reason:
+        "no commits beyond the default branch, but the thread was active within the last 24 hours",
+    });
+    expect(matchWorktreeCleanupRule({ ...unchanged, nowMs: 24 * HOUR_MS })).toEqual(
+      remove("no commits beyond the default branch"),
+    );
+    expect(
+      matchWorktreeCleanupRule({
+        ...unchanged,
+        rules: { ...unchanged.rules, minIdleHours: 1 },
+        nowMs: HOUR_MS - 1,
+      }),
+    ).toEqual({
+      kind: "wait",
+      reason:
+        "no commits beyond the default branch, but the thread was active within the last 1 hour",
+    });
+
+    const merged = { ...base, pullRequestMerged: true, headInDefaultBranch: true };
+    expect(matchWorktreeCleanupRule({ ...merged, nowMs: HOUR_MS })).toMatchObject({
+      kind: "wait",
+    });
+    expect(matchWorktreeCleanupRule({ ...merged, nowMs: 25 * HOUR_MS })).toEqual(
+      remove("the pull request was merged"),
+    );
+
+    // Deletion and the idle-days rule do not wait.
+    expect(matchWorktreeCleanupRule({ ...base, deleted: true, nowMs: 1 })).toEqual(
+      remove("the thread was deleted"),
+    );
+    expect(
+      matchWorktreeCleanupRule({ ...base, rules: { ...rules, afterDays: 1 }, nowMs: DAY_MS }),
+    ).toEqual(remove("idle for 1 days"));
+  });
+
+  it("never removes for an unreadable last interaction time", () => {
+    const unreadable = { ...base, lastInteractionAt: "not a date", nowMs: 400 * DAY_MS };
+    expect(matchWorktreeCleanupRule(unreadable)).toBeNull();
+    expect(
+      matchWorktreeCleanupRule({
+        ...unreadable,
+        rules: { ...rules, unchanged: true },
+        headInDefaultBranch: true,
+      }),
+    ).toMatchObject({ kind: "wait" });
   });
 
   it("treats only node_modules as reproducible ignored content", () => {
@@ -105,7 +165,13 @@ describe("StorageCleanupWorker", { timeout: 60_000 }, () => {
         git(repo.root, "worktree", "add", "-q", "-b", "feature", worktreePath, "main");
         world.projects.push(project("project-1", repo.root));
         world.threads.push(
-          thread({ id: "thread-1", projectId: "project-1", worktreePath, branch: "feature" }),
+          thread({
+            id: "thread-1",
+            projectId: "project-1",
+            worktreePath,
+            branch: "feature",
+            lastInteractionAt: idleSince(),
+          }),
         );
         const worker = yield* StorageCleanupWorker;
         return yield* body({ world, root: repo.root, worktreePath, worker });
@@ -196,6 +262,31 @@ describe("StorageCleanupWorker", { timeout: 60_000 }, () => {
     );
   });
 
+  it("keeps an unchanged worktree whose thread was active recently", async () => {
+    await Effect.runPromise(
+      withWorktree(unchangedRule, ({ worker, world, worktreePath }) =>
+        Effect.gen(function* () {
+          // A restart interrupted the thread's turn moments ago: no session,
+          // turn or queued work claims the worktree any more.
+          world.threads[0] = {
+            ...world.threads[0]!,
+            lastInteractionAt: new Date(Date.now() - 37_000).toISOString(),
+          };
+          const reason =
+            "no commits beyond the default branch, but the thread was active within the last 24 hours";
+          expect((yield* worker.dryRun).targets).toEqual([
+            expect.objectContaining({ action: "skip", reason }),
+          ]);
+          expect(yield* worker.runOnce).toEqual([
+            expect.objectContaining({ action: "skip", reason }),
+          ]);
+          expect(yield* Effect.promise(() => exists(worktreePath))).toBe(true);
+          expect(yield* listStorageAutomationAudit(10)).toEqual([]);
+        }),
+      ),
+    );
+  });
+
   it("skips worktrees with uncommitted, untracked or ignored files", async () => {
     await Effect.runPromise(
       withWorktree(unchangedRule, ({ worker, worktreePath }) =>
@@ -241,7 +332,13 @@ describe("StorageCleanupWorker", { timeout: 60_000 }, () => {
           world.queuedThreadIds.clear();
 
           world.threads.push(
-            thread({ id: "thread-2", projectId: "project-1", worktreePath, branch: "feature" }),
+            thread({
+              id: "thread-2",
+              projectId: "project-1",
+              worktreePath,
+              branch: "feature",
+              lastInteractionAt: idleSince(),
+            }),
           );
           const shared = yield* worker.runOnce;
           expect(shared[0]!.action).toBe("remove");
@@ -342,7 +439,13 @@ describe("StorageCleanupWorker races (lifecycle lock)", { timeout: 60_000 }, () 
         git(repo.root, "worktree", "add", "-q", "-b", "feature", worktreePath, "main");
         world.projects.push(project("project-1", repo.root));
         world.threads.push(
-          thread({ id: "thread-1", projectId: "project-1", worktreePath, branch: "feature" }),
+          thread({
+            id: "thread-1",
+            projectId: "project-1",
+            worktreePath,
+            branch: "feature",
+            lastInteractionAt: idleSince(),
+          }),
         );
         const worker = yield* StorageCleanupWorker;
         const locked = yield* Deferred.make<void>();

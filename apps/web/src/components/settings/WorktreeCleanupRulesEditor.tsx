@@ -1,4 +1,4 @@
-import type { WorktreeCleanupRules } from "@t3tools/contracts";
+import { MAX_WORKTREE_CLEANUP_MIN_IDLE_HOURS, type WorktreeCleanupRules } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 
 import { Input } from "../ui/input";
@@ -59,6 +59,56 @@ export function RetentionDaysInput(props: {
   );
 }
 
+/** Parses the content rules' wait: required, 1 to 720 whole hours. */
+export function parseMinIdleHours(value: string): number | "invalid" {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return "invalid";
+  const hours = Number(trimmed);
+  return hours >= 1 && hours <= MAX_WORKTREE_CLEANUP_MIN_IDLE_HOURS ? hours : "invalid";
+}
+
+/** An hours field that commits on blur or Enter; it cannot be left empty. */
+function MinIdleHoursInput(props: {
+  readonly label: string;
+  readonly value: number;
+  readonly disabled?: boolean;
+  readonly onCommit: (hours: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(props.value));
+  const [invalid, setInvalid] = useState(false);
+  useEffect(() => {
+    setDraft(String(props.value));
+    setInvalid(false);
+  }, [props.value]);
+  const commit = () => {
+    const parsed = parseMinIdleHours(draft);
+    if (parsed === "invalid") {
+      setInvalid(true);
+      return;
+    }
+    setInvalid(false);
+    if (parsed !== props.value) props.onCommit(parsed);
+  };
+  return (
+    <span className="flex items-center gap-2">
+      <Input
+        aria-label={props.label}
+        aria-invalid={invalid || undefined}
+        className="w-24"
+        inputMode="numeric"
+        disabled={props.disabled}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") commit();
+        }}
+      />
+      <span className="text-xs text-muted-foreground">hours</span>
+    </span>
+  );
+}
+
 const RULE_TOGGLES = [
   {
     key: "onMerge",
@@ -113,6 +163,20 @@ export function WorktreeCleanupRulesEditor(props: {
           />
         </label>
       ))}
+      <label className="flex items-center justify-between gap-4 py-2 text-sm">
+        <span>
+          Wait before removing unchanged or merged worktrees
+          <span className="block text-xs text-muted-foreground">
+            Hours since the thread's last activity. Keeps worktrees of threads you are still using.
+          </span>
+        </span>
+        <MinIdleHoursInput
+          label="Wait before removing unchanged or merged worktrees"
+          value={rules.minIdleHours}
+          disabled={disabled ?? false}
+          onCommit={(minIdleHours) => props.onChange({ ...rules, minIdleHours })}
+        />
+      </label>
     </div>
   );
 }
