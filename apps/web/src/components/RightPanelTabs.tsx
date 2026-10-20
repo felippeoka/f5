@@ -14,11 +14,13 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
   type ReactNode,
+  memo,
   useCallback,
   useEffect,
   useRef,
 } from "react";
 
+import { useStableCallback } from "../hooks/useStableCallback";
 import { shortcutLabelForCommand, useServerKeybindings } from "../keybindings";
 import { isElectron } from "../env";
 import { cn } from "../lib/utils";
@@ -263,7 +265,7 @@ function RightPanelEmptyState(props: {
   );
 }
 
-export function RightPanelTabs(props: {
+type RightPanelTabsProps = {
   mode: "sidebar" | "sheet";
   surfaces: readonly RightPanelSurface[];
   onMoveSurface?: (from: number, to: number) => void;
@@ -289,7 +291,94 @@ export function RightPanelTabs(props: {
   liveAgentCount: number;
   previewPresentation?: PreviewPresentation | undefined;
   children: ReactNode;
-}) {
+};
+
+type RightPanelTabStripProps = Omit<
+  RightPanelTabsProps,
+  "children" | "onMoveSurface" | "tabMenuOpen" | "onTabMenuOpenChange"
+> & {
+  canMoveSurfaces: boolean;
+  onMoveSurface: (from: number, to: number) => void;
+  tabMenuOpen: boolean;
+  onTabMenuOpenChange: (open: boolean) => void;
+};
+
+export function RightPanelTabs(props: RightPanelTabsProps) {
+  const keybindings = useServerKeybindings();
+  // The host rebuilds its handlers whenever the thread route re-renders, which includes every
+  // streamed token. Stable wrappers let the memoized tab strip skip those renders.
+  const onMoveSurface = useStableCallback((from: number, to: number) =>
+    props.onMoveSurface?.(from, to),
+  );
+  const onTabMenuOpenChange = useStableCallback((open: boolean) =>
+    props.onTabMenuOpenChange?.(open),
+  );
+  const onActivate = useStableCallback(props.onActivate);
+  const onCloseSurface = useStableCallback(props.onCloseSurface);
+  const onCloseOtherSurfaces = useStableCallback(props.onCloseOtherSurfaces);
+  const onCloseSurfacesToRight = useStableCallback(props.onCloseSurfacesToRight);
+  const onCloseAllSurfaces = useStableCallback(props.onCloseAllSurfaces);
+  const onCopyFilePath = useStableCallback(props.onCopyFilePath);
+  const onAddPreview = useStableCallback(props.onAddPreview);
+  const onAddFiles = useStableCallback(props.onAddFiles);
+  const onAddDiff = useStableCallback(props.onAddDiff);
+  const onAddPlan = useStableCallback(props.onAddPlan);
+  const onAddAgents = useStableCallback(props.onAddAgents);
+
+  return (
+    <div className="flex h-full min-h-0 min-w-0 flex-col bg-background">
+      <RightPanelTabStrip
+        mode={props.mode}
+        surfaces={props.surfaces}
+        canMoveSurfaces={Boolean(props.onMoveSurface)}
+        onMoveSurface={onMoveSurface}
+        tabMenuOpen={props.tabMenuOpen ?? false}
+        onTabMenuOpenChange={onTabMenuOpenChange}
+        activeSurfaceId={props.activeSurfaceId}
+        onActivate={onActivate}
+        onCloseSurface={onCloseSurface}
+        onCloseOtherSurfaces={onCloseOtherSurfaces}
+        onCloseSurfacesToRight={onCloseSurfacesToRight}
+        onCloseAllSurfaces={onCloseAllSurfaces}
+        onCopyFilePath={onCopyFilePath}
+        onAddPreview={onAddPreview}
+        onAddFiles={onAddFiles}
+        onAddDiff={onAddDiff}
+        onAddPlan={onAddPlan}
+        onAddAgents={onAddAgents}
+        previewAvailable={props.previewAvailable}
+        filesAvailable={props.filesAvailable}
+        diffAvailable={props.diffAvailable}
+        planAvailable={props.planAvailable}
+        agentsAvailable={props.agentsAvailable}
+        liveAgentCount={props.liveAgentCount}
+        previewPresentation={props.previewPresentation}
+      />
+      <div className="flex min-h-0 flex-1 flex-col">
+        {props.activeSurfaceId === null ? (
+          <RightPanelEmptyState
+            onAddPreview={props.onAddPreview}
+            onAddFiles={props.onAddFiles}
+            onAddDiff={props.onAddDiff}
+            onAddPlan={props.onAddPlan}
+            onAddAgents={props.onAddAgents}
+            previewAvailable={props.previewAvailable}
+            filesAvailable={props.filesAvailable}
+            diffAvailable={props.diffAvailable}
+            planAvailable={props.planAvailable}
+            agentsAvailable={props.agentsAvailable}
+            liveAgentCount={props.liveAgentCount}
+            diffShortcutLabel={shortcutLabelForCommand(keybindings, "diff.toggle")}
+          />
+        ) : (
+          props.children
+        )}
+      </div>
+    </div>
+  );
+}
+
+const RightPanelTabStrip = memo(function RightPanelTabStrip(props: RightPanelTabStripProps) {
   const keybindings = useServerKeybindings();
   const draggedSurfaceId = useRef<string | null>(null);
   const tabListRef = useRef<HTMLDivElement>(null);
@@ -370,10 +459,10 @@ export function RightPanelTabs(props: {
   );
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col bg-background">
+    <>
       <RightPanelTabMenu
-        open={props.tabMenuOpen ?? false}
-        onOpenChange={props.onTabMenuOpenChange ?? (() => {})}
+        open={props.tabMenuOpen}
+        onOpenChange={props.onTabMenuOpenChange}
         surfaces={props.surfaces}
         title={(surface) => surfaceTitle(surface, props.previewPresentation)}
         onActivate={props.onActivate}
@@ -396,7 +485,7 @@ export function RightPanelTabs(props: {
                   <div
                     key={surface.id}
                     data-active-tab={active}
-                    draggable={Boolean(props.onMoveSurface)}
+                    draggable={props.canMoveSurfaces}
                     onDragStart={(event) => {
                       draggedSurfaceId.current = surface.id;
                       event.dataTransfer.effectAllowed = "move";
@@ -423,7 +512,7 @@ export function RightPanelTabs(props: {
                           (entry) => entry.id === draggedSurfaceId.current,
                         ),
                         to = props.surfaces.findIndex((entry) => entry.id === surface.id);
-                      if (from >= 0 && to >= 0) props.onMoveSurface?.(from, to);
+                      if (from >= 0 && to >= 0) props.onMoveSurface(from, to);
                       draggedSurfaceId.current = null;
                     }}
                     onMouseDown={handleTabMouseDown}
@@ -530,26 +619,6 @@ export function RightPanelTabs(props: {
           </ScrollArea>
         </div>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col">
-        {props.activeSurfaceId === null ? (
-          <RightPanelEmptyState
-            onAddPreview={props.onAddPreview}
-            onAddFiles={props.onAddFiles}
-            onAddDiff={props.onAddDiff}
-            onAddPlan={props.onAddPlan}
-            onAddAgents={props.onAddAgents}
-            previewAvailable={props.previewAvailable}
-            filesAvailable={props.filesAvailable}
-            diffAvailable={props.diffAvailable}
-            planAvailable={props.planAvailable}
-            agentsAvailable={props.agentsAvailable}
-            liveAgentCount={props.liveAgentCount}
-            diffShortcutLabel={shortcutLabelForCommand(keybindings, "diff.toggle")}
-          />
-        ) : (
-          props.children
-        )}
-      </div>
-    </div>
+    </>
   );
-}
+});

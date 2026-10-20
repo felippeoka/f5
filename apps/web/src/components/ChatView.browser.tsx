@@ -121,6 +121,21 @@ vi.mock("./chat/composer/ChatComposer", async (importOriginal) => {
   return { ...actual, ChatComposer: ProfiledChatComposer };
 });
 
+// Counts renders of the right panel tab strip, not of the surface below it. The strip renders
+// the tab menu on every render, so the unmemoized menu stands in for the strip.
+const tabStripRenders = vi.hoisted(() => ({ count: 0 }));
+
+vi.mock("./RightPanelTabMenu", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./RightPanelTabMenu")>();
+  const { createElement } = await import("react");
+  const Menu = actual.RightPanelTabMenu;
+  function CountedRightPanelTabMenu(props: Parameters<typeof Menu>[0]) {
+    tabStripRenders.count += 1;
+    return createElement(Menu, props);
+  }
+  return { ...actual, RightPanelTabMenu: CountedRightPanelTabMenu };
+});
+
 const redesignBootstrapFixture = {
   ...baseServerBootstrapFixture,
   capabilities: [...baseServerBootstrapFixture.capabilities, "composer-redesign"],
@@ -8465,6 +8480,55 @@ describe("ChatView timeline (full app)", () => {
         );
         await waitForRenderQuiet();
         expect(renderCommits.timeline).toBe(0);
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+
+    it("does not re-render the right panel tabs for a token on the open thread", async () => {
+      const { mounted, client, nextSequence } = await mountIsolatedChatView();
+      try {
+        useRightPanelStore.getState().open(THREAD_ID, "plan");
+        await vi.waitFor(() => expect(tabStripRenders.count).toBeGreaterThan(0));
+        await waitForRenderQuiet();
+        const before = tabStripRenders.count;
+        client.send(
+          JSON.stringify({
+            type: "push",
+            sequence: 2,
+            channel: ORCHESTRATION_WS_CHANNELS.domainEvent,
+            data: {
+              sequence: nextSequence,
+              eventId: EventId.makeUnsafe("event-render-isolation-own-token"),
+              aggregateKind: "thread",
+              aggregateId: THREAD_ID,
+              occurredAt: isoAt(240),
+              commandId: null,
+              causationEventId: null,
+              correlationId: null,
+              metadata: {},
+              type: "thread.message-sent",
+              payload: {
+                threadId: THREAD_ID,
+                messageId: "msg-render-isolation-own" as MessageId,
+                role: "assistant",
+                text: "foreground token",
+                turnId: TurnId.makeUnsafe("turn-render-isolation-own"),
+                streaming: true,
+                createdAt: isoAt(240),
+                updatedAt: isoAt(240),
+              },
+            } satisfies Extract<OrchestrationEvent, { type: "thread.message-sent" }>,
+          }),
+        );
+        await vi.waitFor(() => {
+          const thread = useStore.getState().threads.find((entry) => entry.id === THREAD_ID);
+          expect(thread?.messages.some((message) => message.text === "foreground token")).toBe(
+            true,
+          );
+        });
+        await waitForRenderQuiet();
+        expect(tabStripRenders.count).toBe(before);
       } finally {
         await mounted.cleanup();
       }
