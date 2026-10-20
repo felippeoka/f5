@@ -8351,9 +8351,13 @@ describe("ChatView timeline (full app)", () => {
       };
     }
 
-    it("does not commit the timeline or composer for a token on another thread", async () => {
+    it("does not commit the timeline, composer or panel for a token on another thread", async () => {
       const { mounted, client, nextSequence } = await mountIsolatedChatView();
       try {
+        useRightPanelStore.getState().open(THREAD_ID, "files");
+        await vi.waitFor(() => expect(tabStripRenders.count).toBeGreaterThan(0));
+        await waitForRenderQuiet();
+        const tabStripBefore = tabStripRenders.count;
         resetRenderCommits();
         client.send(
           JSON.stringify({
@@ -8392,6 +8396,7 @@ describe("ChatView timeline (full app)", () => {
         });
         await waitForRenderQuiet();
         expect({ ...renderCommits }).toEqual(NO_COMMITS);
+        expect(tabStripRenders.count).toBe(tabStripBefore);
       } finally {
         await mounted.cleanup();
       }
