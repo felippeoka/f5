@@ -1,15 +1,14 @@
 import AppKit
 import ApplicationServices
 import Carbon
+import Darwin
 import F5ComputerCore
 import ScreenCaptureKit
 
 struct Failure: Error {
   let payload: [String: Any]
-  init(
-    _ tag: String, _ key: String? = nil, _ value: Any? = nil,
-    captureFailure: [String: Any]? = nil
-  ) {
+  init(_ tag: String, _ key: String? = nil, _ value: Any? = nil,
+    captureFailure: [String: Any]? = nil) {
     var payload: [String: Any] = ["_tag": tag]
     if let key, let value { payload[key] = value }
     if let captureFailure { payload["captureFailure"] = captureFailure }
@@ -94,20 +93,11 @@ func secureAuditNode(_ element: AXUIElement) -> ComputerSecureAuditNode<AXUIElem
   var values: CFArray?
   guard
     AXUIElementCopyMultipleAttributeValues(
-      element,
-      [kAXRoleAttribute, kAXSubroleAttribute, kAXPositionAttribute, kAXSizeAttribute] as CFArray,
-      AXCopyMultipleAttributeOptions(rawValue: 0), &values)
+      element, computerSecureAuditAttributes, AXCopyMultipleAttributeOptions(rawValue: 0), &values)
       == .success,
     let list = values as [AnyObject]?
   else { return nil }
-  return computerSecureAuditNode(list + [NSArray()])
-}
-func secureAuditChildren(_ element: AXUIElement) -> [AXUIElement]? {
-  var value: CFTypeRef?
-  let error = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value)
-  if error == .attributeUnsupported || error == .noValue { return [] }
-  guard error == .success, let children = value as? [AXUIElement] else { return nil }
-  return children
+  return computerSecureAuditNode(list)
 }
 func secureAuditSearch(_ root: AXUIElement, expired: () -> Bool) -> [AXUIElement]? {
   computerSearchWebArea(root: root, expired: expired) { element, key in
@@ -124,11 +114,20 @@ func secureAuditSearch(_ root: AXUIElement, expired: () -> Bool) -> [AXUIElement
     return value as? [AXUIElement]
   }
 }
-@_silgen_name("_AXUIElementGetWindow")
-func axWindowID(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<CGWindowID>) -> AXError
+private typealias AXWindowIDFunction =
+  @convention(c) (
+    AXUIElement, UnsafeMutablePointer<CGWindowID>
+  ) -> AXError
+private let axWindowIDFunction: AXWindowIDFunction? = {
+  guard let handle = dlopen(nil, RTLD_LAZY) else { return nil }
+  defer { dlclose(handle) }
+  guard let symbol = dlsym(handle, "_AXUIElementGetWindow") else { return nil }
+  return unsafeBitCast(symbol, to: AXWindowIDFunction.self)
+}()
+/// Resolve the private C entry point optionally; unavailable symbols use frame matching.
 func windowIdentifier(_ element: AXUIElement) -> CGWindowID? {
   var id: CGWindowID = 0
-  return axWindowID(element, &id) == .success && id != 0 ? id : nil
+  return axWindowIDFunction?(element, &id) == .success && id != 0 ? id : nil
 }
 func tier(_ id: String) -> String { computerAppTier(id) }
 func browser(_ id: String) -> Bool { computerAppIsBrowser(id) }
@@ -481,9 +480,7 @@ func installMonitor() {
         default: nil
         }
       if type == .leftMouseDragged || type == .rightMouseDragged { dragging = true }
-      if type == .leftMouseUp || type == .rightMouseUp || type == .leftMouseDown {
-        dragging = false
-      }
+      if type == .leftMouseUp || type == .rightMouseUp || type == .leftMouseDown { dragging = false }
       var overflow = false
       let queued: Bool = locked {
         if significant {
@@ -823,6 +820,7 @@ func inspect(_ request: [String: Any], _ host: [String: Any]) throws -> [String:
   let session = string(authorization(request), "sessionGeneration")
   let foregroundOnly = background && backgroundForegroundOnly(id, session: session)
   let inspectDeadline = ProcessInfo.processInfo.systemUptime + 6
+  var byteBudget = ComputerInspectByteBudget()
   func visit(_ element: AXUIElement) throws -> (children: [AXUIElement], emitted: Bool) {
     try checkGrants(request)
     let children = attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
@@ -864,8 +862,6 @@ func inspect(_ request: [String: Any], _ host: [String: Any]) throws -> [String:
       return (children, false)
     }
     let ref = "e\(nodes.count + 1)"
-    elements[ref] = element
-    roles[ref] = role
     var node: [String: Any] = [
       "elementRef": ref, "role": String(role.prefix(200)),
       "name": name,
@@ -907,10 +903,13 @@ func inspect(_ request: [String: Any], _ host: [String: Any]) throws -> [String:
         ]
       }
     }
+    guard try byteBudget.include(node) else { return (children, false) }
+    elements[ref] = element
+    roles[ref] = role
     nodes.append(node)
     return (children, true)
   }
-  let truncated = try computerInspectWalk(
+  let walkTruncated = try computerInspectWalk(
     root: inspectRoot, maxNodes: integer(request, "maxNodes"),
     stop: {
       if requestCancelled(string(request, "requestId")) {
@@ -919,7 +918,7 @@ func inspect(_ request: [String: Any], _ host: [String: Any]) throws -> [String:
       if Date().timeIntervalSince1970 * 1000 >= number(request, "deadlineAtMs") {
         throw Failure("Execution", "message", "Accessibility observation timed out.")
       }
-      return ProcessInfo.processInfo.systemUptime >= inspectDeadline
+      return byteBudget.exceeded || ProcessInfo.processInfo.systemUptime >= inspectDeadline
     }, visit: visit)
   let auth = authorization(request)
   let snapshot = Snapshot(
@@ -931,12 +930,12 @@ func inspect(_ request: [String: Any], _ host: [String: Any]) throws -> [String:
   snapshotLock.lock()
   var appSnapshots = snapshots[id] ?? []
   appSnapshots.append(snapshot)
-  snapshots[id] = Array(appSnapshots.suffix(4))
+  snapshots[id] = computerRetainSnapshots(appSnapshots) { $0.owner + "\0" + $0.session }
   snapshotLock.unlock()
   var result: [String: Any] = [
     "snapshotId": snapshotId, "appId": id, "accessible": true, "nodes": nodes,
   ]
-  if truncated { result["truncated"] = true }
+  if walkTruncated || byteBudget.exceeded { result["truncated"] = true }
   if foregroundOnly {
     result["executionNote"] =
       "This app needs the foreground; call computer_request_foreground before acting."
@@ -967,14 +966,18 @@ func onScreenWindow(_ window: AXUIElement, pid: pid_t) throws -> CGRect {
   }
   return rect
 }
-func isAncestor(_ window: AXUIElement, of element: AXUIElement) -> Bool {
-  var current: AXUIElement? = element
-  for _ in 0..<64 {
-    guard let node = current else { return false }
-    if CFEqual(node, window) { return true }
-    current = axElement(attribute(node, kAXParentAttribute))
+func isAncestor(_ window: AXUIElement, of element: AXUIElement, request: [String: Any]) throws
+  -> Bool
+{
+  try computerHasAncestor(ancestor: window, element: element) { node in
+    if requestCancelled(string(request, "requestId")) {
+      throw Failure("Interrupted", "cause", "paused")
+    }
+    guard Date().timeIntervalSince1970 * 1000 < number(request, "deadlineAtMs") else {
+      throw Failure("Execution", "message", "Accessibility observation timed out.")
+    }
+    return axElement(attribute(node, kAXParentAttribute))
   }
-  return false
 }
 /// Inspect and actions share the same snapshot identity and liveness checks.
 func resolveSnapshotElement(_ request: [String: Any], app: NSRunningApplication) throws
@@ -1004,7 +1007,7 @@ func resolveSnapshotElement(_ request: [String: Any], app: NSRunningApplication)
   }
   guard let element = snapshot.elements[string(request, "elementRef")],
     let role = attribute(element, kAXRoleAttribute) as? String,
-    isAncestor(snapshot.window, of: element)
+    try isAncestor(snapshot.window, of: element, request: request)
   else { throw Failure("StaleElement", "reason", "element-gone") }
   var pid: pid_t = 0
   guard AXUIElementGetPid(element, &pid) == .success, pid == app.processIdentifier else {
@@ -1100,8 +1103,7 @@ func elementAction(_ request: [String: Any], _ host: [String: Any]) throws -> [S
 /// The secure-input deadline expired before a background mutation could run.
 struct SecureInputWait: Error {}
 func backgroundForegroundOnly(_ appId: String, session: String) -> Bool {
-  computerBackgroundForegroundOnly(appId)
-    || locked { activationProne.contains(session + "\0" + appId) }
+  computerBackgroundForegroundOnly(appId) || locked { activationProne.contains(session + "\0" + appId) }
 }
 /// Shared background checks: target not frontmost, app allowed in background, secure input
 /// released, and every physical input up to now resolved against this target.
@@ -1111,14 +1113,13 @@ func backgroundPreflight(_ request: [String: Any], app: NSRunningApplication) th
   if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier {
     throw Failure("TargetBlocked", "kind", "user-active")
   }
-  if backgroundForegroundOnly(appId, session: string(authorization(request), "sessionGeneration")) {
+  if backgroundForegroundOnly(appId, session: string(authorization(request), "sessionGeneration"))
+  {
     throw Failure("ForegroundRequired", "reason", "unsupported-app")
   }
   if IsSecureEventInputEnabled() {
     // Hold, never type into or beside a secure field. Return before the host's own deadline.
-    emit([
-      "type": "executionState", "executionGeneration": generation, "state": "waiting-secure-input",
-    ])
+    emit(["type": "executionState", "executionGeneration": generation, "state": "waiting-secure-input"])
     let deadline = min(
       number(request, "deadlineAtMs") / 1000 - 1, Date().timeIntervalSince1970 + 25)
     while IsSecureEventInputEnabled() {
@@ -1275,10 +1276,7 @@ func backgroundType(_ request: [String: Any], _ host: [String: Any]) throws -> (
       let currentWindow = axElement(attribute(root, kAXFocusedWindowAttribute)),
       CFEqual(currentElement, element), CFEqual(currentWindow, window),
       !IsSecureEventInputEnabled()
-    else {
-      throw start == 0
-        ? Failure("TargetBlocked", "kind", "focus-unknown") : Failure("OutcomeUnknown")
-    }
+    else { throw start == 0 ? Failure("TargetBlocked", "kind", "focus-unknown") : Failure("OutcomeUnknown") }
     let end = min(start + 32, characters.count)
     let dispatch = beginBackgroundAction(request, app: app)
     let result = AXUIElementSetAttributeValue(
@@ -1318,13 +1316,11 @@ func screenshot(_ request: [String: Any], _ host: [String: Any]) async throws ->
   }
   throw Failure("Execution", "message", "Capture layout did not match window positions.")
 }
-func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async throws -> [String:
-  Any]
+func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async throws -> [String: Any]
 {
   try checkGrants(request)
   guard CGPreflightScreenCaptureAccess() else {
-    throw Failure(
-      "Unavailable", "reason", "missing-permissions",
+    throw Failure("Unavailable", "reason", "missing-permissions",
       captureFailure: computerCaptureFailureDiagnostic(stage: .permissionPreflight))
   }
   // App-scoped (background) capture: only the named app, including covered windows. Never
@@ -1362,8 +1358,7 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
   do {
     content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
   } catch {
-    throw Failure(
-      "Unavailable", "reason", "missing-permissions",
+    throw Failure("Unavailable", "reason", "missing-permissions",
       captureFailure: computerCaptureFailureDiagnostic(stage: .shareableContent, error: error))
   }
   let apps = content.applications.filter { app in
@@ -1409,15 +1404,13 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
           return try await SCScreenshotManager.captureImage(
             contentFilter: filter, configuration: configuration)
         } catch {
-          throw Failure(
-            "Unavailable", "reason", "missing-permissions",
+          throw Failure("Unavailable", "reason", "missing-permissions",
             captureFailure: computerCaptureFailureDiagnostic(stage: .imageCapture, error: error))
         }
       }
     }
-  } catch let error as Failure { throw error } catch {
-    throw Failure("Execution", "message", "Unable to encode capture.")
-  }
+  } catch let error as Failure { throw error }
+  catch { throw Failure("Execution", "message", "Unable to encode capture.") }
   try checkGrants(request)
   guard try display(String(target.id)).generation == target.generation else {
     throw Failure("GeometryChanged")
@@ -1474,8 +1467,9 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
     let expired = { ProcessInfo.processInfo.systemUptime >= windowDeadline }
     let audit = computerSecureAudit(
       root: matched, read: secureAuditNode, maxDepth: 256, maxNodes: 20000,
-      expired: expired, search: { secureAuditSearch($0, expired: expired) },
-      children: secureAuditChildren)
+      expired: expired,
+      search: computerWebAreaSearchEnabled(ProcessInfo.processInfo.environment)
+        ? { secureAuditSearch($0, expired: expired) } : nil)
     if let audit {
       maskOutcomes.append(
         ComputerCaptureMaskOutcome(
@@ -1494,22 +1488,17 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
   do {
     after = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
   } catch {
-    throw Failure(
-      "Unavailable", "reason", "missing-permissions",
+    throw Failure("Unavailable", "reason", "missing-permissions",
       captureFailure: computerCaptureFailureDiagnostic(stage: .shareableContent, error: error))
   }
   let afterWindows = after.windows.filter { window in
     captureApps.contains { $0.processID == window.owningApplication?.processID }
       && computerCaptureWindowIntersectsDisplay(window: window.frame, display: target.bounds)
   }
-  if capturedWindows.count != afterWindows.count
-    || capturedWindows.contains(where: { before in
-      !afterWindows.contains {
-        $0.windowID == before.windowID && $0.frame == before.frame
-          && $0.owningApplication?.processID == before.owningApplication?.processID
-      }
-    })
-  {
+  if capturedWindows.count != afterWindows.count || capturedWindows.contains(where: { before in
+    !afterWindows.contains { $0.windowID == before.windowID && $0.frame == before.frame
+      && $0.owningApplication?.processID == before.owningApplication?.processID }
+  }) {
     maskIncomplete = true
     maskOutcomes.append(ComputerCaptureMaskOutcome(.window, reasons: [.windowsChanged]))
     fillMask(target.bounds)
@@ -1810,8 +1799,7 @@ func mutate(_ request: [String: Any], _ host: [String: Any]) async throws -> [St
         for down in [true, false] {
           try validateFocus()
           try inputLock.withLock {
-            guard let event = computerKeyboardEvent(keyCode: 0, keyDown: down, unicode: units)
-            else {
+            guard let event = computerKeyboardEvent(keyCode: 0, keyDown: down, unicode: units) else {
               throw Failure("UnsupportedAction")
             }
             try checkPermit(request)
@@ -1832,8 +1820,7 @@ func mutate(_ request: [String: Any], _ host: [String: Any]) async throws -> [St
           for down in [true, false] {
             try validateFocus()
             try inputLock.withLock {
-              guard
-                let event = computerKeyboardEvent(keyCode: code, keyDown: down, modifiers: flags)
+              guard let event = computerKeyboardEvent(keyCode: code, keyDown: down, modifiers: flags)
               else { throw Failure("UnsupportedAction") }
               try checkPermit(request)
               if down { pressedKeys.insert(code, owner: owner) }
@@ -1873,9 +1860,15 @@ func mutate(_ request: [String: Any], _ host: [String: Any]) async throws -> [St
     "frontmostApp": NSWorkspace.shared.frontmostApplication.flatMap(appRecord) ?? NSNull(),
     "cursor": NSNull(), "actionCompleted": true,
   ]
-  if let current = displays().first(where: { String($0.id) == string(request, "displayId") })
-    ?? displays().first
-  {
+  let allDisplays = displays()
+  let windowFrame = NSWorkspace.shared.frontmostApplication.flatMap { app in
+    axElement(attribute(applicationElement(app.processIdentifier), kAXFocusedWindowAttribute))
+      .flatMap(axRect)
+  }
+  let actionDisplayId = computerActionDisplayID(
+    requestedID: request["displayId"] as? String, windowFrame: windowFrame,
+    displays: allDisplays.map { (id: String($0.id), bounds: $0.bounds) })
+  if let current = allDisplays.first(where: { String($0.id) == actionDisplayId }) {
     result["displayId"] = String(current.id)
     result["geometryGeneration"] = current.generation
   } else {
@@ -1886,15 +1879,8 @@ func mutate(_ request: [String: Any], _ host: [String: Any]) async throws -> [St
   if request["screenshot"] as? Bool == true {
     var capture = request
     capture["op"] = "screenshot"
-    if string(capture, "displayId").isEmpty, let app = NSWorkspace.shared.frontmostApplication,
-      let window = axElement(
-        attribute(applicationElement(app.processIdentifier), kAXFocusedWindowAttribute)),
-      let bounds = axRect(window),
-      let target = displays().first(where: {
-        $0.bounds.contains(CGPoint(x: bounds.midX, y: bounds.midY))
-      })
-    {
-      capture["displayId"] = String(target.id)
+    if string(capture, "displayId").isEmpty, let actionDisplayId {
+      capture["displayId"] = actionDisplayId
     }
     do {
       try checkPermit(request)

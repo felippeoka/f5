@@ -174,7 +174,7 @@ const descriptions: Record<string, string> = {
     "Capture granted apps on one display, or one app in background mode; ungranted windows are hidden.",
   computer_zoom: "View a region of a display screenshot in more detail; viewing only.",
   computer_inspect:
-    "Read an app's accessibility tree (default 400, up to 800 useful nodes). Pass a node's ref as elementRef with its snapshotId to computer_element_action. scrollIntoView and showMenu are not listed but work on most elements. If truncated is true, pass snapshotId and elementRef of a container to inspect just that subtree.",
+    "Read an app's accessibility tree (default 400 useful nodes; macOS supports up to 800, Windows caps at 400). Nodes outside the inspected window are omitted. Pass a node's ref as elementRef with its snapshotId to computer_element_action. scrollIntoView and showMenu are not listed but can work on returned elements in foreground mode; in background mode they require computer_request_foreground. If truncated is true, pass snapshotId and elementRef of a container to inspect just that subtree.",
   computer_wait:
     "Wait for the UI to settle, or for an element to appear (up to 10 s), instead of polling with screenshots; optionally capture afterwards.",
   computer_element_action: "Act on an element from computer_inspect; prefer this to coordinates.",
@@ -185,7 +185,7 @@ const descriptions: Record<string, string> = {
     "Scroll. Positive deltaY scrolls down; positive deltaX scrolls right. Coordinates are integer pixels of a fresh full-display screenshot.",
   computer_type: "Type text into the focused field of a granted app. Never type secrets.",
   computer_key:
-    "Press key chords such as Meta+C, Meta+Minus or Down, repeated up to 20 times. Keys: letters, digits, Enter, Tab, Escape, Space, Backspace, Delete, arrows (Up or ArrowUp), Home, End, PageUp, PageDown, F1–F12 and punctuation (Minus, Equal, Comma, Period, Slash, …).",
+    "Press key chords such as Meta+C or Meta+Minus on macOS, Control+C or Control+Minus on Windows, or Down on either platform, repeated up to 20 times. Keys: letters, digits, Enter, Tab, Escape, Space, Backspace, Delete, arrows (Up or ArrowUp), Home, End, PageUp, PageDown, F1–F12 and punctuation (Minus, Equal, Comma, Period, Slash, …). Reserved system shortcuts are blocked; macOS also blocks modified F-keys and F11.",
   computer_open_app: "Launch an installed app by name or appId.",
   computer_activate_app: "Bring a granted app to the front (foreground only).",
 };
@@ -310,7 +310,8 @@ export class ComputerToolGeometry {
     if (provenance.captureScope === "display") this.lastDisplayId = screenshot.displayId;
   }
   rememberActionDisplay(displayId: string, epoch = this.observationEpoch): void {
-    if (epoch === this.observationEpoch) this.lastActionDisplayId = displayId;
+    if (epoch === this.observationEpoch && displayId !== "unknown" && displayId.length > 0)
+      this.lastActionDisplayId = displayId;
   }
   rememberApps(apps: ReadonlyArray<ComputerApp>): void {
     for (const app of apps) {
@@ -641,7 +642,11 @@ async function executeComputerTool(
         );
         return result({ ...value, inspect: compactInspectResult(tree as ComputerInspectResult) });
       } catch (cause) {
-        return result({ ...value, inspectError: computerError(cause)._tag });
+        return result({
+          ...value,
+          inspectError: computerError(cause)._tag,
+          inspectErrorMessage: computerToolErrorMessage(cause),
+        });
       }
     }
     return result(value);
@@ -670,6 +675,18 @@ async function executeComputerTool(
   }
 }
 
+/** Share recovery guidance between failed tools and successful actions with failed observations. */
+function computerToolErrorMessage(cause: unknown): string {
+  const error = computerError(cause);
+  return error._tag === "StaleElement"
+    ? new ComputerControlError(error).message
+    : cause instanceof ComputerControlError
+      ? cause.message
+      : error._tag === "Execution"
+        ? error.message
+        : error._tag;
+}
+
 function computerToolErrorResult(cause: unknown): McpToolResult {
   const error = computerError(cause);
   return {
@@ -678,14 +695,7 @@ function computerToolErrorResult(cause: unknown): McpToolResult {
     content: [
       {
         type: "text",
-        text:
-          error._tag === "StaleElement"
-            ? new ComputerControlError(error).message
-            : cause instanceof ComputerControlError
-              ? cause.message
-              : error._tag === "Execution"
-                ? error.message
-                : error._tag,
+        text: computerToolErrorMessage(cause),
       },
     ],
   };

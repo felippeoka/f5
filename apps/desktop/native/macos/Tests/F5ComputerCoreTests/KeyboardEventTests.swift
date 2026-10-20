@@ -4,6 +4,30 @@ import XCTest
 @testable import F5ComputerCore
 
 final class KeyboardEventTests: XCTestCase {
+  func testNewFunctionKeysCannotReachSystemUI() throws {
+    for raw in [
+      "Ctrl+F1", "Control+F2", "CTRL+F3", "Ctrl+F8", "Cmd+F5", "Option+Command+F5", "F11",
+      "Shift+F11", "Meta+F12",
+    ] {
+      let chord = try XCTUnwrap(computerKeyChord(raw))
+      XCTAssertTrue(
+        blockedComputerChord(
+          key: chord.key, command: chord.flags.contains(.maskCommand),
+          control: chord.flags.contains(.maskControl), alt: chord.flags.contains(.maskAlternate),
+          shift: chord.flags.contains(.maskShift)), raw)
+    }
+    for raw in [
+      "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F12", "Meta+Minus", "cmd+=",
+      "Down",
+    ] {
+      let chord = try XCTUnwrap(computerKeyChord(raw))
+      XCTAssertFalse(
+        blockedComputerChord(
+          key: chord.key, command: chord.flags.contains(.maskCommand),
+          control: chord.flags.contains(.maskControl), alt: chord.flags.contains(.maskAlternate),
+          shift: chord.flags.contains(.maskShift)), raw)
+    }
+  }
   func testKeyNamesAndAliases() throws {
     let names: [(String, CGKeyCode)] = [
       ("up|arrowup", 126), ("down|arrowdown", 125), ("left|arrowleft", 123),

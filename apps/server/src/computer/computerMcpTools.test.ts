@@ -552,6 +552,73 @@ describe("compact computer observations", () => {
     await callComputerTool(h.context, "computer_type", { text: "hi", inspect: true });
     expect(h.invoke).toHaveBeenCalledTimes(1);
   });
+  it.each([
+    [
+      new ComputerControlError({ _tag: "StaleElement", reason: "window-changed" }),
+      "StaleElement",
+      "StaleElement (window-changed): call computer_inspect again.",
+    ],
+    [
+      new ComputerControlError({ _tag: "ForegroundRequired", reason: "unsupported-in-background" }),
+      "ForegroundRequired",
+      "ForegroundRequired (unsupported-in-background): call computer_request_foreground with a short reason.",
+    ],
+    [new Error("Observation deadline expired."), "Execution", "Observation deadline expired."],
+  ])(
+    "keeps the action successful and preserves follow-up recovery text (%s)",
+    async (cause, tag, message) => {
+      const h = setup();
+      h.invoke
+        .mockResolvedValueOnce({ frontmostApp: { appId: "one" }, actionCompleted: true })
+        .mockRejectedValueOnce(cause);
+      const response = await callComputerTool(h.context, "computer_key", {
+        keys: "Down",
+        inspect: true,
+      });
+      expect(response.isError).toBeFalsy();
+      expect(response.structuredContent).toMatchObject({
+        actionCompleted: true,
+        inspectError: tag,
+        inspectErrorMessage: message,
+      });
+      expect(h.broker.reportToolFailure).not.toHaveBeenCalled();
+    },
+  );
+  it("explains a missing target app without repeating the completed action", async () => {
+    const h = setup();
+    h.invoke.mockResolvedValueOnce({ frontmostApp: null, actionCompleted: true });
+    const response = await callComputerTool(h.context, "computer_key", {
+      keys: "Down",
+      inspect: true,
+    });
+    expect(response.isError).toBeFalsy();
+    expect(response.structuredContent).toMatchObject({
+      actionCompleted: true,
+      inspectError: "Execution",
+      inspectErrorMessage: "Action did not identify an app.",
+    });
+    expect(h.invoke).toHaveBeenCalledTimes(1);
+  });
+  it("documents platform caps and foreground-only element actions", () => {
+    const description = COMPUTER_TOOL_DEFINITIONS.find(
+      (tool) => tool.op === "inspect",
+    )!.description;
+    expect(description).toContain("Windows caps at 400");
+    expect(description).toContain("Nodes outside the inspected window are omitted");
+    expect(description).toContain("in foreground mode");
+    expect(description).toContain("in background mode they require computer_request_foreground");
+    expect(COMPUTER_TOOL_DEFINITIONS.find((tool) => tool.op === "key")!.description).toContain(
+      "Control+Minus on Windows",
+    );
+  });
+  it("does not remember an unresolved helper display", async () => {
+    const h = setup([display, { ...display, displayId: "other" }]);
+    h.invoke.mockResolvedValue({ displayId: "unknown" });
+    await callComputerTool(h.context, "computer_key", { keys: "Down" });
+    expect(() => h.context.geometry.display(undefined, [])).toThrow("Specify displayId");
+    h.context.geometry.rememberActionDisplay("");
+    expect(() => h.context.geometry.display(undefined, [])).toThrow("Specify displayId");
+  });
   it("does not automatically capture keys, but honors an explicit screenshot", async () => {
     const h = setup();
     await callComputerTool(h.context, "computer_key", { keys: "Down" });
@@ -559,7 +626,7 @@ describe("compact computer observations", () => {
     await callComputerTool(h.context, "computer_key", { keys: "Meta+Minus", screenshot: true });
     expect(h.invoke.mock.calls[1]?.[2]).toMatchObject({ screenshot: true });
     expect(COMPUTER_TOOL_DEFINITIONS.find((tool) => tool.op === "key")?.description).toContain(
-      "Meta+Minus or Down",
+      "Meta+Minus on macOS",
     );
   });
   it("uses the last foreground action display without authorizing coordinates, and clears it", async () => {

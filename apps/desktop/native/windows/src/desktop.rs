@@ -1741,27 +1741,36 @@ unsafe fn execute(message: &Value) -> Result<Value, Value> {
     } else {
         None
     };
-    let result_display = list
+    let requested_display = s(request, "displayId");
+    let mut focused_bounds = RECT::default();
+    let focused_bounds_known = GetWindowRect(GetForegroundWindow(), &mut focused_bounds).is_ok();
+    let display_bounds: Vec<_> = list
         .iter()
-        .find(|d| d.id == s(request, "displayId"))
-        .or(cursor_display)
-        .or(list.first());
+        .map(|d| {
+            (
+                d.id.as_str(),
+                (d.bounds.left, d.bounds.top, d.bounds.right, d.bounds.bottom),
+            )
+        })
+        .collect();
+    let result_display = crate::geometry::action_display_index(
+        requested_display,
+        focused_bounds_known.then_some((
+            focused_bounds.left,
+            focused_bounds.top,
+            focused_bounds.right,
+            focused_bounds.bottom,
+        )),
+        &display_bounds,
+    )
+    .and_then(|index| list.get(index));
     let mut result = json!({"displayId":result_display.map(|d|d.id.as_str()).unwrap_or("unknown"),"geometryGeneration":result_display.map(|d|d.generation.as_str()).unwrap_or("unknown"),"frontmostApp":apps().into_iter().find(|app|app["frontmost"]==true),"cursor":cursor_display.map(|d| json!({"displayId":d.id,"x":(pointer.x-d.bounds.left) as f64*d.width as f64/(d.bounds.right-d.bounds.left) as f64,"y":(pointer.y-d.bounds.top) as f64*d.height as f64/(d.bounds.bottom-d.bounds.top) as f64}))});
     result["actionCompleted"] = json!(true);
     if request["screenshot"] == true {
         let mut capture_request = request.clone();
         capture_request["op"] = json!("screenshot");
         if s(&capture_request, "displayId").is_empty() {
-            let list = displays();
-            let hwnd = GetForegroundWindow();
-            let mut bounds = RECT::default();
-            let _ = GetWindowRect(hwnd, &mut bounds);
-            if let Some(display) = list.iter().find(|d| {
-                bounds.left >= d.bounds.left
-                    && bounds.left < d.bounds.right
-                    && bounds.top >= d.bounds.top
-                    && bounds.top < d.bounds.bottom
-            }) {
+            if let Some(display) = result_display {
                 capture_request["displayId"] = json!(display.id)
             }
         }

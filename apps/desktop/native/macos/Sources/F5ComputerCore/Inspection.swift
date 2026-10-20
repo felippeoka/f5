@@ -1,3 +1,56 @@
+import Foundation
+
+/// Traversal and element ancestry validation must support the same maximum path length.
+public let computerInspectMaxVisited = 4000
+
+/// Reserve 64 KiB for snapshot metadata and envelope fields beneath the 512 KiB hard limit.
+public struct ComputerInspectByteBudget {
+  private var bytes = 0
+  public private(set) var exceeded = false
+  private let limit = 448 * 1024
+  public init() {}
+  /// A rejected node gets no ref; callers return their accepted nodes with `truncated`.
+  public mutating func include(_ node: [String: Any]) throws -> Bool {
+    let size = try JSONSerialization.data(withJSONObject: node).count + 1
+    guard !exceeded, size <= limit - bytes else {
+      exceeded = true
+      return false
+    }
+    bytes += size
+    return true
+  }
+}
+
+/// Validate deep inspected controls while bounding work and terminating parent cycles.
+public func computerHasAncestor<Handle: Hashable>(
+  ancestor: Handle, element: Handle, parent: (Handle) throws -> Handle?
+) rethrows -> Bool {
+  var current: Handle? = element
+  var seen: Set<Handle> = []
+  for _ in 0..<computerInspectMaxVisited {
+    guard let node = current, seen.insert(node).inserted else { return false }
+    if node == ancestor { return true }
+    current = try parent(node)
+  }
+  return false
+}
+
+/// Keep eight snapshots per owner/session and a bounded total for the app. One active thread
+/// cannot evict another thread's refs merely by taking several trailing or subtree snapshots.
+public func computerRetainSnapshots<Value>(_ snapshots: [Value], owner: (Value) -> String)
+  -> [Value]
+{
+  var counts: [String: Int] = [:]
+  let kept = snapshots.reversed().filter { snapshot in
+    let key = owner(snapshot)
+    let count = counts[key, default: 0]
+    guard count < 8 else { return false }
+    counts[key] = count + 1
+    return true
+  }
+  return Array(kept.prefix(32).reversed())
+}
+
 /// Unnamed structural wrappers do not spend the emitted-node budget. Chrome exposes the
 /// two weak actions even on otherwise empty groups, so they do not make a wrapper useful.
 public func computerInspectIsWrapper(
@@ -12,7 +65,7 @@ public func computerInspectIsWrapper(
 /// wrapper still visits its descendants. `stop` can throw a request cancellation/deadline or
 /// return true for a soft time cutoff. True means there were nodes left when a cap stopped us.
 public func computerInspectWalk<Handle>(
-  root: Handle, maxNodes: Int, maxVisited: Int = 4000, stop: () throws -> Bool,
+  root: Handle, maxNodes: Int, maxVisited: Int = computerInspectMaxVisited, stop: () throws -> Bool,
   visit: (Handle) throws -> (children: [Handle], emitted: Bool)
 ) rethrows -> Bool {
   let limit = min(800, max(1, maxNodes))

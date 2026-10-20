@@ -32,6 +32,25 @@ final class SecureAuditTests: XCTestCase {
     ]
   }
 
+  func testUnverifiedSearchIsOffAndCannotHideAMissedPassword() {
+    XCTAssertFalse(computerWebAreaSearchEnabled([:]))
+    for value in ["", "true", "0"] {
+      XCTAssertFalse(
+        computerWebAreaSearchEnabled(["F5_COMPUTER_EXPERIMENTAL_WEB_AREA_SEARCH": value]))
+    }
+    XCTAssertTrue(computerWebAreaSearchEnabled(["F5_COMPUTER_EXPERIMENTAL_WEB_AREA_SEARCH": "1"]))
+    let tree = escapingTree()
+    var searchCalls = 0
+    let omittedPassword: (Int) -> [Int]? = { _ in
+      searchCalls += 1
+      return []
+    }
+    let result = computerSecureAudit(
+      root: 0, read: { tree[$0] }, maxDepth: 256, maxNodes: 20000,
+      expired: { false }, search: computerWebAreaSearchEnabled([:]) ? omittedPassword : nil)
+    XCTAssertEqual(searchCalls, 0)
+    XCTAssertEqual(result, ComputerSecureAudit(rects: [tree[3]!.frame!], complete: true))
+  }
   func testNativeChromeDrainsBeforeHugeWebSubtree() {
     var tree = escapingTree()
     tree[0]?.children.append(10)

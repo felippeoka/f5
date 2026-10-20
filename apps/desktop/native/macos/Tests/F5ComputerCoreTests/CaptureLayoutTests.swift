@@ -1,8 +1,24 @@
 import CoreGraphics
 import XCTest
+
 @testable import F5ComputerCore
 
 final class CaptureLayoutTests: XCTestCase {
+  func testActionDisplayFollowsRequestOrFocusedWindowWithoutArbitraryFallback() {
+    let displays = [
+      (id: "left", bounds: CGRect(x: 0, y: 0, width: 1000, height: 800)),
+      (id: "right", bounds: CGRect(x: 1000, y: 0, width: 1000, height: 800)),
+    ]
+    let window = CGRect(x: 1200, y: 50, width: 600, height: 500)
+    XCTAssertEqual(
+      computerActionDisplayID(requestedID: nil, windowFrame: window, displays: displays), "right")
+    XCTAssertEqual(
+      computerActionDisplayID(requestedID: "left", windowFrame: window, displays: displays), "left")
+    XCTAssertNil(
+      computerActionDisplayID(requestedID: "unknown", windowFrame: window, displays: displays))
+    XCTAssertNil(computerActionDisplayID(requestedID: nil, windowFrame: nil, displays: displays))
+    XCTAssertNil(computerActionDisplayID(requestedID: nil, windowFrame: .zero, displays: displays))
+  }
   private let window = CGRect(x: 185, y: 43, width: 256, height: 213)
   private func neutralCanvas() -> CGContext {
     let canvas = CGContext(
@@ -16,7 +32,8 @@ final class CaptureLayoutTests: XCTestCase {
   private func fill(_ canvas: CGContext, _ rect: CGRect, gray: Double) {
     canvas.setFillColor(CGColor(gray: gray, alpha: 1))
     canvas.fill(
-      CGRect(x: rect.minX, y: Double(canvas.height) - rect.maxY, width: rect.width, height: rect.height))
+      CGRect(
+        x: rect.minX, y: Double(canvas.height) - rect.maxY, width: rect.width, height: rect.height))
   }
   func testCanvasRectMapsPrimaryAndOffsetDisplays() {
     let primary = CGRect(x: 0, y: 0, width: 3337, height: 1397)
@@ -104,7 +121,8 @@ final class CaptureLayoutTests: XCTestCase {
   func testMenuBarBandIsAStripAtTheTopOfTheDisplay() {
     let primary = CGRect(x: 0, y: 0, width: 3337, height: 1397)
     XCTAssertEqual(
-      computerMenuBarBand(display: primary, menuWindows: [CGRect(x: 0, y: 0, width: 3337, height: 37)]),
+      computerMenuBarBand(
+        display: primary, menuWindows: [CGRect(x: 0, y: 0, width: 3337, height: 37)]),
       CGRect(x: 0, y: 0, width: 3337, height: 37))
     // A full-height window at menu level cannot widen the allowance past 64 pt.
     XCTAssertEqual(computerMenuBarBand(display: primary, menuWindows: [primary]).height, 64)
@@ -114,7 +132,8 @@ final class CaptureLayoutTests: XCTestCase {
       computerMenuBarBand(
         display: secondary,
         menuWindows: [
-          CGRect(x: 0, y: 0, width: 3337, height: 37), CGRect(x: 1000, y: 1397, width: 1728, height: 24),
+          CGRect(x: 0, y: 0, width: 3337, height: 37),
+          CGRect(x: 1000, y: 1397, width: 1728, height: 24),
         ]),
       CGRect(x: 1000, y: 1397, width: 1728, height: 24))
   }

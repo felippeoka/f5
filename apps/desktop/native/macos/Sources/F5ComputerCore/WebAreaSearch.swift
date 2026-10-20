@@ -1,3 +1,9 @@
+/// Experimental search remains off until real browser password fixtures establish coverage.
+/// The helper must be explicitly launched with this environment switch for on-device testing.
+public func computerWebAreaSearchEnabled(_ environment: [String: String]) -> Bool {
+  environment["F5_COMPUTER_EXPERIMENTAL_WEB_AREA_SEARCH"] == "1"
+}
+
 /// Searches text fields in a web area and every nested frame without walking DOM children.
 /// nil means the root search is unavailable, so the caller should walk normally. A limit-sized
 /// result means incomplete (also used for a failed nested search or an expired deadline).
