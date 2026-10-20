@@ -10,7 +10,12 @@ public func allowsComputerGrant(tier: String, allowTyping: Bool, needed: String)
 public func blockedComputerChord(key: String, command: Bool, control: Bool, alt: Bool, shift: Bool)
   -> Bool
 {
-  ((key == "escape" || key == "esc") && command && (alt || control))
+  // Function keys can target system UI without changing the frontmost app. Keep
+  // modified F-keys and the Show Desktop shortcut outside app-scoped input.
+  let functionKey =
+    Int(key.dropFirst()).map { key.hasPrefix("f") && (1...12).contains($0) } ?? false
+  return (functionKey && (command || control || alt || shift || key == "f11"))
+    || ((key == "escape" || key == "esc") && command && (alt || control))
     || (key == "q" && command && (control || shift)) || (key == "space" && command)
 }
 

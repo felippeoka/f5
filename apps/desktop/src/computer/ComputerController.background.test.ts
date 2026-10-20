@@ -327,7 +327,11 @@ describe("background computer control", () => {
     h.request.mockImplementationOnce(() => new Promise(() => {}));
     try {
       const a = h.controller.acquire(holderFor("a", "com.apple.calculator"));
-      const pending = h.controller.invoke(envelope("confirmed", a, { screenshot: true }));
+      const request = envelope("confirmed", a, {
+        screenshot: true,
+        passwordMasking: "fast",
+      });
+      const pending = h.controller.invoke(request);
       await vi.waitFor(() => expect(h.request).toHaveBeenCalledTimes(1));
       h.event({ type: "actionConfirmed", requestId: "confirmed", executionGeneration: 1 });
       h.controller.cancel("confirmed", "p");
@@ -335,6 +339,12 @@ describe("background computer control", () => {
         actionCompleted: true,
         screenshotError: "Interrupted",
       });
+      expect(h.request.mock.calls[0]?.[0]).toMatchObject({ passwordMasking: "fast" });
+      await expect(h.controller.invoke(request)).resolves.toMatchObject({
+        actionCompleted: true,
+        screenshotError: "Interrupted",
+      });
+      expect(h.request).toHaveBeenCalledTimes(1);
       expect(h.controller.resumeTarget("p", "a").recovery).toBe(false);
     } finally {
       h.controller.close();

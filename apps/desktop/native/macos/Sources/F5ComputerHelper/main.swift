@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Carbon
+import Darwin
 import F5ComputerCore
 import ScreenCaptureKit
 
@@ -88,15 +89,79 @@ func axRect(_ element: AXUIElement) -> CGRect? {
   return CGRect(origin: point, size: dimensions)
 }
 /// Reads one element for the secure-field audit in a single AX round trip.
-func secureAuditNode(_ element: AXUIElement) -> ComputerSecureAuditNode<AXUIElement>? {
+func secureAuditNode(
+  _ element: AXUIElement, diagnostics: ComputerSecureAuditDiagnostics? = nil
+) -> ComputerSecureAuditNode<AXUIElement>? {
+  let started = ProcessInfo.processInfo.systemUptime
+  defer {
+    diagnostics?.nodeReadDuration(seconds: ProcessInfo.processInfo.systemUptime - started)
+  }
   var values: CFArray?
-  guard
-    AXUIElementCopyMultipleAttributeValues(
-      element, computerSecureAuditAttributes, AXCopyMultipleAttributeOptions(rawValue: 0), &values)
-      == .success,
+  let status = AXUIElementCopyMultipleAttributeValues(
+    element, computerSecureAuditAttributes, AXCopyMultipleAttributeOptions(rawValue: 0), &values)
+  guard status == .success,
     let list = values as [AnyObject]?
-  else { return nil }
+  else {
+    if status != .success { diagnostics?.axFailure(.nodeRead, error: Int(status.rawValue)) }
+    return nil
+  }
+  if list.count == 5 {
+    if CFGetTypeID(list[4]) == CFArrayGetTypeID() {
+      diagnostics?.observedChildren(CFArrayGetCount(unsafeBitCast(list[4], to: CFArray.self)))
+    }
+    for (index, operation) in [
+      (0, ComputerSecureAuditDiagnostics.Operation.role), (1, .subrole), (4, .children),
+    ] {
+      if let error = computerAXBatchError(list[index]),
+        error != .attributeUnsupported && error != .noValue
+      {
+        diagnostics?.axFailure(operation, error: Int(error.rawValue))
+      }
+    }
+  }
   return computerSecureAuditNode(list)
+}
+func secureAuditSearch(
+  _ root: AXUIElement, expired: () -> Bool, diagnostics: ComputerSecureAuditDiagnostics
+) -> [AXUIElement]? {
+  computerSearchWebArea(root: root, expired: expired, diagnostics: diagnostics) { element, key in
+    let started = ProcessInfo.processInfo.systemUptime
+    defer {
+      diagnostics.searchDuration(seconds: ProcessInfo.processInfo.systemUptime - started)
+    }
+    var value: CFTypeRef?
+    let predicate: [String: Any] = [
+      "AXSearchKey": key, "AXResultsLimit": 5000, "AXDirection": "AXDirectionNext",
+      "AXImmediateDescendantsOnly": false, "AXVisibleOnly": false,
+    ]
+    let status = AXUIElementCopyParameterizedAttributeValue(
+      element, "AXUIElementsForSearchPredicate" as CFString, predicate as CFDictionary, &value)
+    guard status == .success else {
+      diagnostics.axFailure(
+        key == "AXTextFieldSearchKey" ? .textFields : .frames, error: Int(status.rawValue))
+      return nil
+    }
+    guard let results = value as? [AXUIElement] else {
+      diagnostics.invalidSearchResult()
+      return nil
+    }
+    return results
+  }
+}
+private typealias AXWindowIDFunction =
+  @convention(c) (
+    AXUIElement, UnsafeMutablePointer<CGWindowID>
+  ) -> AXError
+private let axWindowIDFunction: AXWindowIDFunction? = {
+  guard let handle = dlopen(nil, RTLD_LAZY) else { return nil }
+  defer { dlclose(handle) }
+  guard let symbol = dlsym(handle, "_AXUIElementGetWindow") else { return nil }
+  return unsafeBitCast(symbol, to: AXWindowIDFunction.self)
+}()
+/// Resolve the private C entry point optionally; unavailable symbols use frame matching.
+func windowIdentifier(_ element: AXUIElement) -> CGWindowID? {
+  var id: CGWindowID = 0
+  return axWindowIDFunction?(element, &id) == .success && id != 0 ? id : nil
 }
 func tier(_ id: String) -> String { computerAppTier(id) }
 func browser(_ id: String) -> Bool { computerAppIsBrowser(id) }
@@ -389,7 +454,10 @@ func permissions() -> [String: Any] {
     return ["available": false, "reason": "missing-permissions", "missing": missing]
   }
   if !monitorHealthy { return ["available": false, "reason": "monitor-unhealthy"] }
-  return ["available": true, "displays": displays().map(\.json)]
+  return [
+    "available": true, "displays": displays().map(\.json),
+    "passwordMaskingSupported": true,
+  ]
 }
 func installMonitor() {
   guard AXIsProcessTrusted() else {
@@ -763,31 +831,39 @@ func inspect(_ request: [String: Any], _ host: [String: Any]) throws -> [String:
   try checkGrants(request)
   let snapshotId = UUID().uuidString
   let root = applicationElement(app.processIdentifier)
-  guard
-    let window = axElement(attribute(root, kAXFocusedWindowAttribute))
-      ?? (attribute(root, kAXWindowsAttribute) as? [AXUIElement])?.first
-  else { return ["snapshotId": snapshotId, "appId": id, "accessible": false, "nodes": []] }
-  let limit = min(400, max(1, integer(request, "maxNodes")))
+  let window: AXUIElement
+  let inspectRoot: AXUIElement
+  let hasSnapshot = request["snapshotId"] != nil
+  let hasElement = request["elementRef"] != nil
+  guard hasSnapshot == hasElement else { throw Failure("UnsupportedAction") }
+  if hasSnapshot {
+    let (snapshot, element, _) = try resolveSnapshotElement(request, app: app)
+    window = snapshot.window
+    inspectRoot = element
+  } else {
+    guard
+      let focused = axElement(attribute(root, kAXFocusedWindowAttribute))
+        ?? (attribute(root, kAXWindowsAttribute) as? [AXUIElement])?.first
+    else { return ["snapshotId": snapshotId, "appId": id, "accessible": false, "nodes": []] }
+    window = focused
+    inspectRoot = focused
+  }
+  let windowFrame = axRect(window)
+  let allDisplays = displays()
   var nodes: [[String: Any]] = []
   var elements: [String: AXUIElement] = [:]
   var roles: [String: String] = [:]
   let background = isBackground(request)
   let session = string(authorization(request), "sessionGeneration")
   let foregroundOnly = background && backgroundForegroundOnly(id, session: session)
-  let inspectDeadline = ProcessInfo.processInfo.systemUptime + 8
-  func visit(_ element: AXUIElement, depth: Int) throws {
-    if depth > 30 || nodes.count >= limit { return }
-    if requestCancelled(string(request, "requestId")) {
-      throw Failure("Interrupted", "cause", "paused")
-    }
-    guard ProcessInfo.processInfo.systemUptime < inspectDeadline,
-      Date().timeIntervalSince1970 * 1000 < number(request, "deadlineAtMs")
-    else { throw Failure("Execution", "message", "Accessibility observation timed out.") }
+  let inspectDeadline = ProcessInfo.processInfo.systemUptime + 6
+  var byteBudget = ComputerInspectByteBudget()
+  func visit(_ element: AXUIElement) throws -> (children: [AXUIElement], emitted: Bool) {
     try checkGrants(request)
-    let ref = UUID().uuidString
-    elements[ref] = element
+    let children = attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
+    let rect = axRect(element)
+    if let rect, let windowFrame, !rect.intersects(windowFrame) { return (children, false) }
     let role = attribute(element, kAXRoleAttribute) as? String ?? "unknown"
-    roles[ref] = role
     let secure =
       role == "AXSecureTextField"
       || (attribute(element, kAXSubroleAttribute) as? String) == "AXSecureTextField"
@@ -812,22 +888,31 @@ func inspect(_ request: [String: Any], _ host: [String: Any]) throws -> [String:
     {
       actions.append("setValue")
     }
+    let name = String(
+      ((attribute(element, kAXTitleAttribute) as? String)
+        ?? (attribute(element, kAXDescriptionAttribute) as? String) ?? "").prefix(200))
+    let value = secure ? nil : attribute(element, kAXValueAttribute) as? String
+    let focused = attribute(element, kAXFocusedAttribute) as? Bool ?? false
+    if computerInspectIsWrapper(
+      role: role, name: name, value: value, focused: focused, actions: actions)
+    {
+      return (children, false)
+    }
+    let ref = "e\(nodes.count + 1)"
     var node: [String: Any] = [
       "elementRef": ref, "role": String(role.prefix(200)),
-      "name": String(
-        ((attribute(element, kAXTitleAttribute) as? String)
-          ?? (attribute(element, kAXDescriptionAttribute) as? String) ?? "").prefix(200)),
-      "focused": attribute(element, kAXFocusedAttribute) as? Bool ?? false,
+      "name": name,
+      "focused": focused,
       "enabled": attribute(element, kAXEnabledAttribute) as? Bool ?? true,
       // In background, list only actions that execute without the foreground.
       "actions": secure || foregroundOnly
         ? [] : background ? actions.filter { ["press", "setValue"].contains($0) } : actions,
     ]
-    if !secure, let value = attribute(element, kAXValueAttribute) as? String {
+    if let value {
       node["value"] = String(value.prefix(200))
     }
-    if let rect = axRect(element),
-      let display = displays().first(where: { $0.bounds.intersects(rect) })
+    if let rect,
+      let display = allDisplays.first(where: { $0.bounds.intersects(rect) })
     {
       let x = max(
         0,
@@ -855,13 +940,23 @@ func inspect(_ request: [String: Any], _ host: [String: Any]) throws -> [String:
         ]
       }
     }
+    guard try byteBudget.include(node) else { return (children, false) }
+    elements[ref] = element
+    roles[ref] = role
     nodes.append(node)
-    for child in attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? [] {
-      if nodes.count >= limit { break }
-      try visit(child, depth: depth + 1)
-    }
+    return (children, true)
   }
-  try visit(window, depth: 0)
+  let walkTruncated = try computerInspectWalk(
+    root: inspectRoot, maxNodes: integer(request, "maxNodes"),
+    stop: {
+      if requestCancelled(string(request, "requestId")) {
+        throw Failure("Interrupted", "cause", "paused")
+      }
+      if Date().timeIntervalSince1970 * 1000 >= number(request, "deadlineAtMs") {
+        throw Failure("Execution", "message", "Accessibility observation timed out.")
+      }
+      return byteBudget.exceeded || ProcessInfo.processInfo.systemUptime >= inspectDeadline
+    }, visit: visit)
   let auth = authorization(request)
   let snapshot = Snapshot(
     id: snapshotId, pid: app.processIdentifier, launchDate: app.launchDate,
@@ -872,11 +967,12 @@ func inspect(_ request: [String: Any], _ host: [String: Any]) throws -> [String:
   snapshotLock.lock()
   var appSnapshots = snapshots[id] ?? []
   appSnapshots.append(snapshot)
-  snapshots[id] = Array(appSnapshots.suffix(4))
+  snapshots[id] = computerRetainSnapshots(appSnapshots) { $0.owner + "\0" + $0.session }
   snapshotLock.unlock()
   var result: [String: Any] = [
     "snapshotId": snapshotId, "appId": id, "accessible": true, "nodes": nodes,
   ]
+  if walkTruncated || byteBudget.exceeded { result["truncated"] = true }
   if foregroundOnly {
     result["executionNote"] =
       "This app needs the foreground; call computer_request_foreground before acting."
@@ -884,7 +980,7 @@ func inspect(_ request: [String: Any], _ host: [String: Any]) throws -> [String:
     result["executionNote"] =
       "Background mode: press and setValue run here; other actions need computer_request_foreground."
   }
-  if (try JSONSerialization.data(withJSONObject: result)).count > 256 * 1024 {
+  if (try JSONSerialization.data(withJSONObject: result)).count > 512 * 1024 {
     throw Failure("ResultTooLarge")
   }
   return result
@@ -907,14 +1003,58 @@ func onScreenWindow(_ window: AXUIElement, pid: pid_t) throws -> CGRect {
   }
   return rect
 }
-func isAncestor(_ window: AXUIElement, of element: AXUIElement) -> Bool {
-  var current: AXUIElement? = element
-  for _ in 0..<64 {
-    guard let node = current else { return false }
-    if CFEqual(node, window) { return true }
-    current = axElement(attribute(node, kAXParentAttribute))
+func isAncestor(_ window: AXUIElement, of element: AXUIElement, request: [String: Any]) throws
+  -> Bool
+{
+  try computerHasAncestor(ancestor: window, element: element) { node in
+    if requestCancelled(string(request, "requestId")) {
+      throw Failure("Interrupted", "cause", "paused")
+    }
+    guard Date().timeIntervalSince1970 * 1000 < number(request, "deadlineAtMs") else {
+      throw Failure("Execution", "message", "Accessibility observation timed out.")
+    }
+    return axElement(attribute(node, kAXParentAttribute))
   }
-  return false
+}
+/// Inspect and actions share the same snapshot identity and liveness checks.
+func resolveSnapshotElement(_ request: [String: Any], app: NSRunningApplication) throws
+  -> (Snapshot, AXUIElement, String)
+{
+  let id = string(request, "appId")
+  snapshotLock.lock()
+  let snapshot = snapshots[id]?.first(where: { $0.id == string(request, "snapshotId") })
+  snapshotLock.unlock()
+  guard let snapshot, snapshot.pid == app.processIdentifier else {
+    throw Failure("StaleElement", "reason", "snapshot-expired")
+  }
+  guard
+    let currentWindow = axElement(
+      attribute(applicationElement(app.processIdentifier), kAXFocusedWindowAttribute)),
+    CFEqual(currentWindow, snapshot.window)
+  else { throw Failure("StaleElement", "reason", "window-changed") }
+  let background = isBackground(request)
+  if background {
+    let auth = authorization(request)
+    guard snapshot.launchDate == app.launchDate, snapshot.bundleURL == app.bundleURL,
+      snapshot.owner == string(auth, "profileId") + "\0" + string(auth, "threadId"),
+      snapshot.session == string(auth, "sessionGeneration"),
+      snapshot.grantVersion == integer(auth, "grantVersion"), snapshot.delivery == "background",
+      (attribute(currentWindow, kAXDocumentAttribute) as? String) == snapshot.document
+    else { throw Failure("StaleElement", "reason", "window-changed") }
+  }
+  guard let element = snapshot.elements[string(request, "elementRef")],
+    let role = attribute(element, kAXRoleAttribute) as? String,
+    try isAncestor(snapshot.window, of: element, request: request)
+  else { throw Failure("StaleElement", "reason", "element-gone") }
+  var pid: pid_t = 0
+  guard AXUIElementGetPid(element, &pid) == .success, pid == app.processIdentifier else {
+    throw Failure("StaleElement", "reason", "element-gone")
+  }
+  guard snapshot.roles[string(request, "elementRef")] == role else {
+    throw Failure("StaleElement", "reason", "role-changed")
+  }
+  if background { _ = try onScreenWindow(currentWindow, pid: app.processIdentifier) }
+  return (snapshot, element, role)
 }
 /// Returns read-back verification facts for background deliveries; never document text.
 @discardableResult
@@ -926,34 +1066,10 @@ func elementAction(_ request: [String: Any], _ host: [String: Any]) throws -> [S
   try checkPermit(request)
   _ = try grant(app, request: request, host: host, needed: action == "setValue" ? "type" : "click")
   if background { try backgroundPreflight(request, app: app) }
-  snapshotLock.lock()
-  let snapshot = snapshots[id]?.first(where: { $0.id == string(request, "snapshotId") })
-  snapshotLock.unlock()
-  let auth = authorization(request)
-  guard let snapshot, snapshot.pid == app.processIdentifier,
-    let element = snapshot.elements[string(request, "elementRef")],
-    let currentWindow = axElement(
-      attribute(applicationElement(app.processIdentifier), kAXFocusedWindowAttribute)),
-    CFEqual(currentWindow, snapshot.window)
-  else { throw Failure("StaleElement") }
+  let (_, element, role) = try resolveSnapshotElement(request, app: app)
   if background {
-    // Same process incarnation, same owner/session/grants/mode, same document.
-    guard snapshot.launchDate == app.launchDate, snapshot.bundleURL == app.bundleURL,
-      snapshot.owner == string(auth, "profileId") + "\0" + string(auth, "threadId"),
-      snapshot.session == string(auth, "sessionGeneration"),
-      snapshot.grantVersion == integer(auth, "grantVersion"), snapshot.delivery == "background",
-      (attribute(currentWindow, kAXDocumentAttribute) as? String) == snapshot.document,
-      isAncestor(snapshot.window, of: element)
-    else { throw Failure("StaleElement") }
-    _ = try onScreenWindow(currentWindow, pid: app.processIdentifier)
-  }
-  guard let role = attribute(element, kAXRoleAttribute) as? String else {
-    throw Failure("StaleElement")
-  }
-  if background {
-    let expected = snapshot.roles[string(request, "elementRef")]
-    guard expected == role, attribute(element, kAXEnabledAttribute) as? Bool ?? true else {
-      throw Failure("StaleElement")
+    if !(attribute(element, kAXEnabledAttribute) as? Bool ?? true) {
+      throw Failure("StaleElement", "reason", "element-gone")
     }
   }
   if role == "AXSecureTextField"
@@ -964,7 +1080,7 @@ func elementAction(_ request: [String: Any], _ host: [String: Any]) throws -> [S
   }
   var pid: pid_t = 0
   guard AXUIElementGetPid(element, &pid) == .success && pid == app.processIdentifier else {
-    throw Failure("StaleElement")
+    throw Failure("StaleElement", "reason", "element-gone")
   }
   try checkPermit(request)
   // A slow app may take longer than the process-wide ceiling to act; only this element.
@@ -1002,9 +1118,10 @@ func elementAction(_ request: [String: Any], _ host: [String: Any]) throws -> [S
   guard result == .success else {
     // After an AX dispatch that did not confirm, the action may or may not have happened.
     if background && result == .cannotComplete { throw Failure("OutcomeUnknown") }
-    throw Failure(
-      result == .actionUnsupported || result == .attributeUnsupported
-        ? "UnsupportedAction" : "StaleElement")
+    if result == .actionUnsupported || result == .attributeUnsupported {
+      throw Failure("UnsupportedAction")
+    }
+    throw Failure("StaleElement", "reason", "element-gone")
   }
   guard background else { return nil }
   // Bounded read-back. A read-back failure after confirmed success stays success.
@@ -1039,7 +1156,9 @@ func backgroundPreflight(_ request: [String: Any], app: NSRunningApplication) th
   }
   if IsSecureEventInputEnabled() {
     // Hold, never type into or beside a secure field. Return before the host's own deadline.
-    emit(["type": "executionState", "executionGeneration": generation, "state": "waiting-secure-input"])
+    emit([
+      "type": "executionState", "executionGeneration": generation, "state": "waiting-secure-input",
+    ])
     let deadline = min(
       number(request, "deadlineAtMs") / 1000 - 1, Date().timeIntervalSince1970 + 25)
     while IsSecureEventInputEnabled() {
@@ -1354,34 +1473,82 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
     captureApps.contains { $0.processID == window.owningApplication?.processID }
       && computerCaptureWindowIntersectsDisplay(window: window.frame, display: target.bounds)
   }
-  let maskDeadline = ProcessInfo.processInfo.systemUptime + 2
+  let maskStarted = ProcessInfo.processInfo.systemUptime
+  let maskDeadline = maskStarted + 2
+  let passwordMasking = ComputerPasswordMasking.requested(request["passwordMasking"] as? String)
+  let searchEnabled = passwordMasking.usesWebAreaSearch
+  var auditDiagnostics: [[String: Any]] = []
   var appWindows: [pid_t: [AXUIElement]] = [:]
+  var maskOutcomes: [ComputerCaptureMaskOutcome] = []
   let masks = computerSecureCaptureMasks(windows: capturedWindows.map(\.frame)) { index in
     let captured = capturedWindows[index]
+    let diagnostics = ComputerSecureAuditDiagnostics()
+    let started = ProcessInfo.processInfo.systemUptime
+    var complete = false
+    defer {
+      auditDiagnostics.append([
+        "windowIndex": index, "complete": complete,
+        "elapsedMs": max(0, Int((ProcessInfo.processInfo.systemUptime - started) * 1000)),
+        "visitedNodes": diagnostics.visitedNodes,
+        "nodeReadElapsedMs": diagnostics.nodeReadElapsedMs, "maxChildren": diagnostics.maxChildren,
+        "textFieldQueries": diagnostics.textFieldQueries, "frameQueries": diagnostics.frameQueries,
+        "searchResults": diagnostics.searchResults, "searchFallbacks": diagnostics.searchFallbacks,
+        "searchElapsedMs": diagnostics.searchElapsedMs,
+        "invalidSearchResults": diagnostics.invalidSearchResults,
+        "stopReasons": diagnostics.stopReasons.map(\.rawValue).sorted(),
+        "axFailures": diagnostics.axFailures.map {
+          ["operation": $0.operation.rawValue, "error": $0.error, "count": $0.count]
+            as [String: Any]
+        },
+      ])
+    }
     guard ProcessInfo.processInfo.systemUptime < maskDeadline,
-      let pid = captured.owningApplication?.processID else { return nil }
+      let pid = captured.owningApplication?.processID
+    else {
+      diagnostics.stop(.deadline)
+      maskOutcomes.append(ComputerCaptureMaskOutcome(.window, reasons: [.auditIncomplete]))
+      return nil
+    }
     if appWindows[pid] == nil {
       let root = applicationElement(pid)
       appWindows[pid] = attribute(root, kAXWindowsAttribute) as? [AXUIElement] ?? []
     }
     // Resolve this exact captured window. Ambiguous or missing AX ownership is hidden.
-    let matches = (appWindows[pid] ?? []).filter { element in
-      guard let rect = axRect(element) else { return false }
-      return abs(rect.minX - captured.frame.minX) < 1
-        && abs(rect.minY - captured.frame.minY) < 1
-        && abs(rect.width - captured.frame.width) < 1
-        && abs(rect.height - captured.frame.height) < 1
+    guard
+      let matched = computerMatchAXWindow(
+        windows: appWindows[pid] ?? [], windowID: captured.windowID, frame: captured.frame,
+        id: windowIdentifier, rect: axRect,
+        minimized: { attribute($0, kAXMinimizedAttribute) as? Bool ?? false })
+    else {
+      diagnostics.stop(.windowMatch)
+      maskOutcomes.append(ComputerCaptureMaskOutcome(.window, reasons: [.windowMatch]))
+      return nil
     }
-    guard matches.count == 1 else { return nil }
     // The node budget bounds the walk; the depth limit only guards pathological trees, since
     // a cutoff masks the whole enclosing web or scroll area.
     let windowDeadline = computerSecureAuditDeadline(
       now: ProcessInfo.processInfo.systemUptime, end: maskDeadline,
       windowsLeft: capturedWindows.count - index)
-    return computerSecureAudit(
-      root: matches[0], read: secureAuditNode, maxDepth: 256, maxNodes: 20000,
-      expired: { ProcessInfo.processInfo.systemUptime >= windowDeadline })
+    let expired = { ProcessInfo.processInfo.systemUptime >= windowDeadline }
+    let audit = computerSecureAudit(
+      root: matched, read: { secureAuditNode($0, diagnostics: diagnostics) }, maxDepth: 256,
+      maxNodes: 20000,
+      expired: expired,
+      search: searchEnabled
+        ? { secureAuditSearch($0, expired: expired, diagnostics: diagnostics) } : nil,
+      diagnostics: diagnostics)
+    complete = audit?.complete ?? false
+    if let audit {
+      maskOutcomes.append(
+        ComputerCaptureMaskOutcome(
+          audit.complete ? (audit.rects.isEmpty ? .none : .fields) : .webArea,
+          reasons: audit.complete ? [] : [.partialAudit]))
+    } else {
+      maskOutcomes.append(ComputerCaptureMaskOutcome(.window, reasons: [.auditIncomplete]))
+    }
+    return audit
   }
+  let auditElapsedMs = max(0, Int((ProcessInfo.processInfo.systemUptime - maskStarted) * 1000))
   maskIncomplete = masks.incomplete
   for rect in masks.rects { fillMask(rect) }
   // Capture and AX traversal are separate OS calls. If a granted window moved,
@@ -1402,6 +1569,7 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
       && $0.owningApplication?.processID == before.owningApplication?.processID }
   }) {
     maskIncomplete = true
+    maskOutcomes.append(ComputerCaptureMaskOutcome(.window, reasons: [.windowsChanged]))
     fillMask(target.bounds)
   }
   if !captureApps.isEmpty {
@@ -1483,6 +1651,15 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
     "modelSize": ["width": encoded.width, "height": encoded.height],
     "mimeType": zoom ? "image/png" : "image/jpeg", "data": data, "hiddenContent": hidden,
   ]
+  let maskSummary = computerCaptureMaskSummary(maskOutcomes)
+  result["passwordMasking"] = passwordMasking.rawValue
+  result["masked"] = maskSummary.masked
+  result["maskReasons"] = maskSummary.maskReasons
+  result["secureAudit"] = [
+    "searchEnabled": searchEnabled,
+    "elapsedMs": auditElapsedMs,
+    "windows": auditDiagnostics,
+  ]
   if scopedAppId != nil {
     // App-scoped evidence: the captured display, and no cursor (the user's pointer is theirs).
     if zoom { result["rect"] = request["rect"] }
@@ -1509,35 +1686,16 @@ func captureScreenshot(_ request: [String: Any], _ host: [String: Any]) async th
   if zoom { result["rect"] = request["rect"] }
   return result
 }
-let keyCodes: [String: CGKeyCode] = [
-  "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9, "b": 11, "q": 12,
-  "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "1": 18, "2": 19, "3": 20, "4": 21, "6": 22, "5": 23,
-  "9": 25, "7": 26, "8": 28, "0": 29, "o": 31, "u": 32, "i": 34, "p": 35, "enter": 36, "return": 36,
-  "l": 37, "j": 38, "k": 40, "n": 45, "m": 46, "tab": 48, "space": 49, "backspace": 51,
-  "escape": 53, "esc": 53, "delete": 117, "home": 115, "end": 119, "pageup": 116, "pagedown": 121,
-  "arrowleft": 123, "arrowright": 124, "arrowdown": 125, "arrowup": 126,
-]
 func keyChord(_ raw: String) throws -> (CGKeyCode, CGEventFlags) {
-  let parts = raw.lowercased().split(separator: "+").map(String.init)
-  guard let key = parts.last, let code = keyCodes[key] else { throw Failure("UnsupportedAction") }
-  var flags: CGEventFlags = []
-  for part in parts.dropLast() {
-    switch part {
-    case "meta", "cmd", "command": flags.insert(.maskCommand)
-    case "ctrl", "control": flags.insert(.maskControl)
-    case "alt", "option": flags.insert(.maskAlternate)
-    case "shift": flags.insert(.maskShift)
-    default: throw Failure("UnsupportedAction")
-    }
-  }
-  let cmd = flags.contains(.maskCommand)
-  let alt = flags.contains(.maskAlternate)
-  let shift = flags.contains(.maskShift)
-  let ctrl = flags.contains(.maskControl)
-  if blockedComputerChord(key: key, command: cmd, control: ctrl, alt: alt, shift: shift) {
+  guard let chord = computerKeyChord(raw) else { throw Failure("UnsupportedAction") }
+  let flags = chord.flags
+  if blockedComputerChord(
+    key: chord.key, command: flags.contains(.maskCommand), control: flags.contains(.maskControl),
+    alt: flags.contains(.maskAlternate), shift: flags.contains(.maskShift))
+  {
     throw Failure("TargetBlocked", "kind", "system-ui")
   }
-  return (code, flags)
+  return (chord.code, flags)
 }
 /// The request/generation that owns any input this request presses.
 func inputOwner(_ request: [String: Any]) -> HeldComputerInputOwner {
@@ -1777,9 +1935,15 @@ func mutate(_ request: [String: Any], _ host: [String: Any]) async throws -> [St
     "frontmostApp": NSWorkspace.shared.frontmostApplication.flatMap(appRecord) ?? NSNull(),
     "cursor": NSNull(), "actionCompleted": true,
   ]
-  if let current = displays().first(where: { String($0.id) == string(request, "displayId") })
-    ?? displays().first
-  {
+  let allDisplays = displays()
+  let windowFrame = NSWorkspace.shared.frontmostApplication.flatMap { app in
+    axElement(attribute(applicationElement(app.processIdentifier), kAXFocusedWindowAttribute))
+      .flatMap(axRect)
+  }
+  let actionDisplayId = computerActionDisplayID(
+    requestedID: request["displayId"] as? String, windowFrame: windowFrame,
+    displays: allDisplays.map { (id: String($0.id), bounds: $0.bounds) })
+  if let current = allDisplays.first(where: { String($0.id) == actionDisplayId }) {
     result["displayId"] = String(current.id)
     result["geometryGeneration"] = current.generation
   } else {
@@ -1790,15 +1954,8 @@ func mutate(_ request: [String: Any], _ host: [String: Any]) async throws -> [St
   if request["screenshot"] as? Bool == true {
     var capture = request
     capture["op"] = "screenshot"
-    if string(capture, "displayId").isEmpty, let app = NSWorkspace.shared.frontmostApplication,
-      let window = axElement(
-        attribute(applicationElement(app.processIdentifier), kAXFocusedWindowAttribute)),
-      let bounds = axRect(window),
-      let target = displays().first(where: {
-        $0.bounds.contains(CGPoint(x: bounds.midX, y: bounds.midY))
-      })
-    {
-      capture["displayId"] = String(target.id)
+    if string(capture, "displayId").isEmpty, let actionDisplayId {
+      capture["displayId"] = actionDisplayId
     }
     do {
       try checkPermit(request)

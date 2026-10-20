@@ -1,4 +1,6 @@
 import { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
+import { computerRequestPayload } from "@t3tools/shared/computerControl";
 import { describe, expect, it, vi } from "vitest";
 import type { ComputerLeaseHolder, DesktopComputerHostMessage } from "@t3tools/contracts";
 import {
@@ -19,7 +21,12 @@ class Ipc extends EventEmitter {
     this.messages.push(message);
     callback(null);
     if (message.type === "hello")
-      queueMicrotask(() => this.emit("message", { type: "status", status: { available: true } }));
+      queueMicrotask(() =>
+        this.emit("message", {
+          type: "status",
+          status: { available: true, passwordMaskingSupported: true },
+        }),
+      );
     if (message.type === "leaseAcquire")
       queueMicrotask(() =>
         this.emit("message", {
@@ -51,13 +58,13 @@ class Ipc extends EventEmitter {
       );
     return true;
   }
-  finish() {
+  finish(result: unknown = { ok: true }) {
     const request = this.messages.findLast((message) => message.type === "request");
     if (request?.type === "request")
       this.emit("message", {
         type: "response",
         requestId: request.request.requestId,
-        result: { ok: true },
+        result,
       });
   }
 }
@@ -102,6 +109,119 @@ async function harness() {
   };
 }
 describe("computer broker safety boundaries", () => {
+  it("keeps action success but discards a late capture after a masking change", async () => {
+    const h = await harness();
+    try {
+      h.ipc.holdRequests = true;
+      const pending = h.broker.invoke("t", "s", { op: "type", text: "x", screenshot: true });
+      await vi.waitFor(() => expect(h.ipc.messages.some((m) => m.type === "request")).toBe(true));
+      const ctx = await h.broker.context("t", "s");
+      await h.broker.policyTransition(async () => {
+        h.set({ policy: { ...ctx.policy, computerUsePasswordMasking: "conservative" } });
+      });
+      h.ipc.finish({ actionCompleted: true, screenshot: { data: "old-policy-image" } });
+      await expect(pending).resolves.toEqual({
+        actionCompleted: true,
+        screenshotError: "Interrupted",
+      });
+      expect(h.ipc.messages.filter((m) => m.type === "request")).toHaveLength(1);
+    } finally {
+      h.broker.close();
+    }
+  });
+  it("omits masking policy for legacy helpers, including caller-supplied overrides", async () => {
+    const h = await harness();
+    try {
+      h.ipc.emit("message", { type: "status", status: { available: true } });
+      await h.broker.invoke("t", "s", {
+        op: "screenshot",
+        displayId: "d",
+        passwordMasking: "fast",
+      });
+      const message = h.ipc.messages.findLast((m) => m.type === "request");
+      if (message?.type !== "request") throw new Error("missing request");
+      expect(message.request).not.toHaveProperty("passwordMasking");
+    } finally {
+      h.broker.close();
+    }
+  });
+  it.each(["fast", "conservative"] as const)(
+    "injects user masking policy before hashing every capture path (%s)",
+    async (mode) => {
+      const h = await harness();
+      try {
+        if (mode === "conservative") {
+          const ctx = await h.broker.context("t", "s");
+          h.set({ policy: { ...ctx.policy, computerUsePasswordMasking: mode } });
+        }
+        for (const input of [
+          { op: "screenshot", displayId: "d" },
+          { op: "zoom", displayId: "d", rect: { x: 0, y: 0, width: 10, height: 10 } },
+          { op: "type", text: "x", screenshot: true },
+        ] as const) {
+          await h.broker.invoke("t", "s", {
+            ...input,
+            passwordMasking: mode === "fast" ? "conservative" : "fast",
+          });
+          const message = h.ipc.messages.findLast((m) => m.type === "request");
+          if (message?.type !== "request") throw new Error("missing request");
+          const { payloadHash, ...request } = message.request;
+          expect(request.passwordMasking).toBe(mode);
+          expect(payloadHash).toBe(
+            createHash("sha256").update(computerRequestPayload(request)).digest("hex"),
+          );
+          expect(payloadHash).not.toBe(
+            createHash("sha256")
+              .update(
+                computerRequestPayload({
+                  ...request,
+                  passwordMasking: mode === "fast" ? "conservative" : "fast",
+                }),
+              )
+              .digest("hex"),
+          );
+        }
+      } finally {
+        h.broker.close();
+      }
+    },
+  );
+  it("discards old observations and applies a masking change without restarting", async () => {
+    const h = await harness();
+    const events = vi.fn();
+    h.broker.subscribe(events);
+    try {
+      h.ipc.holdRequests = true;
+      const pending = h.broker.invoke("t", "s", { op: "screenshot", displayId: "d" });
+      const rejected = expect(pending).rejects.toMatchObject({
+        error: { _tag: "Interrupted", cause: "access-changed" },
+      });
+      await vi.waitFor(() => expect(h.ipc.messages.some((m) => m.type === "request")).toBe(true));
+      const ctx = await h.broker.context("t", "s");
+      await h.broker.policyTransition(async () => {
+        h.set({ policy: { ...ctx.policy, computerUsePasswordMasking: "conservative" } });
+      });
+      expect(
+        events.mock.calls.some(([event]) => event.channel === "computer.observations.invalidated"),
+      ).toBe(true);
+      expect(h.ipc.messages.some((m) => m.type === "cancel")).toBe(true);
+      h.ipc.finish();
+      await rejected;
+      h.ipc.holdRequests = false;
+      await h.broker.invoke("t", "s", { op: "screenshot", displayId: "d" });
+      expect(h.ipc.messages.findLast((m) => m.type === "request")).toMatchObject({
+        request: { passwordMasking: "conservative" },
+      });
+      // Refreshing unchanged policy must not revoke it again.
+      events.mockClear();
+      await h.broker.refreshPolicies();
+      expect(
+        events.mock.calls.some(([event]) => event.channel === "computer.observations.invalidated"),
+      ).toBe(false);
+    } finally {
+      h.broker.close();
+    }
+  });
   it("reports full-tier typing rights without changing the stored click-tier flag", async () => {
     const h = await harness();
     h.ipc.appResults = [
