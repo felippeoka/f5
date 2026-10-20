@@ -528,13 +528,16 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         : sessionEventIdentities.get(threadId);
     };
     // Legacy adapters are stamped at admission, never after waiting in the service queue.
-    const stampMcpEventAtAdmission = (
+    const stampRuntimeEventAtAdmission = (
       event: ProviderRuntimeEvent,
       source: ProviderInstanceId,
     ): ProviderRuntimeEvent => {
-      if (event.type !== "mcp.status.updated") return event;
       const identity = currentMcpIdentity(event.threadId);
       if (!identity || identity.instanceId !== source) return event;
+      if (event.type !== "mcp.status.updated")
+        return event.sessionGeneration === undefined
+          ? { ...event, sessionGeneration: identity.generation }
+          : event;
       return {
         ...event,
         payload: {
@@ -731,6 +734,71 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             ),
           );
 
+    // Persistence outages must not remove the send fence. Only the matching
+    // generation may inspect/acknowledge a marker held here until storage recovers.
+    const incompleteHistoryFallbacks = new Map<
+      ThreadId,
+      {
+        instanceId: ProviderInstanceId;
+        generation: number;
+        eventId: string;
+      }
+    >();
+    const rememberIncompleteHistory = (
+      threadId: ThreadId,
+      marker: { instanceId: ProviderInstanceId; generation: number; eventId: string },
+    ) => {
+      const current = currentMcpIdentity(threadId);
+      if (
+        current &&
+        (current.instanceId !== marker.instanceId ||
+          (marker.generation >= 0 && current.generation !== marker.generation))
+      )
+        return;
+      const previous = incompleteHistoryFallbacks.get(threadId);
+      if (
+        previous &&
+        previous.instanceId === marker.instanceId &&
+        previous.generation > marker.generation
+      )
+        return;
+      incompleteHistoryFallbacks.set(threadId, marker);
+    };
+    const eventPersistenceRetry = { times: 2, schedule: Schedule.spaced("100 millis") };
+    const requireHistoryReconciliation: NonNullable<
+      ProviderServiceShape["requireHistoryReconciliation"]
+    > = (event) =>
+      Effect.gen(function* () {
+        const instanceId =
+          event.providerInstanceId ??
+          currentMcpIdentity(event.threadId)?.instanceId ??
+          ProviderInstanceId.make(event.provider);
+        const generation =
+          event.sessionGeneration ??
+          currentMcpIdentity(event.threadId)?.generation ??
+          (yield* nativeGeneration(event.threadId).pipe(Effect.orElseSucceed(() => -1)));
+        rememberIncompleteHistory(event.threadId, {
+          instanceId,
+          generation,
+          eventId: event.eventId,
+        });
+        const binding = Option.getOrUndefined(
+          yield* directory.getBinding(event.threadId).pipe(Effect.retry(eventPersistenceRetry)),
+        );
+        const cursor = binding?.resumeCursor;
+        const historyIdentity =
+          isRecord(cursor) && typeof cursor.threadId === "string" ? cursor.threadId : null;
+        const persisted = yield* directory
+          .updateHistoryReconciliationIfCurrent({
+            threadId: event.threadId,
+            instanceId,
+            generation,
+            marker: { eventId: event.eventId, turnId: event.turnId ?? null, historyIdentity },
+          })
+          .pipe(Effect.retry(eventPersistenceRetry));
+        if (persisted && incompleteHistoryFallbacks.get(event.threadId)?.eventId === event.eventId)
+          incompleteHistoryFallbacks.delete(event.threadId);
+      });
     const processRuntimeEvent = (item: {
       readonly source: {
         readonly instanceId: ProviderInstanceId;
@@ -775,6 +843,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           event.type === "turn.aborted" ||
           event.type === "session.exited"
             ? (event.sessionGeneration ??
+              currentMcpIdentity(event.threadId)?.generation ??
               (yield* nativeGeneration(event.threadId).pipe(Effect.orElseSucceed(() => -1))))
             : undefined;
         if ((event.type === "turn.completed" || event.type === "turn.aborted") && event.turnId) {
@@ -817,25 +886,8 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             submissionCompletions.delete(id);
           }
         }
-        if (event.type === "runtime.error" && event.payload.historyReconciliationRequired) {
-          const binding = Option.getOrUndefined(
-            yield* directory
-              .getBinding(event.threadId)
-              .pipe(Effect.retry({ schedule: Schedule.spaced("1 second") }), Effect.orDie),
-          );
-          const cursor = binding?.resumeCursor;
-          const historyIdentity =
-            isRecord(cursor) && typeof cursor.threadId === "string" ? cursor.threadId : null;
-          yield* directory
-            .updateHistoryReconciliationIfCurrent({
-              threadId: event.threadId,
-              instanceId: event.providerInstanceId ?? item.source.instanceId,
-              generation:
-                event.sessionGeneration ?? readPersistedSessionGeneration(binding?.runtimePayload),
-              marker: { eventId: event.eventId, turnId: event.turnId ?? null, historyIdentity },
-            })
-            .pipe(Effect.retry({ schedule: Schedule.spaced("1 second") }), Effect.orDie);
-        }
+        if (event.type === "runtime.error" && event.payload.historyReconciliationRequired)
+          yield* requireHistoryReconciliation(event).pipe(Effect.orDie);
         yield* persistResumeCursorFromRuntimeEvent(event);
         if (event.type === "user-input.requested" && event.payload.elicitation) {
           // The owning generation is what a later private answer must match.
@@ -861,10 +913,11 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         }
         if (isProviderTerminalRuntimeEvent(event) && options?.recordTerminalEvent !== undefined) {
           // Do not fan out a terminal event until its recovery receipt is durable.
-          // Retrying in place preserves provider event order while SQLite is unavailable.
+          // Bounded retries preserve order during a brief outage. Persistent failure
+          // becomes a visible, fenced recovery state and releases this lane.
           yield* options
             .recordTerminalEvent(event)
-            .pipe(Effect.retry({ schedule: Schedule.spaced("1 second") }), Effect.orDie);
+            .pipe(Effect.retry(eventPersistenceRetry), Effect.orDie);
         }
         yield* publishRuntimeEvent(event);
         yield* increment(providerRuntimeEventsTotal, {
@@ -900,7 +953,51 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               return next;
             });
             if (!next) return;
-            yield* processRuntimeEvent(next).pipe(Effect.ensuring(laneBudget.release(1)));
+            yield* processRuntimeEvent(next).pipe(
+              Effect.catchCause((cause) => {
+                if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
+                return Effect.gen(function* () {
+                  const generation =
+                    next.event.sessionGeneration ??
+                    currentMcpIdentity(threadId)?.generation ??
+                    (yield* nativeGeneration(threadId).pipe(Effect.orElseSucceed(() => -1)));
+                  const eventId = EventId.makeUnsafe(`${next.event.eventId}:persistence-failed`);
+                  yield* Effect.logError(
+                    "provider event persistence failed; history recovery required",
+                    {
+                      threadId,
+                      eventId: next.event.eventId,
+                      cause: Cause.pretty(cause),
+                    },
+                  );
+                  const failure: ProviderRuntimeEvent = {
+                    type: "runtime.error",
+                    eventId,
+                    threadId,
+                    provider: next.source.provider,
+                    providerInstanceId: next.source.instanceId,
+                    ...(generation >= 0 ? { sessionGeneration: generation } : {}),
+                    createdAt: new Date().toISOString(),
+                    payload: {
+                      message:
+                        "Provider output could not be persisted. Review incomplete history before continuing.",
+                      class: "transport_error",
+                      historyReconciliationRequired: true,
+                    },
+                  };
+                  yield* requireHistoryReconciliation(failure).pipe(
+                    Effect.catchCause((persistCause) =>
+                      Effect.logError(
+                        "history recovery marker remains in memory until storage recovers",
+                        { threadId, cause: Cause.pretty(persistCause) },
+                      ),
+                    ),
+                  );
+                  yield* publishRuntimeEvent(failure);
+                });
+              }),
+              Effect.ensuring(laneBudget.release(1)),
+            );
           }
         }).pipe(
           Effect.ensuring(
@@ -954,7 +1051,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           yield* Stream.runForEach(adapter.streamEvents, (event) =>
             Queue.offer(runtimeEventQueue, {
               source: { instanceId, provider: adapter.provider },
-              event: stampMcpEventAtAdmission(event, instanceId),
+              event: stampRuntimeEventAtAdmission(event, instanceId),
             }).pipe(Effect.asVoid),
           ).pipe(Effect.forkScoped);
         }
@@ -1820,6 +1917,78 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         return yield* Deferred.await(admitted);
       });
     const nativeOperations: NonNullable<ProviderServiceShape["nativeOperations"]> = {
+      historyRecovery: (input) =>
+        withProviderThreadAccess(
+          input.threadId,
+          withSessionOperation(
+            input.threadId,
+            Effect.gen(function* () {
+              const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
+              if (!binding) return null;
+              const instanceId = resolveBindingInstanceId(binding);
+              const generation = readPersistedSessionGeneration(binding.runtimePayload);
+              const durable = readIncompleteHistory(binding.runtimePayload);
+              const fallback = incompleteHistoryFallbacks.get(input.threadId);
+              const marker =
+                fallback?.instanceId === instanceId &&
+                (fallback.generation === generation || fallback.generation < 0)
+                  ? fallback
+                  : durable;
+              if (!marker) return null;
+              const current = { instanceId, generation, eventId: marker.eventId };
+              if (input.action === "inspect") return current;
+              if (
+                input.expected?.instanceId !== instanceId ||
+                input.expected.generation !== generation ||
+                input.expected.eventId !== marker.eventId
+              )
+                return yield* nativeError(
+                  "The provider history changed. Review the current recovery warning before continuing.",
+                );
+              // Explicit acceptance never resumes/resends the interrupted turn. Stop
+              // its source before releasing the matching incomplete-history fence.
+              yield* stopSessionUnlocked({ threadId: input.threadId });
+              // Source draining can admit another failure while stop is awaited.
+              // Accept only the history the user inspected, retaining newer fences.
+              const stopped = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
+              const stoppedDurable = readIncompleteHistory(stopped?.runtimePayload);
+              const stoppedFallback = incompleteHistoryFallbacks.get(input.threadId);
+              if (
+                !stopped ||
+                resolveBindingInstanceId(stopped) !== instanceId ||
+                readPersistedSessionGeneration(stopped.runtimePayload) !== generation ||
+                (stoppedDurable &&
+                  stoppedDurable.eventId !== marker.eventId &&
+                  stoppedDurable.eventId !== durable?.eventId) ||
+                (stoppedFallback?.instanceId === instanceId &&
+                  stoppedFallback.generation === generation &&
+                  stoppedFallback.eventId !== marker.eventId)
+              )
+                return yield* nativeError(
+                  "Provider history changed while stopping. Review recovery again.",
+                );
+              if (stoppedDurable) {
+                const cleared = yield* directory.updateHistoryReconciliationIfCurrent({
+                  threadId: input.threadId,
+                  instanceId,
+                  generation,
+                  marker: null,
+                  expectedMarkerId: stoppedDurable.eventId,
+                });
+                if (!cleared)
+                  return yield* nativeError("The provider session changed during recovery.");
+              }
+              const adapter = yield* registry.getByInstance(instanceId);
+              yield* (
+                adapter.acknowledgeHistoryReconciliation?.(input.threadId, marker.eventId) ??
+                  Effect.void
+              );
+              if (incompleteHistoryFallbacks.get(input.threadId)?.eventId === marker.eventId)
+                incompleteHistoryFallbacks.delete(input.threadId);
+              return null;
+            }),
+          ),
+        ).pipe(Effect.mapError(nativeError)),
       list: (threadId) =>
         nativeCoordinator
           ? nativeCoordinator.list(threadId).pipe(Effect.mapError(nativeError))
@@ -2121,12 +2290,17 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               retryable: false,
               detail: "The provider session changed before dispatch.",
             });
-          if (readIncompleteHistory(deliveryBinding.value.runtimePayload))
+          const fallback = incompleteHistoryFallbacks.get(input.threadId);
+          if (
+            readIncompleteHistory(deliveryBinding.value.runtimePayload) ||
+            (fallback?.instanceId === resolveBindingInstanceId(deliveryBinding.value) &&
+              (fallback.generation === generation || fallback.generation < 0))
+          )
             return yield* new ProviderTurnDeliveryError({
               certainty: "not_sent",
               retryable: false,
               detail:
-                "Provider output is incomplete. Reconcile native history before starting another turn.",
+                "Provider output is incomplete. Review history recovery before starting another turn.",
             });
           yield* checkWorkspace(
             input.threadId,
@@ -3705,6 +3879,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       );
 
     return {
+      requireHistoryReconciliation,
       acknowledgeHistoryReconciliation,
       getStartingSessionIdentity: (threadId) => {
         const starting = startingSessions.get(threadId);

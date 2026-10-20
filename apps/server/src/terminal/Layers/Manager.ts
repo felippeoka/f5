@@ -765,10 +765,10 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       session.status = "running";
       session.updatedAt = new Date().toISOString();
       session.unsubscribeData = ptyProcess.onData((data) => {
-        this.onProcessData(session, data);
+        if (session.process === ptyProcess) this.onProcessData(session, data);
       });
       session.unsubscribeExit = ptyProcess.onExit((event) => {
-        this.onProcessExit(session, event);
+        if (session.process === ptyProcess) this.onProcessExit(session, event);
       });
       this.updateSubprocessPollingState();
       this.emitEvent({
@@ -823,6 +823,9 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     if (session.history.finish())
       this.queuePersist(session.threadId, session.terminalId, session.history);
     this.clearKillEscalationTimer(session.process);
+    // Intentional stops still drain output/decoder state. Their owner completes
+    // cleanup and emits restarted/opened, rather than closing the user's tab.
+    if (session.process && this.sourceStops.has(session.process)) return;
     this.cleanupProcessHandles(session);
     session.process = null;
     session.pid = null;

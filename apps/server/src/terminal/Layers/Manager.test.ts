@@ -526,6 +526,40 @@ describe("TerminalManager", () => {
     await manager.dispose();
   });
 
+  it.each(["restart", "cwd", "shutdown"] as const)(
+    "drains an intentional %s without emitting a tab-closing exit",
+    async (operation) => {
+      const { manager, ptyAdapter, logsDir } = makeManager();
+      const events: TerminalEvent[] = [];
+      manager.on("event", (event) => events.push(event));
+      await manager.open(openInput());
+      const source = ptyAdapter.processes[0]!;
+      source.exitOnKill = false;
+      const stopping =
+        operation === "restart"
+          ? manager.restart(restartInput())
+          : operation === "cwd"
+            ? manager.open(openInput({ cwd: logsDir }))
+            : manager.dispose();
+      await waitFor(() => source.killSignals.length > 0);
+      source.emitData("last graceful output\n");
+      source.emitExit({ exitCode: 0, signal: 15 });
+      await stopping;
+      expect(events.map((event) => event.type)).toEqual(
+        operation === "shutdown"
+          ? ["started", "output"]
+          : ["started", "output", "cleared", operation === "restart" ? "restarted" : "started"],
+      );
+      if (operation === "shutdown")
+        expect(fs.readFileSync(historyLogPath(logsDir), "utf8")).toContain("last graceful output");
+      else {
+        ptyAdapter.processes[1]!.emitExit({ exitCode: 1, signal: null });
+        expect(events.at(-1)?.type).toBe("exited");
+      }
+      await manager.dispose();
+    },
+  );
+
   it("restarts terminal with empty transcript and respawns pty", async () => {
     const { manager, ptyAdapter, logsDir } = makeManager();
     await manager.open(openInput());

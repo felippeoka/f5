@@ -2,7 +2,12 @@ import { makeCommitSideEffects } from "../commitSideEffects.ts";
 import { hydrateDeciderReadModel, withoutDeletedThreadDetails } from "../deciderReadModel.ts";
 import { ProviderControlTarget } from "../../provider/controlTarget.ts";
 import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
-import { makeCommandAdmission, isControlCommand, isControlEvent } from "../commandAdmission.ts";
+import {
+  makeCommandAdmission,
+  LosslessCommandAdmission,
+  isControlCommand,
+  isControlEvent,
+} from "../commandAdmission.ts";
 import { readPersistedSessionGeneration } from "../../provider/sessionCapabilities.ts";
 import { registerShutdown, AcceptedShutdownWork } from "../../shutdown.ts";
 import {
@@ -959,7 +964,8 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         ...(workspace ? { workspace } : {}),
       };
       const bytes = Buffer.byteLength(JSON.stringify(command));
-      const admittedResult = yield* Effect.uninterruptible(
+      const lossless = yield* LosslessCommandAdmission;
+      const admittedResult = yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           if (
             !accepting &&
@@ -995,7 +1001,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           yield* (
             owner
               ? admission.offerContinuation(envelope, bytes, owner)
-              : admission.offer(envelope, bytes, control)
+              : lossless && !control
+                ? restore(admission.enqueue(envelope, bytes))
+                : admission.offer(envelope, bytes, control)
           ).pipe(
             Effect.onError((cause) =>
               Effect.gen(function* () {

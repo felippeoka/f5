@@ -35,6 +35,8 @@ import type {
 import type {
   NativeOperationInput,
   NativeOperationResolutionInput,
+  NativeHistoryRecoveryInput,
+  NativeHistoryRecovery,
   NativeOperationInspectInput,
   NativeOperationRecord,
   NativeForkInput,
@@ -1036,6 +1038,7 @@ export interface NativeApi {
   };
   /** Private provider form/URL answers; never go through orchestration commands. */
   nativeOperations?: {
+    historyRecovery?: (input: NativeHistoryRecoveryInput) => Promise<NativeHistoryRecovery | null>;
     resolve: (input: NativeOperationResolutionInput) => Promise<NativeOperationRecord>;
     fork: (input: NativeForkInput) => Promise<NativeOperationRecord>;
     execute: (input: NativeOperationInput) => Promise<NativeOperationRecord>;

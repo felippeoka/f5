@@ -1,3 +1,4 @@
+import { MAX_TERMINAL_RECEIPT_ATTEMPTS } from "../Services/ProviderTerminalEvents.ts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -63,6 +64,15 @@ it("upgrades an existing file database and reopens it with the preceding migrati
             id: number;
           }>`SELECT migration_id AS id FROM effect_sql_migrations ORDER BY migration_id DESC LIMIT 1`;
           assert.equal(applied[0]?.id, 126);
+          const indexes = yield* sql<{
+            name: string;
+            sql: string;
+          }>`SELECT name, sql FROM sqlite_master WHERE name IN ('provider_terminal_events_retry_age', 'provider_terminal_events_exhausted')`;
+          assert.equal(indexes.length, 2);
+          for (const index of indexes) {
+            const expected = index.name.endsWith("exhausted") ? ">=" : "<";
+            assert.include(index.sql, `attempt ${expected} ${MAX_TERMINAL_RECEIPT_ATTEMPTS}`);
+          }
         }),
       );
     } finally {

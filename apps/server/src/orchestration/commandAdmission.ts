@@ -1,4 +1,4 @@
-import { Deferred, Effect } from "effect";
+import { Deferred, Effect, ServiceMap } from "effect";
 import type { OrchestrationCommand, OrchestrationEvent } from "@t3tools/contracts";
 import { OrchestrationOverloadError } from "./Errors.ts";
 
@@ -12,6 +12,11 @@ export const isControlEvent = (event: Pick<OrchestrationEvent, "type">) =>
   event.type === "thread.turn-interrupt-requested" ||
   event.type === "thread.approval-response-requested" ||
   event.type === "thread.user-input-response-requested";
+
+export const LosslessCommandAdmission = ServiceMap.Reference<boolean>(
+  "f5/LosslessCommandAdmission",
+  { defaultValue: () => false },
+);
 
 /** Controls retain their reservation until the reactor records their outcome. */
 export const makeCommandAdmission = <A>(
@@ -50,36 +55,54 @@ export const makeCommandAdmission = <A>(
         }
         yield* notify;
       });
-    return {
-      offer: (item: A, bytes: number, control: boolean) =>
-        Effect.uninterruptible(
-          Effect.gen(function* () {
+    const admit = (
+      item: A,
+      bytes: number,
+      control: boolean,
+      wait: boolean,
+    ): Effect.Effect<void, OrchestrationOverloadError> =>
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          while (true) {
             if (
               closed ||
               !Number.isFinite(bytes) ||
               bytes < 0 ||
-              (control
-                ? controlEntries >= (options.controlEntries ?? 64)
-                : ordinaryEntries >= (options.ordinaryEntries ?? 1024) ||
-                  ordinaryBytes + bytes > (options.ordinaryBytes ?? 32 * 1024 * 1024))
+              (!control && bytes > (options.ordinaryBytes ?? 32 * 1024 * 1024))
             )
               return yield* new OrchestrationOverloadError({
                 lane: control ? "control" : "ordinary",
                 reason: closed ? "closed" : "full",
               });
-            const entry = { item, bytes, control, admittedAt: Date.now() };
-            accepted.set(item, entry);
-            if (control) {
-              controlEntries++;
-              controls.push(entry);
-            } else {
-              ordinaryEntries++;
-              ordinaryBytes += bytes;
-              ordinary.push(entry);
-            }
-            yield* notify;
-          }),
-        ),
+            const full = control
+              ? controlEntries >= (options.controlEntries ?? 64)
+              : ordinaryEntries >= (options.ordinaryEntries ?? 1024) ||
+                ordinaryBytes + bytes > (options.ordinaryBytes ?? 32 * 1024 * 1024);
+            if (!full) break;
+            if (!wait)
+              return yield* new OrchestrationOverloadError({
+                lane: control ? "control" : "ordinary",
+                reason: "full",
+              });
+            // Capture the notification before yielding; interruption never admits a ghost entry.
+            yield* restore(Deferred.await(changed));
+          }
+          const entry = { item, bytes, control, admittedAt: Date.now() };
+          accepted.set(item, entry);
+          if (control) {
+            controlEntries++;
+            controls.push(entry);
+          } else {
+            ordinaryEntries++;
+            ordinaryBytes += bytes;
+            ordinary.push(entry);
+          }
+          yield* notify;
+        }),
+      );
+    return {
+      offer: (item: A, bytes: number, control: boolean) => admit(item, bytes, control, false),
+      enqueue: (item: A, bytes: number) => admit(item, bytes, false, true),
       // A control's own projection/failure bookkeeping uses its existing lease.
       // Only one continuation per owner can be admitted; it cannot be hidden
       // behind a saturated ordinary queue or consume another control's capacity.

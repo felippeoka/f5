@@ -23,6 +23,7 @@ type CommandInput<C = OrchestrationCommand> = C extends OrchestrationCommand
 
 it.each([
   "complete",
+  "legacy-backfill",
   "partial",
   "different-identity",
   "divergent",
@@ -65,6 +66,8 @@ it.each([
         },
       },
     };
+    if (mode === "legacy-backfill")
+      binding = { ...binding, runtimePayload: { sessionGeneration: 1 } };
     let acknowledged = false;
     const snapshot: ProviderThreadSnapshot = {
       threadId,
@@ -151,13 +154,14 @@ it.each([
         delta: " prefix",
         createdAt,
       });
-      await dispatch({
-        type: "thread.message.assistant.complete",
-        threadId,
-        messageId,
-        turnId,
-        createdAt,
-      });
+      if (mode !== "legacy-backfill")
+        await dispatch({
+          type: "thread.message.assistant.complete",
+          threadId,
+          messageId,
+          turnId,
+          createdAt,
+        });
       await dispatch({
         type: "thread.session.set",
         threadId,
@@ -215,9 +219,11 @@ it.each([
         expect(message).toBeUndefined();
         return;
       }
-      expect(message.text).toBe(mode === "complete" ? " prefix suffix\n " : " prefix");
+      expect(message.text).toBe(
+        mode === "complete" || mode === "legacy-backfill" ? " prefix suffix\n " : " prefix",
+      );
       expect(message.streaming).toBe(false);
-      if (mode === "complete") {
+      if (mode === "complete" || mode === "legacy-backfill") {
         await reconcile();
         expect((await system.run(system.engine.getReadModel())).snapshotSequence).toBe(
           state.snapshotSequence,

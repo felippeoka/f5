@@ -1,3 +1,4 @@
+import { LosslessCommandAdmission } from "../commandAdmission.ts";
 import { startTerminalReceiptRetries } from "../terminalReceiptRecovery.ts";
 import { PerformanceStageProbe } from "../../observability/Metrics.ts";
 import { registerShutdown, AcceptedShutdownWork } from "../../shutdown.ts";
@@ -5839,7 +5840,19 @@ const make = Effect.gen(function* () {
                   ),
                 )
             : Effect.void;
+        const markIncompleteHistory =
+          input.source === "runtime" && !isProviderTerminalRuntimeEvent(input.event)
+            ? (providerService.requireHistoryReconciliation?.(input.event) ?? Effect.void).pipe(
+                Effect.catchCause((markCause) =>
+                  Effect.logError("could not persist incomplete provider history marker", {
+                    eventId: input.event.eventId,
+                    cause: Cause.pretty(markCause),
+                  }),
+                ),
+              )
+            : Effect.void;
         return markTerminalFailure.pipe(
+          Effect.andThen(markIncompleteHistory),
           Effect.andThen(
             Effect.logWarning("provider runtime ingestion failed to process event", {
               source: input.source,
@@ -5867,6 +5880,7 @@ const make = Effect.gen(function* () {
         : processInputSafely(input)
       ).pipe(
         Effect.provideService(AcceptedShutdownWork, true),
+        Effect.provideService(LosslessCommandAdmission, true),
         Effect.ensuring(
           Effect.sync(() => {
             if (input.source === "runtime" && isProviderTerminalRuntimeEvent(input.event))

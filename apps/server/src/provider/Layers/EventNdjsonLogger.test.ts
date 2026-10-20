@@ -71,6 +71,60 @@ describe("EventNdjsonLogger", () => {
       }),
   );
 
+  it.effect("batches ACP content chunks but awaits append for plan and tool boundaries", () =>
+    Effect.gen(function* () {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "f5-acp-log-"));
+      const opened = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const open = fs.promises.open.bind(fs.promises);
+      const spy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args) => {
+        opened.resolve();
+        await release.promise;
+        return open(...args);
+      });
+      try {
+        const logger = (yield* makeEventNdjsonLogger(path.join(directory, "native.ndjson"), {
+          stream: "native",
+          batchWindowMs: 60_000,
+        }))!;
+        const threadId = ThreadId.makeUnsafe("thread");
+        const event = (sessionUpdate: string) => ({
+          event: {
+            method: "session/update",
+            payload: { update: { sessionUpdate, content: { type: "text", text: "token" } } },
+          },
+        });
+        for (const kind of ["agent_message_chunk", "agent_thought_chunk", "user_message_chunk"])
+          yield* logger.write(event(kind), threadId);
+        assert.equal(spy.mock.calls.length, 0);
+        let acknowledged = false;
+        const boundary = Effect.runPromise(logger.write(event("tool_call"), threadId)).then(() => {
+          acknowledged = true;
+        });
+        yield* Effect.promise(() => opened.promise);
+        assert.isFalse(acknowledged);
+        release.resolve();
+        yield* Effect.promise(() => boundary);
+        yield* logger.write(event("plan"), threadId);
+        yield* logger.close();
+        const records = fs
+          .readFileSync(path.join(directory, "thread.log"), "utf8")
+          .trim()
+          .split("\n")
+          .map(parseLogLine);
+        assert.equal(records.length, 5);
+        assert.equal(
+          JSON.parse(records[3]!.payload).event.payload.update.sessionUpdate,
+          "tool_call",
+        );
+      } finally {
+        release.resolve();
+        spy.mockRestore();
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    }),
+  );
+
   it.effect("close waits for a record admitted before serialization yields", () =>
     Effect.gen(function* () {
       const directory = fs.mkdtempSync(path.join(os.tmpdir(), "f5-log-admission-"));

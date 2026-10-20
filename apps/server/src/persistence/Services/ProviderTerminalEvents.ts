@@ -40,6 +40,8 @@ export type ProviderTerminalEventReceipt = typeof ProviderTerminalEventReceipt.T
 
 export type ProviderTerminalEventRepositoryError = PersistenceSqlError | PersistenceDecodeError;
 
+// Migration 126 partial-index predicates use literals for query planning.
+// 124_ProviderTerminalRetry.test.ts verifies this limit matches both indexes.
 export const MAX_TERMINAL_RECEIPT_ATTEMPTS = 10;
 export interface TerminalReceiptOrigin {
   readonly providerInstanceId: ProviderInstanceId | null;

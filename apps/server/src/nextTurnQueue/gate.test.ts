@@ -101,12 +101,20 @@ describe("resolveNextTurnQueueGate", () => {
     const future = "2026-01-02T00:00:00.000Z";
     expect(
       gate({ item: { ...item, scheduleReason: "usage_limit_reset", notBefore: future } }),
-    ).toEqual({ kind: "wait", reasonCode: "usage_limit_reset" });
+    ).toEqual({
+      kind: "wait",
+      reasonCode: "usage_limit_reset",
+      retryAfterMs: Date.parse(future) - Date.parse(now),
+    });
     expect(
       gate({
         item: { ...item, scheduleReason: "usage_limit_reset", notBefore: future, attemptCount: 1 },
       }),
-    ).toEqual({ kind: "wait", reasonCode: "delivery_retrying" });
+    ).toEqual({
+      kind: "wait",
+      reasonCode: "delivery_retrying",
+      retryAfterMs: Date.parse(future) - Date.parse(now),
+    });
   });
   it("pauses when the provider changes while preserving manual pauses", () => {
     const recovery = { ...item, scheduleReason: "usage_limit_reset" };

@@ -107,6 +107,23 @@ function isCritical(event: unknown): boolean {
       ? (record.event as Record<string, unknown>)
       : undefined;
   const type = String(nested?.type ?? nested?.method ?? record.type ?? record.method ?? "");
+  if (type === "session/update") {
+    const frame = nested ?? record;
+    const body = frame.params ?? frame.payload;
+    const params = body && typeof body === "object" ? (body as Record<string, unknown>) : frame;
+    const update =
+      params.update && typeof params.update === "object"
+        ? (params.update as Record<string, unknown>)
+        : params;
+    // ACP content chunks are deltas even though the envelope method is shared
+    // with plans, tool calls and other boundaries which must await persistence.
+    if (
+      ["agent_message_chunk", "agent_thought_chunk", "user_message_chunk"].includes(
+        String(update.sessionUpdate),
+      )
+    )
+      return false;
+  }
   // Deltas remain lossless but can batch. Envelopes, block boundaries, errors,
   // session/turn transitions and every unrecognized shape wait for append.
   return (

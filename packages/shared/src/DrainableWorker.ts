@@ -204,11 +204,23 @@ export const makeDrainableWorker = <A, E, R>(
         }
       }).pipe(
         Effect.onExit((exit) =>
-          Exit.isFailure(exit) && outstanding > 0
+          Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause) && outstanding > 0
             ? fail(Cause.squash(exit.cause))
             : Effect.sync(() => {
                 if (phase !== "failed") phase = "closed";
-              }),
+              }).pipe(
+                Effect.andThen(
+                  Effect.gen(function* () {
+                    if (phase !== "closed") return;
+                    queue.length = 0;
+                    queuedByKey.clear();
+                    active = undefined;
+                    outstanding = bytes = controlOutstanding = controlBytes = 0;
+                    yield* Deferred.fail(idle, unavailable());
+                    yield* notify;
+                  }),
+                ),
+              ),
         ),
       ),
     );

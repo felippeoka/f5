@@ -1,3 +1,4 @@
+import { ProviderInstanceId } from "./providerInstance";
 import { FilesystemPath } from "./baseSchemas";
 import { Schema } from "effect";
 import {
@@ -95,6 +96,7 @@ export const NativeOperationResolutionInput = Schema.Struct({
 });
 export type NativeOperationResolutionInput = typeof NativeOperationResolutionInput.Type;
 export const NATIVE_OPERATION_WS_METHODS = {
+  historyRecovery: "nativeOperation.historyRecovery",
   resolve: "nativeOperation.resolve",
   fork: "nativeOperation.fork",
   execute: "nativeOperation.execute",
@@ -109,3 +111,17 @@ export const NativeForkInput = Schema.Struct({
   beforeTurnId: Schema.optional(TrimmedNonEmptyString),
 });
 export type NativeForkInput = typeof NativeForkInput.Type;
+
+/** Explicit acceptance of incomplete output is fenced to the inspected source. */
+export const NativeHistoryRecovery = /* @__PURE__ */ Schema.Struct({
+  instanceId: ProviderInstanceId,
+  generation: NonNegativeInt,
+  eventId: TrimmedNonEmptyString,
+});
+export type NativeHistoryRecovery = typeof NativeHistoryRecovery.Type;
+export const NativeHistoryRecoveryInput = /* @__PURE__ */ Schema.Struct({
+  threadId: ThreadId,
+  action: /* @__PURE__ */ Schema.Literals(["inspect", "acknowledge"]),
+  expected: /* @__PURE__ */ Schema.optional(NativeHistoryRecovery),
+});
+export type NativeHistoryRecoveryInput = typeof NativeHistoryRecoveryInput.Type;

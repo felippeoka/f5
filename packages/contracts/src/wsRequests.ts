@@ -5,6 +5,7 @@ import { ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 import {
   NATIVE_OPERATION_WS_METHODS,
   NativeForkInput,
+  NativeHistoryRecoveryInput,
   NativeOperationInput,
   NativeOperationInspectInput,
   NativeOperationListInput,
@@ -356,6 +357,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(USAGE_WS_METHODS.getAccounts, UsageGetAccountsInput),
   tagRequestBody(USAGE_WS_METHODS.getSummary, UsageGetSummaryInput),
   tagRequestBody(USAGE_WS_METHODS.getQuotaHistory, UsageGetQuotaHistoryInput),
+  tagRequestBody(NATIVE_OPERATION_WS_METHODS.historyRecovery, NativeHistoryRecoveryInput),
   tagRequestBody(NATIVE_OPERATION_WS_METHODS.resolve, NativeOperationResolutionInput),
   tagRequestBody(NATIVE_OPERATION_WS_METHODS.fork, NativeForkInput),
   tagRequestBody(NATIVE_OPERATION_WS_METHODS.execute, NativeOperationInput),

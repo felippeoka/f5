@@ -1,3 +1,5 @@
+import { ProviderSessionDirectoryPersistenceError } from "../Errors.ts";
+import { PersistenceSqlError } from "../../persistence/Errors.ts";
 import { ServerShutdown, ShutdownRegistry } from "../../shutdown.ts";
 import { ProviderControlTarget } from "../controlTarget.ts";
 import { PreviewAutomationBroker } from "../../mcp/PreviewAutomationBroker.ts";
@@ -26,6 +28,7 @@ import {
   EventId,
   ProviderDriverKind,
   ProjectId,
+  RuntimeItemId,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   type ProviderKind,
   ProviderSessionStartInput,
@@ -408,6 +411,7 @@ function makeProviderServiceLayerForAdapters(
   mcpConfigLayer: Layer.Layer<ProjectMcpConfigService> = makeProjectMcpConfigServiceTestLayer(
     servers,
   ),
+  options?: ProviderServiceLiveOptions,
 ) {
   const registry = {
     ...makeAdapterRegistryMock(Object.fromEntries(adaptersByProvider) as KindAdapterMap),
@@ -420,7 +424,7 @@ function makeProviderServiceLayerForAdapters(
   const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
 
   return Layer.mergeAll(
-    makeProviderServiceLive().pipe(
+    makeProviderServiceLive(options).pipe(
       Layer.provide(providerServiceConfigLayer),
       Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
       Layer.provide(directoryLayer),
@@ -4261,3 +4265,269 @@ for (const terminalType of ["session.exited", "turn.completed", "turn.aborted"] 
     );
   });
 }
+
+it.effect(
+  "explicit acceptance recovers non-text history only for the inspected generation and marker",
+  () => {
+    const adapter = makeFakeCodexAdapter();
+    const layer = makeProviderServiceLayerForAdapters(new Map([["codex", adapter.adapter]]));
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+      const directory = yield* ProviderSessionDirectory;
+      const threadId = asThreadId("non-text-recovery");
+      const session = yield* service.startSession(threadId, {
+        threadId,
+        provider: "codex",
+        runtimeMode: "full-access",
+        cwd: process.cwd(),
+      });
+      const instanceId = ProviderInstanceId.make("codex"),
+        generation = session.capabilities!.generation;
+      yield* directory.updateHistoryReconciliationIfCurrent({
+        threadId,
+        instanceId,
+        generation,
+        marker: {
+          eventId: "missing-tool-image-reasoning",
+          turnId: "turn-with-non-text",
+          historyIdentity: "native-thread",
+        },
+      });
+      const recovery = service.nativeOperations!.historyRecovery!;
+      const inspected = (yield* recovery({ threadId, action: "inspect" }))!;
+      assert.deepEqual(inspected, {
+        instanceId,
+        generation,
+        eventId: "missing-tool-image-reasoning",
+      });
+      for (const expected of [
+        { ...inspected, generation: generation - 1 },
+        { ...inspected, eventId: "stale-marker" },
+      ]) {
+        assert.isTrue(
+          (yield* recovery({ threadId, action: "acknowledge", expected }).pipe(Effect.exit))
+            ._tag === "Failure",
+        );
+      }
+      assert.equal(adapter.stopSession.mock.calls.length, 0);
+      assert.equal(adapter.sendTurn.mock.calls.length, 0);
+      yield* recovery({ threadId, action: "acknowledge", expected: inspected });
+      assert.equal(adapter.stopSession.mock.calls.length, 1);
+      assert.equal(adapter.sendTurn.mock.calls.length, 0);
+      assert.isNull(yield* recovery({ threadId, action: "inspect" }));
+      yield* service.sendTurn({ threadId, input: "explicit next turn", attachments: [] });
+      assert.equal(adapter.sendTurn.mock.calls.length, 1);
+    }).pipe(Effect.provide(layer));
+  },
+);
+
+it.live(
+  "bounded receipt persistence failure releases its lane, reports recovery and fences sends",
+  () => {
+    const adapter = makeFakeCodexAdapter();
+    let attempts = 0;
+    const failingThread = asThreadId("failing-event-persistence"),
+      healthyThread = asThreadId("healthy-event-persistence");
+    const layer = makeProviderServiceLayerForAdapters(
+      new Map([["codex", adapter.adapter]]),
+      {},
+      {},
+      undefined,
+      {
+        recordTerminalEvent: (event) =>
+          event.threadId === failingThread
+            ? Effect.suspend(() => {
+                attempts++;
+                return Effect.fail(
+                  new PersistenceSqlError({
+                    operation: "record terminal event",
+                    detail: "injected outage",
+                  }),
+                );
+              })
+            : Effect.void,
+      },
+    );
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const service = yield* ProviderService;
+        for (const threadId of [failingThread, healthyThread])
+          yield* service.startSession(threadId, {
+            threadId,
+            provider: "codex",
+            runtimeMode: "full-access",
+            cwd: process.cwd(),
+          });
+        const received: ProviderRuntimeEvent[] = [];
+        yield* Stream.runForEach(service.streamEvents, (event) =>
+          Effect.sync(() => {
+            received.push(event);
+          }),
+        ).pipe(Effect.forkChild);
+        yield* sleep(20);
+        for (const threadId of [failingThread, healthyThread])
+          adapter.emit({
+            type: "turn.completed",
+            provider: "codex",
+            threadId,
+            turnId: asTurnId(`turn-${threadId}`),
+            eventId: asEventId(`terminal-${threadId}`),
+            createdAt: new Date().toISOString(),
+            payload: { state: "completed" },
+          });
+        yield* Effect.suspend(function wait(): Effect.Effect<void> {
+          return received.some(
+            (event) => event.threadId === failingThread && event.type === "runtime.error",
+          ) &&
+            received.some(
+              (event) => event.threadId === healthyThread && event.type === "turn.completed",
+            )
+            ? Effect.void
+            : Effect.sleep("10 millis").pipe(Effect.andThen(Effect.suspend(wait)));
+        }).pipe(Effect.timeout("2 seconds"));
+        assert.equal(attempts, 3);
+        const error = yield* service
+          .sendTurn({ threadId: failingThread, input: "must wait for recovery", attachments: [] })
+          .pipe(Effect.flip);
+        assert.equal(error._tag, "ProviderTurnDeliveryError");
+        assert.equal(adapter.sendTurn.mock.calls.length, 0);
+        const warning = (yield* service.nativeOperations!.historyRecovery!({
+          threadId: failingThread,
+          action: "inspect",
+        }))!;
+        assert.equal(warning.eventId, `terminal-${failingThread}:persistence-failed`);
+        // A later event for the failed lane also progresses; the lane is not poisoned.
+        adapter.emit({
+          type: "content.delta",
+          provider: "codex",
+          threadId: failingThread,
+          eventId: asEventId("later-output"),
+          createdAt: new Date().toISOString(),
+          itemId: RuntimeItemId.makeUnsafe("later-item"),
+          payload: { streamKind: "assistant_text", delta: "later" },
+        });
+        yield* Effect.suspend(function wait(): Effect.Effect<void> {
+          return received.some((event) => event.eventId === "later-output")
+            ? Effect.void
+            : Effect.sleep("10 millis").pipe(Effect.andThen(Effect.suspend(wait)));
+        }).pipe(Effect.timeout("1 second"));
+      }),
+    ).pipe(Effect.provide(layer));
+  },
+);
+
+it.live(
+  "failed history-marker persistence remains fenced in memory and can be explicitly recovered",
+  () => {
+    const adapter = makeFakeCodexAdapter();
+    const layer = makeProviderServiceLayerForAdapters(new Map([["codex", adapter.adapter]]));
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const service = yield* ProviderService;
+        const directory = yield* ProviderSessionDirectory;
+        const threadId = asThreadId("marker-persistence-failure");
+        yield* service.startSession(threadId, {
+          threadId,
+          provider: "codex",
+          runtimeMode: "full-access",
+          cwd: process.cwd(),
+        });
+        const received: ProviderRuntimeEvent[] = [];
+        yield* Stream.runForEach(service.streamEvents, (event) =>
+          Effect.sync(() => {
+            received.push(event);
+          }),
+        ).pipe(Effect.forkChild);
+        let attempts = 0;
+        const spy = vi.spyOn(directory, "updateHistoryReconciliationIfCurrent").mockReturnValue(
+          Effect.suspend(() => {
+            attempts++;
+            return Effect.fail(
+              new ProviderSessionDirectoryPersistenceError({
+                operation: "update history marker",
+                detail: "injected disk error",
+              }),
+            );
+          }),
+        );
+        try {
+          yield* sleep(20);
+          adapter.emit({
+            type: "runtime.error",
+            provider: "codex",
+            threadId,
+            eventId: asEventId("lost-with-disk-error"),
+            createdAt: new Date().toISOString(),
+            payload: {
+              class: "transport_error",
+              message: "Output incomplete",
+              historyReconciliationRequired: true,
+            },
+          });
+          yield* Effect.suspend(function wait(): Effect.Effect<void> {
+            return received.some(
+              (event) => event.eventId === "lost-with-disk-error:persistence-failed",
+            )
+              ? Effect.void
+              : Effect.sleep("10 millis").pipe(Effect.andThen(Effect.suspend(wait)));
+          }).pipe(Effect.timeout("2 seconds"));
+          assert.equal(attempts, 6);
+          assert.equal(spy.mock.calls.length, 2);
+        } finally {
+          spy.mockRestore();
+        }
+        const error = yield* service
+          .sendTurn({ threadId, input: "cannot bypass", attachments: [] })
+          .pipe(Effect.flip);
+        assert.equal(error._tag, "ProviderTurnDeliveryError");
+        assert.equal(adapter.sendTurn.mock.calls.length, 0);
+        const recovery = service.nativeOperations!.historyRecovery!;
+        const expected = (yield* recovery({ threadId, action: "inspect" }))!;
+        assert.equal(expected.eventId, "lost-with-disk-error:persistence-failed");
+        const originalStop = adapter.stopSession.getMockImplementation()!;
+        adapter.stopSession.mockImplementationOnce(() =>
+          Effect.gen(function* () {
+            const late = vi
+              .spyOn(directory, "updateHistoryReconciliationIfCurrent")
+              .mockReturnValue(
+                Effect.fail(
+                  new ProviderSessionDirectoryPersistenceError({
+                    operation: "late marker",
+                    detail: "disk still unavailable",
+                  }),
+                ),
+              );
+            try {
+              yield* service.requireHistoryReconciliation!({
+                type: "runtime.error",
+                provider: "codex",
+                threadId,
+                providerInstanceId: expected.instanceId,
+                sessionGeneration: expected.generation,
+                eventId: asEventId("late-source-output-loss"),
+                createdAt: new Date().toISOString(),
+                payload: {
+                  class: "transport_error",
+                  message: "late source output",
+                  historyReconciliationRequired: true,
+                },
+              }).pipe(Effect.ignore);
+            } finally {
+              late.mockRestore();
+            }
+            yield* originalStop(threadId);
+          }),
+        );
+        assert.isTrue(
+          (yield* recovery({ threadId, action: "acknowledge", expected }).pipe(Effect.exit))
+            ._tag === "Failure",
+        );
+        const latest = (yield* recovery({ threadId, action: "inspect" }))!;
+        assert.equal(latest.eventId, "late-source-output-loss");
+        yield* recovery({ threadId, action: "acknowledge", expected: latest });
+        assert.isNull(yield* recovery({ threadId, action: "inspect" }));
+        assert.equal(adapter.stopSession.mock.calls.length, 1);
+      }),
+    ).pipe(Effect.provide(layer));
+  },
+);

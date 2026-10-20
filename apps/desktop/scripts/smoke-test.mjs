@@ -468,7 +468,10 @@ try {
     page.waitForFunction(
       async ({ origin, expected }) => {
         try {
-          return (await fetch(`${origin}/api/bootstrap`)).ok === expected;
+          const response = await fetch(`${origin}/api/bootstrap`);
+          // An auth failure still proves a server is listening. Stop recovery
+          // must wait for source closure before trying to start its replacement.
+          return expected ? response.ok : false;
         } catch {
           return !expected;
         }
@@ -476,54 +479,63 @@ try {
       { origin: backendOrigin, expected },
       { timeout: 60_000 },
     );
-  const nativeRequest = (method, body) =>
-    page.evaluate(
-      ({ method, body, protocolVersion }) =>
-        new Promise((resolve, reject) => {
-          const url = new URL(window.desktopBridge.getWsUrl());
-          url.searchParams.set("protocol", String(protocolVersion));
-          const socket = new WebSocket(url);
-          const controller = new AbortController();
-          const timer = setTimeout(
-            () => finish(new Error(`Desktop smoke request timed out: ${method}`)),
-            15_000,
-          );
-          const finish = (error, value) => {
-            clearTimeout(timer);
-            controller.abort();
-            socket.close();
-            if (error) reject(error);
-            else resolve(value);
-          };
-          socket.addEventListener(
-            "open",
-            () =>
-              socket.send(JSON.stringify({ id: "desktop-smoke", body: { ...body, _tag: method } })),
-            { signal: controller.signal },
-          );
-          socket.addEventListener(
-            "message",
-            (event) => {
-              const response = JSON.parse(String(event.data));
-              if (response.id !== "desktop-smoke") return;
-              finish(response.error ? new Error(response.error.message) : null, response.result);
-            },
-            { signal: controller.signal },
-          );
-          socket.addEventListener(
-            "error",
-            () => finish(new Error("Desktop smoke connection failed")),
-            { signal: controller.signal },
-          );
-          socket.addEventListener(
-            "close",
-            (event) =>
-              finish(new Error(`Desktop smoke connection closed (${event.code}: ${event.reason})`)),
-            { signal: controller.signal },
-          );
-        }),
-      { method, body, protocolVersion: authorizedBootstrap.protocolVersion },
-    );
+  const nativeRequest = async (method, body) => {
+    try {
+      return await page.evaluate(
+        ({ method, body, protocolVersion }) =>
+          new Promise((resolve, reject) => {
+            const url = new URL(window.desktopBridge.getWsUrl());
+            url.searchParams.set("protocol", String(protocolVersion));
+            const socket = new WebSocket(url);
+            const controller = new AbortController();
+            const timer = setTimeout(
+              () => finish(new Error(`Desktop smoke request timed out: ${method}`)),
+              15_000,
+            );
+            const finish = (error, value) => {
+              clearTimeout(timer);
+              controller.abort();
+              socket.close();
+              if (error) reject(error);
+              else resolve(value);
+            };
+            socket.addEventListener(
+              "open",
+              () =>
+                socket.send(
+                  JSON.stringify({ id: "desktop-smoke", body: { ...body, _tag: method } }),
+                ),
+              { signal: controller.signal },
+            );
+            socket.addEventListener(
+              "message",
+              (event) => {
+                const response = JSON.parse(String(event.data));
+                if (response.id !== "desktop-smoke") return;
+                finish(response.error ? new Error(response.error.message) : null, response.result);
+              },
+              { signal: controller.signal },
+            );
+            socket.addEventListener(
+              "error",
+              () => finish(new Error("Desktop smoke connection failed")),
+              { signal: controller.signal },
+            );
+            socket.addEventListener(
+              "close",
+              (event) =>
+                finish(
+                  new Error(`Desktop smoke connection closed (${event.code}: ${event.reason})`),
+                ),
+              { signal: controller.signal },
+            );
+          }),
+        { method, body, protocolVersion: authorizedBootstrap.protocolVersion },
+      );
+    } catch (cause) {
+      throw new Error(`Desktop smoke request failed: ${method}`, { cause });
+    }
+  };
   const terminalInput = {
     threadId: "desktop-shutdown-smoke",
     terminalId: "default",

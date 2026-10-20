@@ -891,6 +891,8 @@ export function createWsNativeApi(): NativeApi {
       getQuotaHistory: () => transport.request(USAGE_WS_METHODS.getQuotaHistory, {}),
     },
     nativeOperations: {
+      historyRecovery: (input) =>
+        transport.request(NATIVE_OPERATION_WS_METHODS.historyRecovery, input),
       resolve: (input) => transport.request(NATIVE_OPERATION_WS_METHODS.resolve, input),
       fork: (input) => transport.request(NATIVE_OPERATION_WS_METHODS.fork, input),
       execute: (input) => transport.request(NATIVE_OPERATION_WS_METHODS.execute, input),

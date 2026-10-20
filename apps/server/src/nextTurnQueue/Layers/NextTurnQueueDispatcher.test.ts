@@ -1021,3 +1021,34 @@ it.effect("starts every actionable page before the first safety-sweep interval",
     assert.equal(dispatched.filter((id) => expected.has(id)).length, 130);
   }).pipe(Effect.provide(makeTestLayer())),
 );
+
+it.live(
+  "notification before notBefore reinstates the precise wakeup without waiting for a sweep",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const dispatcher = yield* NextTurnQueueDispatcher;
+        const store = yield* NextTurnQueueStore;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.makeUnsafe("not-before-notified");
+        yield* seedThread(threadId);
+        yield* insert(9998, threadId);
+        const item = (yield* store.listByThread(threadId)).items[0]!;
+        vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+        const at = Date.now();
+        yield* sql`UPDATE next_turn_queue SET not_before = ${new Date(at + 200).toISOString()} WHERE item_id = ${item.itemId}`;
+        const before = dispatched.length;
+        // Do not start the sweep: progress must come from the scheduled retry alone.
+        yield* dispatcher.notify(threadId);
+        yield* dispatcher.drain;
+        assert.equal(dispatched.length, before);
+        yield* Effect.promise(() => vi.advanceTimersByTimeAsync(40));
+        yield* dispatcher.notify(threadId);
+        yield* dispatcher.drain;
+        assert.equal(dispatched.length, before);
+        yield* Effect.promise(() => vi.advanceTimersByTimeAsync(160));
+        yield* dispatcher.drain;
+        assert.equal(dispatched.length, before + 1);
+      }),
+    ).pipe(Effect.ensuring(Effect.sync(() => vi.useRealTimers())), Effect.provide(makeTestLayer())),
+);

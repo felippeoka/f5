@@ -4091,6 +4091,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           )
           .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
       }
+      case NATIVE_OPERATION_WS_METHODS.historyRecovery:
       case NATIVE_OPERATION_WS_METHODS.resolve:
       case NATIVE_OPERATION_WS_METHODS.execute:
       case NATIVE_OPERATION_WS_METHODS.list:
@@ -4105,6 +4106,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           return yield* new RouteRequestError({
             message: "Native operations are unavailable for this conversation.",
           });
+        if (request.body._tag === NATIVE_OPERATION_WS_METHODS.historyRecovery) {
+          if (!providerService.nativeOperations.historyRecovery)
+            return yield* new RouteRequestError({ message: "History recovery is unavailable." });
+          return yield* providerService.nativeOperations
+            .historyRecovery(stripRequestTag(request.body))
+            .pipe(Effect.mapError((error) => new RouteRequestError({ message: error.message })));
+        }
         if (request.body._tag === NATIVE_OPERATION_WS_METHODS.resolve) {
           if (!providerService.nativeOperations.resolve)
             return yield* new RouteRequestError({

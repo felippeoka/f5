@@ -127,3 +127,9 @@ The killed-server Claude gate (`integration/chaos/claudeRecoveryGate.integration
 retains complete native transcript text across restart but observes partial, empty
 runtime history after resume. Claude coalescing remains disabled. The shared SDK
 query fake exercises F5 recovery; live CLI compatibility remains separate.
+
+ACP native log records classify `session/update` by its update subtype. Message
+and thought chunks batch without delaying delivery; plans, tool updates, turn
+boundaries and unknown updates await append completion. Intentional PTY restarts,
+working-directory/environment replacements and shutdown drain their source without
+publishing a tab-closing `exited` event. Natural exits still publish it.

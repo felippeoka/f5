@@ -57,6 +57,10 @@ export interface ProviderSubmissionHandle {
 }
 
 export interface ProviderServiceShape {
+  /** Preserve a send fence when ingestion cannot retain an admitted event. */
+  readonly requireHistoryReconciliation?: (
+    event: ProviderRuntimeEvent,
+  ) => Effect.Effect<void, ProviderServiceError>;
   /** Published before adapter startup, until its durable binding has been written. */
   readonly getStartingSessionIdentity?: (
     threadId: ThreadId,
@@ -72,6 +76,12 @@ export interface ProviderServiceShape {
   readonly submitTurn?: (input: ProviderSendTurnInput) => Effect.Effect<ProviderSubmissionHandle>;
 
   readonly nativeOperations?: {
+    readonly historyRecovery?: (
+      input: import("@t3tools/contracts").NativeHistoryRecoveryInput,
+    ) => Effect.Effect<
+      import("@t3tools/contracts").NativeHistoryRecovery | null,
+      ProviderServiceError
+    >;
     readonly resolve?: (
       input: import("@t3tools/contracts").NativeOperationResolutionInput,
     ) => Effect.Effect<import("@t3tools/contracts").NativeOperationRecord, ProviderServiceError>;

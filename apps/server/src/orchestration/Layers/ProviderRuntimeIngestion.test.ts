@@ -2891,6 +2891,82 @@ describe("ProviderRuntimeIngestion", () => {
     );
   });
 
+  it("preserves exact provider output while ordinary command admission is saturated", async () => {
+    vi.stubEnv("F5_COALESCE_STREAMING_DELTAS", "false");
+    const harness = await createHarness({ settings: { enableAssistantStreaming: true } });
+    vi.unstubAllEnvs();
+    const threadId = asThreadId("thread-1"),
+      turnId = asTurnId("saturated-turn");
+    const at = new Date().toISOString();
+    harness.emit({
+      provider: "codex",
+      threadId,
+      turnId,
+      createdAt: at,
+      type: "turn.started",
+      eventId: asEventId("saturated-started"),
+    });
+    await harness.drain();
+    const maintenance = await Effect.runPromise(harness.engine.acquireMaintenanceLock());
+    let released = false;
+    const bulk: Array<Promise<unknown>> = [];
+    try {
+      for (let index = 0; index < 1024; index++)
+        bulk.push(
+          Effect.runPromise(
+            harness.engine
+              .dispatch({
+                type: "thread.meta.update",
+                commandId: CommandId.makeUnsafe("saturated-ingestion-bulk"),
+                threadId,
+                title: "Metadata",
+              })
+              .pipe(Effect.exit),
+          ),
+        );
+      await expect.poll(() => harness.engine.inspectQueue!().entries).toBe(1024);
+      for (const delta of ["A", "B", "C"])
+        harness.emit({
+          provider: "codex",
+          threadId,
+          turnId,
+          createdAt: at,
+          type: "content.delta",
+          eventId: asEventId(`saturated-${delta}`),
+          itemId: asItemId("saturated-message"),
+          payload: { streamKind: "assistant_text", delta },
+        });
+      harness.emit({
+        provider: "codex",
+        threadId,
+        turnId,
+        createdAt: at,
+        type: "item.completed",
+        eventId: asEventId("saturated-complete"),
+        itemId: asItemId("saturated-message"),
+        payload: { itemType: "assistant_message", status: "completed" },
+      });
+      // Wait until ingestion is blocked on admission, then free the writer.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(harness.engine.inspectQueue!().entries).toBe(1024);
+      await Effect.runPromise(Scope.close(maintenance, Exit.void));
+      released = true;
+      await Promise.all(bulk);
+      await harness.drain();
+      const thread = await waitForThread(harness.engine, (thread) =>
+        thread.messages.some(
+          (message) => message.id === "assistant:saturated-message" && !message.streaming,
+        ),
+      );
+      expect(
+        thread.messages.find((message) => message.id === "assistant:saturated-message")?.text,
+      ).toBe("ABC");
+    } finally {
+      if (!released) await Effect.runPromise(Scope.close(maintenance, Exit.void));
+      await Promise.allSettled(bulk);
+    }
+  }, 20_000);
+
   it.each(["codex", "claudeAgent", "codex-unbatched"] as const)(
     "preserves delta/tool/delta order in streaming mode for %s",
     async (driver) => {

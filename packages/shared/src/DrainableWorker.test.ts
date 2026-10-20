@@ -1,6 +1,6 @@
 import { it } from "@effect/vitest";
 import { describe, expect } from "vitest";
-import { Deferred, Effect, Exit, Fiber } from "effect";
+import { Deferred, Effect, Exit, Fiber, Scope } from "effect";
 
 import { makeDrainableWorker } from "./DrainableWorker";
 
@@ -229,4 +229,33 @@ it.live("runs reserved controls after the current item under saturated bulk admi
       expect((yield* worker.snapshot).entries).toBe(0);
     }),
   ),
+);
+
+it.live(
+  "scope cancellation closes unfinished work and wakes admission without reporting worker failure",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const scope = yield* Scope.make();
+        const entered = yield* Deferred.make<void>();
+        const worker = yield* makeDrainableWorker(
+          (_: number) => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
+          { name: "cancelled-worker", maxEntries: 1 },
+        ).pipe(Scope.provide(scope));
+        yield* worker.enqueue(1);
+        yield* Deferred.await(entered);
+        const drain = yield* worker.drain.pipe(Effect.exit, Effect.forkChild);
+        const admission = yield* worker.enqueue(2).pipe(Effect.exit, Effect.forkChild);
+        yield* Effect.yieldNow;
+        yield* Scope.close(scope, Exit.void);
+        const snapshot = yield* worker.snapshot;
+        expect(snapshot.phase).toBe("closed");
+        expect(snapshot.failures).toBe(0);
+        expect(snapshot.entries).toBe(0);
+        expect(snapshot.bytes).toBe(0);
+        expect(Exit.isFailure(yield* Fiber.join(drain))).toBe(true);
+        expect(Exit.isFailure(yield* Fiber.join(admission))).toBe(true);
+        expect(Exit.isFailure(yield* Effect.exit(worker.drain))).toBe(true);
+      }),
+    ),
 );

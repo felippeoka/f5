@@ -79,7 +79,10 @@ when the provider dies without sending item-completion notifications.
 Compaction packs whole message/output groups into transactions toward 2,000
 events. Larger groups run alone; groups above 50,000 events are reported and
 skipped. Rewrite and chunked deletes commit together, and counters update only
-after commit.
+after commit. Oversized groups retain their complete original history and its
+storage cost; subsequent maintenance passes report and skip them again. There is
+no automatic splitting or reclamation of these groups because a partial commit
+would break replay equivalence.
 
 File-backed persistence owns two query-only snapshot readers, created after writer
 migrations. Foreground tail/history reads have their own connection; startup and
@@ -277,3 +280,21 @@ injection before its side effect, after its side effect but before durable resul
 after durable result but before ack, and during cursor persistence. Restart, compacted
 history, duplicate replay, generation replacement and single-owner rollback must all
 pass before that reactor can opt into catch-up.
+
+Provider event ingestion waits for ordinary command admission instead of dropping
+streaming deltas when the command queue fills. Client admission still rejects
+visibly on overload, and controls retain reserved capacity. Provider event
+persistence retries are bounded to three attempts; a lasting failure reports an
+incomplete-history warning, fences new sends and releases the event lane. An
+in-memory origin fence remains if SQLite cannot persist the warning.
+
+The composer offers **Review recovery** for incomplete history, including turns
+with reasoning, tools or images that cannot be proven complete automatically.
+Explicit acceptance stops the inspected provider generation before clearing its
+matching marker. It never resends the interrupted turn; drafts remain editable.
+A stale generation or marker requires reviewing the current warning again.
+
+Codex snapshot backfill preserves leading/trailing whitespace and line endings
+exactly. This also applies to the existing assistant-delta backfill path, whose
+historical trimming could change provider-authored content. Persisted messages
+are not rewritten solely to normalize their whitespace.
