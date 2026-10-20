@@ -483,7 +483,7 @@ export const compactThreadEvents = (input: {
               sql.withTransaction(
                 Effect.forEach(
                   batch.flatMap(({ prepared }) => prepared.ops),
-                  applyOp,
+                  (op) => applyOp(op).pipe(Effect.tap(() => Effect.yieldNow)),
                 ),
               ),
             ).pipe(

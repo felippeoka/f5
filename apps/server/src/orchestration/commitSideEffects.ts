@@ -55,12 +55,19 @@ export function makeCommitSideEffects({
       }
       if (
         savedEvent.type === "thread.session-stop-requested" ||
-        savedEvent.type === "thread.archived"
+        savedEvent.type === "thread.archived" ||
+        (savedEvent.type === "thread.turn-interrupt-requested" &&
+          savedEvent.payload.turnId === undefined)
       ) {
         yield* sql`UPDATE provider_turn_deliveries SET state = 'rejected', certainty = 'not_sent',
         error_code = 'cancelled_before_send', error_detail = 'The session stopped before this turn was sent.',
         updated_at = ${savedEvent.occurredAt}
         WHERE thread_id = ${savedEvent.payload.threadId} AND state = 'pending'`;
+      }
+      if (
+        savedEvent.type === "thread.session-stop-requested" ||
+        savedEvent.type === "thread.archived"
+      ) {
         // Commit cancellation with the stop intent: a crash before live
         // subscribers run must never revive an unsent continuation.
         yield* sql`UPDATE usage_limit_resumes SET state = 'cancelled',

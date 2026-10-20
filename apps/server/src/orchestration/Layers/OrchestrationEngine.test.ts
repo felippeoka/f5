@@ -2336,91 +2336,116 @@ describe("command admission", () => {
       await system.dispose();
     }
   });
-  it("a stop cancels older queued starts while retaining a start admitted afterwards", async () => {
-    const system = await createOrchestrationSystem();
-    const projectId = asProjectId("ordered-project"),
-      threadId = ThreadId.makeUnsafe("ordered-thread");
-    let maintenance: Scope.Closeable | undefined;
-    try {
-      await system.run(
-        system.engine.dispatch({
-          type: "project.create",
-          commandId: CommandId.makeUnsafe("ordered-project-create"),
-          projectId,
-          title: "Project",
-          workspaceRoot: process.cwd(),
-          createdAt: now(),
-        }),
-      );
-      await system.run(
-        system.engine.dispatch({
-          type: "thread.create",
-          commandId: CommandId.makeUnsafe("ordered-thread-create"),
-          threadId,
-          projectId,
-          title: "Thread",
-          model: "gpt-5-codex",
-          runtimeMode: "approval-required",
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          branch: null,
-          worktreePath: null,
-          createdAt: now(),
-        }),
-      );
-      maintenance = await system.run(system.engine.acquireMaintenanceLock());
-      const blocker = system.run(
-        system.engine.dispatch({
-          type: "thread.meta.update",
-          commandId: CommandId.makeUnsafe("ordered-blocker"),
-          threadId,
-          title: "Blocker",
-        }),
-      );
-      await expect.poll(() => system.engine.inspectQueue!().entries).toBe(1);
-      const start = (id: string) =>
-        system.run(
+  for (const controlType of ["thread.session.stop", "thread.turn.interrupt"] as const)
+    it(`${controlType} supersedes older queued starts/steers and retains later starts`, async () => {
+      const system = await createOrchestrationSystem();
+      const projectId = asProjectId("ordered-project"),
+        threadId = ThreadId.makeUnsafe("ordered-thread");
+      let maintenance: Scope.Closeable | undefined;
+      try {
+        await system.run(
+          system.engine.dispatch({
+            type: "project.create",
+            commandId: CommandId.makeUnsafe("ordered-project-create"),
+            projectId,
+            title: "Project",
+            workspaceRoot: process.cwd(),
+            createdAt: now(),
+          }),
+        );
+        await system.run(
+          system.engine.dispatch({
+            type: "thread.create",
+            commandId: CommandId.makeUnsafe("ordered-thread-create"),
+            threadId,
+            projectId,
+            title: "Thread",
+            model: "gpt-5-codex",
+            runtimeMode: "approval-required",
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            branch: null,
+            worktreePath: null,
+            createdAt: now(),
+          }),
+        );
+        maintenance = await system.run(system.engine.acquireMaintenanceLock());
+        const blocker = system.run(
+          system.engine.dispatch({
+            type: "thread.meta.update",
+            commandId: CommandId.makeUnsafe("ordered-blocker"),
+            threadId,
+            title: "Blocker",
+          }),
+        );
+        await expect.poll(() => system.engine.inspectQueue!().entries).toBe(1);
+        const start = (id: string) =>
+          system.run(
+            system.engine
+              .dispatch({
+                type: "thread.turn.start",
+                commandId: CommandId.makeUnsafe(id),
+                threadId,
+                message: { messageId: asMessageId(id), role: "user", text: id, attachments: [] },
+                interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+                runtimeMode: "approval-required",
+                createdAt: now(),
+              })
+              .pipe(Effect.exit),
+          );
+        const older = start("older");
+        await expect.poll(() => system.engine.inspectQueue!().entries).toBe(2);
+        const steer = system.run(
           system.engine
             .dispatch({
-              type: "thread.turn.start",
-              commandId: CommandId.makeUnsafe(id),
+              type: "thread.turn.steer",
+              commandId: CommandId.makeUnsafe("older-steer"),
               threadId,
-              message: { messageId: asMessageId(id), role: "user", text: id, attachments: [] },
+              expectedTurnId: TurnId.makeUnsafe("previous-turn"),
+              message: {
+                messageId: asMessageId("older-steer"),
+                role: "user",
+                text: "steer",
+                attachments: [],
+              },
               interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
               runtimeMode: "approval-required",
               createdAt: now(),
             })
             .pipe(Effect.exit),
         );
-      const older = start("older");
-      await expect.poll(() => system.engine.inspectQueue!().entries).toBe(2);
-      const stop = system.run(
-        system.engine.dispatch({
-          type: "thread.session.stop",
-          commandId: CommandId.makeUnsafe("ordered-stop"),
-          threadId,
-          createdAt: now(),
-        }),
-      );
-      await expect.poll(() => system.engine.inspectQueue!().entries).toBe(3);
-      const newer = start("newer");
-      await expect.poll(() => system.engine.inspectQueue!().entries).toBe(4);
-      await system.run(Scope.close(maintenance, Exit.void));
-      maintenance = undefined;
-      await blocker;
-      await stop;
-      expect(Exit.isFailure(await older)).toBe(true);
-      expect(Exit.isSuccess(await newer)).toBe(true);
-      expect(
-        (await system.run(system.engine.getReadModel())).threads[0]!.messages.map(
-          (message) => message.id,
-        ),
-      ).toEqual(["newer"]);
-      await system.run(system.engine.completeControl!("ordered-stop"));
-    } finally {
-      if (maintenance) await system.run(Scope.close(maintenance, Exit.void));
-      await system.dispose();
-    }
-  });
+        await expect.poll(() => system.engine.inspectQueue!().entries).toBe(3);
+        const stop = system.run(
+          system.engine.dispatch({
+            type: controlType,
+            commandId: CommandId.makeUnsafe("ordered-stop"),
+            threadId,
+            createdAt: now(),
+          }),
+        );
+        await expect.poll(() => system.engine.inspectQueue!().entries).toBe(4);
+        const newer = start("newer");
+        await expect.poll(() => system.engine.inspectQueue!().entries).toBe(5);
+        await system.run(Scope.close(maintenance, Exit.void));
+        maintenance = undefined;
+        await blocker;
+        await stop;
+        for (const pending of [older, steer]) {
+          const result = await pending;
+          expect(Exit.isFailure(result)).toBe(true);
+          if (Exit.isFailure(result)) expect(String(result.cause)).toContain("superseded");
+        }
+        expect(Exit.isSuccess(await newer)).toBe(true);
+        expect(
+          (await system.run(system.engine.getReadModel())).threads[0]!.messages.map(
+            (message) => message.id,
+          ),
+        ).toEqual(["newer"]);
+        await system.run(system.engine.completeControl!("ordered-stop"));
+      } finally {
+        if (maintenance) await system.run(Scope.close(maintenance, Exit.void));
+        await system.dispose();
+      }
+    });
   it("persists a control's outcome ahead of a saturated ordinary queue using its existing reservation", async () => {
     const system = await createOrchestrationSystem();
     const projectId = asProjectId("saturated-project"),

@@ -853,9 +853,9 @@ export function createOrchestrationSyncController(deps: OrchestrationSyncControl
     applyTerminalEvent(event);
   });
   const unsubWelcome = onServerWelcome((payload) => {
+    if (!acceptProfileWelcome(payload)) return;
     router.invalidateSnapshot();
     noteWsResynchronizing();
-    if (!acceptProfileWelcome(payload)) return;
     const previous = useStore.getState().backendIncarnation;
     if (payload.backendIncarnation && previous !== payload.backendIncarnation) {
       if (previous !== undefined) {

@@ -55,6 +55,7 @@ export const makeDrainableWorker = <A, E, R>(
       admittedAt: number;
       key: string | undefined;
       control: boolean;
+      dirty?: boolean;
     };
     const name = options.name ?? "background";
     const queue: Entry[] = [];
@@ -115,7 +116,12 @@ export const makeDrainableWorker = <A, E, R>(
           const result = yield* Effect.uninterruptible(
             Effect.gen(function* () {
               if (phase !== "accepting") return yield* unavailable();
-              const previous = key === undefined ? undefined : queuedByKey.get(key);
+              // A keyed active entry owns its rerun reservation. In particular,
+              // a worker notifying itself must never wait for its own capacity.
+              const previous =
+                key === undefined
+                  ? undefined
+                  : (queuedByKey.get(key) ?? (active?.key === key ? active : undefined));
               if (
                 previous &&
                 options.revision &&
@@ -134,6 +140,7 @@ export const makeDrainableWorker = <A, E, R>(
               if (previous) {
                 previous.item = item;
                 previous.bytes = size;
+                if (previous === active) previous.dirty = true;
                 bytes += extraBytes;
                 if (control) controlBytes += extraBytes;
               } else {
@@ -177,6 +184,13 @@ export const makeDrainableWorker = <A, E, R>(
           yield* Effect.uninterruptible(
             Effect.gen(function* () {
               active = undefined;
+              if (entry.dirty) {
+                entry.dirty = false;
+                queue.push(entry);
+                if (entry.key !== undefined) queuedByKey.set(entry.key, entry);
+                yield* notify;
+                return;
+              }
               outstanding--;
               bytes -= entry.bytes;
               if (entry.control) {

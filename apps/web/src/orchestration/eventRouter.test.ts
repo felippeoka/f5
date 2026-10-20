@@ -92,6 +92,27 @@ function fixture() {
 }
 
 describe("orchestration event router", () => {
+  it("immediately replaces a snapshot invalidated by a welcome without retry backoff", async () => {
+    const f = fixture(),
+      pending = deferred<RouterSnapshot>();
+    f.readSnapshot.mockReturnValueOnce(pending.promise);
+    f.readSnapshot.mockResolvedValueOnce(f.snapshot(2));
+    const stale = f.snapshot(1);
+    const merge = vi.spyOn(stale, "merge");
+    const syncing = f.router.syncSnapshot();
+    f.router.invalidateSnapshot();
+    await f.router.syncSnapshot();
+    pending.resolve(stale);
+    await syncing;
+    expect(merge).not.toHaveBeenCalled();
+    expect(f.router.hasSnapshotRetry).toBe(false);
+    await f.flushMicrotasks();
+    expect(f.readSnapshot).toHaveBeenCalledTimes(2);
+    expect(f.router.committedSequence).toBe(2);
+    expect(f.actions.onSynchronized).toHaveBeenCalledTimes(1);
+    f.router.dispose();
+  });
+
   it("batches in-order events and advances only its committed stream cursor", async () => {
     const f = fixture();
     f.router.receive(event(1));

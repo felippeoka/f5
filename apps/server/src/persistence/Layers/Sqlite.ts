@@ -32,6 +32,9 @@ export const makeRuntimeSqliteLayer = (
       SqlClient.SqlClient,
       Effect.gen(function* () {
         const client = yield* SqlClient.SqlClient;
+        // This pragma is connection-local: Bun readers need it too, before any
+        // snapshot or crash-recovery read can contend with the writer.
+        yield* client`PRAGMA busy_timeout = 5000`.pipe(Effect.orDie);
         return yield* makeLeasedSqlClient(client, config.readonly === true);
       }),
     ).pipe(Layer.provide(native));
@@ -40,7 +43,6 @@ export const makeRuntimeSqliteLayer = (
 const setup = Layer.effectDiscard(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    yield* sql`PRAGMA busy_timeout = 5000;`;
     // Takes effect only before the first table exists, so new databases start
     // incremental; an existing one switches at its next VACUUM (see
     // storage/databaseSpace.ts).

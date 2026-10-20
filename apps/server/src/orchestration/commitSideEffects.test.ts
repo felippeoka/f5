@@ -120,28 +120,31 @@ it.each(["thread.archived", "thread.deleted"] as const)(
   },
 );
 
-it("commits stop cancellation without changing already sent deliveries", async () => {
-  for (const state of ["pending", "sending", "accepted"])
+it.each(["thread.session-stop-requested", "thread.turn-interrupt-requested"] as const)(
+  "commits %s cancellation without changing already sent deliveries",
+  async (type) => {
+    for (const state of ["pending", "sending", "accepted"])
+      await system.run(
+        system.sql`INSERT INTO provider_turn_deliveries(delivery_id,thread_id,command_id,message_id,state,event_json,created_at,updated_at) VALUES (${state},${threadId},${state},'message',${state},'{}',${at},${at})`,
+      );
     await system.run(
-      system.sql`INSERT INTO provider_turn_deliveries(delivery_id,thread_id,command_id,message_id,state,event_json,created_at,updated_at) VALUES (${state},${threadId},${state},'message',${state},'{}',${at},${at})`,
+      system.sql`INSERT INTO usage_limit_resumes(thread_id,limit_key,state,source,auto_eligible_at_failure,created_at,updated_at) VALUES (${threadId},'limit','scheduled','manual',0,${at},${at})`,
     );
-  await system.run(
-    system.sql`INSERT INTO usage_limit_resumes(thread_id,limit_key,state,source,auto_eligible_at_failure,created_at,updated_at) VALUES (${threadId},'limit','scheduled','manual',0,${at},${at})`,
-  );
-  await apply(event("thread.session-stop-requested", { createdAt: at }));
-  expect(
-    await system.run(
-      system.sql`SELECT state,certainty FROM provider_turn_deliveries ORDER BY delivery_id`,
-    ),
-  ).toEqual([
-    { state: "accepted", certainty: null },
-    { state: "rejected", certainty: "not_sent" },
-    { state: "sending", certainty: null },
-  ]);
-  expect((await system.run(system.sql`SELECT state FROM usage_limit_resumes`))[0]?.state).toBe(
-    "cancelled",
-  );
-});
+    await apply(event(type, { createdAt: at }));
+    expect(
+      await system.run(
+        system.sql`SELECT state,certainty FROM provider_turn_deliveries ORDER BY delivery_id`,
+      ),
+    ).toEqual([
+      { state: "accepted", certainty: null },
+      { state: "rejected", certainty: "not_sent" },
+      { state: "sending", certainty: null },
+    ]);
+    expect((await system.run(system.sql`SELECT state FROM usage_limit_resumes`))[0]?.state).toBe(
+      type === "thread.session-stop-requested" ? "cancelled" : "scheduled",
+    );
+  },
+);
 
 it("transfers attachment ownership with message commit and rolls back a failed transfer", async () => {
   await seedAttachment();

@@ -147,12 +147,48 @@ it.live("coalesces queued revisions into one dirty rerun with bounded byte accou
       yield* worker.enqueue({ key: "thread", revision: 2, text: "two" });
       yield* worker.enqueue({ key: "thread", revision: 3, text: "three" });
       yield* worker.enqueue({ key: "thread", revision: 2, text: "older" });
-      expect((yield* worker.snapshot).entries).toBe(2);
-      expect((yield* worker.snapshot).bytes).toBe(8);
-      expect(yield* worker.offer({ key: "other", revision: 1, text: "x" })).toBe(false);
+      expect((yield* worker.snapshot).entries).toBe(1);
+      expect((yield* worker.snapshot).bytes).toBe(5);
+      expect(yield* worker.offer({ key: "other", revision: 9, text: "longer" })).toBe(false);
+      expect(yield* worker.offer({ key: "other", revision: 9, text: "x" })).toBe(true);
       yield* Deferred.succeed(release, undefined);
       yield* worker.drain;
-      expect(processed).toEqual([1, 3]);
+      expect(processed).toEqual([1, 9, 3]);
+      expect((yield* worker.snapshot).bytes).toBe(0);
+    }),
+  ),
+);
+
+it.live("self-notification at full admission reserves one fair dirty rerun and drains", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>(),
+        release = yield* Deferred.make<void>();
+      const processed: string[] = [];
+      let reenqueue!: (item: string) => Effect.Effect<void>;
+      const worker = yield* makeDrainableWorker(
+        (item: string) =>
+          Effect.gen(function* () {
+            const first = processed.length === 0;
+            processed.push(item);
+            if (first) {
+              yield* Deferred.succeed(entered, undefined);
+              yield* Deferred.await(release);
+              yield* reenqueue(item);
+              yield* reenqueue(item);
+            }
+          }),
+        { maxEntries: 2, maxBytes: 2, sizeOf: () => 1, key: (item) => item },
+      );
+      reenqueue = (item) => worker.enqueue(item).pipe(Effect.orDie);
+      yield* worker.enqueue("self");
+      yield* Deferred.await(entered);
+      yield* worker.enqueue("other");
+      expect((yield* worker.snapshot).entries).toBe(2);
+      yield* Deferred.succeed(release, undefined);
+      yield* worker.drain.pipe(Effect.timeout("1 second"));
+      expect(processed).toEqual(["self", "other", "self"]);
+      expect((yield* worker.snapshot).entries).toBe(0);
       expect((yield* worker.snapshot).bytes).toBe(0);
     }),
   ),

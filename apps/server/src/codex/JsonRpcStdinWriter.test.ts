@@ -39,6 +39,57 @@ class ControlledWritable extends Writable {
 }
 
 describe("JsonRpcStdinWriter", () => {
+  it("preserves start/steer/interrupt order for one thread while bypassing other threads", async () => {
+    const stdin = new ControlledWritable();
+    const writer = createJsonRpcStdinWriter({ stdin, closedMessage: "closed" });
+    const active = writer.write({ id: 0 });
+    await Promise.resolve();
+    const other = writer.write({ id: 1, method: "turn/start", params: { threadId: "other" } });
+    const start = writer.write({ id: 2, method: "turn/start", params: { threadId: "target" } });
+    const steer = writer.write({ id: 3, method: "turn/steer", params: { threadId: "target" } });
+    const stop = writer.write(
+      { id: 4, method: "turn/interrupt", params: { threadId: "target" } },
+      { lane: "control" },
+    );
+    for (const [id, completion] of [
+      [0, active],
+      [2, start],
+      [3, steer],
+      [4, stop],
+      [1, other],
+    ] as const) {
+      expect(JSON.parse(stdin.writes.at(-1)!).id).toBe(id);
+      stdin.completeNext();
+      stdin.emitDrainNow();
+      await completion;
+      await Promise.resolve();
+    }
+    writer.close();
+  });
+
+  for (const lane of ["ordinary", "control"] as const)
+    it(`rejects permanently oversized ${lane} frames without writing or consuming capacity`, async () => {
+      const stdin = new ControlledWritable();
+      const writer = createJsonRpcStdinWriter({
+        stdin,
+        closedMessage: "closed",
+        maxBytes: 32,
+        controlBytes: 32,
+      });
+      await expect(writer.write({ text: "🙂".repeat(10) }, { lane })).rejects.toMatchObject({
+        reason: "too_large",
+        deliveryCertainty: "not_sent",
+        deliveryRetryable: false,
+      });
+      expect(stdin.writes).toEqual([]);
+      const next = writer.write({ id: 1 }, { lane });
+      await Promise.resolve();
+      stdin.completeNext();
+      stdin.emitDrainNow();
+      await next;
+      writer.close();
+    });
+
   it("waits for drain before resolving backpressured writes", async () => {
     const stdin = new ControlledWritable();
     const originalEmit = stdin.emit.bind(stdin);

@@ -279,12 +279,16 @@ manual dispatch. It runs separately from `CI result` and does not open
 `ci-main-red` issues or gate merges. Each report uses five warmups and thirty
 measured repetitions. Candidates and diagnostics are retained as workflow artifacts.
 
-The latest retained `perf-baseline` from main supplies the comparison. A missing
+The latest retained `perf-baseline` from a successful main run of this repository's
+nightly workflow supplies the comparison; fork heads and other workflows are excluded. A missing
 baseline, the dispatch's `reset-baseline` option, or incompatible fixture, harness,
 hardware, OS, Git, browser or runtime metadata records a new baseline, with the
 reason in the step summary. Compatible reports run `bun run perf:compare`;
 regressions fail that workflow and appear in its summary. Feature-branch dispatches
-can compare reports but cannot replace main's baseline. This report covers server
+can compare reports but cannot replace main's baseline. Every successful comparison
+re-uploads the unchanged comparison baseline to refresh its 90-day artifact retention;
+the anchor changes only on explicit reset, incompatibility, or a missing artifact.
+Failed comparisons never promote candidates or refresh retention. This report covers server
 components; interactive qualification still requires the production-browser report.
 
 The deleted-thread memory fixture can be run independently with

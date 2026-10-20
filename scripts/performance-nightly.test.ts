@@ -1,5 +1,10 @@
 import { expect, it } from "vitest";
-import { nightlyBaselineDecision } from "./performance-nightly.ts";
+import { nightlyBaselineDecision, selectNightlyBaselineArtifact } from "./performance-nightly.ts";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import type { PerformanceReport } from "./lib/performance/report.ts";
 function report(): PerformanceReport {
   return {
@@ -46,3 +51,103 @@ it("initializes, resets or re-baselines incompatible metadata and compares compa
     "full server measurements",
   );
 });
+
+it("selects only retained artifacts from successful own-repository main nightly runs", () => {
+  const run = {
+    id: 1,
+    workflow_id: 10,
+    head_repository: { id: 20 },
+    head_branch: "main",
+    event: "schedule",
+    conclusion: "success",
+  };
+  const artifact = {
+    id: 100,
+    name: "perf-baseline",
+    expired: false,
+    created_at: "2026-10-19T00:00:00Z",
+    workflow_run: { id: 1, head_repository_id: 20 },
+  };
+  const choose = (runs = [run], artifacts = [artifact]) =>
+    selectNightlyBaselineArtifact({ workflowId: 10, repositoryId: 20, runs, artifacts });
+  expect(choose()).toBe(100);
+  for (const change of [
+    { workflow_id: 11 },
+    { head_repository: { id: 21 } },
+    { head_branch: "feature" },
+    { event: "pull_request" },
+    { conclusion: "failure" },
+  ])
+    expect(choose([{ ...run, ...change }])).toBeUndefined();
+  for (const change of [
+    { expired: true },
+    { name: "perf-candidate" },
+    { workflow_run: { id: 2, head_repository_id: 20 } },
+    { workflow_run: { id: 1, head_repository_id: 21 } },
+  ])
+    expect(choose([run], [{ ...artifact, ...change }])).toBeUndefined();
+  expect(
+    choose(
+      [run, { ...run, id: 2, event: "workflow_dispatch" }],
+      [
+        artifact,
+        {
+          ...artifact,
+          id: 101,
+          created_at: "2026-10-20T00:00:00Z",
+          workflow_run: { id: 2, head_repository_id: 20 },
+        },
+      ],
+    ),
+  ).toBe(101);
+});
+
+it.each(["pass", "regression", "initialize"] as const)(
+  "%s retains only the correct successful comparison anchor",
+  (mode) => {
+    const directory = mkdtempSync(join(tmpdir(), "f5-nightly-retention-"));
+    const candidatePath = join(directory, "candidate.json"),
+      baselinePath = join(directory, "baseline.json");
+    const retainedPath = join(directory, "retained", "candidate.json"),
+      outputPath = join(directory, "output.txt");
+    try {
+      const baseline = report(),
+        candidate = report();
+      candidate.measurements.sample!.wallMs = Array(30).fill(mode === "regression" ? 100 : 1.01);
+      writeFileSync(candidatePath, JSON.stringify(candidate));
+      if (mode !== "initialize") writeFileSync(baselinePath, JSON.stringify(baseline));
+      writeFileSync(outputPath, "");
+      const result = spawnSync(
+        "bun",
+        [
+          fileURLToPath(new URL("./performance-nightly.ts", import.meta.url)),
+          candidatePath,
+          baselinePath,
+          retainedPath,
+        ],
+        {
+          cwd: fileURLToPath(new URL("..", import.meta.url)),
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            RESET_BASELINE: "false",
+            GITHUB_OUTPUT: outputPath,
+            GITHUB_STEP_SUMMARY: join(directory, "summary.md"),
+          },
+        },
+      );
+      expect(result.status, result.stdout + result.stderr).toBe(mode === "regression" ? 1 : 0);
+      if (mode === "regression") {
+        expect(existsSync(retainedPath)).toBe(false);
+        expect(readFileSync(outputPath, "utf8")).not.toContain("retain-baseline=true");
+      } else {
+        expect(JSON.parse(readFileSync(retainedPath, "utf8"))).toEqual(
+          mode === "initialize" ? candidate : baseline,
+        );
+        expect(readFileSync(outputPath, "utf8")).toContain("retain-baseline=true");
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);

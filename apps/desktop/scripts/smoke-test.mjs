@@ -636,7 +636,12 @@ try {
     // Interrupting a turn pauses its queue, so the next explicit submission is
     // labelled "Send now" rather than "Send message".
     await page.getByRole("button", { name: /^Send (?:message|now)$/ }).click();
-    await page.getByRole("button", { name: "Stop generation", exact: true }).waitFor();
+    await page
+      .getByRole("button", {
+        name: prompt.startsWith("F5_SMOKE_APPROVAL") ? "Approve once" : "Stop generation",
+        exact: true,
+      })
+      .waitFor();
     // The composer renders optimistically. Wait for server acceptance before
     // taking a persistence snapshot or interrupting the newly started turn.
     const deadline = Date.now() + 15_000;

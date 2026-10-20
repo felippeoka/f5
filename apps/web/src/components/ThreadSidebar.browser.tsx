@@ -10,6 +10,7 @@ import {
   type DesktopBridge,
   ORCHESTRATION_WS_METHODS,
   PR_HUB_WS_METHODS,
+  ProfileId,
   type MessageId,
   type OrchestrationReadModel,
   type ProjectId,
@@ -34,6 +35,7 @@ import { COMPOSER_DRAFT_STORAGE_KEY, useComposerDraftStore } from "../composerDr
 import { getRouter } from "../router";
 import { useRecoveryStateStore } from "../recoveryStateStore";
 import { useStore } from "../store";
+import { useProfileState } from "../profileState";
 import { createTestServerProvider } from "../testServerProvider";
 import {
   createPlanningWorkflow as createPlanningWorkflowFixture,
@@ -1047,6 +1049,65 @@ describe("Thread sidebar", () => {
     useShortcutsDialogStore.setState({ open: false });
     Reflect.deleteProperty(window, "desktopBridge");
     document.body.innerHTML = "";
+  });
+
+  it("does not invalidate an in-flight startup snapshot for a rejected profile welcome", async () => {
+    const startupResponse = createDeferred<WsRequestResolution>();
+    let socket: TestWsClient | undefined;
+    const mounted = await mountApp({
+      width: 1_400,
+      initialEntries: ["/"],
+      configureFixture: (nextFixture) => {
+        nextFixture.resolveWsRequest = (body, client) => {
+          if (body._tag !== ORCHESTRATION_WS_METHODS.getStartupSnapshot) return null;
+          socket = client;
+          return startupResponse.promise;
+        };
+      },
+    });
+    const previousProfile = useProfileState.getState();
+    try {
+      await vi.waitFor(() => expect(socket).toBeDefined());
+      const profile = {
+        id: ProfileId.makeUnsafe("1".repeat(32)),
+        slug: "one",
+        name: "One",
+        port: 3773,
+        isDefault: true,
+        status: "ready" as const,
+        createdAt: NOW_ISO,
+        stateDir: "/test/profile",
+        isActive: true,
+        providerAccounts: [],
+      };
+      useProfileState.setState({ active: profile, mismatch: false });
+      socket!.send(
+        JSON.stringify({
+          type: "push",
+          sequence: 2,
+          channel: WS_CHANNELS.serverWelcome,
+          data: {
+            ...fixture.welcome,
+            bootstrap: serverBootstrapFixture,
+            profile: { ...profile, id: "2".repeat(32) },
+          },
+        }),
+      );
+      await vi.waitFor(() => expect(useProfileState.getState().mismatch).toBe(true));
+      startupResponse.resolve({
+        type: "result",
+        result: { snapshot: fixture.snapshot, threadTailDetails: null },
+      });
+      await vi.waitFor(() => expect(useStore.getState().threadsHydrated).toBe(true));
+      expect(
+        wsRequests.filter(
+          (request) => request._tag === ORCHESTRATION_WS_METHODS.getStartupSnapshot,
+        ),
+      ).toHaveLength(1);
+    } finally {
+      useProfileState.setState(previousProfile);
+      await mounted.cleanup();
+    }
   });
 
   it("shows startup skeletons until the initial snapshot and recovery complete", async () => {

@@ -314,6 +314,10 @@ export function createOrchestrationEventRouter(deps: OrchestrationEventRouterDep
     },
     invalidateSnapshot() {
       snapshotGeneration++;
+      snapshotInvalidated = true;
+      immediateRecovery = true;
+      pendingSnapshot = true;
+      clearSnapshotRetry();
     },
     receive(event: OrchestrationEvent) {
       if (disposed || breakerOpen || event.sequence <= latestSequence) return;

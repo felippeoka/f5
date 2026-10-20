@@ -2538,6 +2538,38 @@ describe("stream and detail coverage separation", () => {
     expect(useStore.getState().threads).toEqual([]);
     expect(useStore.getState().detailCoverageByThreadId?.size ?? 0).toBe(0);
   });
+  it("backend replacement keeps in-session sidebar preferences through a lower-head snapshot", () => {
+    const state = makeState(makeThread());
+    const first = { ...state.projects[0]!, expanded: false };
+    const second = {
+      ...first,
+      id: ProjectId.makeUnsafe("second"),
+      cwd: "/tmp/second",
+      expanded: true,
+    };
+    useStore.setState({
+      ...state,
+      projects: [second, first],
+      changedFilesExpandedByThreadId: { [a]: false },
+    });
+    useStore.getState().resetBackendState("new-backend");
+    expect(useStore.getState().threads).toEqual([]);
+    const snapshot = {
+      ...makeReadModel(makeReadModelThread({})),
+      snapshotSequence: 1,
+      projects: [
+        makeReadModelProject({ id: first.id, workspaceRoot: first.cwd, title: "New title" }),
+        makeReadModelProject({ id: second.id, workspaceRoot: second.cwd }),
+      ],
+    };
+    useStore.getState().syncServerReadModel(snapshot);
+    expect(useStore.getState().projects.map((project) => [project.cwd, project.expanded])).toEqual([
+      [second.cwd, true],
+      [first.cwd, false],
+    ]);
+    expect(useStore.getState().projects[1]?.name).toBe("New title");
+    expect(useStore.getState().changedFilesExpandedByThreadId[a]).toBe(false);
+  });
   it("ignores an old backend's late tail reply and keeps new hydration owners", async () => {
     clearInFlightOrchestrationRpcRequests();
     useStore.setState({

@@ -32,6 +32,10 @@ it("pins a background view while writes and foreground reads continue independen
         const writer = yield* SqlClient.SqlClient;
         const readers = yield* SnapshotReadClients;
         expect(readers.foreground).not.toBe(readers.background);
+        for (const client of [writer, readers.foreground, readers.background]) {
+          const timeout = yield* client<{ timeout: number }>`PRAGMA busy_timeout`;
+          expect(timeout[0]?.timeout).toBe(5_000);
+        }
         yield* writer`CREATE TABLE reader_probe (sequence INTEGER, value TEXT)`;
         yield* writer`INSERT INTO reader_probe VALUES (1, 'before')`;
         const entered = yield* Deferred.make<void>(),

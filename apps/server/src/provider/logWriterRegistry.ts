@@ -81,7 +81,15 @@ async function append(writer: Writer, text: string) {
   }
   // Windows append-only handles cannot truncate a crashed/partial record.
   // This registry owns writes to the path; use explicit end positions instead.
-  const handle = await fs.open(writer.path, fs.constants.O_RDWR | fs.constants.O_CREAT);
+  // String flags also work in Bun on Windows, whose numeric O_CREAT handling
+  // can otherwise leave a missing log uncreated. Never truncate an existing log.
+  const handle = await fs.open(writer.path, "r+").catch(async (error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+    return fs.open(writer.path, "wx+").catch((creationError: NodeJS.ErrnoException) => {
+      if (creationError.code !== "EEXIST") throw creationError;
+      return fs.open(writer.path, "r+");
+    });
+  });
   try {
     // A previous process can leave an incomplete line. It cannot prove that a
     // lifecycle/completion record committed; remove it before appending again.

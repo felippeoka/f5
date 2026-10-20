@@ -2256,6 +2256,10 @@ export const useStore = create<AppStore>((set) => ({
   resetBackendState: (incarnation) =>
     set((state) => ({
       ...createInitialState(),
+      // Keep the current sidebar as the reconciliation seed. The fresh snapshot
+      // replaces its backend fields while retaining order/expansion by cwd.
+      projects: state.projects,
+      changedFilesExpandedByThreadId: state.changedFilesExpandedByThreadId,
       backendIncarnation: incarnation,
       backendGeneration: (state.backendGeneration ?? 0) + 1,
     })),

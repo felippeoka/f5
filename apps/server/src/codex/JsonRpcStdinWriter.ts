@@ -6,6 +6,7 @@ export class JsonRpcDeliveryError extends Error {
     readonly deliveryCertainty: "not_sent" | "unknown",
     readonly deliveryRetryable = deliveryCertainty === "not_sent",
     cause?: unknown,
+    readonly reason?: "too_large",
   ) {
     super(message, { cause });
   }
@@ -34,6 +35,9 @@ interface Entry {
   abort: (() => void) | undefined;
   settled: boolean;
   written: boolean;
+  readonly order: number;
+  readonly turnThreadId: string | undefined;
+  readonly interrupt: boolean;
 }
 
 /** A bounded FIFO per lane. Control can overtake queued bulk, never an active write. */
@@ -52,6 +56,7 @@ export function createJsonRpcStdinWriter(input: {
   let closed: unknown = null;
   let pumpScheduled = false;
   let detachActive: (() => void) | null = null;
+  let nextOrder = 0;
   const deliveryError = (cause: unknown, written: boolean, retryable = !written) =>
     new JsonRpcDeliveryError(
       cause instanceof Error
@@ -119,7 +124,18 @@ export function createJsonRpcStdinWriter(input: {
   };
   const pump = () => {
     if (active || closed !== null) return;
-    const entry = control.shift() ?? ordinary.shift();
+    // An interrupt may bypass other threads' bulk work, but cannot arrive on
+    // the wire before this thread's earlier queued start/steer frames.
+    const nextControl = control[0];
+    const predecessor =
+      nextControl?.interrupt && nextControl.turnThreadId !== undefined
+        ? ordinary.findIndex(
+            (entry) =>
+              entry.order < nextControl.order && entry.turnThreadId === nextControl.turnThreadId,
+          )
+        : -1;
+    const entry =
+      predecessor >= 0 ? ordinary.splice(predecessor, 1)[0] : (control.shift() ?? ordinary.shift());
     if (!entry) return;
     if (
       entry.options.signal?.aborted ||
@@ -197,11 +213,27 @@ export function createJsonRpcStdinWriter(input: {
         lane === "control"
           ? (input.controlBytes ?? 1024 * 1024)
           : (input.maxBytes ?? 8 * 1024 * 1024);
+      if (bytes > limitBytes)
+        return Promise.reject(
+          new JsonRpcDeliveryError(
+            "JSON-RPC frame exceeds the lane byte limit; request was not sent.",
+            "not_sent",
+            false,
+            undefined,
+            "too_large",
+          ),
+        );
       if (sizes[lane].entries >= limitEntries || sizes[lane].bytes + bytes > limitBytes)
         return Promise.reject(
           deliveryError(new Error("JSON-RPC admission is full; request was not sent."), false),
         );
       return new Promise<void>((resolve, reject) => {
+        const frame =
+          message && typeof message === "object" ? (message as Record<string, unknown>) : undefined;
+        const params =
+          frame?.params && typeof frame.params === "object"
+            ? (frame.params as Record<string, unknown>)
+            : undefined;
         const entry: Entry = {
           chunk,
           bytes,
@@ -213,6 +245,15 @@ export function createJsonRpcStdinWriter(input: {
           abort: undefined,
           settled: false,
           written: false,
+          order: ++nextOrder,
+          turnThreadId:
+            (frame?.method === "turn/start" ||
+              frame?.method === "turn/steer" ||
+              frame?.method === "turn/interrupt") &&
+            typeof params?.threadId === "string"
+              ? params.threadId
+              : undefined,
+          interrupt: frame?.method === "turn/interrupt",
         };
         sizes[lane].entries++;
         sizes[lane].bytes += bytes;

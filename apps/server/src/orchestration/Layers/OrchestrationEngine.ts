@@ -640,11 +640,16 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           : committedCommand.nextReadModel;
         for (const [index, event] of committedCommand.committedEvents.entries()) {
           if (isControlEvent(event)) envelope.controlCommitted = true;
-          if (event.type === "thread.session-stop-requested" || event.type === "thread.archived") {
+          if (
+            event.type === "thread.session-stop-requested" ||
+            event.type === "thread.archived" ||
+            (event.type === "thread.turn-interrupt-requested" && event.payload.turnId === undefined)
+          ) {
             stoppedSequences.set(event.payload.threadId, event.sequence);
             const cancelled = yield* admission.cancelQueued(
               (queued) =>
-                queued.command.type === "thread.turn.start" &&
+                (queued.command.type === "thread.turn.start" ||
+                  queued.command.type === "thread.turn.steer") &&
                 queued.command.threadId === event.payload.threadId &&
                 queued.admissionOrder < envelope.admissionOrder,
             );
