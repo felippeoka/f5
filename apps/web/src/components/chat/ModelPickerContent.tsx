@@ -21,7 +21,7 @@ import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxListVirtualized } from 
 import { TooltipProvider } from "../ui/tooltip";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
-import { buildModelPickerSearchText, scoreModelPickerSearch } from "./modelPickerSearch";
+import { rankModelPickerSearch } from "./modelPickerSearch";
 import {
   type ModelPickerModelOption,
   findProviderStatus,
@@ -145,52 +145,18 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   const filteredModels = useMemo(() => {
     if (searchQuery.trim()) {
-      return flatModels
-        .map((model) => {
-          const key = toModelKey(model.providerKind, model.slug);
-          const score = scoreModelPickerSearch(
-            {
-              providerKind: model.providerKind,
-              modelId: model.slug,
-              name: model.name,
-              shortName: model.shortName,
-              subProvider: model.subProvider,
-              isFavorite: favoriteKeySet.has(key),
-            },
-            searchQuery,
-          );
-          return score === null
-            ? null
-            : {
-                model,
-                score,
-                tieBreaker: buildModelPickerSearchText({
-                  providerKind: model.providerKind,
-                  modelId: model.slug,
-                  name: model.name,
-                  shortName: model.shortName,
-                  subProvider: model.subProvider,
-                }),
-              };
-        })
-        .filter(
-          (
-            entry,
-          ): entry is {
-            model: ModelPickerItem;
-            score: number;
-            tieBreaker: string;
-          } => entry !== null,
-        )
-        .filter((entry) =>
-          props.lockedProvider === null ? true : entry.model.providerKind === props.lockedProvider,
-        )
-        .toSorted((left, right) => {
-          const scoreDelta = left.score - right.score;
-          if (scoreDelta !== 0) return scoreDelta;
-          return left.tieBreaker.localeCompare(right.tieBreaker);
-        })
-        .map((entry) => entry.model);
+      const searchableModels =
+        props.lockedProvider === null
+          ? flatModels
+          : flatModels.filter((model) => model.providerKind === props.lockedProvider);
+      return rankModelPickerSearch(searchableModels, searchQuery, (model) => ({
+        providerKind: model.providerKind,
+        modelId: model.slug,
+        name: model.name,
+        shortName: model.shortName,
+        subProvider: model.subProvider,
+        isFavorite: favoriteKeySet.has(toModelKey(model.providerKind, model.slug)),
+      }));
     }
 
     const providerFilteredModels =
