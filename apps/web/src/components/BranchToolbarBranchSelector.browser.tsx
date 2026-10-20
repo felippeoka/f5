@@ -308,4 +308,29 @@ describe("missing worktree", () => {
     await expect.element(page.getByText(message, { exact: true })).toBeVisible();
     await expect.element(page.getByText(/Create new branch/)).not.toBeInTheDocument();
   });
+
+  it("does not promise recreation when a local thread's project folder is gone", async () => {
+    api.listBranches.mockResolvedValue({
+      isRepo: false,
+      hasOriginRemote: false,
+      branches: [],
+      worktreeMissing: true,
+    });
+    api.status.mockRejectedValue(new Error("missing"));
+    client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    screen = await render(
+      selector({
+        activeWorktreePath: null,
+        branchCwd: "/repo",
+        effectiveEnvMode: "local",
+        envLocked: true,
+      }),
+    );
+    await page.getByText("thread", { exact: true }).click();
+    await expect.element(page.getByText("No branches found.", { exact: true })).toBeVisible();
+    await expect.element(page.getByText(/Worktree missing/)).not.toBeInTheDocument();
+
+    await page.getByPlaceholder("Search branches...").fill("feature");
+    await expect.element(page.getByText(/Create new branch/)).not.toBeInTheDocument();
+  });
 });

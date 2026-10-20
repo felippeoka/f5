@@ -12,6 +12,7 @@ import { withWorktreeLifecycleLock } from "../project/Layers/WorktreeLifecycleCo
 import {
   blockingIgnoredEntries,
   matchWorktreeCleanupRule,
+  newerInteraction,
   redactHomePath,
   StorageCleanupWorker,
   StorageCleanupWorkerLive,
@@ -81,7 +82,7 @@ describe("worktree cleanup rules", () => {
     expect(matchWorktreeCleanupRule({ ...unchanged, nowMs: 37_000 })).toEqual({
       kind: "wait",
       reason:
-        "no commits beyond the default branch, but the thread was active within the last 24 hours",
+        "no commits beyond the default branch, but a thread using it was active within the last 24 hours",
     });
     expect(matchWorktreeCleanupRule({ ...unchanged, nowMs: 24 * HOUR_MS })).toEqual(
       remove("no commits beyond the default branch"),
@@ -95,7 +96,7 @@ describe("worktree cleanup rules", () => {
     ).toEqual({
       kind: "wait",
       reason:
-        "no commits beyond the default branch, but the thread was active within the last 1 hour",
+        "no commits beyond the default branch, but a thread using it was active within the last 1 hour",
     });
 
     const merged = { ...base, pullRequestMerged: true, headInDefaultBranch: true };
@@ -125,6 +126,15 @@ describe("worktree cleanup rules", () => {
         headInDefaultBranch: true,
       }),
     ).toMatchObject({ kind: "wait" });
+  });
+
+  it("picks the later interaction, and an unreadable one over any other", () => {
+    const older = new Date(0).toISOString();
+    const newer = new Date(DAY_MS).toISOString();
+    expect(newerInteraction(older, newer)).toBe(newer);
+    expect(newerInteraction(newer, older)).toBe(newer);
+    expect(newerInteraction(newer, "not a date")).toBe("not a date");
+    expect(newerInteraction("not a date", newer)).toBe("not a date");
   });
 
   it("treats only node_modules as reproducible ignored content", () => {
@@ -273,7 +283,7 @@ describe("StorageCleanupWorker", { timeout: 60_000 }, () => {
             lastInteractionAt: new Date(Date.now() - 37_000).toISOString(),
           };
           const reason =
-            "no commits beyond the default branch, but the thread was active within the last 24 hours";
+            "no commits beyond the default branch, but a thread using it was active within the last 24 hours";
           expect((yield* worker.dryRun).targets).toEqual([
             expect.objectContaining({ action: "skip", reason }),
           ]);
@@ -282,6 +292,31 @@ describe("StorageCleanupWorker", { timeout: 60_000 }, () => {
           ]);
           expect(yield* Effect.promise(() => exists(worktreePath))).toBe(true);
           expect(yield* listStorageAutomationAudit(10)).toEqual([]);
+        }),
+      ),
+    );
+  });
+
+  it("keeps a worktree an idle thread shares with a recently active one", async () => {
+    await Effect.runPromise(
+      withWorktree(unchangedRule, ({ worker, world, worktreePath }) =>
+        Effect.gen(function* () {
+          world.threads.push(
+            thread({
+              id: "thread-2",
+              projectId: "project-1",
+              worktreePath,
+              branch: "feature",
+              lastInteractionAt: new Date(Date.now() - 30_000).toISOString(),
+            }),
+          );
+          const results = yield* worker.runOnce;
+          expect(results.map((entry) => [entry.threadId, entry.action])).toEqual([
+            ["thread-1", "skip"],
+            ["thread-2", "skip"],
+          ]);
+          expect(results[0]!.reason).toContain("a thread using it was active");
+          expect(yield* Effect.promise(() => exists(worktreePath))).toBe(true);
         }),
       ),
     );
@@ -496,12 +531,35 @@ describe("StorageCleanupWorker races (lifecycle lock)", { timeout: 60_000 }, () 
     const { results, kept } = await Effect.runPromise(
       raceCleanup(({ world, worktreePath }) =>
         world.threads.push(
-          thread({ id: "thread-2", projectId: "project-1", worktreePath, branch: "feature" }),
+          thread({
+            id: "thread-2",
+            projectId: "project-1",
+            worktreePath,
+            branch: "feature",
+            lastInteractionAt: idleSince(),
+          }),
         ),
       ),
     );
     expect(results[0]).toMatchObject({ action: "remove" });
     expect(kept).toBe(false);
+  });
+
+  it("keeps a worktree whose thread became active while cleanup waited", async () => {
+    // Activity without a claim: a read-only turn that already ended, a task update.
+    await expectKept(({ world }) => {
+      world.threads[0] = { ...world.threads[0]!, lastInteractionAt: new Date().toISOString() };
+    }, "a thread using it was active within the last 24 hours");
+  });
+
+  it("keeps a worktree another thread used while cleanup waited", async () => {
+    await expectKept(
+      ({ world, worktreePath }) =>
+        world.threads.push(
+          thread({ id: "thread-2", projectId: "project-1", worktreePath, branch: "feature" }),
+        ),
+      "a thread using it was active within the last 24 hours",
+    );
   });
 
   it("keeps a worktree whose HEAD moved (recreation or new work) while cleanup waited", async () => {

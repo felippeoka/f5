@@ -189,15 +189,16 @@ export function BranchToolbarBranchSelector({
   const prReference = parsePullRequestReference(trimmedBranchQuery);
   const isSelectingWorktreeBase =
     effectiveEnvMode === "worktree" && !envLocked && !activeWorktreePath;
-  // The thread's checkout is gone: there is nothing to switch or create a
-  // branch in until a send recreates it.
-  const worktreeMissing = branchesQuery.data?.worktreeMissing === true;
+  // The checkout is gone: there is nothing to switch or create a branch in.
+  // Only a thread worktree comes back on send; a missing project root does not.
+  const checkoutMissing = branchesQuery.data?.worktreeMissing === true;
+  const worktreeMissing = checkoutMissing && activeWorktreePath !== null;
   const checkoutPullRequestItemValue =
-    prReference && onCheckoutPullRequestRequest && !worktreeMissing
+    prReference && onCheckoutPullRequestRequest && !checkoutMissing
       ? `__checkout_pull_request__:${prReference}`
       : null;
   const canCreateBranch =
-    !isSelectingWorktreeBase && !worktreeMissing && trimmedBranchQuery.length > 0;
+    !isSelectingWorktreeBase && !checkoutMissing && trimmedBranchQuery.length > 0;
   const newRefName = sanitizeNewRefName(trimmedBranchQuery);
   const hasExactBranchMatch = branchByName.has(newRefName);
   const createBranchItemValue = canCreateBranch

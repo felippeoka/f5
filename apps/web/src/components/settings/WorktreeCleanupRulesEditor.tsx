@@ -15,50 +15,6 @@ export function parseRetentionDays(value: string): number | null | "invalid" {
   return days >= 1 && days <= MAX_RETENTION_DAYS ? days : "invalid";
 }
 
-/** A days field that commits on blur or Enter; empty clears it. */
-export function RetentionDaysInput(props: {
-  readonly label: string;
-  readonly value: number | null;
-  readonly disabled?: boolean;
-  readonly placeholder?: string;
-  readonly onCommit: (days: number | null) => void;
-}) {
-  const [draft, setDraft] = useState(props.value === null ? "" : String(props.value));
-  const [invalid, setInvalid] = useState(false);
-  useEffect(() => {
-    setDraft(props.value === null ? "" : String(props.value));
-    setInvalid(false);
-  }, [props.value]);
-  const commit = () => {
-    const parsed = parseRetentionDays(draft);
-    if (parsed === "invalid") {
-      setInvalid(true);
-      return;
-    }
-    setInvalid(false);
-    if (parsed !== props.value) props.onCommit(parsed);
-  };
-  return (
-    <span className="flex items-center gap-2">
-      <Input
-        aria-label={props.label}
-        aria-invalid={invalid || undefined}
-        className="w-24"
-        inputMode="numeric"
-        disabled={props.disabled}
-        placeholder={props.placeholder ?? "Never"}
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") commit();
-        }}
-      />
-      <span className="text-xs text-muted-foreground">days</span>
-    </span>
-  );
-}
-
 /** Parses the content rules' wait: required, 1 to 720 whole hours. */
 export function parseMinIdleHours(value: string): number | "invalid" {
   const trimmed = value.trim();
@@ -67,21 +23,24 @@ export function parseMinIdleHours(value: string): number | "invalid" {
   return hours >= 1 && hours <= MAX_WORKTREE_CLEANUP_MIN_IDLE_HOURS ? hours : "invalid";
 }
 
-/** An hours field that commits on blur or Enter; it cannot be left empty. */
-function MinIdleHoursInput(props: {
+/** A whole-number field that commits on blur or Enter and marks values `parse` rejects. */
+function CommittedNumberInput<T extends number | null>(props: {
   readonly label: string;
-  readonly value: number;
+  readonly value: T;
+  readonly unit: string;
+  readonly parse: (value: string) => T | "invalid";
   readonly disabled?: boolean;
-  readonly onCommit: (hours: number) => void;
+  readonly placeholder?: string;
+  readonly onCommit: (value: T) => void;
 }) {
-  const [draft, setDraft] = useState(String(props.value));
+  const [draft, setDraft] = useState(props.value === null ? "" : String(props.value));
   const [invalid, setInvalid] = useState(false);
   useEffect(() => {
-    setDraft(String(props.value));
+    setDraft(props.value === null ? "" : String(props.value));
     setInvalid(false);
   }, [props.value]);
   const commit = () => {
-    const parsed = parseMinIdleHours(draft);
+    const parsed = props.parse(draft);
     if (parsed === "invalid") {
       setInvalid(true);
       return;
@@ -97,6 +56,7 @@ function MinIdleHoursInput(props: {
         className="w-24"
         inputMode="numeric"
         disabled={props.disabled}
+        placeholder={props.placeholder}
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
@@ -104,8 +64,26 @@ function MinIdleHoursInput(props: {
           if (event.key === "Enter") commit();
         }}
       />
-      <span className="text-xs text-muted-foreground">hours</span>
+      <span className="text-xs text-muted-foreground">{props.unit}</span>
     </span>
+  );
+}
+
+/** A days field that commits on blur or Enter; empty clears it. */
+export function RetentionDaysInput(props: {
+  readonly label: string;
+  readonly value: number | null;
+  readonly disabled?: boolean;
+  readonly placeholder?: string;
+  readonly onCommit: (days: number | null) => void;
+}) {
+  return (
+    <CommittedNumberInput
+      {...props}
+      unit="days"
+      parse={parseRetentionDays}
+      placeholder={props.placeholder ?? "Never"}
+    />
   );
 }
 
@@ -167,13 +145,17 @@ export function WorktreeCleanupRulesEditor(props: {
         <span>
           Wait before removing unchanged or merged worktrees
           <span className="block text-xs text-muted-foreground">
-            Hours since the thread's last activity. Keeps worktrees of threads you are still using.
+            Hours since any thread using the worktree was last active. Keeps worktrees you are still
+            using.
           </span>
         </span>
-        <MinIdleHoursInput
+        <CommittedNumberInput
           label="Wait before removing unchanged or merged worktrees"
           value={rules.minIdleHours}
-          disabled={disabled ?? false}
+          unit="hours"
+          parse={parseMinIdleHours}
+          // Only the merged and no-new-commits rules wait.
+          disabled={(disabled ?? false) || (!rules.unchanged && !rules.onMerge)}
           onCommit={(minIdleHours) => props.onChange({ ...rules, minIdleHours })}
         />
       </label>
